@@ -6,6 +6,7 @@ const ROOT_LABELS: Record<SkillCatalogEntry['root'], string> = {
   claude: 'Claude',
   codex: 'Codex',
   universal: 'Agents',
+  plannotator: 'Plannotator',
 };
 
 interface SkillReferenceMenuProps {

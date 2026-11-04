@@ -32,6 +32,7 @@ import { INBOX_BODY_CUT_BYTES, INBOX_EARLIER_PERSON_BYTES, INBOX_THREAD_WINDOW, 
 import { INBOX_AGENT_SEARCH_LIMIT } from "@plannotator/server/inbox-mcp-search";
 import { INBOX_TOOL_DEFAULTS, INBOX_TOOL_HOSTS } from "@plannotator/shared/config";
 import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
+import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_FILLED_ARGUMENTS, INBOX_FOLLOW_THROUGH_RULE, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_SUBAGENT_RULE, INBOX_TAGGED_INSTRUCTION, INBOX_THREAD_RULE, INBOX_TOOL_NAME, inboxReaskInstruction } from "@plannotator/shared/inbox/connection";
 import { INBOX_CALL_ACTIONS, INBOX_COMMAND_USAGE } from "./cli";
 import { createAgentEnvironment, displayPath, type AgentEnvironment } from "@plannotator/server/inbox-agents";
@@ -248,24 +249,39 @@ export interface InboxHelpOptions {
    * Inbox serves none of it then (approval "inbox-thread-steps").
    */
   steps?: boolean;
+  /**
+   * The person turned code review on (config.json `inboxCodeReview`, read by
+   * the caller). Off (the default), the guide says nothing of it: no `review`
+   * field on submit_guide, as the Inbox serves none then (approval
+   * "inbox-code-review-direction").
+   */
+  codeReview?: boolean;
 }
 
 export function inboxHelpPlatform(platform: NodeJS.Platform = process.platform): ConnectContext["platform"] {
   return platform === "win32" ? "windows" : platform === "darwin" ? "mac" : "linux";
 }
 
-function toolBlock(name: InboxMcpToolName, steps = false): string[] {
+function toolBlock(name: InboxMcpToolName, steps = false, codeReview = false): string[] {
   const guide = TOOL_GUIDE[name];
   // send_message's `steps` field exists only while steps are on.
   const withSteps = steps && name === "send_message";
-  const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...(withSteps ? ["steps"] : [])].map(code).join(", ")}.`, ""] : [];
-  const lines = withSteps ? [...guide.lines, "- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : guide.lines;
+  // submit_guide's `review` field exists only while code review is on.
+  const withReview = codeReview && name === "submit_guide";
+  const extra = [...(withSteps ? ["steps"] : []), ...(withReview ? ["review"] : [])];
+  const args = guide.args.length > 0 ? [`Arguments: ${[...guide.args, ...extra].map(code).join(", ")}.`, ""] : [];
+  const lines = [
+    ...guide.lines,
+    ...(withSteps ? ["- `steps`: your steps in the thread this message lands in, sent with it (see steps)."] : []),
+    ...(withReview ? [`- \`review\`: ${INBOX_REVIEW_FIELD_DESCRIPTION}`] : []),
+  ];
   return [`### ${name}`, "", ...args, ...lines, ""];
 }
 
 export function formatInboxHelp(options: InboxHelpOptions): string {
   const board = INBOX_CARD_ACTION_ON && options.board === true;
   const steps = options.steps === true;
+  const codeReview = options.codeReview === true;
   const mcpCommand = [...options.command, "inbox", "mcp"];
   const mcp = shellLine(mcpCommand);
   const self = shellLine(options.command);
@@ -359,7 +375,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "",
     // Every tool this Inbox serves (`card` only while the Board is on and INBOX_CARD_ACTION_ON lets it ship).
     // `steps` only while the person has thread steps on.
-    ...inboxServedTools({ board, steps }).flatMap((name) => toolBlock(name, steps)),
+    ...inboxServedTools({ board, steps }).flatMap((name) => toolBlock(name, steps, codeReview)),
     "## Threads",
     "",
     "Where send_message (and submit_guide) puts a message; the first rule that applies wins:",

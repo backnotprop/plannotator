@@ -403,6 +403,8 @@ export interface InboxServerOptions {
   board?: boolean;
   /** Thread steps, decided here instead of config.json `inboxSteps` (tests). Absent: config.json decides on every request. */
   steps?: boolean;
+  /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
+  codeReview?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -598,6 +600,8 @@ const ERROR_STATUS: Record<string, number> = {
   annotation_closed: 409,
   // A comment on a guided review's diff, on a message that carries none.
   guide_not_found: 404,
+  // A verdict on a review while the person has Code review off (Settings → Capabilities).
+  code_review_off: 409,
   // New message (step 8).
   session_not_live: 409,
   // Send now: the session's connection does not poll now, or cannot deliver into a running turn.
@@ -1017,6 +1021,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
         stepsOn,
+        // Code review: submit_guide's `review` field is listed and served only while the person has it on.
+        codeReviewOn,
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
@@ -1992,6 +1998,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Code review in the Inbox (approval "inbox-code-review-direction",
+   * 2026-11-03): on only when the person turned it on (config.json
+   * `inboxCodeReview`). Off or unset, agents get nothing of it (no
+   * submit_guide `review` field, no skill in the catalog) and the window
+   * shows nothing new. Read on every request.
+   */
+  const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
+  const saveCodeReview = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: codeReviewOn() };
+    const was = codeReviewOn();
+    saveConfig({ inboxCodeReview: on });
+    if ((loadConfig().inboxCodeReview === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Every window follows at once (its Settings switch, the review cards, the "/" list).
+    if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener();
+    return { on: codeReviewOn() };
+  };
+
+  /**
    * The reveals for returning users (approval "inbox-feature-reveal"; the queue is packages/shared/inbox/reveals.ts):
    * Snooze, then the Board. Read live, like Snooze: the days pass while the Inbox runs. A dev build decides nothing.
    * The Board can be revealed only while config.json `inboxBoard` is unset (nobody decided): `true` and `false` are
@@ -2189,6 +2217,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: { on: boardOn() },
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
+    /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
+    code_review: { on: codeReviewOn() },
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2337,7 +2367,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = () => send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() } })}\n\n`);
+        const onCapabilities = () => send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() }, code_review: { on: codeReviewOn() } })}\n\n`);
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
@@ -3425,17 +3455,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.prompts === undefined &&
           body.board === undefined &&
           body.steps === undefined &&
+          body.code_review === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, code_review, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
         if (body.board !== undefined && !owner) return localOnly();
         // Steps too (the steps tool, the wake and compaction lines): the owner's to change.
         if (body.steps !== undefined && !owner) return localOnly();
+        // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
+        if (body.code_review !== undefined && !owner) return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -3476,6 +3509,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
+        if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -3495,9 +3529,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
+        const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, code_review: codeReview, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -3583,7 +3618,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const searched = await search.handle(req, url);
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url);
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn() });
       if (skills) return skills;
 
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
@@ -3977,7 +4012,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).
-      const guide = await inboxGuideRoute(req, path, store, serverSession);
+      const guide = await inboxGuideRoute(req, path, store, serverSession, codeReviewOn);
       if (guide) return guide;
 
       // Undo a hand-off inside its window (approval "inbox-tag-handoff"): the reply goes as an Ask instead.
@@ -4055,6 +4090,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 idempotency_key: body.idempotency_key as string,
                 feedback: typeof body.feedback === "string" ? body.feedback : undefined,
                 annotation_ids: body.annotation_ids as never,
+                // A verdict on a review (Approve / Send feedback in the review's header): only while Code review is on.
+                ...(body.review_verdict !== undefined && body.review_verdict !== null
+                  ? codeReviewOn()
+                    ? { review_verdict: body.review_verdict }
+                    : (() => {
+                        throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities); nothing was sent.");
+                      })()
+                  : {}),
                 // The questions the person chose to skip ("Skip them"): only these. The old
                 // `skip_unanswered` flag is ignored (approval "inbox-explicit-skip", 2026-10-21).
                 skip: body.skip,

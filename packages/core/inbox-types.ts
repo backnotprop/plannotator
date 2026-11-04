@@ -19,6 +19,7 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
+import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
@@ -516,6 +517,25 @@ export interface InboxMessage {
    */
   guide_reviewed?: boolean[] | null;
   /**
+   * On a message carrying a review (`guide.review`): the files the person
+   * ticked Viewed in the review, as the patch names them. Absent until the
+   * first tick.
+   */
+  guide_viewed?: string[] | null;
+  /**
+   * On the person's reply that gave a verdict on a review (Approve or Send
+   * feedback in the review's header): which review, the verdict, and how many
+   * of their comments rode it. The review card shows it as its outcome.
+   * Absent on every other message.
+   */
+  review_verdict?: InboxReviewVerdictRecord;
+  /**
+   * The reviews (message ids) whose diff comments this person's reply carried
+   * (code review in the Inbox), whichever message the reply answers. Set by
+   * the store at Send; the window reads it to tell a review happened.
+   */
+  review_comments_of?: string[];
+  /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
    * delivered to that session as a turn, like a reply. Also on a person's
@@ -900,6 +920,15 @@ export interface InboxGuideRef {
   files: number;
   additions: number;
   deletions: number;
+  /**
+   * The agent asked for a verdict (submit_guide `review: true`, only while
+   * the person has Settings → Capabilities → Code review on): the window
+   * draws a review card with Start review, and the person's Approve or Send
+   * feedback comes back as their reply. Absent on every other guide.
+   */
+  review?: true;
+  /** A review's chapter titles, in order (the card lists them). Only with `review`. */
+  chapters?: string[];
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */

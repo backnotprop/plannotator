@@ -472,6 +472,18 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * Code review in the Inbox (approval "inbox-code-review-direction",
+   * 2026-11-03): something the person turns on, off by default. On: the
+   * review skills in the reply box's "/" list, the review card and its
+   * full-window review with Approve / Send feedback, and submit_guide's
+   * `review` field. Off: none of it; guided reviews and `plannotator review`
+   * stay as they are. Three readings, like the Board's: unset = not decided
+   * yet (off), `true` = on, `false` = the person switched it off. Written by
+   * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
+   * `{ code_review: { on } }`), read on every request.
+   */
+  inboxCodeReview?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed

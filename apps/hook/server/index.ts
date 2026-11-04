@@ -705,6 +705,8 @@ if (isVersionInvocation(args)) {
 const boardOnForHelp = () => INBOX_CARD_ACTION_ON && loadConfig().inboxBoard === true;
 // Thread steps (approval "inbox-thread-steps"): the guide says nothing of them while the person has them off.
 const stepsOnForHelp = () => loadConfig().inboxSteps === true;
+/** The person turned code review on (config.json `inboxCodeReview`): only then does the guide name submit_guide's `review`. */
+const codeReviewOnForHelp = () => loadConfig().inboxCodeReview === true;
 
 if (isTopLevelHelpInvocation(args)) {
   console.log(formatTopLevelHelp({ board: boardOnForHelp() }));
@@ -720,7 +722,7 @@ if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
   console.log(
     helpSubcommand === "inbox"
-      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp() })
+      ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
       : formatSubcommandHelp(helpSubcommand),
   );
   process.exit(0);

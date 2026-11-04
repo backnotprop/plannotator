@@ -44,6 +44,8 @@ import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
+import { ReviewCard, type ReviewOutcome } from './ReviewCard';
+import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
@@ -116,7 +118,7 @@ import {
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
 import { HostMark } from '../icons';
-import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
@@ -1083,6 +1085,11 @@ export interface ThreadPaneProps {
    * the thread (the Board on), opened by the panel head's Board icon.
    */
   threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
+  /**
+   * Code review is on (Settings → Capabilities, approval "inbox-code-review-direction"): a review an agent sent
+   * shows as a review card with Start review. Off or absent: today's guided-review tile, nothing new.
+   */
+  codeReview?: boolean;
   /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
   phone?: boolean;
   /**
@@ -1331,7 +1338,7 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, threadSteps = null, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1944,6 +1951,15 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
   const records = files?.annotations ?? [];
   /** The person's own messages: their images are named "image in my … message" in the feedback (replyFileLinks.ts). */
   const personMessageIds = useMemo(() => new Set(thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.id)), [thread.messages]);
+  // Code review: `/review-recheck` is offered (and matched at Send) only once a review happened in this thread.
+  const reviewHappened = useMemo(() => inboxThreadHadReview(thread.messages), [thread.messages]);
+  const skillFilter = useMemo(() => inboxSkillFilter(reviewHappened), [reviewHappened]);
+  // Each review's outcome: the person's latest verdict reply on it.
+  const reviewOutcomes = useMemo(() => {
+    const out = new Map<string, ReviewOutcome>();
+    for (const m of thread.messages) if (m.author.kind === 'person' && m.review_verdict) out.set(m.review_verdict.of, { verdict: m.review_verdict, at: m.created_at });
+    return out;
+  }, [thread.messages]);
 
   // The session that asked, and whether it is still there (only hosts whose
   // sessions poll the Inbox can be known to have ended). It is the session
@@ -3985,7 +4001,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
         const { target, own } = part;
         const last = index === parts.length - 1;
         const annotationsFeedback = own.length > 0 ? await buildFeedback(own) : '';
-        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE);
+        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter);
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
@@ -4598,6 +4614,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
             tags: composerTags,
+            skillFilter,
           },
         }
       : null;
@@ -5629,7 +5646,12 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
                     newestId={newestFileId}
                   />
                 )}
-                {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
+                {message.guide &&
+                  (codeReview && message.guide.review ? (
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} onOpen={() => onOpenGuide(message.id)} />
+                  ) : (
+                    <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
+                  ))}
                 {isAgent && message.ack && (
                   <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} />
                 )}
@@ -5883,6 +5905,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, machine = null,
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
                 destination="your reply"
+                skillFilter={skillFilter}
                 tags={composerTags}
                 onChange={(text) => changeReply(text)}
                 onKeyDown={(event) => {
