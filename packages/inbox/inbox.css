@@ -7447,7 +7447,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
 .ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
 .ib-shape-who span { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-shape-page .ib-bhead h1 { font-size: 22px; }
+.ib-shape-page .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
 .ib-shape-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
 .ib-shape-find input { all: unset; flex: 1; min-width: 0; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
 .ib-shape-find input::placeholder { color: var(--muted-foreground); }
@@ -7456,7 +7456,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sp-shape-prev { width: 64px; height: 40px; flex: none; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); background: color-mix(in oklab, var(--background) 92%, var(--muted)); }
 .ib-sp-shape-prev .shp-thumb { width: 100%; height: 100%; }
 .ib-sp-shape-prev .shp-drawn { --shp-paper: transparent; }
-@media (max-width: 767px) {
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-shape-find { width: 46vw; }
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
