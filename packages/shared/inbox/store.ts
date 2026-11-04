@@ -6241,8 +6241,7 @@ export class InboxStore {
   /**
    * The live initiative a card tool's `initiative` means: its `ini_` id, or
    * its name, ignoring case and spaces (inboxInitiativeMatchKey; one with the
-   * store's own key first). Null when none is: a stale id is a name no
-   * initiative has.
+   * store's own key first). Null when none is, a stale id included.
    */
   initiativeNamed(value: string): InboxInitiative | null {
     const text = value.trim();
@@ -6259,16 +6258,18 @@ export class InboxStore {
 
   /**
    * A card's initiative given by the card tool's `initiative`: `""` is none;
-   * a live initiative it names (initiativeNamed) is that one; anything else
-   * is a new one's name, checked here (one line, the length) and made by
-   * `initiativeOfPick` only once the card write can no longer be refused, so
-   * a refused card leaves no initiative behind.
+   * a live initiative it names (initiativeNamed) is that one; a stale `ini_`
+   * id is ignored (null: the card's initiative stays as it is, never one named
+   * after the id); anything else is a new one's name, checked here (one line,
+   * the length) and made by `initiativeOfPick` only once the card write can no
+   * longer be refused, so a refused card leaves no initiative behind.
    */
-  private initiativePick(value: unknown): { id: string | null } | { make: string } {
+  private initiativePick(value: unknown): { id: string | null } | { make: string } | null {
     if (typeof value !== "string") throw new InboxError("validation_error", "initiative: a name, or \"\" for none.", { field: "initiative" });
     if (value.trim() === "") return { id: null };
     const named = this.initiativeNamed(value);
     if (named) return { id: named.id };
+    if (isInboxInitiativeId(value.trim())) return null;
     return { make: this.cardText(value, "initiative", INBOX_INITIATIVE_NAME_MAX) };
   }
 

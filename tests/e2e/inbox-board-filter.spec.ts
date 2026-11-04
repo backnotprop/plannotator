@@ -518,4 +518,33 @@ test.describe('iPhone 15 (WebKit)', () => {
       }
     });
   }
+
+  // A phone's toast is `absolute`: inside the dialog it would anchor to the dialog's foot and cover Done for its 7 s.
+  test('one-click delete on a phone: the toast at the window foot, clear of Done, which closes and hands over the Undo', async () => {
+    const context = await browser!.newContext({ ...device });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${world.url}#board`);
+      // Made here: the initiatives test above deleted its own.
+      await page.evaluate(async () => {
+        const res = await fetch('/api/inbox/initiatives', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Phone toast' }) });
+        if (!res.ok) throw new Error(`initiative: ${res.status}`);
+      });
+      await page.reload();
+      await page.locator('.ib-bhead [data-board-filter-button]').tap();
+      await page.locator('[data-board-initiative-edit]').tap();
+      const dialog = page.locator('[data-dialog="initiatives"]');
+      await dialog.locator('[data-initiative-delete]').first().tap();
+      const toast = dialog.locator('.ib-toast');
+      await expect(toast).toBeVisible();
+      const done = dialog.locator('[data-initiatives-done]');
+      const doneBox = (await done.boundingBox())!;
+      expect((await toast.boundingBox())!.y).toBeGreaterThanOrEqual(doneBox.y + doneBox.height);
+      await done.tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.locator('.ib-toast [data-toast-undo]')).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
 });

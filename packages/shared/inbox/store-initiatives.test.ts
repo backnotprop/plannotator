@@ -231,7 +231,7 @@ describe("initiatives: an agent's card names one", () => {
     expect(store.createInitiative({ name: "And another", by: PERSON }).name).toBe("And another");
   });
 
-  test("the field takes a live one's id as well as its name; a stale id is a name like any unknown one", () => {
+  test("the field takes a live one's id as well as its name; a stale id is ignored, and names nothing", () => {
     const { store, project } = world();
     const shape = store.createInitiative({ name: "Shape", by: PERSON });
     const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Tokens", initiative_name: shape.id });
@@ -241,10 +241,18 @@ describe("initiatives: an agent's card names one", () => {
     expect(store.card(other.id)!.initiative).toBe(shape.id);
     expect(store.initiatives().length).toBe(1);
 
+    // Stale (deleted, or never known): no error, no initiative named after the id, the card's own unchanged.
+    const memory = store.createInitiative({ name: "Memory", by: PERSON });
+    const inMemory = store.createCard({ project_id: project.id, by: AGENT, title: "Cache", initiative_name: "Memory" }).card;
     store.deleteInitiative(shape.id);
+    const before = store.initiatives().length;
     const stale = store.createCard({ project_id: project.id, by: AGENT, title: "Late", initiative_name: shape.id }).card;
-    expect(stale.initiative).not.toBe(shape.id);
-    expect(store.initiative(stale.initiative!)!.name).toBe(shape.id);
+    expect(stale.initiative).toBeNull();
+    store.updateCard(inMemory.id, { by: AGENT, initiative_name: shape.id });
+    expect(store.card(inMemory.id)!.initiative).toBe(memory.id);
+    store.updateCard(inMemory.id, { by: AGENT, say: "still on it", initiative_name: "ini_01JX0000000000000000000000" });
+    expect(store.card(inMemory.id)!).toMatchObject({ initiative: memory.id, said: "still on it" });
+    expect(store.initiatives().length).toBe(before);
   });
 
   test("deleted, an initiative's cards stay and read as in none; the person's Undo puts them back", () => {
