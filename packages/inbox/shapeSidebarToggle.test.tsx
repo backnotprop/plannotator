@@ -1,11 +1,13 @@
 /**
- * The Shape page can close the main sidebar (the owner: "I still need to be
+ * The board can close the main sidebar (the owner: "I still need to be
  * able to close the main sidebar in this view. It takes up a lot of
- * horizontal space."). The board opened from the Shape row has the sidebar
- * toggle every full page has, at the left of its title, and it closes and
+ * horizontal space."). The board, opened from the Shape row or over its
+ * thread, covers the page's head, so it has the sidebar toggle every full
+ * page has at the left of its title, and it closes and
  * opens the sidebar through the shell's own state (the window stores that
  * choice, as on every page); ⌘/Ctrl+B does the same with the board open. What
- * regresses: the Shape page losing its toggle, the toggle not reaching the
+ * regresses: the board (on the Shape page or over a thread) losing its
+ * toggle, the toggle not reaching the
  * sidebar, or a phone (where the sidebar is a sheet) gaining one.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -18,6 +20,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { createShapeStore } from '../shared/shape/store';
 import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
+import type { InboxThread } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
 if (hasDom) {
@@ -66,7 +69,7 @@ function windowIs(phone: boolean) {
  * The shell with the board laid over the page, as App.tsx draws it: the sidebar's open state is the window's
  * (`stored` records each change, as App's onOpenChange stores it).
  */
-async function mount(options: { sidebarToggle: boolean; phone?: boolean }): Promise<{ el: HTMLElement; stored: boolean[] }> {
+async function mount(options: { thread?: InboxThread; phone?: boolean } = {}): Promise<{ el: HTMLElement; stored: boolean[] }> {
   windowIs(options.phone ?? false);
   // happy-dom lays nothing out, so every width reads 0, a phone's: the board is desktop-wide.
   const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
@@ -96,7 +99,7 @@ async function mount(options: { sidebarToggle: boolean; phone?: boolean }): Prom
           <nav data-test-nav="">Inbox</nav>
         </Sidebar>
         <main className="ib-main" data-shape-open="">
-          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={null} sidebarToggle={options.sidebarToggle} />
+          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={options.thread ?? null} />
         </main>
       </SidebarProvider>
     );
@@ -114,28 +117,33 @@ async function mount(options: { sidebarToggle: boolean; phone?: boolean }): Prom
 const sidebarState = (el: ParentNode) => el.querySelector('[data-slot="sidebar"][data-state]')?.getAttribute('data-state') ?? null;
 const boardToggle = (el: ParentNode) => el.querySelector<HTMLButtonElement>('.shp-head [data-sidebar="trigger"]');
 
-test.skipIf(!hasDom)('the Shape page: the toggle sits left of the title, and closes and opens the sidebar', async () => {
-  const { el, stored } = await mount({ sidebarToggle: true });
-  const toggle = boardToggle(el);
-  expect(toggle).not.toBeNull();
-  expect(toggle!.getAttribute('aria-label')).toBe('Toggle Sidebar');
-  // On the title's line, before it; Global comment and the × stay at its right.
-  const row = el.querySelector('.shp-title-row')!;
-  expect(row.firstElementChild!.contains(toggle)).toBe(true);
-  expect(row.children[1]!.tagName).toBe('H1');
-  expect(sidebarState(el)).toBe('expanded');
+/** A thread the board hangs off (only the board's Thread tab reads its messages). */
+const THREAD = { thread_id: 'thr_1', messages: [], project: { root: '/work/relay', repo: null } } as unknown as InboxThread;
 
-  act(() => toggle!.click());
-  expect(sidebarState(el)).toBe('collapsed');
-  // Still there with the sidebar closed: the way back.
-  expect(boardToggle(el)).toBe(toggle);
-  act(() => toggle!.click());
-  expect(sidebarState(el)).toBe('expanded');
-  expect(stored).toEqual([false, true]);
-});
+for (const [where, thread] of [['the Shape page', undefined], ['a board over its thread', THREAD]] as const) {
+  test.skipIf(!hasDom)(`${where}: the toggle sits left of the title, and closes and opens the sidebar`, async () => {
+    const { el, stored } = await mount({ thread });
+    const toggle = boardToggle(el);
+    expect(toggle).not.toBeNull();
+    expect(toggle!.getAttribute('aria-label')).toBe('Toggle Sidebar');
+    // On the title's line, before it; Global comment and the × stay at its right.
+    const row = el.querySelector('.shp-title-row')!;
+    expect(row.firstElementChild!.contains(toggle)).toBe(true);
+    expect(row.children[1]!.tagName).toBe('H1');
+    expect(sidebarState(el)).toBe('expanded');
+
+    act(() => toggle!.click());
+    expect(sidebarState(el)).toBe('collapsed');
+    // Still there with the sidebar closed: the way back.
+    expect(boardToggle(el)).toBe(toggle);
+    act(() => toggle!.click());
+    expect(sidebarState(el)).toBe('expanded');
+    expect(stored).toEqual([false, true]);
+  });
+}
 
 test.skipIf(!hasDom)('⌘/Ctrl+B closes and opens the sidebar with the board open', async () => {
-  const { el, stored } = await mount({ sidebarToggle: true });
+  const { el, stored } = await mount();
   act(() => {
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', metaKey: true, bubbles: true }));
   });
@@ -148,7 +156,7 @@ test.skipIf(!hasDom)('⌘/Ctrl+B closes and opens the sidebar with the board ope
 });
 
 test.skipIf(!hasDom)('a phone has no toggle on the board: its sidebar is a sheet, and the board is as it was', async () => {
-  const { el } = await mount({ sidebarToggle: true, phone: true });
+  const { el } = await mount({ phone: true });
   expect(boardToggle(el)).toBeNull();
   expect(el.querySelector('.shp-head-start')).toBeNull();
   expect(el.querySelector('.shp-title-row')!.firstElementChild!.tagName).toBe('H1');

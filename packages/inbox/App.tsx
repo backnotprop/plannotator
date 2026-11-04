@@ -5759,7 +5759,6 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               onClose={() => close({ ...routeRef.current, shape: null })}
-              sidebarToggle={route.page === 'shapes'}
             />
           )}
         </main>

@@ -13,6 +13,6 @@ export interface ShapeBoardProps {
   initialView?: ShapeViewId;
   initialPanel?: ShapePanelTab | null;
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
-  /** Before the board's title (the Shape page's sidebar toggle). */
+  /** Before the board's title (the Inbox's sidebar toggle). */
   headStart?: ReactNode;
 }

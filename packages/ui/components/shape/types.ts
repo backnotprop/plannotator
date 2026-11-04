@@ -121,6 +121,6 @@ export interface ShapeSurfaceProps {
   initialPanel?: ShapePanelTab | null;
   /** The view or the panel changed (a host keeps its URL in step). */
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
-  /** Before the title, on its line (the Inbox's Shape page: its sidebar toggle). Absent: the title comes first. */
+  /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
   headStart?: ReactNode;
 }

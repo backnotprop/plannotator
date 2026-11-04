@@ -63,11 +63,10 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 
 /**
  * The board, over the thread (or over the grid): its ×, Esc or Back closes it.
- * On the Shape page (`sidebarToggle`: the board opened from the Shape row) the
- * sidebar toggle every full page's head has sits at its title's left, so the
- * board can take the window's width.
+ * It covers the page's head, so the sidebar toggle every full page's head has
+ * sits at its title's left: the board can take the window's width.
  */
-export function ShapeLayer({ host, id, onClose, thread, sidebarToggle = false }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null; sidebarToggle?: boolean }) {
+export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
   return (
@@ -78,7 +77,7 @@ export function ShapeLayer({ host, id, onClose, thread, sidebarToggle = false }:
           id={id}
           onClose={onClose}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
-          headStart={sidebarToggle && !isMobile ? <SidebarTrigger /> : undefined}
+          headStart={isMobile ? undefined : <SidebarTrigger />}
         />
       </Suspense>
     </section>

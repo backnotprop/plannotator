@@ -46,7 +46,7 @@
 .shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
 .shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
 .shp-head-side:empty { display: none; }
-/* A host's control before the title (the Inbox's Shape page: its sidebar toggle), centred on the title's first line. */
+/* A host's control before the title (the Inbox: its sidebar toggle), centred on the title's first line. */
 .shp-head-start { flex: none; display: flex; align-items: center; min-height: 32px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 32px) / 2); }
 /* The agent is drawing the next version: the reshaping Pebble (fill only under reduced motion: Pebble.tsx) and its words. */
 .shp-drawing { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
