@@ -343,7 +343,8 @@ describe("the Shape switch, through the entrypoint", () => {
     const inbox = await startInboxServer({ dataDir: c.dataDir, phones: false });
     try {
       const base = `http://127.0.0.1:${inbox.port}`;
-      const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape: { on: boolean } }).shape.on;
+      // Off, the settings read leaves Shape out (held for 0.28.50, inbox.ts heldSwitch): absent reads as off.
+      const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape?: { on: boolean } }).shape?.on === true;
       expect(await settingsShape()).toBe(false);
       expect((await c.run("on")).code).toBe(0);
       expect(await settingsShape()).toBe(true);
