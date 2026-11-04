@@ -257,7 +257,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await expect(cursorDialog.locator('[data-anote-primary]')).toHaveText('Show the note to copy');
     await cursorDialog.locator('[data-anote-primary]').click();
     await expect(cursorDialog.getByRole('heading', { name: 'Copy the note into Cursor', exact: true })).toBeVisible();
-    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText('Copy by hand');
+    await expect(rowsOf(page).locator('.ib-anote-st')).toHaveText('Copy yourself');
     await expect(cursorDialog.locator('.ib-anote-doneline')).toContainText("Plannotator can't see, update or remove that copy.");
     await expect(cursorDialog.locator('.ib-anote-note pre')).toContainText('## Plannotator Inbox');
     await expect(cursorDialog.locator('.ib-anote-note pre')).not.toContainText('plannotator-inbox:start');
