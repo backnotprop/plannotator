@@ -28,7 +28,7 @@ import { createServerSessionNonce, checkServerSession, serverSessionMismatchBody
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { shapesDirOf } from "@plannotator/shared/shape/store";
 import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
-import { loadConfig } from "@plannotator/shared/config";
+import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createBunShapeRoutes } from "./shape-routes";
@@ -201,7 +201,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
   const { dataDir } = options;
   const version = options.version ?? "";
   const serverSession = createServerSessionNonce();
-  const shapeOn = () => options.shape ?? loadConfig().inboxShape === true;
+  const shapeOn = () => options.shape ?? shapeSwitchOn();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const shapes = createBunShapeRoutes({ dataDir, heartbeatMs: options.heartbeatMs, watchMs: options.watchMs });
   const idleMs = options.idleMs ?? SHAPE_SERVER_IDLE_MS;

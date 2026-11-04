@@ -25,12 +25,43 @@ import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root"
 import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
 import { diffShapeVersions, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
+import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
 import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
-/** DRAFT. What `plannotator shape` (help included) says while Shape is off. */
-export const SHAPE_OFF_TEXT = "shape_off: Shape is off. The person turns it on in the Plannotator Inbox: Settings → Capabilities → Shape.";
+/** DRAFT. What `plannotator shape` (help included; not `on` or `off`) says while Shape is off. */
+export const SHAPE_OFF_TEXT = "shape_off: Shape is off. To turn it on, run `plannotator shape on` (the same switch as the Plannotator Inbox's Settings → Capabilities → Shape).";
+
+/**
+ * `plannotator shape on|off`: the person's switch from a terminal, the same
+ * config.json `inboxShape` the Inbox's Settings switch writes
+ * (@plannotator/shared/shape/switch). The only shape commands that run while
+ * Shape is off (index.ts). One plain line out; exit 1 when config.json could
+ * not be saved, 2 on extra arguments.
+ */
+export function runShapeSwitch(
+  argv: readonly string[],
+  deps: { stdout?: (text: string) => void; stderr?: (text: string) => void } = {},
+): number {
+  const out = deps.stdout ?? ((text: string) => process.stdout.write(`${text}\n`));
+  const err = deps.stderr ?? ((text: string) => process.stderr.write(`${text}\n`));
+  const which = argv[0];
+  if (which !== "on" && which !== "off") {
+    err("shape: on or off.");
+    return 2;
+  }
+  if (argv.length > 1) {
+    err(`shape ${which} takes no arguments.`);
+    return 2;
+  }
+  if (!setShapeSwitch(which === "on")) {
+    err(`config_not_saved: ${SHAPE_SWITCH_NOT_SAVED}`);
+    return 1;
+  }
+  out(which === "on" ? "Shape is on." : "Shape is off.");
+  return 0;
+}
 
 type Op = "update" | "read" | "drawing" | "answer" | "done" | "list";
 const OPS: readonly Op[] = ["update", "read", "drawing", "answer", "done", "list"];
@@ -64,7 +95,7 @@ const ALLOWED: Record<Op, readonly string[]> = {
 
 export function parseShapeCommand(argv: readonly string[]): { ok: true; command: ParsedShapeCommand } | { ok: false; error: string } {
   const op = argv[0] as Op | undefined;
-  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done, list or open." };
+  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done, list, open, on or off." };
   const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false, re: null, text: null };
   const positional: string[] = [];
   for (let i = 1; i < argv.length; i++) {
