@@ -581,6 +581,57 @@ export interface InboxDeliveryPresence {
   waitOf?(session: string, itemId: string): { since: string; autoSince: string | null } | null;
 }
 
+/** The review app's comment types a guided-review line comment can be. */
+const GUIDE_COMMENT_TYPES: ReadonlySet<unknown> = new Set(["comment", "suggestion", "concern"]);
+
+/**
+ * The fields of a comment on a guided review that are kept, checked: what the
+ * export and the windows read, and nothing else (a field the client adds is
+ * dropped; one of the wrong kind is refused, so a bad value can never break a
+ * Send). A global comment (`general`) is words only: no suggestion, no quoted
+ * lines, no token, no images. The caller sets the location fields.
+ */
+function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "general"): Record<string, unknown> {
+  const refuse = (field: string, what: string): never => {
+    throw new InboxError("validation_error", `annotation.${field}: ${what}`, { field: `annotation.${field}` });
+  };
+  const absent = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.length === 0);
+  if (scope === "general") {
+    if (fields.type !== "comment") refuse("type", '"comment" (a global comment is words).');
+    for (const field of ["suggestedCode", "originalCode", "selectedText", "tokenText", "charStart", "charEnd", "images"]) {
+      if (!absent(fields[field])) refuse(field, "a global comment is on the whole review and takes none.");
+    }
+  } else {
+    if (!GUIDE_COMMENT_TYPES.has(fields.type)) refuse("type", '"comment", "suggestion" or "concern".');
+    if (!absent(fields.images)) refuse("images", "a comment on a guided review takes none.");
+  }
+  const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
+  if (fields.text !== undefined) kept.text = fields.text;
+  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText"];
+  for (const field of strings) {
+    const value = fields[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") refuse(field, "a string.");
+    kept[field] = value;
+  }
+  if (scope === "line") {
+    for (const field of ["charStart", "charEnd"]) {
+      const value = fields[field];
+      if (value === undefined || value === null) continue;
+      if (!Number.isInteger(value) || (value as number) < 0) refuse(field, "a character offset.");
+      kept[field] = value;
+    }
+  }
+  const decorations = fields.decorations;
+  if (decorations !== undefined && decorations !== null) {
+    if (!Array.isArray(decorations) || !decorations.every((d) => typeof d === "string")) refuse("decorations", "a list of words.");
+    kept.decorations = decorations;
+  }
+  const createdAt = fields.createdAt;
+  kept.createdAt = typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now();
+  return kept;
+}
+
 export class InboxStore {
   readonly dir: string;
   /** The live sessions, for the rows' delivery; null (tests, tools): not known, every session counts as there. */
@@ -4708,7 +4759,9 @@ export class InboxStore {
    * (`CodeAnnotation`) on a file of the guide's patch, one side, a line range.
    * Its key is the message and the file; `version` is the guide snapshot's
    * sha256 and `attachment_id` is empty. Sent with the reply like an
-   * attachment's annotation, as the review app's export.
+   * attachment's annotation, as the review app's export. A global comment
+   * (`scope: "general"`, on the whole review) is the review app's general
+   * comment: no file, no lines (its "" / 0 / 0 sentinels), and words.
    */
   saveGuideAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
     const message = this.messages.get(messageId);
@@ -4720,6 +4773,7 @@ export class InboxStore {
     const fields = annotation as Record<string, unknown>;
     const id = fields.id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    if (fields.scope === "general") return this.saveGuideGlobalComment(message, message.guide, id, fields);
     const file = fields.filePath;
     if (typeof file !== "string" || file === "") throw new InboxError("validation_error", "annotation.filePath: a file of the guide's patch.", { field: "annotation.filePath" });
     const diff = this.guideFiles(message.guide.sha256).get(file);
@@ -4738,9 +4792,10 @@ export class InboxStore {
       throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }
     if (fields.scope !== undefined && fields.scope !== "line") {
-      throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line").', { field: "annotation.scope" });
+      throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line") or on the whole review ("general").', { field: "annotation.scope" });
     }
     if (fields.text !== undefined && typeof fields.text !== "string") throw new InboxError("validation_error", "annotation.text: a string.", { field: "annotation.text" });
+    const kept = guideCommentFields(fields, "line");
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.guide || existing.message_id !== message.id || existing.path !== file)) {
@@ -4759,7 +4814,51 @@ export class InboxStore {
       path: file,
       version: message.guide.sha256,
       guide: { title: message.guide.title, file, side, line_start: start as number, line_end: end as number },
-      annotation: fields,
+      annotation: { ...kept, filePath: file, lineStart: start, lineEnd: end, side },
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /**
+   * A global comment on a guided review (saveGuideAnnotation with `scope:
+   * "general"`): words on the whole review, kept with the thread's other
+   * comments until a Send. It names no file and no lines; the record's
+   * `path` is "" and its `guide` carries the review app's sentinels.
+   */
+  private saveGuideGlobalComment(message: InboxMessage, guide: NonNullable<InboxMessage["guide"]>, id: string, fields: Record<string, unknown>): InboxAnnotationRecord {
+    if (fields.filePath !== undefined && fields.filePath !== "") {
+      throw new InboxError("validation_error", "annotation.filePath: a global comment is on the whole review, on no file.", { field: "annotation.filePath" });
+    }
+    const text = fields.text;
+    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+      throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
+    }
+    const kept = guideCommentFields(fields, "general");
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const existing = this.annotations.get(id);
+    if (existing && (!existing.guide || existing.message_id !== message.id || existing.guide.scope !== "general")) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      message_id: message.id,
+      attachment_id: "",
+      path: "",
+      version: guide.sha256,
+      guide: { title: guide.title, file: "", side: "new", line_start: 0, line_end: 0, scope: "general" },
+      // The review app's general comment: no file, no lines, whatever the client sent for them.
+      annotation: { ...kept, scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
