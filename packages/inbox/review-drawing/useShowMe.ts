@@ -21,7 +21,7 @@ import { inboxApi, type InboxAskTurnWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
-import { anchorLines, newSideLines, showMeSamePlace, waitingShowMe } from './showMeModel';
+import { earlierLinesNow, newSideLines, showMeEnded, showMeSamePlace, waitingShowMe } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -123,14 +123,16 @@ export function useShowMe({
     if (!drawnReviews) return;
     let live = true;
     for (const review of drawnReviews.split(',')) {
+      // Read or not, it is known: one that cannot be read anchors nothing, and its pictures ask anew.
+      const known = (lines: Map<string, Map<number, string>>) => {
+        if (live) setEarlierLines((current) => ({ ...current, [review]: lines }));
+      };
       inboxApi.guide(review).then(
         (answer) => {
           const parsed = parseGuideSnapshot(answer.snapshot);
-          if (!live || !parsed.ok) return;
-          const lines = new Map(parseDiffToFiles(parsed.value.review.rawPatch).map((file) => [file.path, newSideLines(file.patch)] as const));
-          setEarlierLines((current) => ({ ...current, [review]: lines }));
+          known(parsed.ok ? new Map(parseDiffToFiles(parsed.value.review.rawPatch).map((file) => [file.path, newSideLines(file.patch)] as const)) : new Map());
         },
-        () => {},
+        () => known(new Map()),
       );
     }
     return () => {
@@ -138,12 +140,16 @@ export function useShowMe({
     };
   }, [drawnReviews]);
   const nowLines = useMemo(() => new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)), [files]);
-  /** Where an earlier round's picture was asked, in this round's lines: moved lines followed, changed ones as they were. */
-  const placeNow = (at: { review: string; drawing: InboxReviewDrawing }): ShowMePlace => {
+  /** Where an earlier round's picture was asked, in this round's lines (`earlierLinesNow`); null when that is not known. */
+  const placeNow = (at: { review: string; drawing: InboxReviewDrawing }): ShowMePlace | null => {
     const { file, lines } = at.drawing;
     if (!file || !lines) return { file, lines };
-    return { file, lines: anchorLines(lines, earlierLines[at.review]?.get(file), nowLines.get(file)) ?? lines };
+    const now = earlierLinesNow(lines, earlierLines[at.review]?.get(file), nowLines.get(file));
+    return now ? { file, lines: now } : null;
   };
+  /** A Show me pressed while an earlier round's lines for its file are still being read: it opens once they are. */
+  const openWhenRead = useRef<ShowMePlace | null>(null);
+  const stillReading = (place: ShowMePlace) => before.some((at) => at.drawing.file === place.file && !earlierLines[at.review]);
 
   const earlierKey = earlier.join(',');
   useEffect(() => {
@@ -215,10 +221,18 @@ export function useShowMe({
   // It ended with no picture and no answer: the Ask window's note for the turn (the agent went…), else the chat's
   // own problem (the session is blocked…). A window that is not streaming it (a reload) has no chat: when the Inbox
   // no longer runs the turn and kept nothing, it is the Ask window's "No answer arrived."
-  const boxEnded = !!box?.turn && !boxRunning && !boxBusy && !boxDrawing && !boxTurn?.stopped && boxTurn?.answer === undefined;
+  const boxEnded = !!box?.turn && showMeEnded(boxTurn, { running: boxRunning, busy: !!boxBusy, drawn: !!boxDrawing });
   const boxFailed = boxEnded
     ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && live.current?.turn !== box?.turn ? 'No answer arrived.' : null))
     : null;
+  // The turn names its picture and this window's list has not got it (the two are read apart): read the list again.
+  useEffect(() => {
+    if (!boxTurn?.drawing || boxDrawing) return;
+    inboxApi.reviewDrawings(reviewId).then(
+      (read) => setDrawings(read.drawings),
+      () => {},
+    );
+  }, [boxTurn?.drawing, !!boxDrawing]); // eslint-disable-line react-hooks/exhaustive-deps
   // The box goes back to its words, with the note, ready to send again.
   useEffect(() => {
     if (!boxFailed) return;
@@ -254,7 +268,11 @@ export function useShowMe({
       });
       return;
     }
-    const asked = place.file && place.lines ? before.filter((at) => showMeSamePlace(placeNow(at), place)).at(-1) : undefined;
+    if (place.file && place.lines && stillReading(place)) {
+      openWhenRead.current = place;
+      return;
+    }
+    const asked = place.file && place.lines ? before.filter((at) => { const now = placeNow(at); return !!now && showMeSamePlace(now, place); }).at(-1) : undefined;
     if (asked) {
       setBox(null);
       setView({ drawing: asked.drawing.id, as: 'sheet', part: null, from: place });
@@ -262,6 +280,12 @@ export function useShowMe({
     }
     setBox({ place, words: '', turn: null });
   };
+  useEffect(() => {
+    const place = openWhenRead.current;
+    if (!place || stillReading(place)) return;
+    openWhenRead.current = null;
+    open(place);
+  }, [earlierLines, before]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /**
    * Show me again: the box for a picture's lines, asked anew (other words).

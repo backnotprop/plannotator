@@ -201,6 +201,82 @@ export function anchorLines(
 }
 
 /**
+ * Lines an earlier round asked about whose text changed since, where they
+ * are in this round: shifted by the lines added or removed above them. The
+ * offset is the one of the nearest line above the block (else below it) that
+ * both rounds' diffs show once, with lines kept in the same order on both
+ * sides. Null when there is no such line, or the earlier diff did not show
+ * the block.
+ */
+export function shiftLines(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  if (!before || !after) return null;
+  for (let n = lines[0]; n <= lines[1]; n++) if (before.get(n) === undefined) return null;
+  const once = (side: ReadonlyMap<number, string>) => {
+    const seen = new Map<string, number | null>();
+    for (const [n, text] of side) if (text.trim()) seen.set(text, seen.has(text) ? null : n);
+    return seen;
+  };
+  const was = once(before);
+  const now = once(after);
+  const pairs: [number, number][] = [];
+  for (const [text, n] of was) {
+    const m = now.get(text);
+    if (n !== null && m !== undefined && m !== null && (n < lines[0] || n > lines[1])) pairs.push([n, m]);
+  }
+  pairs.sort((a, b) => a[0] - b[0]);
+  // The pairs in the same order on both sides (the longest such run): a line that moved past others is no guide.
+  const tails: number[] = [];
+  const prev: number[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pairs[tails[mid]!]![1] < pairs[i]![1]) lo = mid + 1;
+      else hi = mid;
+    }
+    prev[i] = lo > 0 ? tails[lo - 1]! : -1;
+    tails[lo] = i;
+  }
+  const kept: [number, number][] = [];
+  for (let i = tails.length ? tails[tails.length - 1]! : -1; i >= 0; i = prev[i]!) kept.unshift(pairs[i]!);
+  const guide = kept.filter(([n]) => n < lines[0]).at(-1) ?? kept.find(([n]) => n > lines[1]);
+  if (!guide) return null;
+  const offset = guide[1] - guide[0];
+  return [lines[0] + offset, lines[1] + offset];
+}
+
+/**
+ * Where an earlier round's lines are in this round: the same text followed
+ * (`anchorLines`), else, changed since, shifted with the code around them
+ * (`shiftLines`). Null when neither can say: such a picture is not opened by
+ * its old numbers.
+ */
+export function earlierLinesNow(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  return anchorLines(lines, before, after) ?? shiftLines(lines, before, after);
+}
+
+/**
+ * Whether the Show me the box sent ended with nothing to show: not running,
+ * not waiting on a busy agent, no answer, not stopped, and no picture. A
+ * turn that names its drawing has one, even before this window has read it.
+ */
+export function showMeEnded(
+  turn: { answer?: string; stopped?: boolean; drawing?: string } | undefined,
+  now: { running: boolean; busy: boolean; drawn: boolean },
+): boolean {
+  return !now.running && !now.busy && !now.drawn && !turn?.drawing && !turn?.stopped && turn?.answer === undefined;
+}
+
+/**
  * Every part of an earlier round's picture that opens code, anchored on this
  * round: its target (by `codeKey`) → where it opens now, and the `data-mark` ids of the
  * parts whose lines changed since.
