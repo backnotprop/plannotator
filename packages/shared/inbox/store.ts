@@ -111,7 +111,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { INBOX_ASK_SESSION_PREFIX, INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxAskSession, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { sanitizeTag } from "@plannotator/core/project";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
@@ -1508,7 +1508,11 @@ export class InboxStore {
    */
   redirectedFrom(reply: InboxMessage) {
     const asked = reply.to && reply.reply_to ? this.messages.get(reply.reply_to) : null;
-    return asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? asked.author : null;
+    if (!asked || asked.author.kind !== "agent" || asked.author.session === reply.to!.session) return null;
+    // A launched Codex thread's own question (`perm:ask:<thread>`) answered, the reply gone on to that thread
+    // (`forwardAskReply`): the same session that asked, never another that ended.
+    if (asked.author.session === `${INBOX_ASK_SESSION_PREFIX}${reply.to!.session}`) return null;
+    return asked.author;
   }
 
   /**
@@ -2141,7 +2145,8 @@ export class InboxStore {
    * that Mark read closed (not an earlier one's) exactly as they were, a
    * saved pick included (its revision goes up by one, so a pick in flight is
    * refused rather than lost). No write when nothing changes. An archived
-   * thread refuses.
+   * thread refuses. A launched Codex thread's own question (`perm:ask:`) is
+   * left open: Codex waits on it, and Mark read never answers for the person.
    */
   markRead(threadId: string, read: boolean): InboxListRow {
     const root = this.messages.get(threadId);
@@ -2153,7 +2158,9 @@ export class InboxStore {
       throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     }
     const members = this.threadMessages(threadId);
-    const records = members.filter((m) => m.author.kind === "agent" && !this.closedByArchive(m)).flatMap((m) => this.questionRecords(m.id));
+    const records = members
+      .filter((m) => m.author.kind === "agent" && !isInboxAskSession(m.author.session) && !this.closedByArchive(m))
+      .flatMap((m) => this.questionRecords(m.id));
     if (read) {
       const waiting = records.filter((r) => {
         const state = inboxQuestionState(r, false);
@@ -5862,6 +5869,28 @@ export class InboxStore {
     const at = this.stamp();
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
+    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    this.appendMessage(next, at);
+    return next;
+  }
+
+  /**
+   * Launch: the person's reply to a launched Codex thread's own question (a
+   * `perm:ask:` card) held words Codex's answer had no place for. The same
+   * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
+   * it as the thread's next turn, like any reply. Only such a reply, and
+   * only while not delivered. The same address writes nothing.
+   */
+  forwardAskReply(replyId: string, to: InboxAddressee): InboxMessage {
+    const message = this.messages.get(replyId);
+    if (!message) throw new InboxError("message_not_found", `No message ${replyId}.`);
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (message.author.kind !== "person" || isInboxNote(message) || asked?.author.kind !== "agent" || !isInboxAskSession(asked.author.session)) {
+      throw new InboxError("not_addressed", `${replyId} is not a reply to a launched session's own question.`);
+    }
+    if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    if (message.to?.session === to.session && message.to.host === to.host) return message;
+    const at = this.stamp();
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);
     return next;

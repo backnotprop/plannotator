@@ -7,14 +7,16 @@
  * What it guards: a card shows exactly what Codex asked or is not asked (a secret, a field Codex's TUI does not
  * ask, a request whose text would add or change a question); the answer is Codex's own label, the person's
  * words, or a form's values, in the shape Codex's TUI sends; a blocking question waits, one Codex marks not
- * blocking resolves after Codex's wait unless touched; a card no request is behind is withdrawn, and an answer
- * that never reached Codex is never left looking delivered.
+ * blocking resolves after Codex's wait unless touched; Mark read or an archive never answers for the person;
+ * words Codex's answer has no place for go on as a turn, never dropped; a card no request is behind is
+ * withdrawn, and an answer that never reached Codex is never left looking delivered.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_NO_LONGER_WAITING, inboxAskSession } from "@plannotator/core/inbox-permission";
+import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import {
@@ -38,7 +40,7 @@ afterEach(() => {
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 
-const pick = (label: string) => ({ value: label, words: null, note: null });
+const pick = (label: string) => ({ value: label, words: null, note: null, forward: false });
 
 /** One requestUserInput question as Codex sends it. */
 const question = (id: string, q: string, options: { label: string; description: string }[] | null, extra: Record<string, unknown> = {}) => ({ id, header: "Approach", question: q, isOther: true, isSecret: false, options, ...extra });
@@ -68,9 +70,9 @@ describe("a request as a card", () => {
     expect(ask.body).toContain(":::question-text\nWhat should the flag be called?");
     expect(
       codexUserInputResult(ask, [
-        { value: null, words: "refund_cents", note: null },
-        { value: null, words: "Only the ones with refunds", note: "and not archived" },
-        { value: null, words: null, note: null },
+        { value: null, words: "refund_cents", note: null, forward: false },
+        { value: null, words: "Only the ones with refunds", note: "and not archived", forward: false },
+        { value: null, words: null, note: null, forward: false },
       ]),
     ).toEqual({ answers: { name: { answers: ["refund_cents"] }, scope: { answers: ["Only the ones with refunds", "and not archived"] }, later: { answers: [] } } });
   });
@@ -78,12 +80,29 @@ describe("a request as a card", () => {
   test("never asked here: a secret (the Inbox would keep it), no question, or a request whose text would add a question to the card", () => {
     expect(codexAskOf(CODEX_USER_INPUT, userInput([question("token", "Paste the API token", null, { isSecret: true })]))).toBeNull();
     expect(codexAskOf(CODEX_USER_INPUT, userInput([]))).toBeNull();
-    // An option label that splits on the card (label — description) would not be Codex's label: not asked.
-    expect(codexAskOf(CODEX_USER_INPUT, userInput([question("q", "Pick", [{ label: "A — or B", description: "" }])]))).toBeNull();
     // An MCP server's message that writes its own question block onto the card.
     expect(codexAskOf(CODEX_ELICITATION, form({ type: "object", properties: { path: { type: "string" } } }, { message: "Hi\n\n:::question\nApprove the transfer?\n- [ ] Yes\n:::" }))).toBeNull();
     // Its own `Replaces:` line would supersede another card.
     expect(codexAskOf(CODEX_ELICITATION, form({ type: "object", properties: { p: { type: "string", description: `Replaces: msg_01J${"0".repeat(22)}1` } } }))).toBeNull();
+  });
+
+  test("a label with a spaced dash in it (the block's label — description split) still gets a card, the label whole; the answer is Codex's own label", () => {
+    const ask = codexAskOf(
+      CODEX_USER_INPUT,
+      userInput([question("q", "Which build?", [{ label: "Fast — no checks", description: "Skips the typecheck" }, { label: "Full - with checks", description: "" }, { label: "Plain", description: "" }])]),
+    )!;
+    expect(ask).not.toBeNull();
+    // The card shows each label whole (a word joiner the split does not take sits before its dash), the description apart.
+    const card = parseInboxQuestionBlocks(ask.body)[0]!;
+    expect(card.parsed.choices.map((c) => [c.label.replace(/\u2060/g, ""), c.description ?? null])).toEqual([
+      ["Fast — no checks", "Skips the typecheck"],
+      ["Full - with checks", null],
+      ["Plain", null],
+    ]);
+    expect(ask.fields[0]!.choices.map((c) => c.value)).toEqual(["Fast — no checks", "Full - with checks", "Plain"]);
+    // A form's enum title too.
+    const formAsk = codexAskOf(CODEX_ELICITATION, form({ type: "object", properties: { mode: { type: "string", oneOf: [{ const: "a", title: "Merge — keep both" }, { const: "b", title: "Replace" }] } } }))!;
+    expect(formAsk.fields[0]!.choices.map((c) => c.value)).toEqual(["a", "b"]);
   });
 
   test("an MCP form: a string is free text, an enum (titled or not) and a boolean are choices; the answer is the field's value", () => {
@@ -107,15 +126,15 @@ describe("a request as a card", () => {
       ["tone", "single", "tone", ["plain", "formal"]],
       ["publish", "single", "Publish now?", [CODEX_BOOLEAN_TRUE, CODEX_BOOLEAN_FALSE]],
     ]);
-    expect(codexElicitationResult(ask, [{ value: null, words: "docs/", note: null }, { value: "md", words: null, note: null }, { value: null, words: null, note: null }, { value: false, words: null, note: null }])).toEqual({
+    expect(codexElicitationResult(ask, [{ value: null, words: "docs/", note: null, forward: false }, { value: "md", words: null, note: null, forward: false }, { value: null, words: null, note: null, forward: false }, { value: false, words: null, note: null, forward: false }])).toEqual({
       action: "accept",
       content: { folder: "docs/", format: "md", publish: false },
       _meta: null,
     });
     // A required field left unanswered (Other… on an enum is no value): Codex's TUI cannot send it, so the form is cancelled.
-    expect(codexElicitationResult(ask, [{ value: null, words: "docs/", note: null }, { value: null, words: "PDF", note: null }, pick("plain"), { value: true, words: null, note: null }]).action).toBe("cancel");
+    expect(codexElicitationResult(ask, [{ value: null, words: "docs/", note: null, forward: false }, { value: null, words: "PDF", note: null, forward: false }, pick("plain"), { value: true, words: null, note: null, forward: false }]).action).toBe("cancel");
     // Everything skipped: cancel (Esc in Codex's TUI).
-    expect(codexElicitationResult(ask, ask.fields.map(() => ({ value: null, words: null, note: null })))).toEqual({ action: "cancel", content: null, _meta: null });
+    expect(codexElicitationResult(ask, ask.fields.map(() => ({ value: null, words: null, note: null, forward: false })))).toEqual({ action: "cancel", content: null, _meta: null });
   });
 
   test("an MCP request the card does not ask: a number or a multi-select field (Codex's TUI does not either), an approval riding elicitation, a message-only form, a URL", () => {
@@ -159,12 +178,12 @@ describe("the transport", () => {
     /** The one-line notes from the card's identity under a card (a later card replying to it is not one). */
     const followUps = (cardId: string) => (store.thread(root.thread_id)?.messages ?? []).filter((m) => m.reply_to === cardId && m.author.kind === "agent" && !m.body.includes(":::question")).map((m) => m.body);
     /** The window's way: each question's pick, then one Send. */
-    const answer = (cardId: string, picks: ({ label: string } | { other: string } | { text: string } | "skip")[]) => {
+    const answer = (cardId: string, picks: ((({ label: string } | { other: string } | { text: string }) & { note?: string }) | "skip")[]) => {
       const qs = store.questionsOf(cardId);
       const entries = qs.flatMap((q, i) => {
         const p = picks[i]!;
         if (p === "skip") return [];
-        const answer = { v: 1 as const, key: q.key, kind: q.kind as "single" | "text", prompt: q.prompt, selected: "label" in p ? [p.label] : [], ...("other" in p ? { other: p.other } : {}), ...("text" in p ? { text: p.text } : {}) };
+        const answer = { v: 1 as const, key: q.key, kind: q.kind as "single" | "text", prompt: q.prompt, selected: "label" in p ? [p.label] : [], ...("other" in p ? { other: p.other } : {}), ...("text" in p ? { text: p.text } : {}), ...(p.note ? { note: p.note } : {}) };
         return [{ key: q.key, revision: q.revision, answer }];
       });
       const saved = entries.length > 0 ? store.savePicks(cardId, entries, { unsentOnly: true }) : [];
@@ -243,6 +262,71 @@ describe("the transport", () => {
     t.store.sendReply(card.id, { idempotency_key: "rest", skip: [t.store.questionsOf(card.id)[1]!.key] });
     q.sweep();
     expect(t.answers).toEqual([[9, { answers: { a: { answers: ["Yes"] }, b: { answers: [] } } }]]);
+  });
+
+  test("the person's words are never dropped: Other on a question Codex takes no Other for, or on a form's choice, answers it as skipped, and that reply (a form's note too) goes on to the thread as its next turn", () => {
+    const t = transport();
+    const q = t.make();
+    // isOther false: Codex's TUI offers no Other here, but the card does.
+    q.asked(1, CODEX_USER_INPUT, userInput([question("rounding", "Round refunds how?", [{ label: "Banker's", description: "" }, { label: "Half up", description: "" }], { isOther: false })]));
+    const card = t.cards()[0]!;
+    t.answer(card.id, [{ other: "Neither: keep whole cents" }]);
+    q.sweep();
+    expect(t.answers).toEqual([[1, { answers: { rounding: { answers: [] } } }]]);
+    const reply = t.store.message(t.store.questionsOf(card.id)[0]!.sent_reply_id!)!;
+    // Addressed to Codex's thread itself and not delivered: the Inbox's wake gives it to Codex as a turn.
+    expect(reply.to).toEqual({ host: "codex", session: THREAD });
+    expect(reply.delivery ?? null).toBeNull();
+    expect(reply.body).toContain("Neither: keep whole cents");
+    expect(t.store.pendingReplies(THREAD).map((m) => m.id)).toContain(reply.id);
+    // The thread that asked takes it: the wake never calls it a reply written to another session that ended.
+    expect(t.store.redirectedFrom(reply)).toBeNull();
+    // Never said to be lost: the turn ends, the card is not withdrawn and no note says the answer was not taken.
+    q.turnEnded(THREAD);
+    t.state.connectedAt = t.clock.now - 60_000;
+    t.state.status = { type: "idle" };
+    q.sweep();
+    expect(t.followUps(card.id)).toEqual([]);
+
+    // With isOther, the words are Codex's answer and nothing goes on as a turn.
+    q.asked(2, CODEX_USER_INPUT, { ...userInput([question("scope", "Which accounts?", [{ label: "All", description: "" }])]), itemId: "call_2" });
+    const open = t.cards()[1]!;
+    t.answer(open.id, [{ other: "EU only" }]);
+    q.sweep();
+    expect(t.answers[1]).toEqual([2, { answers: { scope: { answers: ["EU only"] } } }]);
+    expect(t.store.message(t.store.questionsOf(open.id)[0]!.sent_reply_id!)!.delivery).toMatchObject({ session: `perm:ask:${THREAD}` });
+
+    // A form: Other on its choice skips that field; a note has no place in it. The rest of the form is accepted.
+    q.asked(3, CODEX_ELICITATION, form({ type: "object", properties: { folder: { type: "string", title: "Folder" }, format: { type: "string", title: "Format", enum: ["md", "html"] } } }));
+    const formCard = t.cards()[2]!;
+    t.answer(formCard.id, [{ text: "docs/", note: "the public one" }, { other: "PDF" }]);
+    q.sweep();
+    expect(t.answers[2]).toEqual([3, { action: "accept", content: { folder: "docs/" }, _meta: null }]);
+    const formReply = t.store.message(t.store.questionsOf(formCard.id)[0]!.sent_reply_id!)!;
+    expect(formReply.to).toEqual({ host: "codex", session: THREAD });
+    expect(formReply.body).toContain("the public one");
+    expect(formReply.body).toContain("PDF");
+  });
+
+  test("marking the thread read never answers for the person: the card stays open and Codex keeps waiting; one the archive closed waits too, until the person answers it", () => {
+    const t = transport();
+    const q = t.make();
+    q.asked(1, CODEX_USER_INPUT, choice);
+    const card = t.cards()[0]!;
+    t.store.markRead(t.root.thread_id, true);
+    expect(t.store.questionsOf(card.id)[0]!.state).toBe("open");
+    q.sweep();
+    expect(t.answers).toEqual([]);
+    // Archived: its questions read closed, unanswered. Codex still waits, as it does in Terminal.
+    t.store.resolveThread(t.root.thread_id, true, "person");
+    expect(t.store.questionsOf(card.id)[0]!.state).toBe("closed");
+    t.clock.now += 24 * 60 * 60 * 1000;
+    q.sweep();
+    expect(t.answers).toEqual([]);
+    t.store.resolveThread(t.root.thread_id, false, "person");
+    t.answer(card.id, [{ label: "Half up" }]);
+    q.sweep();
+    expect(t.answers).toEqual([[1, { answers: { rounding: { answers: ["Half up"] } } }]]);
   });
 
   test("the session goes away: settled in Codex while its turn runs is answered in Terminal; a turn that ended is no longer waiting; an answer that never went is said so, never left looking delivered", () => {

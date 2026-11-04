@@ -22,10 +22,16 @@
  *    note after them; a skipped question with no answers.
  *  - elicitation: `accept` with `content` (an enum's value, a string's text, a boolean), or `cancel` when the
  *    person skipped every field or one Codex requires (its TUI cannot send a form missing one; Esc cancels).
- * The reply that carried the answer is marked delivered to the card's identity only once it went.
+ * The reply that carried the answer is marked delivered to the card's identity only once it went. The
+ * person's words are never dropped: "Other…" text on a question that takes none (no `isOther`, a form's
+ * choice) answers it as skipped, and a note on a form has no place in it, so that reply goes on to the thread
+ * itself (`InboxStore.forwardAskReply`) and the Inbox's wake delivers it as the next turn, like any reply.
+ * Marking the thread read never answers: the store leaves these cards open (Mark read), and a question
+ * closed unanswered (the thread archived) keeps Codex waiting, as Terminal does.
  *
  * Asked only when the card shows it whole and exactly (the body read back is
- * the questions as written); never: a secret question (the Inbox would keep
+ * the questions as written; a spaced dash inside a choice's label gets a word
+ * joiner so the block keeps the label whole); never: a secret question (the Inbox would keep
  * the answer), a number or a multi-select field, a form with no field (an
  * approval: `_meta.codex_approval_kind`, or a message-only form), the URL and
  * OpenAI form modes. Those wait on Terminal (`codex resume`), as an approval
@@ -91,6 +97,10 @@ export interface CodexAskField {
   choices: { label: string; value: string | boolean }[];
   /** An elicitation field Codex requires (its TUI cannot send the form without it). */
   required: boolean;
+  /** The answer carries the person's own words besides a pick (a requestUserInput question with `isOther`); else Other is not Codex's to take. */
+  other: boolean;
+  /** The answer carries the person's note (requestUserInput); a form has no place for one. */
+  notes: boolean;
 }
 
 /** A Codex request as a card: its body and its questions, in block order. */
@@ -105,6 +115,12 @@ export interface CodexAsk {
 const text = (value: unknown): string | null => (typeof value === "string" && value.trim() ? value : null);
 /** One line: every run of whitespace (line breaks too) one space, at most `max` characters. */
 const oneLine = (value: string, max = 500): string => value.replace(/\s+/g, " ").trim().slice(0, max);
+/**
+ * A choice's label, kept whole on the card: the block format splits a choice at its first spaced dash
+ * (`label — description`), so a dash inside the label gets an invisible word joiner (U+2060) before it, which
+ * the split does not take. The answer still sends Codex's own label (the card's label is read by position).
+ */
+const choiceLabel = (value: string): string => oneLine(value, 200).replace(/(\s)([—–-])(?=\s)/g, "$1\u2060$2");
 
 /**
  * The card for one request, or null when the card cannot show it whole and exactly. The body is read back as
@@ -150,11 +166,19 @@ function userInputCard(params: Record<string, any>): Omit<CodexAsk, "fields"> & 
     if (options.some((o) => !o || !text(o.label))) return null;
     const prompt = oneLine(q.question);
     const header = text(q.header) ? oneLine(q.header, 100) : null;
-    const choices = options.map((o) => ({ label: oneLine(o.label, 200), description: text(o.description) ? oneLine(o.description) : null }));
+    const choices = options.map((o) => ({ label: choiceLabel(o.label), description: text(o.description) ? oneLine(o.description) : null }));
     if (header && header !== prompt) parts.push(`**${header}**`, "");
     parts.push(block(choices.length > 0 ? "single" : "text", prompt, null, choices), "");
     // The value an answer sends is Codex's own label, as its TUI sends it.
-    fields.push({ id: q.id, kind: choices.length > 0 ? "single" : "text", prompt, choices: choices.map((c, i) => ({ label: c.label, value: options[i]!.label as string })), required: false });
+    fields.push({
+      id: q.id,
+      kind: choices.length > 0 ? "single" : "text",
+      prompt,
+      choices: choices.map((c, i) => ({ label: c.label, value: options[i]!.label as string })),
+      required: false,
+      other: choices.length === 0 || q.isOther === true,
+      notes: true,
+    });
   }
   return { method: CODEX_USER_INPUT, body: parts.join("\n").trim(), fields, blocking: params.isBlocking !== false };
 }
@@ -176,12 +200,12 @@ function elicitationCard(params: Record<string, any>): (Omit<CodexAsk, "fields">
     const field = elicitationField(id, raw, required.has(id));
     if (!field) return null;
     parts.push(block(field.kind, field.prompt, field.context, field.choices), "");
-    fields.push({ id, kind: field.kind, prompt: field.prompt, choices: field.choices.map((c) => ({ label: c.label, value: c.value })), required: field.required });
+    fields.push({ id, kind: field.kind, prompt: field.prompt, choices: field.choices.map((c) => ({ label: c.label, value: c.value })), required: field.required, other: field.kind === "text", notes: false });
   }
   return { method: CODEX_ELICITATION, body: parts.join("\n").trim(), fields, blocking: true };
 }
 
-function elicitationField(id: string, raw: any, required: boolean): (CodexAskField & { context: string | null; choices: { label: string; value: string | boolean }[] }) | null {
+function elicitationField(id: string, raw: any, required: boolean): (Omit<CodexAskField, "other" | "notes"> & { context: string | null }) | null {
   if (!raw || typeof raw !== "object") return null;
   const title = text(raw.title) ? oneLine(raw.title, 200) : oneLine(id, 200);
   const description = text(raw.description) ? oneLine(raw.description) : null;
@@ -193,40 +217,50 @@ function elicitationField(id: string, raw: any, required: boolean): (CodexAskFie
   if (Array.isArray(raw.oneOf)) {
     const options = raw.oneOf as Record<string, any>[];
     if (options.length === 0 || options.some((o) => !o || typeof o.const !== "string" || !text(o.title))) return null;
-    return { ...base, kind: "single", choices: options.map((o) => ({ label: oneLine(o.title, 200), value: o.const as string })) };
+    return { ...base, kind: "single", choices: options.map((o) => ({ label: choiceLabel(o.title), value: o.const as string })) };
   }
   if (Array.isArray(raw.enum)) {
     const values = raw.enum as unknown[];
     const names = Array.isArray(raw.enumNames) ? (raw.enumNames as unknown[]) : [];
     if (values.length === 0 || values.some((v) => typeof v !== "string" || !v.trim())) return null;
-    return { ...base, kind: "single", choices: values.map((v, i) => ({ label: oneLine(text(names[i]) ?? (v as string), 200), value: v as string })) };
+    return { ...base, kind: "single", choices: values.map((v, i) => ({ label: choiceLabel(text(names[i]) ?? (v as string)), value: v as string })) };
   }
   return { ...base, kind: "text", choices: [] };
 }
 
-/** The person's answer to one field: the picked choice's value, their own words, a note; or nothing (skipped, closed). */
+/**
+ * The person's answer to one field: the picked choice's value, their own words, a note; or nothing (skipped).
+ * `forward`: they wrote words Codex's answer has no place for (Other on a question without it, a note on a
+ * form). Those are never dropped: their reply goes on to the thread as its next turn. Other where Codex takes
+ * none answers the field as skipped.
+ */
 export interface CodexFieldAnswer {
   value: string | boolean | null;
   words: string | null;
   note: string | null;
+  forward: boolean;
 }
 
 /** One card question's answer as the field reads it: the pick matched by the label the card keeps, never by position alone. */
 export function codexFieldAnswer(field: CodexAskField, question: Pick<InboxQuestion, "state" | "answer" | "choices">): CodexFieldAnswer {
-  const none = { value: null, words: null, note: null };
   const answer: QuestionAnswer | null = question.state === "sent" ? question.answer : null;
-  if (!answer || answer.skipped) return none;
-  const note = answer.note?.trim() || null;
-  if (field.kind === "text") return { value: null, words: answer.text?.trim() || answer.other?.trim() || null, note };
+  if (!answer || answer.skipped) return { value: null, words: null, note: null, forward: false };
+  const rawNote = answer.note?.trim() || null;
+  const note = field.notes ? rawNote : null;
+  const forwardNote = !!rawNote && !field.notes;
+  if (field.kind === "text") return { value: null, words: answer.text?.trim() || answer.other?.trim() || null, note, forward: forwardNote };
+  const other = answer.other?.trim() || null;
+  // Words Codex takes none of: the field is skipped, and the words go on as a turn.
+  if (other && !field.other) return { value: null, words: null, note: null, forward: true };
   const picked = answer.selected.length === 1 ? question.choices.findIndex((c) => c.label === answer.selected[0]) : -1;
-  return { value: picked >= 0 && field.choices[picked] ? field.choices[picked]!.value : null, words: answer.other?.trim() || null, note };
+  return { value: picked >= 0 && field.choices[picked] ? field.choices[picked]!.value : null, words: other, note, forward: forwardNote };
 }
 
 /** requestUserInput's result: per question, the picked label, else the person's words, then a note; a skip answers nothing. */
 export function codexUserInputResult(ask: CodexAsk, answers: readonly CodexFieldAnswer[]): { answers: Record<string, { answers: string[] }> } {
   const out: Record<string, { answers: string[] }> = {};
   ask.fields.forEach((field, i) => {
-    const a = answers[i] ?? { value: null, words: null, note: null };
+    const a = answers[i] ?? { value: null, words: null, note: null, forward: false };
     const list: string[] = [];
     if (typeof a.value === "string") list.push(a.value);
     if (a.words) list.push(a.words);
@@ -302,9 +336,12 @@ export function createCodexQuestions(
     pending.delete(p.key);
     if (p.rpcId !== null) byRpc.delete(String(p.rpcId));
   };
-  /** The card's questions answered and sent whose reply never reached Codex. */
+  /** The card's questions answered and sent whose reply never reached Codex (one gone on to the thread as a turn is the thread's wake's). */
   const undelivered = (messageId: string): InboxQuestion[] =>
-    store.questionsOf(messageId).filter((q) => q.state === "sent" && q.sent_reply_id && !store.message(q.sent_reply_id)?.delivery);
+    store.questionsOf(messageId).filter((q) => {
+      const reply = q.state === "sent" && q.sent_reply_id ? store.message(q.sent_reply_id) : undefined;
+      return !!reply && !reply.delivery && !(reply.to && !isInboxAskSession(reply.to.session));
+    });
 
   const notTakenKey = (messageId: string) => `perm-not-taken-${messageId}`;
   /** An answer of the card that never reached Codex, not yet said. */
@@ -354,23 +391,35 @@ export function createCodexQuestions(
     return sent.message.id;
   };
 
-  /** The request's result once every question of the card is sent or closed; null while one is still open. */
-  const resultOf = (p: Pending): unknown | null => {
+  /**
+   * The request's result once the person answered or skipped every question of the card (sent); null while one
+   * is still open, picked or closed. A question closed unanswered (the thread archived) never answers for the
+   * person: Codex waits, as it does in Terminal. `forward`: the replies whose words the result has no place for.
+   */
+  const resultOf = (p: Pending): { result: unknown; forward: Set<string> } | null => {
     const qs = store.questionsOf(p.messageId!);
-    if (qs.length !== p.ask!.fields.length || qs.some((q) => q.state !== "sent" && q.state !== "closed")) return null;
+    if (qs.length !== p.ask!.fields.length || qs.some((q) => q.state !== "sent")) return null;
     const answers = p.ask!.fields.map((field, i) => codexFieldAnswer(field, qs[i]!));
-    return p.method === CODEX_USER_INPUT ? codexUserInputResult(p.ask!, answers) : codexElicitationResult(p.ask!, answers);
+    const forward = new Set(qs.flatMap((q, i) => (answers[i]!.forward && q.sent_reply_id ? [q.sent_reply_id] : [])));
+    return { result: p.method === CODEX_USER_INPUT ? codexUserInputResult(p.ask!, answers) : codexElicitationResult(p.ask!, answers), forward };
   };
 
-  /** The reply (or replies) that carried the answer went to Codex: delivered, to the card's identity. */
-  const delivered = (p: Pending) => {
+  /**
+   * The reply (or replies) that carried the answer went to Codex: delivered, to the card's identity. One with
+   * words the answer had no place for goes on to the thread itself instead, so the Inbox's wake delivers it as
+   * the thread's next turn, like any reply.
+   */
+  const delivered = (p: Pending, forward: ReadonlySet<string>) => {
     const card = store.message(p.messageId!);
     if (card?.author.kind !== "agent" || !card.author.host || !card.author.session) return;
     for (const replyId of new Set(store.questionsOf(p.messageId!).map((q) => q.sent_reply_id).filter((id): id is string => !!id))) {
       try {
-        store.recordDelivery(replyId, { host: card.author.host, session: card.author.session });
+        if (forward.has(replyId)) {
+          store.forwardAskReply(replyId, { host: card.author.host, session: p.threadId });
+          log(`Inbox launch: reply ${replyId} goes on to Codex as a turn (words its answer could not carry)`);
+        } else store.recordDelivery(replyId, { host: card.author.host, session: card.author.session });
       } catch {
-        // Already recorded: the answer stands.
+        // Already recorded or delivered: the answer stands.
       }
     }
   };
@@ -470,11 +519,11 @@ export function createCodexQuestions(
         const qs = store.questionsOf(p.messageId);
         // Withdrawn (Stop, Delete) or never ours to answer any more.
         if (qs.some((q) => q.state === "superseded")) continue;
-        const result = resultOf(p);
-        if (result !== null) {
-          if (p.rpcId === null || !options.respond(p.rpcId, result)) continue;
+        const done = resultOf(p);
+        if (done !== null) {
+          if (p.rpcId === null || !options.respond(p.rpcId, done.result)) continue;
           p.answered = true;
-          delivered(p);
+          delivered(p, done.forward);
           log(`Inbox launch: Codex ${p.method} answered`);
           options.onChange();
           continue;
