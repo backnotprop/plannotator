@@ -66,6 +66,8 @@ import { autoAfterText, deliveryLine, restartNote, TURN_ENDED_TEXT, uncertainIte
 import { RestartLine } from './RestartNote';
 import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered';
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
+import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
+import { ROW_LABEL_MAX } from './RowAgents';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -1364,6 +1366,29 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
+/**
+ * A named session's message author (issue #2450): the agent's name as ever, then " · " and the session's label in
+ * the secondary colour, a little smaller and never bold, cut in the middle past ROW_LABEL_MAX and with "…" where the
+ * column ends; the agent's name is never cut first. A span, so it can be a Tip's trigger. `open`: the open head's
+ * name (`ib-who`). `hidden`: the fold button's label says it; otherwise (a one-message thread) a screen reader hears
+ * the whole label, never the cut one. `onFold`: an open head with a fold button under it. The name takes the pointer
+ * there (inbox.css), as the time does, so its hover can show the whole label, and a click on it still folds.
+ */
+function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { agent: string; label: string; open?: boolean; hidden?: true; onFold?: () => void }) {
+  return (
+    <span className={`ib-fl-nm${open ? ' ib-who' : ''}`} aria-hidden={hidden} data-session-label="" onClick={onFold}>
+      <bdi className="ib-fl-agent" aria-hidden={hidden ? undefined : true} data-author-agent="">
+        {agent}
+      </bdi>
+      <span className="ib-fl-lbl" aria-hidden={hidden ? undefined : true}>
+        <span className="ib-fl-lsep">{' · '}</span>
+        <bdi data-author-label="">{shortLabel(label, ROW_LABEL_MAX)}</bdi>
+      </span>
+      {!hidden && <span className="ib-sr">{authorWithLabel(agent, label).spoken}</span>}
+    </span>
+  );
+}
+
 export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
@@ -2067,6 +2092,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
   const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
+  // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
+  const sessionLabels = useSessionLabels();
   const tagOwner = wordsAsking?.session ?? taggable?.owner?.session ?? null;
   const tagOpts: TagOption[] = useMemo(() => tagOptions(taggable, tagOwner, thread.project.id, whenTime), [taggable, tagOwner, thread.project.id]);
   // Until the list is read (or from an older Inbox) `@` is plain text.
@@ -5286,7 +5313,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         )}
       </div>
       {/* The Artifacts view swaps the messages out (kept mounted, so folds, scroll and the reply box stay as left). */}
-      <div className={`ib-pbody${one ? '' : ' ib-folding'}`} ref={bodyRef} hidden={artifactsOn}>
+      <div
+        className={`ib-pbody${one ? '' : ' ib-folding'}`}
+        ref={bodyRef}
+        hidden={artifactsOn}
+        // A named session wrote here (issue #2450): every head's name column is wider, so the rows still line up.
+        data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
+      >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
         {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
@@ -5488,7 +5521,16 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             );
           }
           const isAgent = message.author.kind === 'agent';
+          // A named session's message keeps its agent's name and adds the session's after it, quieter (issue #2450,
+          // owner's decision 2026-11-04): "Claude Code · Fix login redirect", the whole label on hover and to a
+          // screen reader. The session's poll names it; an unnamed one reads as it always did. Display only: no
+          // tool takes a label, but Claude Code's comes from the transcript, which the session's own model can
+          // append to, so it never proves who wrote (the agent's name and mark stay, and the server refuses "You").
+          const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
           const name = isAgent ? agentName(message.author) : 'You';
+          const labelled = authorLabel ? authorWithLabel(name, authorLabel) : null;
+          const nameTip = labelled?.shown ?? name;
+          const nameSaid = labelled?.spoken ?? name;
           // The day too when it is not today, and the whole moment on hover.
           const time = whenTime(message.created_at);
           const fullWhen = fullTime(message.created_at);
@@ -5527,7 +5569,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               },
             });
             const snippet = foldSnippet(message, thread.messages);
-            const label = `${name}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
+            const label = `${nameSaid}, ${time}${isNew ? ', new' : ''}${holdings.length > 0 ? `. ${holdings.map((h) => h.say).join(', ')}` : ''}. ${snippetText(snippet)}`;
             before.push(
               <article
                 className="ib-message ib-folded"
@@ -5549,8 +5591,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                       <Icon name="reply" />
                     </span>
                   )}
-                  <Tip content={name} cut>
-                    <span className="ib-fl-nm">{name}</span>
+                  <Tip content={nameTip} cut={!authorLabel}>
+                    {authorLabel ? labelledAuthorName({ agent: name, label: authorLabel, hidden: true }) : <span className="ib-fl-nm">{name}</span>}
                   </Tip>
                   {/* An answers snippet is shortened (each prompt cut at a word): its whole text always; words only while cut. */}
                   <Tip content={snippetText(snippet)} cut={snippet.kind !== 'answers'}>
@@ -5639,7 +5681,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               )}
             </>
           );
-          const foldLabel = `${name}, ${time}${isNew ? ', new' : ''}. Fold this message`;
+          const foldLabel = `${nameSaid}, ${time}${isNew ? ', new' : ''}. Fold this message`;
           const revealed = revealedId === message.id;
           before.push(
             <article
@@ -5678,10 +5720,14 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                         </span>
                       )}
                     </span>
-                    <Tip content={one ? name : null} cut>
-                      <span className="ib-fl-nm ib-who" aria-hidden={hide}>
-                        <bdi>{name}</bdi>
-                      </span>
+                    <Tip content={authorLabel ? nameTip : one ? name : null} cut={!authorLabel}>
+                      {authorLabel ? (
+                        labelledAuthorName({ agent: name, label: authorLabel, open: true, hidden: hide, onFold: one ? undefined : () => toggleMessage(message.id) })
+                      ) : (
+                        <span className="ib-fl-nm ib-who" aria-hidden={hide}>
+                          <bdi>{name}</bdi>
+                        </span>
+                      )}
                     </Tip>
                     {/* The project gives way first; "to you", the session-ended mark and the count never shrink (the row wraps instead). */}
                     <span className="ib-fl-meta">

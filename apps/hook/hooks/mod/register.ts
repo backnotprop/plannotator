@@ -86,6 +86,7 @@ import { PlannotatorMod } from './controller'
 import { resolveAgentToolEnabled, resolveClaudeModEnabled, resolveInboxReminderCustom, resolveInboxReminderEnabled, resolveInboxToolEnabled } from './enabled'
 import type { Host, LoadedPluginInfo } from './host'
 import {
+  claudeTranscriptPaths,
   conversationResumed,
   discoverInboxTools,
   engineHasSessionAppend,
@@ -101,6 +102,7 @@ import {
   readSessionThreads,
   STORE_INBOX_REMINDER_SESSIONS,
   STORE_INBOX_SESSION_NAMES,
+  TranscriptTitle,
   withReminderSession,
 } from './inbox'
 import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-contract'
@@ -477,6 +479,26 @@ async function sessionNameOf($: Engine, sessionId: string): Promise<string> {
 }
 
 /**
+ * The session's title from its transcript (`TranscriptTitle`): what Claude Code
+ * shows as its name, however it was set. Found in Claude Code's own layout,
+ * `<CLAUDE_CONFIG_DIR or ~/.claude>/projects/<folder>/<session id>.jsonl`,
+ * for the folder the session started in (its first root), its root now, or its
+ * working folder. Its null (no transcript, no title in it, no `/bin/sh`) leaves
+ * the label to the `/rename` store.
+ */
+function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTitle {
+  let firstRoot: string | null = null
+  const folder = (read: () => unknown) => Promise.resolve().then(read).then(String, () => '')
+  return new TranscriptTitle(host, sessionId, async () => {
+    const configDir = (await $.env.get('CLAUDE_CONFIG_DIR')) || `${(await $.env.get('HOME')) ?? ''}/.claude`
+    const root = await folder(() => $.session.root())
+    if (firstRoot === null && root.startsWith('/')) firstRoot = root
+    const cwd = await folder(() => $.session.cwd())
+    return configDir.startsWith('/') ? claudeTranscriptPaths(configDir, [firstRoot ?? '', root, cwd], sessionId) : []
+  })
+}
+
+/**
  * The instance for the session the process is in NOW. `session.start` does
  * not fire for `/clear` or an in-process resume (the process goes on under
  * another session id), so the id is checked here and a new instance is made
@@ -494,7 +516,9 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
     const previous = mod
     mod?.dispose()
     await $.env.set('PLANNOTATOR_SESSION_TAG', `claude-code:${sessionId}`)
-    const instance = new PlannotatorMod(hostOf($, settings.debugPath), {
+    const host = hostOf($, settings.debugPath)
+    const title = sessionTitleOf($, host, String(sessionId))
+    const instance = new PlannotatorMod(host, {
       sessionId,
       dataDir: settings.dataDir,
       interactive: true,
@@ -504,7 +528,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // `claude --resume` folder, its Inbox project folder (InboxLink.projectFolder),
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
-      label: () => sessionNameOf($, String(sessionId)),
+      label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       ...(inboxTools
         ? {
             inboxTools,
