@@ -14,7 +14,7 @@ export const inboxFileViewerShortcuts = defineShortcutScope({
       description: 'Close what is open, then leave full screen',
       bindings: ['Escape'],
       section: 'Files',
-      hint: 'One thing per press, innermost first: a menu or the file list, a comment being written (typed words are never lost: you are asked first), the comments drawer, Annotate (HTML goes to Interact), the question about an unsaved comment; then full screen ends and the file is back beside the thread (on a phone, back to the thread). In Interact, an Escape the page uses itself stays the page’s.',
+      hint: 'One thing per press, innermost first: a menu or the file list, a comment being written (typed words are never lost: you are asked first), the earlier comments, the comments drawer, Annotate (HTML goes to Interact), the question about an unsaved comment; then full screen ends and the file is back beside the thread (on a phone, back to the thread). In Interact, an Escape the page uses itself stays the page’s.',
       preventDefault: true,
       displayOrder: 0,
     },

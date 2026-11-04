@@ -118,6 +118,7 @@ packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
 packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
+packages/inbox/earlierCommentsPanel.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx

@@ -1642,6 +1642,8 @@ export interface AttachmentsModel {
   /** The images the messages show, captured as files (additive; absent from an older Inbox). */
   inline_images?: InboxAttachmentState[];
   annotations: InboxAnnotationRecord[];
+  /** The person's comments on files that a Send already carried (additive; absent from an older Inbox or peer). */
+  earlier_annotations?: InboxAnnotationRecord[];
 }
 
 /** One version of a file: its text, and for HTML the page as annotate serves it. */

@@ -13,6 +13,8 @@
  *                 row), and only an empty composer just closes.
  *  3. `field`     the key came from the file's own comment row (an image's or
  *                 a film's): focus leaves the row, its words stay in it.
+ *  3b. `earlier` the earlier comments panel closes. Beside the thread too, before
+ *                 the file itself would close.
  *  4. `drawer`    the comments drawer (a phone's sheet) closes.
  *  4b. `linked`   a page the attached HTML page links to (not attached, shown
  *                 over it) steps back one page. Beside the thread too: the one
@@ -26,14 +28,14 @@
  *                 the same unsaved-comment question), as always where it can
  *                 only be full screen (a phone, a narrow window).
  *
- * Beside the thread (not full screen) there is no ladder: each control keeps
- * its own Escape, as before.
+ * Beside the thread (not full screen) there is no ladder apart from `earlier`
+ * and `linked`: each other control keeps its own Escape, as before.
  */
 
-export type EscapeRung = 'popover' | 'composer' | 'field' | 'drawer' | 'linked' | 'annotate' | 'question' | 'leave';
+export type EscapeRung = 'popover' | 'composer' | 'field' | 'earlier' | 'drawer' | 'linked' | 'annotate' | 'question' | 'leave';
 
 /** The rungs in the order a press takes them. */
-export const ESCAPE_LADDER: readonly EscapeRung[] = ['popover', 'composer', 'field', 'drawer', 'linked', 'annotate', 'question', 'leave'];
+export const ESCAPE_LADDER: readonly EscapeRung[] = ['popover', 'composer', 'field', 'earlier', 'drawer', 'linked', 'annotate', 'question', 'leave'];
 
 export interface EscapeLadderState {
   /** The file is full screen. */
@@ -44,6 +46,8 @@ export interface EscapeLadderState {
   composerOpen: boolean;
   /** The key came from the file's own comment row (an image's or a film's). */
   inField: boolean;
+  /** The earlier comments panel is open. */
+  earlierOpen: boolean;
   /** The comments drawer (a phone's sheet) is open. */
   panelOpen: boolean;
   /** A page the attached HTML page links to is shown over it. */
@@ -59,18 +63,20 @@ export const IDLE_LADDER: EscapeLadderState = {
   popoverOpen: false,
   composerOpen: false,
   inField: false,
+  earlierOpen: false,
   panelOpen: false,
   linkedOpen: false,
   annotating: false,
   questionOpen: false,
 };
 
-/** What this Escape does, or null for nothing (beside the thread, with no linked page shown). */
+/** What this Escape does, or null for nothing (beside the thread, with no earlier comments panel or linked page shown). */
 export function escapeRung(state: EscapeLadderState): EscapeRung | null {
-  if (!state.full) return state.linkedOpen ? 'linked' : null;
+  if (!state.full) return state.earlierOpen ? 'earlier' : state.linkedOpen ? 'linked' : null;
   if (state.popoverOpen) return 'popover';
   if (state.composerOpen) return 'composer';
   if (state.inField) return 'field';
+  if (state.earlierOpen) return 'earlier';
   if (state.panelOpen) return 'drawer';
   if (state.linkedOpen) return 'linked';
   if (state.annotating) return 'annotate';
@@ -87,6 +93,8 @@ export function afterRung(state: EscapeLadderState, rung: EscapeRung): EscapeLad
       return { ...state, composerOpen: false };
     case 'field':
       return { ...state, inField: false };
+    case 'earlier':
+      return { ...state, earlierOpen: false };
     case 'drawer':
       return { ...state, panelOpen: false };
     case 'linked':
@@ -125,17 +133,17 @@ export type LadderFileKind = 'html' | 'markdown' | 'text' | 'code' | 'diagram' |
 export function rungsFor(kind: LadderFileKind): readonly EscapeRung[] {
   switch (kind) {
     case 'html':
-      return ['popover', 'composer', 'drawer', 'linked', 'annotate', 'question', 'leave'];
+      return ['popover', 'composer', 'earlier', 'drawer', 'linked', 'annotate', 'question', 'leave'];
     case 'markdown':
     case 'text':
     case 'code':
     case 'diagram':
-      return ['popover', 'composer', 'drawer', 'question', 'leave'];
+      return ['popover', 'composer', 'earlier', 'drawer', 'question', 'leave'];
     case 'image':
     case 'video':
-      return ['popover', 'field', 'drawer', 'question', 'leave'];
+      return ['popover', 'field', 'earlier', 'drawer', 'question', 'leave'];
     case 'download':
-      return ['popover', 'drawer', 'leave'];
+      return ['popover', 'earlier', 'drawer', 'leave'];
   }
 }
 
@@ -147,6 +155,7 @@ export function everythingOpen(kind: LadderFileKind): EscapeLadderState {
     popoverOpen: rungs.has('popover'),
     composerOpen: rungs.has('composer'),
     inField: rungs.has('field'),
+    earlierOpen: rungs.has('earlier'),
     panelOpen: rungs.has('drawer'),
     linkedOpen: rungs.has('linked'),
     annotating: rungs.has('annotate'),

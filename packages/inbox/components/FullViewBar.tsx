@@ -152,7 +152,7 @@ const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
  * here: it is a fact about the file.
  */
 export const GATHERED =
-  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-earlier-panel';
 /** Focus sits in something that is about to gather (and go inert or hidden). */
 const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 

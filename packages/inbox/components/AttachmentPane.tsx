@@ -66,6 +66,8 @@ import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '..
 import { useHtmlPageComment } from './HtmlPageComment';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
+import { EarlierCommentsPanel, EarlierCommentsSheet, type EarlierEntry } from './EarlierComments';
+import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
 import { FileSwipeCard } from './FileSwipeCard';
@@ -170,6 +172,10 @@ export interface AttachmentPaneProps {
   attachments: readonly InboxAttachmentState[];
   /** The thread's annotations waiting for a Send. */
   records: readonly InboxAnnotationRecord[];
+  /** The person's comments on the thread's files that a Send already carried (earlierComments.ts). */
+  earlierRecords?: readonly InboxAnnotationRecord[];
+  /** What opens the earlier comments panel (EarlierComments.tsx). Absent: nothing opens it. */
+  earlierEntry?: EarlierEntry;
   /**
    * Tag agents with `@` in a comment (approval "inbox-tag-agents"): markdown, text and HTML files. The
    * image, video, code and diagram comment boxes take none yet.
@@ -464,6 +470,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
    * of full screen starts showing.
    */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
+  // Earlier comments (earlierComments.ts): what the person said about this file before. Each file starts closed.
+  const [earlierOpen, setEarlierOpen] = useState(false);
+  const earlierPanelId = `ib-earlier-${useId().replace(/:/g, '')}`;
+  const EarlierEntryPoint = props.earlierEntry;
+  const earlierReplies = useMemo(() => earlierCommentsOn(props.earlierRecords ?? [], attachment), [props.earlierRecords, attachment]);
+  const earlierCount = useMemo(() => earlierReplies.reduce((sum, reply) => sum + reply.comments.length, 0), [earlierReplies]);
   const barRef = useRef<FullViewBarHandle>(null);
   /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
   const gatheredFrom = useRef<'bar' | 'composer'>('bar');
@@ -784,6 +796,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setEndNote(null);
     setGuard(null);
     setSheet(false);
+    setEarlierOpen(false);
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
@@ -1134,8 +1147,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   function ladderRung(target: Element | null): EscapeRung | null {
     if (modalOpen()) return null;
     if (!full) {
-      // Beside the thread the one rung is a linked page, for a key from inside the pane (or the page).
-      if (!linkedTop || document.querySelector(SELF_CLOSING_DRAFTS)) return null;
+      if (document.querySelector(SELF_CLOSING_DRAFTS)) return null;
+      // Beside the thread the earlier comments panel closes before the file does, wherever focus is but a field or an overlay.
+      if (earlierShown) return target && (isEditableTarget(target) || inOverlay(target)) ? null : 'earlier';
+      // The other rung is a linked page, for a key from inside the pane (or the page).
+      if (!linkedTop) return null;
       if (target && (!sectionRef.current?.contains(target) || isEditableTarget(target) || inOverlay(target))) return null;
       return 'linked';
     }
@@ -1147,6 +1163,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       popoverOpen: menuOpen || moreOpen || !!props.composer?.reply.comments.list,
       composerOpen: !props.readOnly && openComposer() !== null,
       inField,
+      earlierOpen: earlierShown,
       panelOpen: panelOpen,
       linkedOpen: linkedTop !== null,
       annotating: isHtml && armed && !props.readOnly,
@@ -1189,6 +1206,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         announce(fromReply ? 'Left the reply box. Your words are kept.' : 'Left the comment box.');
         return;
       }
+      case 'earlier':
+        closeEarlier();
+        return;
       case 'drawer':
         if (fromPage) {
           if (drawerMode) setDrawer(false);
@@ -1237,6 +1257,16 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   linkedStackRef.current = linkedStack;
   const linkedLast = linkedStack.at(-1);
   const linkedTop = linkedLast && linkedLast.attachmentId === attachment.id ? linkedLast : null;
+  /** A linked page over the file is not the file: its earlier comments wait under it. */
+  const earlierHere = earlierCount > 0 && !linkedTop;
+  const earlierShown = earlierOpen && earlierHere;
+  /** Closes the panel; focus inside it goes back to what opened it, else stays where the person is (the file). */
+  const closeEarlier = useCallback(() => {
+    const inside = document.activeElement?.closest('[data-earlier-panel]');
+    setEarlierOpen(false);
+    announce('Earlier comments closed.');
+    if (inside) (sectionRef.current?.querySelector<HTMLElement>('[data-earlier-entry]') ?? sectionRef.current)?.focus({ preventScroll: true });
+  }, [announce]);
   /** Why a link opened nothing, for a moment. */
   const [linkNote, setLinkNote] = useState<string | null>(null);
   const linkNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1623,6 +1653,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const pinchTucks = pinched && !pinchShown && !htmlComment.open;
   const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
   shownToolbarRef.current = shownToolbar;
+  // Hide tools takes the earlier comments with the rest of what floats.
+  useEffect(() => {
+    if (shownToolbar === 'tucked') setEarlierOpen(false);
+  }, [shownToolbar]);
   // Every way back to showing (the corner control, Keep writing, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -2075,8 +2109,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onAnnotateModeExit={() => {
                 if (!escapeFromPage()) setArmed(false);
               }}
-              // In Interact, an Escape the page did not use climbs the ladder (full screen only).
-              onPageEscape={full ? () => void escapeFromPage() : undefined}
+              // In Interact, an Escape the page did not use climbs the ladder (full screen, or to close the earlier comments).
+              onPageEscape={full || earlierShown ? () => void escapeFromPage() : undefined}
               onAnnotateModeToggle={() => setArmed((v) => !v)}
               // ⌘⇧X pressed inside the page: the bridge forwards it (Hide / Show the full-screen toolbar).
               onToolsToggle={full ? () => barRef.current?.toggle() : undefined}
@@ -2338,6 +2372,17 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onAvailableChange={(fits) => setRailFit({ key: docKey, fits })}
               panelAction={<ContentsHide onHide={hideContents} />}
             />
+          )}
+          {earlierHere && (
+            <>
+              {/* How the panel gets opened: the one piece a change of entry point replaces (EarlierComments.tsx). */}
+              {EarlierEntryPoint && <EarlierEntryPoint count={earlierCount} open={earlierShown} panelId={earlierPanelId} onToggle={() => (earlierShown ? closeEarlier() : setEarlierOpen(true))} />}
+              {phone ? (
+                earlierShown && <EarlierCommentsSheet id={earlierPanelId} near={sectionRef.current} replies={earlierReplies} count={earlierCount} onClose={closeEarlier} />
+              ) : (
+                <EarlierCommentsPanel id={earlierPanelId} open={earlierShown} replies={earlierReplies} count={earlierCount} onClose={closeEarlier} />
+              )}
+            </>
           )}
         </div>
         <div

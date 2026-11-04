@@ -38,6 +38,13 @@ describe('the Escape ladder', () => {
     expect(KINDS.filter((kind) => rungsFor(kind).includes('linked'))).toEqual(['html']);
   });
 
+  test('the earlier comments close before the drawer and before leaving, beside the thread too (before the file itself closes)', () => {
+    expect(escapeRung({ ...IDLE_LADDER, earlierOpen: true, panelOpen: true })).toBe('earlier');
+    expect(escapeRung({ ...IDLE_LADDER, earlierOpen: true, composerOpen: true })).toBe('composer');
+    expect(escapeRung({ ...IDLE_LADDER, earlierOpen: true })).toBe('earlier');
+    expect(escapeRung({ ...IDLE_LADDER, full: false, earlierOpen: true, linkedOpen: true })).toBe('earlier');
+  });
+
   test('a menu closes before a composer, the drawer before Annotate, Annotate before the question, and the question before leaving', () => {
     expect(escapeRung({ ...IDLE_LADDER, popoverOpen: true, composerOpen: true })).toBe('popover');
     expect(escapeRung({ ...IDLE_LADDER, composerOpen: true, panelOpen: true })).toBe('composer');
