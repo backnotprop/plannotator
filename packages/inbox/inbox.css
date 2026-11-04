@@ -7453,46 +7453,43 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    thread pane's place: a bar, the stack, the landing order, and Reply at the foot. */
 .ib-prlist .ib-lhead { gap: 10px; padding-right: 14px; }
 .ib-prlist .ib-lhead h1 { flex: none; outline: none; }
-/* The filter (approval "pr-list-filters", take B Joined; PullFilter.tsx): one hairline box on the right of the head's
-   line, "5 on you │ [filter]" at rest, "2 on you │ [eye] To review [book] web-app ×" narrowed. A 28px row of quiet
-   faces (44px targets on a phone); icons are the list's own 16px marks in the muted ink; narrowed, the words are in
-   full ink, never a fill or a dot. The count is muted, its number in normal weight. */
-.ib-prlist .ib-lhead { container: prhead / inline-size; }
-.ib-prlist .ib-lhead .ib-pc { flex: 0 1 auto; min-width: 0; display: flex; align-items: center; margin-left: auto; margin-right: -6px; }
-.ib-pc-grp { position: relative; flex: 0 1 auto; display: inline-flex; align-items: center; min-width: 0; height: 28px; border-radius: 6px; }
-.ib-pc-grp::before { content: ''; position: absolute; inset: 0; border: 1px solid var(--ib-line, var(--border)); border-radius: inherit; pointer-events: none; }
-.pn-inbox .ib-pc-btn { position: relative; flex: 0 1 auto; display: inline-flex; align-items: center; justify-content: center; gap: 3px; min-width: 28px; height: 28px; padding: 0 6px 0 2px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; font-size: var(--ib-fs-13, 13px); font-weight: 500; white-space: nowrap; cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
-.pn-inbox .ib-pc-btn:hover, .pn-inbox .ib-pc-btn[data-popup-open] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
-.pn-inbox .ib-pc-btn:focus-visible, .pn-inbox .ib-pc-x:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.pn-inbox .ib-pc-btn svg.ib-ic { flex: none; width: 16px; height: 16px; stroke-width: 1.6; }
-.ib-pc-you { flex: none; display: inline-flex; align-items: center; gap: 0.25em; padding: 0 2px 0 4px; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); white-space: nowrap; }
-.ib-pc-n { font-variant-numeric: tabular-nums; }
-.ib-pc-div { flex: none; width: 1px; height: 14px; margin: 0 2px; background: var(--ib-line, var(--border)); }
-.ib-pc-grp[data-set] .ib-pc-btn { min-width: 0; overflow: hidden; color: var(--foreground); border-radius: 6px 0 0 6px; padding-right: 2px; }
-.ib-pc-grp[data-set] .ib-pc-btn svg.ib-ic { color: var(--muted-foreground); }
-.ib-pc-val { display: inline-flex; align-items: center; gap: 4px; min-width: 0; }
-.ib-pc-val:not(.ib-pc-proj) { flex: none; }
-.ib-pc-val + .ib-pc-val { margin-left: 3px; }
-.ib-pc-w { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.pn-inbox .ib-pc-x { position: relative; flex: none; display: inline-grid; place-items: center; width: 19px; height: 28px; padding: 0 2px 0 0; border: 0; border-radius: 0 6px 6px 0; background: none; color: var(--muted-foreground); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
-.pn-inbox .ib-pc-x:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
-.pn-inbox .ib-pc-x svg.ib-ic { width: 12px; height: 12px; stroke-width: 2; }
+/* The filter (approval "pr-list-filters", round 7 take B "One filter button"; PullFilter.tsx): the head holds the
+   filter mark alone, 28px (44px on a phone), muted at rest; narrowed, in full ink with a dot. What is picked is named
+   once, in one quiet line over the list (`.ib-pscope`), the project's name cut short with an ellipsis. */
+.ib-prlist .ib-lhead .ib-pf-slot { display: flex; margin-left: auto; margin-right: -6px; }
+.pn-inbox .ib-pf-ico { position: relative; display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); cursor: pointer; transition: background-color 120ms ease-out, color 120ms ease-out; }
+.pn-inbox .ib-pf-ico:hover, .pn-inbox .ib-pf-ico[data-popup-open] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-pf-ico:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pf-mark { display: inline-grid; place-items: center; }
+.pn-inbox .ib-pf-ico svg.ib-ic { width: 16px; height: 16px; stroke-width: 1.8; }
+.pn-inbox .ib-pf-ico[data-set] { color: var(--foreground); }
+.ib-pf-dot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); }
+.ib-pscope { flex: none; display: flex; align-items: center; gap: 10px; min-width: 0; height: 30px; margin: 8px 10px 4px; padding: 0 2px 0 12px; border-radius: 6px; background: var(--ib-hover-s, var(--muted)); color: var(--foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-pscope-v, .ib-pscope-p { display: inline-flex; align-items: center; gap: 5px; min-width: 0; white-space: nowrap; }
+.ib-pscope-v { flex: none; }
+.ib-pscope-p { flex: 0 1 auto; }
+.ib-pscope-n { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-pscope svg.ib-ic { flex: none; width: 14px; height: 14px; stroke-width: 1.7; color: var(--muted-foreground); }
+.pn-inbox .ib-pscope-x { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; margin-left: auto; padding: 0; border: 0; border-radius: 5px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-pscope-x:hover { color: var(--foreground); background: color-mix(in oklch, var(--foreground) 8%, transparent); }
+.pn-inbox .ib-pscope-x:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-pscope-x svg.ib-ic { width: 12px; height: 12px; stroke-width: 2; color: inherit; }
 /* The menu, Linear's shape: a 16px icon per row, the row's count on the right, a tick column, 32px rows. The title
-   ("Filter") shows on a phone's sheet only (`.ib-pm-title`). */
+   ("Filter") shows on a phone's sheet only (`.ib-pm-title`). The picked rows (the owner's "highlights when open") are
+   tinted as the sidebar's selected row is (`--ib-cur-*`), with the tick; the row under the pointer or the keys takes
+   the menu's own highlight instead (its ink and tick stay), so where the keys are always reads. */
 .ib-pm.ib-pc-menu { min-width: 232px; max-width: 300px; }
 .ib-pc-menu .ib-pmi { height: 32px; gap: 10px; }
+.ib-pc-menu .ib-pmi + .ib-pmi { margin-top: 1px; }
 .ib-pc-menu .ib-pmi .ib-ic { width: 16px; height: 16px; stroke-width: 1.6; }
 .ib-pc-menu .ib-pmi-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.ib-pc-menu .ib-pmi[data-checked] .ib-pmi-l { font-weight: 500; }
+.ib-pc-menu .ib-pmi[data-checked] { background: var(--ib-cur-bg); color: var(--ib-cur-fg); box-shadow: var(--ib-cur-shadow); }
+.ib-pc-menu .ib-pmi[data-checked] .ib-pmi-l { font-weight: 550; }
+.ib-pc-menu .ib-pmi[data-checked] .ib-ic { color: var(--ib-cur-fg); }
+.ib-pc-menu .ib-pmi[data-checked][data-highlighted] { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 80%, transparent)); }
 .ib-pc-menu .ib-pmi .ib-pmi-n { padding-left: 12px; font-size: var(--ib-fs-12, 12px); font-variant-numeric: tabular-nums; }
 .ib-pc-tick { flex: none; display: grid; place-items: center; width: 16px; }
-.ib-pc-menu .ib-pmi .ib-pc-tick .ib-ic { width: 14px; height: 14px; stroke-width: 2; color: var(--foreground); }
-/* Too narrow for the picks' words (the head under 331px inside its padding: a 320px phone, a desktop list dragged
-   narrow): they keep their icons, and the trigger's name keeps the words. "N on you" is never cut. */
-@container prhead (max-width: 330px) {
-  .ib-pc-grp[data-set] .ib-pc-w { display: none; }
-  .ib-pc-val + .ib-pc-val { margin-left: 2px; }
-}
+.ib-pc-menu .ib-pmi .ib-pc-tick .ib-ic { width: 14px; height: 14px; stroke-width: 2; color: currentColor; }
 .ib-prlist .ib-lbody { display: flex; flex-direction: column; }
 .ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
 .ib-pr-empty p { margin: 0 0 4px; }
@@ -7699,21 +7696,17 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }
-  /* The filter: 44px targets round the same faces (32px), the title's line unchanged; the menu is a bottom sheet with
-     48px rows. With both a view and a project picked, the view keeps its icon only, so the project keeps its name. */
-  .ib-prlist .ib-lhead .ib-pc { margin-right: -4px; }
-  .ib-pc-grp { height: 44px; border-radius: 8px; }
-  .ib-pc-grp::before { inset: 6px 0; border-radius: 8px; }
-  .pn-inbox .ib-pc-btn { height: 44px; min-width: 44px; font-size: var(--ib-fs-15, 15px); padding: 0 10px 0 2px; border-radius: 8px; }
-  .pn-inbox .ib-pc-btn svg.ib-ic { width: 18px; height: 18px; }
-  .pn-inbox .ib-pc-btn:hover { background: none; }
-  .ib-pc-you { font-size: var(--ib-fs-15, 15px); padding: 0 4px 0 8px; }
-  .ib-pc-div { height: 16px; margin: 0 4px; }
-  .ib-pc-grp[data-set] .ib-pc-btn { padding: 0 4px 0 2px; border-radius: 8px 0 0 8px; }
-  .pn-inbox .ib-pc-x { width: 44px; height: 44px; border-radius: 0 8px 8px 0; }
-  .pn-inbox .ib-pc-x:hover { background: none; }
-  .pn-inbox .ib-pc-x svg.ib-ic { width: 14px; height: 14px; }
-  .ib-pc[data-both] .ib-pc-val:not(.ib-pc-proj) .ib-pc-w { display: none; }
+  /* The filter: a 44px target round the same mark; no grey box behind the open sheet's trigger; the quiet line 44px
+     tall with a 44px ×; the menu is a modal bottom sheet with 48px rows. */
+  .ib-prlist .ib-lhead .ib-pf-slot { margin-right: -8px; }
+  .pn-inbox .ib-pf-ico { width: 44px; height: 44px; border-radius: 8px; }
+  .pn-inbox .ib-pf-ico:hover, .pn-inbox .ib-pf-ico[data-popup-open] { background: none; }
+  .pn-inbox .ib-pf-ico svg.ib-ic { width: 20px; height: 20px; }
+  .ib-pf-dot { top: 11px; right: 10px; width: 7px; height: 7px; }
+  .ib-pscope { height: 44px; margin: 8px 12px 0; padding-left: 12px; font-size: var(--ib-fs-15, 15px); border-radius: 8px; }
+  .pn-inbox .ib-pscope-x { width: 44px; height: 44px; margin-right: -2px; }
+  .pn-inbox .ib-pscope-x:hover { background: none; }
+  .ib-pscope svg.ib-ic { width: 16px; height: 16px; }
   .ib-pm-pos[data-phone] .ib-pc-menu { max-width: none; }
   .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi { height: 48px; gap: 12px; }
   .ib-pm-pos[data-phone] .ib-pc-menu .ib-pmi .ib-ic { width: 18px; height: 18px; }

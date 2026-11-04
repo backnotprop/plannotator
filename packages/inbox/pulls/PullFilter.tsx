@@ -1,20 +1,19 @@
 /**
- * The Pull requests list's filter (approval "pr-list-filters", take B Joined): one bordered control on the right of
- * the list's head, holding the on-you count and the filter.
+ * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button", with the owner's
+ * "highlights when open"; `.product/approved/pr-list-filters/`).
  *
- * - At rest: "5 on you │ [filter]". The count follows the project, never the view, and hides at 0; its tooltip says
- *   what "on you" means.
- * - Narrowed: "2 on you │ [eye] To review [book] web-app ×": the view and the project, each by its icon and words,
- *   and × clears both. Too narrow for that (the list's head under 330px), the picks drop their words and keep their
- *   icons; "on you" is never cut.
+ * - The head holds "PRs" and the filter mark alone; narrowed, the mark is in full ink with a dot. No project name
+ *   and no "N on you" in the head (the list's "On you N" band already says it), so nothing there grows.
  * - The menu, drawn like Linear's: the views (All, Mine, To review, Others), then the projects (only when more than
- *   one has PRs here), each with its icon, its count and a tick on the chosen one; "Clear filters" while narrowed. A
- *   phone draws it as a bottom sheet titled "Filter".
+ *   one has PRs here), each with its icon, its count and a tick; the picked rows are tinted as the sidebar's
+ *   selected row is. "Clear filters" while narrowed. A phone draws it as a modal bottom sheet titled "Filter".
+ * - What is picked is named once, in one quiet line over the list (`PullScopeLine`): the view, then the project cut
+ *   short with an ellipsis, and × to clear both.
  *
  * Base UI carries the keys (arrows, Home/End, type-ahead, Escape and Tab close, focus back to the trigger). No
- * shortcut of its own.
+ * shortcut of its own. The mark's tooltip (its name) opens on keyboard focus too.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
@@ -52,139 +51,162 @@ function Glyph({ name }: { name: GlyphName }) {
 /** Each view's mark: every PR, the person's pen, their eye on others' work, other people. */
 const VIEW_GLYPH: Record<PullFilter, GlyphName> = { all: 'pullRequest', mine: 'pen', review: 'eye', others: 'users' };
 
-/**
- * What "on you" means, in the words of the On you band's own definition (docs/agent-guides/inbox-files-and-guides.md),
- * said to the person, with the PRs assigned to them.
- */
-export const ON_YOU_TIP = "On you: a review requested from you, changes requested or checks failed on your own PR, your agent's PR, or one assigned to you";
-
 export interface PullFilterProps {
   model: InboxPullsAnswer;
   filter: PullFilter;
+  /** The chosen project; one the list no longer offers is dropped by the page before it gets here. */
   project: string | null;
   /** The projects offered: those with a GitHub or GitLab remote here. The project rows show when there are two or more. */
   projects: readonly ProjectFolder[];
   names: ReadonlyMap<string, string>;
   phone: boolean;
-  /** The On you rows of the chosen project (every view). */
-  onYou: number;
+  /** The trigger, so the quiet line's × can put focus back on it. */
+  triggerRef: RefObject<HTMLButtonElement | null>;
   /** A new view and project, in one step (Clear filters sets both). */
   onChange: (next: { filter: PullFilter; project: string | null }) => void;
 }
 
-export function PullFilterControl({ model, filter, project, projects, names, phone, onYou, onChange }: PullFilterProps) {
+/** What the picks say: the view's words and the project's name, or nothing at rest. */
+export function pullScopeWords(filter: PullFilter, projectName: string | null): string {
+  return [filter === 'all' ? null : pullFilterWords(filter), projectName].filter(Boolean).join(', ');
+}
+
+export function PullFilterControl({ model, filter, project, projects, names, phone, triggerRef, onChange }: PullFilterProps) {
   const [open, setOpen] = useState(false);
-  const trigger = useRef<HTMLButtonElement>(null);
   // The menu is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
-  useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
+  useEffect(() => setPortal(triggerRef.current?.closest<HTMLElement>('.pn-inbox') ?? null), [triggerRef]);
+  // The trigger has keyboard focus (not a click's): its tooltip opens as a hover would open it.
+  const [keyed, setKeyed] = useState(false);
 
-  const projectName = project ? (names.get(project) ?? 'Project') : null;
-  const viewWords = filter === 'all' ? null : pullFilterWords(filter);
-  const narrowed = !!viewWords || !!projectName;
-  // The trigger's name says everything its icons stand for ("5 on you. Filter: To review, web-app").
-  const said = [viewWords, projectName].filter(Boolean).join(', ');
-  const name = `${onYou > 0 ? `${formatCount(onYou)} on you. ` : ''}${narrowed ? `Filter: ${said}` : 'Filter'}`;
+  const projectName = project ? (names.get(project) ?? projects.find((p) => p.id === project)?.name ?? null) : null;
+  const said = pullScopeWords(filter, projectName);
+  const narrowed = said !== '';
+  const name = narrowed ? `Filter: ${said}` : 'Filter';
   const clear = () => {
     onChange({ filter: 'all', project: null });
-    // Back on the trigger: the × goes with the filter.
-    requestAnimationFrame(() => trigger.current?.focus());
+    requestAnimationFrame(() => triggerRef.current?.focus());
   };
   const tick = (on: boolean) => <span className="ib-pc-tick">{on && <Icon name="check" />}</span>;
 
   return (
-    <div className="ib-pc" data-both={viewWords && projectName ? '' : undefined} data-pulls-filter-said={said || 'none'}>
-      <span className="ib-pc-grp" data-set={narrowed ? '' : undefined}>
-        <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
-          <Menu.Trigger ref={trigger} className="ib-pc-btn" aria-label={name} data-pulls-filter-trigger="">
-            {onYou > 0 && (
+    <Menu.Root open={open} onOpenChange={setOpen} modal={phone}>
+      <Menu.Trigger
+        ref={triggerRef}
+        className="ib-pf-ico"
+        aria-label={name}
+        data-set={narrowed ? '' : undefined}
+        onFocus={(e) => setKeyed(e.currentTarget.matches(':focus-visible'))}
+        onBlur={() => setKeyed(false)}
+        data-pulls-filter-trigger=""
+      >
+        {/* Drawn anew when the menu opens or closes, so a tooltip shown on focus never stays over the open menu. */}
+        <Tip key={open ? 'menu' : 'rest'} content={name} open={keyed && !open && !phone ? true : undefined}>
+          <span className="ib-pf-mark">
+            <Glyph name="filter" />
+          </span>
+        </Tip>
+        {narrowed && <span className="ib-pf-dot" aria-hidden="true" />}
+      </Menu.Trigger>
+      <Menu.Portal container={portal ?? undefined}>
+        {phone && <Menu.Backdrop className="ib-pm-scrim" />}
+        <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
+          <Menu.Popup className="ib-pm ib-pc-menu" aria-label="Filter" data-pulls-filter-menu="">
+            <div className="ib-pm-title" aria-hidden="true">
+              Filter
+            </div>
+            <Menu.RadioGroup value={filter} onValueChange={(next: PullFilter) => next !== filter && onChange({ filter: next, project })}>
+              {PULL_FILTERS.map(([value, words]) => (
+                <Menu.RadioItem key={value} value={value} closeOnClick className="ib-pmi" label={words} data-pulls-filter={value}>
+                  <Glyph name={VIEW_GLYPH[value]} />
+                  <span className="ib-pmi-l">{words}</span>
+                  <span className="ib-pmi-n">{formatCount(pullCount(model, project, value))}</span>
+                  {tick(filter === value)}
+                </Menu.RadioItem>
+              ))}
+            </Menu.RadioGroup>
+            {projects.length > 1 && (
               <>
-                <Tip content={ON_YOU_TIP}>
-                  <span className="ib-pc-you" data-pulls-on-you={onYou}>
-                    <span className="ib-pc-n">{formatCount(onYou)}</span> on you
-                  </span>
-                </Tip>
-                <span className="ib-pc-div" aria-hidden="true" />
+                <Menu.Separator className="ib-pm-sep" />
+                <Menu.RadioGroup value={project ?? ''} onValueChange={(next: string) => next !== (project ?? '') && onChange({ filter, project: next || null })}>
+                  <Menu.RadioItem value="" closeOnClick className="ib-pmi" label="All projects" data-pulls-filter-project-option="">
+                    <Glyph name="grid" />
+                    <span className="ib-pmi-l">All projects</span>
+                    <span className="ib-pmi-n">{formatCount(pullCount(model, null, filter))}</span>
+                    {tick(project === null)}
+                  </Menu.RadioItem>
+                  {projects.map((p) => {
+                    const shown = names.get(p.id) ?? p.name;
+                    return (
+                      <Menu.RadioItem key={p.id} value={p.id} closeOnClick className="ib-pmi" label={shown} data-pulls-filter-project-option={p.id}>
+                        <Glyph name="repo" />
+                        <span className="ib-pmi-l" dir="auto">
+                          {shown}
+                        </span>
+                        <span className="ib-pmi-n">{formatCount(pullCount(model, p.id, filter))}</span>
+                        {tick(project === p.id)}
+                      </Menu.RadioItem>
+                    );
+                  })}
+                </Menu.RadioGroup>
               </>
             )}
-            {!narrowed && <Glyph name="filter" />}
-            {viewWords && (
-              <span className="ib-pc-val" data-pulls-filter-view={filter}>
-                <Glyph name={VIEW_GLYPH[filter]} />
-                <span className="ib-pc-w">{viewWords}</span>
-              </span>
+            {narrowed && (
+              <>
+                <Menu.Separator className="ib-pm-sep" />
+                <Menu.Item className="ib-pmi" data-pulls-filter-clear-item="" onClick={clear}>
+                  <Icon name="x" />
+                  <span className="ib-pmi-l">Clear filters</span>
+                </Menu.Item>
+              </>
             )}
-            {projectName && (
-              <span className="ib-pc-val ib-pc-proj" data-pulls-filter-project={project}>
-                <Glyph name="repo" />
-                <span className="ib-pc-w" dir="auto">
-                  {projectName}
-                </span>
-              </span>
-            )}
-          </Menu.Trigger>
-          <Menu.Portal container={portal ?? undefined}>
-            {phone && <Menu.Backdrop className="ib-pm-scrim" />}
-            <Menu.Positioner className="ib-pm-pos" side="bottom" align="end" sideOffset={6} data-phone={phone ? '' : undefined}>
-              <Menu.Popup className="ib-pm ib-pc-menu" aria-label="Filter" data-pulls-filter-menu="">
-                <div className="ib-pm-title" aria-hidden="true">
-                  Filter
-                </div>
-                <Menu.RadioGroup value={filter} onValueChange={(next: PullFilter) => next !== filter && onChange({ filter: next, project })}>
-                  {PULL_FILTERS.map(([value, words]) => (
-                    <Menu.RadioItem key={value} value={value} closeOnClick className="ib-pmi" label={words} data-pulls-filter={value}>
-                      <Glyph name={VIEW_GLYPH[value]} />
-                      <span className="ib-pmi-l">{words}</span>
-                      <span className="ib-pmi-n">{formatCount(pullCount(model, project, value))}</span>
-                      {tick(filter === value)}
-                    </Menu.RadioItem>
-                  ))}
-                </Menu.RadioGroup>
-                {projects.length > 1 && (
-                  <>
-                    <Menu.Separator className="ib-pm-sep" />
-                    <Menu.RadioGroup value={project ?? ''} onValueChange={(next: string) => next !== (project ?? '') && onChange({ filter, project: next || null })}>
-                      <Menu.RadioItem value="" closeOnClick className="ib-pmi" label="All projects" data-pulls-filter-project-option="">
-                        <Glyph name="grid" />
-                        <span className="ib-pmi-l">All projects</span>
-                        <span className="ib-pmi-n">{formatCount(pullCount(model, null, filter))}</span>
-                        {tick(project === null)}
-                      </Menu.RadioItem>
-                      {projects.map((p) => {
-                        const shown = names.get(p.id) ?? p.name;
-                        return (
-                          <Menu.RadioItem key={p.id} value={p.id} closeOnClick className="ib-pmi" label={shown} data-pulls-filter-project-option={p.id}>
-                            <Glyph name="repo" />
-                            <span className="ib-pmi-l" dir="auto">
-                              {shown}
-                            </span>
-                            <span className="ib-pmi-n">{formatCount(pullCount(model, p.id, filter))}</span>
-                            {tick(project === p.id)}
-                          </Menu.RadioItem>
-                        );
-                      })}
-                    </Menu.RadioGroup>
-                  </>
-                )}
-                {narrowed && (
-                  <>
-                    <Menu.Separator className="ib-pm-sep" />
-                    <Menu.Item className="ib-pmi" data-pulls-filter-clear-item="" onClick={clear}>
-                      <Icon name="x" />
-                      <span className="ib-pmi-l">Clear filters</span>
-                    </Menu.Item>
-                  </>
-                )}
-              </Menu.Popup>
-            </Menu.Positioner>
-          </Menu.Portal>
-        </Menu.Root>
-        {narrowed && (
-          <button type="button" className="ib-pc-x" aria-label="Clear filters" onClick={clear} data-pulls-filter-clear="">
-            <Icon name="x" />
-          </button>
-        )}
-      </span>
+          </Menu.Popup>
+        </Menu.Positioner>
+      </Menu.Portal>
+    </Menu.Root>
+  );
+}
+
+/**
+ * What is picked, named once, in one quiet line over the list: the view, then the project cut short with an
+ * ellipsis, so a long name never pushes anything; × clears both (and focus goes back to the filter). Absent at rest.
+ */
+export function PullScopeLine({ filter, projectName, triggerRef, onClear }: { filter: PullFilter; projectName: string | null; triggerRef: RefObject<HTMLButtonElement | null>; onClear: () => void }) {
+  const view = filter === 'all' ? null : filter;
+  if (!view && !projectName) return null;
+  return (
+    <div className="ib-pscope" data-pulls-scope="">
+      {view && (
+        <span className="ib-pscope-v" data-pulls-scope-view={view}>
+          <Glyph name={VIEW_GLYPH[view]} />
+          {pullFilterWords(view)}
+        </span>
+      )}
+      {projectName && (
+        <span className="ib-pscope-p" data-pulls-scope-project="">
+          <Glyph name="repo" />
+          <span className="ib-pscope-n" dir="auto">
+            {projectName}
+          </span>
+        </span>
+      )}
+      <button
+        type="button"
+        className="ib-pscope-x"
+        aria-label="Clear filters"
+        onClick={() => {
+          onClear();
+          requestAnimationFrame(() => triggerRef.current?.focus());
+        }}
+        data-pulls-filter-clear=""
+      >
+        <Icon name="x" />
+      </button>
     </div>
   );
+}
+
+/** A ref for the filter's trigger, shared by the head and the quiet line. */
+export function useFilterTrigger() {
+  return useRef<HTMLButtonElement | null>(null);
 }

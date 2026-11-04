@@ -61,7 +61,7 @@ import {
   stackTitle,
   type PullFilter,
 } from './model';
-import { PullFilterControl } from './PullFilter';
+import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
@@ -97,18 +97,26 @@ function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
   return pull.state;
 }
 
-export function PullsPage(props: PullsPageProps) {
-  const { state, phone } = props;
-  const model = state.model;
-  const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
-  // The count on the head follows the project, never the view.
-  const onYou = useMemo(() => (model ? pullGroups(model, props.project).on_you.length : 0), [model, props.project]);
-  const open = groups && props.stackId ? findStack(groups, props.stackId) : null;
+export function PullsPage(given: PullsPageProps) {
+  const model = given.state.model;
   // The filter offers the projects that have a GitHub or GitLab remote here.
   const offered = useMemo(() => {
     const ids = new Set(Object.values(model?.projects ?? {}).flat());
-    return props.projects.filter((p) => ids.has(p.id));
-  }, [model, props.projects]);
+    return given.projects.filter((p) => ids.has(p.id));
+  }, [model, given.projects]);
+  // A project gone from the list (removed, its remote changed, a stale link) is no filter, as an unknown view is All:
+  // never a line naming no project over an empty list. Before the projects and the first answer, it stands.
+  const gone = !!given.project && !!model && given.projects.length > 0 && !offered.some((p) => p.id === given.project);
+  const props = gone ? { ...given, project: null } : given;
+  const { state, phone } = props;
+  const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
+  // A stack the address names opens even when the view leaves it out (a link like `view=mine&stack=…`): never a blank pane.
+  const open = useMemo(() => {
+    if (!groups || !model || !props.stackId) return null;
+    return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
+  }, [groups, model, props.stackId, props.filter, props.project]);
+  const trigger = useFilterTrigger();
+  const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
     <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Pull requests" data-pulls-list="">
@@ -119,18 +127,21 @@ export function PullsPage(props: PullsPageProps) {
         </h1>
         {/* Shown once a first answer came: before it, there is nothing to filter. */}
         {model && (
-          <PullFilterControl
-            model={model}
-            filter={props.filter}
-            project={props.project}
-            projects={offered}
-            names={props.projectNames}
-            phone={phone}
-            onYou={onYou}
-            onChange={props.onScope}
-          />
+          <span className="ib-pf-slot">
+            <PullFilterControl
+              model={model}
+              filter={props.filter}
+              project={props.project}
+              projects={offered}
+              names={props.projectNames}
+              phone={phone}
+              triggerRef={trigger}
+              onChange={props.onScope}
+            />
+          </span>
         )}
       </div>
+      {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
         {!model && state.error && (
           <div className="ib-error" role="alert" style={{ margin: '8px 2px' }}>

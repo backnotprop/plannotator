@@ -1,11 +1,13 @@
 /**
- * The Pull requests list's filter (approval "pr-list-filters", take B Joined), in the window, with the view and the
- * project held the way App holds them (the address). What regresses:
- *  - the filter shown before the first answer, or the old head (the "Pull requests" title, the project chip) back;
- *  - the on-you count following the view, or showing at 0;
- *  - a pick not narrowing the rows, or the head not saying what is picked; × or Clear filters clearing one and not
- *    the other, or in two steps;
+ * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button"), in the window, with
+ * the view and the project held the way App holds them (the address). What regresses:
+ *  - the filter shown before the first answer, or anything but "PRs" and the mark in the head (a project's name, the
+ *    on-you count: the head must never grow);
+ *  - a pick not narrowing the rows, the mark not saying it is narrowed, or the picks not named once over the list;
+ *    × or Clear filters clearing one and not the other, or in two steps;
  *  - the menu's counts not following the other choice; project rows for a single project; Clear filters at rest;
+ *  - a project gone from the list kept as a filter (an empty list naming no project);
+ *  - a stack the address names but the view leaves out opening a blank pane;
  *  - a view with nothing in it saying "Nothing open in your projects", or a failed read said as an empty view;
  *  - the phone's menu not a bottom sheet.
  *
@@ -189,7 +191,7 @@ const menuRows = (selector: string) =>
     on: row.getAttribute('aria-checked') === 'true',
   }));
 
-test.if(hasDom)('at rest: "PRs", the on-you count and the filter mark in one control; nothing before the first answer', async () => {
+test.if(hasDom)('at rest: "PRs" and the filter mark, nothing else in the head; nothing before the first answer', async () => {
   draw({ state: { model: null, error: null, loading: true, refresh: () => {}, reload: () => {} } });
   await settle();
   expect($('[data-pulls-heading]')!.textContent).toBe('PRs');
@@ -199,19 +201,17 @@ test.if(hasDom)('at rest: "PRs", the on-you count and the filter mark in one con
 
   draw();
   await settle();
-  expect($('[data-pulls-heading]')!.textContent).toBe('PRs');
-  // The old head is gone: no project chip beside the control.
-  expect($('[data-board-project-filter]')).toBeNull();
-  const trigger = $('.ib-lhead .ib-pc [data-pulls-filter-trigger]')!;
-  expect(trigger.querySelector('[data-pulls-on-you]')!.getAttribute('data-pulls-on-you')).toBe('3');
-  expect(trigger.querySelector('svg[data-icon="filter"]')).not.toBeNull();
-  expect(trigger.getAttribute('aria-label')).toBe('3 on you. Filter');
-  expect($('[data-pulls-filter-clear]')).toBeNull();
+  const head = $('[data-pulls-list] .ib-lhead')!;
+  expect(head.textContent).toBe('PRs');
+  const trigger = head.querySelector<HTMLElement>('[data-pulls-filter-trigger]')!;
+  expect(trigger.getAttribute('aria-label')).toBe('Filter');
+  expect(trigger.hasAttribute('data-set')).toBe(false);
+  expect($('[data-pulls-scope]')).toBeNull();
   await openWaiting();
   expect(rowNumbers()).toEqual([1, 2, 3, 4, 5, 6]);
 });
 
-test.if(hasDom)('the menu: views and projects with counts and a tick; a pick narrows the rows and the head says it', async () => {
+test.if(hasDom)('the menu: views and projects with counts and a tick; a pick narrows the rows, the mark says so, the line names it once', async () => {
   const drawn = draw();
   await settle();
   await press($('[data-pulls-filter-trigger]')!);
@@ -236,11 +236,12 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   await openWaiting();
   expect(rowNumbers()).toEqual([2, 3, 6]);
   const trigger = $('[data-pulls-filter-trigger]')!;
-  expect(trigger.querySelector('[data-pulls-filter-view="review"]')!.textContent).toBe('To review');
-  expect(trigger.querySelector('svg[data-icon="filter"]')).toBeNull();
-  // The count follows the project, never the view.
-  expect(trigger.querySelector('[data-pulls-on-you]')!.getAttribute('data-pulls-on-you')).toBe('3');
-  expect(trigger.getAttribute('aria-label')).toBe('3 on you. Filter: To review');
+  expect(trigger.hasAttribute('data-set')).toBe(true);
+  expect(trigger.getAttribute('aria-label')).toBe('Filter: To review');
+  expect($('[data-pulls-scope-view]')!.textContent).toBe('To review');
+  expect($('[data-pulls-scope-project]')).toBeNull();
+  // The head never grows: still only "PRs".
+  expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('PRs');
 
   // The projects' counts follow the view.
   await press(trigger);
@@ -249,13 +250,12 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   await settle();
   expect(drawn.picks.at(-1)).toEqual({ filter: 'review', project: 'prj_web' });
   expect(rowNumbers()).toEqual([2, 3]);
-  expect($('.ib-pc')!.hasAttribute('data-both')).toBe(true);
-  expect($('[data-pulls-filter-project="prj_web"]')!.textContent).toBe('web-app');
-  expect(trigger.querySelector('[data-pulls-on-you]')!.getAttribute('data-pulls-on-you')).toBe('2');
-  expect(trigger.getAttribute('aria-label')).toBe('2 on you. Filter: To review, web-app');
-  // The views' counts follow the project.
+  expect($('[data-pulls-scope-project]')!.textContent).toBe('web-app');
+  expect(trigger.getAttribute('aria-label')).toBe('Filter: To review, web-app');
+  // The views' counts follow the project; both picked rows are the checked ones.
   await press(trigger);
   expect(menuRows('[data-pulls-filter]').map((r) => r.n)).toEqual(['4', '1', '2', '1']);
+  expect($$('[data-pulls-filter-menu] [aria-checked="true"]').map((r) => r.getAttribute('data-pulls-filter') ?? r.getAttribute('data-pulls-filter-project-option'))).toEqual(['review', 'prj_web']);
 });
 
 test.if(hasDom)('× and Clear filters clear the view and the project in one step', async () => {
@@ -266,7 +266,7 @@ test.if(hasDom)('× and Clear filters clear the view and the project in one step
   await act(async () => $('[data-pulls-filter-clear]')!.click());
   await settle();
   expect(drawn.picks).toEqual([{ filter: 'all', project: null }]);
-  expect($('[data-pulls-filter-clear]')).toBeNull();
+  expect($('[data-pulls-scope]')).toBeNull();
   await openWaiting();
   expect(rowNumbers()).toEqual([1, 2, 3, 4, 5, 6]);
 
@@ -280,16 +280,30 @@ test.if(hasDom)('× and Clear filters clear the view and the project in one step
   expect(again.picks).toEqual([{ filter: 'all', project: null }]);
 });
 
-test.if(hasDom)('no on-you count at 0; one project offered: no project rows', async () => {
-  const quiet: InboxPullsAnswer = { ...MODEL, pulls: [pull(1), pull(4, { mine: false, author: 'tomas' })], projects: { [`github.com/${WEB}`]: ['prj_web'] } };
-  draw({ state: { model: quiet, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+test.if(hasDom)('one project offered: no project rows', async () => {
+  const one: InboxPullsAnswer = { ...MODEL, pulls: [pull(1), pull(4, { mine: false, author: 'tomas' })], projects: { [`github.com/${WEB}`]: ['prj_web'] } };
+  draw({ state: { model: one, error: null, loading: false, refresh: () => {}, reload: () => {} } });
   await settle();
-  const trigger = $('[data-pulls-filter-trigger]')!;
-  expect(trigger.querySelector('[data-pulls-on-you]')).toBeNull();
-  expect(trigger.getAttribute('aria-label')).toBe('Filter');
-  await press(trigger);
+  await press($('[data-pulls-filter-trigger]')!);
   expect($$('[data-pulls-filter-menu] [data-pulls-filter]')).toHaveLength(4);
   expect($('[data-pulls-filter-project-option]')).toBeNull();
+});
+
+test.if(hasDom)('a project gone from the list is no filter: every PR, no line naming it, the mark at rest', async () => {
+  draw({ project: 'prj_gone' });
+  await settle();
+  expect($('[data-pulls-scope]')).toBeNull();
+  expect($('[data-pulls-filter-trigger]')!.getAttribute('aria-label')).toBe('Filter');
+  await openWaiting();
+  expect(rowNumbers()).toEqual([1, 2, 3, 4, 5, 6]);
+  expect(document.body.textContent).not.toContain('Project');
+});
+
+test.if(hasDom)('a stack the address names opens even when the view leaves it out: never a blank pane', async () => {
+  draw({ filter: 'mine', stackId: `github.com/${WEB}#4` });
+  await settle();
+  expect($('[data-pulls-pane-empty]')).toBeNull();
+  expect($('[data-pulls-stack]')).not.toBeNull();
 });
 
 test.if(hasDom)('an empty view says what the view holds; a failed read is never said as an empty view', async () => {

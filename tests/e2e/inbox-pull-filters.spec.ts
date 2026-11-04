@@ -1,21 +1,23 @@
 /**
- * The Pull requests list's filter (approval "pr-list-filters", take B Joined), proved in a real browser against the
- * compiled binary. The same sandbox as inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp
- * PLANNOTATOR_DATA_DIR, `gh` and `glab` sh fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never
- * run), simulated agents through `plannotator inbox mcp`. HOME is never changed.
+ * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button", with the owner's
+ * "highlights when open"), proved in a real browser against the compiled binary. The same sandbox as
+ * inbox-pull-requests.spec.ts: `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR, `gh` and `glab` sh
+ * fakes first on PATH (nothing reaches GitHub or GitLab; the real CLIs never run), simulated agents through
+ * `plannotator inbox mcp`. HOME is never changed.
  *
  * What is proved, in order:
- *  1. The read: one gh query with the person's searches, the assigned one, and one Others search scoped to the
- *     projects' repositories (never unscoped); one glab query with the assigned list and the project's open MRs.
- *  2. At 1440: "PRs", and "5 on you │ [filter]" in one control on the right (its tooltip says what "on you" means);
- *     the menu's views and projects with their counts; a view and a project narrow the rows, the count follows the
- *     project only, the head says both, and the address keeps them over a reload; × clears both. Light and dark.
- *  3. At 390 (a phone): the filter's sheet titled "Filter", 48px rows; with both picked the view keeps its icon only
- *     and the project its name; every target 44px.
- *  4. At 320: both picked, the picks keep their icons only; "on you" is never cut; one line, nothing past the edge.
+ *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
+ *  2. At 1440: the head is "PRs" and the filter mark only; the menu's views and projects with counts, the picked rows
+ *     tinted; a view and a project narrow the rows, the mark says so, one quiet line names them; the address keeps
+ *     them over a reload; × clears both and focus comes back to the mark.
+ *  3. The keys: the mark's tooltip on keyboard focus; Enter opens; the arrows walk the rows; Enter picks; Escape
+ *     closes; focus comes back to the mark each time. No shortcut of its own.
+ *  4. The menu open while narrowed to To review and "customer-billing-portal-v2-migration", light and dark.
+ *  5. At 390: the modal sheet titled "Filter" (a scrim, no page scroll behind it), 48px rows, tinted picks.
+ *  6. At 320: narrowed with the long name: one line, the name cut short, nothing past the edge, 44px targets.
  *
- * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-filters (1440 rest, both, menu and dark; 390 rest and both with the
- * sheet open; 320 both; and sheet.png, the contact sheet). Fails if a "Tell your agents" dialog appears.
+ * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-filters (1440 rest, the menu narrowed light and dark, the 390 sheet,
+ * 320 narrowed, and sheet.png, the contact sheet). Fails if a "Tell your agents" dialog appears.
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
@@ -232,7 +234,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const web = project(src, 'web-app', 'https://github.com/northwind/web-app.git');
   const ledger = project(src, 'ledger', 'git@gitlab.com:northwind/ledger.git');
   // A project with a long name, for the fit at narrow widths.
-  const portal = project(src, 'customer-billing-portal-v2', 'https://github.com/northwind/customer-billing-portal-v2.git');
+  const portal = project(src, 'customer-billing-portal-v2-migration', 'https://github.com/northwind/customer-billing-portal-v2.git');
 
   const env: Record<string, string> = {
     PATH: `${forge}:${process.env.PATH ?? ''}`,
@@ -307,7 +309,8 @@ async function landed(page: Page, load: () => Promise<unknown>): Promise<void> {
 
 const TRIGGER = '[data-pulls-filter-trigger]';
 const MENU = '[data-pulls-filter-menu]';
-const TIP = "On you: a review requested from you, changes requested or checks failed on your own PR, your agent's PR, or one assigned to you";
+/** The worst real name: a project folder named past what any head could hold. */
+const LONG = 'customer-billing-portal-v2-migration';
 
 /** Opens the filter's menu and picks a row by its words (a row's name is its words and its count, "To review 4"). */
 async function choose(page: Page, item: string): Promise<void> {
@@ -333,26 +336,21 @@ async function rows(page: Page): Promise<string[]> {
   return (await page.locator('[data-pulls-row]').evaluateAll((els) => els.map((el) => el.getAttribute('data-pulls-row')!))).sort();
 }
 
-/** The head now: whether "on you" is clipped, the control over the title or past the edge, one line, the targets. */
-async function head(page: Page) {
+/** The head and the quiet line now: the head one line with nothing past it, the line one line, the targets. */
+async function fit(page: Page) {
   return page.evaluate(() => {
-    const lhead = document.querySelector('[data-pulls-list] .ib-lhead')!;
-    const h1 = document.querySelector('[data-pulls-heading]')!;
-    const pc = document.querySelector('.ib-pc') as HTMLElement;
-    const l = lhead.getBoundingClientRect();
-    const t = h1.getBoundingClientRect();
-    const c = pc.getBoundingClientRect();
-    const you = pc.querySelector<HTMLElement>('.ib-pc-you');
-    const btn = pc.querySelector<HTMLElement>('.ib-pc-btn')!.getBoundingClientRect();
-    const y = you?.getBoundingClientRect();
+    const list = document.querySelector('[data-pulls-list]')!.getBoundingClientRect();
+    const lhead = document.querySelector<HTMLElement>('[data-pulls-list] .ib-lhead')!;
+    const scope = document.querySelector<HTMLElement>('[data-pulls-scope]');
+    const name = document.querySelector<HTMLElement>('[data-pulls-scope-project] .ib-pscope-n');
+    const past = [...document.querySelectorAll<HTMLElement>('[data-pulls-list] .ib-lhead *, [data-pulls-scope] *')].some((el) => el.getBoundingClientRect().right > list.right + 0.5);
     return {
-      words: (lhead as HTMLElement).innerText.replace(/\s+/g, ' ').trim(),
-      shown_words: [...pc.querySelectorAll<HTMLElement>('.ib-pc-w')].filter((el) => getComputedStyle(el).display !== 'none').map((el) => el.textContent),
-      on_you_clipped: !!y && (y.right > btn.right + 0.5 || y.left < btn.left - 0.5),
-      overlaps_title: c.left < t.right - 0.5,
-      past_edge: c.right > l.right + 0.5 || pc.scrollWidth > pc.clientWidth + 1,
-      one_line: c.top >= l.top && c.bottom <= l.bottom,
-      targets: [...pc.querySelectorAll<HTMLElement>('button')].map((el) => {
+      head: lhead.innerText.replace(/\s+/g, ' ').trim(),
+      head_h: Math.round(lhead.getBoundingClientRect().height),
+      scope_h: scope ? Math.round(scope.getBoundingClientRect().height) : 0,
+      name_cut: !!name && name.scrollWidth > name.clientWidth,
+      past_edge: past,
+      targets: [...document.querySelectorAll<HTMLElement>('[data-pulls-filter-trigger], [data-pulls-scope] button')].map((el) => {
         const r = el.getBoundingClientRect();
         return { name: el.getAttribute('aria-label'), w: Math.round(r.width), h: Math.round(r.height) };
       }),
@@ -360,22 +358,43 @@ async function head(page: Page) {
   });
 }
 
-function fits(h: Awaited<ReturnType<typeof head>>, phone: boolean): void {
-  expect(h.on_you_clipped, '"on you" clipped').toBe(false);
-  expect(h.overlaps_title, 'over the title').toBe(false);
-  expect(h.past_edge, 'past the edge').toBe(false);
-  expect(h.one_line, 'one line').toBe(true);
+function fits(f: Awaited<ReturnType<typeof fit>>, phone: boolean): void {
+  expect(f.head, 'the head holds "PRs" only').toBe('PRs');
+  expect(f.past_edge, 'past the edge').toBe(false);
+  if (f.scope_h) expect(f.scope_h, 'the line is one line').toBeLessThanOrEqual(phone ? 44 : 30);
   if (phone) {
-    for (const t of h.targets) {
+    for (const t of f.targets) {
       expect(t.h, `${t.name} height`).toBeGreaterThanOrEqual(44);
       expect(t.w, `${t.name} width`).toBeGreaterThanOrEqual(44);
     }
   }
 }
 
+/** The picked rows are tinted (the owner's "highlights when open"); the others are not. */
+async function tinted(page: Page): Promise<{ checked: string[]; plain: string[] }> {
+  return page.locator(`${MENU} [role="menuitemradio"]`).evaluateAll((els) => {
+    const out = { checked: [] as string[], plain: [] as string[] };
+    for (const el of els) {
+      if (el.hasAttribute('data-highlighted')) continue;
+      (el.getAttribute('aria-checked') === 'true' ? out.checked : out.plain).push(getComputedStyle(el).backgroundColor);
+    }
+    return out;
+  });
+}
+
+function highlighted(t: Awaited<ReturnType<typeof tinted>>): void {
+  const clear = (c: string) => c === 'rgba(0, 0, 0, 0)' || c === 'transparent';
+  expect(t.checked.length).toBeGreaterThan(0);
+  for (const c of t.checked) expect(clear(c), `a picked row is tinted (${c})`).toBe(false);
+  for (const c of t.plain) expect(clear(c), `an unpicked row is not (${c})`).toBe(true);
+}
+
+/** Project ids, read from the address after a pick. */
+const ids: Record<string, string> = {};
+
 test('the read: the person\'s own lists, then Others as a call of its own scoped to the projects; GitLab the same', async () => {
   const { page } = world;
-  await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
+  await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
   const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
@@ -390,7 +409,7 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   expect(gh[0]).not.toContain('others0');
   expect(gh[0]).toContain('rateLimit { cost remaining resetAt }');
   expect(ghOthers[0]).toMatch(/others0=is:pr is:open archived:false sort:updated-desc repo:/);
-  for (const repo of ['northwind/billing-svc', 'northwind/customer-billing-portal-v2', 'northwind/web-app']) expect(ghOthers[0]).toContain(`repo:${repo}`);
+  for (const r of ['northwind/billing-svc', 'northwind/customer-billing-portal-v2', 'northwind/web-app']) expect(ghOthers[0]).toContain(`repo:${r}`);
   expect(ghOthers[0]).not.toContain('others1=');
   expect(glab[0]).toContain('assignedMergeRequests(state: opened');
   expect(glab[0]).not.toContain('p0: project');
@@ -398,81 +417,125 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   expect(calls.filter((c) => c.includes('graphql-other'))).toEqual([]);
 });
 
-test('1440: the count and the filter in one control; the menu; a view and a project narrow the list and stay in the address', async () => {
+test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the list, are named once over it, and stay in the address', async () => {
   const { page } = world;
-  await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
+  await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   const list = page.locator('[data-pulls-list]');
-  await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
-  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
   const trigger = list.locator(TRIGGER);
-  await expect(trigger).toHaveAccessibleName('5 on you. Filter');
-  await expect(list.locator('[data-pulls-on-you]')).toHaveText('5 on you');
-  fits(await head(page), false);
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(trigger).toHaveAccessibleName('Filter');
+  await expect(list.locator('[data-pulls-scope]')).toHaveCount(0);
+  fits(await fit(page), false);
   await page.mouse.move(1438, 898);
   await snap(page, '1440-rest', 'light');
-  await snap(page, '1440-dark', 'dark');
-  await page.emulateMedia({ colorScheme: 'light' });
   expect(await rows(page)).toHaveLength(14);
-
-  // The count's tooltip says what "on you" means.
-  await list.locator('[data-pulls-on-you]').hover();
-  await expect(page.getByText(TIP)).toBeVisible();
-  await page.mouse.move(1438, 898);
-  await expect(page.getByText(TIP)).toHaveCount(0);
 
   await trigger.click();
   await expect(page.locator(MENU)).toBeVisible();
   expect(await menuRows(page, '[data-pulls-filter]')).toEqual(['All 14 ✓', 'Mine 4', 'To review 4', 'Others 6']);
-  expect(await menuRows(page, '[data-pulls-filter-project-option]')).toEqual(['All projects 14 ✓', 'billing-svc 4', 'web-app 6', 'ledger 3', 'customer-billing-portal-v2 1']);
+  expect(await menuRows(page, '[data-pulls-filter-project-option]')).toEqual(['All projects 14 ✓', 'billing-svc 4', 'web-app 6', 'ledger 3', `${LONG} 1`]);
   await expect(page.locator(`${MENU} [data-pulls-filter-clear-item]`)).toHaveCount(0);
-  await snap(page, '1440-menu', 'light');
+  await page.mouse.move(1438, 898);
+  highlighted(await tinted(page));
+  // Escape closes it and focus is back on the mark.
   await page.keyboard.press('Escape');
   await expect(page.locator(MENU)).toHaveCount(0);
+  await expect(trigger).toBeFocused();
 
+  for (const name of ['web-app', LONG]) {
+    await choose(page, name);
+    ids[name] = /project=([^&]+)/.exec(await page.evaluate(() => location.hash))![1]!;
+  }
   await choose(page, 'web-app');
   await choose(page, 'To review');
-  await expect(list.locator('[data-pulls-on-you]')).toHaveText('2 on you');
-  await expect(trigger).toHaveAccessibleName('2 on you. Filter: To review, web-app');
+  await expect(trigger).toHaveAccessibleName('Filter: To review, web-app');
+  await expect(trigger).toHaveAttribute('data-set', '');
+  await expect(list.locator('[data-pulls-scope-view]')).toHaveText('To review');
+  await expect(list.locator('[data-pulls-scope-project]')).toHaveText('web-app');
   expect(await rows(page)).toEqual(['github.com/northwind/web-app#880', 'github.com/northwind/web-app#891']);
   await expect(list.locator('[data-pulls-row="github.com/northwind/web-app#891"]')).toContainText('assigned to you');
-  const both = await head(page);
-  fits(both, false);
-  expect(both.shown_words).toEqual(['To review', 'web-app']);
-  await page.mouse.move(1438, 898);
-  await snap(page, '1440-both', 'light');
+  fits(await fit(page), false);
 
   // The address keeps both: a reload draws the same list.
   expect(await page.evaluate(() => location.hash)).toMatch(/^#pulls&project=prj_[^&]+&view=review$/);
   await landed(page, () => page.reload());
-  await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
-  await expect(trigger).toHaveAccessibleName('2 on you. Filter: To review, web-app');
+  await expect(trigger).toHaveAccessibleName('Filter: To review, web-app');
   expect(await rows(page)).toHaveLength(2);
 
-  // × clears both in one step.
+  // × clears both in one step, and focus goes back to the mark.
   await list.locator('[data-pulls-filter-clear]').click();
-  await expect(trigger).toHaveAccessibleName('5 on you. Filter');
+  await expect(trigger).toHaveAccessibleName('Filter');
+  await expect(trigger).toBeFocused();
   expect(await page.evaluate(() => location.hash)).toBe('#pulls');
   expect(await rows(page)).toHaveLength(14);
   expect(world.errors).toEqual([]);
 });
 
-test('390 (a phone): the sheet titled Filter; both picked, the view keeps its icon and the project its name', async ({ browser }) => {
+test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the arrows move, Enter picks, focus comes back', async () => {
+  const { page } = world;
+  await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
+  const trigger = page.locator(TRIGGER);
+  // Keyboard focus (Tab from the title): the tooltip names it, as a hover does.
+  await page.locator('[data-pulls-heading]').focus();
+  await page.keyboard.press('Tab');
+  await expect(trigger).toBeFocused();
+  await expect(page.locator('[data-pn-tooltip]')).toHaveText('Filter');
+  await page.keyboard.press('Enter');
+  const menu = page.locator(MENU);
+  await expect(menu).toBeVisible();
+  await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
+  // The keys walk the rows: from the first, two down is To review.
+  await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'all');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('ArrowDown');
+  await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'review');
+  await page.keyboard.press('ArrowUp');
+  await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'mine');
+  await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  await expect(trigger).toHaveAccessibleName('Filter: To review');
+  expect(await page.evaluate(() => location.hash)).toBe('#pulls&view=review');
+  // Escape from the open menu also brings focus back.
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(trigger).toBeFocused();
+  expect(world.errors).toEqual([]);
+});
+
+test('1440, the menu open while narrowed to To review and the long project: the picked rows tinted, light and dark', async () => {
+  const { page } = world;
+  await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls&project=${ids[LONG]}&view=review`)));
+  const list = page.locator('[data-pulls-list]');
+  await expect(list.locator('[data-pulls-scope-project]')).toHaveText(LONG);
+  const f = await fit(page);
+  fits(f, false);
+  await page.locator(TRIGGER).click();
+  await expect(page.locator(MENU)).toBeVisible();
+  await page.mouse.move(1438, 898);
+  for (const scheme of ['light', 'dark'] as const) {
+    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+    await page.waitForTimeout(300);
+    highlighted(await tinted(page));
+    await snap(page, `1440-menu-narrowed-${scheme}`, scheme);
+  }
+  await page.emulateMedia({ colorScheme: 'light' });
+  await page.keyboard.press('Escape');
+  expect(world.errors).toEqual([]);
+});
+
+test('390 (a phone): the sheet titled Filter, modal, open while narrowed; its picked rows tinted; 44px targets', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   try {
-    await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
-    await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-    await expect(page.locator('[data-pulls-on-you]')).toHaveText('5 on you');
-    fits(await head(page), true);
-    await snap(page, '390-rest', 'light');
-
-    await choose(page, 'web-app');
-    await choose(page, 'To review');
-    const both = await head(page);
-    fits(both, true);
-    expect(both.shown_words).toEqual(['web-app']);
+    await landed(page, () => page.goto(`${world.url}#pulls&project=${ids['web-app']}&view=review`));
+    await expect(page.locator('[data-pulls-scope-project]')).toHaveText('web-app');
+    fits(await fit(page), true);
     await page.locator(TRIGGER).click();
     const menu = page.locator(MENU);
     await expect(menu).toBeVisible();
@@ -482,7 +545,11 @@ test('390 (a phone): the sheet titled Filter; both picked, the view keeps its ic
       expect(box).toBeGreaterThanOrEqual(48);
     }
     await expect(menu.locator('[data-pulls-filter-clear-item]')).toBeVisible();
-    await snap(page, '390-both-sheet', 'light');
+    // Modal: a scrim over the page, and the page behind does not scroll.
+    await expect(page.locator('.ib-pm-scrim')).toBeVisible();
+    expect(await page.evaluate(() => getComputedStyle(document.documentElement).overflow + getComputedStyle(document.body).overflow)).toContain('hidden');
+    highlighted(await tinted(page));
+    await snap(page, '390-sheet-narrowed', 'light');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
     expect(errors).toEqual([]);
   } finally {
@@ -490,23 +557,19 @@ test('390 (a phone): the sheet titled Filter; both picked, the view keeps its ic
   }
 });
 
-test('320: both picked, the picks keep their icons only; "on you" is never cut', async ({ browser }) => {
+test('320: narrowed to To review and the long project; one line, the name cut short, nothing past the edge', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 320, height: 640 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   try {
-    await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
-    await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-    fits(await head(page), true);
-    await choose(page, 'customer-billing-portal-v2');
-    await choose(page, 'To review');
-    await expect(page.locator('[data-pulls-on-you]')).toHaveText('1 on you');
-    const both = await head(page);
-    fits(both, true);
-    expect(both.shown_words).toEqual([]);
-    await expect(page.locator(TRIGGER)).toHaveAccessibleName('1 on you. Filter: To review, customer-billing-portal-v2');
-    await snap(page, '320-both', 'light');
+    await landed(page, () => page.goto(`${world.url}#pulls&project=${ids[LONG]}&view=review`));
+    await expect(page.locator('[data-pulls-scope-project]')).toHaveText(LONG);
+    const f = await fit(page);
+    fits(f, true);
+    expect(f.name_cut, 'the long name is cut short').toBe(true);
+    await expect(page.locator(TRIGGER)).toHaveAccessibleName(`Filter: To review, ${LONG}`);
+    await snap(page, '320-narrowed', 'light');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(320);
     expect(errors).toEqual([]);
   } finally {
@@ -522,10 +585,9 @@ test('the contact sheet', async ({ browser }) => {
   try {
     await page.setContent(
       `<style>body{margin:0;padding:24px;background:#f4f4f5;font:500 14px system-ui;color:#3f3f46}h2{font:600 18px system-ui;color:#18181b;margin:0 0 12px}.row{display:flex;gap:16px;align-items:flex-start;margin-bottom:20px;flex-wrap:wrap}figure{margin:0}figcaption{margin:0 0 6px}img{display:block;border-radius:8px;box-shadow:0 0 0 1px #d4d4d8}</style>` +
-        `<h2>PR list filter (take B, Joined)</h2>` +
-        `<div class="row">${fig('1440-rest', '1440, rest', 790)}${fig('1440-both', '1440, To review + web-app', 790)}</div>` +
-        `<div class="row">${fig('1440-menu', '1440, the menu', 790)}${fig('1440-dark', '1440, dark', 790)}</div>` +
-        `<div class="row">${fig('390-rest', '390, rest', 260)}${fig('390-both-sheet', '390, both picked, the sheet', 260)}${fig('320-both', '320, both picked', 214)}</div>`,
+        `<h2>PR list filter (round 7 take B, with highlights when open)</h2>` +
+        `<div class="row">${fig('1440-menu-narrowed-light', `1440, the menu open, To review + ${LONG}`, 790)}${fig('1440-menu-narrowed-dark', '1440, dark', 790)}</div>` +
+        `<div class="row">${fig('1440-rest', '1440, rest', 790)}${fig('390-sheet-narrowed', '390, the sheet open, To review + web-app', 260)}${fig('320-narrowed', `320, To review + ${LONG}`, 214)}</div>`,
     );
     await page.waitForFunction(() => [...document.images].every((i) => i.complete && i.naturalWidth > 0));
     await page.screenshot({ path: join(proofDir, 'sheet.png'), fullPage: true });
