@@ -21,7 +21,7 @@
  * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
-import { useCallback, useMemo, useRef, useState, type FC } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
@@ -37,6 +37,7 @@ import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type Guide
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
+import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
@@ -75,6 +76,8 @@ export interface GuideDiffComments {
   ) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  /** Choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  selectionActions?: DiffSelectionActions;
 }
 
 /**
@@ -127,6 +130,7 @@ export const GuideDiff: FC<
       onEditAnnotation={comments?.onEditAnnotation ?? noop}
       onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
       onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
+      {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
     />
   );
@@ -155,7 +159,19 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed }: GuideReaderProps) {
+export default function GuideReader({
+  snapshot,
+  reviewed,
+  onReviewedChange,
+  comments,
+  mode = 'walkthrough',
+  reveal = null,
+  viewed,
+  selectionActions,
+  renderOverviewDiagram,
+  renderOverviewFigure,
+  highlight = null,
+}: GuideReaderProps) {
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
@@ -186,6 +202,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
 
   // Line comments: the selection the toolbar opens on, as the review app keeps it (one, on the focused card).
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
+  useEffect(() => {
+    if (!highlight) return;
+    setFocusedFile(highlight.path);
+    setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
+  }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
@@ -295,11 +317,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
               onEditAnnotation: editComment,
               onSelectAnnotation: selectComment,
               onDeleteAnnotation: deleteComment,
+              ...(selectionActions ? { selectionActions: selectionActions as DiffSelectionActions } : {}),
             },
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions],
   );
   const host = useMemo(
     () => ({
@@ -308,8 +331,10 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
       ...(phone ? {} : { renderSectionTab }),
+      ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
+      ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure],
   );
 
   return (

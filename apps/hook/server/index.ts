@@ -242,6 +242,8 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
 import { runShapeCommand, SHAPE_OFF_TEXT } from "./shape-command";
+import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_CODE_REVIEW_OFF } from "@plannotator/core/inbox-review";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -332,6 +334,26 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator review draw …` / `plannotator review drawings …`: an agent's side of
+// Show me (review-draw-command.ts; approval "shape-in-code-review"). Before the
+// review parse, which would take `draw` for a ref. Off unless the person turned
+// Code review on: only the off line, help included, so an agent learns nothing of it.
+{
+  const args = rawArgs;
+  if (isReviewDrawCommand(args)) {
+    if (loadConfig().inboxCodeReview !== true) {
+      process.stderr.write(`${INBOX_REVIEW_CODE_REVIEW_OFF}\n`);
+      process.exit(1);
+    }
+    const drawDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runReviewDrawCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        ensureRunning: () => ensureInboxRunning(drawDataDir),
       }),
     );
   }

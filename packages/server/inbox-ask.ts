@@ -1,7 +1,15 @@
 /**
  * Plannotator Inbox: Ask AI's routes. Off unless PLANNOTATOR_INBOX_ASK_AI is
- * set when the Inbox starts: off, every path here falls through to the
- * unknown-route 404, as if it did not exist.
+ * set when the Inbox starts, or Code review is on (Settings → Capabilities;
+ * it brings Ask, and Show me with it): off, every path here falls through to
+ * the unknown-route 404, as if it did not exist.
+ *
+ * Show me (code review in the Inbox, approval "shape-in-code-review"): a POST
+ * with `kind: "show_me"` and `show_me: { review, file, lines, round, words? }`
+ * is a question that asks the agent to draw. Only while Code review is on
+ * (`409 code_review_off`), about a review of this thread, and its `question`
+ * is exactly `inboxShowMeRequest`'s words; the drawing comes back through the
+ * CLI (inbox-review-drawings.ts), never the stream.
  *
  *   GET  /api/inbox/ask                    `{ chats }`: every thread with a conversation, for the
  *                                          window's chat list
@@ -37,7 +45,8 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { inboxAgentName, type InboxThread } from "@plannotator/core/inbox-types";
 import { isAIEndpointPath } from "@plannotator/ai/endpoints";
-import { addInboxAskTurn, checkInboxAskInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, updateInboxAskTurn, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
+import { inboxReviewRound, inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
+import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, updateInboxAskTurn, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAskLive, type InboxAskClaim, type InboxAskContext, type InboxAskTimes } from "./inbox-ask-live";
@@ -63,9 +72,23 @@ function agentOf(thread: InboxThread, owner: { host: string | null; session: str
   return { host: (author as { host?: string | null }).host ?? owner?.host ?? null, name: inboxAgentName(author) };
 }
 
+/** A review message as Show me needs it: its thread, its title and the files of its diff. */
+export interface InboxAskReview {
+  threadId: string;
+  title: string;
+  files: readonly string[];
+}
+
 export function createInboxAsk(options: {
-  /** PLANNOTATOR_INBOX_ASK_AI, read once at start. */
-  on: boolean;
+  /**
+   * Whether Ask is on now: PLANNOTATOR_INBOX_ASK_AI (read once at start), or
+   * Code review on (it brings Ask, and so Show me). Read on every request.
+   */
+  on: () => boolean;
+  /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
+  codeReviewOn?: () => boolean;
+  /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
+  reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -86,7 +109,7 @@ export function createInboxAsk(options: {
   const fromWindow = (req: Request): boolean => req.headers.get("sec-fetch-site")?.trim().toLowerCase() === "same-origin";
 
   /** Whether this request may ask or read: the setting is on, and it is the owner's own window. */
-  const allowed = (req: Request, via: "local" | "tailnet"): boolean => on && fromWindow(req) && !options.isGuest(req, via);
+  const allowed = (req: Request, via: "local" | "tailnet"): boolean => on() && fromWindow(req) && !options.isGuest(req, via);
 
   const refuse = (req: Request, via: "local" | "tailnet"): void => {
     if (options.isGuest(req, via)) throw new InboxError("owner_only", "Only this computer's owner can use Ask AI from this Inbox.");
@@ -125,7 +148,7 @@ export function createInboxAsk(options: {
   };
 
   const route = async (req: Request, url: URL, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on) return null;
+    if (!on()) return null;
     if (url.pathname === INBOX_ASK_LIST_PATH) {
       refuse(req, via);
       return req.method === "GET" ? json({ chats: chats() }) : json({ error: "Use GET." }, 405);
@@ -189,6 +212,23 @@ export function createInboxAsk(options: {
     }
 
     const input = checkInboxAskInput(body);
+    // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
+    const showMe = checkInboxShowMeInput(body);
+    let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget } | null = null;
+    if (showMe) {
+      if (!(options.codeReviewOn?.() ?? false)) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      const review = options.reviewOf?.(showMe.target.review) ?? null;
+      if (review === null) return json({ error: `No review ${showMe.target.review} here.`, code: "not_found" }, 404);
+      if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${showMe.target.review} is not a review in this thread.`, code: "not_a_review" }, 409);
+      if (showMe.target.file !== null && !review.files.includes(showMe.target.file)) {
+        throw new InboxError("validation_error", `show_me.file: ${showMe.target.file} is not a file of this review.`, { field: "show_me" });
+      }
+      // The round is the Inbox's to say: the review's place among the thread's reviews.
+      const target: InboxShowMeTarget = { ...showMe.target, round: inboxReviewRound(thread.messages, showMe.target.review) };
+      const expected = inboxShowMeRequest({ target, title: review.title, turnId: input.id, ...(showMe.againOfRound !== undefined ? { againOfRound: showMe.againOfRound } : {}) });
+      if (input.question !== expected) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
+      showMeFields = { kind: "show_me", show_me: target };
+    }
     // Before the gates: a retry of a saved turn gets that turn, even if the thread was archived since.
     const known = findInboxAskTurn(store.dir, threadId, input.id);
     if (known && (known.turn.answer !== undefined || known.turn.stopped)) return json({ ...known, provider_id: null });
@@ -216,7 +256,7 @@ export function createInboxAsk(options: {
       if (moved) saved = updateInboxAskTurn(store.dir, threadId, input.id, { session: owner.session, host: owner.host }) ?? known;
       else if (known) saved = known;
       else {
-        const added = addInboxAskTurn(store.dir, threadId, { ...input, at: new Date().toISOString(), session: owner.session, host: owner.host });
+        const added = addInboxAskTurn(store.dir, threadId, { ...input, ...showMeFields, at: new Date().toISOString(), session: owner.session, host: owner.host });
         saved = { conversation: added.conversation, turn: added.turn };
         options.onChange(threadId);
       }
@@ -252,7 +292,7 @@ export function createInboxAsk(options: {
 
   /** Everything `/api/ai` does for Ask AI, behind the same gate: only the owner's own window. */
   const aiRoute = async (req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> => {
-    if (!on || !isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
+    if (!on() || !isAIEndpointPath(path) || path.startsWith("/api/ai/bridge/")) return null;
     refuse(req, via);
     const endpoint = live.endpoints[path] as (request: Request) => Promise<Response> | Response;
     if (req.method !== "POST") return endpoint(req);

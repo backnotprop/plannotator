@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
@@ -1518,7 +1519,10 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
+  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
+  /** Show me's pictures of one review (code review in the Inbox; packages/server/inbox-review-drawings.ts). */
+  reviewDrawings: (messageId: string) => get<InboxReviewDrawingsRead>(inboxUrl(`/reviews/${encodeURIComponent(messageId)}/drawings`)),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -1536,6 +1540,26 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
+  /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
+  kind?: 'show_me';
+  show_me?: InboxShowMeTarget;
+  /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
+  drawing?: string;
+}
+
+/** What a Show me sends beside its question on `POST …/ask`. */
+export interface InboxShowMeAsk {
+  kind: 'show_me';
+  show_me: InboxShowMeTarget;
+  again_of_round?: number;
+}
+
+/** `GET /api/inbox/reviews/:msg/drawings`. */
+export interface InboxReviewDrawingsRead {
+  title?: string;
+  round?: number;
+  overview?: { round: number; codes: string[] } | null;
+  drawings: InboxReviewDrawing[];
 }
 
 export interface InboxAskConversationWire {

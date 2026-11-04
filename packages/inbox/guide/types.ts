@@ -1,3 +1,5 @@
+import type { ReactNode } from 'react';
+import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
@@ -34,6 +36,33 @@ export interface GuideReaderProps {
   reveal?: { path: string; token: number } | null;
   /** The review's Viewed ticks on each file's header. Absent: no Viewed control, as before. */
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
+  /**
+   * Choices for selected lines before the comment box (code review in the
+   * Inbox: Comment · Ask · Show me; review-editor's `DiffSelectionActions`).
+   * Absent: a selection opens the comment box at once, as before.
+   */
+  selectionActions?: GuideSelectionActions;
+  /** Draws the overview's diagram (the guide host's `renderOverviewDiagram`). Absent or null: as before. */
+  renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => ReactNode | null;
+  /** A picture slot when the overview has no diagram (the guide host's `renderOverviewFigure`). Absent: none. */
+  renderOverviewFigure?: () => ReactNode | null;
+  /** Paint these lines (new side) and bring them into view; a new token moves again. */
+  highlight?: { path: string; start: number; end: number; token: number } | null;
+}
+
+/** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */
+export interface GuideSelection {
+  filePath: string;
+  lineStart: number;
+  lineEnd: number;
+  side: 'old' | 'new';
+}
+
+/** review-editor's `DiffSelectionActions`, as the window's strict typecheck sees it. */
+export interface GuideSelectionActions {
+  onAsk?: (selection: GuideSelection) => void;
+  onShowMe?: (selection: GuideSelection) => void;
+  showMeIcon?: ReactNode;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

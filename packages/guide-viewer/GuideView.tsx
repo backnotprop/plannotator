@@ -74,7 +74,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
   headerActions,
 }) => {
   const host = useGuideHost();
-  const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
+  const overviewFigure = host.renderOverviewFigure?.() ?? null;
+  const resolved =useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
   // Only the guide's own files register shells; in-app the review may hold many more.
   const guideFileCount = resolved.sectionFiles.reduce((n, files) => n + files.length, 0) + resolved.unplacedFiles.length;
   const hasUnplaced = (guide.unplacedFiles?.length ?? 0) > 0;
@@ -227,6 +228,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
       </div>
 
       {guide.overview && <GuideOverview overview={guide.overview} renderLink={renderLink} />}
+      {!guide.overview?.diagram && overviewFigure}
 
       <div ref={viewRef} className="mt-6 space-y-4">
         {guide.sections.map((section, index) => (

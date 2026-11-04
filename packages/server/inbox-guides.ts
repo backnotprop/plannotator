@@ -27,11 +27,19 @@ import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
-import { parseGuideSnapshot, parseGuideSnapshotJson, type GuideSnapshot } from "@plannotator/core/guide-format";
+import {
+  GUIDE_SNAPSHOT_DRAWN_VERSION,
+  GUIDE_SNAPSHOT_OVERVIEW_VERSION,
+  guideDiagramIsDrawn,
+  parseGuideSnapshot,
+  parseGuideSnapshotJson,
+  type GuideSnapshot,
+} from "@plannotator/core/guide-format";
+import type { GuideOverviewDiagram } from "@plannotator/core/guide";
 import { displayInboxSubject, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
-import { INBOX_REVIEW_FIELD_DESCRIPTION, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
+import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -77,14 +85,14 @@ export const GET_GUIDE_BRIEF_DESCRIPTION =
 export const SUBMIT_GUIDE_DESCRIPTION =
   "Send the person a guided review of a code change. It lands in the Plannotator Inbox as a message with a \"Guided review\" card that opens in Plannotator's guide viewer. Pass `guide` (the shape get_guide_brief gives) and `patch` (the exact unified diff it describes), or `snapshot` (a complete Plannotator guide snapshot). Every file a section names must be in the patch, in one section only; a refusal names the file. Files you leave out show under \"Everything else\". `body` is your note above the card (default: the guide's intent). thread, reply_to, supersedes, done and idempotency_key work as in send_message, and the person's answer comes back the same way.\n\nExample: get_guide_brief's `example` is a call that works as it is.";
 
-export type InboxGuideCheck = { ok: true; snapshot: GuideSnapshot } | { ok: false; error: string };
+export type InboxGuideCheck = { ok: true; snapshot: GuideSnapshot } | { ok: false; error: string; code?: "code_review_off" };
 
 /**
  * A guide as an agent sent it, checked by Plannotator's own code. `cwd` is the
  * project root, where `buildAuthoredGuideSnapshot` reads provenance (origin,
  * branch, head) for a guide that does not name its `source`.
  */
-export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string): InboxGuideCheck {
+export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; patch?: string }, cwd: string, options: { codeReview?: boolean } = {}): InboxGuideCheck {
   const hasSnapshot = input.snapshot !== undefined;
   if (hasSnapshot === (input.guide !== undefined || input.patch !== undefined)) {
     return { ok: false, error: "Send either `snapshot`, or `guide` with `patch`." };
@@ -93,6 +101,12 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
     const parsed = typeof input.snapshot === "string" ? parseGuideSnapshotJson(input.snapshot) : parseGuideSnapshot(input.snapshot);
     if (!parsed.ok) return { ok: false, error: `Invalid guide snapshot (${parsed.error.path}): ${parsed.error.message}` };
     const snapshot = parsed.value;
+    // A drawn overview picture (format version 3) is code review's: only while the person has it on.
+    if (snapshot.version === GUIDE_SNAPSHOT_DRAWN_VERSION && !options.codeReview) {
+      return { ok: false, code: "code_review_off", error: "Code review is off in this Inbox (Settings → Capabilities): send the overview's diagram as { kind, source } only." };
+    }
+    const drawnProblem = overviewDiagramProblem(snapshot.guide.overview?.diagram, snapshot.review.rawPatch);
+    if (drawnProblem) return { ok: false, error: drawnProblem };
     // The strict placement checks, on the snapshot's own guide and patch. The
     // snapshot format lets a file reference omit its summary (a shipped
     // fixture does); the authored form wants a string, so an absent one is "".
@@ -109,7 +123,72 @@ export function checkInboxGuide(input: { snapshot?: unknown; guide?: unknown; pa
   }
   if (input.guide === undefined || typeof input.patch !== "string") return { ok: false, error: "`guide` and `patch` go together." };
   const built = buildAuthoredGuideSnapshot(typeof input.guide === "string" ? input.guide : JSON.stringify(input.guide), input.patch, { cwd });
-  return built.ok ? { ok: true, snapshot: built.snapshot } : { ok: false, error: built.error };
+  if (!built.ok) return { ok: false, error: built.error };
+  // The overview (and its drawing) rides an authored guide only while Code review is on; off, it is left out as always.
+  if (!options.codeReview) return { ok: true, snapshot: built.snapshot };
+  let raw: unknown = input.guide;
+  if (typeof raw === "string") {
+    try {
+      raw = JSON.parse(raw);
+    } catch {
+      raw = null;
+    }
+  }
+  const overview = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>).overview : undefined;
+  if (overview === undefined) return { ok: true, snapshot: built.snapshot };
+  return withAuthoredOverview(built.snapshot, overview);
+}
+
+/** What is wrong with an overview's drawn (html) diagram, by Shape's rules and the patch's files, or null. */
+function overviewDiagramProblem(diagram: GuideOverviewDiagram | undefined, rawPatch: string): string | null {
+  if (!diagram || diagram.kind !== "html" || !guideDiagramIsDrawn(diagram)) return null;
+  const files = parseDiffToFiles(rawPatch).map((file) => file.path);
+  const checked = checkInboxDrawing(diagram, files, { withTitle: false });
+  return checked.ok ? null : `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}`;
+}
+
+/**
+ * An authored guide's `overview: { text, diagram? }` (code review in the
+ * Inbox), on the snapshot buildAuthoredGuideSnapshot built: version 2, or 3
+ * for a drawn picture (`css`, `width` and `height`, `tall`), then parsed again
+ * by the snapshot's own strict parser.
+ */
+function withAuthoredOverview(snapshot: GuideSnapshot, overview: unknown): InboxGuideCheck {
+  const bad = (error: string): InboxGuideCheck => ({ ok: false, error: `overview: ${error}` });
+  if (!overview || typeof overview !== "object" || Array.isArray(overview)) return bad("must be { text, diagram? }.");
+  const o = overview as Record<string, unknown>;
+  for (const key of Object.keys(o)) if (key !== "text" && key !== "diagram") return bad(`${key} is not a field (text, diagram).`);
+  if (typeof o.text !== "string" || !o.text.trim()) return bad("text must be a few sentences of markdown.");
+  let diagram: GuideOverviewDiagram | undefined;
+  if (o.diagram !== undefined) {
+    const d = o.diagram as Record<string, unknown>;
+    if (!d || typeof d !== "object" || Array.isArray(d)) return bad('diagram must be { "kind": "html", "source", … } or { "kind": "mermaid", "source" }.');
+    if (d.kind === "mermaid") {
+      for (const key of Object.keys(d)) if (key !== "kind" && key !== "source") return bad(`diagram.${key}: a mermaid diagram is { kind, source }.`);
+      if (typeof d.source !== "string" || !d.source.trim()) return bad("diagram.source is empty.");
+      diagram = { kind: "mermaid", source: d.source };
+    } else {
+      const files = parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path);
+      const checked = checkInboxDrawing(d, files, { withTitle: false });
+      if (!checked.ok) return { ok: false, error: `overview.diagram has problems:\n${checked.problems.map((p) => `  - ${p}`).join("\n")}` };
+      const v = checked.view;
+      diagram = {
+        kind: "html",
+        source: v.html,
+        ...(v.css !== undefined && { css: v.css }),
+        ...(v.width !== undefined && v.height !== undefined && { width: v.width, height: v.height }),
+        ...(v.tall && { tall: { source: v.tall.html, ...(v.tall.css !== undefined && { css: v.tall.css }) } }),
+      };
+    }
+  }
+  const { title, intent, overview: _old, sections, unplacedFiles, reviewed } = snapshot.guide;
+  const next = {
+    ...snapshot,
+    version: guideDiagramIsDrawn(diagram) ? GUIDE_SNAPSHOT_DRAWN_VERSION : GUIDE_SNAPSHOT_OVERVIEW_VERSION,
+    guide: { title, intent, overview: { text: o.text, ...(diagram && { diagram }) }, sections, ...(unplacedFiles !== undefined && { unplacedFiles }), reviewed },
+  };
+  const parsed = parseGuideSnapshot(next);
+  return parsed.ok ? { ok: true, snapshot: parsed.value } : { ok: false, error: `Invalid overview (${parsed.error.path}): ${parsed.error.message}` };
 }
 
 /**
@@ -160,6 +239,22 @@ const JSON_HEADERS = {
  *    server has already run the same-origin check on every POST; the stale-tab
  *    `serverSession` check runs here, as on the other writing routes.
  */
+/**
+ * A review message's guide snapshot as stored (code review in the Inbox: Show
+ * me checks a drawing's files against it), or null when the message carries
+ * no review or its snapshot is gone.
+ */
+export function readInboxReviewSnapshot(store: InboxStore, messageId: string): GuideSnapshot | null {
+  const message = store.message(messageId);
+  if (!message?.guide?.review) return null;
+  try {
+    const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, message.guide.sha256), "utf8"));
+    return parsed.ok ? parsed.value : null;
+  } catch {
+    return null;
+  }
+}
+
 export async function inboxGuideRoute(
   req: Request,
   path: string,
@@ -234,6 +329,38 @@ export async function inboxGuideRoute(
   return new Response(`{"message_id":${JSON.stringify(message.id)},"guide":${JSON.stringify(message.guide)},"snapshot":${text}}`, { headers: JSON_HEADERS });
 }
 
+/**
+ * get_guide_brief's output_schema while Code review is on: the guide's, plus
+ * an optional `overview: { text, diagram? }` (a drawing: `kind: "html"` with
+ * source, css, width and height, tall; or `kind: "mermaid"` with source).
+ */
+function guideSchemaWithOverview(): Record<string, unknown> {
+  const schema = JSON.parse(GUIDE_SCHEMA_JSON) as { properties: Record<string, unknown> } & Record<string, unknown>;
+  const drawnSide = { type: "object", properties: { source: { type: "string" }, css: { type: "string" } }, required: ["source"], additionalProperties: false };
+  schema.properties.overview = {
+    type: "object",
+    properties: {
+      text: { type: "string" },
+      diagram: {
+        type: "object",
+        properties: {
+          kind: { enum: ["html", "mermaid"] },
+          source: { type: "string" },
+          css: { type: "string" },
+          width: { type: "integer", minimum: 200, maximum: 4000 },
+          height: { type: "integer", minimum: 200, maximum: 4000 },
+          tall: drawnSide,
+        },
+        required: ["kind", "source"],
+        additionalProperties: false,
+      },
+    },
+    required: ["text"],
+    additionalProperties: false,
+  };
+  return schema;
+}
+
 /** get_guide_brief and submit_guide, on the Inbox's MCP server. */
 export function registerInboxGuideTools(server: McpServer, context: InboxMcpContext): void {
   server.registerTool(
@@ -247,9 +374,10 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async () =>
       ok("The guided-review method, the guide's shape, how to read the diff, the rules and a worked submit_guide call.", {
         methodology: GUIDE_REVIEW_PROMPT,
-        output_schema: JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>,
+        output_schema: context.codeReviewOn?.() ? guideSchemaWithOverview() : (JSON.parse(GUIDE_SCHEMA_JSON) as Record<string, unknown>),
         diff_steps: GUIDE_DIFF_STEPS,
-        rules: GUIDE_RULES,
+        // Code review on (approval "shape-in-code-review", AGENT-TEXT §4, DRAFT): the overview and its one drawing. Off: as before, byte for byte.
+        rules: context.codeReviewOn?.() ? [...GUIDE_RULES, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC] : GUIDE_RULES,
         example: GUIDE_BRIEF_EXAMPLE,
       }),
   );
@@ -281,8 +409,8 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const checked = checkInboxGuide(input, project.root);
-        if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
+        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false });
+        if (!checked.ok) throw new InboxError(checked.code ?? "invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
         const review = (input as { review?: boolean }).review === true;

@@ -792,6 +792,19 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
 }
 
 /** Validate what an agent writes. Every problem is named by its field. */
+/**
+ * One drawn view on its own, as another surface takes it (code review's
+ * pictures): `{ html, css?, width?, height?, tall? }`, with the same checks a
+ * board's Picture gets. Each problem names its field under `field`.
+ */
+export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<ShapeDrawnView> {
+  const c = new Checker();
+  if (!isRecord(input)) return { ok: false, errors: [`${field}: must be an object with html`] };
+  const view = checkDrawn(c, input, field);
+  if (c.errors.length || !view) return { ok: false, errors: c.errors.length ? c.errors : [`${field}.html: is required`] };
+  return { ok: true, value: view };
+}
+
 export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: ['the board must be a JSON object: { title, claim, views, refs }'] };
