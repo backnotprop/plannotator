@@ -80,7 +80,8 @@ const GH_ANSWER = {
     viewer: { login: "dana" },
     requested: { nodes: [] },
     authored: { nodes: [ghPull(412), ghPull(869)] },
-    merged: { nodes: [ghPull(300, { state: "MERGED", mergedAt: "2026-11-03T12:00:00Z" })] },
+    // Merged after the review the test sends (a review newer than the merge would be listed again).
+    merged: { nodes: [ghPull(300, { state: "MERGED", mergedAt: new Date(Date.now() + 3_600_000).toISOString() })] },
   },
 };
 const MERGED_URL = "https://github.com/northwind/billing-svc/pull/300";

@@ -12,14 +12,17 @@
  *    person handed over shown as not reviewed, or a listed PR shown as reviewed;
  *  - an archived review thread listed with no open PR left, or a review sent
  *    after the archive (the Inbox brings the thread back) hidden;
- *  - a review whose PR merged still listed as Ready to land or On you;
+ *  - a review whose PR merged still listed as Ready to land or On you, or a
+ *    newer review sent after the merge hidden;
+ *  - a teammate's PR (a fork's, or on a long-lived branch) claimed by branch
+ *    into the person's local review, hiding its row or the review;
  *  - a PR merely mentioned in a review thread claimed into its row, hiding a
  *    teammate's "asked for your review" row;
  *  - a source field that an agent made multi-line or unbounded.
  */
 import { describe, expect, test } from "bun:test";
 import { inboxPullMove, inboxPullStacks, type InboxPull, type InboxPullLink } from "./inbox-pulls";
-import { INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewGroups, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewThread } from "./inbox-reviews";
+import { INBOX_REVIEW_SOURCE_FIELD_MAX, inboxReviewGroups, inboxReviewIsOf, inboxReviewMove, inboxReviewRows, inboxReviewSourceOf, type InboxReviewThread } from "./inbox-reviews";
 
 function pr(fields: Partial<InboxPull> & { number: number }): InboxPull {
   const repo = "northwind/billing-svc";
@@ -195,6 +198,47 @@ describe("inboxReviewRows", () => {
       links: { [merged.key]: link("t_stack"), [lone.key]: link("t_lone", "owner") },
     });
     expect(rows.map((r) => [r.id, r.reviewed])).toEqual([[open.key, false]]);
+  });
+
+  test("a review newer than its thread's merged PR stays: round 2 after the merge waits on the person", () => {
+    const merged = pr({ number: 10, head: "feature", state: "merged", merged_at: "2026-11-04T11:00:00.000Z" });
+    const round2 = review({ thread_id: "t", round: 2, latest_review_id: "t_r2", reviewed_at: "2026-11-04T12:00:00.000Z", updated_at: "2026-11-04T12:00:00.000Z" });
+    const rows = inboxReviewRows({ threads: [round2], pulls: [merged], stacks: inboxPullStacks([merged]), links: { [merged.key]: link("t", "owner") } });
+    expect(rows.map((r) => [r.id, r.move, r.pull_keys])).toEqual([["t", "on_you", []]]);
+  });
+
+  test("a teammate's fork PR on the review's branch is not the review's (B1): it keeps its own row", () => {
+    const fork = pr({ number: 77, head: "main", head_repo: "tomas/billing-svc", mine: false, author: "tomas" });
+    const rows = inboxReviewRows({
+      // A local review of `main`, approved, in a thread that names #77.
+      threads: [review({ thread_id: "t", source: { kind: "local", branch: "main", repo: "billing-svc" }, ...approved("t") })],
+      stacks: inboxPullStacks([fork]),
+      links: { [fork.key]: link("t") },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get("t")).toMatchObject({ move: "ready", reason: "approved", pull_keys: [] });
+    expect(byId.get(fork.key)).toMatchObject({ reviewed: false, move: "not_reviewed" });
+  });
+
+  test("a teammate's merged fork PR on the review's branch does not hide the person's own review (B2)", () => {
+    const fork = pr({ number: 78, head: "patch-1", head_repo: "tomas/billing-svc", mine: false, state: "merged", merged_at: "2026-11-04T12:00:00.000Z" });
+    const rows = inboxReviewRows({
+      threads: [review({ thread_id: "t", source: { kind: "local", branch: "patch-1" } })],
+      pulls: [fork],
+      stacks: inboxPullStacks([fork]),
+      links: { [fork.key]: link("t") },
+    });
+    expect(rows.map((r) => [r.id, r.move])).toEqual([["t", "on_you"]]);
+  });
+
+  test("the branch rule: only the person's own PR, from the repository itself, never a long-lived branch", () => {
+    const own = { kind: "local" as const, branch: "retry-jitter" };
+    expect(inboxReviewIsOf(own, pr({ number: 1, head: "retry-jitter" }))).toBe(true);
+    expect(inboxReviewIsOf(own, pr({ number: 2, head: "retry-jitter", mine: false }))).toBe(false);
+    expect(inboxReviewIsOf(own, pr({ number: 3, head: "retry-jitter", head_repo: "dana/billing-svc" }))).toBe(false);
+    expect(inboxReviewIsOf({ kind: "local", branch: "main" }, pr({ number: 4, head: "main" }))).toBe(false);
+    // Naming the PR itself still matches whoever wrote it.
+    expect(inboxReviewIsOf({ kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/5" } }, pr({ number: 5, mine: false }))).toBe(true);
   });
 
   test("a PR merely mentioned in a review thread is not claimed; one the review is of, or handed over, is", () => {

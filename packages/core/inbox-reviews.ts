@@ -21,7 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
-import { inboxPullIsOpen, type InboxPull, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { INBOX_PULL_LONG_LIVED, inboxPullIsOpen, type InboxPull, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -240,14 +240,17 @@ export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonl
 const bareUrl = (url: string) => url.replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
 
 /**
- * The review is of this PR: its source names the PR (`source.pr`), or its
- * branch is the PR's head branch (in the PR's repository, when the source
- * names one). A PR's URL merely mentioned in the thread is not enough.
+ * The review is of this PR: its source names the PR (`source.pr`), or, for
+ * the person's own PR from the repository itself (not a fork), its branch is
+ * the PR's head branch, never a long-lived one (`main`, `develop`, …), in the
+ * PR's repository when the source names one. A PR's URL merely mentioned in
+ * the thread is not enough, and neither is a teammate's branch of the same name.
  */
-export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<InboxPull, "url" | "head" | "repo">): boolean {
+export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<InboxPull, "url" | "head" | "repo" | "mine" | "head_repo">): boolean {
   if (!source) return false;
   if (source.pr) return bareUrl(source.pr.url) === bareUrl(pull.url);
-  if (!source.branch || source.branch !== pull.head) return false;
+  if (!pull.mine || (pull.head_repo !== null && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase())) return false;
+  if (!source.branch || source.branch !== pull.head || INBOX_PULL_LONG_LIVED.test(pull.head)) return false;
   if (!source.repo) return true;
   const repo = source.repo.toLowerCase();
   const of = pull.repo.toLowerCase();
@@ -287,9 +290,12 @@ const latest = (times: readonly string[]) => times.reduce((a, b) => (b > a ? b :
  * - A thread owns a PR the person handed it (`via: "owner"`); through the
  *   agent's own URL only when the thread's latest review is of that PR
  *   (`inboxReviewIsOf`), so a PR merely mentioned stays its own row.
- * - Landed: a thread whose PRs are all merged or closed leaves Reviews (the
- *   work is done; the thread stays in the Inbox, and the approved page has no
- *   group for done work).
+ * - Landed: a thread whose PRs all merged leaves Reviews while its latest
+ *   review is no newer than the latest merge (the work is done; the thread
+ *   stays in the Inbox, and the approved page has no group for done work). A
+ *   review sent after the merge is listed, as a review with no open PR. The
+ *   list reads merged PRs for `INBOX_PULLS_MERGED_DAYS` and never reads closed
+ *   ones, so this holds only within that window.
  * - Archived: a resolved thread is left out while its latest review is no
  *   newer than the archive, unless it still owns an open PR. A review sent
  *   after the archive brings it back, as the Inbox brings the thread back.
@@ -324,8 +330,11 @@ export function inboxReviewRows(input: {
   const push = (threadId: string, review: InboxReviewThread | null, own: { pulls: InboxPull[]; link: InboxPullLink } | undefined) => {
     const pulls = own?.pulls ?? [];
     const open = pulls.filter(inboxPullIsOpen);
-    // Landed: every PR it owns merged or closed.
-    if (pulls.length > 0 && open.length === 0) return;
+    // Landed: every PR it owns merged, and no review came after the latest merge.
+    if (pulls.length > 0 && open.length === 0) {
+      const landedAt = latest(pulls.map((p) => p.merged_at ?? p.updated_at));
+      if (!review || review.reviewed_at <= landedAt) return;
+    }
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);

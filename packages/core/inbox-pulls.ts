@@ -188,8 +188,12 @@ export interface InboxPullStack {
   open_base: string;
 }
 
-/** Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer. */
-const LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
+/**
+ * Long-lived branches: a merged PR from one of them (a release `develop → main`) is never a stack's bottom layer,
+ * and a review of one is never matched to a PR by its branch (Reviews).
+ */
+export const INBOX_PULL_LONG_LIVED = /^(main|master|trunk|develop|dev|staging|production|release([/-].*)?)$/;
+const LONG_LIVED = INBOX_PULL_LONG_LIVED;
 
 /**
  * The stacks among the PRs: one per chain of open PRs where each one's base is
