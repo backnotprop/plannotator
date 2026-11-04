@@ -74,4 +74,45 @@ describe.skipIf(!hasDom)('the Tater mark', () => {
     // The brand's words' -4 px margin stays off the strip.
     expect(value(strip, 'margin-left')).toBe('0');
   });
+
+  // Nothing runs while the mark cannot be seen: the docked sidebar collapsed (clipped to no width) and its
+  // hover copy parked offscreen both report "not intersecting", and the loop pauses until it shows again.
+  // (A closed phone sheet unmounts the mark; a hidden tab draws no frames.) The failure: the pause landing
+  // on an element that does not carry the animation, so a collapsed sidebar keeps the loop going.
+  test('the loop pauses while the mark is off screen and resumes when it shows', () => {
+    const observers: { callback: IntersectionObserverCallback; target: Element | null; disconnected: boolean }[] = [];
+    const Real = globalThis.IntersectionObserver;
+    globalThis.IntersectionObserver = class {
+      private entry: (typeof observers)[number];
+      constructor(callback: IntersectionObserverCallback) {
+        this.entry = { callback, target: null, disconnected: false };
+        observers.push(this.entry);
+      }
+      observe(el: Element) { this.entry.target = el; }
+      unobserve() {}
+      disconnect() { this.entry.disconnected = true; }
+      takeRecords() { return []; }
+    } as unknown as typeof IntersectionObserver;
+    try {
+      host = document.createElement('div');
+      host.className = 'ib-brand';
+      document.body.append(host);
+      root = createRoot(host);
+      act(() => root!.render(<TaterMark />));
+      const strip = host.querySelector<HTMLElement>('[data-sprite="tater-sidebar"]')!;
+      const css = loadCascade(CSS);
+      // The element whose play state is switched is the one that carries the loop.
+      expect(css.winner(strip, 'animation')?.value).toContain('ib-tater-sidebar');
+      const watcher = observers.find((o) => o.target !== null && !o.disconnected)!;
+      const report = (isIntersecting: boolean) =>
+        act(() => watcher.callback([{ isIntersecting, target: watcher.target } as IntersectionObserverEntry], {} as IntersectionObserver));
+      expect(strip.style.animationPlayState).toBe('running');
+      report(false);
+      expect(strip.style.animationPlayState).toBe('paused');
+      report(true);
+      expect(strip.style.animationPlayState).toBe('running');
+    } finally {
+      globalThis.IntersectionObserver = Real;
+    }
+  });
 });
