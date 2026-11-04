@@ -7,15 +7,17 @@
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
  *   folded "N waiting on others". A stack is one row: its third line is a
- *   small chain of PR marks in landing order.
+ *   small chain of PR marks in landing order. Top left, always the author's
+ *   picture (the owner on #2608); the agent that has it is on the third
+ *   line, with its mark ("#48201 · Claude Code has it").
  * - The stack view beside it (a phone: in its place): the layers from the
  *   base branch up, the lowest open one marked "Lands next"; the agent
  *   behind it and its thread, or "No agent yet" with the ask, the agent pills
  *   (the project's live sessions; one is picked) and + New agent (compose's
  *   own launch, while the Inbox can launch); a Board chip only when the Board is on and a
  *   card links it; the purple Review hands it to the picked agent, and "Open
- *   the diff" (phase 1's review mode, layer by layer) with "Whole stack" sits
- *   beside it in every state, as each layer's row does; Reply at the foot goes
+ *   the diff" (phase 1's review mode, layer by layer; the whole stack is its
+ *   switch) sits beside it in every state, as each layer's row does; Reply at the foot goes
  *   into the agent's thread.
  *   No merge button.
  *
@@ -41,37 +43,27 @@ import { matchesShortcutBinding, resolveShortcutBindings } from '@plannotator/ui
 import { ShortcutHint, useShortcutAria } from '../shortcuts/hint';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
-  answeredClis,
-  chainMarks,
   checksWords,
   findStack,
-  forgeName,
   handoffKeys,
   inboxPullLabel,
-  initials,
   ladderHeading,
-  landsNextLayer,
   PULL_HANDOFF_CUSTOM_MAX,
-  layerBaseWords,
   layerPill,
   linkAgentName,
-  otherLayerAgents,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffMessage,
   pullNounWord,
   pullRows,
-  pullsEmptyWords,
-  pullsNotices,
   type PullHandoffAsk,
-  repoLabels,
-  repoName,
-  rowLine,
-  stackLink,
+  rowMeta,
   stackProjects,
   stackTitle,
-  startLayer,
 } from './model';
+import { forgeName, initials, repoLabels, repoName } from './labels';
+import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
+import { chainMarks, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -256,21 +248,58 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
  * Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), an empty tile
  * for a teammate's PR whose account is gone (the column stays even), else nothing (the person's own).
  */
-function RowLead({ item, link }: { item: InboxPullItem; link: InboxPullLink | null }) {
-  if (link?.agent) return <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} />;
-  const author = item.focus.author;
-  if (item.focus.mine) return null;
-  if (!author) {
+/** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
+const failedAvatars = new Set<string>();
+
+/**
+ * The row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
+ * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
+ * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
+ */
+function RowLead({ item }: { item: InboxPullItem }) {
+  const bottom = item.stack.layers[0]!;
+  const author = bottom.author;
+  const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(() => (src ? failedAvatars.has(src) : false));
+  useEffect(() => {
+    setShown(false);
+    setFailed(src ? failedAvatars.has(src) : false);
+  }, [src]);
+  if (!author || !src) {
     return (
       <Tip content="A deleted account">
-        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="" />
+        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
+          <Icon name="user" size={13} />
+        </span>
       </Tip>
     );
   }
+  const fail = () => {
+    failedAvatars.add(src);
+    setFailed(true);
+  };
   return (
     <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author}>
-        {initials(author)}
+      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
+        {!shown && <span aria-hidden="true">{initials(author)}</span>}
+        {!failed && (
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            draggable={false}
+            data-shown={shown ? '' : undefined}
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
+              else fail();
+            }}
+            onError={fail}
+          />
+        )}
       </span>
     </Tip>
   );
@@ -318,7 +347,7 @@ function PullRow({
   onOpen: () => void;
 }) {
   const title = stackTitle(item.stack, links);
-  const line = rowLine(item, link);
+  const meta = rowMeta(item, link);
   const layers = item.stack.layers.length;
   return (
     <button
@@ -332,7 +361,7 @@ function PullRow({
     >
       <div className="ib-l1">
         <span className="ib-from ib-lead">
-          <RowLead item={item} link={link} />
+          <RowLead item={item} />
           <span className="ib-p" dir="auto" data-pulls-repo="">
             {repoLabel}
           </span>
@@ -361,7 +390,17 @@ function PullRow({
               A stack of {layers} {pullNounWord(item.stack.platform)}s:{' '}
             </span>
           )}
-          {line}
+          {meta.lead}
+          {meta.agent && (
+            <>
+              {' · '}
+              <span className="ib-pr-magent" data-pulls-row-agent={meta.agent.host ?? ''}>
+                <HostMark host={meta.agent.host} />
+                {meta.agent.name} {meta.agent.words}
+              </span>
+            </>
+          )}
+          {meta.rest && ` · ${meta.rest}`}
         </span>
       </div>
     </button>
@@ -436,19 +475,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     said.current.focus();
   }, [linkThread]);
   // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
+  // A stack's whole diff is the review's own "This layer | Whole stack" switch, not a second button here.
   const openDiff = start ? (
-    <>
-      <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
-        <Icon name="code" size={15} />
-        Open the diff
-      </button>
-      {many && (
-        <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, top.key, 'stack')} data-pulls-review-stack="">
-          <Icon name="layers" size={15} />
-          Whole stack
-        </button>
-      )}
-    </>
+    <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
+      <Icon name="code" size={15} />
+      Open the diff
+    </button>
   ) : null;
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
@@ -676,7 +708,7 @@ function HandLine({
   onHanded: (session: string) => void;
   onCancel?: () => void;
   onReload: () => void;
-  /** "Open the diff" (and Whole stack), beside Review. */
+  /** "Open the diff", beside Review. */
   diff: ReactNode;
 }) {
   const [targets, setTargets] = useState<HandTargets | null>(null);

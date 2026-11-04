@@ -24,8 +24,9 @@ export interface PullsState {
  * page is closed but `counted` (Code review is on), the sidebar's "On you"
  * count is kept current: the list is read once when the window starts and
  * again on focus after `PULLS_FOCUS_MS` (the server answers from its cache
- * while that is fresh). Neither: nothing is asked and a read in flight is
- * dropped.
+ * while that is fresh). Leaving the page keeps a read in flight while the
+ * count still wants it (its answer is the count's). Neither: nothing is asked
+ * and a read in flight is dropped.
  */
 export function usePulls(enabled: boolean, counted = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
@@ -74,6 +75,7 @@ export function usePulls(enabled: boolean, counted = false): PullsState {
       return () => window.removeEventListener('focus', onFocus);
     }
     if (!enabled) {
+      // Neither the page nor the count: a read in flight is dropped.
       inFlight.current?.abort();
       inFlight.current = null;
       setLoading(false);
@@ -90,10 +92,18 @@ export function usePulls(enabled: boolean, counted = false): PullsState {
     return () => {
       window.removeEventListener('focus', onFocus);
       clearInterval(tick);
-      inFlight.current?.abort();
-      inFlight.current = null;
+      // Not aborted here: the page closing while the count is kept lets the read land (the next state decides).
     };
   }, [enabled, counted, read]);
+
+  // Gone from the window: whatever is in flight is dropped.
+  useEffect(
+    () => () => {
+      inFlight.current?.abort();
+      inFlight.current = null;
+    },
+    [],
+  );
 
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);

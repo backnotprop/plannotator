@@ -513,6 +513,90 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   expect(opened).toEqual([STACK_ID]);
 });
 
+test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
+  // The person's own stack (as "mara-lee", a login no other test drew), handed to Claude; a teammate's PR whose account is gone.
+  const gone = pull(990, { repo: 'northwind/web-app', mine: false, requested: true, author: null, head: 'gone', updated_at: '2026-11-03T11:00:00.000Z' });
+  const own = model.pulls.map((p) => (stack.some((l) => l.key === p.key) ? { ...p, author: 'mara-lee' } : p));
+  const answer: InboxPullsAnswer = { ...model, pulls: [...own, gone], links: { [stack[0]!.key]: { ...link, via: 'owner' } } };
+  // happy-dom loads no image (each one errors at once): the address each picture asks is read as it is set.
+  const srcs: string[] = [];
+  const setAttribute = Element.prototype.setAttribute;
+  Element.prototype.setAttribute = function (name: string, value: string) {
+    if (this.tagName === 'IMG' && name === 'src') srcs.push(String(value));
+    return setAttribute.call(this, name, value);
+  };
+  try {
+    mount(<Page answer={answer} stackId={STACK_ID} />);
+    await settle();
+  } finally {
+    Element.prototype.setAttribute = setAttribute;
+  }
+  const row = (id: string) => el(`[data-pulls-row="${id}"]`);
+  const stackRow = row(STACK_ID);
+  const lead = stackRow.querySelector('.ib-lead')!;
+  // The person's own stack: her picture (the bottom layer's author), never the agent's mark.
+  const av = lead.querySelector<HTMLElement>('[data-pulls-author]')!;
+  expect(av.getAttribute('data-pulls-author')).toBe('mara-lee');
+  const asked = srcs.map((s) => new URL(s, 'http://inbox.test'));
+  // Every picture is the Inbox's own route: nothing from another origin.
+  expect(asked.length).toBeGreaterThan(0);
+  expect(asked.every((u) => u.origin === 'http://inbox.test' && /\/api\/inbox\/pulls\/avatar$/.test(u.pathname))).toBe(true);
+  expect(asked.map((u) => `${u.searchParams.get('host')} ${u.searchParams.get('login')}`)).toContain('github.com mara-lee');
+  expect(lead.querySelector('.ib-atiles')).toBeNull();
+  // The agent: its mark and name on the third line.
+  const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
+  expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
+  expect(agent.textContent).toBe('Claude Code has it');
+  expect(agent.querySelector('svg, img')).not.toBeNull();
+  // The picture failed: the initials stay, no broken image.
+  expect(av.querySelector('img')).toBeNull();
+  expect(av.getAttribute('data-pulls-avatar')).toBe('none');
+  expect(av.textContent).toBe('ML');
+  // A deleted account: a grey person, never an empty box, and no picture asked for.
+  const ghost = row(gone.key).querySelector('[data-pulls-ghost]')!;
+  expect(ghost.getAttribute('aria-label')).toBe('A deleted account');
+  expect(ghost.querySelector('svg')).not.toBeNull();
+  expect(ghost.querySelector('img')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is the review\'s own switch', async () => {
+  const reviewed: string[] = [];
+  mount(<Page answer={model} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
+  await settle();
+  const pane = el('[data-pulls-stack]');
+  expect(pane.querySelectorAll('[data-pulls-open-diff]')).toHaveLength(1);
+  expect(pane.querySelector('[data-pulls-review-stack]')).toBeNull();
+  expect([...pane.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Whole stack')).toBe(false);
+  await act(async () => el('[data-pulls-open-diff]').click());
+  expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
+});
+
+test.skipIf(!hasDom)("a Whole stack over two agents' layers goes to neither: the agent option is off and says why; posting still can", async () => {
+  // Claude has #412 (the bottom), Codex #413: the stack up to #413 covers both.
+  const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
+  // Its head read (postable), and a fresh push: no comments kept from another test.
+  const pulls = model.pulls.map((p) => (p.key === stack[1]!.key ? { ...p, head_sha: SHA, updated_at: '2026-11-04T03:00:00.000Z' } : p));
+  const two: InboxPullsAnswer = { ...model, pulls, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
+  mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
+  await settle();
+  // This layer: Codex's own, offered.
+  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
+  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await settle();
+  const words = 'Claude Code and Codex each have layers here. Send to an agent from This layer.';
+  const option = el('[data-review-destination-choice="agent"]');
+  expect(option.querySelector('input')!.disabled).toBe(true);
+  expect(option.getAttribute('title')).toBe(words);
+  expect(el('[data-review-destination]').getAttribute('data-review-destination')).toBe('forge');
+  expect(el('[data-review-decision]').getAttribute('data-review-posts')).toBe('github');
+  expect(el('[data-pull-review-readonly]').textContent).toBe(words);
+  // Back to This layer: Codex is offered again; nothing was sent.
+  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  await settle();
+  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
+  expect(posted).toEqual([]);
+});
+
 // --- the review's findings (#2590): who a verdict may go to ---
 
 const OTHER_LAST = 'msg_01M4H6G73M9H3Z32T859E72XYZ';
@@ -1018,7 +1102,8 @@ test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading
   expect(document.body.textContent).not.toContain('Reading the diff');
 });
 
-test.skipIf(!hasDom)('a long title is cut in the review header but kept whole in its hover', async () => {
+// The cut itself is measured in tests/e2e/inbox-pull-requests.spec.ts (happy-dom lays nothing out).
+test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover', async () => {
   const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
   const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);

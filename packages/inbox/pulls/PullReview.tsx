@@ -38,7 +38,10 @@ import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
-import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullNounWord, pullVerdictReply, railRows } from './model';
+import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
+import { forgeName } from './labels';
+import { railRows } from './rail';
+import { layerVerdictLink, nextLayer, stackAgentsWords, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = lazy(() => import('#guide-reader'));
@@ -112,8 +115,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const stack = item?.stack ?? null;
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
   // The verdict goes to this layer's own agent thread (its stack's only as a fallback), and only on the person's
-  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict.
-  const link = stack && model && layer ? layerVerdictLink(layer, stack, model.links) : null;
+  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict covers the
+  // layers under this one too: it goes to an agent only when they are all that agent's (posting still can).
+  const routed = useMemo(() => {
+    if (!stack || !model || !layer) return { link: null, blocked: null };
+    if (scope !== 'stack') return { link: layerVerdictLink(layer, stack, model.links), blocked: null };
+    const { link: one, agents } = stackVerdictLink(layer, stack, model.links);
+    return { link: one, blocked: agents.length > 1 ? { words: stackAgentsWords(agents.map((a) => linkAgentName(a) ?? 'Agent')), link: layerVerdictLink(layer, stack, model.links) } : null };
+  }, [stack, model, layer, scope]);
+  const link = routed.link;
+  const blocked = routed.blocked;
   const agent = linkAgentName(link);
   const open = stack ? stack.layers.filter((l) => l.state === 'open' || l.state === 'draft') : [];
   const at = layer ? open.findIndex((l) => l.key === layer.key) : -1;
@@ -363,7 +374,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                       </span>
                     ),
                   }
-                : null
+                : blocked
+                  ? { name: linkAgentName(blocked.link) ?? 'Agent', host: blocked.link?.agent?.host ?? null, control: null, unavailable: blocked.words }
+                  : null
             }
             comments={comments}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
@@ -486,8 +499,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           )}
           {!canDecide && !posted && !diffError && (
-            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-              {layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
+            <p className="ib-prr-note" data-pull-review-readonly={blocked ? 'agents' : layer.mine ? 'unlinked' : 'teammate'}>
+              {blocked ? blocked.words : layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
             </p>
           )}
           {sendError && (

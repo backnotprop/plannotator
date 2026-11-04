@@ -37,6 +37,11 @@
  *     approval with a line comment (the fake gh's stdin is the review the
  *     review app's provider builds), and a refusal from GitHub shown in the
  *     dialog with nothing claimed posted.
+ * 10. The rows' top left is each author's picture (the owner on #2608), the
+ *     Inbox's own route fetching it from the fake forge's `avatarUrl` (a
+ *     loopback server, tests/helpers/fake-avatars.ts); the window never asks
+ *     another origin for anything. A long title is cut in the review header,
+ *     whose controls stay in the window from 1280 down to 760 wide.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -52,6 +57,7 @@ import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { startFakeAvatars, type FakeAvatars } from '../helpers/fake-avatars';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -73,6 +79,22 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
+  avatars: FakeAvatars;
+  /** Every request a window made to an origin other than the Inbox's (none may happen). */
+  outside: string[];
+}
+
+/** The real person's Inbox port: a spec's Inbox never takes it. */
+const OWNER_INBOX_PORT = '59812';
+
+/** Records any request the page makes to an origin other than `url`'s (data: and blob: are the page's own). */
+function watchOutside(page: Page, url: string, outside: string[]): void {
+  const own = new URL(url).origin;
+  page.on('request', (request) => {
+    const at = new URL(request.url());
+    if (at.protocol === 'data:' || at.protocol === 'blob:') return;
+    if (at.origin !== own) outside.push(request.url());
+  });
 }
 
 let world: World;
@@ -189,6 +211,9 @@ function writeForge(dir: string) {
 const forgeCalls = () => readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
+/** The fake forge's picture address for a login (the loopback server started in beforeAll). */
+let avatarOf = (login: string) => `http://127.0.0.1:9/${login}.png`;
+
 function ghPull(repoName: string, number: number, fields: Record<string, unknown>) {
   return {
     number,
@@ -207,7 +232,7 @@ function ghPull(repoName: string, number: number, fields: Record<string, unknown
     reviewDecision: 'REVIEW_REQUIRED',
     repository: { nameWithOwner: repoName },
     headRepository: { nameWithOwner: repoName },
-    author: { login: 'dana' },
+    author: { login: 'dana', avatarUrl: avatarOf('dana') },
     reviewRequests: { nodes: [] },
     latestReviews: { nodes: [] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
@@ -312,6 +337,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const forgeDir = join(root, 'forge');
   const forge = writeForge(forgeDir);
+  // The authors' pictures: a loopback server the fake forge's avatarUrl names (allowed under the test sandbox only).
+  const avatars = await startFakeAvatars();
+  avatarOf = avatars.url;
   const src = join(root, 'src');
 
   // billing-svc: Claude Code's stack of four, the charge client merged under it.
@@ -419,7 +447,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       data: {
         viewer: { login: 'dana' },
         requested: {
-          nodes: [ghPull(webRepo, 880, { title: 'RTL layout for the settings pages', author: { login: 'tomas' }, headRefName: 'tomas/rtl-settings', updatedAt: ago(4), ...stats(rtl), reviewRequests: { nodes: [{ requestedReviewer: { login: 'dana' } }] } })],
+          nodes: [ghPull(webRepo, 880, { title: 'RTL layout for the settings pages', author: { login: 'tomas', avatarUrl: avatarOf('tomas') }, headRefName: 'tomas/rtl-settings', updatedAt: ago(4), ...stats(rtl), reviewRequests: { nodes: [{ requestedReviewer: { login: 'dana' } }] } })],
         },
         authored: {
           nodes: [
@@ -451,7 +479,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     headPipeline: { status: 'SUCCESS' },
     project: { fullPath: 'northwind/ledger' },
     sourceProject: { fullPath: 'northwind/ledger' },
-    author: { username: 'dana' },
+    author: { username: 'dana', avatarUrl: avatarOf('dana') },
     approvedBy: { nodes: [] },
     reviewers: { nodes: [] },
     ...fields,
@@ -466,7 +494,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       data: {
         currentUser: {
           username: 'dana',
-          requested: { nodes: [mr(58, { title: 'Round cents half to even', author: { username: 'priya' }, sourceBranch: 'priya/rounding', updatedAt: ago(75), ...glStats(rounding) })] },
+          requested: { nodes: [mr(58, { title: 'Round cents half to even', author: { username: 'priya', avatarUrl: avatarOf('priya') }, sourceBranch: 'priya/rounding', updatedAt: ago(75), ...glStats(rounding) })] },
           authored: { nodes: [mr(61, { title: 'Export the ledger to CSV', sourceBranch: 'csv-export', headPipeline: { status: 'RUNNING' }, updatedAt: ago(15), ...glStats(csvPatch) })] },
           merged: { nodes: [] },
         },
@@ -492,10 +520,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const url = started.stdout.trim();
+  // The person's own Inbox port is never this spec's.
+  expect(new URL(url).port).not.toBe(OWNER_INBOX_PORT);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  const outside: string[] = [];
+  watchOutside(page, url, outside);
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
 
@@ -531,6 +563,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     context,
     page,
     errors,
+    avatars,
+    outside,
   };
 });
 
@@ -541,6 +575,7 @@ test.afterAll(async () => {
     await world.claude.close().catch(() => {});
     await world.codex.close().catch(() => {});
     await world.context.close();
+    await world.avatars.close();
   } finally {
     await removeInboxScratch();
   }
@@ -598,7 +633,19 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const stackRow = list.locator(`[data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
   await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
-  await expect(stackRow).toContainText('3 open, 1 merged · start at #412');
+  // The agent on the third line, its mark before its name; top left, the author's picture (her own stack too).
+  await expect(stackRow).toContainText('3 open, 1 merged · Claude Code opened it · start at #412');
+  await expect(stackRow.locator('.ib-pv [data-pulls-row-agent="claude-code"]')).toBeVisible();
+  await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
+  for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
+    const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
+    await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
+    const src = new URL((await av.locator('img').getAttribute('src'))!, world.url);
+    expect([src.origin, src.pathname]).toEqual([new URL(world.url).origin, '/api/inbox/pulls/avatar']);
+  }
+  // The Inbox fetched them from the fake forge's addresses; the window asked no other origin.
+  expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
+  expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
   await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
   // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
@@ -643,7 +690,8 @@ test('the stack view with the Board off: layers from main up, Lands next, the ag
   // An agent has it: no Review (Hand to another agent asks again); the diff is one button away.
   await expect(pane.locator('[data-pulls-review]')).toHaveCount(0);
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
-  await expect(pane.getByRole('button', { name: 'Whole stack' })).toBeVisible();
+  // The whole stack is the review's own switch: one Open the diff here.
+  await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
   await shot(page, '3-stack-board-off');
 });
 
@@ -832,6 +880,29 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     expect(box.x + box.width).toBeLessThanOrEqual(rail!.x + rail!.width);
   }
   await shot(page, '7-layer-review');
+  // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
+  const fn = review.locator('[data-pull-review-title]');
+  await expect(fn).toHaveAttribute('title', '#412 Retry schedule table and next-attempt time');
+  for (const width of [1280, 1100, 900, 800, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    const decision = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
+    const back = (await review.locator('.ib-vhead .ib-back').boundingBox())!;
+    expect([width, decision.x + decision.width <= width, back.x >= 0]).toEqual([width, true, true]);
+  }
+  // The worst case's title (break-ui #1), laid out in this header at 900 wide: cut, the decision still in the window.
+  await page.setViewportSize({ width: 900, height: 900 });
+  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
+  const was = await fn.locator('bdi').evaluate((node, text) => {
+    const before = node.textContent;
+    node.textContent = text;
+    return before;
+  }, long);
+  const cut = await fn.locator('bdi').evaluate((node) => ({ cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
+  expect(cut).toEqual({ cut: true, overflow: 'ellipsis' });
+  const after = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
+  expect(after.x + after.width).toBeLessThanOrEqual(900);
+  await fn.locator('bdi').evaluate((node, text) => (node.textContent = text), was);
+  await page.setViewportSize({ width: 1440, height: 900 });
 
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
@@ -873,6 +944,7 @@ test('Reply at the stack\'s foot goes into the agent\'s thread', async () => {
   const reply = await claude.nextReply(world.threads.stack, 50, verdictId);
   expect(String(reply.body)).toBe('Hold #414 until Priya has read the email copy.');
   expect(world.errors).toEqual([]);
+  expect(world.outside).toEqual([]);
 });
 
 test('a phone at 390 px: the list, a stack, a layer review; and off, no row', async ({ browser }) => {

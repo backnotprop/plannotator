@@ -5,29 +5,24 @@
  *  - a failed or partial read saying "Nothing open in your projects", or dropping its PRs without a word;
  *  - gh not installed told as "signed out"; a host's PRs past the search's cap left out without a count;
  *  - a long chain drawn as a row of marks past its line; a fork's second layer read as "After";
- *  - one layer headed "Landing order"; a layer on a branch no PR has said to be "Based on" it as if it lands;
+ *  - in a forked stack, a verdict routed by the layers' order in the list instead of the layer it sits on;
+ *  - a Whole stack verdict sent to one agent over another agent's layers;
+ *  - one layer headed "Landing order"; a branch no PR has claimed to have "no open pull request", or an ordinary
+ *    trunk (`next`, `canary`) losing "Lands next";
+ *  - a self-hosted forge's host blamed on one CLI by its name;
+ *  - the agent drawn top left instead of on the row's third line;
  *  - two repositories of one name in the list told apart by nothing;
  *  - initials that read as "PR" or "MR" on this page;
  *  - a rail of files that share their name and last folder, each row the same text.
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import {
-  chainMarks,
-  initials,
-  ladderHeading,
-  landsNextLayer,
-  layerBaseWords,
-  layerVerdictLink,
-  nextLayer,
-  otherLayerAgents,
-  pullsEmptyWords,
-  pullsNotices,
-  railRows,
-  repoLabels,
-  stackLink,
-  stackTitle,
-} from './model';
+import { inboxPullItems } from '@plannotator/core/inbox-types';
+import { initials, repoLabels } from './labels';
+import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
+import { pullsEmptyWords, pullsNotices } from './notices';
+import { railRows } from './rail';
+import { chainMarks, landsNextLayer, layerBaseWords, layerVerdictLink, nextLayer, otherLayerAgents, stackAgentsWords, stackLink, stackVerdictLink } from './topology';
 
 function pr(fields: Partial<InboxPull> & { number: number; head: string }): InboxPull {
   const repo = fields.repo ?? 'northwind/payments-gateway';
@@ -99,6 +94,56 @@ describe('several agents on one stack (#2)', () => {
     expect(stackTitle(stack!, links)).toBe('Subject of claude');
     expect(stackTitle(stack!, { [layers[2]!.key]: link('codex') })).toBe('PR 1');
   });
+
+  test("a fork: a layer on A takes A's agent, never a sibling's that comes before it in the list", () => {
+    // A on main (Claude), B on A (Codex), C on A (no link).
+    const a = pr({ number: 1, head: 'a', base: 'main' });
+    const b = pr({ number: 2, head: 'b', base: 'a' });
+    const c = pr({ number: 3, head: 'c', base: 'a' });
+    const [fork] = inboxPullStacks([a, b, c]);
+    const forked = { [a.key]: link('claude'), [b.key]: link('codex') };
+    expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('claude');
+    expect(otherLayerAgents(fork!, forked).map((o) => [o.link.thread_id, o.layers.map((l) => l.number)])).toEqual([['codex', [2]]]);
+  });
+
+  test("a fork: a layer on B takes B's agent, though its cousin C (another agent) comes just before it in the list", () => {
+    // A on main, B on A (Claude), C on A (Codex), D on B (no link).
+    const a = pr({ number: 1, head: 'a', base: 'main' });
+    const b = pr({ number: 2, head: 'b', base: 'a' });
+    const c = pr({ number: 3, head: 'c', base: 'a' });
+    const d = pr({ number: 4, head: 'd', base: 'b' });
+    const [fork] = inboxPullStacks([a, b, c, d]);
+    expect(fork!.layers.map((l) => l.number)).toEqual([1, 2, 3, 4]);
+    const forked = { [b.key]: link('claude'), [c.key]: link('codex') };
+    expect(layerVerdictLink(d, fork!, forked)!.thread_id).toBe('claude');
+    expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('codex');
+  });
+
+  test("a Whole stack verdict goes to an agent only when every layer under it is that agent's; else to none", () => {
+    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers.
+    const whole = stackVerdictLink(layers[3]!, stack!, links);
+    expect(whole.link).toBeNull();
+    expect(whole.agents.map((a) => a.thread_id).sort()).toEqual(['claude', 'codex']);
+    // Up to #2: Claude's alone.
+    expect(stackVerdictLink(layers[1]!, stack!, links).link!.thread_id).toBe('claude');
+    // A layer of no agent under the agent's own goes with it.
+    expect(stackVerdictLink(layers[3]!, stack!, { [layers[0]!.key]: link('claude') }).link!.thread_id).toBe('claude');
+    expect(stackAgentsWords(['Claude Code', 'Codex'])).toBe('Claude Code and Codex each have layers here. Send to an agent from This layer.');
+    expect(stackAgentsWords(['Claude Code', 'Claude Code'])).toBe('2 Claude Code threads each have layers here. Send to an agent from This layer.');
+  });
+});
+
+describe("the agent on the row's third line (the owner on #2608)", () => {
+  test('a PR an agent has: "#48201 · Claude Code has it · …"; one it opened, "opened it"; an ended one "had it"', () => {
+    const one = pr({ number: 48201, head: 'x', checks: 'pending' });
+    const [item] = inboxPullItems(inboxPullStacks([one]), () => true);
+    expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Claude Code has it · checks running');
+    expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'has it' });
+    expect(rowLine(item!, link('t'))).toBe('#48201 · Claude Code opened it · checks running');
+    const ended = link('t', { via: 'owner', agent: { host: 'opencode', session: 's', name: null, ended: true } });
+    expect(rowLine(item!, ended)).toBe('#48201 · OpenCode had it · checks running');
+    expect(rowMeta(item!, null).agent).toBeNull();
+  });
 });
 
 describe('what the list says when it could not read everything (#5, #6, #8, #26)', () => {
@@ -120,13 +165,27 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     const signedOut = answer({ clis: { gh: 'signed_out', glab: 'signed_out' }, unsigned: ['github.com'], projects: { 'github.com/northwind/payments-gateway': ['prj_1'] } });
     expect(pullsEmptyWords(signedOut).kind).toBe('signed-out');
     const half = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], clis: { gh: 'signed_in', glab: 'signed_out' }, unsigned: ['gitlab.com'] });
-    expect(pullsNotices(half).map((n) => n.key)).toEqual(['unsigned:glab']);
+    expect(pullsNotices(half).map((n) => n.line)).toEqual(["glab isn't signed in to gitlab.com, so its pull requests aren't shown."]);
+  });
+
+  test('a self-hosted forge is never put on one CLI by its name: both are named, or the one installed', () => {
+    const both = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], clis: { gh: 'signed_in', glab: 'signed_out' }, unsigned: ['code.corp.example'] });
+    expect(pullsNotices(both).map((n) => n.line)).toEqual(["Neither gh nor glab is signed in to code.corp.example, so its pull requests aren't shown."]);
+    const noGlab = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana' }], clis: { gh: 'signed_in', glab: 'missing' }, unsigned: ['gitlab.corp.example'] });
+    expect(pullsNotices(noGlab).map((n) => n.line)).toEqual(["gh isn't signed in to gitlab.corp.example, so its pull requests aren't shown."]);
   });
 
   test('more than one read takes: "Showing 100 of 133", with the forge\'s own list', () => {
     const model = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 100, total: 133 } }] });
     const [notice] = pullsNotices(model);
     expect(notice).toMatchObject({ head: 'Showing 100 of 133', link: { href: 'https://github.com/pulls' } });
+  });
+
+  test('a read not limited to the projects never counts what it shows against the forge total, and is never "Nothing open"', () => {
+    const model = answer({ hosts: [{ cli: 'glab', host: 'gitlab.com', login: 'dana', capped: { shown: 3, total: null } }], projects: { 'gitlab.com/a/b': ['prj_1'] } });
+    const [notice] = pullsNotices(model);
+    expect(notice).toMatchObject({ line: 'Not every merge request on gitlab.com was read: it has more than one read takes.', link: { href: 'https://gitlab.com/dashboard/merge_requests' } });
+    expect(pullsEmptyWords(model).kind).toBe('unread');
   });
 });
 
@@ -154,12 +213,23 @@ describe('stack shapes (#11, #16, #20, #22)', () => {
     expect(ladderHeading(inboxPullStacks(chain(2))[0]!)).toBe('Landing order');
   });
 
-  test('a layer on a branch no PR has: "no open pull request", and no "Lands next"', () => {
-    const top = pr({ number: 7, head: 'dr/failover', base: 'dr/route53' });
-    const above = pr({ number: 8, head: 'dr/drill', base: 'dr/failover' });
-    const [stack] = inboxPullStacks([top, above]);
-    expect(layerBaseWords(top, stack!)).toBe('Based on dr/route53 (no open pull request)');
-    expect(landsNextLayer(stack!)).toBeNull();
+  test('a base no PR has is named, never claimed to have no open pull request; any trunk keeps "Lands next"', () => {
+    // #78 (closed, never read) had dr/route53 as its head: #79 says only what it is based on.
+    const lone = pr({ number: 79, head: 'dr/failover', base: 'dr/route53', default_branch: 'main' });
+    const [alone] = inboxPullStacks([lone]);
+    expect(layerBaseWords(lone, alone!)).toBe('Based on dr/route53');
+    // A single PR into its repository's default branch, or one whose default the forge did not say: nothing.
+    for (const base of ['next', 'canary', 'stable', 'v2', 'gh-pages']) {
+      const into = pr({ number: 5, head: 'x', base, default_branch: base });
+      expect([base, layerBaseWords(into, inboxPullStacks([into])[0]!)]).toEqual([base, null]);
+      const unknown = pr({ number: 5, head: 'x', base });
+      expect([base, layerBaseWords(unknown, inboxPullStacks([unknown])[0]!)]).toEqual([base, null]);
+      // A two-layer stack on that trunk: the bottom lands next, based on it.
+      const low = pr({ number: 6, head: 'l', base });
+      const up = pr({ number: 7, head: 'u', base: 'l' });
+      const [two] = inboxPullStacks([low, up]);
+      expect([base, landsNextLayer(two!)?.number, layerBaseWords(low, two!)]).toEqual([base, 6, `Based on ${base}`]);
+    }
     expect(landsNextLayer(inboxPullStacks(chain(3))[0]!)!.number).toBe(1);
   });
 });
