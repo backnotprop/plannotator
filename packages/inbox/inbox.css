@@ -7743,7 +7743,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (prefers-reduced-motion: reduce) { .ib-sm-sheet, .ib-sm-pip { animation: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-sm-box, .ib-sm-pip { left: 10px; right: 10px; width: auto; max-width: none; }
-  .ib-sm-sheet { left: 0; right: 0; top: 46px; bottom: 0; max-height: none; border-radius: 18px 18px 0 0; }
+  .ib-sm-sheet { left: 0; right: 0; top: 46px; bottom: 0; max-height: none; border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; }
   .ib-sm-sheet-b { padding: 10px 8px; }
   .ib-sm-sheet-h .ib-sm-tx span { font-size: var(--ib-fs-11-5, 11.5px); }
   .ib-sm-sheet-f { font-size: var(--ib-fs-13, 13px); }

@@ -39,7 +39,7 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
-import { Pebble } from '@plannotator/ui/components/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
 import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';

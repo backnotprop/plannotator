@@ -8,7 +8,8 @@
  */
 import { useState } from 'react';
 import type { ShapeCodeTarget, ShapeDrawnView } from '@plannotator/core/shape';
-import { Pebble, ShapeDiagram, type MarkState } from '@plannotator/ui/components/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ShapeDiagram, type MarkState } from '@plannotator/ui/components/shape/ShapeDrawn';
 
 const EMPTY = new Set<string>();
 

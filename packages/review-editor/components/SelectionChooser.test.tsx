@@ -13,6 +13,7 @@ import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act, createRef } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { DiffSelection } from './SelectionChooser';
+import type { ToolbarHostHandle } from './ToolbarHost';
 
 const hasDom = typeof document !== 'undefined';
 const host = (hasDom ? await import('./ToolbarHost') : {}) as typeof import('./ToolbarHost');
@@ -27,7 +28,7 @@ afterEach(() => {
 const PATCH = ['--- a/src/retry-worker.ts', '+++ b/src/retry-worker.ts', '@@ -14,3 +14,5 @@', ' a', '+b', '+c', '+d', ' e', ''].join('\n');
 
 function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectionActions']) {
-  const ref = createRef<import('./ToolbarHost').ToolbarHostHandle>();
+  const ref = createRef<ToolbarHostHandle>();
   const el = document.createElement('div');
   document.body.appendChild(el);
   root = createRoot(el);

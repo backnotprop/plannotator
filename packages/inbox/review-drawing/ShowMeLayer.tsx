@@ -16,7 +16,8 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { inboxReviewLines, type InboxReviewDrawing } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
-import { Pebble, ShapeDiagram, type MarkState } from '@plannotator/ui/components/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { ShapeDiagram, type MarkState } from '@plannotator/ui/components/shape/ShapeDrawn';
 import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { SessionAskActions, type SessionAskAction } from '@plannotator/ui/components/ai/SessionAskNotice';
 import { Icon } from '../icons';

@@ -33,13 +33,17 @@ const home = join(root, "home");
 mkdirSync(home, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-/** sha256 of each text an agent reads, as 0.28.49 (main at 730fa68d2, before Show me) printed it. */
+/**
+ * sha256 of each text an agent reads, as 0.28.49 (main at 730fa68d2, before Show me) printed it; `--help` and
+ * `inbox --help` as main printed them at b8feac46b (after `plannotator guide import` and other main changes for
+ * everyone), still without Show me.
+ */
 const PINNED: Record<string, string> = {
   "mcp tools/list": "ee76aa0665dd05fbfc32c08d84c10cd1bd20ac3e7b2b4358cd41fbbebd7f9ddd",
   get_guide_brief: "906b6918c50a7639c3c5ca8094f499c14dd26f3556b9e74213a683236e937314",
-  "inbox --help": "bd041c8a25674db7de36f7b4d8f9beafb2880d819148a6029a1c7f01ee7572e1",
-  "--help": "bffe3a2f6adab3d1ab955d88dca3c3242e506c2974ebe926b1c5ffa1800bf3bf",
-  "--help (board)": "110b8dba443cdea2e192cdb845df97acf6b8b5ec57ed27f308143af2f9945deb",
+  "inbox --help": "ae7d97e0e307e5530f159cd68666022667a37ac71cacdb426a6931e6fe249a28",
+  "--help": "11552d2c297967261cda34fd6a40f7edb2f1689d3ec1562ef2c7f3123036be5f",
+  "--help (board)": "b9f1e115f1c9fb64454c547432a5069f5361f983c4132548c73721c4c44e99a3",
   "review --help": "91cfedf817e69cdc1506dd8e49ca4e71918f37132286a2e6767faf1c909edd42",
 };
 
