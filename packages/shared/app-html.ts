@@ -107,6 +107,19 @@ export function negotiateAppHtmlEncoding(
   return br >= gzip ? "br" : "gzip";
 }
 
+/**
+ * Whether an `Accept-Encoding` header value takes gzip (or `x-gzip`, or `*`) with a q above 0. For a body that is
+ * only kept gzipped (the Shape page): it is sent as it is when this holds, unzipped otherwise.
+ */
+export function acceptsGzip(acceptEncoding: string | null | undefined): boolean {
+  if (!acceptEncoding) return false;
+  const codings = parseAcceptEncoding(acceptEncoding);
+  const explicit = codings.find((c) => c.name === "gzip" || c.name === "x-gzip");
+  if (explicit) return explicit.q > 0;
+  const wildcard = codings.find((c) => c.name === "*");
+  return wildcard ? wildcard.q > 0 : false;
+}
+
 interface CacheEntry {
   html: string;
   encoded: Partial<Record<"br" | "gzip", Promise<Buffer>>>;

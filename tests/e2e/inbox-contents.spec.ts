@@ -11,7 +11,8 @@
  * Show brings the rail back (its current tick focused), across a reload too.
  * Where the gutter is too short even
  * so, the rail yields and the Contents button opens the rail's headings as a
- * sheet. On a phone the button and sheet: opened
+ * sheet; Hide gathers that button and the toolstrip into the corner control
+ * with the toolbar, and one press brings them back. On a phone the button and sheet: opened
  * mid-document it marks the section being read, its rows are 44 px touch
  * targets, and Escape closes it back to the button. A table popout covers the
  * rail: it is neither on top nor clickable while the popout is open. Plan
@@ -284,6 +285,18 @@ test('full screen at 880 (a gutter under 68 px): the rail yields and the Content
     expect(await sheet.locator('nav[aria-label="Table of contents"] button').allTextContents()).toEqual(HEADINGS);
     await page.keyboard.press('Escape');
     await expect(sheet).toHaveCount(0);
+    // Hide gathers the Contents button and the Select / Markup toolstrip with the toolbar into the corner control
+    // (approval "inbox-fullscreen-gather"); one press brings them back.
+    const strip = pane.locator('.ib-toolstrip');
+    await expect(strip).toBeVisible();
+    await page.locator('[data-full-view-hide]').click();
+    await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'tucked');
+    await expect(open).toBeHidden();
+    await expect(strip).toBeHidden();
+    await page.locator('[data-full-view-handle]').click();
+    await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'pinned');
+    await expect(open).toBeVisible();
+    await expect(strip).toBeVisible();
   });
 });
 
