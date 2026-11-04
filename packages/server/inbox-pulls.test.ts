@@ -135,6 +135,8 @@ interface Forge {
   /** What an Others read answers (default: nothing open); `othersFail` fails it (stderr). */
   othersAnswer: unknown;
   othersFail: string | null;
+  /** How long a GitHub Others read takes, in ms (default: at once). */
+  othersDelayMs?: number;
   /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
 }
@@ -155,6 +157,7 @@ function forge(answer: unknown = GH_ANSWER): Forge {
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (cli === "gh" && othersCall(args)) {
+        if (f.othersDelayMs) await Bun.sleep(f.othersDelayMs);
         if (f.othersFail) return { stdout: "", stderr: f.othersFail, exitCode: 1 };
         return { stdout: JSON.stringify(f.othersAnswer), stderr: "", exitCode: 0 };
       }
@@ -406,6 +409,31 @@ describe("on", () => {
     expect(w.forge.graphql()).toHaveLength(0);
     expect((await w.own(["github.com/northwind/billing-svc#412"], handed)).status).toBe(200);
     expect(w.forge.graphql()).toHaveLength(1);
+  });
+
+  test("after a restart, an Others PR: the owner route waits for the Others read in flight, then finds it", async () => {
+    const w = await world({ codeReview: true });
+    const handed = await w.send("Look at Mei's.", "handed");
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
+    w.forge.othersDelayMs = 150;
+    // The list answers before Others lands (it never waits); the route waits for that read instead of a 404.
+    expect((await w.own(["github.com/northwind/billing-svc#900"], handed)).status).toBe(200);
+    expect(w.forge.others()).toHaveLength(1);
+    // A key no read names is still unknown, with no new Others read.
+    const unknown = await w.own(["github.com/northwind/billing-svc#999"], handed);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { code: string }).code).toBe("pull_unknown");
+    expect(w.forge.others()).toHaveLength(1);
+  });
+
+  test("after a restart, the review route waits for the Others read in flight before saying an Others PR is unknown", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "handed");
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
+    w.forge.othersDelayMs = 150;
+    const res = await w.review({ key: "github.com/northwind/billing-svc#900", action: "comment", body: "Looks fine.", head_sha: "nope" });
+    // Found (and open), so the answer is about the commit, never pull_unknown.
+    expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
   });
 
   test("a draft started from Launch an agent keeps its pull requests", async () => {

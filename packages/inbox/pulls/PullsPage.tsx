@@ -4,10 +4,10 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
- * - The head: "PRs", and on its right the filter (approval "pr-list-filters",
- *   take B Joined; PullFilter.tsx): the on-you count, the view (All, Mine, To
- *   review, Others) and the project, kept in the address (`&view=`,
- *   `&project=`).
+ * - The head: "PRs", and on its right the filter mark (approval
+ *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
+ *   To review, Others) and the project, kept in the address (`&view=`,
+ *   `&project=`) and named once in a quiet line over the list.
  * - The list, in the Inbox list's own rows and bands, grouped by whose move
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
@@ -199,7 +199,8 @@ function PullList({
   // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
   const notices = pullsNotices(model, filter);
   // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
-  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending)) {
+  // A host whose own read failed says so at once instead: the wait never hides a failure.
+  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error)) {
     return (
       <p className="ib-pr-empty" data-pulls-empty="reading">
         Reading your pull requests…

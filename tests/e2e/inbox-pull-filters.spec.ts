@@ -486,6 +486,8 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
   // The keys walk the rows: from the first, two down is To review.
   await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'all');
+  // The first row has focus before the first key (the menu moves focus in after it draws).
+  await expect(menu.locator('[data-pulls-filter="all"]')).toBeFocused();
   await page.keyboard.press('ArrowDown');
   await page.keyboard.press('ArrowDown');
   await expect(menu.locator('[data-highlighted]')).toHaveAttribute('data-pulls-filter', 'review');

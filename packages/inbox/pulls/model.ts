@@ -24,7 +24,7 @@ import { isOpen, startLayer } from './topology';
 export { inboxPullLabel };
 
 /**
- * The list's views (approval "pr-list-filters", take B Joined): every open PR in the Inbox projects' repositories
+ * The list's views (approval "pr-list-filters", round 7 take B): every open PR in the Inbox projects' repositories
  * (`all`), the person's own (`mine`), the ones asked of them (`review`: a review requested, directly or through a
  * team, or assigned to them), and everyone else's (`others`). Each PR is in exactly one of the last three.
  */

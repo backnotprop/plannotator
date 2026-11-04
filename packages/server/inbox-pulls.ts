@@ -565,6 +565,11 @@ export interface InboxPulls {
   ): Promise<{ fetched_at: string | null; hosts: InboxPullHost[]; pulls: InboxPull[]; clis: Partial<Record<RefCli, InboxPullCliState>>; unsigned: string[] }>;
   /** A PR the last list named, by key. */
   find(key: string): InboxPull | null;
+  /**
+   * Waits for the Others reads in flight, each within its own deadline (at once when none is), so a caller that
+   * needs a key Others may hold (an Inbox just restarted) can list again after. Never throws.
+   */
+  othersSettled(): Promise<void>;
   /** The profile pictures' URLs of the authors of the PRs the last list showed on this host, by login. */
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
@@ -957,6 +962,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     },
     find(key) {
       return known.get(key) ?? null;
+    },
+    async othersSettled() {
+      await Promise.all([...hosts.values()].map((state) => state.others.pending));
     },
     avatarUrls(host) {
       return { ...(avatars.get(host.toLowerCase()) ?? {}) };

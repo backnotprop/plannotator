@@ -320,7 +320,7 @@ test.if(hasDom)('an empty view says what the view holds; a failed read is never 
   expect($('[data-pulls-empty]')!.getAttribute('data-pulls-empty')).toBe('unread');
 });
 
-test.if(hasDom)('Others failing or on its way: Mine and To review still say what they hold; Others never says "Nothing else open"', async () => {
+test.if(hasDom)('Others failing or on its way: Mine and To review still say what they hold; Others never says "Nothing else open"; a failed own read is never hidden behind "Reading…"', async () => {
   const theirs = (host: InboxPullsAnswer['hosts'][number]): InboxPullsAnswer => ({ ...MODEL, pulls: [], hosts: [host] });
   const failed = theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'unavailable' });
   const cases: [PullFilter, InboxPullsAnswer, string][] = [
@@ -330,6 +330,17 @@ test.if(hasDom)('Others failing or on its way: Mine and To review still say what
     ['others', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
     ['all', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
   ];
+  // The person's own read failed while Others is on its way: the failure is said at once, never "Reading…".
+  const ownFailed = theirs({ cli: 'gh', host: 'github.com', login: 'dana', error: 'unavailable', others_pending: true });
+  for (const filter of ['all', 'others'] as const) {
+    draw({ filter, state: { model: ownFailed, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+    await settle();
+    expect(`${filter}: ${$('[data-pulls-empty]')!.getAttribute('data-pulls-empty')}`).not.toBe(`${filter}: reading`);
+    expect($('[data-pulls-list]')!.textContent).not.toContain('Reading your pull requests');
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
   for (const [filter, model, said] of cases) {
     draw({ filter, state: { model, error: null, loading: false, refresh: () => {}, reload: () => {} } });
     await settle();

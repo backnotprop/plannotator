@@ -1046,6 +1046,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     return { projectsByRepo, wanted };
   };
+  /**
+   * Keys this Inbox has not read yet (it restarted since the window's list): read the list once, then look again. An
+   * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
+   * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
+   */
+  const findPulls = async (keys: readonly string[], wanted: InboxPullRepo[]): Promise<void> => {
+    if (keys.every((key) => pulls.find(key))) return;
+    await pulls.list(wanted, { refresh: false });
+    if (keys.every((key) => pulls.find(key))) return;
+    await pulls.othersSettled();
+    await pulls.list(wanted, { refresh: false });
+  };
 
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
@@ -3561,8 +3573,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             : new InboxError("validation_error", "thread_id: a thread in the Inbox.", { field: "thread_id" });
         }
         const { projectsByRepo, wanted } = await pullProjects();
-        // A key this Inbox has not read yet (it restarted since the window's list): read the list once, then look again.
-        if ((keys as string[]).some((key) => !pulls.find(key))) await pulls.list(wanted, { refresh: false });
+        // A key this Inbox has not read yet (it restarted since the window's list): read the list once, then look again;
+        // still missing while Others is being read (an Others PR), wait for that read (its own deadline) and look again.
+        await findPulls(keys as string[], wanted);
         let theirs = true;
         for (const key of keys as string[]) {
           const pull = pulls.find(key);
@@ -3600,7 +3613,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const fileComments = pullReviewComments(body.fileComments);
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
         const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
-        if (!pulls.find(key)) await pulls.list((await pullProjects()).wanted, { refresh: false });
+        if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (pull.state !== "open" && pull.state !== "draft") return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
