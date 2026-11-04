@@ -362,6 +362,8 @@ export const codeDocumentBlocks = (text: string, language: string | undefined): 
     language: language && text.length <= CODE_DOCUMENT_HIGHLIGHT_LIMIT ? language : undefined,
     order: 1,
     startLine: 1,
+    // A comment names the lines it sits on, not the whole file.
+    contentStartLine: 1,
     // A trailing newline ends the last line, it does not start another.
     sourceLineCount: text === '' ? 0 : text.replace(/\n$/, '').split('\n').length,
   },
@@ -1103,6 +1105,35 @@ const hostLocationExportLine = (ann: any): string => {
   return typeof line === 'string' && line.trim() !== '' ? `${safeInline(line, 300)}\n` : '';
 };
 
+/** The document lines a quote covers inside a block that sets
+ *  `contentStartLine` (a whole-file code document, which is ONE block). The
+ *  stored `startOffset` is used while it still holds the quote; otherwise the
+ *  quote's first occurrence. `null` when the block has no line base or the
+ *  quote is not in it, so the caller falls back to the block's span. */
+const quoteLinesInContent = (
+  block: Block,
+  quote: unknown,
+  startOffset?: unknown,
+): { first: number; last: number } | null => {
+  if (typeof block.contentStartLine !== 'number' || typeof quote !== 'string' || quote === '') return null;
+  const content = block.content;
+  const start =
+    typeof startOffset === 'number' && Number.isInteger(startOffset) && startOffset >= 0
+      && content.startsWith(quote, startOffset)
+      ? startOffset
+      : content.indexOf(quote);
+  if (start < 0) return null;
+  const base = block.contentStartLine;
+  const lineAt = (offset: number) => {
+    let line = base;
+    for (let i = content.indexOf('\n'); i !== -1 && i < offset; i = content.indexOf('\n', i + 1)) line++;
+    return line;
+  };
+  // The quote's last character, so a quote ending in its line's newline
+  // still ends on that line.
+  return { first: lineAt(start), last: lineAt(start + quote.length - 1) };
+};
+
 const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (!ann.blockId || ann.type === 'GLOBAL_COMMENT') return null;
   // A region names the line its image is written on, not its block's span.
@@ -1111,6 +1142,8 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
   if (typeof ann.blockId === 'string' && ann.blockId.startsWith('diff-block-')) return null;
   const block = blocks.find(b => b.id === ann.blockId);
   if (!block || typeof block.startLine !== 'number') return null;
+  const quoted = quoteLinesInContent(block, ann.originalText, ann.startOffset);
+  if (quoted) return quoted.first === quoted.last ? `line ${quoted.first}` : `lines ${quoted.first}–${quoted.last}`;
   const end = blockEndLine(block);
   if (end <= block.startLine) return `line ${block.startLine}`;
   return `lines ${block.startLine}–${end}`;
@@ -1122,10 +1155,13 @@ const lineLabelForAnnotation = (blocks: Block[], ann: any): string | null => {
  *  the last block's end line, so a selection inside one block names exactly
  *  the span its annotation would export (`(line 41)` / `(lines 41–44)`).
  *  Blocks without a line (diff blocks, unknown ids) are skipped; `null` when
- *  none is left. */
+ *  none is left. In a whole-file code document (one block, see
+ *  `contentStartLine`) the `selectedText` names the lines instead, as its
+ *  annotation's label does. */
 export const selectionSourceLines = (
   blocks: readonly Block[],
   blockIds: readonly string[],
+  selectedText?: string,
 ): { lineStart: number; lineEnd: number } | null => {
   let lineStart = Infinity;
   let lineEnd = -Infinity;
@@ -1133,6 +1169,12 @@ export const selectionSourceLines = (
     if (id.startsWith('diff-block-')) continue;
     const block = blocks.find(b => b.id === id);
     if (!block || typeof block.startLine !== 'number' || block.startLine < 1) continue;
+    const quoted = quoteLinesInContent(block, selectedText);
+    if (quoted) {
+      lineStart = Math.min(lineStart, quoted.first);
+      lineEnd = Math.max(lineEnd, quoted.last);
+      continue;
+    }
     lineStart = Math.min(lineStart, block.startLine);
     lineEnd = Math.max(lineEnd, blockEndLine(block), block.startLine);
   }

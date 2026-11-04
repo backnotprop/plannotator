@@ -7553,7 +7553,7 @@ const App: React.FC = () => {
           onAgentToolChange={agentTool.save}
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
-          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc'}
+          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc' || renderAs === 'code'}
           agentConnected={webmcpActivity.calls > 0}
           onCallbackFeedback={handleCallbackFeedback}
           onCallbackApprove={handleCallbackApprove}

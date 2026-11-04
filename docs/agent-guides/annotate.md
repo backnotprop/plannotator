@@ -58,6 +58,7 @@ The config and data formats (`.yaml` `.yml` `.json` `.jsonc` `.json5` `.toml` `.
 
 - `.cfg` and `.conf` get no grammar (an nginx `.conf` is not INI; fences are never guessed, #1212), `.properties` uses `ini`, `.env.example` uses `dotenv`.
 - Past `CODE_DOCUMENT_HIGHLIGHT_LIMIT` (128 KB) the block has no language: one Shiki pass over a whole large log or JSON dump would stall the page, so it shows as plain monospace text, still annotatable.
+- The whole file is one block, so a block-span line label would name every line. The block sets `contentStartLine`, and the export (`lineLabelForAnnotation`) and Ask AI's lines (`selectionSourceLines`, given the selected text) count the comment's own lines from its position in the block: a comment on line 6 exports `(line 6)`.
 - Edit Mode stays available, as it was when these rendered as markdown. Source save is still markdown/text only (`SOURCE_SAVE_FILE_REGEX`).
 - The version diff's Rendered and Classic modes show each chunk as code in the same language, and a changed block takes a comment as in markdown (`codeDocument` on `PlanCleanDiffView`; see "Plan Diff" in `server-and-storage.md`). Raw is unchanged. Diagram and AsciiDoc files still diff through the markdown parse.
 - Not changed: a share link renders the text as markdown (the payload carries no path to pick a grammar from).

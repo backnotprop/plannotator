@@ -5,7 +5,7 @@
  * made from the same selection would name.
  */
 import { describe, expect, test } from 'bun:test';
-import { exportAnnotations, parseMarkdownToBlocks, selectionSourceLines } from './parser';
+import { codeDocumentBlocks, exportAnnotations, parseMarkdownToBlocks, selectionSourceLines } from './parser';
 import { buildDefaultPrompt } from '../hooks/useAIChat';
 import { AnnotationType } from '../types';
 
@@ -81,6 +81,23 @@ describe('selectionSourceLines', () => {
       text: 'why?', originalText: quote, createdA: 0,
     }]);
     expect(exported).toContain(`(${label}) `);
+  });
+
+  // A config file is ONE code block (`codeDocumentBlocks`): the block's span
+  // is the whole file, so a question naming it would point at every line.
+  // The selection's own lines, matching its exported annotation, must win.
+  test('in a whole-file code document the selection names its own lines, like its export', () => {
+    const yaml = 'apiVersion: v1\nkind: Service\nmetadata:\n  name: web\n---\nkind: ConfigMap\n';
+    const codeBlocks = codeDocumentBlocks(yaml, 'yaml');
+    expect(selectionSourceLines(codeBlocks, ['block-0'], 'kind: ConfigMap')).toEqual({ lineStart: 6, lineEnd: 6 });
+    expect(selectionSourceLines(codeBlocks, ['block-0'], 'metadata:\n  name: web')).toEqual({ lineStart: 3, lineEnd: 4 });
+    const exported = exportAnnotations(codeBlocks, [{
+      id: 'a1', blockId: 'block-0', startOffset: yaml.indexOf('kind: ConfigMap'), endOffset: yaml.length - 1,
+      type: AnnotationType.COMMENT, text: 'why?', originalText: 'kind: ConfigMap', createdA: 0,
+    }]);
+    expect(exported).toContain('(line 6) ');
+    // No selected text (the whole-block code toolbar): the file's span.
+    expect(selectionSourceLines(codeBlocks, ['block-0'])).toEqual({ lineStart: 1, lineEnd: 6 });
   });
 
   test('unknown and diff-view block ids name no line', () => {

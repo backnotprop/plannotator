@@ -142,29 +142,29 @@ describe("annotate approval submission", () => {
   });
 
   // Regression: the export must parse each linked doc the same way the viewer
-  // rendered it. A plain-text source (.yaml/.json/.toml/…) whose first line is
-  // `---` is real content — a multi-document YAML, not frontmatter. Stripping
-  // it here shifted every block id, so the line labels came out wrong (or the
-  // annotation's block vanished and the label was dropped entirely).
-  test("keeps linked-doc line labels correct for plain-text sources that open with ---", () => {
+  // rendered it. A config source (.yaml/.json/.toml/…) is ONE code block over
+  // the raw file, and a first-line `---` is real content (a multi-document
+  // YAML), not frontmatter. Each comment must name the lines it sits on: a
+  // block-span label reads `(lines 1–6)` for every comment in the file.
+  test("keeps linked-doc line labels correct for config sources that open with ---", () => {
     const yaml = "---\napiVersion: v1\nkind: Service\n---\napiVersion: v1\nkind: ConfigMap\n";
-    const yamlBlocks = parseMarkdownToBlocks(yaml, { frontmatter: false });
-    const firstDocument = yamlBlocks.find(
-      (block) => block.type === "paragraph" && block.content.startsWith("apiVersion: v1"),
-    );
-    if (!firstDocument) throw new Error("expected the first YAML document to parse as a block");
-    expect(firstDocument.startLine).toBe(2);
-
-    const linkedAnnotation: Annotation = {
-      id: "yaml-1",
-      blockId: firstDocument.id,
-      startOffset: 0,
-      endOffset: 14,
+    const comment = (id: string, quote: string, startOffset: number): Annotation => ({
+      id,
+      blockId: "block-0",
+      startOffset,
+      endOffset: startOffset + quote.length,
       type: AnnotationType.COMMENT,
-      text: "Pin the API version.",
-      originalText: "apiVersion: v1",
+      text: `Note ${id}.`,
+      originalText: quote,
       createdA: 1,
-    };
+    });
+    // The SECOND `apiVersion: v1` (line 5): its stored offset names the
+    // line, not the quote's first occurrence (line 2).
+    const linkedAnnotations = [
+      comment("yaml-1", "kind: ConfigMap", yaml.indexOf("kind: ConfigMap")),
+      comment("yaml-2", "apiVersion: v1", yaml.lastIndexOf("apiVersion: v1")),
+      comment("yaml-3", "kind: Service\n---", yaml.indexOf("kind: Service")),
+    ];
 
     const feedback = buildCompleteAnnotateFeedback({
       blocks: [],
@@ -172,7 +172,7 @@ describe("annotate approval submission", () => {
       globalAttachments: [],
       linkedDocuments: new Map<string, LinkedDocAnnotationEntry>([
         ["/infra/deploy.yaml", {
-          annotations: [linkedAnnotation],
+          annotations: linkedAnnotations,
           globalAttachments: [],
           markdown: yaml,
         }],
@@ -186,10 +186,10 @@ describe("annotate approval submission", () => {
       savedFileChangesSection: "",
     });
 
-    expect(feedback).toContain("(lines 2–3) ");
-    expect(feedback).toContain('Feedback on: "apiVersion: v1"');
-    // The frontmatter-stripping parse would have relabeled this block to line 5.
-    expect(feedback).not.toContain("lines 5–6");
+    expect(feedback).toContain('(line 6) Feedback on: "kind: ConfigMap"');
+    expect(feedback).toContain('(line 5) Feedback on: "apiVersion: v1"');
+    expect(feedback).toContain("(lines 3–4) ");
+    expect(feedback).not.toContain("lines 1–6");
   });
 
   test("still strips frontmatter for markdown linked docs", () => {
