@@ -24,6 +24,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
+import { resetSkillCatalogCache } from '@plannotator/ui/utils/skillCatalog';
 import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
@@ -116,6 +117,7 @@ import { revealArmed, useBoardReveal } from './reveal';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
+import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, useStalePage } from './stalePage';
@@ -1781,8 +1783,10 @@ function Inbox() {
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"): every window follows.
         onCapabilities: (capabilities) => {
-          const steps = capabilities.steps;
-          if (steps) setSettings((current) => (current ? { ...current, steps } : current));
+          const { steps, code_review: codeReview } = capabilities;
+          // Code review moves the "/" list: the next box reads the catalog again.
+          if (codeReview) resetSkillCatalogCache();
+          if (steps || codeReview) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}) } : current));
           else void refreshSettings();
         },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
@@ -3714,6 +3718,20 @@ function Inbox() {
     }
   };
 
+  // Code review (approval "inbox-code-review-direction"): every other window hears `event: capabilities`.
+  const toggleCodeReview = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, code_review: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveCodeReview(next);
+      resetSkillCatalogCache();
+      setSettings((current) => (current ? { ...current, code_review: saved.code_review } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -4813,6 +4831,7 @@ function Inbox() {
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleCodeReview={(next) => void toggleCodeReview(next)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5141,6 +5160,7 @@ function Inbox() {
               </>
             }
             thread={thread}
+            codeReview={settings?.code_review?.on === true}
             threadSteps={
               settings?.steps
                 ? {
@@ -5718,14 +5738,25 @@ function Inbox() {
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>
-      {guideMessage && thread && (
-        <GuidePane
-          thread={thread}
-          message={guideMessage}
-          onBack={() => close({ ...route, guide: null })}
-          onClose={() => close({ ...route, thread: null, guide: null })}
-        />
-      )}
+      {guideMessage &&
+        thread &&
+        // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
+        (settings?.code_review?.on === true && guideMessage.guide?.review ? (
+          <ReviewPane
+            thread={thread}
+            message={guideMessage}
+            onBack={() => close({ ...route, guide: null })}
+            onClose={() => close({ ...route, thread: null, guide: null })}
+            onSent={afterWrite}
+          />
+        ) : (
+          <GuidePane
+            thread={thread}
+            message={guideMessage}
+            onBack={() => close({ ...route, guide: null })}
+            onClose={() => close({ ...route, thread: null, guide: null })}
+          />
+        ))}
     </div>
   );
 }

@@ -34,6 +34,7 @@ import { ComposerTokenTextarea } from '@plannotator/ui/components/ComposerTokenT
 import { HumanOnlySkillNotice, SkillReferenceMenu } from '@plannotator/ui/components/SkillReferenceMenu';
 import { useMentionAutocomplete } from '@plannotator/ui/hooks/useMentionAutocomplete';
 import { useSkillReferenceAutocomplete } from '@plannotator/ui/hooks/useSkillReferenceAutocomplete';
+import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import type { MentionPerson, MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_UPDATE_WORDS, tagPeople, tagPickedWords, type TagOption } from '../tags';
 import { caretAnchor, caretLineRect, visibleBox, type AnchorBox, type VerticalBox } from '../caretMenu';
@@ -42,6 +43,7 @@ import { VoiceNote, voiceHidesCaret, voicePaint } from './VoiceMic';
 import type { VoiceHandle } from '../voice';
 import { textareaField } from '../voiceField';
 import { isTouchScreen } from '../phone';
+import { inboxSkillFilter } from '../skills';
 
 /** The chip class a tag gets in the composer's highlight layer (inbox.css: colour, background and box-shadow only). */
 export const TAG_TOKEN_CLASS = 'ib-tg-tok';
@@ -89,9 +91,13 @@ export interface InboxComposerFieldProps {
   escapeClosesMenu?: boolean;
   /** Voice dictation (voice.ts): the host's session, whose button sits in the host's toolbar. */
   voice?: VoiceHandle;
+  /** Which skills this field offers and paints (skills.ts `inboxSkillFilter`); all by default. Keep its identity stable. */
+  skillFilter?: (entry: SkillCatalogEntry) => boolean;
 }
 
 const NO_PEOPLE: readonly MentionPerson[] = [];
+/** Where no thread says a review happened (New message, compose, a comment): `/review-recheck` is not offered. */
+const OUTSIDE_A_REVIEW = inboxSkillFilter(false);
 
 export function InboxComposerField({
   value,
@@ -106,6 +112,7 @@ export function InboxComposerField({
   caretMenu,
   escapeClosesMenu = false,
   voice,
+  skillFilter = OUTSIDE_A_REVIEW,
 }: InboxComposerFieldProps) {
   const innerRef = useRef<HTMLTextAreaElement | null>(null);
   const attach = useCallback(
@@ -128,6 +135,7 @@ export function InboxComposerField({
     textareaRef: innerRef,
     enabled: true,
     bareEscapeDismisses: escapeClosesMenu,
+    catalogFilter: skillFilter,
   });
   const [announce, setAnnounce] = useState('');
   const options = tags?.options;

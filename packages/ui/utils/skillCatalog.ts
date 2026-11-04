@@ -42,7 +42,7 @@ function normalizeEntry(raw: unknown): SkillCatalogEntry | null {
   const { name, root, description, humanOnly, dir } = raw as Record<string, unknown>;
   if (typeof name !== 'string' || !name) return null;
   const rootId: SkillRootId =
-    root === 'claude' || root === 'codex' || root === 'universal' ? root : 'universal';
+    root === 'claude' || root === 'codex' || root === 'universal' || root === 'plannotator' ? root : 'universal';
   return {
     name,
     root: rootId,

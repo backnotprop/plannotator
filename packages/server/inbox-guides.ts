@@ -31,6 +31,7 @@ import { parseGuideSnapshot, parseGuideSnapshotJson, type GuideSnapshot } from "
 import { displayInboxSubject, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
+import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -122,8 +123,12 @@ export function inboxGuideInputHash(input: { snapshot?: unknown; guide?: unknown
   return createHash("sha256").update(sent.join("\0")).digest("hex");
 }
 
-/** A checked snapshot as it will be stored (`text`, the blob) and the record the message carries. */
-export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string): { text: string; ref: InboxGuideRef } {
+/**
+ * A checked snapshot as it will be stored (`text`, the blob) and the record the message carries. `review`: the agent
+ * asked for a verdict (submit_guide `review: true` while Code review is on); the record then carries `review` and the
+ * chapter titles the review card lists.
+ */
+export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false): { text: string; ref: InboxGuideRef } {
   const text = JSON.stringify(snapshot);
   const files = parseDiffToFiles(snapshot.review.rawPatch);
   const ref: InboxGuideRef = {
@@ -135,6 +140,7 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string)
     files: files.length,
     additions: files.reduce((n, f) => n + f.additions, 0),
     deletions: files.reduce((n, f) => n + f.deletions, 0),
+    ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => section.title) } : {}),
   };
   return { text, ref };
 }
@@ -154,8 +160,45 @@ const JSON_HEADERS = {
  *    server has already run the same-origin check on every POST; the stale-tab
  *    `serverSession` check runs here, as on the other writing routes.
  */
-export async function inboxGuideRoute(req: Request, path: string, store: InboxStore, serverSession: string): Promise<Response | null> {
+export async function inboxGuideRoute(
+  req: Request,
+  path: string,
+  store: InboxStore,
+  serverSession: string,
+  codeReviewOn: () => boolean = () => false,
+): Promise<Response | null> {
   const answer = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers: JSON_HEADERS });
+  // The files the person ticked Viewed in a review (code review in the Inbox): only while Code review is on.
+  const viewedMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/viewed$/.exec(path);
+  if (viewedMatch) {
+    if (req.method !== "POST") return answer({ error: "Use POST." }, 405);
+    if (!codeReviewOn()) return answer({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+    let body: Record<string, unknown>;
+    try {
+      const value = await req.json();
+      body = value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+    } catch {
+      return answer({ error: "body: expected a JSON object.", code: "validation_error" }, 422);
+    }
+    if (checkServerSession(body, serverSession) === "mismatch") return answer(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    const message = store.message(viewedMatch[1]!);
+    let files: string[] = [];
+    if (message?.guide?.review) {
+      try {
+        const snapshot = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, message.guide.sha256), "utf8"));
+        if (snapshot.ok) files = parseDiffToFiles(snapshot.value.review.rawPatch).map((file) => file.path);
+      } catch {
+        // Gone from the store: no file can be ticked.
+      }
+    }
+    try {
+      return answer({ message_id: viewedMatch[1], viewed: store.saveGuideViewed(viewedMatch[1]!, body.viewed, files) });
+    } catch (error) {
+      if (!(error instanceof InboxError)) throw error;
+      const status = error.code === "validation_error" ? 422 : 404;
+      return answer({ error: error.message, code: error.code, ...error.details }, status);
+    }
+  }
   const reviewedMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/reviewed$/.exec(path);
   if (reviewedMatch) {
     if (req.method !== "POST") return answer({ error: "Use POST." }, 405);
@@ -228,6 +271,8 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
             .optional()
             .describe("Instead of guide and patch: a complete Plannotator guide snapshot, as an object or its JSON."),
           body: z.string().optional().describe("Your note above the card, markdown. Default: the guide's intent."),
+          // Code review (approval "inbox-code-review-direction"): listed only while the person has it on.
+          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION) } : {}),
           ...SEND_ROUTING_FIELDS,
         })
         .strict(),
@@ -238,7 +283,11 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         const project = await sendProject(context, input);
         const checked = checkInboxGuide(input, project.root);
         if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
-        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input));
+        // `review` exists only while Code review is on (the schema above); a session that listed it before the
+        // switch went off is refused here rather than sending a review the window would not draw.
+        const review = (input as { review?: boolean }).review === true;
+        if (review && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `review`.");
+        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review);
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         // A reply never gets the default: its only subject is one the agent gives (it may name a thread the person started).
         // The default is made one line here (displayInboxSubject), so the guide's own title can never fail the subject check.
@@ -252,7 +301,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
         if (!sent.replayed) writeBlob(context.store.dir, described.ref.sha256, Buffer.from(described.text, "utf8"));
         const guide = context.store.message(String(sent.structured.message_id))?.guide ?? described.ref;
         return ok(
-          `${sent.replayed ? "Already sent" : "Sent"} the guided review "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
+          `${sent.replayed ? "Already sent" : "Sent"} the ${guide.review ? "review" : "guided review"} "${guide.title}" (${guide.sections} section${guide.sections === 1 ? "" : "s"}, ${guide.files} file${guide.files === 1 ? "" : "s"}) to the Plannotator Inbox (thread ${sent.structured.thread_id}, ${sent.structured.url}).${namingLine(sent.naming)} ${replyNextStepText(wakes, input.agent_host)}${imagesNotShownText(sent.imagesNotShown)}${noStakesText(sent.noStakes)}${recommendedInLabelText(sent.recommendedInLabel)}${questionOpenersWithTextText(sent.questionOpenersWithText)}`,
           { ...sent.structured, guide },
         );
       }),

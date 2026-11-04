@@ -69,13 +69,20 @@ export function useSkillReferenceAutocomplete(options: {
   textareaRef: React.RefObject<HTMLTextAreaElement | null>;
   enabled: boolean;
   bareEscapeDismisses?: boolean;
+  /**
+   * Which catalog entries this composer offers and paints (a host's per-place
+   * rule, e.g. the Inbox's `/review-recheck` only in a reviewed thread).
+   * Absent: every entry, as before. Keep its identity stable across renders.
+   */
+  catalogFilter?: (entry: SkillCatalogEntry) => boolean;
 }): UseSkillReferenceAutocompleteResult {
-  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false } = options;
+  const { text, setText, textareaRef, enabled, bareEscapeDismisses = false, catalogFilter } = options;
   // Seed from the memory cache only when the surface opted in — a disabled
   // composer must stay inert even after another surface warmed the catalog.
-  const [catalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
+  const [fullCatalog, setCatalog] = useState<SkillCatalogEntry[]>(() =>
     enabled ? getCachedSkillCatalog() : [],
   );
+  const catalog = useMemo(() => (catalogFilter ? fullCatalog.filter(catalogFilter) : fullCatalog), [fullCatalog, catalogFilter]);
   const [caret, setCaret] = useState<number | null>(null);
   const [activeIndex, setActiveIndex] = useState<number | null>(null);
   // Escape dismisses the menu for the trigger it was open on; the same trigger

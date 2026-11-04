@@ -32,6 +32,7 @@
  * the toolbar on a phone, the chip and the notes sit above it. A phone's pill
  * shares the toolbar's row instead (left of it), so it is no foot.
  */
+import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { createContext, useCallback, useEffect, useLayoutEffect, useRef, useState, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from './AnnotationsChip';
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
@@ -92,6 +93,8 @@ export interface FullScreenReply {
   /** The thread's reply box, on the device's own route back to the thread. */
   onOpenThread: () => void;
   tags?: InboxComposerTags;
+  /** The thread's skill rule (skills.ts `inboxSkillFilter`), as the reply box's. */
+  skillFilter?: (entry: SkillCatalogEntry) => boolean;
 }
 
 export interface FullScreenComposerValue {
@@ -458,6 +461,7 @@ export function FullScreenComposer({
                 placeholder={`${replyLabel}…`}
                 destination="your reply"
                 tags={reply.tags}
+                skillFilter={reply.skillFilter}
                 value={reply.value}
                 onChange={(text) => {
                   // Writing here keeps the card on Reply for the thread (a draft emptied never flips it back).
