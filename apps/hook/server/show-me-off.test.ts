@@ -101,7 +101,7 @@ test("Code review off: `review draw` and `review drawings` are the review parse'
   expect(reads).toBe(0);
 });
 
-test("Code review off with a broken config.json: --version, --help and review --help print what 0.28.49 printed", async () => {
+test("Code review off with a broken config.json: --version, --help, review --help and every review draw|drawings form print what 0.28.49 printed", async () => {
   const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
   const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
   const dataDir = join(root, "data-broken");
@@ -118,11 +118,13 @@ test("Code review off with a broken config.json: --version, --help and review --
     PLANNOTATOR_INBOX_CONNECT: "0",
     PLANNOTATOR_TEST_SANDBOX: "1",
   };
-  const cli = async (...argv: string[]) => {
-    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env, stdout: "pipe", stderr: "pipe" });
+  // In a folder that is no repository: the review parse answers at once, nothing is reviewed.
+  const runWith = async (data: string, argv: string[]) => {
+    const proc = Bun.spawn(["bun", "run", join(import.meta.dir, "index.ts"), ...argv], { cwd: root, env: { ...env, PLANNOTATOR_DATA_DIR: data }, stdout: "pipe", stderr: "pipe" });
     const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
     return { stdout, stderr, code };
   };
+  const cli = (...argv: string[]) => runWith(dataDir, argv);
   try {
     // What 0.28.49 printed: --version reads no config; --help reads it once (the Board's help line), and
     // `review --help` once (its Tailscale default). Show me adds no read, so no second warning.
@@ -133,10 +135,36 @@ test("Code review off with a broken config.json: --version, --help and review --
     expect([help.code, help.stdout, warnings(help.stderr)]).toEqual([0, `${formatTopLevelHelp()}\n`, 1]);
     const reviewHelp = await cli("review", "--help");
     expect([reviewHelp.code, reviewHelp.stdout, warnings(reviewHelp.stderr)]).toEqual([0, `${formatSubcommandHelp("review")}\n`, 1]);
+
+    // Every shaped `review draw|drawings` form: a broken config is Code review off, so each prints what it prints
+    // with Code review off, plus the warnings the review parse always gave (0.28.49's): as many as the same words
+    // with the command's word misspelt (`drawx`), which never reach Show me's code.
+    const offDir = join(root, "data-off");
+    mkdirSync(offDir, { recursive: true });
+    writeFileSync(join(offDir, "config.json"), JSON.stringify({ inboxCodeReview: false }));
+    const review = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F";
+    for (const argv of [
+      ["review", "draw", "--help"],
+      ["review", "draw", "-h"],
+      ["review", "drawings", "--help"],
+      ["review", "drawings", "-h"],
+      ["review", "drawings", review],
+      ["review", "draw", "--file", "d.json", "--review", review, "--turn", "turn-0001"],
+      ["review", "draw", "--turn=t"],
+    ]) {
+      const broken = await cli(...argv);
+      const offRun = await runWith(offDir, argv);
+      expect([argv, broken.code, broken.stdout]).toEqual([argv, offRun.code, offRun.stdout]);
+      const twin = await cli(...argv.map((word, i) => (i === 1 ? `${word}x` : word)));
+      expect([argv, warnings(broken.stderr)]).toEqual([argv, warnings(twin.stderr)]);
+      expect(warnings(broken.stderr)).toBeGreaterThan(0);
+      const rest = broken.stderr.split("\n").filter((line) => !line.includes("failed to read config.json")).join("\n");
+      expect([argv, rest]).toEqual([argv, offRun.stderr]);
+    }
   } finally {
     removeStubbedHtml(stubbed);
   }
-}, 60_000);
+}, 120_000);
 
 test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
   const dataDir = join(root, "data-routes");

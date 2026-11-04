@@ -344,7 +344,9 @@ const rawArgs = process.argv.slice(2);
 // included) the review parse takes them, exactly as before Show me.
 {
   const args = rawArgs;
-  if (isReviewDrawCommand(args, () => loadConfig().inboxCodeReview === true)) {
+  // Read quietly: a broken config.json is Code review off, and the review parse that then takes the words
+  // warns about it once, as it always did.
+  if (isReviewDrawCommand(args, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
     const drawDataDir = getPlannotatorDataDir();
     process.exit(
       await runReviewDrawCommand(args.slice(1), {
