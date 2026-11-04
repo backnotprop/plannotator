@@ -2053,8 +2053,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     const on = (input as { on: boolean }).on;
     if (validateOnly) return { on: boardOn() };
+    const was = boardOn();
     saveConfig({ inboxBoard: on });
     if ((loadConfig().inboxBoard === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    // Every window follows at once (its sidebar's Board row, its Settings switch), as the Checklist's.
+    if (was !== boardOn()) for (const listener of capabilityListeners) listener();
     return { on: boardOn() };
   };
   /**
@@ -2200,22 +2203,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The page about to show a reveal claims it: a compare-and-set over the whole queue (no await between the read and
    * the write, so two claims cannot interleave). Only `next` can be claimed, and only while the spacing holds. A claim
    * turns nothing on (the owner, 2026-11-04: reveals are opt-in): the dialog offers the feature, and only its "Turn it
-   * on" writes the switch (`POST /api/inbox/settings`). The Board's claim stamps its reveal, the first-visit dialog (the
-   * reveal shows it, so the Board's first visit does not; an older stamp is kept) and the spacing clock, all in one
-   * save. `show`: the page draws the dialog.
+   * on" writes the switch (`POST /api/inbox/settings`). The Board's claim stamps its reveal and the spacing clock in one
+   * save, never the first-visit dialog (the owner, 2026-11-04, review of #2598 finding 5): the offer has no Copy prompt,
+   * so the first visit to a Board turned on (from the offer, or later in Settings after "Not now") shows the welcome
+   * with Copy prompt; someone who saw it before (its `inboxBoardIntro.shownAt`) does not see it again. `show`: the page
+   * draws the dialog. `key` (the page's own, kept with the stamp): the same page's retry after a lost answer gets
+   * `show: true` again, without a write, while the feature is still undecided; any other key, window or device does not.
    */
-  const claimReveal = (id: RevealId, owner: boolean): boolean => {
+  const claimReveal = (id: RevealId, owner: boolean, key: string | null = null): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
-    if (id === "steps") return claimStepsReveal(owner);
+    if (id === "steps") return claimStepsReveal(owner, key);
     if (id !== "board" || !owner || !snoozeIntroRelease) return false;
+    if (key && loadConfig().inboxReveals?.board?.key === key) return boardUndecided();
     const now = new Date();
     if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
     const at = now.toISOString();
-    const config = loadConfig();
-    saveConfig({
-      ...(config.inboxBoardIntro?.shownAt ? {} : { inboxBoardIntro: { ...config.inboxBoardIntro, shownAt: at } }),
-      inboxReveals: { ...config.inboxReveals, lastShownAt: at, board: { shownAt: at } },
-    });
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, board: { shownAt: at, ...(key ? { key } : {}) } } });
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     return loadConfig().inboxReveals?.board?.shownAt === at;
   };
@@ -2223,12 +2226,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim stamps the reveal and the spacing
    * clock in one save and turns nothing on, as the Board's. "Turn it on" in `ChecklistIntro` writes `inboxSteps`.
    */
-  const claimStepsReveal = (owner: boolean): boolean => {
+  const claimStepsReveal = (owner: boolean, key: string | null): boolean => {
     if (!owner || !snoozeIntroRelease) return false;
+    if (key && loadConfig().inboxReveals?.steps?.key === key) return stepsUndecided();
     const now = new Date();
     if (!revealMayClaim("steps", revealState(now), now) || !stepsUndecided()) return false;
     const at = now.toISOString();
-    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, steps: { shownAt: at } } });
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, steps: { shownAt: at, ...(key ? { key } : {}) } } });
     return loadConfig().inboxReveals?.steps?.shownAt === at;
   };
   const experimentalState = () => ({
@@ -2504,7 +2508,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         syncShapes();
         const onCapabilities = (changed?: "code_review" | "shape") => {
           syncShapes();
-          const frame = { steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -3888,8 +3892,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const id = body.id;
         if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
+        // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
+        const key = body.key;
+        if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
         const owner = ownerOrLocal(req, via);
-        const show = claimReveal(id, owner);
+        const show = claimReveal(id, owner, key ?? null);
         return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
       }
 

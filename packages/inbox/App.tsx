@@ -114,6 +114,8 @@ import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
 import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
+import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -1847,12 +1849,12 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
-        // A capability switch saved here or in another window (approval "inbox-thread-steps"): every window follows.
+        // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
         onCapabilities: (capabilities) => {
-          const { steps, code_review: codeReview, shape } = capabilities;
           // Code review and Shape move the "/" list: the next box reads the catalog again.
-          if (codeReview || shape) reloadSkillCatalog();
-          if (steps || codeReview || shape) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}) } : current));
+          if (capabilities.code_review || capabilities.shape) reloadSkillCatalog();
+          // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
+          if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
           else void refreshSettings();
         },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
@@ -4196,6 +4198,7 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    on: settings?.board?.on === true,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
   // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim only stamps it, then
@@ -4211,38 +4214,21 @@ function Inbox() {
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
     heldBack: revealHeldBack,
+    on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
-  /**
-   * A reveal's "Turn it on" (the owner, 2026-11-04: reveals are opt-in): the dialog closes and the switch is saved as
-   * Settings saves it, so the page follows at once and agents from their next session. Not saved: the switch goes back
-   * and a toast says so (the dialog never comes back; Settings is the way on from here).
-   */
-  const turnOnFromReveal = (feature: 'board' | 'steps', close: () => void) => {
-    close();
-    setSettings((current) => (current ? { ...current, [feature]: { on: true } } : current));
-    const save = feature === 'board' ? inboxApi.saveBoard(true).then((saved) => saved.board) : inboxApi.saveSteps(true).then((saved) => saved.steps);
-    void save
-      .then((on) => setSettings((current) => (current ? { ...current, [feature]: on } : current)))
-      .catch(() => {
-        void refreshSettings();
-        showToast(
-          {
-            icon: 'warn',
-            lead: feature === 'board' ? 'The Board isn’t on' : 'The Checklist isn’t on',
-            detail: 'The setting wasn’t saved. You can turn it on in Settings.',
-            action: {
-              label: 'Open Settings',
-              onPress: () => {
-                dismissToast();
-                window.location.hash = '#settings/capabilities';
-              },
-            },
-          },
-          8000,
-        );
-      });
-  };
+  /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
+  const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
+    void turnOnRevealFeature(feature, close, {
+      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      setSettings,
+      showToast,
+      dismissToast,
+      refreshSettings,
+      openSettings: () => {
+        window.location.hash = '#settings/capabilities';
+      },
+    });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;

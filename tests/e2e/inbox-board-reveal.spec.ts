@@ -9,11 +9,12 @@
  *
  *  - Desktop: never on load, and no Board row. Past a minute on the page the person reads a thread and closes it: the
  *    Board's own first-visit dialog (BoardIntro) opens as an offer (Not now, Turn it on), config.json has the reveal
- *    and the first-visit dialog stamped and the Board still unset, and there is no Board row. A second tab reaching its
+ *    stamped (never the Board's welcome) and the Board still unset, and there is no Board row. A second tab reaching its
  *    moment shows nothing. Not now closes it and the Board stays off (unset, no row). A reload reaching the moment
  *    again shows nothing.
  *  - A 390 px phone: the dialog as a sheet, Turn it on on top; Turn it on writes the Board on and its row is in the
- *    sidebar sheet; the Board's first visit shows no dialog.
+ *    sidebar sheet, and at once in a desktop tab open beside it (settings sync everywhere: `event: capabilities`); the
+ *    Board's first visit shows its welcome with Copy prompt once (the owner, 2026-11-04), never again.
  *
  * Each scene is shot in light and dark (the Inbox follows the system's mode). The page's thresholds are real (60 s,
  * 5 s, 2.5 s). Build the apps first (bun run --cwd apps/review build && bun run build:hook), then `bunx playwright test
@@ -183,10 +184,11 @@ test('desktop: never on load; at the calm moment the first-visit dialog offers t
   // The moment: a thread read and closed, back to the list.
   await readAndLeave(a, w.ids['invoice-pdf']!);
   await expect(a.locator(DIALOG)).toBeVisible({ timeout: 8_000 });
-  // The claim stamped the reveal and the first-visit dialog, and turned nothing on.
+  // The claim stamped the reveal, never the Board's welcome, and turned nothing on.
   const saved = config(w);
   expect(saved.inboxBoard).toBeUndefined();
-  expect(saved.inboxBoardIntro.shownAt).toBe(saved.inboxReveals.board.shownAt);
+  expect(saved.inboxReveals.board.shownAt).toMatch(/^\d{4}-/);
+  expect(saved.inboxBoardIntro).toBeUndefined();
   await expect(a.locator('[data-board-nav]')).toHaveCount(0);
   await expect(a.locator(`${DIALOG} [data-board-intro-close]`)).toHaveText('Not now');
   await expect(a.locator(`${DIALOG} [data-board-intro-on]`)).toHaveText('Turn it on');
@@ -215,10 +217,15 @@ test('desktop: never on load; at the calm moment the first-visit dialog offers t
   expect(config(w).inboxBoard).toBeUndefined();
 });
 
-test('a 390 px phone: the dialog as a sheet; Turn it on writes the Board on, its row in the sidebar sheet, no first-visit dialog after', async ({ browser }) => {
+test('a 390 px phone: the dialog as a sheet; Turn it on writes the Board on, its row in the sidebar sheet and a desktop tab, the welcome on the first visit', async ({ browser }) => {
   test.setTimeout(240_000);
   const w = await world();
   const page = await (await context(browser, true)).newPage();
+  // A desktop tab open beside the phone: it hears the switch live, with no reload.
+  const desk = await (await context(browser, false)).newPage();
+  await desk.goto(w.url);
+  await expect(rowOf(desk, w.ids['invoice-pdf']!)).toBeVisible();
+  await expect(desk.locator('[data-board-nav]')).toHaveCount(0);
   await page.goto(w.url);
   await expect(rowOf(page, w.ids['invoice-pdf']!)).toBeVisible();
   await shots(page, 'phone-{s}-before-list');
@@ -240,12 +247,23 @@ test('a 390 px phone: the dialog as a sheet; Turn it on writes the Board on, its
   await page.locator('[data-board-intro-on]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
   await expect.poll(() => config(w).inboxBoard).toBe(true);
+  await expect(desk.locator('[data-board-nav]')).toBeVisible({ timeout: 5_000 });
   await page.locator('[data-sidebar="trigger"]').first().click();
   await expect(page.locator('[data-board-nav]')).toBeVisible();
   await shots(page, 'phone-{s}-after');
   await page.locator('[data-board-nav]').click();
   await expect(page.locator('[data-board-view="phone"]')).toBeVisible();
-  await page.waitForTimeout(1_500);
+  // The first visit: the welcome, with Copy prompt (the offer had none).
+  await expect(page.locator(DIALOG)).toBeVisible({ timeout: 5_000 });
+  await expect(page.locator(`${DIALOG} [data-board-intro-copy]`)).toBeVisible();
+  await expect(page.locator(`${DIALOG} [data-board-intro-on]`)).toHaveCount(0);
+  await shots(page, 'phone-{s}-welcome');
+  await page.locator('[data-board-intro-close]').click();
   await expect(page.locator(DIALOG)).toHaveCount(0);
+  expect(config(w).inboxBoardIntro.shownAt).toMatch(/^\d{4}-/);
   await shots(page, 'phone-{s}-board');
+  // The desktop tab's first visit: the welcome was this machine's, once.
+  await desk.locator('[data-board-nav]').click();
+  await desk.waitForTimeout(1_500);
+  await expect(desk.locator(DIALOG)).toHaveCount(0);
 });
