@@ -478,10 +478,12 @@ export function createCodexQuestions(
       try {
         store.recordAskAnswer(replyId, p.messageId!, forward.get(replyId) ?? []);
       } catch (error) {
-        // Settled already (it never is while a card it answered waits): words the answer had no place for cannot
-        // go with it any more, so the card says they were not taken rather than losing them unsaid.
+        // Settled already. A card Codex took before (sent again after the reply went): its words went with that
+        // reply. Otherwise (it never is while a card it answered waits) the words cannot go with it any more, so
+        // the card says they were not taken rather than losing them unsaid.
         log(`Inbox launch: could not record ${p.messageId}'s answer on ${replyId}: ${error instanceof Error ? error.message : String(error)}`);
-        if ((forward.get(replyId)?.length ?? 0) > 0) sayNotTaken(p.messageId!);
+        const took = (store.message(replyId)?.ask_taken ?? []).includes(p.messageId!);
+        if (!took && (forward.get(replyId)?.length ?? 0) > 0) sayNotTaken(p.messageId!);
       }
       settle(replyId, p.threadId);
     }

@@ -504,6 +504,62 @@ describe("the transport", () => {
     expect(t.answers).toEqual([]);
   });
 
+  test("a card Codex took, sent again after the reply that carried its words went: answered again, never said not taken", () => {
+    const t = transport();
+    const q = t.make();
+    const params = userInput([question("rounding", "Round refunds how?", [{ label: "Banker's", description: "" }, { label: "Half up", description: "" }], { isOther: false })]);
+    q.asked(1, CODEX_USER_INPUT, params);
+    const card = t.cards()[0]!;
+    t.answer(card.id, [{ other: "Neither: keep whole cents" }]);
+    q.sweep();
+    const reply = t.store.message(t.store.questionsOf(card.id)[0]!.sent_reply_id!)!;
+    expect(t.store.message(reply.id)!.forward_body).toContain("Neither: keep whole cents");
+    // The thread's wake delivered it; then Codex sends the same request again, twice.
+    t.store.recordDelivery(reply.id, { host: "codex", session: THREAD });
+    for (const id of [2, 3]) {
+      q.asked(id, CODEX_USER_INPUT, params);
+      q.sweep();
+    }
+    expect(t.answers.map(([id]) => id)).toEqual([1, 2, 3]);
+    expect(t.followUps(card.id)).toEqual([]);
+  });
+
+  test("a note that an answer was not taken that could not be written is written on a later check, even after the reply's own words went on", () => {
+    const t = transport();
+    const q = t.make();
+    q.asked(1, CODEX_USER_INPUT, userInput([question("a", "Ship it?", [{ label: "Yes", description: "" }, { label: "No", description: "" }]), question("b", "Which accounts?", null)]));
+    const card = t.cards()[0]!;
+    // The first question answered, the second left open, with words of the person's own.
+    const a = t.store.questionsOf(card.id)[0]!;
+    const saved = t.store.savePicks(card.id, [{ key: a.key, revision: a.revision, answer: { v: 1, key: a.key, kind: "single", prompt: a.prompt, selected: ["Yes"] } }], { unsentOnly: true });
+    t.store.sendReply(card.id, { idempotency_key: "half", questions: [{ key: a.key, revision: saved[0]!.revision }], words: "Own words." });
+    // The first note fails to be written.
+    const send = t.store.sendMessage.bind(t.store);
+    let fail = true;
+    t.store.sendMessage = ((input: Parameters<typeof send>[0]) => {
+      if (fail && input.idempotency_key?.startsWith("perm-not-taken-")) {
+        fail = false;
+        throw new Error("disk full");
+      }
+      return send(input);
+    }) as typeof send;
+    restore.push(() => {
+      t.store.sendMessage = send;
+    });
+    // The turn ends with the card's second question open: the card goes, its note fails, the reply's words go on.
+    q.turnEnded(THREAD);
+    q.sweep();
+    const reply = t.store.message(t.store.questionsOf(card.id)[0]!.sent_reply_id!)!;
+    expect(reply.to).toEqual({ host: "codex", session: THREAD });
+    expect(reply.forward_body).toBe("Own words.");
+    expect(t.followUps(card.id)).not.toContain(CODEX_ASK_NOT_TAKEN);
+    // A later check (settled after connecting, the thread idle) says it.
+    t.state.connectedAt = t.clock.now - 60_000;
+    t.state.status = { type: "idle" };
+    q.sweep();
+    expect(t.followUps(card.id)).toContain(CODEX_ASK_NOT_TAKEN);
+  });
+
   test("marking the thread read never answers for the person: the card stays open and Codex keeps waiting; one the archive closed waits too, until the person answers it", () => {
     const t = transport();
     const q = t.make();
