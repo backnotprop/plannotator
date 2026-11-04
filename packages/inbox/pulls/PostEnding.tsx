@@ -97,10 +97,12 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
   // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
-  // comment already posted at this head is not posted again; a follow-up carries only what is new (or a main comment).
+  // comment already posted on this PR is never posted again, at any head (Start review keeps its comments after a
+  // post); a follow-up carries only what is new (or a main comment).
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
-  const sameHead = !!done && !!target && done.key === target.key && done.head === target.head_sha;
-  const comments = useMemo(() => (sameHead ? all.filter((c) => !done!.ids.has(c.id)) : all), [sameHead, all, done]);
+  const sameKey = !!done && !!target && done.key === target.key;
+  const sameHead = sameKey && done!.head === target!.head_sha;
+  const comments = useMemo(() => (sameKey ? all.filter((c) => !done!.ids.has(c.id)) : all), [sameKey, all, done]);
   const isDone = sameHead && comments.length === 0;
   const name = useId();
 
@@ -216,7 +218,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               setOpen(null);
               // A follow-up comment after an approval still reads as the approval.
               const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameHead ? done!.ids : []), ...comments.map((c) => c.id)]) });
+              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map((c) => c.id)]) });
               onPosted({ ...result, action, label: rules.label });
             }}
           />

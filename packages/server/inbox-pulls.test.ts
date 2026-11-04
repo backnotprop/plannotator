@@ -759,6 +759,12 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     w.forge.heads = ["b".repeat(40), "c".repeat(40)];
     const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
     expect(diff.head_sha).toBeNull();
+    // Neither read is kept as a head the person read: a post at either is refused, and nothing runs.
+    for (const sha of ["b".repeat(40), "c".repeat(40)]) {
+      const res = await w.review({ key: PR412, head_sha: sha, action: "approve", body: "" });
+      expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
+    }
+    expect(w.post.calls).toEqual([]);
   });
 
   test("a merged PR is refused (409 pull_closed) and runs nothing", async () => {

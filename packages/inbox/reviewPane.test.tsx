@@ -76,6 +76,8 @@ let reviewPosts: Record<string, unknown>[] = [];
 let reviewReply: () => Response = () => Response.json({ ok: true, prUrl: 'https://github.com/acme/ledger/pull/880', submission: { status: 'complete' } });
 let listHead = 'a'.repeat(40);
 let listReads: string[] = [];
+/** The thread's annotation records (`/attachments`): a guided-review comment when a test writes one. */
+let annotations: Record<string, unknown>[] = [];
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -91,6 +93,7 @@ beforeEach(() => {
   reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
   listHead = 'a'.repeat(40);
   listReads = [];
+  annotations = [];
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -114,7 +117,7 @@ beforeEach(() => {
       return Response.json({ fetched_at: null, hosts: [], pulls: [{ ...PR, head_sha: listHead }], links: {}, projects: {}, cards: {} });
     }
     if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
-    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations });
     if (path.includes('/sessions')) {
       return Response.json({ serverSession: 's', home: '/home/me', project: PROJECT, sessions: others, asker: { session: 'ses_review', live: false } });
     }
@@ -241,6 +244,35 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   await act(async () => dialogButton('Approve').click());
   await settle();
   expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+});
+
+test.skipIf(!hasDom)('a comment posted once is never posted again, even after a push (pull_moved) and a read at the new head', async () => {
+  const comment = { id: 'ann-1', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 1 };
+  annotations = [{ id: 'rec-1', message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation: comment, guide: { line_start: 3, line_end: 3, file: 'src/settings/Layout.tsx', side: 'new' } }];
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await click('[data-review-posts] [data-decision-caret]');
+  const approveWith = [...document.querySelectorAll<HTMLElement>('[role="menuitem"]')].find((item) => /Approve with comments/.test(item.textContent ?? ''))!;
+  await act(async () => approveWith.click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(String(reviewPosts[0]!.body)).toContain('Mirror the icons.');
+  // A follow-up refused for a push: read again at head B.
+  reviewReply = () => Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-post-followup]');
+  act(() => typeMainComment('Also the footer.'));
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  // At B: the decision is back, and its post carries no comment that already went.
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  const last = reviewPosts.at(-1)!;
+  expect(last).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+  expect(JSON.stringify(last)).not.toContain('Mirror the icons.');
 });
 
 test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {
