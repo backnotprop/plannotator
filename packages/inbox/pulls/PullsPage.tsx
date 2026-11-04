@@ -63,7 +63,7 @@ import {
 } from './model';
 import { PullFilterControl } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
-import { answeredClis, pullsEmptyWords, pullsNotices, type PullsNotice } from './notices';
+import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
 import { chainMarks, isOpen, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
@@ -185,11 +185,18 @@ function PullList({
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
-  const notices = pullsNotices(model);
-  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut
-  // (Others failing alone leaves Mine and To review whole: the person's own lists answered).
-  const whole = (n: PullsNotice) => n.key.startsWith('unsigned:') || (filter !== 'others' && n.key.includes(':others:'));
-  if (total === 0 && filter !== 'all' && notices.every(whole)) {
+  // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
+  const notices = pullsNotices(model, filter);
+  // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
+  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending)) {
+    return (
+      <p className="ib-pr-empty" data-pulls-empty="reading">
+        Reading your pull requests…
+      </p>
+    );
+  }
+  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
+  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
     const empty = pullFilterEmptyWords(filter);
     return (
       <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>

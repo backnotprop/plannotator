@@ -35,6 +35,7 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
   createInboxPulls,
+  type InboxPulls,
   GITHUB_SEARCH_MAX_CHARS,
   githubPullSearches,
   byActivity,
@@ -113,6 +114,15 @@ const GH_ANSWER = {
 
 /** A call of the Others read (its own query), apart from the person's own lists. */
 const othersCall = (args: readonly string[]) => args.some((a) => a.startsWith("query=query InboxPullsOthers"));
+
+/** The background reads finish (the fakes answer at once): what the next list sees. */
+const settle = () => new Promise((done) => setTimeout(done, 0));
+/** One list, its background Others read let finish, then the next list: what the window gets on its next read. */
+async function listSettled(pulls: InboxPulls, repos: Parameters<InboxPulls["list"]>[0], options?: Parameters<InboxPulls["list"]>[1]) {
+  await pulls.list(repos, options);
+  await settle();
+  return pulls.list(repos, options);
+}
 
 interface Forge {
   run: RefRunner;
@@ -325,7 +335,8 @@ describe("on", () => {
     // No project is on GitLab, so glab is not even asked whether it is signed in.
     expect(w.forge.calls.filter((c) => c.cli === "glab")).toEqual([]);
     expect(answer.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880]);
-    expect(answer.hosts).toEqual([{ cli: "gh", host: "github.com", login: "dana" }]);
+    // Others is read in the background, never waited for: the answer says it is on its way.
+    expect(answer.hosts).toEqual([{ cli: "gh", host: "github.com", login: "dana", others_pending: true }]);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.thread_id).toBe(thread);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.via).toBe("url");
     expect(answer.links["github.com/northwind/billing-svc#413"]?.agent?.host).toBe("claude-code");
@@ -737,7 +748,7 @@ describe("the worst case (break-ui on #2590)", () => {
     const pulls = createInboxPulls({ run: f.run, now: () => now });
     const first = await pulls.list(repos);
     expect(first.pulls).toEqual([]);
-    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable" }]);
+    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable", others_pending: true }]);
     now += 31_000;
     f.fail = null;
     expect((await pulls.list(repos)).pulls).toHaveLength(3);
@@ -999,6 +1010,24 @@ describe("the searches (scoped to the projects' repositories)", () => {
     expect(others[0]!.args.find((a) => a.startsWith("others0="))).toContain("repo:northwind/billing-svc");
     expect(others[0]!.args.some((a) => a.startsWith("others1="))).toBe(false);
   });
+
+  test("the route honours ?others=1: with the Others view open, Others is read as the list is; without it, not before 5 min", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Hello.", "hello");
+    await w.pulls();
+    await settle();
+    expect(w.forge.others()).toHaveLength(1);
+    setSystemTime(new Date(Date.now() + INBOX_PULLS_FRESH_MS + 1_000));
+    try {
+      await w.pulls();
+      expect(w.forge.graphql()).toHaveLength(2);
+      expect(w.forge.others()).toHaveLength(1);
+      await w.pulls("?others=1");
+      expect(w.forge.others()).toHaveLength(2);
+    } finally {
+      setSystemTime();
+    }
+  });
 });
 
 describe("Mine, To review and Others (the list's filters)", () => {
@@ -1023,7 +1052,7 @@ describe("Mine, To review and Others (the list's filters)", () => {
     expect(parseGithubPulls(JSON.stringify(own), "github.com", "others")!.pulls).toEqual([]);
     const f = forge(own);
     f.othersAnswer = others;
-    const listed = await createInboxPulls({ run: f.run }).list(repos);
+    const listed = await listSettled(createInboxPulls({ run: f.run }), repos);
     const by = Object.fromEntries(listed.pulls.map((p) => [p.number, p]));
     expect(listed.pulls).toHaveLength(4);
     expect(by[900]).toMatchObject({ mine: false, requested: false });
@@ -1068,13 +1097,13 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const f = forge();
     f.othersAnswer = othersOf(1, [ghPull(900, { author: { login: "mei" } })]);
     const pulls = createInboxPulls({ run: f.run, now: () => now });
-    const first = await pulls.list(repos);
+    const first = await listSettled(pulls, repos);
     expect(first.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
 
     // Others answers a GraphQL error: the own lists are read and shown; Others' last answer is kept and said.
     f.othersAnswer = { ...othersOf(1, []), errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", message: "Resource limits exceeded" }] };
     now += INBOX_PULLS_OTHERS_FRESH_MS;
-    const second = await pulls.list(repos);
+    const second = await listSettled(pulls, repos);
     expect(f.graphql()).toHaveLength(2);
     expect(f.others()).toHaveLength(2);
     expect(second.hosts[0]!.error).toBeUndefined();
@@ -1084,14 +1113,43 @@ describe("Mine, To review and Others (the list's filters)", () => {
     // Others never answered at all: the own lists stand alone, and the host says Others is missing (no last read).
     const fresh = forge();
     fresh.othersFail = "HTTP 502: Bad Gateway";
-    const alone = await createInboxPulls({ run: fresh.run }).list(repos);
+    const alone = await listSettled(createInboxPulls({ run: fresh.run }), repos);
     expect(alone.pulls).toHaveLength(3);
     expect(alone.hosts[0]!.error).toBeUndefined();
     expect(alone.hosts[0]!.others_error).toBe("unavailable");
     expect(alone.hosts[0]!.others_last_read).toBeUndefined();
   });
 
-  test("the whole Others read has one deadline: past it, the own lists are answered and Others is said as failed", async () => {
+  test("a hung Others read never holds the list: the own lists answer at once (the real deadline), Others' last answer with them", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    f.othersAnswer = othersOf(1, [ghPull(900, { author: { login: "mei" } })]);
+    let hang = false;
+    let letGo: () => void = () => {};
+    const hung = new Promise<void>((done) => (letGo = done));
+    const run: RefRunner = async (cli, args, env) => {
+      if (othersCall(args) && hang) await hung;
+      return f.run(cli, args, env);
+    };
+    const pulls = createInboxPulls({ run, now: () => now });
+    try {
+      await listSettled(pulls, repos);
+      hang = true;
+      now += INBOX_PULLS_OTHERS_FRESH_MS;
+      const started = performance.now();
+      const listed = await pulls.list(repos, { refresh: true, others: true });
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(f.graphql()).toHaveLength(2);
+      // The own lists, and Others' last answer (#900), while the new Others read hangs.
+      expect(listed.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
+      expect(listed.hosts[0]).toMatchObject({ others_pending: true });
+      expect(listed.hosts[0]!.error).toBeUndefined();
+    } finally {
+      letGo();
+    }
+  });
+
+  test("the whole Others read has one deadline: past it, Others is said as failed and its read can run again", async () => {
     const f = forge();
     let asked = 0;
     let letGo: () => void = () => {};
@@ -1108,11 +1166,17 @@ describe("Mine, To review and Others (the list's filters)", () => {
     // The deadline's timer fires at once; every other timer as asked.
     globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, ms === INBOX_PULLS_OTHERS_DEADLINE_MS ? 1 : ms)) as unknown as typeof setTimeout;
     try {
-      const listed = await createInboxPulls({ run }).list(repos);
+      const pulls = createInboxPulls({ run });
+      const first = await pulls.list(repos);
+      expect(first.pulls).toHaveLength(3);
+      expect(first.hosts[0]).toMatchObject({ others_pending: true });
+      await new Promise((done) => realSetTimeout(done, 20));
+      const listed = await pulls.list(repos);
       expect(asked).toBe(1);
       expect(listed.pulls).toHaveLength(3);
       expect(listed.hosts[0]!.error).toBeUndefined();
       expect(listed.hosts[0]!.others_error).toBe("unavailable");
+      expect(listed.hosts[0]!.others_pending).toBeUndefined();
     } finally {
       globalThis.setTimeout = realSetTimeout;
       letGo();
@@ -1151,14 +1215,15 @@ describe("Mine, To review and Others (the list's filters)", () => {
     // The person's own PR is in the last repository by name: the most active, so it is searched first.
     const hot = many.at(-1)!.repo;
     const f = forge({ data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412, { repository: { nameWithOwner: hot }, url: `https://github.com/${hot}/pull/412` })] }, assigned: { nodes: [] }, merged: { nodes: [] } } });
-    const listed = await createInboxPulls({ run: f.run }).list(many);
+    const listed = await listSettled(createInboxPulls({ run: f.run }), many);
     const others = f.others();
     expect(others).toHaveLength(1);
     const searches = others[0]!.args.filter((a) => /^others\d+=/.test(a));
     expect(searches.length).toBeLessThanOrEqual(INBOX_PULLS_OTHERS_CALLS_MAX);
     expect(searches[0]).toContain(`repo:${hot} `);
     // Not every repository was read: how many open PRs there are is not known.
-    expect(listed.hosts[0]!.capped).toEqual({ shown: 1, total: null });
+    // Only Others left PRs out: the person's own lists are whole (`of: "others"`).
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 1, total: null, of: "others" });
   });
 
   test("the Others count is the whole when every repository was searched: more open PRs than came back says how many the list shows, of how many", async () => {
@@ -1166,10 +1231,24 @@ describe("Mine, To review and Others (the list's filters)", () => {
     const own = { data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } };
     const f = forge(own);
     f.othersAnswer = othersOf(140, many);
-    expect((await createInboxPulls({ run: f.run }).list(repos)).hosts[0]!.capped).toEqual({ shown: 101, total: 140 });
+    expect((await listSettled(createInboxPulls({ run: f.run }), repos)).hosts[0]!.capped).toEqual({ shown: 101, total: 140, of: "others" });
     const all = forge(own);
     all.othersAnswer = othersOf(2, [ghPull(900, { author: { login: "mei" } }), ghPull(412)]);
-    expect((await createInboxPulls({ run: all.run }).list(repos)).hosts[0]!.capped).toBeUndefined();
+    expect((await listSettled(createInboxPulls({ run: all.run }), repos)).hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("a new set of repositories whose Others read fails shows no count from the old set", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ghPull(3000 + i, { author: { login: "mei" }, headRefName: `o${i}` }));
+    const own = { data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } };
+    const f = forge(own);
+    f.othersAnswer = othersOf(140, many);
+    const pulls = createInboxPulls({ run: f.run });
+    expect((await listSettled(pulls, repos)).hosts[0]!.capped).toEqual({ shown: 101, total: 140, of: "others" });
+    f.othersFail = "HTTP 502: Bad Gateway";
+    const more = [...repos, { host: "github.com", repo: "northwind/web-app", project_id: "prj_2" }];
+    const after = await listSettled(pulls, more);
+    expect(after.hosts[0]!.others_error).toBe("unavailable");
+    expect(after.hosts[0]!.capped).toBeUndefined();
   });
 
   test("GitHub's budget nearly spent: list reads wait until it fills, the answer still shown; a layer's diff is not held", async () => {

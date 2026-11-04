@@ -193,6 +193,17 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     expect(pullsNotices(both).map((n) => n.key)).toEqual(['unavailable:false']);
   });
 
+  test("what Others left out or failed to read is said where Others shows (All, Others), never in Mine or To review", () => {
+    const cut = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 12, total: null, of: 'others' }, others_error: 'unavailable' }] });
+    expect(pullsNotices(cut).map((n) => n.line)).toEqual(["GitHub didn't answer; pull requests by others aren't shown.", 'Not every pull request on github.com was read.']);
+    expect(pullsNotices(cut, 'others')).toHaveLength(2);
+    expect(pullsNotices(cut, 'mine')).toEqual([]);
+    expect(pullsNotices(cut, 'review')).toEqual([]);
+    // The person's own searches cut: every view says so.
+    const own = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 50, total: 80 } }] });
+    expect(pullsNotices(own, 'mine').map((n) => n.key)).toEqual(['capped:github.com']);
+  });
+
   test('a read not limited to the projects never counts what it shows against the forge total, and is never "Nothing open"', () => {
     const model = answer({ hosts: [{ cli: 'glab', host: 'gitlab.com', login: 'dana', capped: { shown: 3, total: null } }], projects: { 'gitlab.com/a/b': ['prj_1'] } });
     const [notice] = pullsNotices(model);

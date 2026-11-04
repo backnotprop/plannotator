@@ -6,6 +6,8 @@ import { inboxApi } from '../api';
 export const PULLS_FOCUS_MS = 20_000;
 /** While the page stays open, the list is read again this often (the server answers from its cache in between). */
 export const PULLS_TICK_MS = 2 * 60_000;
+/** Others is read in the background (the server never waits for it): while it is on its way, ask again this soon. */
+export const PULLS_PENDING_MS = 2_000;
 
 export interface PullsState {
   model: InboxPullsAnswer | null;
@@ -35,12 +37,15 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
   const [loading, setLoading] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
   const lastAt = useRef(0);
+  const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const others = useRef(othersView);
   others.current = othersView;
 
   const read = useCallback(
     (refresh: boolean) => {
       if (!enabled && !counted) return;
+      if (pendingTimer.current) clearTimeout(pendingTimer.current);
+      pendingTimer.current = null;
       inFlight.current?.abort();
       const controller = new AbortController();
       inFlight.current = controller;
@@ -52,6 +57,8 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
           if (controller.signal.aborted) return;
           setModel(answer);
           setError(null);
+          // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call).
+          if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
         })
         .catch((cause: unknown) => {
           if (controller.signal.aborted) return;
@@ -66,6 +73,8 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     },
     [enabled, counted],
   );
+  const readRef = useRef(read);
+  readRef.current = read;
 
   useEffect(() => {
     if (!enabled && counted) {
@@ -111,6 +120,7 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
     () => () => {
       inFlight.current?.abort();
       inFlight.current = null;
+      if (pendingTimer.current) clearTimeout(pendingTimer.current);
     },
     [],
   );

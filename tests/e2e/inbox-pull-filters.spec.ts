@@ -291,6 +291,20 @@ async function snap(page: Page, name: string, scheme: 'light' | 'dark'): Promise
   await page.screenshot({ path: join(proofDir, `${name}.png`) });
 }
 
+/**
+ * Loads the page and waits for a list answer with Others in it: Others is read in the background (the list never waits
+ * for it), and the window asks again while it is on its way.
+ */
+async function landed(page: Page, load: () => Promise<unknown>): Promise<void> {
+  const whole = page.waitForResponse(async (r) => {
+    if (!/\/api\/inbox\/pulls(\?|$)/.test(r.url())) return false;
+    const body = (await r.json().catch(() => null)) as { hosts?: { others_pending?: boolean }[] } | null;
+    return !!body?.hosts && !body.hosts.some((h) => h.others_pending);
+  });
+  await load();
+  await whole;
+}
+
 const TRIGGER = '[data-pulls-filter-trigger]';
 const MENU = '[data-pulls-filter-menu]';
 const TIP = "On you: a review requested from you, changes requested or checks failed on your own PR, your agent's PR, or one assigned to you";
@@ -361,7 +375,7 @@ function fits(h: Awaited<ReturnType<typeof head>>, phone: boolean): void {
 
 test('the read: the person\'s own lists, then Others as a call of its own scoped to the projects; GitLab the same', async () => {
   const { page } = world;
-  await page.goto(`${world.url}#pulls`);
+  await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
   const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
@@ -386,7 +400,7 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
 
 test('1440: the count and the filter in one control; the menu; a view and a project narrow the list and stay in the address', async () => {
   const { page } = world;
-  await page.goto(`${world.url}#pulls`);
+  await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
@@ -429,7 +443,7 @@ test('1440: the count and the filter in one control; the menu; a view and a proj
 
   // The address keeps both: a reload draws the same list.
   expect(await page.evaluate(() => location.hash)).toMatch(/^#pulls&project=prj_[^&]+&view=review$/);
-  await page.reload();
+  await landed(page, () => page.reload());
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   await expect(trigger).toHaveAccessibleName('2 on you. Filter: To review, web-app');
   expect(await rows(page)).toHaveLength(2);
@@ -448,7 +462,7 @@ test('390 (a phone): the sheet titled Filter; both picked, the view keeps its ic
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   try {
-    await page.goto(`${world.url}#pulls`);
+    await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
     await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
     await expect(page.locator('[data-pulls-on-you]')).toHaveText('5 on you');
     fits(await head(page), true);
@@ -482,7 +496,7 @@ test('320: both picked, the picks keep their icons only; "on you" is never cut',
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
   try {
-    await page.goto(`${world.url}#pulls`);
+    await landed(page, async () => (await page.goto("about:blank"), page.goto(`${world.url}#pulls`)));
     await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
     fits(await head(page), true);
     await choose(page, 'customer-billing-portal-v2');

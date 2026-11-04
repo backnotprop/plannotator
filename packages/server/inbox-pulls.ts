@@ -861,7 +861,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         const host = repo.host.toLowerCase();
         byHost.set(host, [...(byHost.get(host) ?? []), repo]);
       }
-      const asked: { host: string; state: HostState }[] = [];
+      const asked: { host: string; state: HostState; reposKey: string }[] = [];
       const unsigned: string[] = [];
       const cliStates: Partial<Record<RefCli, InboxPullCliState>> = {};
       await Promise.all(
@@ -880,9 +880,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           // The searches are scoped to the projects' repositories: a new set of them reads again.
           const reposKey = [...repoNames].map((r) => r.toLowerCase()).sort().join(" ");
           if (due(state, refresh) || (state.answer && state.answer.repos !== reposKey && !(state.error && now() - state.failedAt < REF_FAILURE_MS))) await read(host, state, repoNames);
-          // Others after the person's own lists (its order follows their activity), on its own path and clock.
-          if (othersDue(state.others, reposKey, refresh, eager)) await readOthers(host, state, repoNames);
-          asked.push({ host, state });
+          // Others after the person's own lists (its order follows their activity), on its own path and clock, and never
+          // waited for: this answer carries its last answer (and `others_pending`); a new one lands on the next list.
+          if (othersDue(state.others, reposKey, refresh, eager)) void readOthers(host, state, repoNames);
+          asked.push({ host, state, reposKey });
         }),
       );
       asked.sort((a, b) => a.host.localeCompare(b.host));
@@ -912,26 +913,29 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
        * What the list shows of a host whose reads left PRs out: its open PRs in this list (`shown`), and how many there
        * are (`total`): Others' count when it searched every repository, or the person's own searches' count when they
        * were limited to the projects' repositories (the larger); null when that is not known (Others searched only
-       * the most active repositories, or the own searches were not limited and Others has no answer).
+       * the most active repositories, or the own searches were not limited and Others has no answer). `of: "others"`:
+       * only Others left PRs out (the person's own lists are whole). An Others answer read for another set of
+       * repositories counts nothing: no count from the old set until Others answers for this one.
        */
-      const cappedOfHost = (host: string, state: HostState): InboxPullHost["capped"] | undefined => {
+      const cappedOfHost = (host: string, state: HostState, reposKey: string): InboxPullHost["capped"] | undefined => {
         const { answer } = state;
-        const others = state.others.answer;
+        const others = state.others.answer?.repos === reposKey ? state.others.answer : null;
         if (!answer && !others) return undefined;
         const shown = pulls.filter((p) => p.host.toLowerCase() === host && (p.state === "open" || p.state === "draft")).length;
-        if (others && others.total === null) return { shown, total: null };
-        let total = others?.total ?? shown;
-        if (answer?.capped && answer.capped.total > answer.capped.shown) {
-          if (answer.scoped) total = Math.max(total, shown + (answer.capped.total - answer.capped.shown));
-          else if (!others) return { shown, total: null };
-        }
-        return total > shown ? { shown, total } : undefined;
+        const ownCut = !!answer?.capped && answer.capped.total > answer.capped.shown;
+        // The person's own searches cut and not limited to the projects (and no whole Others count): the cut is theirs.
+        if (ownCut && !answer!.scoped && (!others || others.total === null)) return { shown, total: null };
+        const ownTotal = ownCut && answer!.scoped ? shown + (answer!.capped!.total - answer!.capped!.shown) : shown;
+        if (others && others.total === null) return ownTotal > shown ? { shown, total: ownTotal } : { shown, total: null, of: "others" };
+        const othersTotal = others?.total ?? 0;
+        if (ownTotal >= othersTotal) return ownTotal > shown ? { shown, total: ownTotal } : undefined;
+        return othersTotal > shown ? { shown, total: othersTotal, of: "others" } : undefined;
       };
       const times = asked.map((a) => a.state.answer?.at).filter((t): t is number => typeof t === "number");
       return {
         fetched_at: times.length > 0 ? new Date(Math.min(...times)).toISOString() : null,
-        hosts: asked.map(({ host, state }): InboxPullHost => {
-          const capped = cappedOfHost(host, state);
+        hosts: asked.map(({ host, state, reposKey }): InboxPullHost => {
+          const capped = cappedOfHost(host, state, reposKey);
           const others = state.others;
           return {
             cli: state.cli,
@@ -941,6 +945,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             ...(state.error ? { error: state.error, ...(state.answer ? { last_read: new Date(state.answer.at).toISOString() } : {}) } : {}),
             // Others failed on its own: the person's own lists stand; the window says Others is the last read, or missing.
             ...(others.error ? { others_error: others.error, ...(others.answer ? { others_last_read: new Date(others.answer.at).toISOString() } : {}) } : {}),
+            // Others is being read in the background (never waited for): the window asks again shortly.
+            ...(others.pending ? { others_pending: true as const } : {}),
             ...(capped ? { capped } : {}),
           };
         }),

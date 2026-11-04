@@ -119,12 +119,14 @@ export interface InboxPullHost {
   others_error?: "rate_limited" | "unavailable";
   /** With `others_error`: when the Others answer still shown was read; absent when there is none (Others is not shown). */
   others_last_read?: string;
+  /** The Others read is running in the background (the list never waits for it): ask again shortly for its answer. */
+  others_pending?: true;
   /**
-   * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
-   * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
-   * to the projects' repositories, so how many of the ones left out are the projects' is not known.
+   * The reads found more open PRs than they take: `shown`, the host's open PRs in this list; `total`, how many there
+   * are. Null `total`: not known (the person's own searches were not limited to the projects' repositories, or Others
+   * searched only the most active ones). `of: "others"`: only Others left PRs out; the person's own lists are whole.
    */
-  capped?: { shown: number; total: number | null };
+  capped?: { shown: number; total: number | null; of?: "others" };
 }
 
 /** A CLI as the Inbox found it: not installed, installed and signed in to no host, or signed in to at least one. */

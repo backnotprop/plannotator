@@ -306,6 +306,26 @@ test.if(hasDom)('an empty view says what the view holds; a failed read is never 
   expect($('[data-pulls-empty]')!.getAttribute('data-pulls-empty')).toBe('unread');
 });
 
+test.if(hasDom)('Others failing or on its way: Mine and To review still say what they hold; Others never says "Nothing else open"', async () => {
+  const theirs = (host: InboxPullsAnswer['hosts'][number]): InboxPullsAnswer => ({ ...MODEL, pulls: [], hosts: [host] });
+  const failed = theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'unavailable' });
+  const cases: [PullFilter, InboxPullsAnswer, string][] = [
+    ['mine', failed, 'view-mine'],
+    ['review', failed, 'view-review'],
+    ['others', failed, 'unread'],
+    ['others', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
+    ['all', theirs({ cli: 'gh', host: 'github.com', login: 'dana', others_pending: true }), 'reading'],
+  ];
+  for (const [filter, model, said] of cases) {
+    draw({ filter, state: { model, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+    await settle();
+    expect(`${filter}: ${$('[data-pulls-empty]')!.getAttribute('data-pulls-empty')}`).toBe(`${filter}: ${said}`);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
+});
+
 test.if(hasDom)("a phone's menu is a bottom sheet titled Filter", async () => {
   draw({ phone: true, filter: 'review', project: 'prj_web' });
   await settle();
