@@ -40,7 +40,7 @@ import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
+import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -194,7 +194,7 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
  */
 export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
 
-/** The longest session label kept, in characters (code points, so a pair is never split). */
+/** The longest session label kept, in user-perceived characters (`graphemesOf`, so a family emoji or a flag is never split). */
 export const INBOX_SESSION_LABEL_MAX = 60;
 
 /**
@@ -206,10 +206,21 @@ export const INBOX_SESSION_LABEL_MAX = 60;
  */
 export function cleanInboxSessionLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  // Twice as many UTF-16 units always hold that many characters, so the first cut never spends on the rest of a long string.
-  const input = Array.from(value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join("");
+  // Twice as many UTF-16 units always hold that many code points, so the first cut never spends on the rest of a long
+  // string. Whole characters only: the last one of a string cut there may be half of one, and what is kept stays
+  // within INBOX_SESSION_LABEL_INPUT_MAX code points.
+  const head = value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2);
+  const parts = graphemesOf(head);
+  if (head.length < value.length) parts.pop();
+  let points = 0;
+  let input = "";
+  for (const part of parts) {
+    points += Array.from(part).length;
+    if (points > INBOX_SESSION_LABEL_INPUT_MAX) break;
+    input += part;
+  }
   const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
-  const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
+  const label = graphemesOf(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
   const visible = label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim();
   return visible && !readsAsYou(visible) ? label : null;
 }

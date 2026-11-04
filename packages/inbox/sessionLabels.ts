@@ -15,7 +15,7 @@
  * read with `Object.hasOwn`, so a session id like "constructor" finds nothing.
  */
 import { useSyncExternalStore } from 'react';
-import { INBOX_HOST_NAMES } from '@plannotator/core/inbox-types';
+import { graphemesOf } from '@plannotator/core/inbox-format';
 
 export type SessionLabels = Readonly<Record<string, string>>;
 
@@ -57,22 +57,16 @@ export function labelOf(labels: SessionLabels, session: string | null | undefine
 }
 
 /**
- * A label cut to `max` characters (code points) for words that cannot be cut by CSS (a tooltip, a spoken name):
- * the start and the end kept with "…" between, so "Fix login redirect for SSO users" stays told apart from
- * "Fix login redirect for the admin".
+ * A label cut to `max` characters (user-perceived ones, `graphemesOf`, so a family emoji or a flag is never split)
+ * for words that cannot be cut by CSS (a tooltip, a spoken name): the start and the end kept with "…" between, so
+ * "Fix login redirect for SSO users" stays told apart from "Fix login redirect for the admin".
  */
 export function shortLabel(label: string, max = 32): string {
-  const chars = Array.from(label);
+  const chars = graphemesOf(label);
   if (chars.length <= max) return label;
   const head = Math.ceil((max - 1) / 2);
   const tail = max - 1 - head;
   return `${chars.slice(0, head).join('').trimEnd()}…${chars.slice(chars.length - tail).join('').trimStart()}`;
-}
-
-/** "Fix login redirect (Claude Code)": a labelled session in words, its agent after it. */
-export function labelledAgent(label: string, host: string | null | undefined): string {
-  const agent = host ? (Object.hasOwn(INBOX_HOST_NAMES, host) ? INBOX_HOST_NAMES[host]! : host) : 'An agent';
-  return `${label} (${agent})`;
 }
 
 /**

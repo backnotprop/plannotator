@@ -2752,9 +2752,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 /* Under an open head's fold button the name takes the pointer (its hover shows the whole label; a click folds, Thread.tsx). */
 .ib-fline > .ib-fl-hit ~ .ib-fl-nm[data-session-label] { pointer-events: auto; cursor: pointer; }
 /* A thread a named session wrote in: the name column takes a label's room, on every head alike so they line up
-   (from 176 px in a 561 px thread to 288 px in a wide one). The narrow thread below has no such column. */
+   (34% of the thread's width, about 191 px in a 561 px thread, at most 288 px). The narrow thread below has no such column. */
 @container ib-thread (min-width: 561px) {
-  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px clamp(176px, 34cqi, 288px) minmax(0, 1fr) auto minmax(66px, auto); }
+  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px min(34cqi, 288px) minmax(0, 1fr) auto minmax(66px, auto); }
 }
 .ib-fl-sn { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-fl-sn b { font-weight: 600; color: var(--foreground); }

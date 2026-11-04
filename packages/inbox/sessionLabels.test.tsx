@@ -20,7 +20,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAuthor, InboxMessageWire, InboxParticipant, InboxProject, InboxThread } from '@plannotator/core/inbox-types';
 import { dispatchInboxFrame, type LiveSessionsModel, type TaggableModel, type TaggableSession } from './api';
 import { rowAgentGroups, rowAgentWords } from './components/RowAgents';
-import { labelledAgent, labelOf, setSessionLabels, shortLabel } from './sessionLabels';
+import { labelOf, setSessionLabels, shortLabel } from './sessionLabels';
 import { TAG_LABEL_MAX, tagOptions } from './tags';
 
 const hasDom = typeof document !== 'undefined';
@@ -115,6 +115,22 @@ test('shortLabel keeps whole characters at both ends', () => {
   // No lone surrogate: every UTF-16 high half is followed by its low half.
   expect(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/.test(cut)).toBe(false);
   expect(cut.endsWith('tail')).toBe(true);
+});
+
+test('shortLabel never splits a family emoji, wherever the cut falls', () => {
+  // Seven code points, one character: a code-point cut leaves a man, or a ZWJ, on either side of the "…".
+  const family = '\u{1F468}\u200D\u{1F469}\u200D\u{1F467}\u200D\u{1F466}';
+  const segmenter = new Intl.Segmenter('en', { granularity: 'grapheme' });
+  const whole = (text: string) => Array.from(segmenter.segment(text), (s) => s.segment).every((g) => !g.includes('\u200D') || g === family);
+  // max 10 keeps 5 at the head and 4 at the tail: put the family at each edge of each kept end, and at the cut itself.
+  for (let at = 0; at < 20; at += 1) {
+    const chars = Array.from('abcdefghijklmnopqrst');
+    chars[at] = family;
+    const cut = shortLabel(chars.join(''), 10);
+    expect(Array.from(segmenter.segment(cut))).toHaveLength(10);
+    expect(whole(cut), `family at ${at}: ${cut}`).toBe(true);
+    expect(cut.split(family).length - 1).toBe(at < 5 || at >= 16 ? 1 : 0);
+  }
 });
 
 test('the deliveries frame says when a label changed; an older frame is a delivery change alone', () => {
@@ -248,7 +264,6 @@ describe('drawn', () => {
     expect(name.querySelector('.ib-sr')!.textContent).toBe(`Claude Code (${long})`);
   });
 
-
   test.skipIf(!hasDom)("a row's agents say the names in their accessible name", async () => {
     const { RowAgents, RowAgentTiles } = await import('./components/RowAgents');
     setSessionLabels({ 'ses-login': 'Fix login redirect' });
@@ -304,7 +319,6 @@ describe('a session id that is a name Object has', () => {
     expect(labelOf(labels, 'ses-a')).toBe('Fix login');
     // A list whose map really carries "__proto__" (JSON.parse makes it an own key) reads it as a label.
     expect(labelOf(JSON.parse('{"__proto__":"Proto named"}'), '__proto__')).toBe('Proto named');
-    expect(labelledAgent('X', 'constructor')).toBe('X (constructor)');
   });
 
   test.skipIf(!hasDom)('a "constructor" session with no labels renders exactly as it does with none at all', async () => {
