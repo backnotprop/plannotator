@@ -42,7 +42,7 @@ function normalizeEntry(raw: unknown): SkillCatalogEntry | null {
   const { name, root, description, humanOnly, dir } = raw as Record<string, unknown>;
   if (typeof name !== 'string' || !name) return null;
   const rootId: SkillRootId =
-    root === 'claude' || root === 'codex' || root === 'universal' ? root : 'universal';
+    root === 'claude' || root === 'codex' || root === 'universal' || root === 'plannotator' ? root : 'universal';
   return {
     name,
     root: rootId,
@@ -156,6 +156,27 @@ export function resetSkillCatalogCache(): void {
   reportedContentNames.clear();
   setSkillCatalogForExport([]);
   resetSkillContentsForExport();
+}
+
+const reloadListeners = new Set<() => void>();
+
+/**
+ * The catalog changed at its source (a host switch that adds or removes
+ * skills, e.g. the Inbox's Code review): drop the cache, and every mounted
+ * composer reads it again at once (`onSkillCatalogReload`), so an open "/"
+ * list never offers, or paints, a skill that is gone.
+ */
+export function reloadSkillCatalog(): void {
+  resetSkillCatalogCache();
+  for (const listener of [...reloadListeners]) listener();
+}
+
+/** Called after each `reloadSkillCatalog`; returns the unsubscribe. */
+export function onSkillCatalogReload(listener: () => void): () => void {
+  reloadListeners.add(listener);
+  return () => {
+    reloadListeners.delete(listener);
+  };
 }
 
 // ---------------------------------------------------------------------------

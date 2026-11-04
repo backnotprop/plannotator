@@ -66,11 +66,13 @@ import { INBOX_MAX_REQUEST_BYTES, inboxRequestTooLargeMessage } from "@plannotat
 import { statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 
-const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card"]);
+const FILLED_TOOLS = new Set(["send_message", "read_thread", "submit_guide", "card", "steps"]);
+/** The filled tools that take no project: thread steps name their thread (the schema is strict, so no `project_path`). */
+const NO_PROJECT_TOOLS = new Set(["steps"]);
 /** The tools that take the project but no session: search (its schema is strict, so no `agent_session`). */
 const PROJECT_ONLY_TOOLS = new Set(["search"]);
 /** The tools that record an author, and so take `agent_host` / `agent_name` (their schemas are strict). A card records who made and moved it. */
-const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card"]);
+const AUTHOR_TOOLS = new Set(["send_message", "submit_guide", "card", "steps"]);
 
 /**
  * The hosts whose sessions a reply wakes, with the name each one's
@@ -338,7 +340,7 @@ export function fillInboxToolArguments(
   }
   if (!FILLED_TOOLS.has(name)) return message;
   const args = { ...((message.params.arguments as Record<string, unknown> | undefined) ?? {}) };
-  if (args.project_path === undefined && args.reply_to === undefined) {
+  if (!NO_PROJECT_TOOLS.has(name) && args.project_path === undefined && args.reply_to === undefined) {
     // The session the call is filed as: the agent's own, else the host session it adopts below.
     const adopts = hostSession && args.agent_session === undefined && adoptsHostSession(hostSession, args.agent_host);
     const caller = adopts ? hostSession : typeof args.agent_session === "string" ? { host: typeof args.agent_host === "string" ? args.agent_host : null, session: args.agent_session } : null;

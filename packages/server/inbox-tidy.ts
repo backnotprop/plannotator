@@ -13,7 +13,7 @@
  */
 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
-import { inboxId, isInboxId, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
+import { inboxId, isInboxId, type InboxSteps, type InboxTidyCombine, type InboxTidyPlan, type InboxTidyReach, type InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { inboxTidyBody, inboxTidyPlan, inboxTidyRun, inboxTidyWakeThread, type InboxTidySurface } from "@plannotator/shared/inbox/tidy";
@@ -30,6 +30,8 @@ export interface InboxTidyDeps {
   /** The agents that read the Inbox over MCP only, and when they were last seen. */
   mcpAgents: () => { session: string; last_at: string }[];
   boardOn: () => boolean;
+  /** Thread steps' staleness (inbox-steps.ts `inboxStepsStale`) while the person's switch is on, read per plan; null when off. */
+  stepsStale?: () => ((record: InboxSteps) => boolean) | null;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   now?: () => number;
@@ -67,7 +69,7 @@ export function createInboxTidy(deps: InboxTidyDeps) {
     inboxTidyRun(store, { now: now(), idleSince: deps.idleSince, reachOf });
 
   const planFor = (projectId: string | null, surface: InboxTidySurface, reachOf: (session: string) => InboxTidyReach | null) =>
-    inboxTidyPlan(store, { projectId, surface, now: now(), reachOf, boardOn: deps.boardOn() });
+    inboxTidyPlan(store, { projectId, surface, now: now(), reachOf, boardOn: deps.boardOn(), stepsStale: deps.stepsStale?.() ?? null });
 
   const plan = (projectId: string | null, surface: InboxTidySurface): InboxTidyPlan => {
     const reachOf = reachFor();

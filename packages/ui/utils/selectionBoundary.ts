@@ -38,3 +38,17 @@ export const trimWhitespaceOnlyBoundaryNodes = (
 
   return selectedNodes.slice(start, end);
 };
+
+/**
+ * Drop the empty text nodes anywhere in the list, not only at its ends. They
+ * hold no text, so a highlight on them shows nothing; and they are the ones
+ * web-highlighter leaves inside a highlight wrapper when it splits a text node
+ * at its first or last character. A selection that runs over such a wrapper
+ * takes them along with the wrapper's words, and wrapping an empty node first
+ * replaces the shared wrapper with copies, so the next node in it is wrapped
+ * against a parent that is no longer in the page and the library throws
+ * (`Cannot read properties of null (reading 'replaceChild')`). Whitespace that
+ * is really there (" ") is text, and stays.
+ */
+export const dropEmptyNodes = (selectedNodes: SelectedNodeLike[]): SelectedNodeLike[] =>
+  selectedNodes.filter((node) => (node.$node.textContent ?? '') !== '');

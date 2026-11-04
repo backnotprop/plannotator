@@ -6,8 +6,9 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 
 ## Hard rules (read before touching anything)
 
+- **Never compromise UX.** Plannotator is an open-source product that has to work well and feel like magic; it is not an enterprise critical system. Don't add friction for defensive reasons: no extra gates, confirmations, owner-only checks, warnings or settings that make it harder to use. Fix real bugs without making the product worse to use, and when a safety idea would cost UX, ask the owner first.
 - **Reusing the document UI in the commercial Workspaces app?** Read [`packages/ui/README.md`](packages/ui/README.md) FIRST: an earlier from-scratch rebuild of this UI broke the app and was reverted. Do not rebuild the UI or recreate `packages/document-ui`; add a seam to `@plannotator/ui` (`configurePlannotatorUI()`), keep Plannotator's app unchanged, and never delete working code until a human confirms parity in the browser.
-- **Two server runtimes change together.** An endpoint change goes into both the Bun server (`packages/server/`) and the Pi server (`apps/pi-extension/server/`); shared logic lives in `packages/shared/`. Only the Inbox is Bun-only. See [Server Runtimes](docs/agent-guides/project-and-development.md#server-runtimes).
+- **Two server runtimes change together.** An endpoint change goes into both the Bun server (`packages/server/`) and the Pi server (`apps/pi-extension/server/`); shared logic lives in `packages/shared/`. Only the Inbox and the Shapes server are Bun-only. See [Server Runtimes](docs/agent-guides/project-and-development.md#server-runtimes).
 - **Build order: review, then hook, then opencode.** `bun run --cwd apps/review build && bun run build:hook && bun run build:opencode`; building out of order copies stale HTML. See [Build](docs/agent-guides/project-and-development.md#build).
 - **Tailwind `@source`.** A new directory with `.tsx` files that use Tailwind classes needs a matching `@source` entry in the app's `index.css`.
 - **Testing Rules** (full list in [Testing Rules](docs/agent-guides/project-and-development.md#testing-rules)):

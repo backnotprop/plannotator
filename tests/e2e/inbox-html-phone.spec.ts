@@ -166,12 +166,19 @@ for (const phone of [
       await expect(frame(page).locator('#tap')).toHaveText('tapped');
       await expect(card(page)).toHaveCount(0);
 
-      // The pill opens the reply; the card folds back to it.
+      // The pill opens the reply. Its ⌄ gathers the card with the toolbar into the corner control (approval
+      // "inbox-fullscreen-gather"); one tap brings both back, the card open.
       await replyPill(page).tap();
       await expect(composer(page)).toBeVisible();
       await page.locator('[data-fcomp-minimize]').tap();
-      await expect(composer(page)).toHaveCount(0);
-      await expect(replyPill(page)).toBeVisible();
+      await expect.poll(() => tools(page)).toBe('tucked');
+      await expect(composer(page)).toBeHidden();
+      await expect(bar(page)).toBeHidden();
+      await expect(replyPill(page)).toHaveCount(0);
+      await page.locator('[data-full-view-handle]').tap();
+      await expect.poll(() => tools(page)).toBe('pinned');
+      await expect(composer(page)).toBeVisible();
+      await expect(bar(page)).toBeVisible();
     });
   });
 
@@ -247,21 +254,28 @@ for (const phone of [
       await pen(page).tap();
       await frame(page).locator('#n1').tap();
       await expect(card(page)).toBeVisible();
+      // ⌄ gathers everything into the corner control (approval "inbox-fullscreen-gather"); the comment with no words is dropped.
       await page.locator('[data-fcomp-minimize]').tap();
+      await expect.poll(() => tools(page)).toBe('tucked');
       await expect(card(page)).toHaveCount(0);
-      await expect(composer(page)).toHaveCount(0);
-      await expect(replyPill(page)).toBeVisible();
+      await expect(composer(page)).toBeHidden();
+      await page.locator('[data-full-view-handle]').tap();
+      await expect.poll(() => tools(page)).toBe('pinned');
 
       await frame(page).locator('#n1').tap();
       await field(page).fill('Keep this');
       await page.locator('[data-fcomp-minimize]').tap();
-      await expect(composer(page)).toHaveCount(0);
-      await replyPill(page).tap();
+      await expect.poll(() => tools(page)).toBe('tucked');
+      await expect(composer(page)).toBeHidden();
+      // With words it stays: one tap on the corner control brings the card back on them.
+      await page.locator('[data-full-view-handle]').tap();
+      await expect.poll(() => tools(page)).toBe('pinned');
       await page.locator('[data-fcomp-mode="comment"]').tap();
       await expect(field(page)).toHaveValue('Keep this');
 
-      // Words waiting: a step to the next file asks first, as it does for an image's comment.
-      await page.locator('[data-fcomp-minimize]').tap();
+      // Words waiting: a step to the next file asks first, as it does for an image's comment. (The Reply tab
+      // brings the toolbar back; the pin's draft is held.)
+      await page.locator('[data-fcomp-mode="reply"]').tap();
       await bar(page).locator('[data-full-view-position]').tap();
       await page.locator('[data-image-peek-sheet]').getByRole('gridcell', { name: /^second\.html/ }).tap();
       await expect(page.locator('.ib-stepguard')).toBeVisible();
@@ -269,14 +283,14 @@ for (const phone of [
     });
   });
 
-  test(`${phone.name}: Show tools after Hide tools leaves the reply working (#2484)`, async () => {
+  test(`${phone.name}: one tap on the corner control after Hide tools brings the reply back working (#2484)`, async () => {
     await withPhone(phone.engine, async (w, page) => {
       await open(w, page, 'report.html');
       await bar(page).getByRole('button', { name: 'Hide tools' }).tap();
       await expect.poll(() => tools(page)).toBe('tucked');
       await expect(replyPill(page)).toBeHidden();
       await page.locator('[data-full-view-handle]').tap();
-      await expect.poll(() => tools(page)).toBe('revealed');
+      await expect.poll(() => tools(page)).toBe('pinned');
       await expect(page.locator('[data-fcomp-pillwrap]')).not.toHaveAttribute('inert', /.*/);
       await replyPill(page).tap();
       await expect(composer(page)).toBeVisible();
@@ -412,12 +426,15 @@ test('Pixel 7 (Chromium): words in the card wait for an answer before the other 
     await pen(page).tap();
     await frame(page).locator('#n1').tap();
     await field(page).fill('Keep this');
+    // ⌄ gathers the tools; the changed chip stays (a fact about the file), and its link still asks first.
     await page.locator('[data-fcomp-minimize]').tap();
+    await expect.poll(() => tools(page)).toBe('tucked');
     await page.getByRole('button', { name: 'Open the version it sent' }).tap();
     await expect(page.locator('.ib-stepguard')).toBeVisible();
     await expect(page.locator('.ib-fvver-t')).toHaveText('Changed since sent');
-    // Keep writing brings the card back on its words.
+    // Keep writing brings the tools back first, then the card on its words.
     await page.locator('[data-guard-keep]').tap();
+    await expect.poll(() => tools(page)).toBe('pinned');
     await expect(field(page)).toHaveValue('Keep this');
     await expect(field(page)).toBeFocused();
     // Discarded on purpose, the other version opens.
