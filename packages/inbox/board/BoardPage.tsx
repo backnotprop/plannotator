@@ -146,11 +146,11 @@ export function BoardPage(props: BoardPageProps) {
   const initiative = props.initiative ?? null;
   // Filtered to a project and/or an initiative: everything below reads only those cards (the opened card is found among all).
   const projectCards = cardsInProject(allCards, project);
-  const cards = cardsInInitiative(projectCards, initiative);
   const names = useMemo(() => projectNames(props.projects), [props.projects]);
   const offered = boardProjects(allCards, props.projects, project);
   const projectName = project ? (names.get(project) ?? null) : null;
   const initiatives = useMemo(() => liveInitiatives(model?.initiatives), [model?.initiatives]);
+  const cards = cardsInInitiative(projectCards, initiative, initiatives);
   const initiativeName = initiativeLabel(initiatives, initiative);
   const counts = boardCounts(cards);
   const drops = unseenDrops(cards);
@@ -691,6 +691,7 @@ export function BoardPage(props: BoardPageProps) {
           phone={phone}
           onClose={() => setManaging(null)}
           onChanged={() => props.onChanged()}
+          fallbackFocus={() => pageRef.current?.querySelector<HTMLElement>('[data-board-filter-button]') ?? null}
         />
       )}
       {intro && <BoardIntro mcpCommand={props.mcpCommand} phone={phone} onClose={() => setIntro(false)} />}

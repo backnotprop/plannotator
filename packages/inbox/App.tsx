@@ -5197,13 +5197,13 @@ function Inbox() {
         openCard={route.card ?? null}
         onOpenCard={(id) => {
           if (id) handleCard(id);
-          const next: Route = { page: 'board', project: route.project, initiative: route.initiative, thread: null, board: route.board ?? 'lanes', card: id };
+          const next: Route = { page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: route.board ?? 'lanes', card: id };
           // Another card replaces the open one's entry; opening the first and closing are entries of their own (a phone's Back closes it).
           if (id === null && route.card) close(next);
           else writeRoute(next, { replace: !!route.card && id !== null });
         }}
         rowOf={(threadId) => rowById.get(threadId) ?? null}
-        onView={(next) => go({ page: 'board', project: route.project, initiative: route.initiative, thread: null, board: next })}
+        onView={(next) => go({ page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: next })}
         project={boardFilter}
         // The filter is a place, like the list's project: each pick is a history entry, and Back undoes it.
         onProject={(project) => {
@@ -5212,7 +5212,7 @@ function Inbox() {
           go({
             page: 'board',
             project,
-            initiative: route.initiative,
+            initiative: boardInitiative,
             thread: null,
             board: route.board ?? 'lanes',
             card: open && (project === null || open.project_id === project) ? open.id : null,
@@ -5223,7 +5223,7 @@ function Inbox() {
         // The other half of the one filter: a pick is a history entry too, and Back undoes it.
         onInitiative={(initiative) => {
           const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
-          const shows = open && cardsInInitiative([open], initiative).length > 0;
+          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives)).length > 0;
           go({ page: 'board', project: route.project, initiative, thread: null, board: route.board ?? 'lanes', card: shows ? open.id : null });
         }}
         onMove={moveCard}

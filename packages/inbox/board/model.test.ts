@@ -311,6 +311,11 @@ test('the initiative filter narrows what the project filter left: one initiative
   expect(cardsInInitiative(cardsInProject(cards, 'prj_1'), SHAPE).map((c) => c.id)).toEqual(['a']);
   expect(cardsInInitiative(cards, 'none').map((c) => c.id)).toEqual(['c']);
   expect(cardsInInitiative(cards, null)).toBe(cards);
+  // A card whose initiative was deleted is in none, as it counts there (the window may hold it a moment before the server's null).
+  const gone = [...cards, card('e', { initiative: GONE })];
+  const live = liveInitiatives([initiative(SHAPE, 'Shape'), initiative(MEMORY, 'Memory'), initiative(GONE, 'Gone', true)]);
+  expect(cardsInInitiative(gone, 'none', live).map((c) => c.id)).toEqual(['c', 'e']);
+  expect(Object.fromEntries(initiativeCounts(gone, live)).none).toBe(cardsInInitiative(gone, 'none', live).length);
 });
 
 test('the address: #board&project=…&initiative=…, `none` kept, a stale or bad id no filter once the initiatives have loaded', () => {

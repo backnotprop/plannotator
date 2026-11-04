@@ -96,6 +96,8 @@ describe("initiatives: the store", () => {
     const third = InboxStore.open(dir);
     expect(third.card(card.id)!.said).toBe("older inbox wrote this");
     expect(third.card(card.id)!.initiative).toBe(shape.id);
+    // The event for that raw line (cardWire of the line's record, as eventPayload sends it) carries the kept one too.
+    expect(third.cardWire(latest).initiative).toBe(shape.id);
     // And its history does not say the initiative was cleared.
     expect(third.cardHistory(card.id).filter((entry) => entry.kind === "initiative")).toEqual([
       { at: expect.any(String), by: PERSON, kind: "initiative", initiative: shape.id },

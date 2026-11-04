@@ -6071,7 +6071,9 @@ export class InboxStore {
     const threads = card.threads.filter((id) => this.messages.get(id)?.thread_id === id);
     // A combined project's cards read the project it went into, as its rows do. The record keeps its own.
     // A card whose initiative was deleted reads as in none (the record keeps the id, for its history).
-    const initiative = card.initiative ? (this.initiativesById.get(card.initiative)?.deleted_at === null ? card.initiative : null) : null;
+    // A raw line an older Inbox wrote has no field: it reads the initiative the store kept (apply carries it).
+    const held = card.initiative === undefined ? this.cards.get(card.id)?.initiative : card.initiative;
+    const initiative = held ? (this.initiativesById.get(held)?.deleted_at === null ? held : null) : null;
     return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, initiative, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
   }
 

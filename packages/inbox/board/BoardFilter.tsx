@@ -278,6 +278,7 @@ export function InitiativesDialog({
   phone,
   onClose,
   onChanged,
+  fallbackFocus,
 }: {
   initiatives: readonly InboxInitiative[];
   /** Cards in each initiative, every column (what a delete leaves in none). */
@@ -287,12 +288,36 @@ export function InitiativesDialog({
   onClose: () => void;
   /** An initiative was made, renamed or deleted: read the cards again. `made` names a new one. */
   onChanged: (made?: InboxInitiative) => void;
+  /** Where focus goes on close when what opened it is gone (the menu item): the filter button. */
+  fallbackFocus?: () => HTMLElement | null;
 }) {
   const [adding, setAdding] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [asking, setAsking] = useState<string | null>(null);
+  // Where focus goes once the next render is drawn: the ask's Cancel, a row's Delete, or the name field.
+  const [focusTo, setFocusTo] = useState<{ kind: 'ask' | 'row'; id: string } | { kind: 'new' } | null>(null);
   const newField = useRef<HTMLInputElement>(null);
+  const inner = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!focusTo) return;
+    const at =
+      focusTo.kind === 'new'
+        ? newField.current
+        : inner.current?.querySelector<HTMLElement>(
+            focusTo.kind === 'ask' ? `[data-initiative-delete-ask="${focusTo.id}"] [data-initiative-delete-no]` : `[data-initiative-row="${focusTo.id}"] [data-initiative-delete]`,
+          );
+    at?.focus();
+    setFocusTo(null);
+  }, [focusTo]);
+  const askDelete = (id: string) => {
+    setAsking(id);
+    setFocusTo({ kind: 'ask', id });
+  };
+  const keepAsking = (id: string) => {
+    setAsking(null);
+    setFocusTo({ kind: 'row', id });
+  };
   // The dialog first focuses its primary button: New initiative… lands in the name field instead.
   useEffect(() => {
     if (start !== 'new') return;
@@ -334,7 +359,7 @@ export function InitiativesDialog({
                 Delete <b dir="auto">{i.name}</b>?{' '}
                 {(cardCounts.get(i.id) ?? 0) > 0 && `Its ${cardCounts.get(i.id) === 1 ? 'card goes' : `${cardCounts.get(i.id)} cards go`} to No initiative.`}
               </span>
-              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => setAsking(null)}>
+              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => keepAsking(i.id)} data-initiative-delete-no="">
                 Cancel
               </button>
               <button
@@ -345,7 +370,11 @@ export function InitiativesDialog({
                 onClick={async () => {
                   const gone = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative);
                   if (!gone) return;
+                  // Focus moves to the next row's Delete (the one before when it was the last), else the name field.
+                  const at = initiatives.findIndex((other) => other.id === i.id);
+                  const next = initiatives[at + 1] ?? initiatives[at - 1];
                   setAsking(null);
+                  setFocusTo(next ? { kind: 'row', id: next.id } : { kind: 'new' });
                   onChanged();
                 }}
               >
@@ -362,7 +391,7 @@ export function InitiativesDialog({
                 if (renamed) onChanged();
                 return renamed !== null;
               }}
-              onDelete={() => setAsking(i.id)}
+              onDelete={() => askDelete(i.id)}
             />
           ),
         )}
@@ -370,8 +399,8 @@ export function InitiativesDialog({
     );
   }
   return (
-    <Modal label="Initiatives" testId="initiatives" onClose={onClose} ownKeys className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
-      <div className="ib-dlg-in">
+    <Modal label="Initiatives" testId="initiatives" onClose={onClose} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
+      <div className="ib-dlg-in" ref={inner}>
         <div className="ib-dlg-head">
           <h2>Initiatives</h2>
           <button type="button" className="ib-ncd-x" aria-label="Close" onClick={onClose}>

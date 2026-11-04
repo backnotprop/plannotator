@@ -64,11 +64,19 @@ export function cardsInProject<T extends Pick<InboxCardWire, 'project_id'>>(card
  * The Board's initiative filter (approval "board-initiatives"): an `ini_` id
  * (`#board&initiative=ini_…`), `none` for the cards in no initiative
  * (`&initiative=none`), or null for every card. It narrows what the project
- * filter left, so the two combine.
+ * filter left, so the two combine. Given the live initiatives, `none` also
+ * holds a card whose initiative is gone, as the counts do (`initiativeCounts`).
  */
-export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(cards: readonly T[], initiative: string | null): readonly T[] {
+export function cardsInInitiative<T extends Pick<InboxCardWire, 'initiative'>>(
+  cards: readonly T[],
+  initiative: string | null,
+  live?: readonly Pick<InboxInitiative, 'id'>[],
+): readonly T[] {
   if (initiative === null) return cards;
-  if (initiative === INBOX_NO_INITIATIVE) return cards.filter((card) => !card.initiative);
+  if (initiative === INBOX_NO_INITIATIVE) {
+    const ids = live ? new Set(live.map((i) => i.id)) : null;
+    return cards.filter((card) => !card.initiative || (ids !== null && !ids.has(card.initiative)));
+  }
   return cards.filter((card) => card.initiative === initiative);
 }
 

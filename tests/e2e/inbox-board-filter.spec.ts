@@ -293,6 +293,8 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   }
   await dialog.locator('[data-initiatives-done]').click();
   await expect(dialog).toHaveCount(0);
+  // The menu item that opened it is gone: focus lands on the filter button.
+  await expect(filterButton(page)).toBeFocused();
   const made = (await cardsRead()).initiatives;
   expect(made.map((i) => i.name)).toEqual(['Design system', 'Onboarding']);
   const design = made[0]!.id;
@@ -349,19 +351,36 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   expect(await tokenWords(page, 'initiative')).toBe('No initiative');
 
   // Deleted (asked once): its cards are in none again, and a link to it is no filter.
+  const onboarding = made[1]!.id;
+  const deleteOf = (id: string) => dialog.locator(`[data-initiative-row="${id}"] [data-initiative-delete]`);
   await filterButton(page).click();
   await page.locator('[data-board-initiative-edit]').click();
-  await dialog.locator(`[data-initiative-row="${design}"] [data-initiative-delete]`).click();
+  // The ask takes focus on its Cancel; Cancel gives it back to the row's Delete.
+  await deleteOf(design).click();
+  await expect(dialog.locator(`[data-initiative-delete-ask="${design}"] [data-initiative-delete-no]`)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(deleteOf(design)).toBeFocused();
+  await page.keyboard.press('Enter');
   await expect(dialog.locator(`[data-initiative-delete-ask="${design}"]`)).toContainText('Its 2 cards go to No initiative.');
   await dialog.locator('[data-initiative-delete-yes]').click();
   await expect(dialog.locator(`[data-initiative-row="${design}"]`)).toHaveCount(0);
+  // Focus on the next row's Delete; the last one gone, on the name field.
+  await expect(deleteOf(onboarding)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await dialog.locator('[data-initiative-delete-yes]').click();
+  await expect(dialog.locator('[data-initiative-row]')).toHaveCount(0);
+  await expect(dialog.locator('[data-initiative-new-name]')).toBeFocused();
   await dialog.locator('[data-initiatives-done]').click();
+  await expect(filterButton(page)).toBeFocused();
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
   const after = await cardsRead();
   expect(after.cards.filter((c) => c.initiative !== null)).toEqual([]);
   await page.goto(`${world.url}#board&initiative=${design}`);
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
   await expect(page.locator('[data-board-filter-token]')).toHaveCount(0);
+  // The next step on the Board drops the deleted id from the address.
+  await cardEl(page, ids.design).locator('[data-card-open]').click();
+  expect(await hashOf(page)).toBe(`#board&card=${ids.design}`);
   await page.goto(`${world.url}#board`);
   expect(world.errors).toEqual([]);
 });
