@@ -42,6 +42,8 @@ process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 // who set it in their shell must not make every Inbox test run the real
 // `tailscale` CLI. Tests that need it inject a scripted runner.
 delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+// The same for sessions: every spawned review/annotate would run `tailscale serve`.
+delete process.env.PLANNOTATOR_TAILSCALE;
 
 // `plannotator inbox` connects the agents it finds on PATH (packages/server/
 // inbox-agents.ts) by running their own CLIs. Tests never run a real agent

@@ -18,6 +18,9 @@ import type { QuestionAnswer, QuestionKind } from "./question-block";
 import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, InboxInlineImage } from "./inbox-attachments";
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
+import type { InboxSteps } from "./inbox-steps";
+import type { InboxInitiative } from "./inbox-initiatives";
+import type { InboxReviewVerdictRecord } from "./inbox-review";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
@@ -33,38 +36,28 @@ export * from "./inbox-qwen";
 export * from "./inbox-t3";
 // The Board's cards (approval "inbox-board"), the same way.
 export * from "./inbox-cards";
+// Thread steps (approval "inbox-thread-steps"), the same way.
+export * from "./inbox-steps";
+// The Board's initiatives (approval "board-initiatives"), the same way.
+export * from "./inbox-initiatives";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Pull requests (code review in the Inbox, phase 2), the same way.
+export * from "./inbox-pulls";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+export { ulid } from "./ulid";
+import { ulid } from "./ulid";
 
-/**
- * A ULID (48-bit millisecond time + 80 random bits, Crockford base32), so ids
- * sort by creation time and a later sync can keep them as they are.
- */
-export function ulid(now: number = Date.now()): string {
-  let time = Math.max(0, Math.floor(now));
-  let timePart = "";
-  for (let i = 0; i < 10; i++) {
-    timePart = CROCKFORD[time % 32] + timePart;
-    time = Math.floor(time / 32);
-  }
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  let randomPart = "";
-  for (let i = 0; i < 16; i++) randomPart += CROCKFORD[bytes[i]! % 32];
-  return timePart + randomPart;
-}
-
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -87,6 +80,10 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   lch: /^lch_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** An Inbox: the stable id other machines' links key on (packages/server/inbox-links.ts). */
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
+  stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A Board initiative (packages/core/inbox-initiatives.ts). */
+  ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -512,6 +509,25 @@ export interface InboxMessage {
    * thread"). Absent until the first tick; the snapshot's own ticks apply then.
    */
   guide_reviewed?: boolean[] | null;
+  /**
+   * On a message carrying a review (`guide.review`): the files the person
+   * ticked Viewed in the review, as the patch names them. Absent until the
+   * first tick.
+   */
+  guide_viewed?: string[] | null;
+  /**
+   * On the person's reply that gave a verdict on a review (Approve or Send
+   * feedback in the review's header): which review, the verdict, and how many
+   * of their comments rode it. The review card shows it as its outcome.
+   * Absent on every other message.
+   */
+  review_verdict?: InboxReviewVerdictRecord;
+  /**
+   * The reviews (message ids) whose diff comments this person's reply carried
+   * (code review in the Inbox), whichever message the reply answers. Set by
+   * the store at Send; the window reads it to tell a review happened.
+   */
+  review_comments_of?: string[];
   /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
@@ -991,6 +1007,15 @@ export interface InboxGuideRef {
   files: number;
   additions: number;
   deletions: number;
+  /**
+   * The agent asked for a verdict (submit_guide `review: true`, only while
+   * the person has Settings → Capabilities → Code review on): the window
+   * draws a review card with Start review, and the person's Approve or Send
+   * feedback comes back as their reply. Absent on every other guide.
+   */
+  review?: true;
+  /** A review's chapter titles, in order (the card lists them). Only with `review`. */
+  chapters?: string[];
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -1618,13 +1643,29 @@ export interface InboxThread {
    * thread's. Absent from an older Inbox and from the MCP tools.
    */
   archive_seq?: number | null;
+  /**
+   * The window's read only: every pull request the person handed to this thread is a teammate's (Pull requests'
+   * Hand to an agent; the Inbox's own pull list said so when the owner was kept). Its reviews take no verdict:
+   * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
+   */
+  pull_theirs?: true;
+  /**
+   * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
+   * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
+   */
+  pull_keys?: string[];
   messages: InboxMessageWire[];
 }
 
 // ─────────────────────────────── Lines ───────────────────────────────
 
-/** `card`: a Board card (approval "inbox-board"); a reader that does not know a kind skips its lines. */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card";
+/**
+ * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
+ * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
+ * initiative (approval "board-initiatives"). A reader that does not know a
+ * kind skips its lines.
+ */
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -1632,7 +1673,9 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "message"; id: string; record: InboxMessage }
   | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord }
   | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord }
-  | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard };
+  | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
+  | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
+  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -2313,6 +2356,14 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
 const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
 export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+/**
+ * What thread steps add to the entry when the person turns them on (the
+ * `steps` action and send_message's `steps` field; approval
+ * "inbox-thread-steps"), for the switch's words. Measured on Pi's request
+ * shape from a real Inbox, steps on minus steps off (checked within 5% by
+ * inbox-steps-agent.test.ts): 854 bytes (the approved text on the field, a short action line); tokens scaled from the entry's bytes per token and stated high. Off, they add nothing.
+ */
+export const INBOX_TOOL_COST_STEPS = { bytes: 854, tokens: 235 } as const;
 export const INBOX_TOOL_COST: Readonly<Record<InboxToolCostHost, { bytes: number; tokens: number }>> = {
   pi: INBOX_TOOL_COST_NOW,
   opencode: INBOX_TOOL_COST_NOW,
@@ -2490,6 +2541,12 @@ export interface InboxDraft {
    * any other draft.
    */
   card?: { id: string; title: string };
+  /**
+   * The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread.
+   * `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review
+   * line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
+   */
+  pulls?: { keys: string[]; projects: string[]; ask_line: string };
   /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
   board_request?: true;
 }

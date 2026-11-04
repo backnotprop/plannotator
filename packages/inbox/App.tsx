@@ -24,6 +24,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
+import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
@@ -98,6 +99,8 @@ import { feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 import { cardReport, noteQuestionRows } from './agents';
 import type { InboxAgentRow, InboxAgentsModel, InboxConnectReport, InboxTourChange, InboxTourState } from '@plannotator/core/inbox-types';
 import { SettingsPage } from './components/Settings';
+import { createStepsBus, STEPS_REFRESH_MS } from './steps/useThreadSteps';
+import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
@@ -110,9 +113,13 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
+import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
+import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
+import { ReviewPane } from './components/ReviewPane';
 import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
 import { leaveOnPurpose, replyBeingWritten, unsentReply } from './unsent';
 import { reloadOntoInbox, useStalePage } from './stalePage';
@@ -143,9 +150,15 @@ import { parseSettingsHash, settingsHash, type SettingsSection } from './setting
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
+import { PullsPage } from './pulls/PullsPage';
+import { PullReview } from './pulls/PullReview';
+import { usePulls } from './pulls/usePulls';
+import { pullGroups } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
+import { BoardIntro } from './board/BoardIntro';
+import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
-import { boardViewOf, newCardProject, type BoardView } from './board/model';
+import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
 import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
@@ -159,6 +172,12 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { createInboxShapeHost } from './shape/inboxShapeHost';
+import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { useInboxShapes } from './shape/useInboxShapes';
+import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
+import type { SearchShape } from './search/model';
+import { connectCommand } from './connectPrompt';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -216,6 +235,14 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** Who hears the event stream's `event: shapes` (the window has one stream; useInboxShapes listens here). */
+const shapeFrameListeners = new Set<(ids: string[]) => void>();
+const subscribeShapeFrames = (listener: (ids: string[]) => void) => {
+  shapeFrameListeners.add(listener);
+  return () => {
+    shapeFrameListeners.delete(listener);
+  };
+};
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
@@ -262,7 +289,19 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls' | 'shapes';
+  /**
+   * Pull requests (`#pulls`, Code review on): the stack open beside the list (`&stack=`, its top layer's key),
+   * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
+   */
+  stack?: string | null;
+  layer?: string | null;
+  scope?: 'layer' | 'stack';
+  /**
+   * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
+   * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
+   */
+  shape?: string | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -272,6 +311,13 @@ interface Route {
    * way back lands on the same filtered Board. On the Board itself the filter is `project` (`#board&project=prj_…`).
    */
   boardProject?: string | null;
+  /**
+   * The Board's initiative filter (approval "board-initiatives"): on the Board `#board&initiative=ini_…` (or
+   * `none`, the cards in none), beside `project`; on a thread opened from a card, `&board-initiative=`, so its
+   * way back lands on the same filtered Board.
+   */
+  initiative?: string | null;
+  boardInitiative?: string | null;
   /** The onboarding tour's step (`#tour=3`, approval "inbox-onboarding-tour"): 1 to 6. */
   step?: number;
   /** The release whose notes the What's new page shows (`#whats-new=0.28.12`). */
@@ -323,8 +369,22 @@ function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
-  if (params.has('board')) return { page: 'board', project: params.get('project') || null, thread: null, board: boardViewOf(params.get('board')), card: params.get('card') };
+  if (params.has('pulls')) {
+    const stack = params.get('stack') || null;
+    const layer = stack ? params.get('layer') || null : null;
+    return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+  }
+  if (params.has('board'))
+    return {
+      page: 'board',
+      project: params.get('project') || null,
+      initiative: boardInitiativeOf(params.get('initiative'), null),
+      thread: null,
+      board: boardViewOf(params.get('board')),
+      card: params.get('card'),
+    };
   const thread = params.get('thread');
   const fileId = thread ? params.get('file') : null;
   return {
@@ -334,12 +394,14 @@ function routeOf(fullHash: string): Route {
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
+    shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     card: thread ? params.get('card') : null,
     // The Board list the card was opened from (Done, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
     boardProject: thread && params.get('card') ? params.get('board-project') || null : null,
+    boardInitiative: thread && params.get('card') ? boardInitiativeOf(params.get('board-initiative'), null) : null,
   };
 }
 
@@ -349,11 +411,18 @@ function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
-      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      boardFilterHash({ project: route.project, initiative: route.initiative }) +
       (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
+  else if (route.page === 'pulls')
+    hash =
+      'pulls' +
+      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -373,10 +442,12 @@ function hashOf(route: Route): string {
       if (route.file.set) params.set('set', route.file.set);
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
+    if (route.thread && route.shape) params.set('shape', route.shape);
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
+    if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
     // `&artifacts`, a flag: written without its empty `=`.
     hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
   }
@@ -678,6 +749,11 @@ function Inbox() {
   const [decidePaused, setDecidePaused] = useState(0);
   const decisionModeOnRef = useRef(false);
   const questionListeners = useRef(new Set<(question: InboxQuestion) => void>());
+  /**
+   * Thread steps' changes (approval "inbox-thread-steps"): a `steps` record names its thread; presence moving
+   * (`event: deliveries`), a reconnect and a catch-up name every thread. The open thread's steps read again.
+   */
+  const [stepsBus] = useState(createStepsBus);
   /** The questions the open thread is saving, whether one's record came meanwhile, and the read it owes (`onPickSaves`). */
   const pickSaves = useRef({ saving: new Set<string>() as ReadonlySet<string>, owed: false, read: () => {} });
   const subscribeQuestions = useCallback((listener: (question: InboxQuestion) => void) => {
@@ -866,8 +942,11 @@ function Inbox() {
   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
   const [listIntroSettled, setListIntroSettled] = useState(false);
   const voiceIntroDueAtLoad = useRef(false);
-  /** The one-time Snooze announcement (snoozeIntro.ts): due for this page, read once per load. */
-  const snoozeIntroLatch = useRef<{ due: boolean } | null>(null);
+  /**
+   * The reveals for returning users (reveal.ts; approval "inbox-feature-reveal"): the one this page may arm, read once
+   * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed: one per load.
+   */
+  const snoozeIntroLatch = useRef<{ due: boolean; next: 'snooze' | 'board' | 'steps' | null } | null>(null);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -1132,6 +1211,12 @@ function Inbox() {
    */
   const closing = useRef<OpenThread | null>(null);
   /**
+   * Rows this window's own snooze moved while the list held (`moveSnoozedRow`),
+   * each with the list as drawn before it: an Unsnooze puts the row back there.
+   * Emptied whenever the list settles or adopts, since the slots are gone then.
+   */
+  const snoozeMoved = useRef(new Map<string, InboxListSection[]>());
+  /**
    * The thread the held list treats as open: the route's, else the one
    * closing (with its row as it stood at the close, so an agent message after
    * the close waits behind "N new" like any other); the close's own render
@@ -1161,6 +1246,7 @@ function Inbox() {
       const next = latestRef.current;
       if (!next) return;
       if (slide) armSlide();
+      snoozeMoved.current.clear();
       const groups = listGroups(next);
       setShown((current) => (what === 'all' || current === null || !hasRows(current) ? groups : settleOwn(current, groups, openedHere.current, closed)));
     },
@@ -1199,6 +1285,7 @@ function Inbox() {
       if (adopt && refresh?.light) showFrom.current = shownRef.current;
       // A refresh beside an open thread keeps that thread's row where it is on screen (held.ts adoptKeepingOpen).
       const keep = adopt && refresh?.keepOpen ? routeRef.current.thread : null;
+      if (adopt) snoozeMoved.current.clear();
       setUpdate(next.update);
       setUpdated(next.updated ?? null);
       setRestartAgents(restartAgentsOf(next.restart_agents, next.restart_claude_code));
@@ -1485,6 +1572,18 @@ function Inbox() {
    */
   const boardEnabled = settings ? (settings.board ? settings.board.on : true) : null;
   boardOnRef.current = boardEnabled === true;
+  // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
+  // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
+  const shapeOn = settings?.shape?.on === true && settings.guest !== true;
+  const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
+  const shapeHost = useMemo(
+    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
+    [shapes.subscribe, settings?.mcp_command],
+  );
+  // A `#shapes` link while Shape is off (or never on): the list, in its place.
+  useEffect(() => {
+    if (settings && !shapeOn && route.page === 'shapes') writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+  }, [settings, shapeOn, route.page]);
   useEffect(() => {
     if (boardEnabled !== true) {
       // Off (or not known yet): no card is read, and none kept from before it was turned off.
@@ -1496,12 +1595,57 @@ function Inbox() {
   }, [boardEnabled, refreshCards]);
   const onBoard = route.page === 'board' && boardEnabled === true;
   /**
+   * The Board's checklists (approval "inbox-thread-steps", part 4) ride on the cards read: while the Board shows and
+   * the switch is on, a steps change for a thread a card links (or a presence move, a catch-up) reads the cards
+   * again, and so does the switch turning, and a minute passing while a card wears a checklist (its presence ages).
+   */
+  const cardsNowRef = useRef(cards);
+  cardsNowRef.current = cards;
+  const stepsShownOn = settings?.steps?.on === true;
+  const stepsBoardOn = useRef<boolean | null>(null);
+  useEffect(() => {
+    if (!onBoard) {
+      stepsBoardOn.current = null;
+      return;
+    }
+    // The switch turned while the Board was in front: its marks come or go now (entering the Board reads the cards anyway).
+    if (stepsBoardOn.current !== null && stepsBoardOn.current !== stepsShownOn) void refreshCards();
+    stepsBoardOn.current = stepsShownOn;
+    if (!stepsShownOn) return;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const unsubscribe = stepsBus.subscribe((change) => {
+      const now = cardsNowRef.current;
+      // Presence moving changes only a checklist a card wears; a thread's steps line, only a card that links it.
+      const wanted =
+        change === '*' ||
+        (change === 'presence' ? Object.keys(now?.steps ?? {}).length > 0 : !!now?.cards.some((card) => card.threads.includes(change)));
+      if (!wanted) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => void refreshCards(), 250);
+    });
+    const tick = setInterval(() => {
+      const steps = cardsNowRef.current?.steps;
+      if (steps && Object.keys(steps).length > 0) void refreshCards();
+    }, STEPS_REFRESH_MS);
+    return () => {
+      unsubscribe();
+      if (timer) clearTimeout(timer);
+      clearInterval(tick);
+    };
+  }, [onBoard, stepsShownOn, stepsBus, refreshCards]);
+  /**
    * The project the Board is filtered to (`#board&project=prj_…`). A project the Inbox does not
    * know (a stale or hand-edited link) is no filter once the projects have loaded; before that the
    * id filters as it stands, so a filtered link never flashes every card.
    */
   const boardFilter =
     route.page === 'board' && route.project && (latest === null || latest.projects.some((p) => p.id === route.project)) ? route.project : null;
+  /**
+   * The initiative the Board is filtered to (`#board&initiative=ini_…`, or `none`; approval
+   * "board-initiatives"). One the Inbox does not hold (deleted, a stale link) is no filter once the
+   * cards have loaded; before that the id filters as it stands.
+   */
+  const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {
       setBoardVisit(null);
@@ -1524,7 +1668,7 @@ function Inbox() {
    * look to record (no `seen_seq`): nothing is bold beyond this visit there.
    */
   const lookRecorded = useRef(false);
-  const boardShowsAll = onBoard && boardFilter === null;
+  const boardShowsAll = onBoard && boardFilter === null && boardInitiative === null;
   useEffect(() => {
     if (!boardVisit) {
       lookRecorded.current = false;
@@ -1691,9 +1835,15 @@ function Inbox() {
       unsubscribe = subscribeInboxEvents(first.cursor, {
         onRecord: (event) => {
           // A Board card (approval "inbox-board"): only the Board reads it; it never changes the list or a thread.
-          if (event?.kind === 'card') {
+          // A Board initiative (approval "board-initiatives") reaches the Board through its cards' read too.
+          if (event?.kind === 'card' || event?.kind === 'initiative') {
             if (cardsTimer) clearTimeout(cardsTimer);
             cardsTimer = setTimeout(() => void refreshCards(), 60);
+            return;
+          }
+          // A thread's steps (approval "inbox-thread-steps"): silent. Never a notification, unread, or a list or thread read.
+          if (event?.kind === 'steps') {
+            stepsBus.emit(event.thread_id);
             return;
           }
           const now = routeRef.current;
@@ -1741,6 +1891,14 @@ function Inbox() {
         // How the rows look was saved (here, another window, a phone): every list takes it at once.
         // One at or below the last event's count (the count gone back, or a late copy): the settings read decides.
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
+        // A capability switch saved here or in another window (approval "inbox-thread-steps"; the Board too): every window follows.
+        onCapabilities: (capabilities) => {
+          // Code review and Shape move the "/" list: the next box reads the catalog again.
+          if (capabilities.code_review || capabilities.shape) reloadSkillCatalog();
+          // The Board too (its sidebar row; capabilities.ts): settings sync everywhere.
+          if (namesCapability(capabilities)) setSettings((current) => (current ? withCapabilities(current, capabilities) : current));
+          else void refreshSettings();
+        },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
           setUpdate(next);
           if (nextUpdated !== undefined) setUpdated(nextUpdated);
@@ -1757,14 +1915,24 @@ function Inbox() {
           if (open && threadLoaded.current?.thread_id === open && threadLoaded.current.messages[0]?.launch) void refreshThread(open);
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
+          // So does each steps list's presence (the in-progress mark turns only while its session works): read
+          // again only where a list shows.
+          stepsBus.emit('presence');
           if (!hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
+        // Shape's boards changed (only sent while Shape is on).
+        onShapes: (ids) => {
+          for (const listener of shapeFrameListeners) listener(ids);
+        },
         onConnect: () => {
+          // A reconnect may have missed `event: shapes`: the boards are read again.
+          for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
           emitAskChange(null);
+          stepsBus.emit('*');
           // The Inbox may have restarted onto a newer release while this page stayed open.
           stalePageRef.current.recheck();
         },
@@ -1777,6 +1945,8 @@ function Inbox() {
           const open = routeRef.current.thread;
           if (open) void refreshThread(open);
           void refreshDrafts();
+          // A steps line meanwhile (a record, so replayed too, but read once here like the thread).
+          stepsBus.emit('*');
           // A card record reads the Board: while it is open, it is read again too.
           if (routeRef.current.page === 'board') void refreshCards();
           // The rows' look another window saved meanwhile (`event: rows` is not replayed): the settings read has it.
@@ -2118,6 +2288,14 @@ function Inbox() {
         pageBackRef.current();
         return;
       }
+      // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
+      // (its panel, its draw-in) runs first and marks the key used.
+      if (event.key === 'Escape' && routeRef.current.page === 'shapes') {
+        const from = keyTarget(event);
+        if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from)))) return;
+        closeTo(routeRef.current.shape ? { ...routeRef.current, shape: null } : { page: 'inbox', project: null, thread: null });
+        return;
+      }
       // An open file owns Escape (the HTML viewer's ladder, the composers).
       if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
@@ -2132,6 +2310,11 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
+      // A board open over the thread closes first, back to the thread.
+      if (now.shape) {
+        closeTo({ ...now, shape: null });
+        return;
+      }
       if (!now.guide && !now.artifacts && threadFullRef.current) {
         leaveFullRef.current();
         return;
@@ -2960,10 +3143,14 @@ function Inbox() {
   };
 
   /**
-   * Snooze a thread, from its row's menu or its ⋯ (approval "inbox-snooze"). The
-   * row leaves its section as Mark read's does: at once with no thread open,
-   * when the list settles with one. The toast says when it comes back; its Undo
-   * puts back exactly what was there, an earlier snooze included.
+   * Snooze a thread, from its row's menu, the thread header's clock or a
+   * phone's ⋯ (approval "inbox-snooze"). The row leaves its section at once
+   * (the owner, 2026-11-03: "ideally when snoozing they would move in the list
+   * after i snooze it"): with no thread open the write's read moves it, as
+   * Mark read's does; with one open beside the list, only this row moves
+   * (`moveSnoozedRow`) and the rest of the list holds still. The toast says
+   * when it comes back; its Undo puts back exactly what was there, an earlier
+   * snooze included, and the row with it.
    */
   const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
     const threadId = row.thread_id;
@@ -2976,17 +3163,44 @@ function Inbox() {
       return;
     }
     await afterWrite();
+    const drawnBefore = moveSnoozedRow(threadId);
+    if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
     const when = inboxSnoozeWhen(until);
     showToast({
       icon: 'clock',
       lead: 'Snoozed',
       detail: when,
       speech: `Snoozed “${row.subject ?? '(no subject)'}” until ${when}.`,
-      onUndo: () => void putSnooze(threadId, earlier),
+      onUndo: () => void putSnooze(threadId, earlier, drawnBefore),
     });
   };
-  /** Snooze's Undo: the snooze it replaced, or none. */
-  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null) => {
+  /**
+   * The person's own snooze while a thread is open beside the list: that one
+   * row goes to the Snoozed band now (held.ts `settleThread`), fading from its
+   * place while the rows below slide up (settle.ts; nothing moves under
+   * reduced motion). Every other row holds, and agent activity stays behind
+   * "N new". Nothing to do with no thread open (the write's read adopted the
+   * list) or where the thread covers the list (Back moves it, `settlesOnBack`).
+   * Only a row the read shows snoozed moves: a write a linked machine's outbox
+   * holds has not snoozed anything yet. Returns the list as drawn before, for
+   * Undo, or null when nothing moved.
+   */
+  const moveSnoozedRow = (threadId: string): InboxListSection[] | null => {
+    const drawn = shownRef.current;
+    if (!routeRef.current.thread || listCovered() || !drawn || !latestRef.current) return null;
+    if (drawnSection(drawn, threadId) === null || !rowOf(threadId)?.snoozed) return null;
+    const groups = listGroups(latestRef.current);
+    armSlide();
+    setShown((current) => (current ? settleThread(current, groups, threadId) : current));
+    return drawn;
+  };
+  /**
+   * Snooze's Undo: the snooze it replaced, or none. A row the snooze moved
+   * while a thread is open goes back where it was drawn, between the same
+   * neighbours (held.ts `putRowBack`), in its state as it is now.
+   */
+  const putSnooze = async (threadId: string, earlier: InboxRowSnooze | null, drawnBefore: InboxListSection[] | null = null) => {
+    snoozeMoved.current.delete(threadId);
     try {
       await inboxApi.snooze(threadId, earlier && inboxSnoozeRunning(earlier.until) ? earlier.until : null, earlier?.at);
     } catch (cause) {
@@ -2994,20 +3208,44 @@ function Inbox() {
       return;
     }
     await afterWrite();
+    putSnoozedRowBack(threadId, drawnBefore);
     dismissToast();
     say(earlier ? 'Snooze moved back.' : 'Unsnoozed.');
   };
-  /** Unsnooze: the thread is back in its section now. Undo snoozes it again, to the same time. */
+  /**
+   * A row this window's own snooze moved (`moveSnoozedRow`) whose snooze then
+   * changed, the thread still open beside the list: unsnoozed, it goes back
+   * between the neighbours it had (held.ts `putRowBack`), in its state as it is
+   * now; snoozed again, it takes its place in the band. Nothing once the list
+   * has settled since (`snoozeMoved` is emptied then) or with no thread open
+   * (the write's read adopted the list).
+   */
+  const putSnoozedRowBack = (threadId: string, drawnBefore: InboxListSection[] | null) => {
+    const now = rowOf(threadId);
+    if (!drawnBefore || !now || !routeRef.current.thread || listCovered() || drawnSection(shownRef.current, threadId) !== 'snoozed') return;
+    armSlide();
+    setShown((current) => (current ? (now.snoozed ? settleThread(current, listGroups(latestRef.current!), threadId) : putRowBack(replaceHeldRow(current, now), drawnBefore, threadId)) : current));
+  };
+  /**
+   * Unsnooze: the thread is back in its section now. A row this window's own
+   * snooze moved comes back at once, as Snooze's Undo brings it (the person's
+   * own snooze undone); any other held row waits for the list to settle. Undo
+   * snoozes it again, to the same time, and sends a row that came back to the
+   * band again.
+   */
   const unsnooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>) => {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
+    const drawnBefore = snoozeMoved.current.get(threadId) ?? null;
     try {
       await inboxApi.snooze(threadId, null);
     } catch (cause) {
       showError(cause);
       return;
     }
+    snoozeMoved.current.delete(threadId);
     await afterWrite();
+    putSnoozedRowBack(threadId, drawnBefore);
     showToast({
       icon: 'clock',
       lead: 'Unsnoozed',
@@ -3015,7 +3253,11 @@ function Inbox() {
       onUndo: earlier
         ? () => {
             dismissToast();
-            void restoreSnooze(threadId, earlier);
+            void restoreSnooze(threadId, earlier).then(() => {
+              if (!drawnBefore) return;
+              const moved = moveSnoozedRow(threadId);
+              if (moved) snoozeMoved.current.set(threadId, moved);
+            });
           }
         : undefined,
     });
@@ -3667,6 +3909,46 @@ function Inbox() {
     }
   };
 
+  // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
+  const toggleSteps = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, steps: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveSteps(next);
+      setSettings((current) => (current ? { ...current, steps: saved.steps } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
+  // Code review (approval "inbox-code-review-direction"): every other window hears `event: capabilities`.
+  const toggleCodeReview = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, code_review: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveCodeReview(next);
+      reloadSkillCatalog();
+      setSettings((current) => (current ? { ...current, code_review: saved.code_review } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
+  const toggleShape = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveShape(next);
+      reloadSkillCatalog();
+      setSettings((current) => (current ? { ...current, shape: saved.shape } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -3930,33 +4212,81 @@ function Inbox() {
   // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
   if (updateDialog !== null || restarting) updatingThisLoad.current = true;
   if (snoozeIntroLatch.current === null && settings && latest !== null) {
-    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true };
+    // Only `reveal.next` is armed; an older Inbox reports no queue: its Snooze rule alone (reveal.ts `revealArmed`).
+    const armed = revealArmed(settings);
+    snoozeIntroLatch.current = { due: armed.snoozeDue, next: armed.next };
   }
   const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
+  const revealBlocked = snoozeIntroBlockedBy({
+    tour: tourThisLoad.current,
+    updating: updatingThisLoad.current,
+    sound: soundDialog,
+    agentNote,
+    listIntroWant,
+    listIntro,
+    voiceWanted: voiceIntro.wanted,
+    voiceStage: voiceIntro.stage,
+    board: oneTimeDialogShownThisLoad(),
+  });
+  // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
+  const revealHeldBack = () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null;
   const snoozeIntro = useSnoozeIntro({
     due: snoozeIntroLatch.current?.due ?? false,
     listLoaded: snoozeIntroLatch.current !== null,
     firstRun,
-    blocked: snoozeIntroBlockedBy({
-      tour: tourThisLoad.current,
-      updating: updatingThisLoad.current,
-      sound: soundDialog,
-      agentNote,
-      listIntroWant,
-      listIntro,
-      voiceWanted: voiceIntro.wanted,
-      voiceStage: voiceIntro.stage,
-      board: oneTimeDialogShownThisLoad(),
-    }),
+    blocked: revealBlocked,
     snoozedHere: snoozedThisLoad.current,
     rows: snoozeIntroRows,
     toast: toast !== null,
     thread: route.page === 'inbox' ? (route.thread ?? null) : null,
     clear: listIntroClear,
     place: `${route.thread}|${route.project}|${route.machine}`,
-    // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
-    heldBack: () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null,
+    heldBack: revealHeldBack,
   });
+  // The Board reveal (reveal.ts): the same calm moment, back on the list; the claim only stamps it, and the Board's own
+  // first-visit dialog (BoardIntro) offers it: "Turn it on" turns it on (its sidebar row appears), "Not now" leaves it.
+  const boardReveal = useBoardReveal({
+    due: snoozeIntroLatch.current?.next === 'board',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    on: settings?.board?.on === true,
+    onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
+  });
+  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim only stamps it, then
+  // ChecklistIntro offers it.
+  const stepsReveal = useStepsReveal({
+    due: snoozeIntroLatch.current?.next === 'steps',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    on: settings?.steps?.on === true,
+    onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
+  });
+  /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
+  const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
+    void turnOnRevealFeature(feature, close, {
+      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      setSettings,
+      showToast,
+      dismissToast,
+      refreshSettings,
+      openSettings: () => {
+        window.location.hash = '#settings/capabilities';
+      },
+    });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -3993,7 +4323,11 @@ function Inbox() {
     voiceIntro.stage !== 'open' &&
     voiceIntro.stage !== 'claimed' &&
     snoozeIntro.stage !== 'open' &&
-    snoozeIntro.stage !== 'claimed';
+    snoozeIntro.stage !== 'claimed' &&
+    boardReveal.stage !== 'open' &&
+    boardReveal.stage !== 'claimed' &&
+    stepsReveal.stage !== 'open' &&
+    stepsReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -4008,6 +4342,17 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
+  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
+  // page is open, and for the sidebar's count once at start and on focus; never from a tailnet guest's page (it runs
+  // this computer's gh / glab).
+  const codeReviewOn = settings?.code_review?.on === true;
+  const pullsShown = codeReviewOn && !guestPage;
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
+  // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
+  useEffect(() => {
+    if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.page, settings !== null, pullsShown]);
   useEffect(() => {
     if (!firstRun || guestPage) return;
     let last = Date.now();
@@ -4464,7 +4809,29 @@ function Inbox() {
     setThreadFull(false);
   };
   leaveFullRef.current = leaveFull;
-  const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
+  const backToCard = () =>
+    close({ page: 'board', project: route.boardProject ?? null, initiative: route.boardInitiative ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
+  // ⌘K's "Shape" group: the boards whose title or project the words find, newest change first.
+  const searchShapes = useCallback(
+    (q: string): SearchShape[] =>
+      filterShapeItems(
+        (shapes.shapes ?? []).filter((s) => s.state === 'active').map((s) => ({ s, title: s.title, project: s.project.name })),
+        q,
+      )
+        .slice(0, 5)
+        .map(({ s }) => ({
+          id: s.id,
+          title: s.title,
+          project: s.project.name,
+          meta: s.thread ? (s.drawing ? 'drawing now' : shapeAgo(s.updated)) : 'no thread',
+          hash: s.thread ? `#thread=${encodeURIComponent(s.thread)}&shape=${encodeURIComponent(s.id)}` : `#shapes&shape=${encodeURIComponent(s.id)}`,
+          picture: s.preview?.picture ?? null,
+          refs: s.preview?.refs ?? [],
+        })),
+    [shapes.shapes],
+  );
+  // The board open over its thread or over the grid (Shape on only).
+  const shapeLayerId = shapeOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
@@ -4744,6 +5111,9 @@ function Inbox() {
         onToggleCookieHost={(next) => void toggleCookieHost(next)}
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
+        onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleCodeReview={(next) => void toggleCodeReview(next)}
+        onToggleShape={(next) => void toggleShape(next)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -4862,19 +5232,34 @@ function Inbox() {
         openCard={route.card ?? null}
         onOpenCard={(id) => {
           if (id) handleCard(id);
-          const next: Route = { page: 'board', project: route.project, thread: null, board: route.board ?? 'lanes', card: id };
+          const next: Route = { page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: route.board ?? 'lanes', card: id };
           // Another card replaces the open one's entry; opening the first and closing are entries of their own (a phone's Back closes it).
           if (id === null && route.card) close(next);
           else writeRoute(next, { replace: !!route.card && id !== null });
         }}
         rowOf={(threadId) => rowById.get(threadId) ?? null}
-        onView={(next) => go({ page: 'board', project: route.project, thread: null, board: next })}
+        onView={(next) => go({ page: 'board', project: route.project, initiative: boardInitiative, thread: null, board: next })}
         project={boardFilter}
         // The filter is a place, like the list's project: each pick is a history entry, and Back undoes it.
         onProject={(project) => {
           // An opened card stays open while the Board still shows it.
           const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
-          go({ page: 'board', project, thread: null, board: route.board ?? 'lanes', card: open && (project === null || open.project_id === project) ? open.id : null });
+          go({
+            page: 'board',
+            project,
+            initiative: boardInitiative,
+            thread: null,
+            board: route.board ?? 'lanes',
+            card: open && (project === null || open.project_id === project) ? open.id : null,
+          });
+        }}
+        initiative={boardInitiative}
+        onClearFilter={() => go({ page: 'board', project: null, initiative: null, thread: null, board: route.board ?? 'lanes', card: route.card ?? null })}
+        // The other half of the one filter: a pick is a history entry too, and Back undoes it.
+        onInitiative={(initiative) => {
+          const open = route.card ? cards?.cards.find((c) => c.id === route.card) : undefined;
+          const shows = open && cardsInInitiative([open], initiative, liveInitiatives(cards?.initiatives)).length > 0;
+          go({ page: 'board', project: route.project, initiative, thread: null, board: route.board ?? 'lanes', card: shows ? open.id : null });
         }}
         onMove={moveCard}
         // A card that leaves the lanes from its right-click menu: the one toast, with Undo (`Z`).
@@ -4889,10 +5274,60 @@ function Inbox() {
         }}
         onSeeDrops={seeDrops}
         tidy={boardTidy}
-        onOpenThread={(card, threadId) => go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter })}
+        onOpenThread={(card, threadId) =>
+          go({ page: 'inbox', project: null, thread: threadId, card: card.id, board: route.board ?? 'lanes', boardProject: boardFilter, boardInitiative })
+        }
         onCreateThread={(card, session, opener) => openCompose({ session, card: { id: card.id, title: card.title } }, opener)}
         // The lane marks run this computer's gh / glab: never asked from a tailnet guest's page.
         marks={settings !== null && !guestPage}
+      />
+    );
+  } else if (route.page === 'pulls' && pullsShown && route.stack && route.layer) {
+    main = (
+      <PullReview
+        model={pulls.model}
+        modelError={pulls.error}
+        stackId={route.stack}
+        layerKey={route.layer}
+        scope={route.scope ?? 'layer'}
+        onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
+        onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onSent={() => {
+          close({ ...route, layer: null, scope: 'layer' });
+          showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
+        }}
+      />
+    );
+  } else if (route.page === 'pulls' && pullsShown) {
+    main = (
+      <PullsPage
+        state={pulls}
+        stackId={route.stack ?? null}
+        project={route.project}
+        projects={projects}
+        projectNames={projectNames}
+        phone={phone}
+        onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
+        onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
+        onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
+        onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
+        onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
+        onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
+        onLaunch={(keys, projectIds, body, askLine, opener, threadName) => openCompose({ body, threadName, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
+        onHanded={(session) => {
+          rememberSent(session);
+          pulls.reload();
+        }}
+      />
+    );
+  } else if (route.page === 'pulls') {
+    main = <div className="ib-listcol" aria-busy="true" />;
+  } else if (route.page === 'shapes') {
+    // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
+    main = (
+      <ShapeGridPage
+        shapes={shapeOn ? shapes.shapes : null}
+        onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
       />
     );
   } else if (route.page === 'drafts') {
@@ -5072,6 +5507,25 @@ function Inbox() {
               </>
             }
             thread={thread}
+            codeReview={settings?.code_review?.on === true}
+            threadSteps={
+              settings?.steps
+                ? {
+                    on: settings.steps.on,
+                    subscribe: stepsBus.subscribe,
+                    // The checklist head's Board icon (part 4): the card that links this thread, while the Board is on.
+                    boardCard: (() => {
+                      const card = boardEnabled === true && cards ? threadBoardCard(cards.cards, thread.thread_id) : null;
+                      if (!card) return null;
+                      return {
+                        title: card.title,
+                        onOpen: () =>
+                          fromCard === card.id ? backToCard() : go({ page: 'board', project: null, thread: null, board: 'lanes', card: card.id }),
+                      };
+                    })(),
+                  }
+                : null
+            }
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
@@ -5097,6 +5551,12 @@ function Inbox() {
             filesChanged={filesChanged}
             onReplyOpened={() => setReplyFor(null)}
             askButton={ask.button}
+            shapeButton={(() => {
+              const board = shapeOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
+              if (!board) return null;
+              const open = route.shape === board.id;
+              return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
+            })()}
             askFileButton={ask.fileButton}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
@@ -5296,6 +5756,11 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
+            onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
+            pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
+            onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
+            shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
@@ -5325,7 +5790,17 @@ function Inbox() {
           )
         }
       >
-        <main className="ib-main">{main}</main>
+        <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
+          {main}
+          {shapeLayerId && (
+            <ShapeLayer
+              host={shapeHost}
+              id={shapeLayerId}
+              thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+              onClose={() => close({ ...routeRef.current, shape: null })}
+            />
+          )}
+        </main>
       </SidebarShell>
       <UsagePeek
         anchor={usageRow}
@@ -5393,6 +5868,10 @@ function Inbox() {
         />
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
+      {boardReveal.stage === 'open' && (
+        <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
+      )}
+      {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}
@@ -5572,6 +6051,7 @@ function Inbox() {
         onOpenResult={openSearchResult}
         actions={paletteActions}
         onAction={(action) => openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current)}
+        shapes={shapeOn ? searchShapes : undefined}
       />
       {compose && (
         <ComposeDialog
@@ -5590,6 +6070,13 @@ function Inbox() {
                 .editCard(sent.cardId, { op: 'link', thread_id: sent.threadId })
                 .then(() => refreshCards())
                 .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not linked to the card', phoneLead: 'Not linked to the card', detail: 'Open the thread from the Inbox.' }, 7000));
+            }
+            // Launch an agent from Pull requests: the new thread is the PRs' agent's, so verdicts and Reply go there.
+            if (sent.pullKeys && sent.pullKeys.length > 0) {
+              void inboxApi
+                .pullOwner(sent.pullKeys, sent.threadId, sent.pullAsk ?? undefined)
+                .then(() => pulls.reload())
+                .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not tied to the pull request', phoneLead: 'Not tied to the pull request', detail: 'Open the thread from the Inbox.' }, 7000));
             }
           }}
           onSaved={composeSaved}
@@ -5635,14 +6122,30 @@ function Inbox() {
       <div className="ib-sr" aria-live="polite" data-inbox-live="">
         {said}
       </div>
-      {guideMessage && thread && (
-        <GuidePane
-          thread={thread}
-          message={guideMessage}
-          onBack={() => close({ ...route, guide: null })}
-          onClose={() => close({ ...route, thread: null, guide: null })}
-        />
-      )}
+      {guideMessage &&
+        thread &&
+        // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
+        (settings?.code_review?.on === true && guideMessage.guide?.review ? (
+          <ReviewPane
+            key={guideMessage.id}
+            thread={thread}
+            message={guideMessage}
+            // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
+            onBack={() => {
+              const now = routeRef.current;
+              if (now.guide === guideMessage.id) close({ ...now, guide: null });
+            }}
+            onClose={() => close({ ...route, thread: null, guide: null })}
+            onSent={afterWrite}
+          />
+        ) : (
+          <GuidePane
+            thread={thread}
+            message={guideMessage}
+            onBack={() => close({ ...route, guide: null })}
+            onClose={() => close({ ...route, thread: null, guide: null })}
+          />
+        ))}
     </div>
   );
 }
@@ -5658,4 +6161,9 @@ export function InboxApp() {
       </TooltipProvider>
     </ThemeProvider>
   );
+}
+
+/** The sidebar's Pull requests count: the rows on the person in the last read. */
+function pullsOnYou(model: import('@plannotator/core/inbox-types').InboxPullsAnswer): number {
+  return pullGroups(model, null).on_you.length;
 }

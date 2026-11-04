@@ -567,6 +567,8 @@ describe("plannotator inbox mcp inside an agent session", () => {
     // search takes the project only (strict, no session), and nothing when it searches every project.
     expect(call("search", { query: "retry" })).toEqual({ query: "retry", project_path: "/work" });
     expect(call("search", { query: "retry", all_projects: true })).toEqual({ query: "retry", all_projects: true });
+    // Thread steps are the session's own and name their thread: session and author, no project (the schema is strict).
+    expect(call("steps", { thread_id: "thr_1", steps: [] })).toEqual({ thread_id: "thr_1", steps: [], agent_session: CLAUDE_SESSION, agent_host: "claude-code", agent_name: "Claude Code" });
     // The agent's own choices stand.
     expect(call("send_message", { body: "hi", agent_session: "mine" })).toEqual({ body: "hi", project_path: "/work", agent_session: "mine" });
     // An agent that names another host is not this session: it gets the shim's own id, so a reply to it never wakes the session.

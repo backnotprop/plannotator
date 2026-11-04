@@ -50,7 +50,11 @@ export const GUIDE_FOLD_PANEL_BELOW = 1200;
 const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
 
-export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
+/**
+ * A guided review's state in the window, shared by the guide pane and the review (code review in the Inbox): the
+ * snapshot, the reviewed ticks, and the person's comments on its diffs as the store keeps them until a Send.
+ */
+export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const [snapshot, setSnapshot] = useState<GuideSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reviewed, setReviewed] = useState<boolean[]>(() => message.guide_reviewed ?? []);
@@ -68,26 +72,6 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
    * back a comment just removed or drop one just saved.
    */
   const localWrites = useRef(0);
-  const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
-  /** The folded panel, open over the guide. */
-  const [sheet, setSheet] = useState(false);
-  useEffect(() => {
-    if (!folded) setSheet(false);
-  }, [folded]);
-  const sheetButtonRef = useRef<HTMLButtonElement>(null);
-  const sheetId = useId();
-  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
-  const closeSheet = () => {
-    setSheet(false);
-    sheetButtonRef.current?.focus({ preventScroll: true });
-  };
-  // Escape closes the open sheet before it closes the guide (App's handler skips a used Escape).
-  const onSheetKey = (event: React.KeyboardEvent) => {
-    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
-      event.preventDefault();
-      closeSheet();
-    }
-  };
 
   useEffect(() => {
     let cancelled = false;
@@ -144,16 +128,20 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   const comments = useMemo(() => records.map(guideCommentOf).filter((c): c is CodeAnnotation => c !== null), [records]);
 
   const save = useCallback(
-    (annotation: CodeAnnotation) => {
+    (annotation: CodeAnnotation): Promise<boolean> => {
       setSaveError(null);
       localWrites.current += 1;
-      inboxApi.saveGuideAnnotation(message.id, annotation).then(
+      return inboxApi.saveGuideAnnotation(message.id, annotation).then(
         (saved) => {
           // Again on the answer: a read that started while the write was in flight may not hold it.
           localWrites.current += 1;
           setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]);
+          return true;
         },
-        (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.'),
+        (cause: unknown) => {
+          setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
+          return false;
+        },
       );
     },
     [message.id],
@@ -179,9 +167,47 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
   };
 
   const readerComments = useMemo(
-    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget }),
-    [readOnly, comments, selectedId, save, remove, scrollTarget],
+    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget, draftScope: message.id }),
+    [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
+
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
+}
+
+export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
+  /** The folded panel, open over the guide. */
+  const [sheet, setSheet] = useState(false);
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
+  const readerComments = useMemo(
+    () =>
+      stateComments && {
+        ...stateComments,
+        onShowGlobalComment: (id: string) => {
+          setSelectedId(id);
+          if (folded) setSheet(true);
+        },
+      },
+    [stateComments, setSelectedId, folded],
+  );
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetId = useId();
+  /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */
+  const closeSheet = () => {
+    setSheet(false);
+    sheetButtonRef.current?.focus({ preventScroll: true });
+  };
+  // Escape closes the open sheet before it closes the guide (App's handler skips a used Escape).
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
+      event.preventDefault();
+      closeSheet();
+    }
+  };
 
   return (
     <section

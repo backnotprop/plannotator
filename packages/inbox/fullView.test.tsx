@@ -3,13 +3,13 @@
  * The pane's Full screen button takes the file to the whole window with one
  * floating toolbar (pen on HTML, the comment count, `N/M ⌄`, ⋯, Side by
  * side, × Exit full screen, » Hide tools); the header, the changed line and
- * the bar under the file are gone, and there is no eye. Hide tucks the toolbar into a corner
- * handle; the corner reveals it; a pin keeps it out. The count opens the
+ * the bar under the file are gone, and there is no eye. Hide gathers the tools into one corner
+ * control and one press brings them back. The count opens the
  * comments drawer beside the page, remembered and never opened by itself.
  *
  * What is proved here, on the pane as the thread drives it: the single mode
- * and focus both ways; tuck, reveal and pin, with focus never lost; the
- * corner's timing; the drawer and its remembered state; a new comment only
+ * and focus both ways; the gather and its way back, with focus never lost; no
+ * hover reveal; the drawer and its remembered state; a new comment only
  * bumping the count; the toolbar always starting out; ⌘⇧X on HTML only; the
  * ⋯ menu; the peek and a step keeping full screen with its chip; Escape's
  * ladder (one thing per press, full screen last; typed words never lost); the changed chip and dot; a phone and a stacked window. The
@@ -27,7 +27,6 @@ import { tooltipOf } from './testing/tooltip';
 
 const hasDom = typeof document !== 'undefined';
 const { AttachmentPane, COMMENTS_DRAWER_COOKIE } = (hasDom ? await import('./components/AttachmentPane') : {}) as typeof import('./components/AttachmentPane');
-const { REVEAL_DELAY_MS, TUCK_DELAY_MS } = (hasDom ? await import('./components/FullViewBar') : {}) as typeof import('./components/FullViewBar');
 const { getShortcutPlatform } = (hasDom ? await import('@plannotator/ui/shortcuts') : {}) as typeof import('@plannotator/ui/shortcuts');
 const { storage } = (hasDom ? await import('@plannotator/ui/utils/storage') : {}) as typeof import('@plannotator/ui/utils/storage');
 
@@ -305,7 +304,7 @@ test.skipIf(!hasDom)('an HTML file: the pen leads the toolbar and flips Annotate
   expect(host!.querySelector('[data-full-view-pen]')!.getAttribute('aria-pressed')).toBe('false');
 });
 
-test.skipIf(!hasDom)('Hide tucks the toolbar into its handle (inert, focus on the handle); the handle shows it again; the pin keeps it out; Escape tucks a revealed toolbar', async () => {
+test.skipIf(!hasDom)('Hide gathers the tools into the corner control (inert, focus on it); one press brings them back with focus on »; » is only ever Hide', async () => {
   stubViews();
   await render(<Pane start={notes} harness={harnessOf()} />);
   hideButton().focus();
@@ -316,67 +315,28 @@ test.skipIf(!hasDom)('Hide tucks the toolbar into its handle (inert, focus on th
   expect(handle().getAttribute('aria-label')).toBe('Show tools, 1 comment');
   expect(handle().getAttribute('aria-expanded')).toBe('false');
   expect(document.activeElement).toBe(handle());
-  expect(live()).toBe('Tools hidden. They are in the top right corner.');
+  expect(live()).toBe('Tools hidden. They are in the bottom right corner.');
 
-  // The keyboard on the handle: revealed, focus on the toolbar's first button; the last button is the pin.
-  await press(handle());
-  expect(barState()).toBe('revealed');
-  expect(bar()!.inert).toBe(false);
-  expect(handle().inert).toBe(true);
-  expect(document.activeElement).toBe(bar()!.querySelector('button'));
-  expect(hideButton().getAttribute('data-full-view-hide')).toBe('pin');
-  expect(hideButton().getAttribute('aria-label')).toBe('Keep tools out');
-
-  // Escape (no popover open) tucks it and returns focus to the handle.
-  await key(document.activeElement!, { key: 'Escape' });
-  expect(barState()).toBe('tucked');
-  expect(document.activeElement).toBe(handle());
-
-  // Out again, then the pin: it stays, and the same button is » Hide tools again, focus on it.
-  await press(handle());
-  hideButton().focus();
-  await click(hideButton());
-  expect(barState()).toBe('pinned');
-  expect(hideButton().getAttribute('aria-label')).toBe('Hide tools');
-  expect(document.activeElement).toBe(hideButton());
-  expect(live()).toBe('Tools pinned. They stay out.');
-});
-
-test.skipIf(!hasDom)('the corner: a pointer reveals the toolbar after its delay and leaving tucks it after its delay; focus leaving or a press outside tucks it too', async () => {
-  stubViews();
-  await render(<Pane start={notes} harness={harnessOf()} />);
-  await click(hideButton());
-  // A mouse user: nothing in the corner holds focus.
-  (document.activeElement as HTMLElement | null)?.blur();
-  const enter = () => act(async () => dock()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
-  const leave = () => act(async () => dock()!.dispatchEvent(new PointerEvent('pointerout', { bubbles: true, pointerType: 'mouse', relatedTarget: document.body })));
-  await enter();
-  expect(barState()).toBe('tucked');
-  await settle(REVEAL_DELAY_MS + 60);
-  expect(barState()).toBe('revealed');
-  await leave();
-  await settle(TUCK_DELAY_MS - 200);
-  expect(barState()).toBe('revealed');
+  // A pointer resting on the dock no longer brings anything out: only a press does.
+  await act(async () => dock()!.dispatchEvent(new PointerEvent('pointerover', { bubbles: true, pointerType: 'mouse' })));
   await settle(300);
   expect(barState()).toBe('tucked');
 
-  // Revealed, then a press outside the toolbar tucks it.
-  await click(handle());
-  expect(barState()).toBe('revealed');
-  const outside = document.createElement('button');
-  outside.setAttribute('data-test-stray', '');
-  document.body.appendChild(outside);
-  await act(async () => outside.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true })));
-  await settle();
-  expect(barState()).toBe('tucked');
-
-  // Revealed by the keyboard, then focus leaves: tucked, and focus stays where it went.
+  // One press: everything back at once (no half state), focus on » where the person pressed it.
   await press(handle());
-  expect(barState()).toBe('revealed');
-  await act(async () => outside.focus());
-  await settle();
-  expect(barState()).toBe('tucked');
-  expect(document.activeElement).toBe(outside);
+  expect(barState()).toBe('pinned');
+  expect(bar()!.inert).toBe(false);
+  expect(handle().inert).toBe(true);
+  expect(document.activeElement).toBe(hideButton());
+  expect(hideButton().getAttribute('aria-label')).toBe('Hide tools');
+  expect(hideButton().getAttribute('data-full-view-hide')).toBe('hide');
+  expect(live()).toBe('Tools shown.');
+
+  // A mouse press on the corner control: back as well, and focus is never left on the inert control.
+  await click(hideButton());
+  await click(handle());
+  expect(barState()).toBe('pinned');
+  expect(document.activeElement).not.toBe(handle());
 });
 
 test.skipIf(!hasDom)('every opening of full screen starts with the toolbar showing', async () => {
@@ -385,7 +345,7 @@ test.skipIf(!hasDom)('every opening of full screen starts with the toolbar showi
   await click(host!.querySelector('[data-full-screen-toggle]'));
   await click(hideButton());
   expect(barState()).toBe('tucked');
-  // Leave with the toolbar tucked (its handle shows; Exit is in the toolbar, so reveal it first).
+  // Leave with the tools gathered (Exit is in the toolbar, so bring them back first).
   await press(handle());
   await click(host!.querySelector('[data-full-view-exit]'));
   expect(bar()).toBeNull();
@@ -502,7 +462,7 @@ test.skipIf(!hasDom)('⌘⇧X on an HTML file tucks and shows the toolbar; on ma
   expect(event.defaultPrevented).toBe(true);
   expect(barState()).toBe('tucked');
   await settle();
-  expect(live()).toBe('Tools hidden. They are in the top right corner.');
+  expect(live()).toBe('Tools hidden. They are in the bottom right corner.');
   await key(document.body, chord());
   expect(barState()).toBe('pinned');
   // The tooltip names the chord on HTML only.

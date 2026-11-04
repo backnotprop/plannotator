@@ -13,8 +13,8 @@
  * card somewhere other than where it was.
  */
 import { expect, test } from 'bun:test';
-import type { InboxAuthor, InboxCardWire } from '@plannotator/core/inbox-types';
-import { boardCounts, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
+import type { InboxAuthor, InboxCardWire, InboxInitiative } from '@plannotator/core/inbox-types';
+import { boardCounts, boardFilterHash, boardInitiativeOf, cardsInInitiative, initiativeCounts, liveInitiatives, newCardInitiative, boardLanes, boardViewOf, boardProjects, cardAge, cardsInProject, newCardProject, cardFoot, cardLine, cardMenuItems, cardMenuToast, cardMessageBody, cardUndoStillApplies, cardShowsUnread, columnChoices, historyWords, messageKey, refState, sentTo, shortRef, unseenDrops, waitingThread, youLinkLabel, youThread, type CardMenuItem } from './model';
 
 const CLAUDE: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 's1', name: 'Claude Code' };
 const PERSON: InboxAuthor = { kind: 'person' };
@@ -285,4 +285,68 @@ test('an older Board link still opens: #board=icebox is the Cancelled list, #boa
   expect(boardViewOf('done')).toBe('done');
   expect(boardViewOf('shipped')).toBe('done');
   expect(boardViewOf(null)).toBe('lanes');
+});
+
+// The Board's initiatives (approval "board-initiatives").
+const SHAPE = 'ini_01JX0000000000000000000001';
+const MEMORY = 'ini_01JX0000000000000000000002';
+const GONE = 'ini_01JX0000000000000000000003';
+function initiative(id: string, name: string, deleted = false): InboxInitiative {
+  return { id, name, created_at: '2026-11-04T10:00:00.000Z', created_by: PERSON, updated_at: '2026-11-04T10:00:00.000Z', deleted_at: deleted ? '2026-11-04T11:00:00.000Z' : null };
+}
+
+test('the filter counts each live initiative and No initiative; a card in a deleted one counts as in none', () => {
+  const live = liveInitiatives([initiative(SHAPE, 'Shape'), initiative(MEMORY, 'Memory'), initiative(GONE, 'Gone', true)]);
+  expect(live.map((i) => i.name)).toEqual(['Shape', 'Memory']);
+  const cards = [card('a', { initiative: SHAPE }), card('b', { initiative: SHAPE }), card('c', { initiative: null }), card('d'), card('e', { initiative: GONE })];
+  expect(Object.fromEntries(initiativeCounts(cards, live))).toEqual({ none: 3, [SHAPE]: 2, [MEMORY]: 0 });
+  // The counts follow what they are given: the Board passes the picked project's lane cards.
+  const other = [...cards, card('x', { project_id: 'prj_2', initiative: MEMORY })];
+  expect(Object.fromEntries(initiativeCounts(cardsInProject(other, 'prj_2'), live))).toEqual({ none: 0, [SHAPE]: 0, [MEMORY]: 1 });
+});
+
+test('the initiative filter narrows what the project filter left: one initiative, none, or every card', () => {
+  const cards = [card('a', { initiative: SHAPE }), card('b', { initiative: SHAPE, project_id: 'prj_2' }), card('c'), card('d', { initiative: MEMORY })];
+  expect(cardsInInitiative(cards, SHAPE).map((c) => c.id)).toEqual(['a', 'b']);
+  expect(cardsInInitiative(cardsInProject(cards, 'prj_1'), SHAPE).map((c) => c.id)).toEqual(['a']);
+  expect(cardsInInitiative(cards, 'none').map((c) => c.id)).toEqual(['c']);
+  expect(cardsInInitiative(cards, null)).toBe(cards);
+  // A card whose initiative was deleted is in none, as it counts there (the window may hold it a moment before the server's null).
+  const gone = [...cards, card('e', { initiative: GONE })];
+  const live = liveInitiatives([initiative(SHAPE, 'Shape'), initiative(MEMORY, 'Memory'), initiative(GONE, 'Gone', true)]);
+  expect(cardsInInitiative(gone, 'none', live).map((c) => c.id)).toEqual(['c', 'e']);
+  expect(Object.fromEntries(initiativeCounts(gone, live)).none).toBe(cardsInInitiative(gone, 'none', live).length);
+});
+
+test('the address: #board&project=…&initiative=…, `none` kept, a stale or bad id no filter once the initiatives have loaded', () => {
+  expect(boardFilterHash({ project: 'prj_1', initiative: SHAPE })).toBe(`&project=prj_1&initiative=${SHAPE}`);
+  expect(boardFilterHash({ project: null, initiative: 'none' })).toBe('&initiative=none');
+  expect(boardFilterHash({})).toBe('');
+  const live = [initiative(SHAPE, 'Shape')];
+  // Round trip through the hash the window writes and reads.
+  const params = new URLSearchParams(`board${boardFilterHash({ project: 'prj_1', initiative: SHAPE })}`);
+  expect(boardInitiativeOf(params.get('initiative'), live)).toBe(SHAPE);
+  expect(params.get('project')).toBe('prj_1');
+  expect(boardInitiativeOf('none', live)).toBe('none');
+  expect(boardInitiativeOf('none', null)).toBe('none');
+  // Before the cards load, an id filters as it stands (a filtered link never flashes every card).
+  expect(boardInitiativeOf(MEMORY, null)).toBe(MEMORY);
+  // Loaded: one the Inbox does not hold (deleted, a stale link) is no filter.
+  expect(boardInitiativeOf(MEMORY, live)).toBeNull();
+  expect(boardInitiativeOf('shape', live)).toBeNull();
+  expect(boardInitiativeOf(null, live)).toBeNull();
+});
+
+test('New card starts in the filtered initiative, never in "No initiative"', () => {
+  expect(newCardInitiative(SHAPE)).toBe(SHAPE);
+  expect(newCardInitiative('none')).toBeNull();
+  expect(newCardInitiative(null)).toBeNull();
+});
+
+test('the history names the initiative a card was put in, and says when it was cleared', () => {
+  const names = (id: string) => (id === SHAPE ? 'Shape' : null);
+  const set = historyWords({ at: '2026-11-04T10:00:00.000Z', by: PERSON, kind: 'initiative', initiative: SHAPE }, names);
+  expect(`${set.before}${set.bold}${set.after}`).toBe('Initiative: Shape by you');
+  const cleared = historyWords({ at: '2026-11-04T10:00:00.000Z', by: PERSON, kind: 'initiative', initiative: null }, names);
+  expect(`${cleared.before}${cleared.bold ?? ''}${cleared.after}`).toBe('Initiative cleared by you');
 });
