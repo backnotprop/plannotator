@@ -31,7 +31,7 @@ import { parseGuideSnapshot, parseGuideSnapshotJson, type GuideSnapshot } from "
 import { displayInboxSubject, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
-import { INBOX_REVIEW_FIELD_DESCRIPTION } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_FIELD_DESCRIPTION, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -140,7 +140,7 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string,
     files: files.length,
     additions: files.reduce((n, f) => n + f.additions, 0),
     deletions: files.reduce((n, f) => n + f.deletions, 0),
-    ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => section.title) } : {}),
+    ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => inboxReviewTitleLine(section.title)) } : {}),
   };
   return { text, ref };
 }

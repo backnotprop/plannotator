@@ -100,12 +100,14 @@ export interface InboxReviewThreadMessage {
   body?: string;
   guide?: { review?: true } | null;
   review_verdict?: unknown;
+  review_comments_of?: readonly string[];
 }
 
 /**
  * Whether a review already happened in a thread: the person sent a verdict
- * on a review, or a reply to a review that carries their comments on its
- * diff. `/review-recheck` is offered only then.
+ * on a review, or a reply that carried their comments on a review's diff
+ * (`review_comments_of`, marked by the store whichever message the reply
+ * answers). `/review-recheck` is offered only then.
  */
 export function inboxThreadHadReview(messages: readonly InboxReviewThreadMessage[]): boolean {
   const reviews = new Set(messages.filter((message) => message.guide?.review).map((message) => message.id));
@@ -113,8 +115,7 @@ export function inboxThreadHadReview(messages: readonly InboxReviewThreadMessage
   return messages.some(
     (message) =>
       message.author.kind === 'person' &&
-      (!!message.review_verdict ||
-        (!!message.reply_to && reviews.has(message.reply_to) && (message.body ?? '').includes(`# ${INBOX_GUIDE_FEEDBACK_TITLE}`))),
+      (!!message.review_verdict || (message.review_comments_of ?? []).some((id) => reviews.has(id))),
   );
 }
 
@@ -124,6 +125,21 @@ export function inboxThreadHadReview(messages: readonly InboxReviewThreadMessage
  */
 export const INBOX_REVIEW_FIELD_DESCRIPTION =
   'true asks the person for a verdict on this change: they read your guide beside the full diff, comment on lines, then Approve or Send feedback. The verdict and their comments come back as their reply in this thread.';
+
+/** How long an agent's review title may run in the person's verdict words, and a chapter title on the card. */
+export const INBOX_REVIEW_TITLE_MAX = 120;
+
+/**
+ * An agent's title as one line of at most `max` characters (runs of
+ * whitespace, newlines included, become one space; a longer one is cut with
+ * "…"). The agent writes the title; the verdict words are the person's, so
+ * the title can never add lines of its own to them.
+ */
+export function inboxReviewTitleLine(title: string, max = INBOX_REVIEW_TITLE_MAX): string {
+  const line = title.replace(/\s+/g, ' ').trim();
+  const chars = Array.from(line);
+  return chars.length > max ? `${chars.slice(0, max - 1).join('').trimEnd()}…` : line;
+}
 
 /** The person's verdict on a review. */
 export type InboxReviewVerdict = 'approved' | 'changes_requested';
@@ -143,7 +159,7 @@ export interface InboxReviewVerdictRecord {
  * app's export). The agent reads this; the window shows it as the reply.
  */
 export function inboxReviewVerdictWords(verdict: InboxReviewVerdict, title: string, comments: number): string {
-  const name = `"${title}"`;
+  const name = `"${inboxReviewTitleLine(title)}"`;
   if (verdict === 'approved') {
     return comments > 0
       ? `I approved your review ${name}, with ${comments === 1 ? 'a comment' : `${comments} comments`} below. Nothing in it blocks the change.`

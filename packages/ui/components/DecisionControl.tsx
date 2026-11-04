@@ -68,6 +68,15 @@ export interface DecisionControlProps {
    * `closeMenu`, for a row that leaves the menu (e.g. one opening Settings).
    */
   menuFooter?: React.ReactNode | ((api: { closeMenu: () => void }) => React.ReactNode);
+  /**
+   * The notes, held by the host (keyed by decision id), with
+   * `onDraftsChange`: the host keeps them past this control (a close, a
+   * reload) and clears them itself once its decision went, so a send that
+   * fails keeps the note. Absent: the control holds them, and clears a
+   * note when its decision is handed over, exactly as before.
+   */
+  drafts?: Record<string, string>;
+  onDraftsChange?: (drafts: Record<string, string>) => void;
 }
 
 const NOTE_MAX_HEIGHT_PX = 144;
@@ -276,6 +285,8 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
   dismissOnIframeFocus = false,
   confirmDialog,
   menuFooter,
+  drafts: hostDrafts,
+  onDraftsChange,
 }) => {
   const rootRef = useRef<HTMLDivElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
@@ -284,7 +295,22 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
   const [activeItemId, setActiveItemId] = useState<DecisionMenuItem['id'] | null>(null);
   // Drafts are keyed per item so stepping back from a composer (Esc, back
   // button, even closing the popover) keeps the half-typed note.
-  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [ownDrafts, setOwnDrafts] = useState<Record<string, string>>({});
+  const hostHolds = hostDrafts !== undefined && onDraftsChange !== undefined;
+  const drafts = hostHolds ? hostDrafts : ownDrafts;
+  const draftsRef = useRef(drafts);
+  draftsRef.current = drafts;
+  const setDrafts = useCallback(
+    (next: (prev: Record<string, string>) => Record<string, string>) => {
+      if (!hostHolds) {
+        setOwnDrafts(next);
+        return;
+      }
+      draftsRef.current = next(draftsRef.current);
+      onDraftsChange(draftsRef.current);
+    },
+    [hostHolds, onDraftsChange],
+  );
   // L2: only the ID is state — the confirm's title/message/handler resolve
   // from the LIVE spec at render, so a spec update while the dialog is up
   // can never confirm stale copy (e.g. an outdated count).
@@ -394,14 +420,17 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
         ?.focus();
       return;
     }
-    setDrafts((prev) => {
-      const next = { ...prev };
-      delete next[activeItem.id];
-      return next;
-    });
+    // A host holding the notes clears one when its decision went.
+    if (!hostHolds) {
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[activeItem.id];
+        return next;
+      });
+    }
     closePopover();
     handlers[activeItem.id]?.(trimmed);
-  }, [activeItem, closePopover, drafts, handlers]);
+  }, [activeItem, closePopover, drafts, handlers, hostHolds, setDrafts]);
 
   const backToMenu = useCallback(() => {
     setPopover('menu');

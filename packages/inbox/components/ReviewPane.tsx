@@ -23,20 +23,32 @@
 
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
-import { inboxReviewVerdictWords, type InboxReviewVerdict } from '@plannotator/core/inbox-review';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { InboxApiError, inboxApi } from '../api';
-import { guideFeedback } from '../attachments';
 import { agentName } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
-import { newUuid } from '../uuid';
+import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
+import { useLiveSessions } from './NewMessage';
+import {
+  AskerEndedNote,
+  askerCanEnd,
+  askerHasEnded,
+  CLOSED_ROUTE,
+  LEAVE,
+  mergeRouteRows,
+  othersLive,
+  RouteChoice,
+  routeRace,
+  type AskingSession,
+  type RouteState,
+} from './ReplyRoute';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -60,23 +72,6 @@ const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
-
-/** The verdict each decision sends, and whether the review's comments ride it. */
-function verdictOf(id: DecisionActionId, hasComments: boolean): { verdict: InboxReviewVerdict; withComments: boolean; discard?: true } {
-  switch (id) {
-    case 'primary':
-      return hasComments ? { verdict: 'changes_requested', withComments: true } : { verdict: 'approved', withComments: false };
-    case 'note-with-approval':
-      return { verdict: 'approved', withComments: false };
-    case 'approve-with-notes':
-      return { verdict: 'approved', withComments: true };
-    case 'discard-and-finish':
-      return { verdict: 'approved', withComments: false, discard: true };
-    case 'request-changes':
-    case 'note-with-feedback':
-      return { verdict: 'changes_requested', withComments: hasComments };
-  }
-}
 
 export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
@@ -133,10 +128,64 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   );
   const viewedProp = useMemo(() => (readOnly ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedSet, toggleViewed]);
 
+  // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
+  // and a reload keep them), the way the reply box keeps its draft.
+  const [notes, setNotes] = useState<Record<string, string>>(() => readReviewNotes(message.id));
+  useEffect(() => setNotes(readReviewNotes(message.id)), [message.id]);
+  const changeNotes = useCallback(
+    (next: Record<string, string>) => {
+      setNotes(next);
+      saveReviewNotes(message.id, next);
+    },
+    [message.id],
+  );
+  const keys = useRef(new VerdictKeys());
+  // A verdict whose answer comes after the person left the review (closed it, opened another thread) leaves
+  // them where they are.
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+
+  // The session that wrote the review: when it ended and another of the project is live, the verdict asks
+  // where it goes first, as a reply does (ReplyRoute); with none live it waits for the next agent.
+  const asking = useMemo<AskingSession | null>(
+    () =>
+      message.author.kind === 'agent' && message.author.session
+        ? { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) }
+        : null,
+    [message],
+  );
+  const { model: live } = useLiveSessions(thread.thread_id, asking && askerCanEnd(asking) ? asking.session : null, !readOnly && asking !== null && askerCanEnd(asking));
+  const askerEnded = askerHasEnded(asking, live);
+  const anyOtherLive = asking !== null && othersLive(asking, live).length > 0;
+  const [route, setRoute] = useState<RouteState>(CLOSED_ROUTE);
+  const routed = useRef<{ id: DecisionActionId; note?: string } | null>(null);
+  useEffect(() => {
+    if (!asking) return;
+    setRoute((current) => (current.open ? mergeRouteRows(current, asking, live) : current));
+    // Only a new read of the live sessions merges.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [live]);
+
   // The verdict: one reply to the review's message, its comments (as the review app exports them) after the words.
   const sendVerdict = useCallback(
-    async (id: DecisionActionId, note?: string) => {
+    async (id: DecisionActionId, note?: string, choice?: RouteState) => {
       if (sending || !snapshot) return;
+      if (!choice && askerEnded && anyOtherLive && asking) {
+        routed.current = { id, ...(note !== undefined ? { note } : {}) };
+        setSendError(null);
+        setRoute((current) => mergeRouteRows({ ...current, open: true, error: null, focus: current.focus + 1 }, asking, live));
+        return;
+      }
+      const chosen =
+        choice && choice.selected && choice.selected !== LEAVE && choice.selected !== asking?.session
+          ? (choice.rows.find((row) => row.live.session === choice.selected && !row.ended)?.live ?? null)
+          : null;
+      const to = chosen ? { host: chosen.host, session: chosen.session } : undefined;
       const plan = verdictOf(id, records.length > 0);
       setSending(true);
       setSendError(null);
@@ -145,25 +194,28 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
           for (const record of records) await inboxApi.removeAnnotation(record.id);
           setRecords([]);
         }
-        const carried = plan.withComments ? records : [];
-        const words = [inboxReviewVerdictWords(plan.verdict, message.guide?.title ?? snapshot.guide.title, carried.length), note?.trim() ?? '']
-          .filter((part) => part !== '')
-          .join('\n\n');
-        await inboxApi.reply(message.id, {
-          idempotency_key: newUuid(),
-          words,
-          questions: [],
-          ...(carried.length > 0 ? { feedback: guideFeedback(carried), annotation_ids: carried.map((r) => r.id) } : {}),
-          review_verdict: plan.verdict,
-        });
+        const parts = verdictReply(plan, message.guide?.title ?? snapshot.guide.title, plan.discard ? [] : records, note);
+        const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback, annotation_ids: parts.annotation_ids } : {}), review_verdict: plan.verdict, ...(to ? { to } : {}) };
+        await inboxApi.reply(message.id, { idempotency_key: keys.current.keyFor(input), ...input });
+        keys.current.done();
+        clearReviewNotes(message.id);
+        routed.current = null;
+        if (!mounted.current) return;
+        setNotes({});
+        setRoute(CLOSED_ROUTE);
         await onSent();
-        onBack();
+        if (mounted.current) onBack();
       } catch (cause) {
-        setSendError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'Your verdict was not sent.');
+        if (!mounted.current) return;
+        if (to && cause instanceof InboxApiError && cause.code === 'session_not_live') {
+          setRoute((current) => routeRace(current, to.session));
+        } else {
+          setSendError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'Your verdict was not sent.');
+        }
         setSending(false);
       }
     },
-    [sending, snapshot, records, setRecords, message.id, message.guide?.title, onSent, onBack],
+    [sending, snapshot, records, setRecords, message.id, message.guide?.title, onSent, onBack, askerEnded, anyOtherLive, asking, live],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),
@@ -241,7 +293,15 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
         )}
         {!readOnly && snapshot && (
           <span className="ib-rv-decide" data-review-decision="">
-            <DecisionControl spec={spec} handlers={handlers} busy={sending} isLoading={sending} labelBreakpoint="md" />
+            <DecisionControl
+              spec={spec}
+              handlers={handlers}
+              busy={sending || route.open}
+              isLoading={sending}
+              labelBreakpoint="md"
+              drafts={notes}
+              onDraftsChange={changeNotes}
+            />
           </span>
         )}
         <Tip content="Close">
@@ -299,8 +359,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                       <span className="ib-rv-t">
                         <Tip content={file.path} cut>
                           <span className="ib-rv-path">
-                            {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
-                            {file.path.slice(slash + 1)}
+                            {/* Cut at the start (the box is right to left); the path itself reads left to right, a leading dot included. */}
+                            <bdi dir="ltr">
+                              {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
+                              {file.path.slice(slash + 1)}
+                            </bdi>
                           </span>
                         </Tip>
                       </span>
@@ -354,6 +417,29 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                   ))
                 )}
               </select>
+            </div>
+          )}
+          {!readOnly && asking && (route.open || askerEnded) && (
+            // The session that wrote the review ended: the thread's own note, and at a decision its route choice.
+            <div className="ib-rv-route" data-review-route="">
+              {route.open ? (
+                <RouteChoice
+                  name={`review-route-${message.id}`}
+                  asking={asking}
+                  project={thread.project.name}
+                  state={route}
+                  sending={sending}
+                  onSelect={(id) => setRoute((current) => ({ ...current, selected: id, error: null }))}
+                  onSubmit={() => {
+                    const pending = routed.current;
+                    if (pending) void sendVerdict(pending.id, pending.note, route);
+                  }}
+                  onBack={() => setRoute((current) => ({ ...current, open: false, error: null }))}
+                  onShowAll={() => setRoute((current) => ({ ...current, showAll: true }))}
+                />
+              ) : (
+                <AskerEndedNote asking={asking} project={thread.project.name} anyLive={anyOtherLive} />
+              )}
             </div>
           )}
           {(saveError || sendError) && (

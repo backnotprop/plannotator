@@ -530,6 +530,12 @@ export interface InboxMessage {
    */
   review_verdict?: InboxReviewVerdictRecord;
   /**
+   * The reviews (message ids) whose diff comments this person's reply carried
+   * (code review in the Inbox), whichever message the reply answers. Set by
+   * the store at Send; the window reads it to tell a review happened.
+   */
+  review_comments_of?: string[];
+  /**
    * On a person's New message (plan step 8): the live agent session it is
    * addressed to. Such a message answers nothing (`reply_to` null) and is
    * delivered to that session as a turn, like a reply. Also on a person's

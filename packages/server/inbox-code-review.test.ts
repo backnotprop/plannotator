@@ -18,11 +18,16 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import { INBOX_REVIEW_SKILL_NAMES } from "@plannotator/core/inbox-review";
+import { INBOX_REVIEW_SKILL_NAMES, inboxThreadHadReview } from "@plannotator/core/inbox-review";
+import type { InboxAnnotationRecord, InboxThread } from "@plannotator/core/inbox-types";
+import type { SkillCatalogEntry } from "@plannotator/ui/utils/skillReferences";
+import { routeSendAnnotations } from "../inbox/sendTargets";
+import { inboxSkillFilter } from "../inbox/skills";
 import { attachmentFeedback } from "../inbox/attachments";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 import { inboxSkillCatalog } from "./inbox-skills";
 import { startInboxServer, type InboxServer } from "./inbox";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
 import { inboxAgentTool as modAgentTool } from "../../apps/hook/hooks/mod/inbox-contract";
 
@@ -71,6 +76,28 @@ async function world() {
   return { root, project, dataDir, server, base, post, setCodeReview, call, sendGuide, submitGuideSchema };
 }
 
+/** A scripted `tailscale` that serves this Inbox over a tailnet `magic` name, `owner` its login (as inbox-board-routes.test.ts). */
+function scriptedTailscale(magic: string, owner: string): TailscaleRunner {
+  const serve = new Map<number, string>();
+  return (args) => {
+    const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${magic}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: owner } } }));
+    if (args[1] === "status") {
+      if (serve.size === 0) return ok("{}");
+      return ok(
+        JSON.stringify({
+          TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])),
+          Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${magic}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])),
+        }),
+      );
+    }
+    const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+    if (args.includes("off")) serve.delete(httpsPort);
+    else serve.set(httpsPort, args.at(-1)!);
+    return ok(`https://${magic}:${httpsPort}/\n`);
+  };
+}
+
 describe("the Code review switch", () => {
   test("off by default; on and off are saved in config.json; a malformed switch is refused", async () => {
     const w = await world();
@@ -89,6 +116,44 @@ describe("the Code review switch", () => {
     const bad = await w.post("/api/inbox/settings", { code_review: true });
     expect(bad.status).toBe(422);
     expect(await read()).toEqual({ on: false });
+  });
+
+  test("only the owner turns it on: a tailnet guest is refused and the switch stays as it was", async () => {
+    const MAGIC = "macbook-pro.tail0000.ts.net";
+    const OWNER = "ramos@example.com";
+    const GUEST = "guest@example.com";
+    const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    try {
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-code-review-owner-")));
+      roots.push(root);
+      const dataDir = join(root, "data");
+      mkdirSync(dataDir, { recursive: true });
+      process.env.PLANNOTATOR_DATA_DIR = dataDir;
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxTailscale: true, inboxTailscaleAllow: [GUEST] }));
+      const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale(MAGIC, OWNER) });
+      servers.push(server);
+      const listener = server.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      const through = (login: string) =>
+        fetch(`http://127.0.0.1:${listener}/api/inbox/settings`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` },
+          body: JSON.stringify({ code_review: { on: true } }),
+        });
+      const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8")) as { inboxCodeReview?: boolean };
+
+      const guest = await through(GUEST);
+      expect(guest.status).toBe(403);
+      expect(((await guest.json()) as { code: string }).code).toBe("local_only");
+      expect(config().inboxCodeReview).toBeUndefined();
+
+      expect((await through(OWNER)).status).toBe(200);
+      expect(config().inboxCodeReview).toBe(true);
+    } finally {
+      if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+      else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
+    }
   });
 
   test("a saved switch tells every window (event: capabilities) and never an agent's stream", async () => {
@@ -199,6 +264,42 @@ describe("the verdict and the Viewed ticks", () => {
 
     const bad = await w.post(`/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "v3", words: "x", review_verdict: "maybe" });
     expect(bad.status).toBe(422);
+  });
+
+  test("review comments sent from the reply box mark the reply as a review's, so /review-recheck is offered", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const review = (await w.sendGuide({ review: true })).structuredContent;
+    // The agent writes again after the review: the reply box's Send answers this newer message.
+    const later = (await w.call("send_message", { body: "Also bumped the timeout.", reply_to: review.message_id, agent_session: "ses_review", agent_host: "pi" })).structuredContent;
+    expect(later.thread_id).toBe(review.thread_id);
+    const comment = await w.post(`/api/inbox/messages/${review.message_id}/guide/annotations`, {
+      annotation: { id: "ann-r", type: "comment", scope: "line", filePath: "src/auth.ts", lineStart: 1, lineEnd: 1, side: "new", text: "Refresh earlier.", selectedText: "new", createdAt: 1 },
+    });
+    expect(comment.status).toBe(200);
+    const readThread = async () => ((await (await fetch(`${w.base}/api/inbox/threads/${review.thread_id}`)).json()) as { thread: InboxThread }).thread;
+    const model = (await (await fetch(`${w.base}/api/inbox/threads/${review.thread_id}/attachments`)).json()) as { annotations: InboxAnnotationRecord[] };
+    let thread = await readThread();
+    expect(inboxThreadHadReview(thread.messages)).toBe(false);
+
+    // The window's Send: the guide comment rides the reply to the newest agent message, with the words.
+    const newest = thread.messages.find((m) => m.id === later.message_id)!;
+    const routed = routeSendAnnotations(thread, [{ message: newest, questions: [], skip: [], actions: [] }], model.annotations);
+    expect(routed.targets.map((t) => t.message.id)).toEqual([later.message_id]);
+    const carried = routed.carried.get(later.message_id) ?? [];
+    expect(carried.map((r) => r.id)).toEqual(["ann-r"]);
+    const reply = await w.post(`/api/inbox/messages/${later.message_id}/reply`, {
+      idempotency_key: "box-1",
+      words: "See my comment.",
+      feedback: attachmentFeedback(carried as never[], [], new Map(), w.project),
+      annotation_ids: carried.map((r) => r.id),
+    });
+    expect(reply.status).toBe(200);
+
+    thread = await readThread();
+    expect(inboxThreadHadReview(thread.messages)).toBe(true);
+    const offered = ((await (await fetch(`${w.base}/api/inbox/skills`)).json()) as { skills: SkillCatalogEntry[] }).skills;
+    expect(offered.filter(inboxSkillFilter(inboxThreadHadReview(thread.messages))).map((s) => s.name)).toContain("review-recheck");
   });
 
   test("Viewed ticks: saved on the message, only the review's files, refused while off", async () => {

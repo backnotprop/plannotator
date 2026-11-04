@@ -158,6 +158,27 @@ export function resetSkillCatalogCache(): void {
   resetSkillContentsForExport();
 }
 
+const reloadListeners = new Set<() => void>();
+
+/**
+ * The catalog changed at its source (a host switch that adds or removes
+ * skills, e.g. the Inbox's Code review): drop the cache, and every mounted
+ * composer reads it again at once (`onSkillCatalogReload`), so an open "/"
+ * list never offers, or paints, a skill that is gone.
+ */
+export function reloadSkillCatalog(): void {
+  resetSkillCatalogCache();
+  for (const listener of [...reloadListeners]) listener();
+}
+
+/** Called after each `reloadSkillCatalog`; returns the unsubscribe. */
+export function onSkillCatalogReload(listener: () => void): () => void {
+  reloadListeners.add(listener);
+  return () => {
+    reloadListeners.delete(listener);
+  };
+}
+
 // ---------------------------------------------------------------------------
 // Human-only skill contents (lazy, per referenced skill)
 // ---------------------------------------------------------------------------

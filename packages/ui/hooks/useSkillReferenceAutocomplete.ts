@@ -10,7 +10,7 @@ import {
   type SkillReferenceToken,
   type SkillTriggerContext,
 } from '../utils/skillReferences';
-import { fetchSkillCatalog, getCachedSkillCatalog } from '../utils/skillCatalog';
+import { fetchSkillCatalog, getCachedSkillCatalog, onSkillCatalogReload } from '../utils/skillCatalog';
 
 export interface SkillReferenceMenuState {
   items: SkillCatalogEntry[];
@@ -89,6 +89,10 @@ export function useSkillReferenceAutocomplete(options: {
   // does not reopen until the user leaves it (new trigger start clears this).
   const [dismissedStart, setDismissedStart] = useState<number | null>(null);
 
+  // A reload (the host's catalog changed at its source) reads it again here too.
+  const [reloads, setReloads] = useState(0);
+  useEffect(() => (enabled ? onSkillCatalogReload(() => setReloads((n) => n + 1)) : undefined), [enabled]);
+
   useEffect(() => {
     if (!enabled) return;
     let cancelled = false;
@@ -98,7 +102,7 @@ export function useSkillReferenceAutocomplete(options: {
     return () => {
       cancelled = true;
     };
-  }, [enabled]);
+  }, [enabled, reloads]);
 
   const trigger: SkillTriggerContext | null = useMemo(() => {
     if (!enabled || catalog.length === 0 || caret === null) return null;

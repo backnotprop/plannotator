@@ -4053,6 +4053,10 @@ export class InboxStore {
     const skips = listed.filter((r) => !planned.has(r.id) && inboxQuestionState(r, false) === "open");
     const attachments = input.attachments ?? [];
     const verdict = this.planReviewVerdict(message, input.review_verdict, carried);
+    // The reviews whose comments this reply carries (code review in the Inbox): marked on the reply, whichever
+    // message it answers (a Send puts guide comments on the thread's newest agent message), so the window can
+    // tell a review happened in this thread (`inboxThreadHadReview`).
+    const reviewCommentsOf = [...new Set(carried.filter((record) => !!record.guide && this.messages.get(record.message_id)?.guide?.review).map((record) => record.message_id))];
     // The action items whose Done or Can't do it waits in the draft go with this Send (approval "inbox-action-items-in-reply").
     const stagedActions = this.planStagedActions(message, input.actions);
     if (plan.length === 0 && skips.length === 0 && stagedActions.length === 0 && words.trim() === "" && feedback === "" && attachments.length === 0) {
@@ -4185,6 +4189,7 @@ export class InboxStore {
         ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
+      ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
     // a later reply never reaches the new owner before the hand-off does, and Undo can no longer

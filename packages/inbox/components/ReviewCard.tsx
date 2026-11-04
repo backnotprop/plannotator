@@ -12,7 +12,7 @@
  */
 
 import type { InboxGuideRef } from '@plannotator/core/inbox-types';
-import type { InboxReviewVerdictRecord } from '@plannotator/core/inbox-review';
+import { inboxReviewTitleLine, type InboxReviewVerdictRecord } from '@plannotator/core/inbox-review';
 import { formatCount, plural, whenTime } from '@plannotator/core/inbox-format';
 import { Icon } from '../icons';
 
@@ -45,7 +45,7 @@ export function ReviewCard({ guide, outcome, onOpen }: { guide: InboxGuideRef; o
         </span>
       </div>
       <div className="ib-rvc-title">
-        <bdi>{guide.title}</bdi>
+        <bdi>{inboxReviewTitleLine(guide.title)}</bdi>
       </div>
       <div className="ib-rvc-meta">
         {plural(guide.files, 'file')} <span className="ib-add">+{formatCount(guide.additions)}</span> <span className="ib-del">-{formatCount(guide.deletions)}</span>
@@ -55,7 +55,7 @@ export function ReviewCard({ guide, outcome, onOpen }: { guide: InboxGuideRef; o
           {chapters.map((title, index) => (
             <li key={`${title}:${index}`}>
               <span className="ib-rvc-n">{index + 1}</span>
-              <span className="ib-rvc-ct">{title}</span>
+              <span className="ib-rvc-ct">{inboxReviewTitleLine(title)}</span>
             </li>
           ))}
         </ol>

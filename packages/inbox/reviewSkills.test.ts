@@ -57,15 +57,16 @@ describe('/review-recheck needs a review in the thread', () => {
     // A skill of the person's own with the name is never hidden.
     expect(hidden({ name: 'review-recheck', root: 'claude', humanOnly: false })).toBe(true);
 
-    // No review at all; a review with no answer; a plain reply to it: no.
+    // No review at all; a review with no answer; a plain reply to it: no. (The server's marking of a real Send is
+    // in packages/server/inbox-code-review.test.ts.)
     expect(inboxThreadHadReview([agent('m1'), person('m2')])).toBe(false);
     expect(inboxThreadHadReview([agent('m1', true)])).toBe(false);
     expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', body: 'Thanks.' })])).toBe(false);
-    // A verdict, or the review's comments under their heading: yes.
+    // A verdict, or a reply the Inbox marked as carrying the review's comments (to whichever message): yes.
     expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', review_verdict: { of: 'm1', verdict: 'approved', comments: 0 } })])).toBe(true);
-    expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', body: `Notes.\n\n# ${INBOX_GUIDE_FEEDBACK_TITLE}\n\n…` })])).toBe(true);
-    // Comments on a plain guided review (not a review): no.
-    expect(inboxThreadHadReview([agent('m1'), person('m2', { reply_to: 'm1', body: `# ${INBOX_GUIDE_FEEDBACK_TITLE}` })])).toBe(false);
+    expect(inboxThreadHadReview([agent('m1', true), agent('m2'), person('m3', { reply_to: 'm2', review_comments_of: ['m1'] })])).toBe(true);
+    // The feedback heading alone (comments on a plain guide, or typed words) is not a review.
+    expect(inboxThreadHadReview([agent('m1', true), person('m2', { reply_to: 'm1', body: `# ${INBOX_GUIDE_FEEDBACK_TITLE}` })])).toBe(false);
   });
 
   test('at Send, a typed /review-recheck in a thread with no review stays plain text; after one it carries its instructions', async () => {

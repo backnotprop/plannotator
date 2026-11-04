@@ -24,7 +24,7 @@ import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
-import { resetSkillCatalogCache } from '@plannotator/ui/utils/skillCatalog';
+import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
 import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
@@ -1793,7 +1793,7 @@ function Inbox() {
         onCapabilities: (capabilities) => {
           const { steps, code_review: codeReview } = capabilities;
           // Code review moves the "/" list: the next box reads the catalog again.
-          if (codeReview) resetSkillCatalogCache();
+          if (codeReview) reloadSkillCatalog();
           if (steps || codeReview) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}) } : current));
           else void refreshSettings();
         },
@@ -3791,7 +3791,7 @@ function Inbox() {
     setSettings((current) => (current ? { ...current, code_review: { on: next } } : current));
     try {
       const saved = await inboxApi.saveCodeReview(next);
-      resetSkillCatalogCache();
+      reloadSkillCatalog();
       setSettings((current) => (current ? { ...current, code_review: saved.code_review } : current));
     } catch (cause) {
       setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
@@ -5810,9 +5810,14 @@ function Inbox() {
         // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
         (settings?.code_review?.on === true && guideMessage.guide?.review ? (
           <ReviewPane
+            key={guideMessage.id}
             thread={thread}
             message={guideMessage}
-            onBack={() => close({ ...route, guide: null })}
+            // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
+            onBack={() => {
+              const now = routeRef.current;
+              if (now.guide === guideMessage.id) close({ ...now, guide: null });
+            }}
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
           />

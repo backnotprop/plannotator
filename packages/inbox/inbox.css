@@ -7332,7 +7332,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rvc-chapters { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 4px; }
 .ib-rvc-chapters li { display: flex; gap: 10px; font-size: var(--ib-fs-13-5, 13.5px); min-width: 0; }
 .ib-rvc-n { width: 14px; flex: none; text-align: right; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-rvc-ct { min-width: 0; overflow-wrap: anywhere; }
+.ib-rvc-ct { min-width: 0; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
 .ib-rvc-foot { margin-top: 14px; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
 .ib-rvc-note { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 
@@ -7362,6 +7362,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-file .ib-rv-t { overflow: hidden; }
 .ib-rv-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); direction: rtl; text-align: left; }
 .ib-rv-dir { color: var(--muted-foreground); }
+.ib-rv-route { margin: 0 0 12px; }
+.ib-rv-route .ib-sessnote { margin: 0; }
 .ib-rv-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-rv-progress { margin-top: auto; padding: 8px 8px 0; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
 .ib-rv-phonebar { display: none; }

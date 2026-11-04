@@ -345,11 +345,27 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await expect(pane.locator('[data-review-files] li')).toHaveCount(4);
   const ledger = pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]');
   await ledger.scrollIntoViewIfNeeded();
+  // The review app's V key does not work here: the tooltip does not name it.
+  expect(await ledger.getByRole('button', { name: /Viewed/ }).first().getAttribute('title')).not.toContain('(V)');
   await ledger.getByRole('button', { name: /Viewed/ }).first().click();
   await expect.poll(async () => ((await (await page.request.get(`${world.url}api/inbox/threads/${review.thread_id}`)).json()) as { thread: { messages: { id: string; guide_viewed?: string[] }[] } }).thread.messages.find((m) => m.id === review.message_id)?.guide_viewed).toEqual(['src/payouts/ledger.ts']);
   await pane.locator('[data-review-mode-choice="walkthrough"]').click();
   await retry.scrollIntoViewIfNeeded();
   await shot(page, '4-review-comment');
+
+  // A note half written on a decision is kept across a close and a reopen, until its verdict goes.
+  await pane.locator('[data-review-decision] [data-decision-caret]').click();
+  await page.getByRole('menuitem', { name: /Send with a note/ }).click();
+  await page.locator('[data-decision-note-input]').fill('Also check the retry cap.');
+  await pane.getByRole('button', { name: 'Thread' }).click();
+  await expect(pane).toHaveCount(0);
+  await page.locator('[data-review-card]').getByRole('button', { name: /review/ }).click();
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-decision] [data-decision-caret]').click();
+  await page.getByRole('menuitem', { name: /Send with a note/ }).click();
+  await expect(page.locator('[data-decision-note-input]')).toHaveValue('Also check the retry cap.');
+  await page.keyboard.press('Escape');
+  await page.keyboard.press('Escape');
 
   const decide = pane.locator('[data-review-decision] [data-decision-primary]');
   await expect(decide).toContainText(/Send/);
