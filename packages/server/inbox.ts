@@ -3403,8 +3403,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = await pullProjects();
         // A key this Inbox has not read yet (it restarted since the window's list): read the list once, then look again.
         if ((keys as string[]).some((key) => !pulls.find(key))) await pulls.list(wanted, { refresh: false });
+        let theirs = true;
         for (const key of keys as string[]) {
           const pull = pulls.find(key);
+          if (pull && pull.mine) theirs = false;
           if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
           if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
             const field = validateOnly ? "project_id" : "thread_id";
@@ -3413,7 +3415,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (validateOnly) return json({ serverSession, ok: true });
         if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
-        pullOwners.set(keys as string[], threadId, (body.ask as "guide" | "custom" | undefined) ?? null);
+        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
         return json({ serverSession, ok: true });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
@@ -3935,7 +3937,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
         const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
-        const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
+        // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
+        const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) }, ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}) };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
         const row = store.listRow(thread.thread_id);
         return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row && withSnooze(row) });

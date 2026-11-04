@@ -22,6 +22,7 @@ import type { InboxMessageWire, InboxProject, InboxThread } from '@plannotator/c
 const hasDom = typeof document !== 'undefined';
 if (hasDom) mock.module('#guide-reader', () => ({ default: () => null }));
 const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
+const { ReviewCard } = (hasDom ? await import('./components/ReviewCard') : {}) as typeof import('./components/ReviewCard');
 const { readReviewNotes, clearReviewNotes } = (hasDom ? await import('./reviewVerdict') : {}) as typeof import('./reviewVerdict');
 
 const PROJECT: InboxProject = { id: 'prj_1', key: 'ledger-abcdef', name: 'ledger', root: '/work/ledger', created_at: '2026-10-11T10:00:00.000Z' };
@@ -107,14 +108,14 @@ async function settle() {
   }
 }
 
-async function render() {
+async function render(on: InboxThread = thread) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
     root.render(
       <div className="pn-inbox">
-        <ReviewPane thread={thread} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
+        <ReviewPane thread={on} message={message} onBack={() => (backs += 1)} onClose={() => {}} onSent={() => {}} />
       </div>,
     );
   });
@@ -127,6 +128,30 @@ const click = async (selector: string) => {
   await act(async () => el.click());
   await settle();
 };
+
+test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {
+  await render({ ...thread, pull_theirs: true });
+  expect(document.querySelector('[data-review-chapters]')).not.toBeNull();
+  expect(document.querySelector('[data-review-decision]')).toBeNull();
+  expect(document.querySelector('[data-decision-primary]')).toBeNull();
+  expect(document.querySelector('[data-asker-ended]')).toBeNull();
+  expect(posted).toEqual([]);
+  act(() => root?.unmount());
+  host?.remove();
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  const card = (verdict: boolean) => {
+    act(() => {
+      root = createRoot(host!);
+      root.render(<ReviewCard guide={message.guide!} outcome={null} verdict={verdict} onOpen={() => {}} />);
+    });
+    const words = host!.textContent ?? '';
+    act(() => root?.unmount());
+    return words;
+  };
+  expect(card(true)).toContain('Waiting on you');
+  expect(card(false)).not.toContain('Waiting on you');
+});
 
 test.skipIf(!hasDom)('the review built for the test', () => {
   expect(snapshot).not.toBeNull();

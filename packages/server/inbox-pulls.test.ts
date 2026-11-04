@@ -228,6 +228,21 @@ describe("on", () => {
     expect(answer.links["github.com/northwind/billing-svc#412"]).toMatchObject({ via: "owner", ask: "custom" });
   });
 
+  test("a thread handed only a teammate's PR reads as such (its reviews take no verdict); one of the person's own PRs ends that", async () => {
+    const w = await world({ codeReview: true });
+    const theirs = await w.send("Ready.", "theirs");
+    const own = await w.send("Ready.", "own");
+    await w.pulls();
+    const thread = async (id: string) => ((await (await fetch(`${w.base}/api/inbox/threads/${id}`)).json()) as { thread: { pull_theirs?: true } }).thread;
+    expect((await w.own(["github.com/northwind/billing-svc#880"], theirs)).status).toBe(200);
+    expect((await w.own(["github.com/northwind/billing-svc#412"], own)).status).toBe(200);
+    expect((await thread(theirs)).pull_theirs).toBe(true);
+    expect((await thread(own)).pull_theirs).toBeUndefined();
+    // The person hands one of their own PRs to the same thread: it is theirs to give a verdict in again.
+    expect((await w.own(["github.com/northwind/billing-svc#413"], theirs)).status).toBe(200);
+    expect((await thread(theirs)).pull_theirs).toBeUndefined();
+  });
+
   test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "handed");

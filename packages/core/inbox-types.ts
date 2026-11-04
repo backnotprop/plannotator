@@ -1552,6 +1552,12 @@ export interface InboxThread {
    * thread's. Absent from an older Inbox and from the MCP tools.
    */
   archive_seq?: number | null;
+  /**
+   * The window's read only: every pull request the person handed to this thread is a teammate's (Pull requests'
+   * Hand to an agent; the Inbox's own pull list said so when the owner was kept). Its reviews take no verdict:
+   * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
+   */
+  pull_theirs?: true;
   messages: InboxMessageWire[];
 }
 

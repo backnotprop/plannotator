@@ -76,6 +76,9 @@ type RailMode = 'walkthrough' | 'files';
 export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments } = state;
+  // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
+  // conversation in the thread, and no Approve or Request changes is offered.
+  const verdict = !thread.pull_theirs;
   const phone = usePhone();
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
@@ -291,7 +294,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
             {comments.length}
           </button>
         )}
-        {!readOnly && snapshot && (
+        {!readOnly && verdict && snapshot && (
           <span className="ib-rv-decide" data-review-decision="">
             <DecisionControl
               spec={spec}
@@ -419,7 +422,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
               </select>
             </div>
           )}
-          {!readOnly && asking && (route.open || askerEnded) && (
+          {!readOnly && verdict && asking && (route.open || askerEnded) && (
             // The session that wrote the review ended: the thread's own note, and at a decision its route choice.
             <div className="ib-rv-route" data-review-route="">
               {route.open ? (

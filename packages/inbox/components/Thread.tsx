@@ -5648,7 +5648,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 )}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
-                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} onOpen={() => onOpenGuide(message.id)} />
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}

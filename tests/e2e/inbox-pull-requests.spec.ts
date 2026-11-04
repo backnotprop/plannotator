@@ -872,6 +872,9 @@ test('the walkthrough video (35 s): a PR with no agent, the ask, handed over, it
     await expect(page.locator('[data-pulls-stack] [data-pulls-start-review]')).toBeVisible();
     await pause(2500);
     await page.locator('[data-pulls-stack] [data-pulls-start-review]').click();
+    // A teammate's PR: the review reads with no verdict.
+    await expect(page.locator('[data-review-chapters]')).toBeVisible();
+    await expect(page.locator('[data-review-decision]')).toHaveCount(0);
     await pause(5000);
   } finally {
     await context.close();
