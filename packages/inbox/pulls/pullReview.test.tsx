@@ -488,9 +488,8 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
       onProject={() => {}}
       onReview={() => {}}
       onOpenThread={() => {}}
-      onOpenGuide={() => {}}
       onLaunch={() => {}}
-      onHanded={() => {}}
+      onStarted={() => {}}
     />
     </SidebarProvider>,
   );
@@ -514,7 +513,7 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
 });
 
 test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's own origin; the agent is on the third line", async () => {
-  // The person's own stack (as "mara-lee", a login no other test drew), handed to Claude; a teammate's PR whose account is gone.
+  // The person's own stack (as "mara-lee", a login no other test drew), its review thread with Claude; a teammate's PR whose account is gone.
   const gone = pull(990, { repo: 'northwind/web-app', mine: false, requested: true, author: null, head: 'gone', updated_at: '2026-11-03T11:00:00.000Z' });
   const own = model.pulls.map((p) => (stack.some((l) => l.key === p.key) ? { ...p, author: 'mara-lee' } : p));
   const answer: InboxPullsAnswer = { ...model, pulls: [...own, gone], links: { [stack[0]!.key]: { ...link, via: 'owner' } } };
@@ -546,7 +545,7 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   // The agent: its mark and name on the third line.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.textContent).toBe('Claude Code has it');
+  expect(agent.textContent).toBe('Review thread with Claude Code');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
@@ -571,30 +570,19 @@ test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is t
   expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
 });
 
-test.skipIf(!hasDom)("a Whole stack over two agents' layers goes to neither: the agent option is off and says why; posting still can", async () => {
+test.skipIf(!hasDom)("a Whole stack goes to the stack's one review thread, its lowest linked layer's, though another agent linked a layer above", async () => {
   // Claude has #412 (the bottom), Codex #413: the stack up to #413 covers both.
   const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
-  // Its head read (postable), and a fresh push: no comments kept from another test.
-  const pulls = model.pulls.map((p) => (p.key === stack[1]!.key ? { ...p, head_sha: SHA, updated_at: '2026-11-04T03:00:00.000Z' } : p));
-  const two: InboxPullsAnswer = { ...model, pulls, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
+  const two: InboxPullsAnswer = { ...model, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
   mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
   await settle();
-  // This layer: Codex's own, offered.
-  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
   await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
   await settle();
-  const words = 'Claude Code and Codex each have layers here. Send to an agent from This layer.';
-  const option = el('[data-review-destination-choice="agent"]');
-  expect(option.querySelector('input')!.disabled).toBe(true);
-  expect(option.getAttribute('title')).toBe(words);
-  expect(el('[data-review-destination]').getAttribute('data-review-destination')).toBe('forge');
-  expect(el('[data-review-decision]').getAttribute('data-review-posts')).toBe('github');
-  expect(el('[data-pull-review-readonly]').textContent).toBe(words);
-  // Back to This layer: Codex is offered again; nothing was sent.
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  // No note about several agents: the verdict has one place to go.
+  expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
+  await act(async () => el('[data-review-decision] [data-decision-primary]').click());
   await settle();
-  expect(el<HTMLInputElement>('[data-review-destination-choice="agent"] input').disabled).toBe(false);
-  expect(posted).toEqual([]);
+  expect(posted.map((p) => p.path)).toEqual([`/api/inbox/messages/${LAST}/reply`]);
 });
 
 // --- the review's findings (#2590): who a verdict may go to ---
@@ -649,14 +637,14 @@ test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones
   expect(window.localStorage.getItem(`${store}${layer.key}:layer:${layer.updated_at}`)).not.toBeNull();
 });
 
-// --- ownership is explicit (owner direction on #2590): No agent yet, Hand to an agent, Launch an agent, the ask ---
+// --- one review thread per PR or stack (approval "pr-page-review-with-agent"): Review with an agent, the picker ---
 
 function Page({
   answer,
   stackId,
   onLaunch,
-  onHanded,
-  onOpenGuide,
+  onStarted,
+  onOpenThread,
   onOpenCard,
   onReview,
 }: {
@@ -664,8 +652,8 @@ function Page({
   stackId: string;
   onReview?: (stackId: string, key: string, scope: 'layer' | 'stack') => void;
   onLaunch?: (keys: readonly string[], projects: readonly string[], body: string, askLine: string) => void;
-  onHanded?: (session: string) => void;
-  onOpenGuide?: (thread: string, message: string) => void;
+  onStarted?: (session: string) => void;
+  onOpenThread?: (thread: string) => void;
   onOpenCard?: (id: string) => void;
 }) {
   return (
@@ -680,35 +668,60 @@ function Page({
         onOpenStack={() => {}}
         onProject={() => {}}
         onReview={(id, key, scope) => onReview?.(id, key, scope)}
-        onOpenThread={() => {}}
-        onOpenGuide={(thread, message) => onOpenGuide?.(thread, message)}
+        onOpenThread={(thread) => onOpenThread?.(thread)}
         {...(onOpenCard ? { onOpenCard } : {})}
         onLaunch={(keys, projects, body, askLine) => onLaunch?.(keys, projects, body, askLine)}
-        onHanded={(session) => onHanded?.(session)}
+        onStarted={(session) => onStarted?.(session)}
       />
     </SidebarProvider>
   );
 }
 
 const sentPaths = () => posted.map((p) => p.path.replace(/^.*\/api\/inbox/, ''));
+const pickerSessions = () => [...document.querySelectorAll('[data-pulls-picker-session]')].map((o) => o.getAttribute('data-pulls-picker-session'));
+const pickedSession = () => [...document.querySelectorAll('[data-pulls-picker-session]')].filter((o) => o.querySelector<HTMLInputElement>('input')!.checked).map((o) => o.getAttribute('data-pulls-picker-session'));
 
-/** Pick an agent's pill, then the purple Review: the hand-off goes to the picked agent. */
-async function handTo(session: string) {
-  await act(async () => el(`[data-pulls-hand-session="${session}"] input`).click());
-  await act(async () => el('[data-pulls-review]').click());
+/** The one button under the title opens the picker; its agents are read. */
+async function openPicker() {
+  await act(async () => el('[data-pulls-primary]').click());
+  await settle();
 }
 
-test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's live sessions; checked, then sent with the guided review's ask, then kept as the stack's", async () => {
-  const handed: string[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onHanded={(s) => handed.push(s)} />);
+/** Pick an agent in the picker, then Start review thread. */
+async function startWith(session: string) {
+  await act(async () => el(`[data-pulls-picker-session="${session}"] input`).click());
+  await act(async () => el('[data-pulls-start]').click());
+}
+
+async function typeWords(value: string) {
+  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+}
+
+test.skipIf(!hasDom)("no review thread: one button, Review with an agent; the picker lists only the project's running agents; checked, then sent with the guided review's ask, then kept as the stack's", async () => {
+  const started: string[] = [];
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onStarted={(s) => started.push(s)} />);
   await settle();
-  expect(el('[data-pulls-no-agent]').textContent).toContain('No agent yet');
+  const primary = el('[data-pulls-primary]');
+  expect(primary.getAttribute('data-pulls-primary')).toBe('review');
+  expect(primary.textContent).toBe('Review with an agent');
+  expect(primary.getAttribute('aria-expanded')).toBe('false');
+  // Nothing is read, sent or shown before the person asks: no picker, no thread line, no Reply.
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  expect(document.querySelector('[data-pulls-thread]')).toBeNull();
   expect(document.querySelector('[data-pulls-reply]')).toBeNull();
-  // Launch shows only while the Inbox can launch (compose's sessions answer says so).
-  expect(document.querySelector('[data-pulls-launch]')).toBeNull();
-  expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
+  await openPicker();
+  expect(primary.getAttribute('aria-expanded')).toBe('true');
+  expect(el('[data-pulls-picker]').getAttribute('id')).toBe(primary.getAttribute('aria-controls'));
+  // "Start a new agent" shows only where this Inbox can start one (compose's sessions answer says so).
+  expect(document.querySelector('[data-pulls-picker-new]')).toBeNull();
+  expect(pickerSessions()).toEqual(['ses_billing']);
+  expect(el('[data-pulls-picker-list]').textContent).toContain('Running in billing-svc');
   expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
-  await handTo('ses_billing');
+  await startWith('ses_billing');
   await settle();
   // The check runs first, so a PR the Inbox would refuse to keep never reaches the agent.
   expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/pulls/owner']);
@@ -721,7 +734,21 @@ test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's li
   expect(body).toContain('/review-curate Walk it layer by layer, in landing order');
   expect(body).toContain(INBOX_REVIEW_SKILL_TEXTS['review-curate']!.body);
   expect(posted[2]!.body).toMatchObject({ keys: stack.map((l) => l.key), thread_id: 'thr_new', ask: 'guide' });
-  expect(handed).toEqual(['ses_billing']);
+  expect(started).toEqual(['ses_billing']);
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('Cancel and Escape close the picker without sending; focus goes back to the button', async () => {
+  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
+  await settle();
+  await openPicker();
+  await act(async () => el('[data-pulls-picker-cancel]').click());
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  expect(document.activeElement).toBe(el('[data-pulls-primary]'));
+  await openPicker();
+  await act(async () => el('[data-pulls-picker]').dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  expect(posted).toEqual([]);
 });
 
 test.skipIf(!hasDom)('Custom curation: the person\'s words ride /review-curate, and the PR keeps that it was asked for', async () => {
@@ -729,60 +756,68 @@ test.skipIf(!hasDom)('Custom curation: the person\'s words ride /review-curate, 
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={single.key} />);
   await settle();
+  await openPicker();
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  // No words yet: Review sends nothing.
-  expect(el<HTMLButtonElement>('[data-pulls-review]').disabled).toBe(true);
-  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'only the fallback chain, and its tests');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await handTo('ses_web');
+  // No words yet: Start review thread sends nothing.
+  expect(el<HTMLButtonElement>('[data-pulls-start]').disabled).toBe(true);
+  await typeWords('only the fallback chain, and its tests');
+  await startWith('ses_web');
   await settle();
   expect(String(posted.find((p) => p.path.endsWith('/messages'))!.body.body)).toContain('/review-curate only the fallback chain, and its tests');
   expect(posted.at(-1)!.body).toMatchObject({ ask: 'custom' });
 });
 
-test.skipIf(!hasDom)('a refused check sends nothing; a stack past the hand-off limit is refused before anything is sent', async () => {
+test.skipIf(!hasDom)('a stack past the limit of one review thread is refused before anything is sent', async () => {
   const many = Array.from({ length: 21 }, (_, i) => pull(500 + i, { head: `l${i}`, base: i === 0 ? 'main' : `l${i - 1}` }));
   mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} />);
   await settle();
-  await handTo('ses_billing');
+  await openPicker();
+  await startWith('ses_billing');
   await settle();
   expect(posted).toEqual([]);
-  expect(el('[data-pulls-handoff] [role="alert"]').textContent).toContain('more than 20');
+  expect(el('[data-pulls-picker] [role="alert"]').textContent).toBe("A stack of more than 20 open pull requests can't go to one review thread.");
 });
 
-test.skipIf(!hasDom)('Launch an agent opens compose with the hand-off, the stack\'s PRs and their project, once the Inbox can launch', async () => {
-  sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+test.skipIf(!hasDom)('Start a new agent shows once the Inbox can start one: it opens compose with the first message, the stack\'s PRs and their project, and the chosen ask', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }, { agent: 'codex', name: 'Codex' }], projects: [] } };
   const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string }[] = [];
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(keys, projects, body, askLine) => launched.push({ keys, projects, body, askLine })} />);
   await settle();
-  await act(async () => el('[data-pulls-launch]').click());
+  await openPicker();
+  // No agent running: the new one is picked, and the list says why.
+  expect(el('[data-pulls-picker-list]').textContent).toContain('No agent is running in billing-svc.');
+  const fresh = el('[data-pulls-picker-new]');
+  expect(fresh.querySelector<HTMLInputElement>('input')!.checked).toBe(true);
+  expect(fresh.textContent).toBe('Start a new agentClaude Code or Codex');
+  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
+  await typeWords('just the retry loop');
+  await act(async () => el('[data-pulls-start]').click());
   expect(launched).toHaveLength(1);
   expect(launched[0]!.keys).toEqual(stack.map((l) => l.key));
   expect(launched[0]!.projects).toEqual(['prj_1']);
-  expect(launched[0]!.body).toContain(launched[0]!.askLine);
+  expect(launched[0]!.body).toContain('/review-curate just the retry loop');
   expect(posted).toEqual([]);
 });
 
-test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the diff; a pill only picks; the last agent is picked first next time', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
+test.skipIf(!hasDom)('the picker picks a running agent that is not working, the last one used first next time; a row only picks', async () => {
+  const busy = { ...liveSession('ses_busy', 'prj_1'), busy: true, label: 'Refactor the ledger' };
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [busy, liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
   const reviewed: string[] = [];
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
   await settle();
-  const pressed = () => [...document.querySelectorAll('[data-pulls-hand-session]')].filter((b) => b.querySelector<HTMLInputElement>('input')!.checked).map((b) => b.getAttribute('data-pulls-hand-session'));
-  // Nothing handed yet: the first live agent is picked.
-  expect(pressed()).toEqual(['ses_a']);
-  expect(el('[data-pulls-review]').textContent).toBe('Review');
-  // The pills are one radio group; Review says which agent it goes to.
-  expect(el('[role="radiogroup"][aria-label="Agent"]').querySelectorAll('input[type="radio"]')).toHaveLength(2);
-  expect(document.getElementById(el('[data-pulls-review]').getAttribute('aria-describedby')!)!.textContent).toBe('With Claude Code');
-  await act(async () => el('[data-pulls-hand-session="ses_b"] input').click());
+  await openPicker();
+  expect(pickedSession()).toEqual(['ses_a']);
+  // Each row says what it is: the agent, its title (or none yet), and whether it is working.
+  expect(el('[data-pulls-picker-session="ses_busy"]').textContent).toBe('Claude CodeRefactor the ledgerWorking');
+  expect(el('[data-pulls-picker-session="ses_a"]').textContent).toMatch(/^Claude CodeNo title yetStarted .+ ago$/);
+  // The rows are one radio group.
+  expect(el('[data-pulls-picker-list][role="radiogroup"]').querySelectorAll('input[type="radio"]')).toHaveLength(3);
+  await act(async () => el('[data-pulls-picker-session="ses_b"] input').click());
   await settle();
   expect(posted).toEqual([]);
-  expect(pressed()).toEqual(['ses_b']);
-  await act(async () => el('[data-pulls-review]').click());
+  expect(pickedSession()).toEqual(['ses_b']);
+  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_b');
+  await act(async () => el('[data-pulls-start]').click());
   await settle();
   expect(posted.find((p) => p.path.endsWith('/messages'))!.body.to).toEqual({ host: 'claude-code', session: 'ses_b' });
   expect(reviewed).toEqual([]);
@@ -791,41 +826,43 @@ test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the di
   posted.length = 0;
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
   await settle();
-  expect(pressed()).toEqual(['ses_b']);
+  await openPicker();
+  expect(pickedSession()).toEqual(['ses_b']);
 });
 
-test.skipIf(!hasDom)('an ended agent: Review reads the live agents again, drops the pick, and launches a new one when none is left', async () => {
+test.skipIf(!hasDom)('an agent that ended after the picker read it: the running agents are read again, its row goes, a new one is offered', async () => {
   sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
   refuse = { ses_billing: { status: 409, body: { code: 'session_not_live', error: 'That session is not live any more: nothing was sent.' } } };
   const launched: string[] = [];
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
   await settle();
-  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('ses_billing');
+  await openPicker();
+  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_billing');
   const reads = sessionReads;
-  // The agent ended after the page read it: compose's answer no longer has it.
   sessionsAnswer = { ...sessionsAnswer, projects: [] };
-  await act(async () => el('[data-pulls-review]').click());
+  await act(async () => el('[data-pulls-start]').click());
   await settle();
   expect(sessionReads).toBe(reads + 1);
-  expect(el('[data-pulls-handoff] [role="alert"]').textContent).toContain('not live');
-  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
-  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('new');
+  expect(el('[data-pulls-picker] [role="alert"]').textContent).toContain('not live');
+  expect(pickerSessions()).toEqual([]);
+  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('new');
   const sends = posted.filter((p) => p.path.endsWith('/messages')).length;
-  await act(async () => el('[data-pulls-review]').click());
+  await act(async () => el('[data-pulls-start]').click());
   expect(launched).toHaveLength(1);
   expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(sends);
 });
 
-test.skipIf(!hasDom)('the window coming back reads the live agents again', async () => {
+test.skipIf(!hasDom)('the window coming back reads the running agents again', async () => {
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
   await settle();
-  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(1);
+  await openPicker();
+  expect(pickerSessions()).toEqual(['ses_billing']);
   const reads = sessionReads;
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_billing', 'prj_1'), liveSession('ses_new', 'prj_1')] }] };
   await act(async () => window.dispatchEvent(new Event('focus')));
   await settle();
   expect(sessionReads).toBe(reads + 1);
-  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(2);
+  expect(pickerSessions()).toEqual(['ses_billing', 'ses_new']);
 });
 
 test.skipIf(!hasDom)('a new pick gets a new idempotency key: the retry to another agent is a new send, not the first one replayed', async () => {
@@ -833,11 +870,12 @@ test.skipIf(!hasDom)('a new pick gets a new idempotency key: the retry to anothe
   refuse = { ses_a: { status: 503, body: { code: 'busy', error: 'Try again.' } } };
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
   await settle();
-  await handTo('ses_a');
+  await openPicker();
+  await startWith('ses_a');
   await settle();
-  await handTo('ses_a');
+  await startWith('ses_a');
   await settle();
-  await handTo('ses_b');
+  await startWith('ses_b');
   await settle();
   const keys = posted.filter((p) => p.path.endsWith('/messages')).map((p) => [(p.body.to as { session: string }).session, p.body.idempotency_key]);
   expect(keys.map(([to]) => to)).toEqual(['ses_a', 'ses_a', 'ses_b']);
@@ -846,26 +884,25 @@ test.skipIf(!hasDom)('a new pick gets a new idempotency key: the retry to anothe
   expect(keys[2]![1]).not.toBe(keys[0]![1]);
 });
 
-test.skipIf(!hasDom)("one PR's pick and words stay with it: the custom words typed for PR A are not sent with PR B", async () => {
+test.skipIf(!hasDom)("one PR's picker stays with it: the custom words typed for PR A are not sent with PR B", async () => {
   const a = model.pulls.find((p) => p.number === 869)!;
   const b = model.pulls.find((p) => p.number === 880)!;
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2'), liveSession('ses_web2', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={a.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand-session="ses_web2"] input').click());
+  await openPicker();
+  await act(async () => el('[data-pulls-picker-session="ses_web2"] input').click());
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'only the fallback chain for #869');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  // The person moves to PR B in the same page.
+  await typeWords('only the fallback chain for #869');
+  // The person moves to PR B in the same page: its own button, closed.
   act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: {} }} stackId={b.key} /></div>));
   await settle();
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  await openPicker();
   expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
   expect(document.querySelector('[data-pulls-ask-words]')).toBeNull();
-  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('ses_web');
-  await act(async () => el('[data-pulls-review]').click());
+  expect(el('[data-pulls-start]').getAttribute('data-pulls-start')).toBe('ses_web');
+  await act(async () => el('[data-pulls-start]').click());
   await settle();
   const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
   expect(body).toContain('#880');
@@ -873,68 +910,54 @@ test.skipIf(!hasDom)("one PR's pick and words stay with it: the custom words typ
   expect(posted.at(-1)!.body).toMatchObject({ keys: [b.key], ask: 'guide' });
 });
 
-test.skipIf(!hasDom)('after a hand-off, focus moves to the status line that says who has it', async () => {
+test.skipIf(!hasDom)('once a thread starts, focus moves to the line that names its agent', async () => {
   mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} />);
   await settle();
-  el<HTMLButtonElement>('[data-pulls-review]').focus();
-  await act(async () => el('[data-pulls-review]').click());
+  await openPicker();
+  await act(async () => el('[data-pulls-start]').click());
   await settle();
   // The list reads the new thread: the PR is that thread's now.
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_new', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_billing', name: null } };
   act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} /></div>));
   await settle();
-  expect(document.activeElement?.hasAttribute('data-pulls-said')).toBe(true);
-});
-
-test.skipIf(!hasDom)('with no live agent, Review launches a new one with the chosen ask', async () => {
-  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
-  const launched: string[] = [];
-  mount(<Page answer={{ ...model, links: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
-  await settle();
-  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
-  await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
-  const input = el<HTMLInputElement>('[data-pulls-ask-words]');
-  await act(async () => {
-    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'just the retry loop');
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-  });
-  await act(async () => el('[data-pulls-review]').click());
-  expect(launched).toHaveLength(1);
-  expect(launched[0]).toContain('/review-curate just the retry loop');
-  expect(posted).toEqual([]);
+  expect(document.activeElement?.getAttribute('data-pulls-thread')).toBe('thr_new');
 });
 
 test.skipIf(!hasDom)('Open the diff, in every state, and each open row go straight to the review mode (layer by layer for a stack)', async () => {
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
   const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true } };
+  const ended: InboxPullLink = { ...owned, agent: { ...owned.agent!, ended: true } };
   const states: [string, Record<string, InboxPullLink>][] = [
-    ['before', {}],
+    ['none', {}],
     ['on the way', { [stack[2]!.key]: owned }],
     ['arrived', { [stack[2]!.key]: arrived }],
+    ['ended', { [stack[2]!.key]: ended }],
   ];
   const first = stack.find((l) => l.state === 'open')!;
   for (const [name, links] of states) {
     const reviewed: string[] = [];
     mount(<Page answer={{ ...model, links }} stackId={STACK_ID} onReview={(_id, key, scope) => reviewed.push(`${key}:${scope}`)} />);
     await settle();
+    // Beside the one primary button.
+    expect([name, el('[data-pulls-open-diff]').closest('.ib-pr-actions')!.querySelectorAll('.ib-pri')]).toEqual([name, expect.objectContaining({ length: 1 })]);
     await act(async () => el('[data-pulls-open-diff]').click());
     expect([name, reviewed]).toEqual([name, [`${first.key}:layer`]]);
     await act(async () => el(`[data-pulls-layer="${stack[2]!.key}"] button`).click());
     expect([name, reviewed.at(-1)]).toEqual([name, `${stack[2]!.key}:layer`]);
     expect(el(`[data-pulls-layer="${stack[2]!.key}"] .ib-pr-lgo`).textContent).toBe('Open diff');
     expect([name, posted]).toEqual([name, []]);
-    if (name === 'arrived') expect(el('[data-pulls-start-review]').closest('.ib-pr-actions')!.querySelector('[data-pulls-open-diff]')).not.toBeNull();
     act(() => root?.unmount());
     host?.remove();
   }
 });
 
-test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the words forbid pushing and approving", async () => {
+test.skipIf(!hasDom)("a teammate's PR can go to a review thread for discussion: the words forbid pushing and approving", async () => {
   const theirs = model.pulls.find((p) => p.number === 880)!;
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={theirs.key} />);
   await settle();
-  await handTo('ses_web');
+  await openPicker();
+  await startWith('ses_web');
   await settle();
   const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
   expect(body).toContain("tomas's");
@@ -942,41 +965,37 @@ test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the wor
   expect(body).toMatch(/don't push to the branch, comment on the pull request, or approve it/);
 });
 
-test.skipIf(!hasDom)('owned: "guided review on the way", Hand to another agent; the review arrived: Start review opens it', async () => {
+test.skipIf(!hasDom)('a review thread: "Review thread with Claude Code", the ask on its way, one button that opens the thread; no picker, no second agent', async () => {
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
-  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_1', 'prj_1'), liveSession('ses_billing', 'prj_1')] }] };
-  mount(<Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} />);
-  await settle();
-  expect(el('[data-pulls-ask="guide"]').textContent).toContain('guided review on the way');
-  expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
-  expect(document.querySelector('[data-pulls-start-review]')).toBeNull();
-  // Hand to another agent opens the two lines again as "Hand again for", without the agent that has it.
-  await act(async () => el('[data-pulls-rehand]').click());
-  await settle();
-  expect(el('[data-pulls-handoff="again"]').textContent).toContain('Hand again for');
-  expect(document.querySelector('[data-pulls-rehand]')).toBeNull();
-  expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
-  expect(document.querySelector('[data-pulls-launch]')).toBeNull();
-  await handTo('ses_billing');
-  await settle();
-  expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
-  expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
-  act(() => root?.unmount());
-  host?.remove();
-  // The session the hand-off went to is left out too, when another session answered in the thread.
-  mount(<Page answer={{ ...model, links: { [stack[2]!.key]: { ...owned, handed_to: 'ses_billing' } } }} stackId={STACK_ID} />);
-  await settle();
-  await act(async () => el('[data-pulls-rehand]').click());
-  await settle();
-  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
-  act(() => root?.unmount());
-  host?.remove();
+  // Codex linked a layer higher up: the stack still has one review thread, its lowest linked layer's.
+  const codex: InboxPullLink = { ...linkTo('thr_codex', OTHER_LAST), agent: { host: 'codex', session: 'ses_cx', name: null } };
   const opened: string[] = [];
-  mount(<Page answer={{ ...model, links: { [stack[2]!.key]: { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true } } } }} stackId={STACK_ID} onOpenGuide={(_t, m) => opened.push(m)} />);
+  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: owned, [stack[1]!.key]: codex } }} stackId={STACK_ID} onOpenThread={(t) => opened.push(t)} />);
   await settle();
+  const line = el('[data-pulls-thread-line]');
+  expect(line.getAttribute('data-pulls-thread-line')).toBe('asked');
+  expect(line.textContent).toBe('Review thread with Claude CodeGuided review on the way');
+  expect(line.querySelector('.ib-atile, .ib-mk, svg')).not.toBeNull();
+  expect(document.querySelectorAll('[data-pulls-thread]')).toHaveLength(1);
+  expect(document.body.textContent).not.toContain('Codex');
+  const primary = el('[data-pulls-primary]');
+  expect(primary.getAttribute('data-pulls-primary')).toBe('open');
+  expect(primary.textContent).toBe('Open review thread');
+  await act(async () => primary.click());
+  expect(opened).toEqual([owned.thread_id]);
+  expect(document.querySelector('[data-pulls-picker]')).toBeNull();
+  expect(sessionReads).toBe(0);
+  act(() => root?.unmount());
+  host?.remove();
+  // The guided review arrived: the thread is still the way in (no button of its own); the line gives the last answer.
+  const arrived: InboxPullLink = { ...owned, guide: { message_id: 'msg_g', title: 'Retries', steps: 3, review: true }, last: { message_id: LAST, preview: 'The guided review is ready.', at: '2026-11-03T09:00:00.000Z' } };
+  mount(<Page answer={{ ...model, links: { [stack[0]!.key]: arrived } }} stackId={STACK_ID} />);
+  await settle();
+  expect(el('[data-pulls-thread-line]').getAttribute('data-pulls-thread-line')).toBe('live');
+  expect(el('[data-pulls-thread-line]').textContent).toContain('The guided review is ready.');
   expect(document.querySelector('[data-pulls-ask]')).toBeNull();
-  await act(async () => el('[data-pulls-start-review]').click());
-  expect(opened).toEqual(['msg_g']);
+  expect([...document.querySelectorAll('.ib-pr-actions button')].map((b) => b.textContent)).toEqual(['Open review thread', 'Open the diff']);
+  expect(document.querySelector('[data-pulls-reply]')).not.toBeNull();
 });
 
 test.skipIf(!hasDom)('the Board is optional: no Board chip without a card; a quiet chip when the Board is on and a card links the PR', async () => {
@@ -1111,14 +1130,21 @@ test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover',
   expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
 });
 
-test.skipIf(!hasDom)('an ended agent stays named, marked ended; Reply gives way to "Hand to another agent"', async () => {
+test.skipIf(!hasDom)('an ended agent stays named: "Claude Code ended"; no Reply; Start a new review thread opens the picker without it', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_1', 'prj_1'), liveSession('ses_billing', 'prj_1')] }] };
   const ended: InboxPullsAnswer = { ...model, links: { [stack[2]!.key]: { ...link, agent: { ...link.agent!, ended: true } } } };
   mount(<Page answer={ended} stackId={STACK_ID} />);
   await settle();
-  expect(document.querySelector('[data-pulls-agent-ended]')).not.toBeNull();
+  const line = el('[data-pulls-thread-line]');
+  expect(line.getAttribute('data-pulls-thread-line')).toBe('ended');
+  expect(line.textContent).toBe('Claude Code ended');
   expect(document.querySelector('[data-pulls-reply]')).toBeNull();
-  await act(async () => el('[data-pulls-rehand-foot]').click());
+  const primary = el('[data-pulls-primary]');
+  expect(primary.getAttribute('data-pulls-primary')).toBe('again');
+  expect(primary.textContent).toBe('Start a new review thread');
+  await openPicker();
+  expect(pickerSessions()).toEqual(['ses_billing']);
+  await act(async () => el('[data-pulls-start]').click());
   await settle();
-  expect(document.querySelector('[data-pulls-ended-foot]')).toBeNull();
-  expect(el('[data-pulls-handoff]').getAttribute('data-pulls-handoff')).toBe('again');
+  expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
 });

@@ -125,7 +125,7 @@ export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): 
 }
 
 /**
- * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent): what it is, where,
+ * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one): what it is, where,
  * the ask (`pullHandoffAskLine`: first a guided review, sent through phase 1's review path so it opens as Start
  * review), and what the agent may do after. Only the person's own open layers are the agent's to change; a
  * teammate's is for discussion: never pushed to, commented on or approved. Everything from the forge is quoted,
@@ -194,9 +194,11 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
   switch (item.reason) {
     case 'requested':
       return pull.author ? `${pull.author} asked for your review` : 'Your review was asked for';
-    case 'agent_ready':
-      // `owner`: the person handed it over (the agent did not open it); `url`: the agent's own thread names it.
-      return `${linkAgentName(link) ?? 'Your agent'} ${link?.via === 'owner' ? 'has it' : 'opened it'} · your review`;
+    case 'agent_ready': {
+      // Its review thread (the person's ask, or the agent's own thread that names it); the agent unnamed, only the ask.
+      const name = linkAgentName(link);
+      return name ? `${agentThreadWords(name, link?.agent?.ended === true)} · your review` : 'Your review';
+    }
     case 'running':
       return 'Checks running';
     case 'changes':
@@ -222,22 +224,30 @@ export function reasonWords(item: Pick<InboxPullItem, 'reason' | 'focus'>, link:
   }
 }
 
-/** A row's third line in parts: what it is ("#412", "3 open, 1 merged"), the agent that has it, and why it waits. */
+/** A row's third line in parts: what it is ("#412", "3 open, 1 merged"), its review thread's agent, and why it waits. */
 export interface RowMeta {
   lead: string;
-  /** The agent tied to it ("Claude Code has it"), drawn with its mark; null when none is. */
+  /** The agent of its review thread ("Review thread with Claude Code"), drawn with its mark; null when none is. */
   agent: { name: string; host: string | null; words: string } | null;
   rest: string;
 }
 
 /**
- * A row's third line: "#48201 · Claude Code has it · checks running", "3 open, 1 merged · Codex opened it · start at
- * #412". The agent follows what the row is, before why it waits; an agent whose session ended "had it".
+ * The review thread's agent in words: "Review thread with Claude Code", or "Claude Code ended" once its session ended.
+ * The same whether the person asked for the review or the agent's own thread names the PR: one thread either way.
+ */
+export function agentThreadWords(name: string, ended: boolean): string {
+  return ended ? `${name} ended` : `Review thread with ${name}`;
+}
+
+/**
+ * A row's third line: "#48201 · Review thread with Claude Code · checks running", "3 open, 1 merged · Codex ended ·
+ * start at #412". The agent follows what the row is, before why it waits.
  */
 export function rowMeta(item: InboxPullItem, link: InboxPullLink | null): RowMeta {
   const name = link?.agent ? linkAgentName(link) : null;
-  const agent = name && link?.agent ? { name, host: link.agent.host, words: link.via !== 'owner' ? 'opened it' : link.agent.ended ? 'had it' : 'has it' } : null;
-  // Mid-line the reason starts lower case, but never an agent's name ("Your agent opened it").
+  const agent = name && link?.agent ? { name, host: link.agent.host, words: agentThreadWords(name, link.agent.ended === true) } : null;
+  // Mid-line the reason starts lower case, but never an agent's name.
   const why = item.reason === 'agent_ready' ? (agent ? 'your review' : reasonWords(item, link)) : reasonWords(item, link).replace(/^./, (c) => c.toLowerCase());
   if (item.stack.layers.length === 1) return { lead: inboxPullLabel(item.focus), agent, rest: why };
   const open = item.stack.layers.filter(isOpen);
@@ -250,7 +260,7 @@ export function rowMeta(item: InboxPullItem, link: InboxPullLink | null): RowMet
 /** The row's third line as one string (what a screen reader and the tests read). */
 export function rowLine(item: InboxPullItem, link: InboxPullLink | null): string {
   const meta = rowMeta(item, link);
-  return [meta.lead, meta.agent ? `${meta.agent.name} ${meta.agent.words}` : null, meta.rest].filter(Boolean).join(' · ');
+  return [meta.lead, meta.agent?.words ?? null, meta.rest].filter(Boolean).join(' · ');
 }
 
 /** A layer's status pill in the stack view, or null for none. */
