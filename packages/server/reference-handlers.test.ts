@@ -280,7 +280,7 @@ describe("annotatable plain-text files (#1029)", () => {
 		]);
 	});
 
-	test("doc=1 serves a .yaml file as an annotatable markdown document", async () => {
+	test("doc=1 serves a .yaml file as an annotatable code document", async () => {
 		const root = makeTempDir("plannotator-doc-yaml-");
 		const file = writeTempFile(root, "config.yaml", "key: value\n");
 
@@ -290,7 +290,8 @@ describe("annotatable plain-text files (#1029)", () => {
 		expect(res.status).toBe(200);
 		expect(data.codeFile).toBeUndefined();
 		expect(data.markdown).toBe("key: value\n");
-		expect(data.renderAs).toBe("markdown");
+		// Its own text in one code block, never the markdown pipeline (#1099's follow-up).
+		expect(data.renderAs).toBe("code");
 	});
 
 	test("without doc=1, a .yaml path keeps the code-file popout response", async () => {

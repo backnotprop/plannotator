@@ -10,26 +10,26 @@ import { StepsLists } from './StepsList';
 /**
  * The Checklist's one-time reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's first-visit
  * dialog's frame, type and buttons (`.ib-bi`), over a small thread foot whose checklist ticks itself from 1/4 to 4/4,
- * with its list open for a moment. Shown once, after the claim turned the Checklist on: "Open Settings" lands on
- * Settings → Capabilities, where its switch now reads on; "Got it" closes. Every way out is final. No keyboard
- * shortcut. Under reduced motion the picture rests on its last beat: 4/4, the list open.
+ * with its list open for a moment. Shown once, as an offer (the owner, 2026-11-04: reveals are opt-in): "Turn it on"
+ * turns the Checklist on; "Not now", Escape and a click outside close it and leave it off. Every way out is final. No
+ * keyboard shortcut. Under reduced motion the picture rests on its last beat: 4/4, the list open.
  */
-export function ChecklistIntro({ phone, onClose, onSettings }: { phone: boolean; onClose: () => void; onSettings: () => void }) {
+export function ChecklistIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   return (
     <Modal labelledBy="ib-ci-title" describedBy="ib-ci-desc" testId="checklist-intro" onClose={onClose} ownKeys className={`ib-bi ib-ci${phone ? ' ib-bi-phone' : ''}`}>
       <ChecklistIntroArt />
       <div className="ib-bi-text">
         <h2 id="ib-ci-title">Checklist</h2>
         <p id="ib-ci-desc">For longer work, agents keep a checklist at the foot of the thread and tick off steps as they go.</p>
-        <p className="ib-bi-q">It starts with their next session. A tick never notifies you.</p>
+        <p className="ib-bi-q">It starts with their next session after you turn it on. A tick never notifies you.</p>
       </div>
       <div className="ib-bi-acts">
-        <button type="button" className="ib-btn ib-ghost" onClick={onSettings} data-checklist-intro-settings="">
-          Open Settings
+        <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-checklist-intro-close="">
+          Not now
         </button>
         <span className="ib-bsp" />
-        <button type="button" className="ib-btn ib-pri ib-bi-copy" onClick={onClose} data-checklist-intro-close="">
-          Got it
+        <button type="button" className="ib-btn ib-pri ib-bi-copy" onClick={onTurnOn} data-checklist-intro-on="">
+          Turn it on
         </button>
       </div>
     </Modal>

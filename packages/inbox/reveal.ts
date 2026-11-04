@@ -12,12 +12,15 @@
  *
  * A moment lasts `momentMs`; one that passes without all of that waits for the next leave. A claimed reveal that
  * cannot open yet waits for a free moment (unless the reveal says it no longer holds). Every way out is final: the
- * claim already stamped it.
+ * claim already stamped it (a claim whose answer was lost is sent again with the same key: `claimRevealOnce`). A claim
+ * turns nothing on (the owner, 2026-11-04: reveals are opt-in); a feature's dialog offers "Turn it on" and "Not now",
+ * and never opens once the settings say the feature is on.
  */
 import { useEffect, useRef, useState } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
-import { inboxApi } from './api';
+import { InboxApiError, inboxApi } from './api';
 import { LIST_INTRO_SETTLED_MS } from './listIntro';
+import { newUuid } from './uuid';
 
 /** The page's thresholds, ms, shared by every reveal. A test shrinks them (and puts them back). */
 export const REVEAL_TIMES = {
@@ -31,6 +34,8 @@ export const REVEAL_TIMES = {
   momentMs: 15_000,
   /** How often a moment that is held back (something typed, open or toasting) looks again. */
   recheckMs: 700,
+  /** A claim whose answer was lost (a network error) is sent again, once, after this long. */
+  claimRetryMs: 1_500,
 };
 
 /** One visit to a thread: which, and when it opened. */
@@ -200,8 +205,27 @@ export interface BoardRevealInput {
   clear: boolean;
   place: string;
   heldBack: () => boolean;
-  /** The claim was granted: the Inbox turned the Board on (the sidebar's row appears with the dialog). */
+  /** The settings say the Board is on (live, `event: capabilities`): the offer no longer opens. */
+  on?: boolean;
+  /** The claim's answer says the Board is on (another tab or device turned it on): the sidebar's row shows now. */
   onBoardOn: () => void;
+}
+
+type RevealClaimAnswer = Awaited<ReturnType<typeof inboxApi.claimReveal>>;
+
+/**
+ * Claim a reveal, safe to repeat: the page's `key` goes with it and the Inbox keeps it with the stamp, so a claim whose
+ * answer was lost (the phone's network dropped after the Inbox stamped it) is sent again, once, and is shown it again.
+ * An answer from the Inbox (any status) is final; another window's or device's key still gets `show: false`.
+ */
+export async function claimRevealOnce(id: 'board' | 'steps', key: string): Promise<RevealClaimAnswer> {
+  try {
+    return await inboxApi.claimReveal(id, key);
+  } catch (cause) {
+    if (cause instanceof InboxApiError) throw cause;
+    await new Promise((resolve) => setTimeout(resolve, REVEAL_TIMES.claimRetryMs));
+    return inboxApi.claimReveal(id, key);
+  }
 }
 
 /**
@@ -219,12 +243,13 @@ export function boardRevealMayClaim(gate: Pick<BoardRevealInput, 'due' | 'blocke
 }
 
 /**
- * The Board reveal: at the calm moment it claims `board` (the claim turns the Board on), then opens the Board's
- * existing first-visit dialog (`BoardIntro`). No new dialog (the owner, 2026-11-03).
+ * The Board reveal: at the calm moment it claims `board` (the claim only stamps it), then opens the Board's existing
+ * first-visit dialog (`BoardIntro`) as an offer: "Turn it on" or "Not now" (the owner, 2026-11-04: opt-in).
  */
 export function useBoardReveal(input: BoardRevealInput) {
   const latest = useRef(input);
   latest.current = input;
+  const key = useRef<string | null>(null);
   return useRevealMoment({
     wanted: input.due && !input.blocked,
     thread: input.thread,
@@ -235,30 +260,33 @@ export function useBoardReveal(input: BoardRevealInput) {
     toast: input.toast,
     leaveCounts: (visit, now, _row, next) => boardRevealLeaveCounts(visit, now, next),
     mayClaim: (pageAge) => boardRevealMayClaim(latest.current, pageAge),
-    holds: () => true,
+    // Turned on meanwhile (Settings here, or another window or device): the offer no longer applies.
+    holds: () => !latest.current.on,
     claim: async () => {
-      const answer = await inboxApi.claimReveal('board');
-      // Granted here, or by another tab or device first: the Board is on either way, so its row shows now.
-      if (answer.show || answer.board?.on) latest.current.onBoardOn();
+      key.current ??= newUuid();
+      const answer = await claimRevealOnce('board', key.current);
+      // The claim turns nothing on; the answer only reports a Board turned on elsewhere, so its row shows now.
+      if (answer.board?.on) latest.current.onBoardOn();
       return answer.show;
     },
   });
 }
 
-/** What one load knows for the Checklist reveal: the Board's, but its claim turns the Checklist on. */
+/** What one load knows for the Checklist reveal: the Board's (`on`: the settings say the Checklist is on). */
 export interface StepsRevealInput extends Omit<BoardRevealInput, 'onBoardOn'> {
-  /** The claim was granted (or another tab's was): the Inbox turned the Checklist on. */
+  /** The claim's answer says the Checklist is on (another tab or device turned it on). */
   onStepsOn: () => void;
 }
 
 /**
  * The Checklist reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's calm moment and gate (back on
- * the list after reading a thread, 60 s into the page, 5 rows or more). The claim turns the Checklist on, then the
- * page opens `ChecklistIntro`.
+ * the list after reading a thread, 60 s into the page, 5 rows or more). The claim only stamps it; the page opens
+ * `ChecklistIntro`, whose "Turn it on" turns the Checklist on.
  */
 export function useStepsReveal(input: StepsRevealInput) {
   const latest = useRef(input);
   latest.current = input;
+  const key = useRef<string | null>(null);
   return useRevealMoment({
     wanted: input.due && !input.blocked,
     thread: input.thread,
@@ -269,10 +297,11 @@ export function useStepsReveal(input: StepsRevealInput) {
     toast: input.toast,
     leaveCounts: (visit, now, _row, next) => boardRevealLeaveCounts(visit, now, next),
     mayClaim: (pageAge) => boardRevealMayClaim(latest.current, pageAge),
-    holds: () => true,
+    holds: () => !latest.current.on,
     claim: async () => {
-      const answer = await inboxApi.claimReveal('steps');
-      if (answer.show || answer.steps?.on) latest.current.onStepsOn();
+      key.current ??= newUuid();
+      const answer = await claimRevealOnce('steps', key.current);
+      if (answer.steps?.on) latest.current.onStepsOn();
       return answer.show;
     },
   });
