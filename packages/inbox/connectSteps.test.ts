@@ -74,7 +74,7 @@ test('MCP agents come after every Plannotator host; one the person turned off or
   const plan = connectPlan(model);
   expect(ids(plan.steps)).toEqual(['pi', 'opencode', 'codex', 'cline']);
   expect(stepTitle(plan.steps[2]!)).toBe('Connect Codex');
-  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline by hand');
+  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline yourself');
   expect(stepText(plan.steps[3]!).text).toBe("Only you can add it here: Cline's MCP command is not verified.");
 });
 
