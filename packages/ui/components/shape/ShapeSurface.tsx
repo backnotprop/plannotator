@@ -128,6 +128,18 @@ function marksFor(all: MarkState, view: ShapeViewId): MarkState {
 
 const without = (s: ReadonlySet<string>, drop: readonly string[]) => new Set([...s].filter((x) => !drop.includes(x)));
 
+/** A part's words as the page shows them, without its reference bubbles' numbers ("decides7"). */
+function partWords(el: HTMLElement): string {
+  const bubbles = [...el.querySelectorAll<HTMLElement>('.shp-rb')];
+  const was = bubbles.map((b) => b.style.display);
+  for (const b of bubbles) b.style.display = 'none';
+  try {
+    return el.innerText;
+  } finally {
+    bubbles.forEach((b, i) => (b.style.display = was[i]!));
+  }
+}
+
 /** The Ask panel's words once the session ended: what answers a question then depends on the host. */
 export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): string {
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
@@ -494,7 +506,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   // ── pointing at the board ──
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
-    setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? el.innerText).replace(/\s+/g, ' ').trim() });
+    setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? partWords(el)).replace(/\s+/g, ' ').trim() });
     setHoverRect(null);
   }, []);
   const hoverMark = useCallback((el: HTMLElement | null) => {

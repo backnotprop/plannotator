@@ -85,6 +85,8 @@ export interface ComposeRequest {
    * in `body`. The window keeps the sent thread as their agent's (`ComposeSent.pullKeys`). Not kept with a draft.
    */
   pulls?: InboxDraft['pulls'] | null;
+  /** The thread's name as compose opens (Launch an agent: `pullHandoffThreadName`), as if the person had typed it. */
+  threadName?: string;
 }
 
 export interface ComposeSent {
@@ -182,7 +184,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const boardChip = props.board === true && !card;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
-  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft));
+  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ? { thread_name: request.threadName } : null)));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
