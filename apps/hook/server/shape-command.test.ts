@@ -8,7 +8,8 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { parseShapeCommand, runShapeCommand } from "./shape-command";
+import { checkShapeBoard } from "@plannotator/core/shape";
+import { parseShapeCommand, runShapeCommand, SHAPE_COMMAND_USAGE } from "./shape-command";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -180,6 +181,17 @@ describe("parseShapeCommand", () => {
   });
 });
 
+describe("shape --help", () => {
+  // What regresses: the format or the validator changes and the help's example (the one an agent copies with no
+  // thread and no /shape skill) stops being a board the store takes.
+  test("its JSON example is a board the store accepts", () => {
+    const json = SHAPE_COMMAND_USAGE.match(/```json\n([\s\S]*?)\n```/)?.[1];
+    expect(json).toBeDefined();
+    const checked = checkShapeBoard(JSON.parse(json!));
+    expect(checked.ok ? [] : checked.errors).toEqual([]);
+  });
+});
+
 describe("the Shape switch, through the entrypoint", () => {
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
   // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
@@ -227,7 +239,8 @@ describe("the Shape switch, through the entrypoint", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");
       expect(help.code, help.stderr).toBe(0);
-      expect(`${help.stdout}${help.stderr}`).toContain("shape update");
+      // On, --help is the whole guide (welcome, commands, drawing); off (above) it is only SHAPE_OFF_TEXT.
+      expect(`${help.stdout}${help.stderr}`).toContain(SHAPE_COMMAND_USAGE);
       const made = await run("update", "--file", join(root, "board.json"), "--project", project);
       expect(made.code, made.stderr).toBe(0);
       expect(JSON.parse(made.stdout).v).toBe(1);

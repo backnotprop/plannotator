@@ -40,6 +40,7 @@
     "package:vscode": "bun run --cwd apps/vscode-extension package",
     "check:release-version": "node scripts/check-release-version.mjs",
     "check:sibling-deps": "bun scripts/check-sibling-deps.ts",
+    "gen:skills": "bun scripts/gen-skill-sections.ts",
     "test": "bun test",
     "postinstall": "bun apps/guides-show/build/sync-manifest.ts --if-missing",
     "bench:plan-load": "bun scripts/bench-plan-load.mjs",

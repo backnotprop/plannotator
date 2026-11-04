@@ -33,6 +33,8 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { AGENT_CONFIG } from "@plannotator/shared/agents";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/shared/question-block";
+import { SHAPE_SKILL_DESCRIPTION_PHRASE, SHAPE_SKILL_SECTION } from "@plannotator/core/shape-skill";
+import { renderSkillSections, skillSectionOf } from "../../../scripts/gen-skill-sections";
 import {
   formatTopLevelHelp,
   HIDDEN_SUBCOMMANDS,
@@ -130,12 +132,23 @@ for (const m of indexSource.matchAll(/args\[0\] === "([a-z][a-z0-9-]*)"/g)) {
 const skillDoc = readFileSync(SKILL_MD_PATH, "utf-8");
 const annotateSkillDoc = readFileSync(ANNOTATE_SKILL_MD_PATH, "utf-8");
 
-const documentedSubcommands = new Set<string>();
-for (const fence of skillDoc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
-  for (const m of fence[1].matchAll(/^\s*plannotator\s+([a-z][a-z0-9-]*)/gm)) {
-    documentedSubcommands.add(m[1]);
+// A fenced usage line documents a subcommand, and so does an inline pointer to
+// its own help (`plannotator shape --help`), for a section that hands the whole
+// guide to that help.
+function documentedSubcommandsOf(doc: string): Set<string> {
+  const subs = new Set<string>();
+  for (const fence of doc.matchAll(/```[a-z]*\n([\s\S]*?)```/g)) {
+    for (const m of fence[1].matchAll(/^\s*plannotator\s+([a-z][a-z0-9-]*)/gm)) {
+      subs.add(m[1]);
+    }
   }
+  for (const m of doc.matchAll(/(?<!`)`plannotator ([a-z][a-z0-9-]*) --help`/g)) {
+    subs.add(m[1]);
+  }
+  return subs;
 }
+
+const documentedSubcommands = documentedSubcommandsOf(skillDoc);
 
 const documentedFlags = new Set<string>();
 for (const m of skillDoc.matchAll(/(?<![\w-])--[a-z][a-z0-9-]*/g)) {
@@ -317,6 +330,59 @@ describe("plannotator skill: question authoring section", () => {
     for (const fact of [":::question", ":::question-multi", ":::question-text", "- [x]", "Recommended:", "about 8", "Answers to your questions", "Unanswered"]) {
       expect(QUESTION_AUTHORING_GUIDE).toContain(fact);
     }
+  });
+});
+
+/**
+ * The "## plannotator shape" section and the description's Shape phrase are the
+ * owner's approved words (approval "shape-skill"), kept in
+ * packages/core/shape-skill.ts and written into SKILL.md by `bun run gen:skills`
+ * (scripts/gen-skill-sections.ts). What regresses: someone edits the copy in
+ * SKILL.md (or the source) by hand and the two drift, or the skill names Shape
+ * while `plannotator shape` is still unreleased.
+ */
+describe("plannotator skill: Shape section", () => {
+  const shapeReleased = !HIDDEN_SUBCOMMANDS.has("shape");
+  const heading = SHAPE_SKILL_SECTION.split("\n", 1)[0]!;
+  const descriptionOf = (doc: string) => doc.split("\n").find((line) => line.startsWith("description: ")) ?? "";
+  const phraseIn = (doc: string) => descriptionOf(doc).includes(`Guided Reviews, ${SHAPE_SKILL_DESCRIPTION_PHRASE} and the Plannotator Inbox`);
+  const sectionText = (doc: string) => {
+    const at = skillSectionOf(doc, heading);
+    return at ? doc.slice(at.start, at.end) : null;
+  };
+
+  test("SKILL.md is exactly what `bun run gen:skills` writes", () => {
+    expect(
+      renderSkillSections(skillDoc, { shapeReleased }) === skillDoc,
+      "apps/skills/core/plannotator/SKILL.md is out of date with packages/core/shape-skill.ts — run `bun run gen:skills`",
+    ).toBe(true);
+  });
+
+  test("the section equals SHAPE_SKILL_SECTION byte for byte once shape is released, and is absent while it is hidden", () => {
+    if (shapeReleased) {
+      expect(sectionText(skillDoc), "run `bun run gen:skills`").toBe(`${SHAPE_SKILL_SECTION}\n`);
+      expect(phraseIn(skillDoc), "run `bun run gen:skills`").toBe(true);
+    } else {
+      expect(sectionText(skillDoc)).toBeNull();
+      expect(skillDoc).not.toContain(SHAPE_SKILL_DESCRIPTION_PHRASE);
+    }
+  });
+
+  test("released, the generator writes the approved words byte for byte, and the skill then documents shape", () => {
+    const released = renderSkillSections(skillDoc, { shapeReleased: true });
+    expect(sectionText(released)).toBe(`${SHAPE_SKILL_SECTION}\n`);
+    expect(phraseIn(released)).toBe(true);
+    // Before "## Other subcommands", once, and a second run changes nothing.
+    expect(released.indexOf(`\n${heading}\n`)).toBeLessThan(released.indexOf("\n## Other subcommands\n"));
+    expect(released.split(`\n${heading}\n`)).toHaveLength(2);
+    expect(renderSkillSections(released, { shapeReleased: true })).toBe(released);
+    // The release test above then finds shape documented (through its --help pointer).
+    expect(documentedSubcommandsOf(released).has("shape")).toBe(true);
+    for (const flag of SHAPE_SKILL_SECTION.match(/(?<![\w-])--[a-z][a-z0-9-]*/g) ?? []) expect(cliFlags.has(flag)).toBe(true);
+    // Hiding it again takes both out and gives back the skill without them.
+    const hidden = renderSkillSections(released, { shapeReleased: false });
+    expect(hidden).not.toContain(SHAPE_SKILL_DESCRIPTION_PHRASE);
+    expect(hidden.toLowerCase()).not.toContain("plannotator shape");
   });
 });
 
