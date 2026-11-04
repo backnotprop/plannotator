@@ -571,8 +571,14 @@ const App: React.FC = () => {
     [displayedMarkdown, parseFrontmatter],
   );
   const blocks = useMemo(
-    () => blocksForRenderAs(displayedMarkdown, renderAs, parseFrontmatter),
-    [renderAs, displayedMarkdown, parseFrontmatter],
+    () => blocksForRenderAs(displayedMarkdown, renderAs, parseFrontmatter, activeParseDocPath),
+    [renderAs, displayedMarkdown, parseFrontmatter, activeParseDocPath],
+  );
+  // A config file's version diff shows its chunks as code, in the language
+  // (and under the same size limit) its document block already resolved.
+  const planDiffCodeDocument = useMemo(
+    () => (renderAs === 'code' ? { language: blocks[0]?.language } : undefined),
+    [renderAs, blocks],
   );
   const [showExport, setShowExport] = useState(false);
   const [showImport, setShowImport] = useState(false);
@@ -2922,8 +2928,9 @@ const App: React.FC = () => {
   const canEditMarkdown =
     // Diagram sources (.mmd/.dot) are excluded with HTML: the surface is the
     // diagram, not a text column, and Edit Mode would show a code editor over
-    // a document that never renders as markdown.
-    renderAs === 'markdown' &&
+    // a document that never renders as markdown. A config file (`code`) stays
+    // editable: it was a markdown-rendered text file before it got its own view.
+    (renderAs === 'markdown' || renderAs === 'code') &&
     // editStats non-null keeps the toggle available after committing an
     // emptied document, so the user can re-enter and undo. Source-backed files
     // are editable even when they start empty.
@@ -4016,8 +4023,9 @@ const App: React.FC = () => {
           // A bundle opens its first file once loaded (see the effect below).
           setMarkdown('');
         } else if (typeof data.plan === 'string') {
-          // An .adoc file renders through the AsciiDoc block parser.
-          if (data.renderAs === 'asciidoc') setRenderAs('asciidoc');
+          // An .adoc file renders through the AsciiDoc block parser, and a
+          // config or data file (.toml, .yaml, …) as one code block.
+          if (data.renderAs === 'asciidoc' || data.renderAs === 'code') setRenderAs(data.renderAs);
           // CM6 joins lines with \n; CRLF input would make an untouched
           // edit round-trip fabricate a whole-document diff. Normalize once.
           const normalizedPlan = data.plan.replace(/\r\n?/g, '\n');
@@ -6263,7 +6271,15 @@ const App: React.FC = () => {
     submitted, isApiMode, documentReadOnly, isEditingMarkdown, handleSaveEditedSourceFile, displayedMarkdown, annotationsOutput,
   ]);
 
-  // Cmd/Ctrl+P keyboard shortcut — print plan
+  const handlePrint = useCallback(() => {
+    if (isHtmlSurface && viewerRef.current?.print) {
+      viewerRef.current.print();
+    } else {
+      window.print();
+    }
+  }, [isHtmlSurface]);
+
+  // Cmd/Ctrl+P keyboard shortcut — print the active document
   useEffect(() => {
     const handlePrintShortcut = (e: KeyboardEvent) => {
       const blocked = showExport ||
@@ -6272,14 +6288,14 @@ const App: React.FC = () => {
       if (!shouldPrintOnKey(e, blocked)) return;
 
       e.preventDefault();
-      window.print();
+      handlePrint();
     };
 
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
     showExport, showSourceFileEditWarning, showExitWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage, submitted,
+    showPermissionModeSetup, pendingPasteImage, submitted, handlePrint,
   ]);
 
   const agentName = useMemo(() => getAgentName(origin), [origin]);
@@ -6715,7 +6731,6 @@ const App: React.FC = () => {
   const handleOpenSettings = useCallback(() => setMobileSettingsOpen(true), []);
   const handleCloseSettings = useCallback(() => setMobileSettingsOpen(false), []);
   const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
-  const handlePrint = useCallback(() => window.print(), []);
   const handleOpenImport = useCallback(() => setShowImport(true), []);
   const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
   const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
@@ -7545,7 +7560,7 @@ const App: React.FC = () => {
           onAgentToolChange={agentTool.save}
           agentTerminalAvailable={showAgentTerminalControls}
           webmcpAvailable={webmcp.available}
-          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc'}
+          documentTextSizeAvailable={renderAs === 'markdown' || renderAs === 'asciidoc' || renderAs === 'code'}
           agentConnected={webmcpActivity.calls > 0}
           onCallbackFeedback={handleCallbackFeedback}
           onCallbackApprove={handleCallbackApprove}
@@ -7839,6 +7854,7 @@ const App: React.FC = () => {
                     selectedAnnotationId={selectedAnnotationId}
                     mode={effectiveEditorMode}
                     fillHeight={gridDiffPaperFillsView}
+                    codeDocument={planDiffCodeDocument}
                   />
                 </div>
               )}

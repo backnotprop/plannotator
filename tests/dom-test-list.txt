@@ -58,6 +58,7 @@ packages/ui/components/MermaidBlock.theme.test.tsx
 packages/ui/components/DiagramBlock.anchor.test.tsx
 packages/ui/components/DiagramBlock.askAI.test.tsx
 packages/ui/components/Viewer.askAISelectionLine.test.tsx
+packages/ui/components/Viewer.codeDocumentRepeatedLine.test.tsx
 packages/ui/components/Viewer.textComments.test.tsx
 packages/ui/components/ImageLightbox.test.tsx
 packages/ui/components/ImageZoomStage.wheelHint.test.tsx
@@ -233,6 +234,7 @@ packages/ui/hooks/usePinpoint.question.test.tsx
 packages/ui/utils/blockTargeting.blocks.test.tsx
 packages/ui/components/blocks/BlockquoteBlock.test.tsx
 packages/ui/components/RenderedMarkdown.hostSeams.test.tsx
+packages/ui/components/plan-diff/PlanCleanDiffView.codeDocument.test.tsx
 packages/ui/components/plan-diff/PlanCleanDiffView.seams.test.tsx
 packages/ui/components/AnnotationPanel.questions.test.tsx
 packages/ui/hooks/useActiveSection.test.tsx
@@ -334,6 +336,7 @@ packages/ui/hooks/useLinkedDoc.test.tsx
 packages/ui/components/DocBadges.test.tsx
 packages/editor/planDiffAutoExit.test.tsx
 packages/editor/App.archiveReadOnly.test.tsx
+packages/editor/App.codeDocument.test.tsx
 packages/editor/App.refCards.test.tsx
 packages/editor/App.htmlChrome.test.tsx
 packages/editor/App.sidebarTabsAgentTerminal.test.tsx
@@ -499,9 +502,17 @@ packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
 packages/inbox/snoozeIntroDialog.test.tsx
 packages/inbox/boardReveal.test.tsx
+packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
+packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
+packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
+packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
+packages/ui/components/CodeFilePopout.commentDraft.test.tsx
+packages/ui/components/ImageLightbox.regionDraft.test.tsx
+packages/review-editor/components/MarkdownBody.prImages.test.tsx
