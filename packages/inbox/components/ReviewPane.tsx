@@ -181,7 +181,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     const at = thread.messages.findIndex((m) => m.id === message.id);
     return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
   }, [thread.messages, message.id]);
-  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, enabled: !readOnly });
+  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly });
   // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
   const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
   const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);

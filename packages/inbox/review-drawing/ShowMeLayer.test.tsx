@@ -101,9 +101,9 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('[role="status"]')!.textContent).toBe('Waiting for Claude Code to finish…');
 
     // Nobody took it: the box is ready to send again, with the problem.
-    act(() => root!.render(<layer.ShowMeBox state={state({ box: { ...box, turn: null }, problem: 'The agent can’t take this right now. Try again in a moment.' })} {...props} />));
+    act(() => root!.render(<layer.ShowMeBox state={state({ box: { ...box, turn: null }, problem: 'No answer arrived.' })} {...props} />));
     expect(el.querySelector('[data-show-me-box]')!.getAttribute('data-show-me-box')).toBe('compose');
-    expect(el.querySelector('[role="alert"]')!.textContent).toBe('The agent can’t take this right now. Try again in a moment.');
+    expect(el.querySelector('[role="alert"]')!.textContent).toBe('No answer arrived.');
     expect(el.querySelector('[data-show-me-send]')).not.toBeNull();
   });
 

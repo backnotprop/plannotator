@@ -8,7 +8,9 @@
  * turn and tells the window (`event: ask`); its short answer streams here as
  * an Ask answer does. No new keys.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxShowMeRequest, type InboxReviewDrawing, type InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import type { AIResponse } from '@plannotator/ui/types';
@@ -19,7 +21,7 @@ import { inboxApi, type InboxAskTurnWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
-import { showMeSamePlace, waitingShowMe } from './showMeModel';
+import { anchorLines, newSideLines, showMeSamePlace, waitingShowMe } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -68,6 +70,7 @@ export function useShowMe({
   title,
   round,
   agent,
+  files,
   enabled,
 }: {
   threadId: string;
@@ -78,6 +81,8 @@ export function useShowMe({
   round: number;
   /** The agent's name, for the Ask window's notes ("Claude Code went away before it finished."). */
   agent: string;
+  /** This round's files, to find where an earlier round's lines are now (`anchorLines`). */
+  files: readonly { path: string; patch: string }[];
   enabled: boolean;
 }) {
   const chat = useAIChat({ context: ASK_CONTEXT });
@@ -110,6 +115,35 @@ export function useShowMe({
       () => {},
     );
   }, [enabled, threadId, reviewId]);
+
+  // Each earlier review's new-side lines by file, for the reviews with pictures: where their lines are now.
+  const [earlierLines, setEarlierLines] = useState<Record<string, Map<string, Map<number, string>>>>({});
+  const drawnReviews = [...new Set(before.map((at) => at.review))].join(',');
+  useEffect(() => {
+    if (!drawnReviews) return;
+    let live = true;
+    for (const review of drawnReviews.split(',')) {
+      inboxApi.guide(review).then(
+        (answer) => {
+          const parsed = parseGuideSnapshot(answer.snapshot);
+          if (!live || !parsed.ok) return;
+          const lines = new Map(parseDiffToFiles(parsed.value.review.rawPatch).map((file) => [file.path, newSideLines(file.patch)] as const));
+          setEarlierLines((current) => ({ ...current, [review]: lines }));
+        },
+        () => {},
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [drawnReviews]);
+  const nowLines = useMemo(() => new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)), [files]);
+  /** Where an earlier round's picture was asked, in this round's lines: moved lines followed, changed ones as they were. */
+  const placeNow = (at: { review: string; drawing: InboxReviewDrawing }): ShowMePlace => {
+    const { file, lines } = at.drawing;
+    if (!file || !lines) return { file, lines };
+    return { file, lines: anchorLines(lines, earlierLines[at.review]?.get(file), nowLines.get(file)) ?? lines };
+  };
 
   const earlierKey = earlier.join(',');
   useEffect(() => {
@@ -179,11 +213,12 @@ export function useShowMe({
   const boxResponse = box?.turn && live.current?.turn === box.turn && !streaming ? liveResponse : undefined;
   const boxBusy = !boxRunning && !boxDone && boxResponse?.errorCode === SESSION_ASK_ERROR_CODES.agentBusy ? boxResponse : null;
   // It ended with no picture and no answer: the Ask window's note for the turn (the agent went…), else the chat's
-  // own problem (the session is blocked…).
-  const boxFailed =
-    box?.turn && !boxRunning && !boxBusy && !boxDrawing && !boxTurn?.stopped && boxTurn?.answer === undefined
-      ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? null)
-      : null;
+  // own problem (the session is blocked…). A window that is not streaming it (a reload) has no chat: when the Inbox
+  // no longer runs the turn and kept nothing, it is the Ask window's "No answer arrived."
+  const boxEnded = !!box?.turn && !boxRunning && !boxBusy && !boxDrawing && !boxTurn?.stopped && boxTurn?.answer === undefined;
+  const boxFailed = boxEnded
+    ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && live.current?.turn !== box?.turn ? 'No answer arrived.' : null))
+    : null;
   // The box goes back to its words, with the note, ready to send again.
   useEffect(() => {
     if (!boxFailed) return;
@@ -219,7 +254,7 @@ export function useShowMe({
       });
       return;
     }
-    const asked = place.file && place.lines ? before.filter((at) => showMeSamePlace(at.drawing, place)).at(-1) : undefined;
+    const asked = place.file && place.lines ? before.filter((at) => showMeSamePlace(placeNow(at), place)).at(-1) : undefined;
     if (asked) {
       setBox(null);
       setView({ drawing: asked.drawing.id, as: 'sheet', part: null, from: place });
@@ -254,11 +289,11 @@ export function useShowMe({
       } else {
         // Nobody to ask: the box stays as it was written, to send when the agent is back.
         setBox((current) => (current ? { ...current, turn: null } : current));
-        setProblem('The agent can’t take this right now. Try again in a moment.');
+        setProblem('No answer arrived.');
       }
       reload();
     } catch (cause) {
-      setProblem(errorText(cause, 'That Show me did not go through. Try again.'));
+      setProblem(errorText(cause, 'That question did not go through. Try again.'));
     } finally {
       setPosting(false);
     }

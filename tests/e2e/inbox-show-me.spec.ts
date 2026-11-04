@@ -252,6 +252,8 @@ interface World {
   agent: ScriptedAskAgent;
   /** Holds the agent's drawing until the waiting shot is taken. */
   hold: { release: () => void; promise: Promise<void> } | null;
+  /** The next Show me ends with no words: the agent fails before it answers (nothing is kept). */
+  fail: boolean;
   draws: { status: number | null; stdout: string; stderr: string }[];
   context: BrowserContext;
   page: Page;
@@ -363,6 +365,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       const turn = /--turn (\S+)/.exec(text)?.[1];
       if (!review || !turn) return 'That was a plain question.';
       if (world.hold) await world.hold.promise;
+      if (world.fail) {
+        world.fail = false;
+        throw new Error('The session ended.');
+      }
       const file = join(root, `show-me-${turn}.json`);
       writeFileSync(file, JSON.stringify(SHOW_ME_DRAWING));
       const run = spawnSync(binary, ['review', 'draw', '--file', file, '--review', review, '--turn', turn], { env, encoding: 'utf8', timeout: 30_000 });
@@ -375,7 +381,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
-  world = { root, dataDir, env, url, project, round1, round2, client, agent, hold: null, draws, context, page, errors };
+  world = { root, dataDir, env, url, project, round1, round2, client, agent, hold: null, fail: false, draws, context, page, errors };
 });
 
 test.afterAll(async () => {
@@ -611,6 +617,18 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   await expect(page.locator('[data-show-me-box] [data-show-me-place]')).toHaveText('retry-worker.ts · lines 6–18');
   await expect(sheet(page)).toHaveCount(0);
   await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
+  // Round 1's picture of lines 7–9 is at 8–10 now (the import above them): those open it as asked, and line 7,
+  // other code at the old numbers, asks anew.
+  await selectLines(page, WORKER, 7, 7);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(sheet(page)).toHaveCount(0);
+  await page.locator('[data-show-me-box]').getByRole('button', { name: 'Close Show me' }).click();
+  await selectLines(page, WORKER, 8, 10);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(sheet(page)).toContainText('Claude Code · Show me on retry-worker.ts lines 7–9 · round 1');
+  await expect(sheet(page)).toContainText('As asked in round 1.');
+  await sheet(page).getByRole('button', { name: 'Close the picture' }).click();
   expect(world.errors).toEqual([]);
 });
 
@@ -732,6 +750,43 @@ test('a phone at 390 px: the popover and the picture', async ({ browser }) => {
   } finally {
     await context.close();
   }
+});
+
+test("reloaded while it draws, and the agent ends with no words: the box goes back to its words with the Ask window's note", async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#thread=${round2.thread_id}`);
+  await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
+  const pane = page.locator(`[data-review-message="${round2.message_id}"]`);
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await selectLines(page, WORKER, 22, 23);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  const box = page.locator('[data-show-me-box]');
+  world.hold = gate();
+  world.fail = true;
+  await box.getByLabel('What the picture should show').fill('Is the log line counted?');
+  await box.locator('[data-show-me-send]').click();
+  await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
+
+  // Another load of the window: it reopens the waiting box, with no chat of its own for the turn.
+  await page.reload();
+  const start = page.locator('[data-review-card]').last().getByRole('button', { name: /review/ });
+  await expect(start.or(pane).first()).toBeVisible();
+  if (!(await pane.isVisible())) await start.click();
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await selectLines(page, WORKER, 22, 22);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(box).toHaveAttribute('data-show-me-box', 'drawing');
+  world.hold.release();
+  world.hold = null;
+  // Nothing is kept for an answer with no words: the box comes back with its words, ready to send again.
+  await expect(box.getByRole('alert')).toHaveText('No answer arrived.', { timeout: 30_000 });
+  await expect(box).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(box.getByLabel('What the picture should show')).toHaveValue('Is the log line counted?');
+  await expect(box.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 22–23');
+  await box.getByRole('button', { name: 'Close Show me' }).click();
+  expect(world.errors).toEqual([]);
 });
 
 test("the agent gone: a Show me it never answers goes back to the box with the Ask window's problem, never says it draws", async () => {
