@@ -745,9 +745,10 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   const threadId = String(await chip.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words).toContain('Own pull request #869: `Fall back to English for missing strings`');
-  expect(words).toContain('https://github.com/northwind/web-app/pull/869');
-  expect(words).toContain('\n/review-curate\n');
+  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
+  expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
+  expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
   // Kept: a fresh read still ties it to that thread, and says what was asked.
   await page.reload();
