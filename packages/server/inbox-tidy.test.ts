@@ -6,13 +6,13 @@
  * hours or days old.
  */
 import { afterEach, describe, expect, setSystemTime, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { InboxListRow, InboxQuestion, InboxThread, InboxTidyPlan, InboxTidyRun } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
-import { inboxTidyBody, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
+import { inboxTidyBody, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyRun } from "@plannotator/shared/inbox/tidy";
 import { INBOX_TIDY_HOW, INBOX_TIDY_INSTRUCTION, parseInboxSessionRef } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, inboxWakeText, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -22,13 +22,21 @@ const roots: string[] = [];
 const servers: InboxServer[] = [];
 const clients: Client[] = [];
 
+const savedDataDir = process.env.PLANNOTATOR_DATA_DIR;
+
 afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
 
-async function setup() {
+/**
+ * `steps`: the checklist switch, fixed for the test (true, false), or "file": this test's own config.json, on at
+ * the start, which the window's Settings route can turn off (the person's switch).
+ */
+async function setup(options: { steps?: boolean | "file" } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-tidy-")));
   roots.push(root);
   const billing = join(root, "billing");
@@ -38,7 +46,14 @@ async function setup() {
   // What a test writes while `behind` is set reads as that much older.
   const clock = { behind: 0 };
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, binaryPath: null, board: true, storeNow: () => new Date(Date.now() - clock.behind) });
+  // The checklist switch is this test's (never the person's config.json): off unless a test turns it on.
+  if (options.steps === "file") {
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxSteps: true }));
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  }
+  const steps = options.steps === "file" ? undefined : (options.steps ?? false);
+  const server = await startInboxServer({ dataDir, binaryPath: null, board: true, steps, storeNow: () => new Date(Date.now() - clock.behind) });
   servers.push(server);
   const client = new Client({ name: "inbox-tidy-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -154,6 +169,207 @@ describe("Tidy: who gets asked", () => {
     expect(board.agents.map((a) => a.session)).toEqual(["ses-a"]);
     expect(board.agents[0]!.items).toEqual([expect.objectContaining({ thread_id: lane.thread_id, reasons: [expect.stringContaining("card idle")] })]);
     expect((await plan(server, `?project=${await projectOf(server, "billing")}`)).agents.map((a) => a.session).sort()).toEqual(["ses-a", "ses-c"]);
+  });
+});
+
+// Thread steps (approval "inbox-thread-steps", part 5): "Tidy asks about a step still in `doing` when the session has
+// been idle over 2 h or has ended", and with the switch off agents get "no Tidy rule".
+describe("Tidy: a checklist step left in progress", () => {
+  const PLAN = [
+    { step: "Classify failed charges", status: "done" },
+    { step: "Replay the failures in staging", status: "doing" },
+    { step: "Ship it behind a flag", status: "todo" },
+  ];
+  /** ses-a's thread with a step doing, written 3 h ago; its connection says it has been idle since `idleFor` ago. */
+  async function quietStep(steps: boolean | "file", idleFor: number, plan: { step: string; status: string }[] = PLAN) {
+    const w = await setup({ steps });
+    w.clock.behind = 3 * HOUR;
+    await poll(w.server, "ses-a", w.billing, { busy: true });
+    const lane = await send(w.client, w.billing, "ses-a", { subject: "Retry worker", thread: "Retry worker", body: "Starting the retry worker." });
+    w.server.store.setThreadSteps({ thread_id: lane.thread_id, agent: { kind: "agent", host: "claude-code", session: "ses-a", name: "Claude Code" }, steps: plan });
+    w.clock.behind = 0;
+    await poll(w.server, "ses-a", w.billing, { busy: false, idle_since: Date.now() - idleFor });
+    return { ...w, lane };
+  }
+
+  test("on: listed for its session once it sat idle 2 h, and the wake names the step and how to update it", async () => {
+    const { server, billing, lane } = await quietStep(true, 3 * HOUR);
+    const found = await plan(server);
+    expect(found.agents.map((a) => a.session)).toEqual(["ses-a"]);
+    expect(found.agents[0]!.items).toEqual([expect.objectContaining({ thread_id: lane.thread_id, reasons: ["step in progress, 3 h"] })]);
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t-steps" })).status).toBe(200);
+    const commands = await deliver(server, "ses-a", billing);
+    expect(commands).toHaveLength(1);
+    expect(commands[0]!.body).toContain(
+      `Your steps here: 1 of 3 done; doing: Replay the failures in staging, unchanged for 3 h. Update them if that changed (the steps action, thread_id ${lane.thread_id}).`,
+    );
+  });
+
+  test("off: the same quiet step is no Tidy item and no words", async () => {
+    const { server } = await quietStep(false, 3 * HOUR);
+    expect((await plan(server)).agents).toEqual([]);
+  });
+
+  /**
+   * ses-a, idle 3 h, with a quiet step in two threads: "Retry worker" also has an open question 3 h old, "Ledger"
+   * has the step alone.
+   */
+  async function quietWork(steps: boolean | "file") {
+    const w = await setup({ steps });
+    w.clock.behind = 3 * HOUR;
+    await poll(w.server, "ses-a", w.billing, { busy: true });
+    const asked = await send(w.client, w.billing, "ses-a", { subject: "Retry worker", thread: "Retry worker", body: `Starting the retry worker.\n\n${block("Backfill first?")}` });
+    const lane = await send(w.client, w.billing, "ses-a", { subject: "Ledger", thread: "Ledger", body: "Starting the ledger lane." });
+    for (const id of [asked.thread_id, lane.thread_id]) {
+      w.server.store.setThreadSteps({ thread_id: id, agent: { kind: "agent", host: "claude-code", session: "ses-a", name: "Claude Code" }, steps: PLAN });
+    }
+    w.clock.behind = 0;
+    await poll(w.server, "ses-a", w.billing, { busy: false, idle_since: Date.now() - 3 * HOUR });
+    return { ...w, asked, lane };
+  }
+  /** The thread list's lines of a Tidy body (`1. Retry worker · billing (reply_to …)`). */
+  const listed = (body: string) => body.split("\n").filter((line) => /^\d+\. /.test(line));
+
+  test("off: a run with other items in it adds no steps words, and a thread with only a quiet step is not listed", async () => {
+    const { server, billing, asked } = await quietWork(false);
+    const found = await plan(server);
+    expect(found.agents.map((a) => a.session)).toEqual(["ses-a"]);
+    expect(found.agents[0]!.items).toEqual([expect.objectContaining({ thread_id: asked.thread_id, reasons: ["question, 3 h"] })]);
+    expect((await tidy(server, { sessions: ["ses-a"], idempotency_key: "t-off" })).status).toBe(200);
+    const [command] = await deliver(server, "ses-a", billing);
+    const wake = inboxWakeText(command!);
+    expect(wake).toContain("Backfill first?");
+    expect(wake).not.toMatch(/steps/i);
+    expect(listed(wake)).toEqual([expect.stringMatching(/^1\. Retry worker · billing \(reply_to /)]);
+  });
+
+  test("off at delivery: a thread listed first for its step alone goes, and the rest renumber from 1", () => {
+    const body = [
+      INBOX_TIDY_INSTRUCTION,
+      INBOX_TIDY_HOW,
+      "1. Ledger · billing (reply_to msg_b)\n   - Your steps here: 1 of 3 done; doing: X, unchanged for 3 h. Update them if that changed (the steps action, thread_id msg_b).",
+      "2. Retry worker · billing (reply_to msg_a)\n   - Action item open since 3 h ago: msg_a/a-1  Rotate the key\n   - Your steps here: 0 of 2 done; doing: Y, unchanged for 3 h. Update them if that changed (the steps action, thread_id msg_a).",
+    ].join("\n\n");
+    expect(inboxTidyBodyStepsOff(body)).toBe([INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, "1. Retry worker · billing (reply_to msg_a)\n   - Action item open since 3 h ago: msg_a/a-1  Rotate the key"].join("\n\n"));
+    // Only steps listed: nothing is left, so the wake is withdrawn, not handed over empty.
+    expect(inboxTidyIsStepsOnly(body)).toBe(false);
+    const stepsOnly = body.split("\n\n").slice(0, 3).join("\n\n");
+    expect(inboxTidyIsStepsOnly(stepsOnly)).toBe(true);
+    expect(inboxTidyIsStepsOnly([INBOX_TIDY_INSTRUCTION, INBOX_TIDY_HOW, "1. Ledger · billing (reply_to msg_b)\n   - Action item open since 3 h ago: msg_b/a-1  X"].join("\n\n"))).toBe(false);
+  });
+
+  test("on when the run starts, off before delivery: the wake goes without its steps lines, by a poll and by a next read", async () => {
+    // A poll.
+    const polled = await quietWork("file");
+    expect((await plan(polled.server)).agents[0]!.items.map((i) => i.reasons).sort()).toEqual([["question, 3 h", "step in progress, 3 h"], ["step in progress, 3 h"]]);
+    expect((await tidy(polled.server, { sessions: ["ses-a"], idempotency_key: "t-flip" })).status).toBe(200);
+    // The run's stored note has the steps lines (that is what the switch must hold back).
+    expect((await thread(polled.server, polled.lane.thread_id)).messages.find((m) => m.tidy)!.body).toContain("Your steps here: ");
+    expect((await post(polled.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+    const [command] = await deliver(polled.server, "ses-a", polled.billing);
+    const wake = inboxWakeText(command!);
+    expect(wake).toContain("Backfill first?");
+    expect(wake).not.toMatch(/steps/i);
+    expect(listed(wake)).toEqual([expect.stringMatching(/^1\. Retry worker · billing \(reply_to /)]);
+
+    // A next read: the bridge stopped polling, so the session's next Inbox call carries the note.
+    const read = await quietWork("file");
+    expect((await tidy(read.server, { sessions: ["ses-a"], idempotency_key: "t-flip-read" })).status).toBe(200);
+    // The stored wake has the steps line (what the next call must hold back).
+    expect((await thread(read.server, read.asked.thread_id)).messages.find((m) => m.tidy)!.body).toContain("Your steps here: ");
+    expect((await post(read.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+    setSystemTime(new Date(Date.now() + 31_000));
+    try {
+      const result = await call(read.client, "read_thread", { thread_id: read.asked.thread_id, agent_session: "ses-a", project_path: read.billing });
+      const text = result.content.map((c) => c.text).join("\n");
+      expect(text).toContain(INBOX_TIDY_INSTRUCTION);
+      expect(text).toContain("Backfill first?");
+      expect(text).not.toContain("Your steps here");
+      expect(JSON.stringify(result.structuredContent.tidy)).not.toContain("Your steps here");
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  // Amendment 2: "turning the switch off stops a Tidy that is already running". A wake that listed only steps has
+  // nothing left to say: no turn goes out, by a poll or by a next read, and the run reads Nothing to change.
+  test("on when the run starts, off before delivery, only steps listed: no wake at all, and the run reads nothing", async () => {
+    // Off from Settings (the switch withdraws it), or by hand in config.json (the poll or the read withdraws it).
+    for (const [off, via] of [["settings", "poll"], ["file", "poll"], ["file", "read"]] as const) {
+      const w = await quietStep("file", 3 * HOUR);
+      expect((await plan(w.server)).agents[0]!.items.map((i) => i.reasons)).toEqual([["step in progress, 3 h"]]);
+      expect((await tidy(w.server, { sessions: ["ses-a"], idempotency_key: `t-only-${off}-${via}` })).status).toBe(200);
+      if (off === "settings") {
+        expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+        // The switch itself withdrew it, before any poll or call.
+        expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      } else writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
+      if (via === "poll") {
+        expect(await poll(w.server, "ses-a", w.billing)).toEqual([]);
+      } else {
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const result = await call(w.client, "read_thread", { thread_id: w.lane.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(result.content.map((c) => c.text).join("\n")).not.toContain(INBOX_TIDY_INSTRUCTION);
+          expect(result.structuredContent.tidy).toBeUndefined();
+        } finally {
+          setSystemTime();
+        }
+      }
+      // Withdrawn, the run asked it nothing: the thread shows no Tidy note either.
+      {
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const again = await call(w.client, "read_thread", { thread_id: w.lane.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(again.content.map((c) => c.text).join("\n")).not.toContain("to tidy its threads");
+        } finally {
+          setSystemTime();
+        }
+      }
+      expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      // It writes later: still nothing (it was never asked).
+      await send(w.client, w.billing, "ses-a", { reply_to: w.lane.message_id, body: "Still on the replay." });
+      expect(await stateOf(w.server, "ses-a")).toBe("nothing");
+      // Nor did it start the cool-down: an old open question of that session is offered again at once.
+      w.clock.behind = 3 * HOUR;
+      await send(w.client, w.billing, "ses-a", { subject: "Refunds", thread: "Refunds", body: block("Move refunds now?") });
+      w.clock.behind = 0;
+      expect((await plan(w.server)).agents.map((a) => a.session)).toEqual(["ses-a"]);
+    }
+  });
+
+  // The review of the withdrawal: it must settle nothing else in the thread. A reply the person sent that session
+  // before the run is still handed over, by the next poll or the next call's read.
+  test("a withdrawn wake keeps the person's earlier reply owed", async () => {
+    for (const via of ["poll", "call"] as const) {
+      const w = await quietStep("file", 3 * HOUR);
+      // Another thread of the session, for a next call that reads something else.
+      const other = await send(w.client, w.billing, "ses-a", { subject: "Docs", thread: "Docs", body: "Docs lane." });
+      expect((await post(w.server, `/api/inbox/messages/${w.lane.message_id}/reply`, { words: "Please also check the refunds.", idempotency_key: `r-${via}` })).status).toBe(200);
+      const reply = (await thread(w.server, w.lane.thread_id)).messages.find((m) => m.author.kind === "person" && !m.tidy)!;
+      expect((await tidy(w.server, { sessions: ["ses-a"], idempotency_key: `t-reply-${via}` })).status).toBe(200);
+      expect(w.server.store.pendingReplies("ses-a").map((m) => m.id)).toContain(reply.id);
+      if (via === "poll") {
+        expect((await post(w.server, "/api/inbox/settings", { steps: { on: false } })).status).toBe(200);
+        expect((await poll(w.server, "ses-a", w.billing)).map((c) => c.id)).toEqual([reply.id]);
+      } else {
+        writeFileSync(join(w.dataDir, "config.json"), JSON.stringify({ inboxSteps: false }));
+        setSystemTime(new Date(Date.now() + 31_000));
+        try {
+          const result = await call(w.client, "read_thread", { thread_id: other.thread_id, agent_session: "ses-a", project_path: w.billing });
+          expect(result.structuredContent.tidy).toBeUndefined();
+        } finally {
+          setSystemTime();
+        }
+        expect(w.server.store.pendingReplies("ses-a").map((m) => m.id)).toEqual([reply.id]);
+      }
+    }
+  });
+
+  test("on: not while the session went idle under 2 h ago, nor for a list with nothing doing", async () => {
+    expect((await plan((await quietStep(true, 30 * 60_000)).server)).agents).toEqual([]);
+    const finished = PLAN.map((step) => ({ ...step, status: "done" }));
+    expect((await plan((await quietStep(true, 3 * HOUR, finished)).server)).agents).toEqual([]);
   });
 });
 

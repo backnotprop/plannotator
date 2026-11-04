@@ -1,0 +1,1000 @@
+diff --git a/packages/inbox/App.tsx b/packages/inbox/App.tsx
+index 8bc7cf16e..bd2158023 100644
+--- a/packages/inbox/App.tsx
++++ b/packages/inbox/App.tsx
+@@ -108,6 +108,9 @@ import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWa
+ import { VoiceIntro } from './components/VoiceIntro';
+ import { adoptVoiceSettings } from './voice';
+ import { useVoiceIntro } from './voiceIntro';
++import { SnoozeIntro } from './components/SnoozeIntro';
++import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
++import { openSnoozeMenu } from './snoozeIntroTry';
+ import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
+ import { GuidePane } from './components/GuidePane';
+ import { AboutBlock, FailedDialog, GeneralUpdateRow, RestartDialog, UpdateDialog, WhatsNewPage } from './components/Updates';
+@@ -852,6 +855,12 @@ function Inbox() {
+   const listIntroLatch = useRef<{ due: boolean; local: boolean; firstRun: boolean; rows: number } | null>(null);
+   const [listIntroSettled, setListIntroSettled] = useState(false);
+   const voiceIntroDueAtLoad = useRef(false);
++  /** The one-time Snooze announcement (snoozeIntro.ts): due for this page, read once per load. */
++  const snoozeIntroLatch = useRef<{ due: boolean } | null>(null);
++  /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
++  const updatingThisLoad = useRef(false);
++  /** This page snoozed something in this load: the announcement would tell the person what they just did. */
++  const snoozedThisLoad = useRef(false);
+   const tourThisLoad = useRef(false);
+   /** Sidebar → Feedback (components/FeedbackDialog.tsx): open only on the person's click. */
+   const [feedbackOpen, setFeedbackOpen] = useState(false);
+@@ -2893,6 +2902,7 @@ function Inbox() {
+   const snooze = async (row: Pick<InboxListRow, 'thread_id' | 'subject'>, until: string) => {
+     const threadId = row.thread_id;
+     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
++    snoozedThisLoad.current = true;
+     try {
+       await inboxApi.snooze(threadId, until);
+     } catch (cause) {
+@@ -3848,6 +3858,63 @@ function Inbox() {
+     `${route.thread}|${route.project}|${route.machine}`,
+     listIntroHeldBack,
+   );
++  // The one-time Snooze announcement (snoozeIntro.ts): never at load, never with another one-time dialog, the tour or
++  // an update on this load; at a calm moment right after the person leaves a thread that still waits on them.
++  if (updateDialog !== null || restarting) updatingThisLoad.current = true;
++  if (snoozeIntroLatch.current === null && settings && latest !== null) {
++    snoozeIntroLatch.current = { due: settings.snooze_intro?.due === true };
++  }
++  const snoozeIntroRows = useMemo(() => latestSections.flatMap((section) => section.threads), [latestSections]);
++  const snoozeIntro = useSnoozeIntro({
++    due: snoozeIntroLatch.current?.due ?? false,
++    listLoaded: snoozeIntroLatch.current !== null,
++    firstRun,
++    blocked: snoozeIntroBlockedBy({
++      tour: tourThisLoad.current,
++      updating: updatingThisLoad.current,
++      sound: soundDialog,
++      agentNote,
++      listIntroWant,
++      listIntro,
++      voiceWanted: voiceIntro.wanted,
++      voiceStage: voiceIntro.stage,
++      board: oneTimeDialogShownThisLoad(),
++    }),
++    snoozedHere: snoozedThisLoad.current,
++    rows: snoozeIntroRows,
++    toast: toast !== null,
++    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
++    clear: listIntroClear,
++    place: `${route.thread}|${route.project}|${route.machine}`,
++    // Nothing typed or open: the list intro's rule, and no menu open (a row's, a header's, a sheet) and no toast.
++    heldBack: () => listIntroHeldBack() || document.querySelector('.ib-pm-pos:not(.ib-zx-pos), [data-inbox-toast]') !== null,
++  });
++  /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
++  const trySnoozeIntro = () => {
++    const left = snoozeIntro.target;
++    snoozeIntro.close();
++    setTimeout(() => {
++      const now = routeRef.current;
++      void openSnoozeMenu({
++        root: document.querySelector('.pn-inbox') ?? document,
++        phone,
++        openThread: now.page === 'inbox' ? (now.thread ?? null) : null,
++        left,
++        openLeft: (threadId) => go({ page: 'inbox', project: now.project ?? null, machine: now.machine, thread: threadId }),
++      });
++    }, 0);
++  };
++  /**
++   * The picture's two rows: a neighbour (the row above it in the list, or below when it is the top row), then the thread
++   * just left, last, where the menu is aimed (the approved picture's order).
++   */
++  const snoozeIntroPicture = useMemo(() => {
++    if (snoozeIntro.stage !== 'open') return [];
++    const index = snoozeIntroRows.findIndex((row) => row.thread_id === snoozeIntro.target);
++    if (index < 0) return snoozeIntroRows.slice(0, 2);
++    const neighbour = snoozeIntroRows[index > 0 ? index - 1 : index + 1];
++    return neighbour ? [neighbour, snoozeIntroRows[index]!] : [snoozeIntroRows[index]!];
++  }, [snoozeIntro.stage, snoozeIntro.target, snoozeIntroRows]);
+   // The notification lines wait for it too, as for the other one-time dialogs, and stand down while it is due here.
+   const linesFree =
+     askLinesFree &&
+@@ -3856,7 +3923,9 @@ function Inbox() {
+     listIntro !== 'claimed' &&
+     (!voiceIntro.wanted || voiceIntro.decided) &&
+     voiceIntro.stage !== 'open' &&
+-    voiceIntro.stage !== 'claimed';
++    voiceIntro.stage !== 'claimed' &&
++    snoozeIntro.stage !== 'open' &&
++    snoozeIntro.stage !== 'claimed';
+   const listIntroGroups: ListIntroGroup[] =
+     listIntro === 'open' && shown
+       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
+@@ -5247,6 +5316,7 @@ function Inbox() {
+           onKeep={() => setListIntro('shown')}
+         />
+       )}
++      {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
+       {voiceIntro.stage === 'open' && (
+         <VoiceIntro
+           phone={phone}
+diff --git a/packages/inbox/api.ts b/packages/inbox/api.ts
+index 27fb40d52..2720caa3f 100644
+--- a/packages/inbox/api.ts
++++ b/packages/inbox/api.ts
+@@ -362,6 +362,8 @@ export interface SettingsModel {
+   sound?: InboxSoundSettings;
+   /** The one-time list options dialog waits to be claimed (POST /api/inbox/list-intro). Absent from an older Inbox. */
+   list_intro?: { due: boolean };
++  /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
++  snooze_intro?: { due: boolean };
+   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
+   voice?: InboxVoiceSettings;
+   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
+@@ -1325,6 +1327,8 @@ export const inboxApi = {
+   claimListIntro: () => post<{ show: boolean; list_intro: { due: boolean } }>(inboxUrl('/list-intro'), {}),
+   /** The one-time voice announcement, as the list options dialog; the Inbox also checks this computer's Codex login. */
+   claimVoiceIntro: () => post<{ show: boolean }>(inboxUrl('/voice/intro'), {}),
++  /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
++  claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
+   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
+   /** Only on this computer; the answer never holds the key. Null removes it. */
+   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
+diff --git a/packages/inbox/board/BoardPage.tsx b/packages/inbox/board/BoardPage.tsx
+index 66b6f901a..e2e6bc04a 100644
+--- a/packages/inbox/board/BoardPage.tsx
++++ b/packages/inbox/board/BoardPage.tsx
+@@ -56,6 +56,7 @@ import {
+   type BoardView,
+ } from './model';
+ import { newUuid } from '../uuid';
++import { noteOneTimeDialogShown } from '../snoozeIntro';
+ 
+ export type { BoardMove } from './model';
+ 
+@@ -142,7 +143,12 @@ export function BoardPage(props: BoardPageProps) {
+     claimed.current = true;
+     inboxApi
+       .claimBoardIntro()
+-      .then((answer) => answer.show && setIntro(true))
++      .then((answer) => {
++        if (!answer.show) return;
++        // Another one-time dialog this load: no Snooze announcement on it (snoozeIntro.ts).
++        noteOneTimeDialogShown();
++        setIntro(true);
++      })
+       .catch(() => {});
+   }, [props.claimIntro]);
+   const promptCopy = useCopyBoardPrompt(props.mcpCommand);
+diff --git a/packages/inbox/components/SnoozeIntro.tsx b/packages/inbox/components/SnoozeIntro.tsx
+new file mode 100644
+index 000000000..84d9b0b10
+--- /dev/null
++++ b/packages/inbox/components/SnoozeIntro.tsx
+@@ -0,0 +1,172 @@
++/**
++ * The one-time Snooze announcement (approval "inbox-snooze-announce", direction B "The real menu"; when it shows:
++ * snoozeIntro.ts). A third user of the one-time dialog shell (`.ib-lo`, after the list options and voice intros).
++ *
++ * The picture is static and in the person's own mode (no light frame): two of the person's real rows (the thread they
++ * just left is the one the menu is aimed at), the real "Snooze until" menu with a pointer on Tomorrow, and the real
++ * "Snoozed · <time> · Undo" toast. Its times are today's, from core's inbox-snooze.ts. On a phone it is the ⋯ sheet's
++ * times. No motion: the dialog has no entrance of its own (Modal), and the picture never moves, so reduced motion
++ * changes nothing.
++ *
++ * Try it (first focus) opens the real Snooze menu (snoozeIntroTry.ts) and never snoozes anything by itself. Got it,
++ * Escape and a click outside close it. Every way out is final: the Inbox stamped it when this page claimed it.
++ */
++import { useMemo, type ReactNode } from 'react';
++import type { InboxListRow } from '@plannotator/core/inbox-types';
++import { inboxSnoozeChoices, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
++import { Icon } from '../icons';
++import { ShortcutHint } from '../shortcuts/hint';
++import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
++import { ListRow } from './InboxList';
++import { Modal } from './Updates';
++
++const noop = () => {};
++
++/** The menu's times as the real menu draws them; `lit`: the choice under the pointer (or a phone's first). */
++function Times({ now, lit, pointer }: { now: Date; lit: string; pointer: boolean }) {
++  const choices = inboxSnoozeChoices(now);
++  return (
++    <>
++      <div className="ib-pmi ib-zb">
++        <Icon name="chevL" size={14} />
++        Snooze until
++      </div>
++      {choices.map((choice) => (
++        <div key={choice.id} className="ib-pmi ib-zi" data-highlighted={choice.id === lit ? '' : undefined} data-snooze-intro-choice={choice.id}>
++          {choice.label}
++          <span className="ib-zw">{inboxSnoozeWhen(choice.until, now)}</span>
++          {pointer && choice.id === lit && <Pointer />}
++        </div>
++      ))}
++      <div className="ib-pm-sep" />
++      <div className="ib-pmi">Pick a time…</div>
++    </>
++  );
++}
++
++/** A mouse pointer, resting on the choice. */
++function Pointer() {
++  return (
++    <svg className="ib-zx-pointer" width="16" height="22" viewBox="0 0 16 22" aria-hidden="true">
++      <path d="M1 1 L1 17 L5 13.4 L7.8 20 L10.6 18.8 L7.9 12.4 L13 12.4 Z" fill="#111" stroke="#fff" strokeWidth="1.2" strokeLinejoin="round" />
++    </svg>
++  );
++}
++
++/** The real toast's look, at rest under the menu. */
++function Toast({ when }: { when: string }) {
++  return (
++    <div className="ib-toast ib-toast-closable ib-zx-toast">
++      <Icon name="clock" size={16} />
++      <span className="ib-tsay">
++        <span className="ib-tlead">Snoozed</span>
++        <span className="ib-tdetail">{when}</span>
++      </span>
++      <span className="ib-tacts">
++        <span className="ib-tundo">
++          Undo
++          <ShortcutHint scope={inboxThreadShortcuts} action="undo" className="" />
++        </span>
++        <span className="ib-tclose">
++          <Icon name="x" size={14} />
++        </span>
++      </span>
++    </div>
++  );
++}
++
++function Row({ row, project, menu }: { row: InboxListRow; project: string; menu: boolean }) {
++  return (
++    <ListRow
++      row={row}
++      project={project}
++      away={false}
++      drawn={row.section}
++      shape="narrow"
++      full={false}
++      filtered={false}
++      selected={false}
++      lit={false}
++      onOpen={noop}
++      day=""
++      menu={menu}
++      pinned={false}
++      pinColumn={false}
++      pill={false}
++      compact={false}
++    />
++  );
++}
++
++export interface SnoozeIntroProps {
++  /** The rows to draw: the thread just left last (the menu's target), one more above it when there is one. */
++  rows: readonly InboxListRow[];
++  projectNames?: ReadonlyMap<string, string>;
++  phone: boolean;
++  /** Open the real Snooze menu (the dialog closes first). */
++  onTry: () => void;
++  /** Got it, Escape, a click outside. */
++  onClose: () => void;
++}
++
++export function SnoozeIntro({ rows, projectNames, phone, onTry, onClose }: SnoozeIntroProps) {
++  const now = useMemo(() => new Date(), []);
++  const choices = useMemo(() => inboxSnoozeChoices(now), [now]);
++  const tomorrow = choices.find((choice) => choice.id === 'tomorrow') ?? choices[0]!;
++  const hint: ReactNode = phone ? (
++    <>
++      In a thread, tap ⋯ and pick <b>Snooze</b>.
++    </>
++  ) : (
++    'Right-click a thread, or click the clock at the top of an open thread.'
++  );
++  return (
++    <Modal labelledBy="ib-zx-title" describedBy="ib-zx-desc" testId="snooze-intro" onClose={onClose} ownKeys className={`ib-lo ib-zx${phone ? ' ib-lo-phone' : ''}`}>
++      <div className="ib-lo-art ib-zx-art" inert aria-hidden="true" data-snooze-intro-picture="">
++        {phone ? (
++          <div className="ib-pm-pos ib-zx-pos" data-phone="">
++            <div className="ib-pm ib-zx-menu">
++              <Times now={now} lit={choices[0]!.id} pointer={false} />
++            </div>
++          </div>
++        ) : (
++          <div className="ib-zx-scene">
++            <section className="ib-listcol ib-narrow ib-zx-list">
++              <div className="ib-lbody">
++                <div className="ib-group">
++                  {rows.map((row, index) => (
++                    <Row key={row.thread_id} row={row} project={projectNames?.get(row.project.id) ?? row.project.name} menu={index === rows.length - 1} />
++                  ))}
++                </div>
++              </div>
++            </section>
++            <div className="ib-pm ib-zx-menu">
++              <Times now={now} lit={tomorrow.id} pointer />
++            </div>
++            <Toast when={inboxSnoozeWhen(tomorrow.until, now)} />
++          </div>
++        )}
++      </div>
++      <div className="ib-lo-text">
++        <div className="ib-zx-new">New</div>
++        <h2 id="ib-zx-title">Snooze a thread until later</h2>
++        <p id="ib-zx-desc">Pick later today, tomorrow, in 3 days, next week, or a time you choose. The thread waits in Snoozed and comes back on its own. Undo puts it back at once.</p>
++        <p className="ib-zx-hint">
++          <span className="ib-zx-chip" aria-hidden="true">
++            <Icon name={phone ? 'dots' : 'clock'} size={phone ? 16 : 14} />
++          </span>
++          <span>{hint}</span>
++        </p>
++      </div>
++      <div className="ib-lo-acts">
++        <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-snooze-intro-close="">
++          Got it
++        </button>
++        <span className="ib-bsp" />
++        <button type="button" className="ib-btn ib-pri" onClick={onTry} data-snooze-intro-try="">
++          Try it
++        </button>
++      </div>
++    </Modal>
++  );
++}
+diff --git a/packages/inbox/inbox.css b/packages/inbox/inbox.css
+index 561a26def..1b44f0d27 100644
+--- a/packages/inbox/inbox.css
++++ b/packages/inbox/inbox.css
+@@ -6890,6 +6890,39 @@ mark.ib-vmark.ib-vfade { background: transparent; }
+ .ib-vo-picture .ib-rbox { margin: 0; }
+ .ib-vo-text { padding: 10px 12px 6px; min-height: 52px; line-height: 1.55; }
+ .ib-lo-text p.ib-vo-route { margin-top: 10px; color: var(--foreground); }
++/* The one-time Snooze announcement (approval "inbox-snooze-announce", B "The real menu"; components/SnoozeIntro.tsx):
++   the list intro's shell, 520 px. Its picture is static and in the person's own mode (no light scope): two real rows
++   in a card, the real "Snooze until" menu (`.ib-pm`) over the target row's right edge with a pointer on Tomorrow, and
++   the real toast (`.ib-toast`) at rest under them. Nothing in it moves: the menu's and the toast's entrances are off.
++   A phone: the ⋯ sheet's times (`.ib-pm-pos[data-phone]`'s own sizes), in the sheet's place at the top. */
++dialog.ib-dlg.ib-lo.ib-zx { width: min(520px, calc(100vw - 32px)); }
++.ib-lo.ib-zx .ib-lo-art { padding: 22px 22px 17px; }
++.ib-zx-scene { position: relative; height: 264px; }
++dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibility: visible; width: 300px; max-width: 100%; height: auto; border: 0; border-radius: 10px; overflow: hidden; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); text-align: left; }
++.ib-zx-list .ib-lbody { overflow: hidden; padding-bottom: 10px; }
++.ib-zx-list .ib-lbody > .ib-group > .ib-rw { content-visibility: visible; }
++.ib-zx-list :is(.ib-nrow .ib-l2 > .ib-title, .ib-nrow .ib-l3) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; overflow-wrap: normal; }
++.ib-pm.ib-zx-menu { position: absolute; left: 248px; top: 19px; width: 210px; animation: none; text-align: left; }
++.ib-zx-menu .ib-pmi { position: relative; }
++.ib-zx-pointer { position: absolute; left: 76px; top: 7px; filter: drop-shadow(0 1px 1px rgb(0 0 0 / 0.3)); }
++.ib-toast.ib-zx-toast { position: absolute; left: 0; top: 224px; bottom: auto; transform: none; z-index: auto; animation: none; max-width: 300px; text-align: left; }
++/* "New" above the title: quiet accent text, no fill or border. */
++.ib-zx-new { margin: 0 0 2px; font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--primary); }
++.ib-lo-text .ib-zx-hint { display: flex; align-items: center; gap: 8px; margin-top: 10px; color: var(--foreground); }
++.ib-zx-chip { display: inline-flex; align-items: center; justify-content: center; flex: none; width: 20px; height: 20px; border-radius: 5px; background: var(--muted); color: var(--muted-foreground); }
++.ib-zx-pos[data-phone] { position: static !important; transform: none !important; width: auto !important; }
++.ib-zx-pos .ib-pm.ib-zx-menu { position: static; width: auto; animation: none; }
++@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
++  /* The bottom sheet's width (the shared phone rule loses to the 520 px width above, which comes later). */
++  dialog.ib-dlg.ib-lo.ib-zx.ib-lo-phone { width: calc(100vw - 16px); }
++  .ib-lo-phone.ib-zx .ib-lo-art, :root:not(.light) .ib-lo-phone.ib-zx .ib-lo-art { padding: 14px 14px 12px; }
++  /* A picture of the sheet, not the sheet: flat, its rows drawn compact (the real sheet's are 48 px touch rows). */
++  .ib-zx-pos[data-phone] .ib-pm { box-shadow: none; }
++  .ib-zx-pos[data-phone] .ib-pmi { height: 30px; padding: 0 6px; font-size: var(--ib-fs-15, 15px); }
++  .ib-lo-phone.ib-zx .ib-lo-text { padding: 20px 22px 0; }
++  .ib-lo-phone.ib-zx .ib-lo-text h2 { font-size: var(--ib-fs-16, 16px); }
++  .ib-lo-phone.ib-zx .ib-lo-text p { font-size: var(--ib-fs-13, 13px); }
++}
+ /* Settings → Voice. */
+ .ib-vpage-note { margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+ .ib-vkeyctl { flex: 0 1 300px; min-width: 0; }
+diff --git a/packages/inbox/snoozeIntro.ts b/packages/inbox/snoozeIntro.ts
+new file mode 100644
+index 000000000..34413a509
+--- /dev/null
++++ b/packages/inbox/snoozeIntro.ts
+@@ -0,0 +1,238 @@
++/**
++ * When the one-time Snooze announcement may show (approval "inbox-snooze-announce", 2026-11-02). The Inbox decides who
++ * (settings `snooze_intro.due`: packages/server/inbox-snooze-intro.ts) and spends the claim (POST /api/inbox/snooze-intro: only
++ * the first claim ever gets `show: true`, stamped as it is claimed). The page decides when, only at a calm moment:
++ *
++ *  - right after the person LEAVES a thread that still waits on them without answering it (they close it, go back to
++ *    the list, or open another), having had it open for `readMs` (5 s) or more, with nothing left typed in it;
++ *  - the list holds two or more threads read and left for a day or more, and three rows or more;
++ *  - the page has been loaded for `pageAgeMs` (60 s) or more;
++ *  - no tour, update or other one-time dialog on this load, and the page has not snoozed anything itself;
++ *  - nothing typed or open over the page, no toast up, and the Inbox page settled for `settledMs` (2.5 s): another
++ *    thread, project or machine, or a change in the list, starts that wait again.
++ *
++ * A moment lasts `momentMs`; one that passes without all of that waits for the next leave. A claimed dialog that
++ * cannot open yet waits for a free moment, unless the page snoozes something meanwhile (it would announce what the
++ * person just did). Every dismiss is final: the claim already stamped it.
++ */
++import { useEffect, useRef, useState } from 'react';
++import type { InboxListRow } from '@plannotator/core/inbox-types';
++import { inboxApi } from './api';
++import { snoozeIntroNeed, snoozeIntroWaits } from './snoozeIntroRows';
++import { LIST_INTRO_MIN_ROWS, LIST_INTRO_SETTLED_MS } from './listIntro';
++
++/** The page's thresholds, ms. A test shrinks them (and puts them back). */
++export const SNOOZE_INTRO_TIMES = {
++  /** The page has been loaded this long. */
++  pageAgeMs: 60_000,
++  /** The thread was open this long before the person left it: they read it. */
++  readMs: 5_000,
++  /** The Inbox page settled this long, without a break. */
++  settledMs: LIST_INTRO_SETTLED_MS,
++  /** How long after the leave the moment lasts. */
++  momentMs: 15_000,
++  /** How often a moment that is held back (something typed, open or toasting) looks again. */
++  recheckMs: 700,
++};
++
++/** Another one-time dialog showed on this load somewhere App does not see (the Board's first visit). */
++let otherOneTimeDialog = false;
++export function noteOneTimeDialogShown(): void {
++  otherOneTimeDialog = true;
++}
++export function oneTimeDialogShownThisLoad(): boolean {
++  return otherOneTimeDialog;
++}
++
++/**
++ * What else this load showed or has due (App's state; a stage holds it back unless it is 'none'). Every field is
++ * required, so App cannot leave one out.
++ */
++export interface SnoozeIntroOthers {
++  tour: boolean;
++  updating: boolean;
++  sound: unknown;
++  agentNote: unknown;
++  listIntroWant: boolean;
++  listIntro: unknown;
++  voiceWanted: boolean;
++  voiceStage: unknown;
++  /** The Board intro (`oneTimeDialogShownThisLoad`). */
++  board: boolean;
++}
++
++/** The tour, an update or any other one-time dialog on this load holds the Snooze dialog back for the whole load. */
++export function snoozeIntroBlockedBy(o: SnoozeIntroOthers): boolean {
++  return o.tour || o.updating || o.sound !== 'none' || o.agentNote !== 'none' || o.listIntroWant || o.listIntro !== 'none' || o.voiceWanted || o.voiceStage !== 'none' || o.board;
++}
++
++/** One visit to a thread: which, and when it opened. */
++export interface SnoozeIntroVisit {
++  threadId: string;
++  at: number;
++}
++
++/**
++ * Whether leaving this visit is the moment: open long enough to read, and the thread (as the list has it now) still
++ * waits on the person, with nothing of theirs unsent in it. A reply sent moves the thread out of the waiting sections,
++ * so "still waits" is also "left without answering".
++ */
++export function snoozeIntroLeaveCounts(visit: SnoozeIntroVisit, now: number, row: InboxListRow | null): boolean {
++  return now - visit.at >= SNOOZE_INTRO_TIMES.readMs && snoozeIntroTargetHolds(row);
++}
++
++/**
++ * The thread just left, as the list has it now: still there, still waiting on the person, nothing unsent. Checked at
++ * the leave, and again before the claim and before the opening (a reply draft saves 500 ms after the last key, so the
++ * list can learn of it only after the leave).
++ */
++export function snoozeIntroTargetHolds(row: InboxListRow | null | undefined): boolean {
++  return !!row && snoozeIntroWaits(row) && !row.unsent;
++}
++const targetRow = (rows: readonly InboxListRow[], threadId: string | null) => rows.find((r) => r.thread_id === threadId);
++
++/** What one load knows (read once: `due`) and what holds now. */
++export interface SnoozeIntroGate {
++  /** The Inbox has it due for this page (settings `snooze_intro.due`; never for a tailnet guest), read once per load. */
++  due: boolean;
++  listLoaded: boolean;
++  firstRun: boolean;
++  /** The tour, an update or another one-time dialog was on screen (or due) on this load. */
++  blocked: boolean;
++  /** This page snoozed something on this load. */
++  snoozedHere: boolean;
++  /** The rows of the list (every section; the Snoozed band apart). */
++  rows: readonly InboxListRow[];
++  /** Ms since the page loaded. */
++  pageAge: number;
++  /** A toast is up (never cover an Undo). */
++  toast: boolean;
++}
++
++/** Whether this load may still show it at all: false ends it for the load. */
++export function snoozeIntroWanted(gate: Pick<SnoozeIntroGate, 'due' | 'blocked' | 'snoozedHere'>): boolean {
++  return gate.due && !gate.blocked && !gate.snoozedHere;
++}
++
++/** Whether, at a settled moment, the page may claim it now. */
++export function snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>, now: Date = new Date()): boolean {
++  if (!snoozeIntroWanted(gate) || !gate.listLoaded || gate.firstRun) return false;
++  if (gate.pageAge < SNOOZE_INTRO_TIMES.pageAgeMs) return false;
++  if (gate.rows.length < LIST_INTRO_MIN_ROWS) return false;
++  return snoozeIntroNeed(gate.rows, now);
++}
++
++export type SnoozeIntroStage = 'none' | 'claimed' | 'open' | 'shown';
++
++export interface SnoozeIntroInput extends Omit<SnoozeIntroGate, 'pageAge'> {
++  /** The thread open now (the route's), or null. */
++  thread: string | null;
++  /** The Inbox page with nothing over it (listIntro.ts `listIntroPageClear`). */
++  clear: boolean;
++  /** What restarts the settling wait: the thread, project and machine on screen. */
++  place: string;
++  /** Something typed or open over the page (App's `listIntroHeldBack`). */
++  heldBack: () => boolean;
++}
++
++/** A row's state in the list, for "the list settled": ids, sections and what is unseen. */
++function listKey(rows: readonly InboxListRow[]): string {
++  return rows.map((row) => `${row.thread_id}:${row.section}:${row.unseen}`).join('|');
++}
++
++/**
++ * The moment, the claim and the opening. `target`: the thread just left, for Try it.
++ */
++export function useSnoozeIntro(input: SnoozeIntroInput) {
++  const [stage, setStage] = useState<SnoozeIntroStage>('none');
++  const [moment, setMoment] = useState<SnoozeIntroVisit | null>(null);
++  const [target, setTarget] = useState<string | null>(null);
++  const [settled, setSettled] = useState(false);
++  const loadAt = useRef(Date.now());
++  const asked = useRef(false);
++  const visit = useRef<SnoozeIntroVisit | null>(null);
++  const latest = useRef(input);
++  latest.current = input;
++  const wanted = snoozeIntroWanted(input);
++  const watching = wanted && stage === 'none' && !asked.current;
++
++  // Each change of the open thread: leaving one that counts makes the moment.
++  useEffect(() => {
++    const now = Date.now();
++    const left = visit.current;
++    visit.current = input.thread ? { threadId: input.thread, at: now } : null;
++    if (!left || left.threadId === input.thread || !watching) return;
++    const row = latest.current.rows.find((r) => r.thread_id === left.threadId) ?? null;
++    if (snoozeIntroLeaveCounts(left, now, row)) setMoment({ threadId: left.threadId, at: now });
++    // `watching` is read, not watched: a visit is what changes it.
++    // eslint-disable-next-line react-hooks/exhaustive-deps
++  }, [input.thread]);
++
++  // A moment lasts so long.
++  useEffect(() => {
++    if (!moment) return;
++    const timer = setTimeout(() => setMoment(null), Math.max(0, moment.at + SNOOZE_INTRO_TIMES.momentMs - Date.now()));
++    return () => clearTimeout(timer);
++  }, [moment]);
++
++  // The settling wait, from the moment, again after each change of place or list.
++  const key = listKey(input.rows);
++  useEffect(() => {
++    setSettled(false);
++    if (!moment || !input.clear || !watching) return;
++    const timer = setTimeout(() => setSettled(true), SNOOZE_INTRO_TIMES.settledMs);
++    return () => clearTimeout(timer);
++  }, [moment, input.clear, input.place, key, watching]);
++
++  // Settled at a moment: the gate decides once (a moment that fails it is dropped, and the next leave is the next
++  // chance); something typed, open or toasting only makes it wait, while the moment lasts.
++  const ready = settled && moment !== null && watching;
++  useEffect(() => {
++    if (!ready || !moment) return;
++    const step = () => {
++      const now = latest.current;
++      if (asked.current) return true;
++      if (now.heldBack() || now.toast) return false;
++      if (!snoozeIntroMayClaim({ ...now, pageAge: Date.now() - loadAt.current }) || !snoozeIntroTargetHolds(targetRow(now.rows, moment.threadId))) {
++        setMoment(null);
++        return true;
++      }
++      asked.current = true;
++      setTarget(moment.threadId);
++      inboxApi
++        .claimSnoozeIntro()
++        .then((answer) => setStage(answer.show ? 'claimed' : 'shown'))
++        .catch(() => setStage('shown'));
++      return true;
++    };
++    if (step()) return;
++    const timer = setInterval(() => {
++      if (step()) clearInterval(timer);
++    }, SNOOZE_INTRO_TIMES.recheckMs);
++    return () => clearInterval(timer);
++  }, [ready, moment]);
++
++  // Claimed: it opens once the page is free; never after the page snoozed something itself, or once the thread just
++  // left took a draft, was answered or went (it is spent either way).
++  const claimed = stage === 'claimed';
++  useEffect(() => {
++    if (!claimed) return;
++    const step = () => {
++      const now = latest.current;
++      if (now.snoozedHere || !snoozeIntroTargetHolds(targetRow(now.rows, target))) {
++        setStage('shown');
++        return true;
++      }
++      if (now.heldBack() || now.toast || !now.clear) return false;
++      setStage('open');
++      return true;
++    };
++    if (step()) return;
++    const timer = setInterval(() => {
++      if (step()) clearInterval(timer);
++    }, SNOOZE_INTRO_TIMES.recheckMs);
++    return () => clearInterval(timer);
++  }, [claimed]);
++
++  return { stage, target, close: () => setStage('shown') };
++}
+diff --git a/packages/inbox/snoozeIntroRows.ts b/packages/inbox/snoozeIntroRows.ts
+new file mode 100644
+index 000000000..9e127b7e9
+--- /dev/null
++++ b/packages/inbox/snoozeIntroRows.ts
+@@ -0,0 +1,39 @@
++/**
++ * The window's half of the one-time Snooze announcement's rules (approval "inbox-snooze-announce"): which rows say the
++ * person has things to put away. Pure, so a test can move the clock; the page's gate is snoozeIntro.ts, and who gets it
++ * at all is the Inbox's (packages/server/inbox-snooze-intro.ts). Inbox-only, so not a core export: the published UI
++ * package never needs it.
++ */
++import type { InboxListRow } from '@plannotator/core/inbox-types';
++
++/** A row "read and left" for this long (the agent's last word is older) counts toward the need. */
++export const SNOOZE_INTRO_LEFT_MS = 24 * 60 * 60 * 1000;
++/** How many read-and-left rows the list must hold. */
++export const SNOOZE_INTRO_LEFT_ROWS = 2;
++
++/** The sections a thread that waits on the person sits in. */
++const WAITING_SECTIONS = new Set(['stopped', 'holding', 'waiting']);
++
++/** A thread that still waits on the person: an agent's question or last word is theirs to answer. */
++export function snoozeIntroWaits(row: Pick<InboxListRow, 'section' | 'waiting_on_person' | 'snoozed'>): boolean {
++  if (row.snoozed) return false;
++  return row.waiting_on_person || WAITING_SECTIONS.has(row.section);
++}
++
++/**
++ * A thread the person read and left: in Stopped, Holding, Waiting or New, nothing unseen (they looked), nothing unsent,
++ * not snoozed, and the agent's last word older than `SNOOZE_INTRO_LEFT_MS`.
++ */
++export function snoozeIntroReadAndLeft(row: Pick<InboxListRow, 'section' | 'unseen' | 'unsent' | 'snoozed' | 'last_agent_at' | 'last_at'>, now: Date): boolean {
++  if (row.section !== 'new' && !WAITING_SECTIONS.has(row.section)) return false;
++  if (row.unseen !== 0 || row.unsent || row.snoozed) return false;
++  const last = Date.parse(row.last_agent_at ?? row.last_at);
++  return !Number.isNaN(last) && now.getTime() - last >= SNOOZE_INTRO_LEFT_MS;
++}
++
++/** Whether the list holds enough read-and-left rows. */
++export function snoozeIntroNeed(rows: Iterable<Parameters<typeof snoozeIntroReadAndLeft>[0]>, now: Date): boolean {
++  let count = 0;
++  for (const row of rows) if (snoozeIntroReadAndLeft(row, now) && ++count >= SNOOZE_INTRO_LEFT_ROWS) return true;
++  return false;
++}
+diff --git a/packages/inbox/snoozeIntroTry.ts b/packages/inbox/snoozeIntroTry.ts
+new file mode 100644
+index 000000000..c1343a96e
+--- /dev/null
++++ b/packages/inbox/snoozeIntroTry.ts
+@@ -0,0 +1,95 @@
++/**
++ * The Snooze announcement's "Try it" (approval "inbox-snooze-announce"): it opens the REAL Snooze menu, as the
++ * person's own click would, and stops there. It never picks a time, so it never snoozes anything by itself.
++ *
++ *  - A thread open, off a phone: that thread's header clock (its "Snooze until" menu).
++ *  - A thread open, on a phone: that thread's ⋯ sheet, swapped to its times.
++ *  - No thread open, off a phone: the right-click menu of the row just left, swapped to its times.
++ *  - No thread open, on a phone: the thread just left opens again, then its ⋯ sheet, swapped to its times.
++ *
++ * It presses the same buttons a person does (Base UI opens a menu on the pointer's press), so a change to those menus
++ * reaches it. True when a Snooze menu is on screen.
++ */
++
++export interface SnoozeTryTarget {
++  /** Where the window is drawn (`.pn-inbox`, or the document). */
++  root: ParentNode;
++  phone: boolean;
++  /** The thread open now, or null. */
++  openThread: string | null;
++  /** The thread the person just left (the moment), or null. */
++  left: string | null;
++  /** Open a thread (a phone with none open). */
++  openLeft: (threadId: string) => void;
++}
++
++const WAIT_MS = 2500;
++
++/** Wait for `find` to answer, a frame at a time (the menus draw a render or two later). */
++async function until<T>(find: () => T | null | undefined, ms = WAIT_MS): Promise<T | null> {
++  const end = Date.now() + ms;
++  for (;;) {
++    const found = find();
++    if (found) return found;
++    if (Date.now() > end) return null;
++    await new Promise((resolve) => setTimeout(resolve, 30));
++  }
++}
++
++/** A person's click: Base UI's menus open on the press, a plain button on the click. */
++function press(el: HTMLElement): void {
++  el.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
++  el.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true, button: 0 }));
++  el.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, cancelable: true, button: 0, pointerType: 'mouse' }));
++  el.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true, button: 0 }));
++  el.click();
++}
++
++const pane = (root: ParentNode) => root.querySelector<HTMLElement>('section.ib-pane');
++
++/** The open thread's ⋯ sheet, swapped to its times. */
++async function sheet(root: ParentNode): Promise<boolean> {
++  const more = await until(() => pane(root)?.querySelector<HTMLElement>('[data-thread-more]'));
++  if (!more) return false;
++  press(more);
++  const item = await until(() => root.querySelector<HTMLElement>('[data-thread-menu] [data-thread-snooze-item]'));
++  if (!item) return false;
++  press(item);
++  return (await until(() => root.querySelector('[data-thread-menu] [data-snooze-choice]'))) !== null;
++}
++
++/** The open thread's header clock. */
++async function clock(root: ParentNode): Promise<boolean> {
++  const button = pane(root)?.querySelector<HTMLElement>('[data-thread-snooze]');
++  if (!button) return false;
++  press(button);
++  return (await until(() => root.querySelector('[data-thread-snooze-menu] [data-snooze-choice]'))) !== null;
++}
++
++/** The row's right-click menu, swapped to its times. */
++async function rowMenu(root: ParentNode, threadId: string): Promise<boolean> {
++  const id = CSS.escape(threadId);
++  const row = root.querySelector<HTMLElement>(`.ib-lbody [data-row="${id}"] [data-thread-id], .ib-lbody .ib-mrow[data-thread-id="${id}"]`);
++  if (!row) return false;
++  row.scrollIntoView?.({ block: 'nearest' });
++  const rect = row.getBoundingClientRect();
++  row.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: rect.left + Math.min(240, rect.width / 2), clientY: rect.top + rect.height / 2 }));
++  const item = await until(() => root.querySelector<HTMLElement>(`[data-row-menu="${id}"] [data-row-action="snooze"]`));
++  if (!item) return false;
++  press(item);
++  return (await until(() => root.querySelector(`[data-row-menu="${id}"] [data-snooze-choice]`))) !== null;
++}
++
++/** Open the real Snooze menu for Try it. True when it is on screen. */
++export async function openSnoozeMenu(target: SnoozeTryTarget): Promise<boolean> {
++  const { root, phone, openThread, left } = target;
++  if (openThread) {
++    if (phone ? await sheet(root) : await clock(root)) return true;
++    // That thread offers no Snooze (archived, say): the row just left, off a phone.
++    return !phone && left !== null && left !== openThread ? rowMenu(root, left) : false;
++  }
++  if (!left) return false;
++  if (!phone) return rowMenu(root, left);
++  target.openLeft(left);
++  return sheet(root);
++}
+diff --git a/packages/inbox/tour/model.ts b/packages/inbox/tour/model.ts
+index 77fcb9a52..491f71e5b 100644
+--- a/packages/inbox/tour/model.ts
++++ b/packages/inbox/tour/model.ts
+@@ -753,9 +753,13 @@ export interface TourDegraded {
+   pictures?: boolean;
+ }
+ 
+-/** The four things the "Also in your Inbox" card names (the approved mock): they exist, and each could be a step. */
++/**
++ * The things the "Also in your Inbox" card names (the approved mock): they exist, and each could be a step. Snooze
++ * joined them (approval "inbox-snooze-announce", 2026-11-02): new users never get its one-time dialog, so the tour names it.
++ */
+ export const TOUR_ALSO_ITEMS: { mark: string; title: string; text: string }[] = [
+   { mark: '📌', title: 'Pin a thread', text: 'to keep it at the top of the sidebar.' },
++  { mark: '⏰', title: 'Snooze', text: 'puts a thread away until later, and brings it back on time.' },
+   { mark: '👍', title: 'Looks good', text: 'tells an agent in one click when there’s nothing to add.' },
+   { mark: '↻', title: 'Re-ask', text: 'gathers an agent’s open questions into one fresh message.' },
+   { mark: '➤', title: 'Send now', text: 'puts your reply into a turn that’s running.' },
+diff --git a/packages/server/inbox-snooze-intro.ts b/packages/server/inbox-snooze-intro.ts
+new file mode 100644
+index 000000000..310f15888
+--- /dev/null
++++ b/packages/server/inbox-snooze-intro.ts
+@@ -0,0 +1,49 @@
++/**
++ * The one-time Snooze announcement (approval "inbox-snooze-announce", 2026-11-02): who gets it. Pure, so a test can
++ * move the clock; packages/server/inbox.ts reads and stamps config.json with it. The window's side (which rows say the
++ * person has things to put away, and when) is packages/inbox/snoozeIntro.ts. Inbox-only, so neither half is a core
++ * export: the published UI package never needs them.
++ *
++ * Who (config.json `inboxSnoozeIntro`): a release build, first use at least two days ago (rebuilt once from the event
++ * log on upgrade), never snoozed anything (a mark of its own: snoozes.json deletes itself with the last snooze), and
++ * not shown yet. There is no active-days rule (the owner, 2026-11-02). It shows on this computer and on the owner's
++ * phone, never to a tailnet guest (the owner, q-e29f8cd6).
++ */
++
++/** First use must be at least this long ago: two days (the owner: "I think this needs to be 2 days"). */
++export const SNOOZE_INTRO_TENURE_MS = 2 * 24 * 60 * 60 * 1000;
++
++/** What config.json keeps (`inboxSnoozeIntro`). Every field is an ISO time. */
++export interface SnoozeIntroSaved {
++  /** The person's first use of the Inbox: the oldest record in the event log. */
++  firstUseAt?: string;
++  /** The person snoozed something (any route: the window, the phone, a linked machine's forward). Never again then. */
++  snoozedAt?: string;
++  /** A page claimed the dialog. Never again. */
++  shownAt?: string;
++}
++
++/**
++ * Whether the Inbox has the dialog due: a release build, first use at least `SNOOZE_INTRO_TENURE_MS` ago, never
++ * snoozed, never shown.
++ */
++export function snoozeIntroDue(saved: SnoozeIntroSaved | undefined, now: Date, release: boolean): boolean {
++  if (!release || !saved?.firstUseAt || saved.snoozedAt || saved.shownAt) return false;
++  return now.getTime() - Date.parse(saved.firstUseAt) >= SNOOZE_INTRO_TENURE_MS;
++}
++
++/**
++ * The person's first use, rebuilt from the event log: the oldest time any line or record carries (a line's `at`, a
++ * record's `created_at`). Null for an empty log.
++ */
++export function snoozeIntroFirstUse(lines: Iterable<{ at: string; record?: unknown }>): string | null {
++  let oldest = Number.POSITIVE_INFINITY;
++  for (const line of lines) {
++    const at = Date.parse(line.at);
++    if (!Number.isNaN(at) && at < oldest) oldest = at;
++    const created = (line.record as { created_at?: unknown } | null | undefined)?.created_at;
++    const made = typeof created === "string" ? Date.parse(created) : Number.NaN;
++    if (!Number.isNaN(made) && made < oldest) oldest = made;
++  }
++  return Number.isFinite(oldest) ? new Date(oldest).toISOString() : null;
++}
+diff --git a/packages/server/inbox.ts b/packages/server/inbox.ts
+index 056970b84..dc1a679b6 100644
+--- a/packages/server/inbox.ts
++++ b/packages/server/inbox.ts
+@@ -194,6 +194,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
+ import { createInboxPins } from "./inbox-pins";
+ import { createInboxSnoozes } from "./inbox-snooze";
+ import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
++import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
+ import { createInboxEmbeds } from "./inbox-embeds";
+ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
+ import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
+@@ -738,6 +739,9 @@ function startOnLoopback(fetch: Parameters<typeof Bun.serve>[0]["fetch"], prefer
+   }
+ }
+ 
++/** A snooze write: this machine's thread, or a linked machine's through the forward (`/api/inbox/m/<machine>/…`). */
++const INBOX_SNOOZE_WRITE = /^\/api\/inbox\/(?:m\/[^/]+\/)?threads\/[^/]+\/snooze$/;
++
+ /**
+  * Whether an Inbox ran on this machine before this start, from evidence that
+  * predates it (read before this start writes the version, the store or the
+@@ -1776,6 +1780,46 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
+     return loadConfig().inboxListIntro?.shownAt === at;
+   };
+ 
++  /**
++   * The one-time Snooze announcement (approval "inbox-snooze-announce"; the rules are inbox-snooze-intro.ts):
++   * due on a release build for someone who first used the Inbox two days ago or more, never snoozed and never saw it.
++   * Decided live, not at start: the two days pass while the Inbox runs. A dev build reads and writes nothing.
++   */
++  const snoozeIntroRelease = normalizeStableVersion(version) !== null;
++  /** The saved state, with first use filled in from the event log when it is missing (an empty log at the backfill). */
++  const snoozeIntroSaved = (): SnoozeIntroSaved | undefined => {
++    const saved = loadConfig().inboxSnoozeIntro;
++    if (!snoozeIntroRelease || !saved || saved.firstUseAt) return saved;
++    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
++    if (!firstUseAt) return saved;
++    saveConfig({ inboxSnoozeIntro: { ...saved, firstUseAt } });
++    return { ...saved, firstUseAt };
++  };
++  // The backfill, once, at the first release start that knows the key (an upgrade): first use from the event log, and
++  // a snooze running now is a snooze the person made.
++  if (snoozeIntroRelease && loadConfig().inboxSnoozeIntro === undefined) {
++    const firstUseAt = snoozeIntroFirstUse(store.changesSince(0));
++    saveConfig({ inboxSnoozeIntro: { ...(firstUseAt ? { firstUseAt } : {}), ...(store.snoozes().length > 0 ? { snoozedAt: new Date().toISOString() } : {}) } });
++  }
++  /** Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. */
++  const snoozeIntroState = (owner: boolean) => ({
++    due: owner && snoozeIntroDue(snoozeIntroSaved(), new Date(), snoozeIntroRelease),
++  });
++  /** The person snoozed something: the dialog never shows. Once; a dev build marks too (only showing is release-only). */
++  const markSnoozeUsed = () => {
++    const saved = loadConfig().inboxSnoozeIntro;
++    if (saved?.snoozedAt) return;
++    saveConfig({ inboxSnoozeIntro: { ...saved, snoozedAt: new Date().toISOString() } });
++  };
++  /**
++   * The page about to show it claims it: only the first claim ever gets `show: true` (no await between the read and
++   * the write, so two claims cannot interleave). A claim that could not be saved shows nothing.
++   */
++  const claimSnoozeIntro = (owner: boolean): boolean => {
++    if (!snoozeIntroState(owner).due) return false;
++    return saveConfig({ inboxSnoozeIntro: { ...loadConfig().inboxSnoozeIntro, shownAt: new Date().toISOString() } });
++  };
++
+   /** The two update switches (PLANNOTATOR_UPDATE_CHECK, PLANNOTATOR_AUTO_UPDATE): the effective value and whether the env decides. */
+   const updatesState = () => {
+     const config = loadConfig();
+@@ -1926,6 +1970,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
+     sound: soundState(),
+     /** The one-time list options dialog: whether it waits to be claimed (POST /api/inbox/list-intro). */
+     list_intro: listIntroState(),
++    /** The one-time Snooze announcement: whether it waits to be claimed by this page (POST /api/inbox/snooze-intro). */
++    snooze_intro: snoozeIntroState(!guest),
+     /** Settings → Voice: off unless turned on. Never a key: its source and, for a saved one, its last 4. */
+     voice: voice.settings(via, guest),
+     /** Settings → About: update notices and automatic updates. */
+@@ -3204,6 +3250,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
+         return json({ show: claimListIntro(via), list_intro: listIntroState() });
+       }
+ 
++      // The one-time Snooze announcement (approval "inbox-snooze-announce"): the first page to ask gets `show: true`,
++      // once per machine, on this computer or the owner's phone; a tailnet guest never.
++      if (path === "/api/inbox/snooze-intro") {
++        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
++        const body = await readBody(req);
++        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
++        const owner = ownerOrLocal(req, via);
++        return json({ show: claimSnoozeIntro(owner), snooze_intro: snoozeIntroState(owner) });
++      }
++
+       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
+       // computer to open the Board claims it, once per machine (config.json `inboxBoardIntro.shownAt`);
+       // a page reached over the tailnet never claims it.
+@@ -3819,6 +3875,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
+     }
+   };
+ 
++  // Snooze, by any route the person has (the window and the phone here, a linked machine's thread through the
++  // forward, a phone app or a linked machine through the door, which hands its write to this same path): once it went
++  // through, the one-time Snooze announcement never shows (approval "inbox-snooze-announce"). snoozes.json cannot say
++  // so: it deletes itself with the last snooze. A tailnet guest's snooze is not the owner's.
++  const handleMarkingSnoozes = async (req: Request, via: RequestVia): Promise<Response> => {
++    const ask = req.method === "POST" && INBOX_SNOOZE_WRITE.test(new URL(req.url, "http://127.0.0.1").pathname) && ownerOrLocal(req, via) ? req.clone() : null;
++    const response = await handle(req, via);
++    if (ask && response.ok) {
++      const body = (await ask.json().catch(() => null)) as { until?: unknown } | null;
++      if (typeof body?.until === "string") markSnoozeUsed();
++    }
++    return response;
++  };
+   // With the debug log on only (inbox-perf.ts): Server-Timing on every API answer, slow requests and a stalled loop
+   // noted. Off, the handler is not wrapped and perfPhase does nothing but a compare.
+   // The store's load time and the loop watch start with the first request the log keeps, so the log stays empty until then.
+@@ -3841,10 +3910,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
+           for (const id of threadIds) messages += store.threadMessageIds(id).length;
+           debugLog.note("store_load", { ms: Math.round(storeLoadMs), threads: threadIds.length, messages });
+         }
+-        return handle(req, via);
++        return handleMarkingSnoozes(req, via);
+       }, debugOwner)
+-    : handle;
+-  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handle;
++    : handleMarkingSnoozes;
++  const served = debugLog ? withServerTiming(logged, debugRoute, (slow) => debugLog.note("slow_req", { ...slow })) : handleMarkingSnoozes;
+ 
+   /**
+    * The window's own port: everything here came from this computer. A
+diff --git a/packages/shared/config.ts b/packages/shared/config.ts
+index 3ed0d7e3e..2a31d02d6 100644
+--- a/packages/shared/config.ts
++++ b/packages/shared/config.ts
+@@ -442,6 +442,14 @@ export interface PlannotatorConfig {
+   inboxVoice?: { on?: boolean; phonesOnly?: boolean; engine?: "codex" | "api" };
+   /** The voice announcement: the list intro's rule (`dueAt`, or `shownAt` on a fresh install), claimed with `POST /api/inbox/voice/intro`. `skippedAt`: the check found no ChatGPT login, so it never asks again. */
+   inboxVoiceIntro?: { dueAt?: string; shownAt?: string; skippedAt?: string };
++  /**
++   * The one-time Snooze announcement (approval "inbox-snooze-announce"; rules in packages/server/inbox-snooze-intro.ts). Written
++   * only by a release build. `firstUseAt`: the oldest record of the event log, rebuilt once at the first release start
++   * that knows this key (and filled in later when the log was empty then). `snoozedAt`: the person snoozed something
++   * (the window, the phone, a linked machine's forward), so it never shows. `shownAt`: a page claimed it (`POST
++   * /api/inbox/snooze-intro`, a compare-and-set), once per machine.
++   */
++  inboxSnoozeIntro?: { firstUseAt?: string; snoozedAt?: string; shownAt?: string };
+   /**
+    * The Board (approval "inbox-board", 2026-10-26 amendment): something the
+    * person turns on, off by default. On: the sidebar's Board row and page,

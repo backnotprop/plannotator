@@ -13,11 +13,13 @@
     "./GuideView": "./GuideView.tsx",
     "./GuideSectionCard": "./GuideSectionCard.tsx",
     "./GuideOverview": "./GuideOverview.tsx",
+    "./GuideGlobalComments": "./GuideGlobalComments.tsx",
     "./GuideFileCard": "./GuideFileCard.tsx",
     "./GuideViewportManager": "./GuideViewportManager.tsx",
     "./GuideSkeleton": "./GuideSkeleton.tsx",
     "./GuideViewer": "./GuideViewer.tsx",
-    "./FileKindIcon": "./FileKindIcon.tsx"
+    "./FileKindIcon": "./FileKindIcon.tsx",
+    "./ShapeCodeGuide": "./ShapeCodeGuide.tsx"
   },
   "files": ["**/*.ts", "**/*.tsx", "!**/*.test.ts", "!**/*.test.tsx"],
   "dependencies": {

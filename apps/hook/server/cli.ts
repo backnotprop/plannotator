@@ -114,6 +114,48 @@ export function parseStrictAnnotateOptions(
   return { requireApproval, resultFile, remainingArgs };
 }
 
+/** The subcommands that take `--title`: the ones that open a page in a tab. */
+export const TITLE_COMMANDS: ReadonlySet<string> = new Set(["review", "annotate", "annotate-last", "last"]);
+
+export interface ParsedTitleOption {
+  /** The tab title the caller chose, whitespace collapsed; absent when not given or blank. */
+  title?: string;
+  remainingArgs: string[];
+}
+
+/**
+ * Take `--title <text>` out of the arguments (#2289). The text becomes the
+ * whole tab title, as given: runs of whitespace (a newline included) collapse
+ * to one space, the ends are trimmed, and nothing is cut, so the browser
+ * truncates a long title the way it truncates any other. A blank title is the
+ * same as none. Throws on a missing value, a second `--title`, or a command
+ * that opens no page.
+ */
+export function parseTitleOption(args: string[]): ParsedTitleOption {
+  let title: string | undefined;
+  let seen = false;
+  const remainingArgs: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg !== "--title") {
+      remainingArgs.push(arg);
+      continue;
+    }
+    if (seen) throw new Error("--title may only be specified once");
+    seen = true;
+    const value = args[index + 1];
+    // Like --result-file: a following flag is a forgotten value, not a title.
+    if (value === undefined || value.startsWith("--")) throw new Error("Missing value for --title");
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (collapsed) title = collapsed;
+    index += 1;
+  }
+  if (seen && !TITLE_COMMANDS.has(remainingArgs[0] ?? "")) {
+    throw new Error("--title is only supported with: plannotator review, annotate, annotate-last (last)");
+  }
+  return title === undefined ? { remainingArgs } : { title, remainingArgs };
+}
+
 /** True when any token is a help flag (`--help` / `-h`). */
 export function hasHelpFlag(args: string[]): boolean {
   return args.some((arg) => HELP_FLAGS.has(arg));
@@ -156,9 +198,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
@@ -167,6 +209,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
+    "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
@@ -206,7 +249,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
  * runs.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -235,6 +278,46 @@ export const CARD_COMMAND_USAGE = [
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
+].join("\n");
+
+/**
+ * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
+ * Unreleased (HIDDEN_SUBCOMMANDS). DRAFT: every word below needs the owner's
+ * approval before Shape ships (approval "shape-living-board", "Still needs
+ * its own approval").
+ */
+export const SHAPE_COMMAND_USAGE = [
+  "DRAFT: this text is not approved yet.",
+  "",
+  "Usage:",
+  "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
+  "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
+  "  plannotator shape drawing [<shp_id>]",
+  "  plannotator shape answer [<shp_id>] --re <shn_id> --text '<answer>'",
+  "  plannotator shape done [<shp_id>]",
+  "  plannotator shape list [--all] [--json]",
+  "  plannotator shape open [<shp_id>]",
+  "",
+  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
+  "and Code, with numbered references. Each update stores a new version of the whole board.",
+  "",
+  "update   Stores the board in <board.json>. Without --id it makes a new shape and",
+  "         prints its id. With --id, --base is the version you drew from; if the shape",
+  "         changed since, the update is refused and the latest version is printed.",
+  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
+  "         board redraws only what changed.",
+  "read     Prints the latest version (or --version <n>). --notes also prints the notes",
+  "         that wait for you (Change it and Ask) and marks them as received.",
+  "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
+  "answer   Answers the person's Ask (its id is in read --notes). Change it notes need",
+  "         no answer: draw the change as a new version.",
+  "done     Finishes the shape. Do this only when the person says so.",
+  "list     Lists the active shapes, newest change first (--all: finished ones too).",
+  "open     Opens the Shape page in the person's browser: every board, or one board.",
+  "         It prints the page's address.",
+  "",
+  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
+  "else this project's.",
 ].join("\n");
 
 /**
@@ -302,7 +385,8 @@ export const INBOX_CALL_USAGE = [
   "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "",
   "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
-  `Actions: ${INBOX_CALL_ACTIONS.join(", ")}. The JSON holds the action's fields, as in`,
+  // `steps` is left out: it is served only while the person has thread steps on, and the guide names it then.
+  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps").join(", ")}. The JSON holds the action's fields, as in`,
   "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
   "quoting JSON is painful). A stopped Inbox starts in the background.",
   "",
@@ -442,7 +526,7 @@ export const UPDATE_COMMAND_USAGE = [
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
     "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
     "",
@@ -464,6 +548,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                stays what local refs resolve to; Fetch still works. Useful when",
     "                SSH auth costs a hardware-key touch. Also PLANNOTATOR_GIT_REMOTE_CHECK=0",
     "                or { \"gitRemoteCheck\": false } in the data dir's config.json.",
+    "  --title <text>",
+    "                Name the browser tab this, in place of \"<repo> · Code Review\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        You wait for the sign-off: a bare Approve reaches you too. The approval",
     "                is printed either way; an agent host that only logs a bare Approve",
@@ -496,7 +582,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "Several existing file paths (plannotator annotate spec.md mock.html notes.md) open",
@@ -505,6 +591,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
     "  --no-jina     Fetch URLs with fetch+Turndown instead of Jina Reader",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of the file",
+    "                or folder name, whichever document is open",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
@@ -517,13 +606,15 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
     "Options:",
     "  --stdin       Read the message content from stdin instead of session logs",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of \"Last message\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
@@ -602,6 +693,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  shape: SHAPE_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",

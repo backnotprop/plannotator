@@ -48,6 +48,31 @@ export interface GuideDiffRendererContext {
   focused: boolean;
 }
 
+/** A comment about the whole guided review, not tied to a line or a file. */
+export interface GuideGlobalComment {
+  id: string;
+  text: string;
+}
+
+/**
+ * A host that takes comments on the review (the Inbox, the review app) passes
+ * its global comments here. The chain draws the "Global comment" button in
+ * the header's actions and the comments under the header, before the first
+ * section; the host owns the composer and where a comment is kept.
+ */
+export interface GuideGlobalComments {
+  comments: readonly GuideGlobalComment[];
+  /**
+   * Open the host's composer for a new global comment, anchored to the
+   * chain's button. Absent: the comments are shown and no button is drawn
+   * (a read-only review).
+   */
+  onAdd?: (anchor: HTMLElement) => void;
+  /** The comment chosen in the list: the host shows it where it lists comments. */
+  onSelect?: (id: string) => void;
+  selectedId?: string | null;
+}
+
 export interface GuideHostValue<P extends object = Record<string, unknown>> {
   /** Every file of the review the guide describes. Guide refs resolve against this list. */
   files: DiffFile[];
@@ -103,12 +128,24 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderSectionFooter?: (index: number) => React.ReactNode | null;
   /**
+   * A section card's file column when the chapter has no files in the diff (a
+   * guide written before the change exists: Shape's Code view lists the files
+   * each step plans). Called with the card's index; answering null (or
+   * absent) shows the usual "No chapter files in the current diff".
+   */
+  renderSectionEmpty?: (index: number) => React.ReactNode | null;
+  /**
    * Draws a guide link the chain cannot follow itself (a `symbol:` link, a
    * `code:` link to a file outside the guide): the VS Code extension asks
    * the language server. Answering null (or absent) shows the link's label
    * as plain text, as before.
    */
   renderLink?: (href: string, label: React.ReactNode, key: string | number) => React.ReactNode | null;
+  /**
+   * Global comments: comments on the whole review, not a line or a file.
+   * Absent (guides.show, the VS Code reader): no button and no list.
+   */
+  globalComments?: GuideGlobalComments;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

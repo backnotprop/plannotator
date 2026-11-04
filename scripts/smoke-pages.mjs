@@ -12,6 +12,9 @@
  * 1. review and annotate answer `/` with the built review.html / index.html
  *    page, byte for byte, and only `Content-Type: text/html` (a local
  *    session); in remote mode a gzip answer decompresses to the same bytes.
+ *    The Shapes server (`shape serve`, Shape turned on in the sandbox) answers
+ *    `/` with the built shape.html: gzip as embedded to a browser that takes
+ *    it, unzipped to one that does not.
  *    The chunks and stylesheet the page loads up front (packed behind it,
  *    build/pack-app.ts) are served as built, `nosniff`. Review's diagram
  *    engine files are served as built.
@@ -53,7 +56,7 @@ for (const line of readFileSync(digestsFile, "utf8").split("\n")) {
   const m = /^([0-9a-f]{64})\s+\*?(.+)$/.exec(line.trim());
   if (m) digests.set(basename(m[2]), m[1]);
 }
-for (const name of ["index.html", "review.html"]) {
+for (const name of ["index.html", "review.html", "shape.html"]) {
   if (!digests.has(name)) throw new Error(`no digest for ${name} in ${digestsFile}`);
 }
 
@@ -136,10 +139,10 @@ function replaceLikeInstaller(target, source) {
   if (sha256(readFileSync(target)) !== sha256(readFileSync(source))) throw new Error("the replacement did not land");
 }
 
-function checkPage(label, res, digest, encoding) {
+function checkPage(label, res, digest, encoding, contentType = "text/html") {
   if (res.status !== 200) return fail(`${label}: status ${res.status}`);
   const type = res.headers["content-type"];
-  if (type !== "text/html") fail(`${label}: Content-Type ${type}`);
+  if (type !== contentType) fail(`${label}: Content-Type ${type}`);
   let body = res.body;
   if (encoding === "identity") {
     if (res.headers["content-encoding"]) fail(`${label}: unexpected Content-Encoding ${res.headers["content-encoding"]}`);
@@ -238,6 +241,29 @@ async function servedPages(repo) {
   }
 }
 
+async function shapePage(repo) {
+  // Shape is off by default: turn it on in the sandbox, and give the server its port the way a stopped one keeps it.
+  const p = port++;
+  const shapes = join(env.PLANNOTATOR_DATA_DIR, "shapes");
+  mkdirSync(shapes, { recursive: true });
+  writeFileSync(join(env.PLANNOTATOR_DATA_DIR, "config.json"), JSON.stringify({ inboxShape: true }));
+  writeFileSync(join(shapes, "server.json"), JSON.stringify({ v: 1, pid: 0, port: p, url: `http://127.0.0.1:${p}`, version: "smoke", started: "" }));
+  const child = start(binary, ["shape", "serve"], {}, repo);
+  try {
+    await waitFor(p, "/api/shape-server", child);
+    for (const [label, headers, encoding] of [
+      ["shape /", {}, "identity"],
+      ["shape / (gzip)", { "Accept-Encoding": "gzip, deflate, br" }, "gzip"],
+    ]) {
+      checkPage(label, await get(p, "/", headers), digests.get("shape.html"), encoding, "text/html; charset=utf-8");
+    }
+  } catch (e) {
+    fail(`shape: ${e.message}\n${child.log()}`);
+  } finally {
+    stop(child);
+  }
+}
+
 async function pagesAfterReplacement(repo) {
   const installDir = join(sandbox, "install");
   mkdirSync(installDir, { recursive: true });
@@ -318,6 +344,7 @@ async function probeFirstReadAfterReplacement() {
 
 const repo = scratchRepo();
 await servedPages(repo);
+await shapePage(repo);
 await pagesAfterReplacement(repo);
 if (bun) await probeFirstReadAfterReplacement();
 else console.log("SKIP: no --bun, the embedded-file probe did not run");

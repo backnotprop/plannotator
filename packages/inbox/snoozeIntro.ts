@@ -1,7 +1,8 @@
 /**
  * When the one-time Snooze announcement may show (approval "inbox-snooze-announce", 2026-11-02). The Inbox decides who
- * (settings `snooze_intro.due`: packages/server/inbox-snooze-intro.ts) and spends the claim (POST /api/inbox/snooze-intro: only
- * the first claim ever gets `show: true`, stamped as it is claimed). The page decides when, only at a calm moment:
+ * (settings `snooze_intro.due`: packages/server/inbox-snooze-intro.ts, and the reveals' queue, `reveal.next`) and spends the
+ * claim (POST /api/inbox/snooze-intro: only the first claim ever gets `show: true`, stamped as it is claimed). The page
+ * decides when, only at a calm moment (the shared tracker is reveal.ts):
  *
  *  - right after the person LEAVES a thread that still waits on them without answering it (they close it, go back to
  *    the list, or open another), having had it open for `readMs` (5 s) or more, with nothing left typed in it;
@@ -15,25 +16,15 @@
  * cannot open yet waits for a free moment, unless the page snoozes something meanwhile (it would announce what the
  * person just did). Every dismiss is final: the claim already stamped it.
  */
-import { useEffect, useRef, useState } from 'react';
+import { useRef } from 'react';
 import type { InboxListRow } from '@plannotator/core/inbox-types';
 import { inboxApi } from './api';
 import { snoozeIntroNeed, snoozeIntroWaits } from './snoozeIntroRows';
-import { LIST_INTRO_MIN_ROWS, LIST_INTRO_SETTLED_MS } from './listIntro';
+import { LIST_INTRO_MIN_ROWS } from './listIntro';
+import { REVEAL_TIMES, useRevealMoment, type RevealStage, type RevealVisit } from './reveal';
 
-/** The page's thresholds, ms. A test shrinks them (and puts them back). */
-export const SNOOZE_INTRO_TIMES = {
-  /** The page has been loaded this long. */
-  pageAgeMs: 60_000,
-  /** The thread was open this long before the person left it: they read it. */
-  readMs: 5_000,
-  /** The Inbox page settled this long, without a break. */
-  settledMs: LIST_INTRO_SETTLED_MS,
-  /** How long after the leave the moment lasts. */
-  momentMs: 15_000,
-  /** How often a moment that is held back (something typed, open or toasting) looks again. */
-  recheckMs: 700,
-};
+/** The page's thresholds, ms: the reveals' (reveal.ts), one object. A test shrinks them (and puts them back). */
+export const SNOOZE_INTRO_TIMES = REVEAL_TIMES;
 
 /** Another one-time dialog showed on this load somewhere App does not see (the Board's first visit). */
 let otherOneTimeDialog = false;
@@ -67,10 +58,7 @@ export function snoozeIntroBlockedBy(o: SnoozeIntroOthers): boolean {
 }
 
 /** One visit to a thread: which, and when it opened. */
-export interface SnoozeIntroVisit {
-  threadId: string;
-  at: number;
-}
+export type SnoozeIntroVisit = RevealVisit;
 
 /**
  * Whether leaving this visit is the moment: open long enough to read, and the thread (as the list has it now) still
@@ -122,7 +110,7 @@ export function snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>, now: D
   return snoozeIntroNeed(gate.rows, now);
 }
 
-export type SnoozeIntroStage = 'none' | 'claimed' | 'open' | 'shown';
+export type SnoozeIntroStage = RevealStage;
 
 export interface SnoozeIntroInput extends Omit<SnoozeIntroGate, 'pageAge'> {
   /** The thread open now (the route's), or null. */
@@ -135,104 +123,25 @@ export interface SnoozeIntroInput extends Omit<SnoozeIntroGate, 'pageAge'> {
   heldBack: () => boolean;
 }
 
-/** A row's state in the list, for "the list settled": ids, sections and what is unseen. */
-function listKey(rows: readonly InboxListRow[]): string {
-  return rows.map((row) => `${row.thread_id}:${row.section}:${row.unseen}`).join('|');
-}
-
 /**
- * The moment, the claim and the opening. `target`: the thread just left, for Try it.
+ * The moment, the claim and the opening (the shared tracker in reveal.ts). `target`: the thread just left, for Try it.
  */
 export function useSnoozeIntro(input: SnoozeIntroInput) {
-  const [stage, setStage] = useState<SnoozeIntroStage>('none');
-  const [moment, setMoment] = useState<SnoozeIntroVisit | null>(null);
-  const [target, setTarget] = useState<string | null>(null);
-  const [settled, setSettled] = useState(false);
-  const loadAt = useRef(Date.now());
-  const asked = useRef(false);
-  const visit = useRef<SnoozeIntroVisit | null>(null);
   const latest = useRef(input);
   latest.current = input;
-  const wanted = snoozeIntroWanted(input);
-  const watching = wanted && stage === 'none' && !asked.current;
-
-  // Each change of the open thread: leaving one that counts makes the moment.
-  useEffect(() => {
-    const now = Date.now();
-    const left = visit.current;
-    visit.current = input.thread ? { threadId: input.thread, at: now } : null;
-    if (!left || left.threadId === input.thread || !watching) return;
-    const row = latest.current.rows.find((r) => r.thread_id === left.threadId) ?? null;
-    if (snoozeIntroLeaveCounts(left, now, row)) setMoment({ threadId: left.threadId, at: now });
-    // `watching` is read, not watched: a visit is what changes it.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [input.thread]);
-
-  // A moment lasts so long.
-  useEffect(() => {
-    if (!moment) return;
-    const timer = setTimeout(() => setMoment(null), Math.max(0, moment.at + SNOOZE_INTRO_TIMES.momentMs - Date.now()));
-    return () => clearTimeout(timer);
-  }, [moment]);
-
-  // The settling wait, from the moment, again after each change of place or list.
-  const key = listKey(input.rows);
-  useEffect(() => {
-    setSettled(false);
-    if (!moment || !input.clear || !watching) return;
-    const timer = setTimeout(() => setSettled(true), SNOOZE_INTRO_TIMES.settledMs);
-    return () => clearTimeout(timer);
-  }, [moment, input.clear, input.place, key, watching]);
-
-  // Settled at a moment: the gate decides once (a moment that fails it is dropped, and the next leave is the next
-  // chance); something typed, open or toasting only makes it wait, while the moment lasts.
-  const ready = settled && moment !== null && watching;
-  useEffect(() => {
-    if (!ready || !moment) return;
-    const step = () => {
-      const now = latest.current;
-      if (asked.current) return true;
-      if (now.heldBack() || now.toast) return false;
-      if (!snoozeIntroMayClaim({ ...now, pageAge: Date.now() - loadAt.current }) || !snoozeIntroTargetHolds(targetRow(now.rows, moment.threadId))) {
-        setMoment(null);
-        return true;
-      }
-      asked.current = true;
-      setTarget(moment.threadId);
-      inboxApi
-        .claimSnoozeIntro()
-        .then((answer) => setStage(answer.show ? 'claimed' : 'shown'))
-        .catch(() => setStage('shown'));
-      return true;
-    };
-    if (step()) return;
-    const timer = setInterval(() => {
-      if (step()) clearInterval(timer);
-    }, SNOOZE_INTRO_TIMES.recheckMs);
-    return () => clearInterval(timer);
-  }, [ready, moment]);
-
-  // Claimed: it opens once the page is free; never after the page snoozed something itself, or once the thread just
-  // left took a draft, was answered or went (it is spent either way).
-  const claimed = stage === 'claimed';
-  useEffect(() => {
-    if (!claimed) return;
-    const step = () => {
-      const now = latest.current;
-      if (now.snoozedHere || !snoozeIntroTargetHolds(targetRow(now.rows, target))) {
-        setStage('shown');
-        return true;
-      }
-      if (now.heldBack() || now.toast || !now.clear) return false;
-      setStage('open');
-      return true;
-    };
-    if (step()) return;
-    const timer = setInterval(() => {
-      if (step()) clearInterval(timer);
-    }, SNOOZE_INTRO_TIMES.recheckMs);
-    return () => clearInterval(timer);
-  }, [claimed]);
-
-  return { stage, target, close: () => setStage('shown') };
+  return useRevealMoment({
+    wanted: snoozeIntroWanted(input),
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    // Any leave counts (to the list or to another thread), as long as the thread still waits on the person.
+    leaveCounts: (visit, now, row) => snoozeIntroLeaveCounts(visit, now, row),
+    mayClaim: (pageAge) => snoozeIntroMayClaim({ ...latest.current, pageAge }),
+    // Never after the page snoozed something itself, or once the thread just left took a draft, was answered or went.
+    holds: (threadId) => !latest.current.snoozedHere && snoozeIntroTargetHolds(targetRow(latest.current.rows, threadId)),
+    claim: async () => (await inboxApi.claimSnoozeIntro()).show,
+  });
 }
