@@ -70,8 +70,12 @@ export function reviewEnding(pull: InboxPull | null, hasAgent: boolean, picked: 
 export interface PostEndingProps {
   /** The PR this review can be posted to; null or unpostable (closed, its head unknown): the agent's ending alone. */
   pull: InboxPull | null;
-  /** The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending. */
-  agent: { name: string; host?: string | null; control: ReactNode } | null;
+  /**
+   * The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending.
+   * `unavailable`: why it cannot take this review (a Whole stack over several agents' layers): its option is shown
+   * off, with these words as its tooltip, and the review posts.
+   */
+  agent: { name: string; host?: string | null; control: ReactNode; unavailable?: string } | null;
   comments: readonly CodeAnnotation[];
   /** What the comments were written on (PlatformPost's `anchor`). */
   anchor: 'diff' | 'guide' | 'stack';
@@ -80,8 +84,8 @@ export interface PostEndingProps {
   /** The person's pick (`useReviewDestination`), with its setter. */
   picked: ReviewDestination;
   onPick: (next: ReviewDestination) => void;
-  /** The review went on the PR: the host clears its comments and says so. */
-  onPosted: (result: { action: PlatformAction; url: string; label: string }) => void;
+  /** The review went on the PR: the host clears the comments that went (`posted`, their ids) and says so. */
+  onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly string[] }) => void;
   /**
    * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
    * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
@@ -99,7 +103,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     return headSha ? { ...listed, head_sha: headSha } : null;
   }, [pull, headSha]);
   const rules = target ? platformRules(target) : null;
-  const destination: ReviewDestination = !target ? 'agent' : !agent ? 'forge' : picked;
+  const destination: ReviewDestination = !target ? 'agent' : !agent || agent.unavailable ? 'forge' : picked;
   const choose = onPick;
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
@@ -154,15 +158,16 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     [run],
   );
 
-  if (!target || !rules || !spec) return agent ? <>{agent.control}</> : null;
+  if (!target || !rules || !spec) return agent && !agent.unavailable ? <>{agent.control}</> : null;
 
   const choice = agent && (
     <div className="ib-seg ib-seg-sm ib-rv-dest" role="radiogroup" aria-label="Where your review goes" data-review-destination={destination}>
       {(['forge', 'agent'] as const).map((value) => {
-        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : `Send to ${agent.name}`;
+        const off = value === 'agent' && !!agent.unavailable;
+        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : off ? agent.unavailable! : `Send to ${agent.name}`;
         return (
-          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-review-destination-choice={value} title={words}>
-            <input type="radio" name={name} checked={destination === value} onChange={() => choose(value)} aria-label={words} />
+          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-off={off ? '' : undefined} data-review-destination-choice={value} title={words}>
+            <input type="radio" name={name} checked={destination === value} disabled={off} onChange={() => choose(value)} aria-label={words} />
             {value === 'forge' ? <PRPlatformIcon platform={target.platform} className="ib-rv-dest-mark" /> : <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />}
             {!phone && <span aria-hidden="true">{value === 'forge' ? rules.label : agent.name}</span>}
           </label>
@@ -174,7 +179,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   return (
     <>
       {choice}
-      {destination === 'agent' && agent ? (
+      {destination === 'agent' && agent && !agent.unavailable ? (
         agent.control
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
@@ -226,7 +231,8 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               setOpen(null);
               // A follow-up comment after an approval still reads as the approval.
               const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map(postedSignature)]) });
+              const went = new Set(result.posted);
+              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
               onPosted({ ...result, action, label: rules.label });
             }}
           />

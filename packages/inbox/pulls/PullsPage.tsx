@@ -7,22 +7,24 @@
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
  *   folded "N waiting on others". A stack is one row: its third line is a
- *   small chain of PR marks in landing order.
+ *   small chain of PR marks in landing order. Top left, always the author's
+ *   picture (the owner on #2608); the agent that has it is on the third
+ *   line, with its mark ("#48201 · Claude Code has it").
  * - The stack view beside it (a phone: in its place): the layers from the
  *   base branch up, the lowest open one marked "Lands next"; the agent
  *   behind it and its thread, or "No agent yet" with the ask, the agent pills
  *   (the project's live sessions; one is picked) and + New agent (compose's
  *   own launch, while the Inbox can launch); a Board chip only when the Board is on and a
  *   card links it; the purple Review hands it to the picked agent, and "Open
- *   the diff" (phase 1's review mode, layer by layer) with "Whole stack" sits
- *   beside it in every state, as each layer's row does; Reply at the foot goes
+ *   the diff" (phase 1's review mode, layer by layer; the whole stack is its
+ *   switch) sits beside it in every state, as each layer's row does; Reply at the foot goes
  *   into the agent's thread.
  *   No merge button.
  *
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
-import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullLandsNext, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import type { InboxComposeSession } from '@plannotator/core/inbox-types';
@@ -43,24 +45,28 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import {
   checksWords,
   findStack,
-  forgeName,
   handoffKeys,
   inboxPullLabel,
+  ladderHeading,
   PULL_HANDOFF_CUSTOM_MAX,
-  layerBaseWords,
   layerPill,
   linkAgentName,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffMessage,
+  pullHandoffThreadName,
+  handoffStack,
+  openLayers,
+  pullNounWord,
+  pullRows,
   type PullHandoffAsk,
-  repoName,
-  rowLine,
-  stackLink,
+  rowMeta,
   stackProjects,
   stackTitle,
-  startLayer,
 } from './model';
+import { forgeName, initials, repoLabels, repoName } from './labels';
+import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
+import { chainMarks, landsNextLayer, layerBaseWords, otherLayerAgents, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -80,12 +86,11 @@ export interface PullsPageProps {
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** Launch an agent: compose's New thread, with the hand-off's words and the PRs it is for. */
-  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement) => void;
+  /** `threadName`: the new thread's name (`pullHandoffThreadName`), compose's chip as it opens. */
+  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement, threadName: string) => void;
   /** Review sent the hand-off to `session`, the picked agent: the list reads the new thread. */
   onHanded: (session: string) => void;
 }
-
-const isOpen = (pull: InboxPull) => pull.state === 'open' || pull.state === 'draft';
 
 /** A layer's state as the Board's mark draws it. */
 function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
@@ -158,22 +163,54 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
+  const notices = pullsNotices(model);
   if (total === 0) {
-    const signedIn = model.hosts.length > 0;
+    const empty = pullsEmptyWords(model, notices);
     return (
-      <div className="ib-pr-empty" data-pulls-empty="">
-        <p className="ib-pr-empty-h">{signedIn ? 'Nothing open in your projects' : 'No signed-in GitHub or GitLab here'}</p>
-        <p>
-          {signedIn
-            ? 'Pull requests you opened, and the ones you are asked to review, show here.'
-            : 'Pull requests show here when this computer’s gh or glab is signed in to the host of a project’s origin.'}
-        </p>
+      <div className="ib-pr-empty" data-pulls-empty={empty.kind}>
+        <p className="ib-pr-empty-h">{empty.head}</p>
+        {empty.lines.map((line) => (
+          <p key={line}>{line}</p>
+        ))}
       </div>
     );
   }
-  const row = (item: InboxPullItem) => <PullRow key={item.stack.id} item={item} link={stackLink(item.stack, model.links)} selected={item.stack.id === selected} phone={phone} now={now} onOpen={() => onOpen(item.stack.id)} />;
+  const labels = repoLabels(pullRows(groups).map((item) => item.stack));
+  const row = (item: InboxPullItem) => (
+    <PullRow
+      key={item.stack.id}
+      item={item}
+      link={stackLink(item.stack, model.links)}
+      links={model.links}
+      repoLabel={labels.get(inboxPullRepoKey(item.stack.host, item.stack.repo)) ?? repoName(item.stack.repo)}
+      selected={item.stack.id === selected}
+      phone={phone}
+      now={now}
+      onOpen={() => onOpen(item.stack.id)}
+    />
+  );
   return (
     <>
+      {notices.length > 0 && (
+        <div className="ib-pr-notices" role="status" data-pulls-notices="">
+          {notices.map((n) => (
+            <p key={n.key} className="ib-pr-notice" data-pulls-notice={n.key}>
+              <Icon name="info" size={14} />
+              <span>
+                {n.line}
+                {n.link && (
+                  <>
+                    {' · '}
+                    <a href={n.link.href} target="_blank" rel="noreferrer noopener" data-pulls-notice-link="">
+                      {n.link.label}
+                    </a>
+                  </>
+                )}
+              </span>
+            </p>
+          ))}
+        </div>
+      )}
       {groups.on_you.length > 0 && (
         <div className="ib-group" role="group" aria-label="On you" data-pulls-group="on_you">
           <div className="ib-band">
@@ -209,45 +246,110 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
   );
 }
 
-/** Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), else nothing. */
-function RowLead({ item, link }: { item: InboxPullItem; link: InboxPullLink | null }) {
-  if (link?.agent) return <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} />;
-  const author = item.focus.author;
-  if (!author || item.focus.mine) return null;
+/**
+ * Who the row is from: the agent's tile when one is tied to it, else the author's initials (a teammate), an empty tile
+ * for a teammate's PR whose account is gone (the column stays even), else nothing (the person's own).
+ */
+/** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
+const failedAvatars = new Set<string>();
+
+/**
+ * The row's top-left spot: always the PR author's profile picture (the person's own PRs too; a stack's bottom layer's
+ * author), read through the Inbox's own route (`GET /api/inbox/pulls/avatar`): the window's CSP never loads a remote
+ * image. The initials show while it loads and stay when it cannot; a deleted account is a grey person.
+ */
+function RowLead({ item }: { item: InboxPullItem }) {
+  const bottom = item.stack.layers[0]!;
+  const author = bottom.author;
+  const src = author ? inboxApi.pullAvatarUrl(bottom.host, author) : null;
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(() => (src ? failedAvatars.has(src) : false));
+  useEffect(() => {
+    setShown(false);
+    setFailed(src ? failedAvatars.has(src) : false);
+  }, [src]);
+  if (!author || !src) {
+    return (
+      <Tip content="A deleted account">
+        <span className="ib-pr-av ib-pr-av-ghost" role="img" aria-label="A deleted account" data-pulls-ghost="">
+          <Icon name="user" size={13} />
+        </span>
+      </Tip>
+    );
+  }
+  const fail = () => {
+    failedAvatars.add(src);
+    setFailed(true);
+  };
   return (
     <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author}>
-        {initials(author)}
+      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
+        {!shown && <span aria-hidden="true">{initials(author)}</span>}
+        {!failed && (
+          <img
+            src={src}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            referrerPolicy="no-referrer"
+            draggable={false}
+            data-shown={shown ? '' : undefined}
+            onLoad={(event) => {
+              const img = event.currentTarget;
+              if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
+              else fail();
+            }}
+            onError={fail}
+          />
+        )}
       </span>
     </Tip>
   );
 }
 
-function initials(login: string): string {
-  // Two words give two letters ("mara-lee" → "ML"); one gives one ("priya" → "P"), never a pair that reads as "PR".
-  const parts = login.split(/[-_. ]+/).filter(Boolean);
-  return ((parts[0]?.[0] ?? '') + (parts[1]?.[0] ?? '')).toUpperCase();
-}
-
-/** The chain of PR marks, bottom (lands first) to top. */
+/** The chain of PR marks, bottom (lands first) to top: past five layers, the first two, "+N" and the last two. */
 function Chain({ stack }: { stack: InboxPullStack }) {
   return (
     <span className="ib-pr-chain" aria-hidden="true" data-pulls-chain={stack.layers.length}>
-      {stack.layers.map((layer, i) => (
-        <span key={layer.key} className="ib-pr-link">
+      {chainMarks(stack.layers).map((mark, i) => (
+        <span key={'more' in mark ? 'more' : mark.key} className="ib-pr-link">
           {i > 0 && <span className="ib-pr-dash" />}
-          <span className="ib-bc-mark" data-card-mark={markState(layer)} data-card-mark-kind="pr">
-            <RefMarkIcon kind="pr" state={markState(layer)} size={13} />
-          </span>
+          {'more' in mark ? (
+            <span className="ib-pr-more" data-pulls-chain-more={mark.more}>
+              +{mark.more}
+            </span>
+          ) : (
+            <span className="ib-bc-mark" data-card-mark={markState(mark)} data-card-mark-kind="pr">
+              <RefMarkIcon kind="pr" state={markState(mark)} size={13} />
+            </span>
+          )}
         </span>
       ))}
     </span>
   );
 }
 
-function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPullItem; link: InboxPullLink | null; selected: boolean; phone: boolean; now: number; onOpen: () => void }) {
-  const title = stackTitle(item.stack, link);
-  const line = rowLine(item, link);
+function PullRow({
+  item,
+  link,
+  links,
+  repoLabel,
+  selected,
+  phone,
+  now,
+  onOpen,
+}: {
+  item: InboxPullItem;
+  link: InboxPullLink | null;
+  links: InboxPullsAnswer['links'];
+  repoLabel: string;
+  selected: boolean;
+  phone: boolean;
+  now: number;
+  onOpen: () => void;
+}) {
+  const title = stackTitle(item.stack, links);
+  const meta = rowMeta(item, link);
   const layers = item.stack.layers.length;
   return (
     <button
@@ -261,9 +363,9 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
     >
       <div className="ib-l1">
         <span className="ib-from ib-lead">
-          <RowLead item={item} link={link} />
-          <span className="ib-p" dir="auto">
-            {repoName(item.stack.repo)}
+          <RowLead item={item} />
+          <span className="ib-p" dir="auto" data-pulls-repo="">
+            {repoLabel}
           </span>
         </span>
         <span className="ib-t">
@@ -285,8 +387,22 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
           </span>
         )}
         <span className="ib-pv" dir="auto">
-          {layers > 1 && <span className="ib-sr">A stack of {layers} pull requests: </span>}
-          {line}
+          {layers > 1 && (
+            <span className="ib-sr">
+              A stack of {layers} {pullNounWord(item.stack.platform)}s:{' '}
+            </span>
+          )}
+          {meta.lead}
+          {meta.agent && (
+            <>
+              {' · '}
+              <span className="ib-pr-magent" data-pulls-row-agent={meta.agent.host ?? ''}>
+                <HostMark host={meta.agent.host} />
+                {meta.agent.name} {meta.agent.words}
+              </span>
+            </>
+          )}
+          {meta.rest && ` · ${meta.rest}`}
         </span>
       </div>
     </button>
@@ -295,10 +411,18 @@ function PullRow({ item, link, selected, phone, now, onOpen }: { item: InboxPull
 
 function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnswer | null; loading: boolean; error: string | null; onRefresh: () => void }) {
   const now = useRelativeClock(true);
-  const clis = [...new Set((model?.hosts ?? []).map((h) => h.cli))];
-  const from = clis.length === 0 ? 'gh and glab' : clis.join(' and ');
-  const limited = model?.hosts.some((h) => h.error === 'rate_limited');
-  const when = model?.fetched_at ? relativeWords(model.fetched_at, now).replace('just now', 'just now') : null;
+  // Only the CLIs that answered: a host that failed is said in the list, by name.
+  const answered = model ? answeredClis(model) : [];
+  const when = model?.fetched_at ? relativeWords(model.fetched_at, now) : null;
+  const words = error
+    ? error
+    : !model
+      ? 'From gh and glab on this computer'
+      : answered.length > 0
+        ? `From ${answered.join(' and ')} on this computer${when ? ` · ${when}` : ''}`
+        : model.hosts.length > 0
+          ? 'Nothing read this time'
+          : 'Nothing read on this computer';
   return (
     <div className="ib-pr-foot" data-pulls-foot="">
       <Tip content="Read again">
@@ -306,8 +430,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
           <Icon name="refresh" size={14} />
         </button>
       </Tip>
-      <span className="ib-pr-foot-t" aria-live="polite">
-        {error ? error : limited ? `${from} asked to slow down; showing the last read` : `From ${from} on this computer${when ? ` · ${when}` : ''}`}
+      <span className="ib-pr-foot-t" aria-live="polite" title={words || undefined} data-pulls-foot-words="">
+        {words}
       </span>
     </div>
   );
@@ -324,10 +448,18 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const reviewGuide = link?.guide?.review ? link.guide : null;
   const asked = link?.via === 'owner' && link.ask && !reviewGuide ? (link.ask === 'custom' ? 'custom curation on the way' : 'guided review on the way') : null;
   const now = useRelativeClock(true);
-  const next = inboxPullLandsNext(stack);
+  // "Lands next" only where the base is one it lands on (a merged layer in the middle, or an unread base, gets none).
+  const next = landsNextLayer(stack);
+  // An agent whose session ended stays named, marked ended; Reply gives way to handing it to another agent.
+  const ended = link?.agent?.ended === true;
+  // Other agents on the stack: each gets verdicts for its own layers only, and the ladder says whose those are.
+  const others = otherLayerAgents(stack, model.links);
   const start = startLayer(stack);
-  const openLayers = stack.layers.filter(isOpen);
-  const top = openLayers[openLayers.length - 1] ?? stack.layers[stack.layers.length - 1]!;
+  const open = openLayers(stack);
+  // What a hand-off is about (`handoffStack`): with no agent yet, the whole stack (a tree: the chain to its top); Hand
+  // again, the layers the agent has. A tree's sibling left out of that chain shows nothing of its own here.
+  const handed = (link ? handoffStack(stack, model.links, link.thread_id) : null) ?? handoffStack(stack, model.links) ?? stack;
+  const top = open[open.length - 1] ?? stack.layers[stack.layers.length - 1]!;
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -335,7 +467,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     if (phone) heading.current?.focus({ preventScroll: true });
   }, [stack.id, phone]);
   const forge = forgeName(stack);
-  const many = openLayers.length > 1;
+  const many = open.length > 1;
   // "Hand to another agent": the two lines open again, under the agent that has it.
   const [rehand, setRehand] = useState(false);
   // After a hand-off, focus moves to the status line that says who has it (the hand-off's controls are gone).
@@ -348,20 +480,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     said.current.focus();
   }, [linkThread]);
   // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
+  // A stack's whole diff is the review's own "This layer | Whole stack" switch, not a second button here.
   const openDiff = start ? (
-    <>
-      <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
-        <Icon name="code" size={15} />
-        Open the diff
-      </button>
-      {many && (
-        <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, top.key, 'stack')} data-pulls-review-stack="">
-          <Icon name="layers" size={15} />
-          Whole stack
-        </button>
-      )}
-    </>
+    <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
+      <Icon name="code" size={15} />
+      Open the diff
+    </button>
   ) : null;
+  const threadName = pullHandoffThreadName(handed, model.links, stack);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -385,18 +511,36 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
       </div>
       <div className="ib-pr-body">
         <h2 id={titleId} ref={heading} tabIndex={-1} className="ib-pr-h" dir="auto">
-          {stackTitle(stack, link)}
+          {stackTitle(stack, model.links)}
         </h2>
         <div className="ib-pr-meta">
           <span dir="auto">{stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`}</span>
           {agent && link?.agent && (
-            <span className="ib-pr-agent">
+            <span className="ib-pr-agent" data-pulls-agent-ended={ended ? '' : undefined}>
               <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />
               {agent}
+              {ended && <span className="ib-mut">ended</span>}
             </span>
           )}
-          <span>{plural(stack.layers.length, stack.platform === 'gitlab' ? 'merge request' : 'pull request')}</span>
-          {!link && openLayers.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
+          {others.map((other) => (
+            <Tip key={other.link.thread_id} content={`Open ${linkAgentName(other.link) ?? 'the agent'}'s thread: ${other.link.thread_subject ?? 'Untitled'}`}>
+              <button type="button" className="ib-pr-chip" onClick={() => props.onOpenThread(other.link.thread_id)} data-pulls-layer-agents={other.link.thread_id}>
+                <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: other.link.agent?.host ?? null }} tip={false} />
+                <span>
+                  {linkAgentName(other.link) ?? 'Agent'}
+                  {other.link.agent?.ended ? ' (ended)' : ''}
+                </span>
+                <span className="ib-pr-chip-k">{other.layers.map(inboxPullLabel).join(', ')}</span>
+              </button>
+            </Tip>
+          ))}
+          <span>{plural(stack.layers.length, pullNounWord(stack.platform))}</span>
+          {phone && next && (
+            <span data-pulls-lands-next-head="">
+              Lands next: <span className="ib-pr-num">{inboxPullLabel(next)}</span>
+            </span>
+          )}
+          {!link && open.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
           {/* Each chip says what it opens ("Thread", "Board"), with its own mark: a thread and its card often share a title. */}
           {link && (
             <Tip content="Open the agent's thread">
@@ -423,6 +567,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             <div className="ib-pr-status-h">
               {link.agent && <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />}
               <b>{agent ?? 'Agent'}</b>
+              {ended && (
+                <span className="ib-mut" data-pulls-ended="">
+                  · ended
+                </span>
+              )}
               {asked ? (
                 <span className="ib-mut" data-pulls-ask={link.ask}>
                   · {asked}
@@ -432,7 +581,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               ) : (
                 <span className="ib-mut">· no answer yet</span>
               )}
-              {openLayers.length > 0 && !rehand && (
+              {open.length > 0 && !rehand && (
                 <>
                   <span className="ib-mut" aria-hidden="true">
                     ·
@@ -456,15 +605,16 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             )}
           </div>
         )}
-        {openLayers.length > 0 && (!link || rehand) && (
+        {open.length > 0 && (!link || rehand) && (
           <HandLine
             key={link ? `again:${link.thread_id}` : 'first'}
-            stack={stack}
+            stack={handed}
             projects={stackProjects(model, stack)}
             lead={link ? 'Hand again for' : 'Ask for'}
             owners={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
             launch={!link}
-            onLaunch={(body, opener) => props.onLaunch(handoffKeys(stack), stackProjects(model, stack), body, pullHandoffAskLine(stack, { kind: 'guide' }), opener)}
+            threadName={threadName}
+            onLaunch={(body, opener) => props.onLaunch(handoffKeys(handed), stackProjects(model, stack), body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName)}
             onHanded={(session) => {
               focusSaid.current = true;
               setRehand(false);
@@ -475,7 +625,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             diff={openDiff}
           />
         )}
-        {openLayers.length > 0 && link && !rehand && (
+        {open.length > 0 && link && !rehand && (
           <div className="ib-pr-actions">
             {reviewGuide && (
               // The agent's guided review arrived: it is the review (phase 1's Start review), a stack's chapters its layers.
@@ -488,11 +638,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
         )}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
-            <b>{many ? 'Landing order' : 'Pull request'}</b>
+            <b>{ladderHeading(stack)}</b>
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
-              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key && many} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
+              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
             ))}
             <li className="ib-pr-base" aria-label={`Base branch ${stack.base}`}>
               <span className="ib-pr-dot" aria-hidden="true" />
@@ -501,7 +651,17 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           </ol>
         </div>
       </div>
-      {link?.last && <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} />}
+      {link?.last && !ended && <StackReply key={link.thread_id} link={link} agent={agent ?? 'the agent'} onOpenThread={() => props.onOpenThread(link.thread_id)} />}
+      {link && ended && open.length > 0 && !rehand && (
+        <div className="ib-pr-replyfoot" data-pulls-ended-foot="">
+          <div className="ib-pr-replyrow">
+            <button type="button" className="ib-pr-replybtn" onClick={() => setRehand(true)} data-pulls-rehand-foot="">
+              <Icon name="forward" size={15} />
+              <b>Hand to another agent</b> <span className="ib-mut">{agent ?? 'The agent'} ended</span>
+            </button>
+          </div>
+        </div>
+      )}
     </section>
   );
 }
@@ -539,6 +699,7 @@ function HandLine({
   lead,
   owners,
   launch,
+  threadName,
   onLaunch,
   onHanded,
   onCancel,
@@ -548,6 +709,8 @@ function HandLine({
   stack: InboxPullStack;
   projects: readonly string[];
   lead: string;
+  /** The new thread's name (`pullHandoffThreadName`). */
+  threadName: string;
   /** The sessions that have the PR now (Hand again for): not offered. */
   owners: readonly string[];
   launch: boolean;
@@ -555,14 +718,14 @@ function HandLine({
   onHanded: (session: string) => void;
   onCancel?: () => void;
   onReload: () => void;
-  /** "Open the diff" (and Whole stack), beside Review. */
+  /** "Open the diff", beside Review. */
   diff: ReactNode;
 }) {
   const [targets, setTargets] = useState<HandTargets | null>(null);
   const [sending, setSending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // One idempotency key per send to one agent: a retry to the same agent reuses it, a new pick gets a new one.
-  const keyRef = useRef<{ session: string; key: string } | null>(null);
+  const keyRef = useRef<{ session: string; key: string; unnamed?: boolean } | null>(null);
   const projectKey = projects.join('\u0000');
   // Read again when an agent turns out to have ended, and when the window comes back (agents end while it is away).
   const [readCount, setReadCount] = useState(0);
@@ -614,7 +777,15 @@ function HandLine({
       await inboxApi.pullOwnerCheck(keys, session.project_id);
       // The ask's instructions are phase 1's /review-curate, carried as the skills block a Send adds for it.
       const body = withSkillsBlock(pullHandoffMessage(stack, ask), reviewCurateBlock());
-      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: idempotency.key });
+      const to = { host: session.host, session: session.session };
+      const named = (name: string | undefined) => inboxApi.startThread({ to, body, idempotency_key: idempotency.key, ...(name ? { thread_name: name } : {}) });
+      const sent = await named(idempotency.unnamed ? undefined : threadName).catch((cause: unknown) => {
+        // Another open thread of the project has that name (the PR handed again): the thread goes without one, and a
+        // retry with this key does too (the same Send).
+        if (!(cause instanceof InboxApiError) || cause.code !== 'thread_name_taken') throw cause;
+        idempotency.unnamed = true;
+        return named(undefined);
+      });
       try {
         await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
       } catch (cause) {
@@ -685,10 +856,18 @@ function HandLine({
           {sessions.length > 0 && (
             <div className="ib-pr-agents" role="radiogroup" aria-label="Agent">
               {sessions.map((session) => (
-                <label className="ib-pr-agbtn" key={session.session} data-pulls-hand-session={session.session} data-on={picked?.session === session.session ? '' : undefined} data-disabled={sending !== null ? '' : undefined}>
+                <label
+                  className="ib-pr-agbtn"
+                  key={session.session}
+                  title={agentWords(session)}
+                  data-pulls-hand-session={session.session}
+                  data-on={picked?.session === session.session ? '' : undefined}
+                  data-disabled={sending !== null ? '' : undefined}
+                >
                   <input type="radio" name={agentName} checked={picked?.session === session.session} disabled={sending !== null} onChange={() => setPickedSession(session.session)} />
                   <HostMark host={session.host} />
-                  {agentWords(session)}
+                  {/* A long session label is cut on a narrow screen, never past it; the whole label is the pill's title. */}
+                  <span className="ib-pr-agbtn-t">{agentWords(session)}</span>
                   {session.busy && <i className="ib-pr-busy" title="Working now" aria-label="Working now" />}
                 </label>
               ))}
@@ -799,7 +978,7 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
                   {checks}
                 </span>
               )}
-              {base && <span>{base}</span>}
+              {base && <span className="ib-pr-basew">{base}</span>}
             </>
           )}
         </span>

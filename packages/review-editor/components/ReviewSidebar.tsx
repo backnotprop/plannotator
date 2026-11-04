@@ -47,11 +47,12 @@ interface ReviewSidebarProps {
    *  outdated comments (#1590), which are not drawn on the diff and so have
    *  no inline editor. */
   onEditAnnotationText?: (id: string, text: string) => void;
-  /** "+ General comment": commit a durable scope:'general' review-level
+  /** "+ Global comment": commit a durable scope:'general' review-level
    *  comment to the session (spec §3.3). When present, the affordance renders
    *  in the General section header AND in the all-empty state — the state it
-   *  is most useful in. */
-  onAddGeneralComment?: (text: string) => void;
+   *  is most useful in. Returns false when the comment was not added: the
+   *  words stay in the box. */
+  onAddGeneralComment?: (text: string) => boolean | void;
   feedbackMarkdown?: string;
   width?: number;
   editorAnnotations?: EditorAnnotation[];
@@ -134,7 +135,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
 };
 
 /**
- * "+ General comment" — the human producer for a durable review-level comment
+ * "+ Global comment" — the human producer for a durable review-level comment
  * (the sole producer before this was Call Flow). The SAME button renders in
  * both placements (General section header, all-empty state); the composer is
  * the shared `DecisionNoteField` in a small anchored popover — the third
@@ -150,7 +151,7 @@ const SuggestionPreview: React.FC<{ code: string; originalCode?: string; languag
  * field, the same contract as the decision composers.
  */
 const GeneralCommentComposer: React.FC<{
-  onAdd: (text: string) => void;
+  onAdd: (text: string) => boolean | void;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   text: string;
@@ -173,7 +174,7 @@ const GeneralCommentComposer: React.FC<{
       ref.current?.querySelector<HTMLTextAreaElement>('[data-decision-note-input]')?.focus();
       return;
     }
-    onAdd(trimmed);
+    if (onAdd(trimmed) === false) return;
     onTextChange('');
     onOpenChange(false);
   };
@@ -198,10 +199,10 @@ const GeneralCommentComposer: React.FC<{
         onClick={() => onOpenChange(!open)}
         aria-expanded={open}
         aria-haspopup="dialog"
-        title="Add a review-level comment"
+        title="Add global comment"
         className="inline-flex items-center rounded px-1.5 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
-        + General comment
+        + Global comment
       </button>
       {open && (
         <div
@@ -215,7 +216,7 @@ const GeneralCommentComposer: React.FC<{
             onTextChange={onTextChange}
             onSubmit={submit}
             onCancel={() => onOpenChange(false)}
-            placeholder="Add a general comment..."
+            placeholder="Add a global comment..."
             enterSubmits={enterSavesComment}
           />
           <div className="mt-2 flex items-center justify-end gap-2">
@@ -411,7 +412,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
               </span>
             ) : isGeneralScope ? (
               <span className="text-[9px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded bg-primary/10 text-primary">
-                general
+                global
               </span>
             ) : isFileScope ? (
               <span className="inline-flex items-center gap-1.5">
@@ -700,7 +701,7 @@ export const ReviewSidebar: React.FC<ReviewSidebarProps> = /* React.memo */({
                           anchored composer popover is never painted under a
                           later section's header. */}
                       <div className="sticky top-0 z-[25] bg-background/95 backdrop-blur-sm px-2 py-1 flex items-center justify-between gap-2">
-                        <span className="text-xs font-medium text-muted-foreground">General</span>
+                        <span className="text-xs font-medium text-muted-foreground">Global comments</span>
                         {onAddGeneralComment && (
                           <GeneralCommentComposer
                             onAdd={onAddGeneralComment}

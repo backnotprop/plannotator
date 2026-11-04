@@ -210,6 +210,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
+    "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",

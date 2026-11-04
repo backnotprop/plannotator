@@ -19,6 +19,9 @@
  *                                      (approval "inbox-thread-steps"): their
  *                                      own records, read by nothing that
  *                                      routes, lists or notifies
+ *     initiatives.jsonl                the Board's initiatives (approval
+ *                                      "board-initiatives"): one file for every
+ *                                      project, read by the Board only
  *     blobs/<sha256>                  the bytes of each attachment as sent
  *     seq.json                         the highest seq ever written (kept
  *                                      across a deletion, so seq never repeats)
@@ -46,13 +49,19 @@ export const ANNOTATIONS_FILE = "annotations.jsonl";
 export const CARDS_FILE = "cards.jsonl";
 /** Each agent session's steps per thread (approval "inbox-thread-steps"): never read by routing, the list, unread or notifications. */
 export const STEPS_FILE = "steps.jsonl";
+/**
+ * The Board's initiatives (approval "board-initiatives"): one file in the
+ * inbox folder, not per project (an initiative crosses projects), on the
+ * store's one seq counter. Never read by routing, the list, unread or notifications.
+ */
+export const INITIATIVES_FILE = "initiatives.jsonl";
 export const SEQ_FLOOR_FILE = "seq.json";
 
 export function inboxDir(dataDir: string): string {
   return join(dataDir, INBOX_DIR_NAME);
 }
 
-const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps"]);
+const KINDS: ReadonlySet<InboxRecordKind> = new Set(["project", "message", "question", "annotation", "card", "steps", "initiative"]);
 
 /**
  * One line of a store file, or null when it is not a line this reader can

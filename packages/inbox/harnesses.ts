@@ -178,7 +178,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'link', label: 'Add to Cursor', href: cursorInstallLink(ctx) }],
         note: 'Opens Cursor, which asks before it adds the server.',
-        another: { summary: 'add it to ~/.cursor/mcp.json by hand', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
+        another: { summary: 'add it to ~/.cursor/mcp.json yourself', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
       };
     case 'vscode':
       return {
@@ -194,7 +194,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         artefacts: [{ kind: 'code', text: `devin mcp add -s user ${SERVER} -- ${cmd}` }],
         note: 'Adds it to Devin Desktop (formerly Windsurf) in every project.',
         another: {
-          summary: 'add it to ~/.config/devin/config.json by hand',
+          summary: 'add it to ~/.config/devin/config.json yourself',
           body: { kind: 'code', label: '~/.config/devin/config.json', text: mcpServersSnippet(ctx) },
         },
       };
