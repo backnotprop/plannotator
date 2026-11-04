@@ -226,7 +226,7 @@ const noop = () => {};
 const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
 
 export function ShapeDrawn(props: ShapeDrawnProps) {
-  const { drawn, phase = 'drawn', skip = false, pinpoint = false, marks = NO_MARKS, refs = [], refHover = null, refFlash = null } = props;
+  const { drawn, phase = 'drawn', skip = false, pinpoint = false, marks = NO_MARKS, refHover = null, refFlash = null } = props;
   const systemReduce = useReducedMotion();
   const reduce = props.reduce ?? systemReduce;
   const frameRef = useRef<HTMLDivElement>(null);
@@ -372,6 +372,22 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       if (b) {
         e.stopPropagation();
         openBubble(b);
+        return;
+      }
+      // A drawing's link never moves the page it sits on: `#…` scrolls inside the drawing (never the host's
+      // hash, which is the Inbox's route), an http(s) link opens in a new tab, and anything else does nothing.
+      const link = path.find((t): t is Element => t instanceof Element && t.localName === 'a' && (t.hasAttribute('href') || t.hasAttribute('xlink:href')));
+      if (link) {
+        e.preventDefault();
+        const href = (link.getAttribute('href') ?? link.getAttribute('xlink:href') ?? '').trim();
+        if (href.startsWith('#')) {
+          const id = decodeURIComponent(href.slice(1));
+          const to = id ? (root as ShadowRoot).getElementById?.(id) : null;
+          to?.scrollIntoView({ block: 'nearest', behavior: handlers.current.reduce ? 'auto' : 'smooth' });
+        } else {
+          const url = shapeLinkUrl(href);
+          if (url) window.open(url, '_blank', 'noopener,noreferrer');
+        }
         return;
       }
       const h = handlers.current;

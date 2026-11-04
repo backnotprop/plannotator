@@ -7406,3 +7406,28 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-rvcard { border: 1px solid CanvasText; }
   .ib-rv-mark[data-done] { background: Highlight; color: HighlightText; }
 }
+
+/* ───────── Shape (approval "shape-inbox-placement") ───────── */
+.ib-shapebtn { position: relative; }
+.ib-shapebtn.ib-on { color: var(--primary); background: color-mix(in oklab, var(--primary) 12%, transparent); }
+.ib-shape-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--background); }
+.ib-shape-tip b { font-weight: 600; margin-right: 4px; }
+.ib-shape-tip { white-space: nowrap; }
+.ib-main[data-shape-open] { position: relative; }
+.ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
+.ib-shape-layer > * { flex: 1; min-height: 0; }
+.ib-shape-loading { flex: 1; }
+.ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
+.ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
+.ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
+.ib-shape-who span { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shape-page .ib-bhead h1 { font-size: 22px; }
+.ib-shape-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
+.ib-shape-find input { all: unset; flex: 1; min-width: 0; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
+.ib-shape-find input::placeholder { color: var(--muted-foreground); }
+.ib-shape-gridwrap { flex: 1; min-height: 0; overflow: auto; }
+.ib-nav .ib-pebble-ico { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
+.ib-sp-shape-prev { width: 64px; height: 40px; flex: none; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); background: color-mix(in oklab, var(--background) 92%, var(--muted)); }
+@media (max-width: 767px) {
+  .ib-shape-find { width: 46vw; }
+}

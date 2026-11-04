@@ -4,7 +4,7 @@
  * wherever it is open (SPEC.md §3, "Routes"). Each server turns the result
  * into its own response: JSON, or a file it streams.
  *
- *   GET  /api/shapes                     every shape, newest change first
+ *   GET  /api/shapes[?preview=1]         every shape, newest change first (preview: each one's latest Picture and refs, for a grid)
  *   GET  /api/shapes/:id[?n=]            one shape: its latest (or nth) version, notes, seen
  *   GET  /api/shapes/:id/versions        its history
  *   POST /api/shapes/:id/notes           the person's Change it or Ask
@@ -109,7 +109,14 @@ export async function handleShapeRoute(req: ShapeRouteRequest, deps: ShapeRouteD
   if (parts.length === 0) {
     if (method !== "GET") return bad("method not allowed", 405);
     const all = req.params.get("state") === "all";
-    return { status: 200, body: { shapes: store.list({ state: all ? "all" : "active" }) satisfies ShapeSummary[] } };
+    const shapes: (ShapeSummary & { preview?: { picture: unknown; refs: unknown } | null })[] = store.list({ state: all ? "all" : "active" });
+    if (req.params.get("preview") === "1") {
+      for (const s of shapes) {
+        const latest = store.read(s.id);
+        s.preview = latest ? { picture: latest.views.picture ?? null, refs: latest.refs ?? [] } : null;
+      }
+    }
+    return { status: 200, body: { shapes } };
   }
 
   const id = parts[0]!;

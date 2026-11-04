@@ -3652,7 +3652,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const searched = await search.handle(req, url);
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
       if (skills) return skills;
 
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.

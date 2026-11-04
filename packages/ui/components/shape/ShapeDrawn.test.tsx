@@ -13,7 +13,9 @@
  * - a part's `data-code` no longer reaches the host, so a diagram outside the
  *   board (code review's "show me how this works") cannot open the code;
  * - while pointing (Change it / Ask), a marked part opens the code instead of
- *   being picked, or a bad `data-code` reaches the host.
+ *   being picked, or a bad `data-code` reaches the host;
+ * - a drawing's `#…` link changes the host page's hash (the Inbox's route), or
+ *   its https link opens in the same tab (leaving the Inbox).
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -142,5 +144,33 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     await act(async () => board.querySelector<HTMLElement>('[data-mark]')!.click());
     expect(picked).toEqual(['heat']);
     expect(opened).toEqual([]);
+  });
+
+  test("a drawing's #link never changes the host's hash, and its https link opens in a new tab", async () => {
+    window.location.hash = '#thread=msg_keep';
+    const opened: unknown[][] = [];
+    const realOpen = window.open;
+    window.open = ((...args: unknown[]) => {
+      opened.push(args);
+      return null;
+    }) as typeof window.open;
+    try {
+      const { board } = await draw({
+        html: '<a href="#steam">Steam</a><p id="steam">Steam</p><a href="https://example.com/kettle">Spec</a><svg><a href="#steam"><text>S</text></a></svg>',
+      });
+      const [frag, out] = [...board.querySelectorAll<HTMLAnchorElement>(':scope > a')];
+      for (const a of [frag!, out!, board.querySelector('svg a')!]) {
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true });
+        await act(async () => {
+          a.dispatchEvent(click);
+        });
+        expect(click.defaultPrevented).toBe(true);
+      }
+      expect(window.location.hash).toBe('#thread=msg_keep');
+      expect(opened).toEqual([['https://example.com/kettle', '_blank', 'noopener,noreferrer']]);
+    } finally {
+      window.open = realOpen;
+      window.location.hash = '';
+    }
   });
 });

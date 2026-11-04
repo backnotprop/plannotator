@@ -29,6 +29,9 @@ import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
+/** DRAFT. What `plannotator shape` (help included) says while Shape is off. */
+export const SHAPE_OFF_TEXT = "shape_off: Shape is off. The person turns it on in the Plannotator Inbox: Settings → Capabilities → Shape.";
+
 type Op = "update" | "read" | "drawing" | "answer" | "done" | "list";
 const OPS: readonly Op[] = ["update", "read", "drawing", "answer", "done", "list"];
 

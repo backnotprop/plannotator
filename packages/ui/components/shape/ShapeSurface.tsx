@@ -44,7 +44,7 @@ import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeRequirements } from './ShapeRequirements';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefsCtx, type RefsState } from './refs';
-import { ShapeInline, shapePlainText } from './inline';
+import { ShapeInline } from './inline';
 import type { ShapeEvent, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
 
 const DRAW_MS = 1500; // the longest draw-in, for Esc
@@ -357,17 +357,21 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
+      // What the board uses Escape for is marked used, so the host's own Escape (the Inbox's: close the board) waits.
       if (panelRef.current) {
+        e.preventDefault();
         setPanel(null);
         return;
       }
       if (Date.now() > drawingUntil.current) return;
+      e.preventDefault();
       setSkip(true);
       setLeaving(null);
       drawingUntil.current = 0;
     };
-    window.addEventListener('keydown', on);
-    return () => window.removeEventListener('keydown', on);
+    // Capture: before a host's window listener, which closes the board on an Escape the board did not use.
+    window.addEventListener('keydown', on, true);
+    return () => window.removeEventListener('keydown', on, true);
   }, [target, viewer]);
 
   // ── Change it and Ask ──

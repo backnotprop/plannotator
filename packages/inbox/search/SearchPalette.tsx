@@ -26,6 +26,7 @@ import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type 
 import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
+import { ShapeThumb } from '@plannotator/ui/components/shape';
 import { KeyCaps } from '../shortcuts/hint';
 import { isTextCut, ProjectTipText, Tip } from '../components/Tip';
 import { actionLabel, busyWord, namesActionWord, startedLine, type ComposeAction } from '../compose/model';
@@ -48,6 +49,7 @@ import {
   searchTime,
   searchGroups,
   searchRowMark,
+  type SearchShape,
   sectionLabel,
   typeCountWords,
   type SearchFilters,
@@ -86,6 +88,8 @@ export interface SearchPaletteProps {
   actions?: (q: string) => ComposeAction[];
   /** An action chosen: the palette closes and the window opens compose. */
   onAction?: (action: ComposeAction) => void;
+  /** Shape's boards the words find (the "Shape" group, under the results). Absent: none (Shape off). */
+  shapes?: (q: string) => SearchShape[];
 }
 
 type FilterKind = keyof SearchFilters;
@@ -338,7 +342,7 @@ function keepInputFocus(event: ReactMouseEvent): void {
 }
 
 export default function SearchPalette(props: SearchPaletteProps) {
-  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction } = props;
+  const { open, phone, currentProject, projects, onClose, onOpenResult, actions, onAction, shapes } = props;
   const dialogRef = useRef<HTMLDialogElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   /** An IME composition is under way in the input (its Escape is not the palette's). */
@@ -498,14 +502,17 @@ export default function SearchPalette(props: SearchPaletteProps) {
     const found = answered.model.indexing ? [] : searchGroups(answered.model, expanded);
     // A picked type lists its group alone, without Actions.
     if (answered.type) return found;
+    // Shape's boards the words find: their own group, under the results.
+    const shapeList = shapes && answered.q.trim() ? shapes(answered.q) : [];
+    const withShapes = shapeList.length ? [...found, { id: 'shapes' as const, heading: 'Shape', total: null, options: shapeList.map((shape) => ({ kind: 'shape' as const, shape })) }] : found;
     const actionList = actions ? actions(answered.q) : [];
-    if (actionList.length === 0) return found;
+    if (actionList.length === 0) return withShapes;
     const group: SearchGroupView = { id: 'actions', heading: 'Actions', total: null, options: actionList.map((action) => ({ kind: 'action' as const, action })) };
     // Above everything (Recent searches included) with no words, when nothing
     // matched, or when the words name an action; below real results otherwise.
-    const first = !answered.q.trim() || found.length === 0 || namesActionWord(answered.q);
-    return first ? [group, ...found] : [...found, group];
-  }, [answered, expanded, actions]);
+    const first = !answered.q.trim() || withShapes.length === 0 || namesActionWord(answered.q);
+    return first ? [group, ...withShapes] : [...withShapes, group];
+  }, [answered, expanded, actions, shapes]);
   const options = useMemo(() => groups.flatMap((g) => g.options), [groups]);
   const optionsKey = answered?.key ?? '';
   // The highlight snaps to the first row when the rows change (a new answer), never while arrowing.
@@ -577,6 +584,15 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (option.kind === 'action') {
       close('opened');
       onAction?.(option.action);
+      return;
+    }
+    if (option.kind === 'shape') {
+      if (newTab) {
+        window.open(`${window.location.pathname}${window.location.search}${option.shape.hash}`, '_blank', 'noopener');
+        return;
+      }
+      close('opened');
+      onOpenResult(option.shape.hash, null);
       return;
     }
     if (option.kind === 'recent-q') {
@@ -917,6 +933,22 @@ export default function SearchPalette(props: SearchPaletteProps) {
                     <span className="ib-sp-s">
                       {action.kind === 'new' ? 'Start a thread with a live agent' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
                     </span>
+                  </span>
+                </div>
+              );
+            }
+            if (option.kind === 'shape') {
+              const shape = option.shape;
+              return (
+                <div key={`shape-${shape.id}`} className="ib-sp-row" {...common} data-result="shape" data-result-id={shape.id}>
+                  <span className="ib-sp-shape-prev" aria-hidden="true">
+                    <ShapeThumb picture={shape.picture} refs={shape.refs} />
+                  </span>
+                  <span className="ib-sp-rs">
+                    <span className="ib-sp-p">{shape.title}</span>
+                  </span>
+                  <span className="ib-sp-time ib-sp-shape-meta">
+                    {shape.project} · {shape.meta}
                   </span>
                 </div>
               );
