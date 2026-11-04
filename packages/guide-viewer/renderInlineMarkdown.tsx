@@ -10,6 +10,7 @@ export type GuideLinkRenderer = (href: string, label: React.ReactNode, key: numb
 
 export interface InlineMarkdownOptions {
   renderLink?: GuideLinkRenderer;
+  resolveImageSrc?: (src: string) => string;
 }
 
 /**
@@ -82,7 +83,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
         nodes.push(
           <img
             key={key++}
-            src={match[3]}
+            src={opts?.resolveImageSrc?.(match[3]) ?? match[3]}
             alt={match[2]}
             loading="lazy"
             className="max-w-full h-auto rounded my-1"
