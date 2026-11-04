@@ -22,7 +22,7 @@
  */
 
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
-import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -35,6 +35,8 @@ import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
+import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
+import { postedWords } from '../pulls/postRules';
 import { useLiveSessions } from './NewMessage';
 import {
   AskerEndedNote,
@@ -76,6 +78,43 @@ type RailMode = 'walkthrough' | 'files';
 export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
+  // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
+  // conversation in the thread, and no Approve or Request changes is offered.
+  const verdict = !thread.pull_theirs;
+  // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
+  // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
+  // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
+  const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
+  const [postPull, setPostPull] = useState<InboxPull | null>(null);
+  // `pull_moved` on a post: the PR was pushed since it was read here. Read again from the forge, then offered at its new
+  // head (the review's comments ride the body, so they do not depend on the commit).
+  const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
+  const [reread, setReread] = useState(0);
+  useEffect(() => {
+    if (reread === 0) setPostPull(null);
+    if (!postKey) return;
+    const controller = new AbortController();
+    inboxApi.pulls(reread > 0, controller.signal).then(
+      (answer) => {
+        if (controller.signal.aborted) return;
+        setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? null);
+        if (reread > 0) setMoved('read');
+      },
+      () => {
+        // The list could not be read: the agent's ending alone, as before.
+        if (!controller.signal.aborted && reread > 0) setMoved('failed');
+      },
+    );
+    return () => controller.abort();
+  }, [postKey, reread]);
+  useEffect(() => {
+    setMoved(null);
+    setReread(0);
+  }, [postKey]);
+  const [picked, pick] = useReviewDestination();
+  const ending = reviewEnding(postPull, verdict, picked);
+  const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
+  useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
@@ -303,18 +342,44 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
             {comments.length}
           </button>
         )}
-        {!readOnly && snapshot && (
-          <span className="ib-rv-decide" data-review-decision="">
-            <DecisionControl
-              spec={spec}
-              handlers={handlers}
-              busy={sending || route.open}
-              isLoading={sending}
-              labelBreakpoint="md"
-              drafts={notes}
-              onDraftsChange={changeNotes}
-            />
-          </span>
+        {!readOnly && snapshot && postPull ? (
+          <PostEnding
+            pull={postPull}
+            agent={
+              verdict
+                ? {
+                    name: author,
+                    host: message.author.kind === 'agent' ? (message.author.host ?? null) : null,
+                    control: (
+                      <span className="ib-rv-decide" data-review-decision="">
+                        <DecisionControl spec={spec} handlers={handlers} busy={sending || route.open} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={changeNotes} />
+                      </span>
+                    ),
+                  }
+                : null
+            }
+            comments={comments}
+            anchor="guide"
+            busy={sending || route.open}
+            picked={picked}
+            onPick={pick}
+            onPosted={(result) => {
+              setMoved(null);
+              setPosted({ label: result.label, url: result.url, action: result.action });
+            }}
+            onMoved={() => {
+              setMoved('reading');
+              setReread((n) => n + 1);
+            }}
+          />
+        ) : (
+          !readOnly &&
+          verdict &&
+          snapshot && (
+            <span className="ib-rv-decide" data-review-decision="">
+              <DecisionControl spec={spec} handlers={handlers} busy={sending || route.open} isLoading={sending} labelBreakpoint="md" drafts={notes} onDraftsChange={changeNotes} />
+            </span>
+          )
         )}
         <Tip content="Close">
           <button type="button" className="ib-iconbtn" onClick={onClose} aria-label="Close the review">
@@ -431,7 +496,26 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
               </select>
             </div>
           )}
-          {!readOnly && asking && (route.open || askerEnded) && (
+          {moved && (
+            <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
+              {moved === 'reading'
+                ? 'This pull request has new commits since you opened this review. Reading it again…'
+                : moved === 'read'
+                  ? 'This pull request has new commits since you opened this review. Read again: your review now posts to its newest commit.'
+                  : 'This pull request has new commits, and it could not be read again. Try again in a moment.'}
+            </p>
+          )}
+          {posted && (
+            <div className="ib-prr-posted" role="status" data-pull-review-posted={posted.action}>
+              <Icon name="checkCircle" size={15} />
+              <span>{postedWords(posted)}</span>
+              <a href={posted.url} target="_blank" rel="noreferrer noopener">
+                View on {posted.label}
+                <Icon name="external" size={13} />
+              </a>
+            </div>
+          )}
+          {!readOnly && verdict && ending !== 'forge' && asking && (route.open || askerEnded) && (
             // The session that wrote the review ended: the thread's own note, and at a decision its route choice.
             <div className="ib-rv-route" data-review-route="">
               {route.open ? (

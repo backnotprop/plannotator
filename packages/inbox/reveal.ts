@@ -244,3 +244,36 @@ export function useBoardReveal(input: BoardRevealInput) {
     },
   });
 }
+
+/** What one load knows for the Checklist reveal: the Board's, but its claim turns the Checklist on. */
+export interface StepsRevealInput extends Omit<BoardRevealInput, 'onBoardOn'> {
+  /** The claim was granted (or another tab's was): the Inbox turned the Checklist on. */
+  onStepsOn: () => void;
+}
+
+/**
+ * The Checklist reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's calm moment and gate (back on
+ * the list after reading a thread, 60 s into the page, 5 rows or more). The claim turns the Checklist on, then the
+ * page opens `ChecklistIntro`.
+ */
+export function useStepsReveal(input: StepsRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  return useRevealMoment({
+    wanted: input.due && !input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now, _row, next) => boardRevealLeaveCounts(visit, now, next),
+    mayClaim: (pageAge) => boardRevealMayClaim(latest.current, pageAge),
+    holds: () => true,
+    claim: async () => {
+      const answer = await inboxApi.claimReveal('steps');
+      if (answer.show || answer.steps?.on) latest.current.onStepsOn();
+      return answer.show;
+    },
+  });
+}

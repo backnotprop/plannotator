@@ -9,7 +9,7 @@
  * is not idle the host keeps Send off. Starting a recording in one composer cancels one running in another.
  */
 import { createVoiceGate, encodeWav } from './voiceAudio';
-import { HOLD_MS, type VoicePressTarget } from './voicePress';
+import { HOLD_MS, type VoicePoint, type VoicePressTarget } from './voicePress';
 import type { VoiceRecorder } from './voiceRecorder';
 import type { InboxVoiceEngine, InboxVoiceFailure, InboxVoiceStatus } from '@plannotator/core/inbox-types';
 
@@ -438,8 +438,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
     set({ ...IDLE, trouble: known.trouble, engine: answer.engine ?? null, kept: known.keeps, clipMs: view.clipMs, said: 'Dictation failed' });
   };
 
-  /** Each input with the state it met, so a tap that did nothing shows in the log. */
-  const pressNote = (input: 'press' | 'release' | 'lost' | 'toggle') => note('voice_press', { input, phase: view.phase, mode: view.mode ?? undefined });
+  /** Each input with the state it met, so a tap that did nothing shows in the log; a pointer's adds its offset from the button's centre. */
+  const pressNote = (input: 'press' | 'release' | 'lost' | 'toggle', at?: VoicePoint) => note('voice_press', { input, phase: view.phase, mode: view.mode ?? undefined, dx: at?.dx, dy: at?.dy });
 
   const session: VoiceSession = {
     view: () => view,
@@ -463,8 +463,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
         field = null;
       };
     },
-    press: () => {
-      pressNote('press');
+    press: (at) => {
+      pressNote('press', at);
       if (view.phase === 'listening' && view.mode === 'tap') {
         secondPress = true;
         return;
@@ -477,8 +477,8 @@ export function createVoiceSession(deps: VoiceDeps): VoiceSession {
       pressedAt = deps.now();
       start(false);
     },
-    release: () => {
-      pressNote('release');
+    release: (at) => {
+      pressNote('release', at);
       if (secondPress) {
         secondPress = false;
         stop();
