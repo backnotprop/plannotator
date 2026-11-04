@@ -58,7 +58,7 @@ export function stackLink(stack: InboxPullStack, links: Readonly<Record<string, 
  * Where a verdict on one layer goes: that layer's own agent thread, else the stack's (among the person's own
  * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge). In a
  * tree the stack's thread is only that of a layer above it on its own chain (whose diff holds it): a thread handed #412
- * and #414 was never told about their sibling #413, so #413 has no agent until it is handed on its own.
+ * and #414 was never told about their sibling #413, so #413 has no agent until it is linked itself.
  */
 export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
   if (!layer.mine) return null;
@@ -193,8 +193,9 @@ function handoffLayers(stack: InboxPullStack): InboxPull[] {
  *   (`stackLink`) nothing of it is left to hand.
  * - A tree (two open PRs on one branch): the topmost open layer that thread has (or no thread has), down its chain
  *   while the layers under it are that thread's too (or no thread's). Those are the layers the review's Whole stack
- *   reads for it, so the list, step 1's "from" and "to" branches and "in list order" stay true. First the chain to the
- *   top (#412 and #414), then their sibling #413 on its own: its base is #412's branch, another thread's.
+ *   reads for it, so the list, step 1's "from" and "to" branches and "in list order" stay true. A hand-off covers the
+ *   chain to the top first (#412 and #414). Their sibling #413 is what `thread` null answers after that, but the page
+ *   offers no hand-off for it (the stack view shows the stack's agent, as for any linked stack).
  * The merged layers under the stack stay when the hand-off starts at its bottom.
  */
 export function handoffStack(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>, thread: string | null = null): InboxPullStack | null {

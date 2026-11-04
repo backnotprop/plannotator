@@ -724,9 +724,9 @@ test.skipIf(!hasDom)('a thread name another open thread has: the hand-off still 
   expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/messages', '/pulls/owner']);
 });
 
-test.skipIf(!hasDom)("a tree: the chain to the top goes first; then its sibling has no agent yet and is handed on its own", async () => {
+test.skipIf(!hasDom)("a tree: the page hands the chain to its top; once that thread has it, the page offers nothing more", async () => {
   const tree = TREE();
-  const [l412, l413, l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
+  const [l412, , l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
   mount(<Page answer={{ ...model, pulls: tree.layers, links: {} }} stackId={tree.id} />);
   await settle();
   await handTo('ses_billing');
@@ -735,25 +735,11 @@ test.skipIf(!hasDom)("a tree: the chain to the top goes first; then its sibling 
   expect(posted[1]!.body.thread_name).toBe('Review #412, #414: Layer 412');
   act(() => root?.unmount());
   host?.remove();
-  posted = [];
-  // That thread has #412 and #414: the view shows it, and #413, which it was never told about, can be handed by itself.
+  // #413 was left out of that thread: the page shows the stack's agent, as for any linked stack, and no line of its own.
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_a', last: null };
   mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned } }} stackId={tree.id} />);
   await settle();
   expect(el('[data-pulls-thread]').getAttribute('data-pulls-thread')).toBe('thr_a');
-  expect(el('[data-pulls-no-agent]').textContent).toBe('No agent yet for #413');
-  expect(document.querySelectorAll('[data-pulls-open-diff]')).toHaveLength(1);
-  await handTo('ses_billing');
-  await settle();
-  expect(posted[0]!.body).toMatchObject({ keys: [l413.key], validate_only: true });
-  expect(posted[1]!.body.thread_name).toBe('Review #413: Layer 413');
-  expect(String(posted[1]!.body.body)).toContain('\n- Number: #413\n');
-  expect(posted[2]!.body).toMatchObject({ keys: [l413.key], thread_id: 'thr_new' });
-  act(() => root?.unmount());
-  host?.remove();
-  // Each layer has a thread: nothing is left to hand.
-  mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned, [l413.key]: { ...owned, thread_id: 'thr_b' } } }} stackId={tree.id} />);
-  await settle();
   expect(document.querySelector('[data-pulls-no-agent]')).toBeNull();
   expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
 });
@@ -1198,12 +1184,12 @@ test('the thread name: "Review #869: <title>", a stack "Review #412 to #414: <ti
   expect(name).not.toMatch(/[\n\r\u202E]/);
 });
 
-// --- A tree (two open PRs on one branch): the chain to its top first, then the sibling left out, on its own ---
+// --- A tree (two open PRs on one branch): the chain to its top first ---
 
 /** #413 and #414 both on #412's branch. */
 const TREE = () => inboxPullStacks([pull(412, { head: 'kid' }), pull(413, { head: 'kid-a', base: 'kid' }), pull(414, { head: 'kid-b', base: 'kid' })])[0]!;
 
-test('a tree hands over the chain to its top, named "Review #412, #414", then its sibling #413 on its own', () => {
+test('a tree hands over the chain to its top, named "Review #412, #414"; Hand again moves only what that thread has', () => {
   const tree = TREE();
   const [l412, l413, l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
   expect(tree.layers.map((l) => l.number)).toEqual([412, 413, 414]);
@@ -1216,15 +1202,8 @@ test('a tree hands over the chain to its top, named "Review #412, #414", then it
   expect(text).toContain('\n- Lands into: main, in list order\n');
   // Not "#412 to #414": that reads as if #413 were in it.
   expect(pullHandoffThreadName(first, null, tree)).toBe('Review #412, #414: Layer 412');
-  // Once a thread has #412 and #414, #413 is what is left: on its own, its diff against #412's branch.
-  const handed = { [l412.key]: linkTo('thr_a', 'msg_a'), [l414.key]: linkTo('thr_a', 'msg_a') };
-  const sibling = handoffStack(tree, handed)!;
-  expect(handoffKeys(sibling)).toEqual([l413.key]);
-  expect(pullHandoffMessage(sibling)).toContain('\n- Number: #413\n');
-  expect(pullHandoffMessage(sibling)).toContain('\n- Branch: kid-a, into kid\n');
-  expect(pullHandoffMessage(sibling)).toContain('\n1. Send me a guided review of its diff against kid, using /review-curate');
-  expect(pullHandoffThreadName(sibling, null, tree)).toBe('Review #413: Layer 413');
   // Hand to another agent moves what that thread has, and only that.
+  const handed = { [l412.key]: linkTo('thr_a', 'msg_a'), [l414.key]: linkTo('thr_a', 'msg_a') };
   expect(handoffKeys(handoffStack(tree, handed, 'thr_a')!)).toEqual([l412.key, l414.key]);
   const all = { ...handed, [l413.key]: linkTo('thr_b', 'msg_b') };
   expect(handoffStack(tree, all)).toBeNull();
