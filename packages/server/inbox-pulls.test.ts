@@ -42,6 +42,7 @@ import {
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import type { RefRunner } from "./ref-cards";
 import type { PRRuntime } from "@plannotator/shared/pr-provider";
+import type { PullAvatarOptions } from "./inbox-pull-avatars";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -154,7 +155,7 @@ function postForge(): PostForge {
   return f;
 }
 
-async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean } = {}) {
+async function world(options: { codeReview?: boolean; answer?: unknown; tailscale?: TailscaleRunner; board?: boolean; gitlab?: boolean; avatars?: Partial<PullAvatarOptions> } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-pulls-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -172,6 +173,7 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
     ...(options.codeReview === undefined ? {} : { codeReview: options.codeReview }),
     ...(options.tailscale ? { tailscale: options.tailscale } : {}),
     ...(options.board === undefined ? {} : { board: options.board }),
+    ...(options.avatars ? { pullAvatars: options.avatars } : {}),
     refRunner: f.run,
     readProjectRepo: async () => (options.gitlab ? { display: "northwind/data/ledger", host: "gitlab.com" } : { display: "northwind/billing-svc", host: "github.com" }),
   });
@@ -717,18 +719,97 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(out.hosts).toEqual([]);
   });
 
-  test("more open PRs than the searches answer: the host says how many were read, of how many", async () => {
+  test("more open PRs than the searches answer: the host says how many the list shows, of how many (searches limited to the projects)", async () => {
     const many = (from: number, n: number) => Array.from({ length: n }, (_, i) => ghPull(from + i, { headRefName: `b${from + i}` }));
     const answer = { data: { viewer: { login: "dana" }, requested: { issueCount: 61, nodes: many(2000, 50) }, authored: { issueCount: 72, nodes: many(1000, 50) }, merged: { nodes: [] } } };
-    const listed = await createInboxPulls({ run: forge(answer).run }).list(repos);
+    const f = forge(answer);
+    const listed = await createInboxPulls({ run: f.run }).list(repos);
+    // The searches were limited to the project's repository (`repo:`): every PR they found is the project's.
+    expect(f.graphql()[0]!.args.some((a) => a.startsWith("authored=") && a.includes(" repo:northwind/billing-svc"))).toBe(true);
     expect(listed.hosts[0]!.capped).toEqual({ shown: 100, total: 133 });
     // Nothing left out: no count said.
     expect(parseGithubPulls(JSON.stringify(GH_ANSWER), "github.com")!.capped).toBeUndefined();
-    const gitlab = parseGitlabPulls(
-      JSON.stringify({ data: { currentUser: { username: "dana", requested: { count: 3, nodes: [GL_MR(1)] }, authored: { count: 1, nodes: [GL_MR(2, { author: { username: "dana" } })] }, merged: { nodes: [] } } } }),
+    expect((await createInboxPulls({ run: forge().run }).list(repos)).hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("the count says what the list shows: searches not limited to the projects (GitLab) give no total", async () => {
+    // jun's MRs: two found in the project, the rest of the 60 anywhere on gitlab.com.
+    const answer = {
+      data: {
+        currentUser: {
+          username: "dana",
+          requested: { count: 40, nodes: [GL_MR(1), GL_MR(2, { project: { fullPath: "elsewhere/thing" }, webUrl: "https://gitlab.com/elsewhere/thing/-/merge_requests/2" })] },
+          authored: { count: 20, nodes: [GL_MR(3, { author: { username: "dana" } })] },
+          merged: { nodes: [] },
+        },
+      },
+    };
+    const parsed = parseGitlabPulls(JSON.stringify(answer), "gitlab.com")!;
+    expect(parsed.capped).toEqual({ shown: 3, total: 60 });
+    const run: RefRunner = async (cli, args) => {
+      if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
+      return { stdout: "", stderr: "not logged in", exitCode: 1 };
+    };
+    const listed = await createInboxPulls({ run }).list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+    expect(listed.pulls.map((p) => p.number).sort()).toEqual([1, 3]);
+    // Two shown, not "3 of 60": how many of the other 57 are the project's is not known.
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 2, total: null });
+  });
+
+  test("two lists at once each keep their own CLI states: one never wipes the other's", async () => {
+    // gh is not installed and answers at once; glab is not installed either, but answers only when let go. The second
+    // list starts after the first has found gh missing, while both wait on glab.
+    let letGo: () => void = () => {};
+    const glabWaits = new Promise<void>((done) => (letGo = done));
+    let glabAsked = false;
+    const run: RefRunner = async (cli) => {
+      if (cli === "glab") {
+        glabAsked = true;
+        await glabWaits;
+      }
+      return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
+    };
+    const pulls = createInboxPulls({ run });
+    const first = pulls.list(repos);
+    while (!glabAsked) await new Promise((done) => setTimeout(done, 1));
+    const second = pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_2" }]);
+    await new Promise((done) => setTimeout(done, 5));
+    letGo();
+    const [a, b] = await Promise.all([first, second]);
+    expect(a.clis).toEqual({ gh: "missing", glab: "missing" });
+    expect(b.clis).toEqual({ gh: "missing", glab: "missing" });
+    expect(a.unsigned).toEqual(["github.com"]);
+    expect(b.unsigned).toEqual(["gitlab.com"]);
+  });
+
+  test("the repository's default branch is read (GitHub `defaultBranchRef`, GitLab `rootRef`); absent when the forge does not say", () => {
+    const gh = parseGithubPulls(JSON.stringify(answerOf([ghPull(1, { baseRepository: { defaultBranchRef: { name: "next" } } }), ghPull(2)])), "github.com")!;
+    expect(gh.pulls.find((p) => p.number === 1)!.default_branch).toBe("next");
+    expect("default_branch" in gh.pulls.find((p) => p.number === 2)!).toBe(false);
+    const gl = parseGitlabPulls(
+      JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [GL_MR(4, { project: { fullPath: "northwind/data/ledger", repository: { rootRef: "trunk" } } })] }, merged: { nodes: [] } } } }),
       "gitlab.com",
     )!;
-    expect(gitlab.capped).toEqual({ shown: 2, total: 4 });
+    expect(gl.pulls[0]!.default_branch).toBe("trunk");
+  });
+
+  test("authors' pictures stay on the server: only the authors of PRs the list shows, GitLab's relative paths made absolute", async () => {
+    const gl = parseGitlabPulls(
+      JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(5, { author: { username: "jun", avatarUrl: "/uploads/-/system/user/avatar/7/a.png" } })] }, authored: { nodes: [] }, merged: { nodes: [] } } } }),
+      "gitlab.example.org",
+    )!;
+    expect(gl.avatars).toEqual({ jun: "https://gitlab.example.org/uploads/-/system/user/avatar/7/a.png" });
+    const answer = answerOf(
+      [ghPull(1, { author: { login: "dana", avatarUrl: "https://avatars.githubusercontent.com/u/1" } }), ghPull(9, { author: { login: "outsider", avatarUrl: "https://avatars.githubusercontent.com/u/9" }, repository: { nameWithOwner: "elsewhere/thing" } })],
+      [ghPull(2, { author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2" } })],
+    );
+    const pulls = createInboxPulls({ run: forge(answer).run });
+    const listed = await pulls.list(repos);
+    // The answer itself carries no URL: the window asks the Inbox.
+    expect(JSON.stringify(listed)).not.toContain("avatars.githubusercontent.com");
+    expect(pulls.avatarUrls("github.com")).toEqual({ dana: "https://avatars.githubusercontent.com/u/1", tomas: "https://avatars.githubusercontent.com/u/2" });
+    expect(pulls.avatarUrls("gitlab.com")).toEqual({});
   });
 
   test("a conflicting PR says so (GitHub `mergeable`, GitLab `conflicts`); an unknown one says nothing", () => {
@@ -1069,5 +1150,77 @@ describe("who may read it", () => {
       if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
       else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
     }
+  });
+});
+
+// --- the authors' pictures (the owner on #2608: the row's top-left spot is the author's picture) ---
+
+describe("GET /api/inbox/pulls/avatar", () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+  const pictured = answerOf(
+    [ghPull(412, { headRefName: "retry/schedule", author: { login: "dana", avatarUrl: "https://avatars.githubusercontent.com/u/1?v=4" } })],
+    [ghPull(880, { headRefName: "rtl", author: { login: "tomas", avatarUrl: "https://avatars.githubusercontent.com/u/2?v=4" } })],
+  );
+  const scripted = () => {
+    const fetched: string[] = [];
+    const options: Partial<PullAvatarOptions> = {
+      fetch: async (url) => {
+        fetched.push(url);
+        return new Response(PNG, { headers: { "content-type": "image/png" } });
+      },
+      lookup: async () => ["185.199.108.133"],
+    };
+    return { fetched, options };
+  };
+
+  test("a listed author's picture comes from the Inbox's own origin, fetched once from the URL the forge gave", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    expect((await w.pulls()).status).toBe(200);
+    const res = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`);
+    expect(res.status).toBe(200);
+    expect(res.headers.get("content-type")).toBe("image/png");
+    expect(res.headers.get("content-security-policy")).toBe("sandbox; default-src 'none'");
+    expect(res.headers.get("cross-origin-resource-policy")).toBe("same-origin");
+    expect(new Uint8Array(await res.arrayBuffer())).toEqual(PNG);
+    // The person's own picture too; the second ask of a picture is the cache's.
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(200);
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).status).toBe(200);
+    expect(s.fetched).toEqual(["https://avatars.githubusercontent.com/u/2?v=4", "https://avatars.githubusercontent.com/u/1?v=4"]);
+  });
+
+  test("a login the list did not show is 404 and nothing is fetched; another site's page is refused", async () => {
+    const s = scripted();
+    const w = await world({ codeReview: true, answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    // Before any list: no one is known.
+    expect(((await (await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`)).json()) as { code: string }).code).toBe("avatar_unknown");
+    await w.pulls();
+    const unknown = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=mallory`);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { code: string }).code).toBe("avatar_unknown");
+    const crossSite = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`, { headers: { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" } });
+    expect(crossSite.status).toBe(403);
+    expect(s.fetched).toEqual([]);
+  });
+
+  test("a picture the forge does not give is a miss (the window shows initials), and nothing runs while Code review is off", async () => {
+    const s = scripted();
+    s.options.fetch = async (url) => {
+      s.fetched.push(url);
+      return new Response("gone", { status: 404 });
+    };
+    const w = await world({ answer: pictured, avatars: s.options });
+    await w.send("Working in billing-svc.", "avatars");
+    expect((await w.setCodeReview(true)).status).toBe(200);
+    await w.pulls();
+    const miss = await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=tomas`);
+    expect(miss.status).toBe(404);
+    expect((await miss.json()) as unknown).toMatchObject({ code: "avatar_miss", miss: "status" });
+    await w.setCodeReview(false);
+    const before = s.fetched.length;
+    expect((await fetch(`${w.base}/api/inbox/pulls/avatar?host=github.com&login=dana`)).status).toBe(409);
+    expect(s.fetched.length).toBe(before);
   });
 });
