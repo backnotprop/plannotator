@@ -45,6 +45,8 @@ import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
+import { ReviewCard, type ReviewOutcome } from './ReviewCard';
+import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
 import { PermissionCard } from './PermissionCard';
@@ -120,7 +122,7 @@ import {
 import type { MentionSource } from '@plannotator/ui/utils/mentions';
 import { TAG_TOKEN_CLASS } from './ComposerField';
 import { HostMark } from '../icons';
-import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillsBlock, withSkillsBlock } from '../skills';
+import { INBOX_REPLY_SKILL_AUDIENCE, annotationSkillTexts, inboxSkillFilter, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { ActionChecklist, type ActionMark } from './ActionChecklist';
 import { actionForBlock } from '../actions';
 import { splitInboxSkillsBlock } from '@plannotator/core/skill-reference-block';
@@ -138,6 +140,9 @@ import { bareKeyAllowed, inOverlay, keyTarget, modalOpen } from '../shortcuts/gu
 import { INBOX_SHORTCUT_EXTRAS } from '../shortcuts/extras';
 import { useShortcutScope } from '@plannotator/ui/shortcuts';
 import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
+import { StepsButton } from '../steps/StepsButton';
+import { stepsCount, stepsWaitTarget } from '../steps/model';
+import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
@@ -1069,6 +1074,8 @@ export interface ThreadPaneProps {
   onReplyOpened?: () => void;
   /** Ask AI's icon (ask/useInboxAsk.tsx): null while this thread cannot ask, always null with the setting off. */
   askButton?: React.ReactNode;
+  /** Shape's Pebble (approval "shape-inbox-placement"): the thread's board, at the header's right beside ⋮. Null: none. */
+  shapeButton?: React.ReactNode;
   /** The same icon for the bar of a full-screen file, whose bar hides the thread's. */
   askFileButton?: React.ReactNode;
   /** Words from Ask AI's Reply in the thread: they join the reply draft, and the pane calls `onReplyWordsTaken` once. */
@@ -1078,6 +1085,17 @@ export interface ThreadPaneProps {
   backLabel?: string;
   /** A thread opened from a Board card: the chip naming the card, under the subject (board/CardChip.tsx). */
   cardChip?: React.ReactNode;
+  /**
+   * Thread steps (approval "inbox-thread-steps"): the switch, and the window's steps changes (a steps line naming
+   * this thread, presence moved, a catch-up). Null or off: no steps button. `boardCard`: the Board card that links
+   * the thread (the Board on), opened by the panel head's Board icon.
+   */
+  threadSteps?: { on: boolean; subscribe: StepsSubscribe; boardCard?: { title: string; onOpen: () => void } | null } | null;
+  /**
+   * Code review is on (Settings → Capabilities, approval "inbox-code-review-direction"): a review an agent sent
+   * shows as a review card with Start review. Off or absent: today's guided-review tile, nothing new.
+   */
+  codeReview?: boolean;
   /** A phone: one screen at a time, so an open file takes the whole window (phone.ts). */
   phone?: boolean;
   /**
@@ -1346,9 +1364,11 @@ async function replyLanded(threadId: string, key: string): Promise<'yes' | 'no' 
 
 const THREAD_GONE_TEXT = 'This thread was deleted, so nothing was sent.';
 
-export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
+  // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
+  const stepLists = useThreadSteps(thread.thread_id, threadSteps?.on ?? false, threadSteps?.subscribe ?? null);
   const root = thread.messages[0]!;
   // A thread the person started (compose) is about the agent it is addressed to, never the person.
   const startedTo = root.started_by_person && root.to ? root.to : null;
@@ -1993,6 +2013,15 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const records = files?.annotations ?? [];
   /** The person's own messages: their images are named "image in my … message" in the feedback (replyFileLinks.ts). */
   const personMessageIds = useMemo(() => new Set(thread.messages.filter((m) => m.author.kind === 'person').map((m) => m.id)), [thread.messages]);
+  // Code review: `/review-recheck` is offered (and matched at Send) only once a review happened in this thread.
+  const reviewHappened = useMemo(() => inboxThreadHadReview(thread.messages), [thread.messages]);
+  const skillFilter = useMemo(() => inboxSkillFilter(reviewHappened), [reviewHappened]);
+  // Each review's outcome: the person's latest verdict reply on it.
+  const reviewOutcomes = useMemo(() => {
+    const out = new Map<string, ReviewOutcome>();
+    for (const m of thread.messages) if (m.author.kind === 'person' && m.review_verdict) out.set(m.review_verdict.of, { verdict: m.review_verdict, at: m.created_at });
+    return out;
+  }, [thread.messages]);
 
   // The session that asked, and whether it is still there (only hosts whose
   // sessions poll the Inbox can be known to have ended). It is the session
@@ -4036,7 +4065,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
         const { target, own } = part;
         const last = index === parts.length - 1;
         const annotationsFeedback = own.length > 0 ? await buildFeedback(own) : '';
-        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE);
+        const skills = await inboxSkillsBlock([last ? words : '', ...annotationSkillTexts(own)], INBOX_REPLY_SKILL_AUDIENCE, undefined, skillFilter);
         const feedback = withSkillsBlock(annotationsFeedback, skills);
         // The agents tagged anywhere in this Send ride the last reply (a tag in a file comment sends the whole reply).
         const tags = sendTags.get(part.key) ?? [];
@@ -4673,6 +4702,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
             tags: composerTags,
+            skillFilter,
           },
         }
       : null;
@@ -4811,9 +4841,11 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   const footRowShown = !resolved && !(guard && staleQuestions.length > 0) && newMessage?.kind !== 'compose' && !box.open && !(route.open && asking);
   // What the row shows; a change re-fits it (with its width).
   // The Reply keycap (Show keys on buttons) takes room too: turning it on or off re-fits the row.
+  // So does the checklist button ("3/6"), which arrives after its own read and changes width as steps tick, or as
+  // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown].join('|');
+  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -5049,7 +5081,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // tighter padding, the Artifacts count, then the way back's label; the subject shows only with room to read.
   const headRef = useRef<HTMLDivElement>(null);
   const textSize = useInboxTextSize();
-  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
+  const headSig = [phone, artifactsOn, artifactsButton, artifactList.length, one, !!askButton, !!shapeButton, markReadOffered, markUnreadOffered, readAt !== null, backLabel, textSize].join('|');
   const headFittedFor = useRef('');
   const fitHeadRef = useRef<(force?: boolean) => void>(() => {});
   fitHeadRef.current = (force = false) => {
@@ -5229,6 +5261,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
             )}
             {/* A full-screen file's bar carries it instead: one launcher on the page, so focus has one way back. */}
             {!shownFull && askButton}
+            {shapeButton}
             <ThreadMore
               {...copyHost}
               pin={onPin ? { pinned: pinShown, onToggle: togglePin } : undefined}
@@ -5777,7 +5810,12 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     newestId={newestFileId}
                   />
                 )}
-                {message.guide && <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />}
+                {message.guide &&
+                  (codeReview && message.guide.review ? (
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onOpen={() => onOpenGuide(message.id)} />
+                  ) : (
+                    <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
+                  ))}
                 {isAgent && message.ack && (
                   <AckPill ack={message.ack} agent={name} wakes={message.wakes === true} connection={message.id === ackWaiting?.id ? ackConnection : undefined} />
                 )}
@@ -6033,6 +6071,7 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                 ariaDescribedBy={[showAskerNote ? noteId : null, replyDraft.conflict !== null ? conflictId : null].filter(Boolean).join(' ') || undefined}
                 placeholder="Write a reply"
                 destination="your reply"
+                skillFilter={skillFilter}
                 tags={composerTags}
                 onChange={(text) => changeReply(text)}
                 onKeyDown={(event) => {
@@ -6225,7 +6264,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                   keyHint={<ShortcutHint scope={inboxThreadShortcuts} action="openItems" className="ib-kbd ib-btn-kbd" />}
                 />
               )}
-              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits. */}
+              {/* 👍 Looks good beside Reply: sent to the agent after the Undo window; hidden while a question waits.
+                  Before the checklist: the actions first, the status after. */}
               {ackOffered && !waiting && !draftKept && (
                 <Tip
                   content={
@@ -6241,6 +6281,18 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
                     Looks good
                   </button>
                 </Tip>
+              )}
+              {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
+              {stepLists.length > 0 && (
+                <StepsButton
+                  lists={stepLists}
+                  phone={phone}
+                  onWaiting={(list) => {
+                    const target = stepsWaitTarget(list.agent.session ?? null, openQ.questions, openActions, (id) => { const author = thread.messages.find((m) => m.id === id)?.author; return author?.kind === 'agent' ? (author.session ?? null) : null; });
+                    return target ? () => jumpTo(target) : null;
+                  }}
+                  boardCard={threadSteps?.boardCard ?? null}
+                />
               )}
               {/* The in-thread New message button is off (approval "inbox-acknowledge", 2026-10-15): Reply and compose cover it.
                   Its route, door row and code stay; turn SHOW_NEW_MESSAGE_BUTTON on to bring it back. */}

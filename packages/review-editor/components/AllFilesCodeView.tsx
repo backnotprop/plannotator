@@ -2985,6 +2985,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         renderMarkdownView={previewable ? (fit) => previewControl!.renderViewControl({ file, ...fit }) : undefined}
         onToggleViewed={onToggleViewed ? () => handleToggleViewedAndCollapse(filePath, item.id) : undefined}
         showViewedControl={showViewedControls}
+        viewedKeyHint={!readOnly && !commentOnly}
         isStaged={stagedFiles?.has(filePath)}
         isStaging={stagingFile === filePath}
         onStage={onStage ? () => onStage(filePath) : undefined}

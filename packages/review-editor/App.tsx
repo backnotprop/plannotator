@@ -816,6 +816,8 @@ const ReviewApp: React.FC = () => {
   const [sourceKind, setSourceKind] = useState<ReviewSourceKind>('vcs');
   const isStaticPatch = sourceKind === 'patch';
   const [repoInfo, setRepoInfo] = useState<{ display: string; branch?: string } | null>(null);
+  // `plannotator review --title` (#2289): the whole tab title, in place of `<repo> · Code Review`.
+  const [sessionTitle, setSessionTitle] = useState<string | null>(null);
   /** The region the issue / PR / MR hover cards listen on (the whole app). */
   const refCardRootRef = useRef<HTMLDivElement>(null);
 
@@ -825,8 +827,8 @@ const ReviewApp: React.FC = () => {
   const repoName = repoInfo ? repoLabel(repoInfo.display, hideRepoOwner) : null;
 
   useEffect(() => {
-    document.title = repoName ? `${repoName} · Code Review` : "Code Review";
-  }, [repoName]);
+    document.title = sessionTitle ?? (repoName ? `${repoName} · Code Review` : "Code Review");
+  }, [repoName, sessionTitle]);
 
   const { prMetadata, prStackInfo, prStackTree, prDiffScope, prDiffScopeOptions, prPatchIncomplete, prPatchUpgradeAvailable, updatePRSession } = usePRSession();
   const { status: reviewProgressStatus, persistViewed, flush: flushReviewProgress } = useReviewProgress({
@@ -2864,6 +2866,7 @@ const ReviewApp: React.FC = () => {
         diagramEngine?: unknown;
         sourceKind?: ReviewSourceKind;
         repoInfo?: { display: string; branch?: string };
+        title?: string;
         prMetadata?: PRMetadata;
         prStackInfo?: PRStackInfo | null;
         prStackTree?: PRStackTree | null;
@@ -2957,6 +2960,7 @@ const ReviewApp: React.FC = () => {
         // the demo. A card shows only when the forge answered (`onlyWithData` below).
         setRefCardTransport(refCardRouteTransport('/api/ref'));
         if (data.repoInfo) setRepoInfo(data.repoInfo);
+        if (typeof data.title === 'string' && data.title) setSessionTitle(data.title);
         updatePRSession({
           ...(data.prMetadata && { prMetadata: data.prMetadata }),
           ...(data.prStackInfo !== undefined && { prStackInfo: data.prStackInfo }),
@@ -5009,7 +5013,7 @@ const ReviewApp: React.FC = () => {
   ]);
 
   // Note → scope:'general' CodeAnnotation at submit time: it rides the
-  // existing export (## General) and the /api/feedback annotations array with
+  // existing export (## Global comments) and the /api/feedback annotations array with
   // no server change on either runtime (#1449 transport). Shape (sentinels,
   // no PR context) lives in createGeneralReviewComment; deliberately NOT
   // recorded in review history — it lives for one submit.
@@ -5022,23 +5026,33 @@ const ReviewApp: React.FC = () => {
     return note.id;
   }, [identity, localDraftTarget]);
 
-  // Sidebar "+ General comment" — the durable human producer for a
+  // Sidebar "+ Global comment" — the durable human producer for a
   // scope:'general' review-level comment (spec §3.3). Unlike the submit note
   // above, it goes through history (undoable, draft-persisted, deletable via
   // the sidebar's existing delete); like it, it is deliberately NOT
   // withPRContext-stamped, so it survives an in-place PR switch (see the
   // factory's doc in reviewDecision.ts).
-  const handleAddGeneralComment = useCallback((text: string) => {
+  const handleAddGeneralComment = useCallback((text: string): boolean => {
     // Mirrors the 'note' route's guard: a commit during an in-flight decision
     // POST would append an annotation the captured body never carries — the
     // server then deletes the draft and the comment vanishes from wire and
     // archive alike.
-    if (submitted || busyWithDecision) return;
+    if (submitted || busyWithDecision) return false;
     const note = createGeneralReviewComment(text, identity);
-    if (!note) return;
+    if (!note) return false;
     if (localDraftTarget) note.localReviewTarget = localDraftTarget;
     addCodeAnnotationsWithHistory([note]);
+    return true;
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
+
+  // A global comment chosen in the guide's list: the sidebar's Annotations tab
+  // shows it selected (its edit and delete live there).
+  const handleShowGlobalComment = useCallback((id: string) => {
+    reviewSidebar.open('annotations');
+    setScrollTargetAnnotation(null);
+    selectedAnnotationIdRef.current = id;
+    setSelectedAnnotationId(id);
+  }, [reviewSidebar.open]);
 
   // The commit above is a state write, so feedbackMarkdown/handleSendFeedback
   // (which close over `allAnnotations`) only see the note on the NEXT render.
@@ -6546,6 +6560,8 @@ const ReviewApp: React.FC = () => {
                 onOpenFixedGuide={handleOpenGuide}
                 onOpenSavedGuide={handleOpenGuide}
                 onMarkFilesViewed={handleGuideMarkFilesViewed}
+                onAddGlobalComment={submitted || busyWithDecision ? undefined : handleAddGeneralComment}
+                onShowGlobalComment={handleShowGlobalComment}
               />
             </div>
           )}

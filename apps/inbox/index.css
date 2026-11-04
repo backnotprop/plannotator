@@ -11,8 +11,13 @@
 /* The guided review: the guide chain and the read-only diff renderer it draws with (packages/inbox/guide). */
 @source "../../packages/guide-viewer/**/*.tsx";
 @source "../../packages/review-editor/components/**/*.tsx";
+/* Shape (the living board, packages/ui/components/shape) and its Inbox parts (packages/inbox/shape). */
+@source "../../packages/ui/components/shape/**/*.tsx";
+@source "../../packages/inbox/shape/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
+/* The board's own sheet (shp- classes). */
+@import "../../packages/ui/components/shape/shape.css";
 /* A document's contents rail (its own sheet: not in theme.css). */
 @import "../../packages/ui/contents-rail.css";
 /* The guide reader's line comments: the review app's comment cards, toolbar and suggestion styles. */

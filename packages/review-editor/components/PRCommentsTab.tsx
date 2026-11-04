@@ -9,6 +9,7 @@ import { getItem, setItem } from '@plannotator/ui/utils/storage';
 import { Popover } from '@base-ui/react/popover';
 import { CommentPopover } from '@plannotator/ui/components/CommentPopover';
 import { useReviewState } from '../dock/ReviewStateContext';
+import { proxiesGitHubImages } from '../utils/prImage';
 import { Avatar } from './Avatar';
 
 type AnnotateFn = (commentId: string, author: string, body: string, anchorEl: HTMLElement) => void;
@@ -142,7 +143,8 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
   const [excludedAuthors, setExcludedAuthors] = useState<Set<string>>(new Set());
 
   // Comment annotation: the "Annotate" button on a card opens one comment box.
-  const { onAddCommentAnnotation, onAskAIForComment, commentScrollTarget } = useReviewState();
+  const { onAddCommentAnnotation, onAskAIForComment, commentScrollTarget, prMetadata } = useReviewState();
+  const authenticatedImages = proxiesGitHubImages(prMetadata);
   const [annotating, setAnnotating] = useState<{ commentId: string; author: string; body: string; anchorEl: HTMLElement } | null>(null);
   const handleAnnotate = useCallback<AnnotateFn>((commentId, author, body, anchorEl) => {
     setAnnotating({ commentId, author, body, anchorEl });
@@ -479,6 +481,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
                   onSelect={() => setSelectedId(isSelected ? null : id)}
                   onToggleCollapse={() => toggleCollapsed(id)}
                   onAnnotate={handleAnnotate}
+                  authenticatedImages={authenticatedImages}
                 />
               );
             }
@@ -530,7 +533,7 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 
                 {!isCollapsed && entry.data.body && (
                   <div className="mt-2 review-comment-markdown">
-                    <MarkdownBody markdown={entry.data.body} textClassName="text-[13px]" />
+                    <MarkdownBody authenticatedImages={authenticatedImages} markdown={entry.data.body} textClassName="text-[13px]" />
                   </div>
                 )}
 
@@ -574,13 +577,15 @@ export const PRCommentsTab: React.FC<PRCommentsTabProps> = React.memo(({ context
 // Subcomponents
 // ---------------------------------------------------------------------------
 
-function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate }: {
+function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollapse, onAnnotate, authenticatedImages }: {
   thread: PRReviewThread;
   isSelected: boolean;
   isCollapsed: boolean;
   onSelect: () => void;
   onToggleCollapse: () => void;
   onAnnotate: AnnotateFn;
+  /** GitHub attachment images load through the proxy (`proxiesGitHubImages`). */
+  authenticatedImages: boolean;
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const first = thread.comments[0];
@@ -669,7 +674,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
           {first.body && (
             <div className={`relative mt-2 ${isDimmed && !isExpanded ? 'max-h-16 overflow-hidden' : ''}`}>
               <div className={`leading-relaxed review-comment-markdown ${isDimmed && !isExpanded ? 'text-muted-foreground' : 'text-foreground/85'}`}>
-                <MarkdownBody markdown={first.body} textClassName="text-[13px]" />
+                <MarkdownBody authenticatedImages={authenticatedImages} markdown={first.body} textClassName="text-[13px]" />
               </div>
               {isDimmed && !isExpanded && (
                 <div className="absolute bottom-0 left-0 right-0 h-10 bg-gradient-to-t from-card to-transparent pointer-events-none" />
@@ -701,7 +706,7 @@ function ThreadCard({ thread, isSelected, isCollapsed, onSelect, onToggleCollaps
                     <span className="text-[10px] text-muted-foreground">{formatRelativeTime(reply.createdAt)}</span>
                   </div>
                   <div className="pl-6 leading-relaxed review-comment-markdown text-foreground/85">
-                    <MarkdownBody markdown={reply.body} textClassName="text-[13px]" />
+                    <MarkdownBody authenticatedImages={authenticatedImages} markdown={reply.body} textClassName="text-[13px]" />
                   </div>
                 </div>
               ))}

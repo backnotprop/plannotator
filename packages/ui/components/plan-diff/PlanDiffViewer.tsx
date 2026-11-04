@@ -13,7 +13,7 @@ import {
   PlanDiffModeSwitcher,
   type PlanDiffMode,
 } from "./PlanDiffModeSwitcher";
-import { PlanCleanDiffView } from "./PlanCleanDiffView";
+import { PlanCleanDiffView, type PlanDiffCodeDocument } from "./PlanCleanDiffView";
 import { PlanRawDiffView } from "./PlanRawDiffView";
 import { PlanDiffBadge } from "./PlanDiffBadge";
 import { VSCodeIcon } from "./VSCodeIcon";
@@ -44,6 +44,12 @@ interface PlanDiffViewerProps {
    * Default false: the card sizes to its content.
    */
   fillHeight?: boolean;
+  /**
+   * The document is a config or data file (`renderAs: "code"`): the Rendered
+   * and Classic modes show its chunks as code in `language` instead of
+   * parsing them as markdown. Absent, the diff renders as markdown.
+   */
+  codeDocument?: PlanDiffCodeDocument;
 }
 
 const defaultOpenVscodeDiff = async (
@@ -86,6 +92,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
   mode,
   onOpenVscodeDiff,
   fillHeight = false,
+  codeDocument,
 }) => {
   const hideRepoOwner = useConfigValue('hideRepoOwner');
   const [vscodeDiffLoading, setVscodeDiffLoading] = useState(false);
@@ -225,6 +232,7 @@ export const PlanDiffViewer: React.FC<PlanDiffViewerProps> = ({
             selectedAnnotationId={selectedAnnotationId}
             mode={mode}
             wordLevel={diffMode === "clean"}
+            codeDocument={codeDocument}
           />
         )}
       </article>
