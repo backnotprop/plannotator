@@ -39,7 +39,7 @@ import { shortTime } from "./inbox-mcp-read";
 import { guarded, okComplete, PROJECT_PATH_DESCRIPTION } from "./inbox-mcp-result";
 import type { InboxMcpContext } from "./inbox-mcp";
 
-export const INBOX_CARD_OPS = ["create", "move", "say", "link", "ship", "drop", "list"] as const;
+export const INBOX_CARD_OPS = ["create", "move", "say", "link", "ship", "drop", "list", "initiative_delete"] as const;
 export type InboxCardOp = (typeof INBOX_CARD_OPS)[number];
 
 /** For raw MCP clients; the agent tool words its action line itself (INBOX_AGENT_ACTION_LEADS.card). */
@@ -146,6 +146,7 @@ export const INBOX_CARD_OP_FIELDS: Record<InboxCardOp, readonly (keyof CardCallI
   ship: ["card_id", "say", "pr", "ref", "thread_id"],
   drop: ["card_id", "reason", "say"],
   list: ["asked_by", "include_resolved"],
+  initiative_delete: ["initiative"],
 };
 const OP_COMMON = new Set<keyof CardCallInput>(["op", "project_path", "agent_session", "agent_name", "agent_host"]);
 
@@ -176,6 +177,18 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const { project, projectIds, unresolved } = await cardScope(context, input.project_path);
   if (unresolved) {
     throw new InboxError("project_unresolved", "git did not answer in time, so this folder's project is not known yet. Nothing was changed; try the same call again.");
+  }
+  // An initiative crosses projects, so deleting one needs no project of the caller's.
+  if (input.op === "initiative_delete") {
+    if (!input.initiative?.trim()) throw new InboxError("validation_error", "initiative: the one to delete, by name or id (list shows them).", { field: "initiative" });
+    const named = store.initiativeNamed(input.initiative);
+    if (!named) throw new InboxError("initiative_not_found", `No initiative ${input.initiative.trim()}.`, { field: "initiative" });
+    const cards = store.listCards().filter((card) => store.cardWire(card).initiative === named.id).length;
+    const gone = store.deleteInitiative(named.id);
+    return {
+      text: `Deleted the initiative ${JSON.stringify(gone.name)}. Its ${cards} card${cards === 1 ? " stays" : "s stay"} on the Board, in no initiative.`,
+      structured: { initiative: gone, cards_kept: cards },
+    };
   }
   if (!project && input.op !== "list") {
     throw new InboxError(

@@ -6187,8 +6187,8 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox .ib-inid-add .ib-inid-in { border-color: var(--ib-line); }
 .ib-inid-del { flex: none; border: 0; background: none; cursor: pointer; }
 .pn-inbox .ib-inid-del:hover { color: var(--destructive); background: var(--ib-hover); }
-.ib-inid-ask { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; padding: 6px 8px; border-radius: 8px; background: color-mix(in oklab, var(--destructive) 8%, var(--card)); }
-.ib-inid-askt { flex: 1 1 200px; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.45; overflow-wrap: anywhere; }
+/* The toast inside the dialog (its Undo must be above the modal): at the window's foot, as ever. A phone's toast is `absolute`, which here would be the dialog's foot, over Done. */
+.ib-inid .ib-toast { position: fixed; }
 .ib-inid-err { margin: 8px 0 0; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox .ib-bflt-btn { width: 44px; height: 44px; }

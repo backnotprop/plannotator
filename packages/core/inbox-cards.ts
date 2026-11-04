@@ -125,10 +125,11 @@ export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
  * Words approved by the owner (q-f1ff983a, msg_01M6MCACRRYAJJ3PNS25BH4AZ7,
  * with "Not all cards need an initiative:" for the draft's opening). Change
  * them here only (the skill, being markdown, pastes the rule;
- * plannotator-skill-reference.test.ts checks it still does).
+ * plannotator-skill-reference.test.ts checks it still does). The last
+ * sentence, on clearing out, is a draft awaiting the owner's OK.
  */
 export const INBOX_CARD_INITIATIVE_RULE =
-  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it.";
+  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it. When an initiative's work is done, delete it (`initiative_delete`); its cards stay.";
 
 /** What the `initiative` field takes, before the rule. */
 export const INBOX_CARD_INITIATIVE_FIELD =
@@ -332,7 +333,7 @@ export interface InboxCard {
    * The Board initiative the card is in (approval "board-initiatives"): an
    * `ini_` id, or null for none. Absent on a line written before initiatives
    * (readInboxCard reads it as null). The person sets it by id; an agent by
-   * name (the card tool's `initiative`). The last one to set it wins. A
+   * name or id (the card tool's `initiative`). The last one to set it wins. A
    * deleted initiative reads as none on the wire.
    */
   initiative?: string | null;

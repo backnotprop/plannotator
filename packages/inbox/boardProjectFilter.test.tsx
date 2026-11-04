@@ -112,6 +112,8 @@ function scriptFetch() {
       const body = JSON.parse(String(init.body)) as { name: string };
       return json({ initiative: { id: 'ini_01JX0000000000000000000009', name: body.name, created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: null } });
     }
+    const initiativeAt = url.pathname.match(/^\/api\/inbox\/initiatives\/([^/]+)$/);
+    if (initiativeAt && init?.method === 'POST') return json({ initiative: INITIATIVES.find((i) => i.id === initiativeAt[1]) });
     if (url.pathname === '/api/inbox/sessions') return json({ serverSession: 's', home: '/Users/ada', projects: [] });
     const one = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)$/);
     if (one && init?.method === 'POST') {
@@ -361,7 +363,7 @@ test.if(hasDom)('the opened card sets its initiative, and takes it out', async (
   expect($('[data-board-live]')!.textContent).toContain('Memory');
 });
 
-test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiatives… renames and deletes, asking first', async () => {
+test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiatives… renames in place', async () => {
   scriptFetch();
   let refreshed = 0;
   draw({ onChanged: () => (refreshed += 1) });
@@ -384,15 +386,61 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
   await settle();
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'rename', name: 'Shape v2' } });
 
-  // Delete asks once, naming what happens to its cards (three are in Shape).
-  await act(async () => dialog.querySelector<HTMLElement>(`[data-initiative-row="${SHAPE}"] [data-initiative-delete]`)!.click());
-  const ask = dialog.querySelector<HTMLElement>(`[data-initiative-delete-ask="${SHAPE}"]`)!;
-  expect(ask.textContent).toContain('Its 3 cards go to No initiative.');
-  const before = posts.length;
-  await act(async () => ask.querySelector<HTMLElement>('[data-initiative-delete-yes]')!.click());
+});
+
+// The owner, 2026-11-04: "delete initiatives very simply without friction". The failures guarded: a question coming
+// back; an Undo drawn under the modal (the page behind it is inert, so it could not be pressed) or lost on Done; a
+// double click deleting the row that moved up under the pointer.
+test.if(hasDom)('Delete is one click with no question; the toast inside the dialog undoes it, and Done hands the Undo to the window', async () => {
+  scriptFetch();
+  const toasts: ({ lead: string; detail?: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
   await settle();
-  expect(posts.length).toBe(before + 1);
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  const row = (id: string) => dialog.querySelector<HTMLElement>(`[data-initiative-row="${id}"]`);
+  const del = (id: string) => row(id)!.querySelector<HTMLElement>('[data-initiative-delete]')!;
+
+  await act(async () => del(SHAPE).click());
+  await settle();
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'delete' } });
+  expect(row(SHAPE)).toBeNull();
+  const inside = dialog.querySelector<HTMLElement>('.ib-toast')!;
+  expect(inside.textContent).toContain('Deleted');
+  expect(inside.textContent).toContain('“Shape”');
+  // Undo by its button: the dialog's fields take a Z.
+  expect(inside.querySelector('[data-toast-undo]')!.getAttribute('aria-keyshortcuts')).toBeNull();
+  await act(async () => inside.querySelector<HTMLElement>('[data-toast-undo]')!.click());
+  await settle();
+  expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'restore' } });
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+  expect(row(SHAPE)).not.toBeNull();
+
+  // The second click of a double click writes nothing.
+  const before = posts.length;
+  await act(async () => del(SHAPE).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+  await settle();
+  expect(posts.length).toBe(before);
+
+  // Two deletes in one toast, undone together, by the window's toast once the dialog closed.
+  await act(async () => del(SHAPE).click());
+  await settle();
+  await act(async () => del(MEMORY).click());
+  await settle();
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+  expect($('[data-dialog="initiatives"]')).toBeNull();
+  const handed = toasts.at(-1)!;
+  expect(handed.lead).toBe('Deleted');
+  await act(async () => handed.onUndo!());
+  await settle();
+  expect(posts.slice(-2).map((p) => [p.path, p.body.op])).toEqual([
+    [`/api/inbox/initiatives/${SHAPE}`, 'restore'],
+    [`/api/inbox/initiatives/${MEMORY}`, 'restore'],
+  ]);
 });
 
 test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a failed fetch says the one line, a taken name the server's words", async () => {

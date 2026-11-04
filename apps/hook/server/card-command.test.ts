@@ -191,7 +191,7 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(help.stdout).toContain("--ref <issue or PR>");
     expect(HIDDEN_SUBCOMMANDS.has("card")).toBe(false);
     const top = await plannotator(box, ["--help"]);
-    expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list>");
+    expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list|initiative_delete>");
   }, 30_000);
 
   // The agent tool's Board-off line (INBOX_TOOL_BOARD_OFF_NOTE) sends agents here while the Board is off:
@@ -241,5 +241,7 @@ describe("parseCardCommand", () => {
     // --initiative names one; "" (take the card out) reaches the tool as "", not as a missing value.
     expect(parseCardCommand(["create", "Invoices", "--initiative", "Billing"])).toMatchObject({ ok: true, args: { op: "create", title: "Invoices", initiative: "Billing" } });
     expect(parseCardCommand(["say", "crd_x", "--initiative", ""])).toMatchObject({ ok: true, args: { op: "say", card_id: "crd_x", initiative: "" } });
+    expect(parseCardCommand(["initiative_delete", "Billing"])).toMatchObject({ ok: true, args: { op: "initiative_delete", initiative: "Billing" } });
+    expect(parseCardCommand(["initiative_delete"])).toMatchObject({ ok: false });
   });
 });

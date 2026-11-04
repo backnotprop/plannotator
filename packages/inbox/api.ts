@@ -1394,7 +1394,7 @@ export const inboxApi = {
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
   /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' }) =>
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
     post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>

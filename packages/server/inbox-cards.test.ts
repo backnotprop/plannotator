@@ -68,7 +68,7 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     const tool = inboxAgentTool(tools)!;
     const props = tool.inputSchema.properties as Record<string, { enum?: string[] }>;
     expect(props.action!.enum).toContain("card");
-    expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list"]);
+    expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list", "initiative_delete"]);
     // The schema lists the v2 columns only; the ids before v2 are still taken (the next test).
     expect(props.column!.enum).toEqual(["backlog", "todo", "in_progress", "in_review", "done", "dropped"]);
     // Claude Code passes a tool description up to 2,048 characters.
@@ -447,7 +447,7 @@ describe("the Board page's routes: New card and the look", () => {
       [null, "agent", "Claude Code"],
     ]);
 
-    // Only create and say take it; there is no op to rename or delete one.
+    // Only create, say and initiative_delete take it; there is no op to rename one.
     expect((await card({ op: "move", card_id: id, column: "in_progress", initiative: "Billing" })).content[0]!.text).toContain("initiative: op move does not take it");
     expect((await card({ op: "rename", initiative: "Billing" })).isError).toBe(true);
     const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as { initiatives: { name: string; deleted_at: string | null }[] };
@@ -455,6 +455,33 @@ describe("the Board page's routes: New card and the look", () => {
       ["Billing", null],
       ["Code review", null],
     ]);
+  });
+
+  // The owner, 2026-11-04: agents "clear initiatives out". The failures guarded: a delete that takes cards with it, or
+  // that only works by name or only by id; the field refused on the op.
+  test("an agent deletes an initiative by name or by id; its cards stay, in none", async () => {
+    const { card, base } = await world();
+    const first = await card({ op: "create", title: "Schema step", initiative: "Billing" });
+    const id = first.structuredContent.card.id as string;
+    const billing = first.structuredContent.card.initiative as string;
+    const second = await card({ op: "create", title: "Hover cards", initiative: billing });
+    expect(second.structuredContent.card.initiative).toBe(billing);
+    const shape = (await card({ op: "create", title: "Popover", initiative: "Shape" })).structuredContent.card.initiative as string;
+
+    const gone = await card({ op: "initiative_delete", initiative: "  BILLING " });
+    expect(gone.isError).toBeUndefined();
+    expect(gone.content[0]!.text).toBe('Deleted the initiative "Billing". Its 2 cards stay on the Board, in no initiative.');
+    expect(gone.structuredContent.cards_kept).toBe(2);
+    expect((await card({ op: "initiative_delete", initiative: shape })).structuredContent.initiative.name).toBe("Shape");
+
+    const listed = await card({ op: "list" });
+    expect(listed.structuredContent.total).toBe(3);
+    expect(listed.structuredContent.cards.map((c: { initiative: string | null }) => c.initiative)).toEqual([null, null, null]);
+    expect(listed.content[0]!.text).not.toContain("Initiatives:");
+    expect(((await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { card: { id: string } }).card.id).toBe(id);
+
+    expect((await card({ op: "initiative_delete", initiative: "Billing" })).content[0]!.text).toContain("No initiative Billing.");
+    expect((await card({ op: "initiative_delete" })).isError).toBe(true);
   });
 });
 

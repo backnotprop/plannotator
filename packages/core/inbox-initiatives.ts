@@ -12,10 +12,11 @@
  * initiative is deleted reads as none (the store's `cardWire`), and its
  * history still names it.
  *
- * The person names, renames and deletes them. An agent puts its own card in
- * one by name through the card tool's `initiative` (approval
- * "board-initiatives", "Agents and initiatives"): a name no live initiative
- * matches makes a new one, the only way an agent makes one.
+ * The person names, renames and deletes them. An agent puts a card in one
+ * through the card tool's `initiative`, a name or a live one's id (approval
+ * "board-initiatives", "Agents and initiatives"): anything no live initiative
+ * answers to makes a new one, the only way an agent makes one. An agent may
+ * delete one too (op `initiative_delete`); only the person renames.
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
@@ -29,15 +30,12 @@ export interface InboxInitiative {
   created_by: InboxAuthor;
   /** The last rename (or the creation). */
   updated_at: string;
-  /** Set when the person deleted it: cards that named it read as none; the record stays for their history. */
+  /** Set when it was deleted (the person, or an agent): cards that named it read as none; the record stays for their history and an Undo. */
   deleted_at: string | null;
 }
 
 /** The longest initiative name, in characters. */
 export const INBOX_INITIATIVE_NAME_MAX = 40;
-
-/** The most live initiatives at once (the filter menu stays a menu). */
-export const INBOX_INITIATIVES_MAX = 50;
 
 /** The filter's value for cards with no initiative (`#board&initiative=none`). */
 export const INBOX_NO_INITIATIVE = "none";

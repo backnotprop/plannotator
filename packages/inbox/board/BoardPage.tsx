@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
+import { InboxApiError, inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip, isTextCut } from '../components/Tip';
@@ -34,6 +34,7 @@ import {
   cardsInInitiative,
   cardsInProject,
   initiativeCounts,
+  initiativeDeletedToast,
   liveInitiatives,
   newCardInitiative,
   inDoneLane,
@@ -187,8 +188,6 @@ export function BoardPage(props: BoardPageProps) {
   const liveCount = cards.filter(onLanes).length;
   // The filter's counts: the cards on the lanes of the picked project, per initiative (and in none).
   const filterCounts = initiativeCounts(projectCards.filter(onLanes), initiatives);
-  // The Initiatives dialog's: every card in each, any column (what a delete leaves in none).
-  const cardCounts = initiativeCounts(allCards, initiatives);
   /** Put a card in an initiative (or none): the card menu's Initiative and the opened card's. */
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);
@@ -242,6 +241,27 @@ export function BoardPage(props: BoardPageProps) {
       setSaid(moveSaid(card, moved));
     }
     return moved;
+  };
+  /**
+   * The Initiatives dialog closed with its Undo still up: the window's toast takes it over, so Done never loses it.
+   * A name taken since refuses (only that says why, as the dialog's line; anything else the one line).
+   */
+  const undoableInitiatives = (deleted: readonly InboxInitiative[]) => {
+    props.onToast?.({
+      icon: 'check',
+      ...initiativeDeletedToast(deleted),
+      onUndo: () => {
+        props.onToast?.(null);
+        void (async () => {
+          try {
+            for (const i of deleted) await inboxApi.changeInitiative(i.id, { op: 'restore' });
+          } catch (cause) {
+            props.onToast?.({ icon: 'warn', wrap: true, lead: cause instanceof InboxApiError && cause.code === 'initiative_exists' ? cause.message : 'That did not save. Try again.' });
+          }
+          props.onChanged();
+        })();
+      },
+    });
   };
   /**
    * The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now.
@@ -687,11 +707,11 @@ export function BoardPage(props: BoardPageProps) {
       {managing && (
         <InitiativesDialog
           initiatives={initiatives}
-          cardCounts={cardCounts}
           start={managing}
           phone={phone}
           onClose={() => setManaging(null)}
           onChanged={() => props.onChanged()}
+          onCloseWithUndo={undoableInitiatives}
           fallbackFocus={() => pageRef.current?.querySelector<HTMLElement>('[data-board-filter-button]') ?? null}
         />
       )}

@@ -2255,10 +2255,12 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * with the cost test, main 11,581 → 12,005 bytes (+424); the description
  * stays 1,940 characters; Board off unchanged. Tokens scaled at about 4
  * bytes a token for the added prose (+137 from the stated 11,456), so 3,273.
+ * With the op `initiative_delete` and the rule's sentence on clearing out:
+ * 12,005 → 12,109 bytes (+104), tokens scaled the same way (+26), so 3,299.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12005, tokens: 3273 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12109, tokens: 3299 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
