@@ -357,7 +357,8 @@ const rawArgs = process.argv.slice(2);
     process.exit(1);
   }
   // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
-  if (args[0] === "shape" && args[1] === "open" && !hasHelpFlag(args.slice(2))) {
+  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
+  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
     process.exit(
       await runShapeOpen(args.slice(2), {
         dataDir: getPlannotatorDataDir(),

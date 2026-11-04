@@ -136,7 +136,8 @@ describe("through the entrypoint", () => {
     };
     let serverPid: number | null = null;
     try {
-      for (const argv of [["open"], ["open", w.id], ["serve"]]) {
+      // Bare `plannotator shape` (it opens the page) is gated like `open`.
+      for (const argv of [[], ["open"], ["open", w.id], ["serve"]]) {
         const r = await run(...argv);
         expect(r.code).toBe(1);
         expect(r.stdout).toBe("");
@@ -160,6 +161,17 @@ describe("through the entrypoint", () => {
       expect(list.shapes.map((s) => s.id)).toEqual([w.id]);
       const help = await run("open", "--help");
       expect(`${help.stdout}${help.stderr}`).toContain("plannotator shape open [<shp_id>]");
+      // Bare `plannotator shape` opens the page like `open` with no id (the browser is the no-browser sandbox's),
+      // prints its address and reuses the server; the usage moved to --help, which opens nothing.
+      const bare = await run();
+      expect(bare.code, bare.stderr).toBe(0);
+      expect(bare.stdout).toBe(`http://127.0.0.1:${started.port}/\n`);
+      expect(bare.stderr).not.toContain("Usage:");
+      expect(readShapeServerEntry(w.dataDir)!.pid).toBe(serverPid);
+      const { SHAPE_COMMAND_USAGE } = await import("./shape-command");
+      const shapeHelp = await run("--help");
+      expect(shapeHelp.code).toBe(0);
+      expect(`${shapeHelp.stdout}${shapeHelp.stderr}`.trim()).toBe(SHAPE_COMMAND_USAGE);
     } finally {
       if (serverPid && isProcessAlive(serverPid)) {
         process.kill(serverPid, "SIGTERM");
