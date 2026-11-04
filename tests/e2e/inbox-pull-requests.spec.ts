@@ -643,7 +643,30 @@ async function sendReview(agent: SimAgent, projectPath: string, replyTo: string,
   } as never);
 }
 
-test('a PR with no agent: the ask (Guided review / Custom curation), Hand to an agent, "on the way", and the review arriving as Start review', async () => {
+/** The same PR on a phone (390 px), in a context of its own: for the hand-off's states, taken where they happen. */
+async function phoneShot(browser: Browser, row: string, name: string, schemes: readonly ('light' | 'dark')[] = ['light', 'dark']): Promise<void> {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
+  const page = await context.newPage();
+  try {
+    await offerLaunch(page);
+    await page.goto(`${world.url}#pulls`);
+    const toggle = page.locator('[data-pulls-waiting-toggle][aria-expanded="false"]');
+    if (await toggle.count()) await toggle.click();
+    await page.locator(`[data-pulls-row="${row}"]`).click();
+    await expect(page.locator('[data-pulls-stack]')).toBeVisible();
+    // The pills wrap inside the screen: nothing scrolls sideways, and each is a full touch target.
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    for (const box of await page.locator('[data-pulls-hand-session], [data-pulls-launch]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+      expect(box.right).toBeLessThanOrEqual(390);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
+    await shot(page, name, schemes);
+  } finally {
+    await context.close();
+  }
+}
+
+test('a PR with no agent: Ask for (Guided review / Custom curation), Hand to an agent pill, "on the way", Start review, and Hand to another agent', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -651,26 +674,31 @@ test('a PR with no agent: the ask (Guided review / Custom curation), Hand to an 
   await list.locator('[data-pulls-waiting-toggle]').click();
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
-  const none = pane.locator('[data-pulls-no-agent]');
-  await expect(none).toHaveText(/^No agent yet\s*Hand to an agent\s*Launch an agent$/);
+  await expect(pane.locator('[data-pulls-no-agent]')).toHaveText('No agent yet');
+  // Inline, no menu: Ask for, then Hand to with the agents as pills and + New agent last.
+  const hand = pane.locator('[data-pulls-handoff="first"]');
+  await expect(hand).toContainText('Ask for');
+  await expect(hand).toContainText('Hand to');
+  await expect(pane.locator('[data-pulls-hand-menu], [role="menu"]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
-  await shot(page, '4-no-agent');
-  await none.locator('[data-pulls-hand]').click();
-  const menu = pane.locator('[data-pulls-hand-menu]');
   // Only web-app's live sessions: billing-svc's is another project's.
-  await expect(menu.locator('[data-pulls-hand-session]')).toHaveCount(2);
-  await expect(menu.locator('[data-pulls-hand-session="ses-billing-claude"]')).toHaveCount(0);
-  await expect(menu.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
-  await shot(page, '5-ask-picker');
-  await menu.locator('[data-pulls-ask-option="custom"]').click();
-  await menu.locator('[data-pulls-ask-words]').fill('only the fallback chain, and a test for a missing locale');
-  await shot(page, '5a-ask-custom');
-  await menu.locator('[data-pulls-ask-option="guide"]').click();
-  await menu.locator('[data-pulls-hand-session="ses-web-claude"]').click();
-  await expect(none).toHaveCount(0);
+  await expect(hand.locator('[data-pulls-hand-session]')).toHaveCount(2);
+  await expect(hand.locator('[data-pulls-hand-session="ses-billing-claude"]')).toHaveCount(0);
+  await expect(hand.locator('[data-pulls-launch]')).toHaveText('New agent');
+  await expect(hand.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
+  // Review sits under the two lines.
+  const handBox = (await hand.boundingBox())!;
+  expect((await pane.locator('[data-pulls-review-layers]').boundingBox())!.y).toBeGreaterThan(handBox.y + handBox.height - 1);
+  await shot(page, '4-no-agent');
+  await hand.locator('[data-pulls-ask-option="custom"]').click();
+  await hand.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
+  await shot(page, '5-ask-custom');
+  await hand.locator('[data-pulls-ask-option="guide"]').click();
+  await hand.locator('[data-pulls-hand-session="ses-web-claude"]').click();
+  await expect(hand).toHaveCount(0);
   const chip = pane.locator('[data-pulls-thread]');
   await expect(chip).toBeVisible();
-  await expect(pane.locator('[data-pulls-said]')).toContainText(/Claude Code\s*· guided review on the way/);
+  await expect(pane.locator('[data-pulls-said]')).toContainText(/Claude Code\s*· guided review on the way\s*·\s*Hand to another agent/);
   const threadId = String(await chip.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
@@ -684,6 +712,7 @@ test('a PR with no agent: the ask (Guided review / Custom curation), Hand to an 
   await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Claude Code has it · your review');
   await expect(page.locator('[data-pulls-stack] [data-pulls-said-waiting]')).toContainText('guided review on the way');
   await shot(page, '6-on-the-way');
+  await phoneShot(browser, LOCALE, 'phone-6-on-the-way');
 
   // The agent's guided review arrives through phase 1's path: on the PR it is Start review.
   await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
@@ -692,6 +721,18 @@ test('a PR with no agent: the ask (Guided review / Custom curation), Hand to an 
   await expect(startReview).toBeVisible();
   await expect(page.locator('[data-pulls-stack] [data-pulls-ask]')).toHaveCount(0);
   await shot(page, '6a-start-review');
+  await phoneShot(browser, LOCALE, 'phone-6a-start-review');
+  // Hand to another agent: the two lines again, "Hand again for", without the agent that has it; Escape folds them.
+  await page.locator('[data-pulls-stack] [data-pulls-rehand]').click();
+  const again = page.locator('[data-pulls-stack] [data-pulls-handoff="again"]');
+  await expect(again).toContainText('Hand again for');
+  await expect(again.locator('[data-pulls-hand-session]')).toHaveCount(1);
+  await expect(again.locator('[data-pulls-hand-session="ses-web-pi"]')).toBeVisible();
+  await expect(again.locator('[data-pulls-launch]')).toHaveCount(0);
+  await shot(page, '6c-start-review-rehand');
+  await again.locator('[data-pulls-ask-option="guide"]').focus();
+  await page.keyboard.press('Escape');
+  await expect(again).toHaveCount(0);
   await startReview.click();
   await expect.poll(() => page.evaluate(() => location.hash)).toContain('guide=');
   await page.unroute('**/api/inbox/sessions*');
@@ -800,20 +841,21 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no agent: the same two actions; the menu is a sheet from the bottom edge.
+    // A teammate's PR with no agent: the same two lines, each label over its line, the pills wrapping.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
-    const none = page.locator('[data-pulls-stack] [data-pulls-no-agent]');
-    await expect(none).toHaveText(/^No agent yet\s*Hand to an agent\s*Launch an agent$/);
+    const hand = page.locator('[data-pulls-stack] [data-pulls-handoff="first"]');
+    await expect(hand.locator('[data-pulls-hand-session]')).toHaveCount(2);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+    for (const box of await hand.locator('[data-pulls-hand-session], [data-pulls-launch]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+      expect(box.right).toBeLessThanOrEqual(390);
+      expect(box.height).toBeGreaterThanOrEqual(44);
+    }
     await shot(page, 'phone-4-no-agent');
-    await none.locator('[data-pulls-hand]').click();
-    await expect(none.locator('[data-pulls-hand-session]')).toHaveCount(2);
-    await shot(page, 'phone-5-ask-picker');
-    await none.locator('[data-pulls-ask-option="custom"]').click();
-    await none.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
-    await shot(page, 'phone-5a-ask-custom', ['light']);
-    await page.keyboard.press('Escape');
+    await hand.locator('[data-pulls-ask-option="custom"]').click();
+    await hand.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
+    await shot(page, 'phone-5-ask-custom');
     // Every control in the review's strip and foot is a 44 px target or more on a phone.
     for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -852,8 +894,6 @@ test('the walkthrough video (35 s): a PR with no agent, the ask, handed over, it
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await pause(2500);
     const pane = page.locator('[data-pulls-stack]');
-    await pane.locator('[data-pulls-hand]').click();
-    await pause(2500);
     await pane.locator('[data-pulls-ask-option="custom"]').click();
     await pause(800);
     await pane.locator('[data-pulls-ask-words]').pressSequentially('what changes for Arabic and Hebrew', { delay: 40 });

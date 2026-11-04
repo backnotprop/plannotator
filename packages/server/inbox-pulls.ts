@@ -640,10 +640,12 @@ export function linkInboxPulls(
 
   const linkOf = (via: InboxPullLink["via"], threadId: string, projectId: string): InboxPullLink => {
     const { last, guide } = threadFacts(store, threadId);
+    const root = store.message(threadId)?.to ?? null;
     // A thread the person just handed over: its agent has not written yet, so it is the session the first message went to.
-    const to = last ? null : (store.message(threadId)?.to ?? null);
+    const to = last ? null : root;
     return {
       via,
+      ...(via === "owner" && root?.session ? { handed_to: root.session } : {}),
       thread_id: threadId,
       thread_subject: store.threadSubject(threadId),
       project_id: projectId,

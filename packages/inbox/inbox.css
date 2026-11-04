@@ -7464,22 +7464,27 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-chip > .ib-pr-chip-k { flex: none; color: var(--muted-foreground); font-weight: 600; }
 .pn-inbox button.ib-pr-chip:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
 .pn-inbox button.ib-pr-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-.ib-pr-said { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
-.ib-pr-said-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-pr-said p { margin: 6px 0 0; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
-/* No agent yet: Hand to an agent (its menu under the button; a sheet on a phone) and Launch an agent. */
-.ib-pr-noagent-acts { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
-.pn-inbox .ib-pr-noagent-acts > .ib-btn { height: 32px; padding: 0 12px; font-size: var(--ib-fs-13-5, 13.5px); background: var(--card); }
-.ib-menu.ib-nmpop.ib-pr-handmenu-d { left: 0; top: calc(100% + 4px); bottom: auto; width: 340px; }
-/* The hand-off's ask, at the top of its menu: Guided review / Custom curation, and the person's words for a custom one. */
-.ib-pr-ask { display: flex; flex-direction: column; gap: 8px; padding: 4px 4px 8px; margin-bottom: 4px; border-bottom: 1px solid var(--border); }
-.ib-pr-ask .ib-seg { display: flex; }
-.ib-pr-ask .ib-seg-o { flex: 1; justify-content: center; }
-.pn-inbox .ib-pr-askin { width: 100%; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-.pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid var(--ring); outline-offset: 0; }
-.ib-pr-noagent-l { align-self: center; margin-right: 4px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
-.ib-pr-said > .ib-pr-noagent-acts { margin-top: 10px; }
-.pn-inbox .ib-menu .ib-mi:disabled { opacity: 0.6; }
+/* The agent that has the PR: one status line, no box (take B), its last words under it. */
+.ib-pr-status { margin-top: 18px; }
+.ib-pr-status-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-pr-status-p { margin: 6px 0 0 25px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
+.pn-inbox .ib-pr-quietlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 40%, transparent); cursor: pointer; }
+.pn-inbox .ib-pr-quietlink:hover { color: var(--foreground); }
+.pn-inbox .ib-pr-quietlink:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+/* The hand-off, inline (take B): "Ask for" then "Hand to", the agents as pills, "+ New agent" dashed and last. */
+.ib-pr-hgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 14px; margin-top: 18px; }
+.ib-pr-lab { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-pr-hline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.ib-seg.ib-seg-sm .ib-seg-o { height: 26px; padding: 0 9px; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-pr-askin { flex: 1; min-width: 220px; max-width: 360px; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent); border-color: var(--ring); }
+.pn-inbox .ib-pr-agbtn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; white-space: nowrap; }
+.pn-inbox .ib-pr-agbtn:hover:not(:disabled) { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
+.pn-inbox .ib-pr-agbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-pr-agbtn:disabled { opacity: 0.55; cursor: default; }
+.pn-inbox .ib-pr-agbtn.ib-new { padding-left: 10px; border-style: dashed; color: var(--muted-foreground); }
+.ib-pr-busy { width: 6px; height: 6px; border-radius: 50%; background: var(--success, #16a34a); }
+.ib-pr-hgrid-err { grid-column: 1 / -1; }
 .pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
 .pn-inbox .ib-pr-guide:hover { background: var(--ib-hover-s, var(--muted)); }
 .ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
@@ -7563,6 +7568,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
   .pn-inbox .ib-pr-actions .ib-btn { height: 44px; }
+  /* The hand-off on a phone: each label over its line, the pills wrapping, the words a full line. */
+  .ib-pr-hgrid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ib-pr-hgrid > .ib-pr-lab:nth-of-type(2) { margin-top: 6px; }
+  .pn-inbox .ib-pr-askin { flex-basis: 100%; max-width: none; min-width: 0; font-size: var(--ib-fs-16-in, 16px); height: 44px; }
+  .pn-inbox .ib-pr-agbtn { height: 44px; }
+  .ib-pr-hline .ib-seg-sm .ib-seg-o { height: 40px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
@@ -7581,6 +7592,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-prr-foot .ib-btn { height: 44px; }
 }
 @media (forced-colors: active) {
-  .ib-pr-pill, .pn-inbox .ib-pr-chip, .ib-pr-said { border: 1px solid CanvasText; }
+  .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }
   .ib-pr-ladder::before, .ib-pr-dash { background: CanvasText; }
 }

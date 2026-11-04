@@ -364,8 +364,6 @@ test.skipIf(!hasDom)("No agent yet: Hand to an agent lists only the project's li
   expect(document.querySelector('[data-pulls-reply]')).toBeNull();
   // Launch shows only while the Inbox can launch (compose's sessions answer says so).
   expect(document.querySelector('[data-pulls-launch]')).toBeNull();
-  await act(async () => el('[data-pulls-hand]').click());
-  await settle();
   expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
   expect(el('[data-pulls-ask-choice]').getAttribute('data-pulls-ask-choice')).toBe('guide');
   await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
@@ -389,8 +387,6 @@ test.skipIf(!hasDom)('Custom curation: the person\'s words ride /review-curate, 
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={single.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand]').click());
-  await settle();
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
   // No words yet: no agent can be picked.
   expect(el<HTMLButtonElement>('[data-pulls-hand-session="ses_web"]').disabled).toBe(true);
@@ -409,12 +405,10 @@ test.skipIf(!hasDom)('a refused check sends nothing; a stack past the hand-off l
   const many = Array.from({ length: 21 }, (_, i) => pull(500 + i, { head: `l${i}`, base: i === 0 ? 'main' : `l${i - 1}` }));
   mount(<Page answer={{ ...model, pulls: many, links: {} }} stackId={many[20]!.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand]').click());
-  await settle();
   await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
   await settle();
   expect(posted).toEqual([]);
-  expect(el('[data-pulls-no-agent] [role="alert"]').textContent).toContain('more than 20');
+  expect(el('[data-pulls-handoff] [role="alert"]').textContent).toContain('more than 20');
 });
 
 test.skipIf(!hasDom)('Launch an agent opens compose with the hand-off, the stack\'s PRs and their project, once the Inbox can launch', async () => {
@@ -435,8 +429,6 @@ test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the wor
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession('ses_web', 'prj_2')] }] };
   mount(<Page answer={{ ...model, links: {} }} stackId={theirs.key} />);
   await settle();
-  await act(async () => el('[data-pulls-hand]').click());
-  await settle();
   await act(async () => el('[data-pulls-hand-session="ses_web"]').click());
   await settle();
   const body = String(posted.find((p) => p.path.endsWith('/messages'))!.body.body);
@@ -446,12 +438,32 @@ test.skipIf(!hasDom)("a teammate's PR can be handed over for discussion: the wor
 });
 
 test.skipIf(!hasDom)('owned: "guided review on the way", Hand to another agent; the review arrived: Start review opens it', async () => {
-  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null };
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_1', name: null } };
+  sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_1', 'prj_1'), liveSession('ses_billing', 'prj_1')] }] };
   mount(<Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} />);
   await settle();
   expect(el('[data-pulls-ask="guide"]').textContent).toContain('guided review on the way');
-  expect(el('[data-pulls-said] [data-pulls-hand]').textContent).toContain('Hand to another agent');
+  expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
   expect(document.querySelector('[data-pulls-start-review]')).toBeNull();
+  // Hand to another agent opens the two lines again as "Hand again for", without the agent that has it.
+  await act(async () => el('[data-pulls-rehand]').click());
+  await settle();
+  expect(el('[data-pulls-handoff="again"]').textContent).toContain('Hand again for');
+  expect(document.querySelector('[data-pulls-rehand]')).toBeNull();
+  expect([...document.querySelectorAll('[data-pulls-hand-session]')].map((b) => b.getAttribute('data-pulls-hand-session'))).toEqual(['ses_billing']);
+  expect(document.querySelector('[data-pulls-launch]')).toBeNull();
+  await act(async () => el('[data-pulls-hand-session="ses_billing"]').click());
+  await settle();
+  expect(posted.at(-1)!.body).toMatchObject({ thread_id: 'thr_new', ask: 'guide' });
+  expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  // The session the hand-off went to is left out too, when another session answered in the thread.
+  mount(<Page answer={{ ...model, links: { [stack[2]!.key]: { ...owned, handed_to: 'ses_billing' } } }} stackId={STACK_ID} />);
+  await settle();
+  await act(async () => el('[data-pulls-rehand]').click());
+  await settle();
+  expect(document.querySelectorAll('[data-pulls-hand-session]')).toHaveLength(0);
   act(() => root?.unmount());
   host?.remove();
   const opened: string[] = [];

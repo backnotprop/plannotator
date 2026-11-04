@@ -79,6 +79,8 @@ export interface InboxPullLink {
   project_id: string;
   /** The agent that last wrote in the thread. */
   agent: { host: string | null; session: string | null; name: string | null } | null;
+  /** The person's hand-off (`via: "owner"`): the session it went to, which Hand again for leaves out with `agent`. */
+  handed_to?: string | null;
   /** The agent's last message there: what Reply answers, and its words, cut. */
   last: { message_id: string; preview: string; at: string } | null;
   /** The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review). */
