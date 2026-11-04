@@ -12,6 +12,7 @@ import type { ComposerMirrorPaint } from '@plannotator/ui/components/ComposerTok
 import { Icon } from '../icons';
 import { useVoiceBlock, useVoiceSettings, useVoiceShown, voiceWhere, type VoiceBlock, type VoiceHandle } from '../voice';
 import { voiceLine } from '../voiceLine';
+import { watchVoiceMisses } from '../voiceMiss';
 import { voicePressProps } from '../voicePress';
 import { VOICE_BARS, type VoiceSession, type VoiceTrouble, type VoiceView } from '../voiceSession';
 
@@ -67,6 +68,12 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   const { session, view } = voice;
   const live = view.phase === 'opening' || view.phase === 'listening';
   const tapped = view.phase === 'listening' && view.mode === 'tap';
+  const button = useRef<HTMLButtonElement>(null);
+  // The debug log's near misses (voiceMiss.ts): listened for only while live, and only with the debug log on.
+  useEffect(() => {
+    if (!live || !button.current) return;
+    return watchVoiceMisses(button.current, () => session.view().phase);
+  }, [live, session]);
   const iconSize = phone ? 19 : 16;
   // Opening shows from the press itself: lit, with the spinner, so a tap never looks like it did nothing. Its words
   // follow on the status line a moment later (VOICE_OPENING_SLOW_MS).
@@ -74,6 +81,7 @@ function MicButton({ voice, phone, block }: { voice: VoiceHandle; phone: boolean
   const label = block ? 'Dictate: not available here' : view.phase === 'sending' ? 'Transcribing' : opening ? 'Opening the microphone' : tapped ? 'Stop dictating' : live ? 'Dictating' : 'Dictate: hold to talk, or tap';
   return (
     <button
+      ref={button}
       type="button"
       className="ib-vmic"
       data-state={live ? 'live' : view.phase === 'sending' ? 'sending' : 'idle'}

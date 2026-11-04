@@ -84,6 +84,7 @@ const WINDOW_EVENTS = new Set([
   "voice_press",
   "voice_phase",
   "voice_open",
+  "voice_miss",
   "slow_ui",
 ]);
 /** The interactions the window times (packages/inbox/perfMarks.ts) that a `slow_ui` line may name. */
@@ -101,10 +102,14 @@ const VOICE_PHASES = new Set(["idle", "opening", "listening", "sending"]);
 const VOICE_MODES = new Set(["hold", "tap"]);
 const VOICE_TROUBLES = new Set(["notheard", "blocked", "micfailed", "nothing", "badclip", "expired", "refused", "keyrefused", "offline", "inboxgone", "codexfailed", "notready", "voiceoff"]);
 const VOICE_STEPS = new Set(["context", "stream", "worklet", "ready"]);
+/** Where a `voice_miss` landed, seen from the mic's hit box. */
+const VOICE_EDGES = new Set(["above", "below", "left", "right"]);
 const AUDIO_STATES = new Set(["running", "suspended", "closed", "interrupted"]);
 /** `nextHopProtocol` as browsers report it. */
 const PROTOCOLS = new Set(["http/0.9", "http/1.0", "http/1.1", "h2", "h2c", "h3"]);
 const count = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) && value >= 0 ? Math.round(value) : undefined);
+/** A press's offset from the mic's centre: whole px, either sign, and never past a screen's reach. */
+const offset = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) && Math.abs(value) <= 10_000 ? Math.round(value) : undefined);
 const listed = (value: unknown, list: Set<string>): string | undefined => (typeof value === "string" && list.has(value) ? value : undefined);
 const shaped = (value: unknown, shape: RegExp): string | undefined => (typeof value === "string" && shape.test(value) ? value : undefined);
 
@@ -143,6 +148,12 @@ export function cleanWindowRecord(raw: unknown): Record<string, unknown> | null 
     ok: typeof record.ok === "boolean" ? record.ok : undefined,
     what: listed(record.what, PERF_WHATS),
     audio: listed(record.audio, AUDIO_STATES),
+    dx: offset(record.dx),
+    dy: offset(record.dy),
+    px: count(record.px),
+    edge: listed(record.edge, VOICE_EDGES),
+    w: count(record.w),
+    h: count(record.h),
   };
   return Object.fromEntries(Object.entries(fields).filter(([, value]) => value !== undefined));
 }

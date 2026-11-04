@@ -64,6 +64,12 @@ describe('what may enter the debug log', () => {
     expect(cleanWindowRecord({ t: 1, ev: 'voice_phase', ...words })).toEqual({ t: 1, side: 'window', ev: 'voice_phase' });
   });
 
+  test('a near miss keeps its distance, side and the mic size; a press keeps its signed offset; anything else is dropped', () => {
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', w: 36, h: 36 })).toEqual({ t: 1, side: 'window', ev: 'voice_miss', px: 9, edge: 'below', phase: 'listening', w: 36, h: 36 });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_press', input: 'release', phase: 'listening', dx: -14, dy: 3 })).toEqual({ t: 1, side: 'window', ev: 'voice_press', input: 'release', phase: 'listening', dx: -14, dy: 3 });
+    expect(cleanWindowRecord({ t: 1, ev: 'voice_miss', px: -3, edge: 'the send button', w: 'wide', dx: 1e9, dy: 'up', target: 'BUTTON' })).toEqual({ t: 1, side: 'window', ev: 'voice_miss' });
+  });
+
   test('a page id and its request ids are digits, and pass their own check', () => {
     const page = debugPageId(1793536686632.4);
     expect(page).toMatch(/^p\d+-\d+$/);
