@@ -62,10 +62,11 @@ test('every data-code the board draws after sanitizing is one the reader read', 
       document.body.append(host);
       const root = host.attachShadow({ mode: 'open' });
       root.innerHTML = `<div class="board">${w.sanitizeShapeHtml(source)}</div>`;
-      const read = new Set(w.shapeHtmlDataCodes(source));
+      // DOMPurify trims every attribute value (String.prototype.trim, so U+00A0 too); the checks trim the reader's.
+      const read = new Set(w.shapeHtmlDataCodes(source).map((value) => value.trim()));
       for (const el of root.querySelectorAll('[data-code]')) {
         drawn++;
-        if (!read.has(el.getAttribute('data-code') ?? '')) missed.push(source);
+        if (!read.has((el.getAttribute('data-code') ?? '').trim())) missed.push(source);
       }
       host.remove();
     }
