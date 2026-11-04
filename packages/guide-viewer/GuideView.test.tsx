@@ -568,9 +568,55 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(boxHeight('a.ts')).toBe(`${59 + 8 * 20}px`);
   });
 
-  // Guards a commented file's box dipping for a frame: a remounted CodeView first reports its layout before its
-  // inline comments are drawn. A real shrink still lands once the viewer has drawn.
-  test.skipIf(!hasDom)('after a remount a shrinking report waits until the viewer has drawn', async () => {
+  // Guards a modified file growing on its first mount: the separators above and between hunks are 40 and 48 px.
+  test.skipIf(!hasDom)('the first estimate counts the separator above a first hunk and those between hunks', async () => {
+    const hunk = (at: number) => `@@ -${at},2 +${at},2 @@\n ctx\n-a\n+b\n`;
+    const patchOf = (...ats: number[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n${ats.map(hunk).join('')}`;
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
+    const box = async (patch: string) => {
+      const file: DiffFile = { path: 'a.ts', patch, additions: 1, deletions: 1, status: 'modified' };
+      await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
+      return boxHeight('a.ts');
+    };
+    // Each hunk draws three rows in Unified.
+    expect(await box(patchOf(1))).toBe(`${59 + 3 * 20}px`);
+    expect(await box(patchOf(10))).toBe(`${59 + 3 * 20 + 40}px`);
+    expect(await box(patchOf(1, 30))).toBe(`${59 + 6 * 20 + 48}px`);
+    expect(await box(patchOf(10, 30, 50))).toBe(`${59 + 9 * 20 + 40 + 2 * 48}px`);
+  });
+
+  // Guards the same growth on a file with no final newline: the viewer draws that note as a row of its own.
+  test.skipIf(!hasDom)('the first estimate gives a "No newline" note its row, on the side it follows', async () => {
+    const NOTE = '\\ No newline at end of file\n';
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
+    const box = async (body: string, diffStyle: 'split' | 'unified') => {
+      const file: DiffFile = { path: 'a.ts', patch: `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n${body}`, additions: 1, deletions: 1, status: 'modified' };
+      await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle } });
+      return boxHeight('a.ts');
+    };
+    // As measured in the browser.
+    const oldSide = `-a\n${NOTE}+a\n`;
+    const bothSides = `-a\n${NOTE}+b\n${NOTE}`;
+    const afterContext = `-a\n+b\n c\n${NOTE}`;
+    expect(await box(oldSide, 'unified')).toBe('119px');
+    expect(await box(oldSide, 'split')).toBe('99px');
+    expect(await box(bothSides, 'unified')).toBe('139px');
+    expect(await box(bothSides, 'split')).toBe('99px');
+    expect(await box(afterContext, 'unified')).toBe('139px');
+    expect(await box(afterContext, 'split')).toBe('119px');
+  });
+
+  // A commented file back in the outer window: 20 files so the window runs, frames by hand once it is back.
+  // Each test waits out the mount lease, up to twice, hence the explicit timeouts.
+  async function withCommentedFile(run: (file: {
+    path: string;
+    report: (height: number) => Promise<void>;
+    frame: () => Promise<void>;
+    /** The file's CodeView unmounted (the box keeps its height). */
+    away: () => Promise<void>;
+    /** Brought back by focus; from here frames run by hand. */
+    back: () => Promise<void>;
+  }) => Promise<void>) {
     const originalObserver = globalThis.IntersectionObserver;
     Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: FakeIntersectionObserver });
     const realFrame = globalThis.requestAnimationFrame;
@@ -586,75 +632,115 @@ describe('GuideView bare (the Inbox PR page)', () => {
         await new Promise((resolve) => setTimeout(resolve, 25));
       });
       const path = files[1]!.path;
-      const report = () => [...latestCodeViewProps].reverse().find((p) => (p.files as DiffFile[])[0]?.path === path)!.onContentHeightChange as (h: number) => void;
-      await near((index) => index < 8);
-      // The file with its comments drawn.
-      await act(async () => report()(400));
-      expect(boxHeight(path)).toBe('402px');
-
-      // Past the mount lease, the window moves away and the CodeView unmounts; the box keeps its height.
-      await act(async () => { await new Promise((resolve) => setTimeout(resolve, 1_550)); });
-      await near((index) => index >= 8 && index < 16);
-      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).toBeNull();
-      expect(boxHeight(path)).toBe('402px');
-
-      // Frames by hand while a wait runs: happy-dom's run at once, and the wait is counted in frames. (The viewport
-      // manager needs real ones to move the window, so `back` brings the file in first.)
+      const props = () => [...latestCodeViewProps].reverse().find((p) => (p.files as DiffFile[])[0]?.path === path)!;
+      const mountedView = () => host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`);
       const queued = new Map<number, FrameRequestCallback>();
       let frameId = 0;
-      const back = async () => {
+      const realFrames = () => {
         globalThis.requestAnimationFrame = realFrame;
         globalThis.cancelAnimationFrame = realCancel;
-        await act(async () => {
-          shells[1]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-          await new Promise((resolve) => setTimeout(resolve, 25));
-        });
-        globalThis.requestAnimationFrame = (callback) => {
-          frameId += 1;
-          queued.set(frameId, callback);
-          return frameId;
-        };
-        globalThis.cancelAnimationFrame = (id) => void queued.delete(id);
       };
-      const frame = () => act(async () => {
-        const due = [...queued.values()];
-        queued.clear();
-        for (const callback of due) callback(0);
-      });
-
-      // Back: the first report, before the comments are drawn, does not shrink the box; a growth lands at once.
-      await back();
-      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).not.toBeNull();
-      await act(async () => report()(157));
+      await near((index) => index < 8);
+      // The file with its comments drawn.
+      await act(async () => (props().onContentHeightChange as (h: number) => void)(400));
       expect(boxHeight(path)).toBe('402px');
-      await act(async () => report()(410));
-      expect(boxHeight(path)).toBe('412px');
-      // The wait is over: a report that really is smaller lands at once.
-      await act(async () => report()(300));
-      expect(boxHeight(path)).toBe('302px');
-
-      // A shrink alone, the viewer drawn with no later report: it lands after two frames.
-      globalThis.requestAnimationFrame = realFrame;
-      globalThis.cancelAnimationFrame = realCancel;
-      await act(async () => {
-        shells[8]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
-        await new Promise((resolve) => setTimeout(resolve, 1_550));
+      await run({
+        path,
+        report: (height) => act(async () => (props().onContentHeightChange as (h: number) => void)(height)),
+        // happy-dom's frames run at once, and the wait is counted in frames.
+        frame: () => act(async () => {
+          const due = [...queued.values()];
+          queued.clear();
+          for (const callback of due) callback(0);
+        }),
+        away: async () => {
+          // Past the mount lease; the viewport manager moves the window on real frames.
+          realFrames();
+          await act(async () => {
+            shells[8]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 1_550));
+          });
+          await near((index) => index >= 8 && index < 16);
+          expect(mountedView()).toBeNull();
+        },
+        back: async () => {
+          realFrames();
+          await act(async () => {
+            shells[1]!.dispatchEvent(new FocusEvent('focusin', { bubbles: true }));
+            await new Promise((resolve) => setTimeout(resolve, 25));
+          });
+          expect(mountedView()).not.toBeNull();
+          globalThis.requestAnimationFrame = (callback) => {
+            frameId += 1;
+            queued.set(frameId, callback);
+            return frameId;
+          };
+          globalThis.cancelAnimationFrame = (id) => void queued.delete(id);
+        },
       });
-      await near((index) => index >= 8 && index < 16);
-      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${path}"]`)).toBeNull();
-      await back();
-      await act(async () => report()(157));
-      await frame();
-      expect(boxHeight(path)).toBe('302px');
-      await frame();
-      expect(boxHeight(path)).toBe('159px');
     } finally {
       globalThis.requestAnimationFrame = realFrame;
       globalThis.cancelAnimationFrame = realCancel;
       FakeIntersectionObserver.latest = null;
       Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: originalObserver });
     }
-  });
+  }
+
+  // Guards a commented file's box dipping for a frame: a remounted CodeView first reports its layout before its
+  // inline comments are drawn. A growth ends the wait; a real shrink then lands at once.
+  test.skipIf(!hasDom)('after a remount a shrinking report waits, and a growth ends the wait', async () => {
+    await withCommentedFile(async ({ path, report, away, back }) => {
+      await away();
+      expect(boxHeight(path)).toBe('402px');
+      await back();
+      await report(157);
+      expect(boxHeight(path)).toBe('402px');
+      await report(410);
+      expect(boxHeight(path)).toBe('412px');
+      await report(300);
+      expect(boxHeight(path)).toBe('302px');
+    });
+  }, 15_000);
+
+  // Guards a real shrink never landing, or landing before the viewer has drawn.
+  test.skipIf(!hasDom)('after a remount a shrink alone lands two frames later', async () => {
+    await withCommentedFile(async ({ path, report, frame, away, back }) => {
+      await away();
+      await back();
+      await report(157);
+      await frame();
+      expect(boxHeight(path)).toBe('402px');
+      await frame();
+      expect(boxHeight(path)).toBe('159px');
+    });
+  }, 15_000);
+
+  // Guards the box settling on a stale height: only the last report of the wait counts.
+  test.skipIf(!hasDom)('after a remount the latest shrinking report is the one that lands', async () => {
+    await withCommentedFile(async ({ path, report, frame, away, back }) => {
+      await away();
+      await back();
+      await report(157);
+      await report(200);
+      expect(boxHeight(path)).toBe('402px');
+      await frame();
+      await frame();
+      expect(boxHeight(path)).toBe('202px');
+    });
+  }, 15_000);
+
+  // Guards a wait outliving its CodeView: gone again before the frames ran, the box keeps its height.
+  test.skipIf(!hasDom)('a shrink still waiting when the file unmounts never lands', async () => {
+    await withCommentedFile(async ({ path, report, frame, away, back }) => {
+      await away();
+      await back();
+      await report(157);
+      await away();
+      await frame();
+      await frame();
+      expect(boxHeight(path)).toBe('402px');
+    });
+  }, 15_000);
 
   // Guards the shared chain's default (the review app, guides.show, VS Code): unchanged.
   test.skipIf(!hasDom)('with neither bare nor the opt-in the box keeps its estimate and the renderer is asked for no height', async () => {

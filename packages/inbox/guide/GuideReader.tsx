@@ -374,7 +374,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
         bare={bare}
-        // Every file's box as tall as its diff, in all of the Inbox's readers (a thread's guided review, the review, the PR page).
+        // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />
       {globalAnchor && globalDraftKey && (

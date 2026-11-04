@@ -42,7 +42,7 @@ export interface GuideDiffRendererProps {
   isActive: boolean;
   allowScrollChaining: true;
   /**
-   * Passed only when the guide fits each file's box to its content (GuideView `bare`): the renderer reports the
+   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
    * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
    */
   onContentHeightChange?: (height: number) => void;

@@ -20,14 +20,14 @@ function estimateDiffHeight(patch: string): number {
  * The box a file's diff fills when the guide fits boxes to their content (GuideView `fitFileHeights`), before the
  * renderer measures it: the rows the diff draws (its hunks' lines, not git's header lines; in Split a run of removed
  * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
- * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, a 33 px header, 32 px separators,
- * 8 px above and below the list, 8 px in the code block, a 1 px border). A patch with no hunk (a binary file, a
- * rename) keeps the old estimate.
+ * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, one more for a "\ No newline", a
+ * 33 px header, a 40 px separator above the first hunk and 48 px between hunks, 8 px above and below the list, 8 px
+ * in the code block, a 1 px border). A patch with no hunk (a binary file, a rename) keeps the old estimate.
  */
 function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified'): number {
   let rows = 0;
   let hunks = 0;
-  let separators = 0;
+  let separatorHeight = 0;
   let inHunk = false;
   // The change block being read: its removed and added lines (Split draws max of the two rows).
   let removed = 0;
@@ -41,7 +41,8 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
     if (line.startsWith('@@')) {
       closeBlock();
       const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunks > 0 || (at && (Number(at[1]) > 1 || Number(at[2]) > 1))) separators += 1;
+      if (hunks > 0) separatorHeight += 48;
+      else if (at && (Number(at[1]) > 1 || Number(at[2]) > 1)) separatorHeight += 40;
       hunks += 1;
       inHunk = true;
     } else if (line.startsWith('diff --git')) {
@@ -56,11 +57,16 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
     } else if (inHunk && line[0] === ' ') {
       closeBlock();
       rows += 1;
+    } else if (inHunk && line[0] === '\\') {
+      // "\ No newline at end of file": the viewer draws it as a row of the side it follows.
+      if (added > 0) added += 1;
+      else if (removed > 0) removed += 1;
+      else rows += 1;
     }
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return Math.min(2 + 16 + 33 + 8 + rows * 20 + separators * 32, MAX_DIFF_HEIGHT);
+  return Math.min(2 + 16 + 33 + 8 + rows * 20 + separatorHeight, MAX_DIFF_HEIGHT);
 }
 
 interface GuideFileCardProps {

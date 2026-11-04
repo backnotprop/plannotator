@@ -180,7 +180,7 @@ interface GuideSectionCardProps {
   onRequestReveal: (filePath: string) => void;
   /** Renders guide links (`chapter:`, `code:`) in the chapter overview. */
   renderLink?: GuideLinkRenderer;
-  /** Each file's box as tall as its diff (GuideView `bare`); see GuideFileCard `fitContent`. */
+  /** Each file's box as tall as its diff (GuideView `fitFileHeights`); see GuideFileCard `fitContent`. */
   fitFileHeights?: boolean;
   /** Drawn on the tab's row, left of the tab, when this card has one (GuideView `bare`: the header's actions). */
   tabLead?: React.ReactNode;
