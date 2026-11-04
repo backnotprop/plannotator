@@ -2567,7 +2567,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
-        const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
+        // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
+        // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
+        const labelsHere = ownerOrLocal(req, via);
+        const sendDeliveries = (labels: boolean, moved: boolean) => {
+          if (!moved && !labelsHere) return;
+          send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+        };
         if (windowId) deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
         // the outbox, each in its own frame and never with an `id:`, so the local seq and Last-Event-ID stay this Inbox's.
@@ -3102,16 +3108,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A session's turn starting or ending, its connection going away, or an asker grace running out moves a
   // row's delivery without writing a store line. The sessions' delivery signature is compared on a short
   // timer, only while a window listens, and `event: deliveries` tells the windows to read the list again.
-  const deliveryListeners = new Set<() => void>();
+  // A poll that changed a session's label (issue #2450) says `labels` on the same frame: the rows' agents and the
+  // open thread's authors read the list again.
+  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only).
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean) => void>();
   let lastDeliverySignature = "";
+  let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     // Launched threads: respawn a stopped session someone wrote to; read the CLI only while a window watches.
     launch.sweep(deliveryListeners.size > 0);
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature() + launch.signature();
-    if (signature === lastDeliverySignature) return;
+    const moved = signature !== lastDeliverySignature;
+    const labels = live.labelVersion() !== lastLabelVersion;
+    if (!moved && !labels) return;
     lastDeliverySignature = signature;
-    for (const listener of deliveryListeners) listener();
+    lastLabelVersion = live.labelVersion();
+    for (const listener of deliveryListeners) listener(labels, moved);
   }, INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -3142,7 +3155,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     readBody: (req) => readBody(req),
     json,
     onChange: () => {
-      for (const listener of deliveryListeners) listener();
+      // A run line moved: a delivery move to every window, no label change.
+      for (const listener of deliveryListeners) listener(false, true);
     },
     log: (line) => process.stderr.write(`${line}\n`),
     // The permission hook runs this Plannotator.
@@ -3524,7 +3538,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url))));
+      if (path === "/api/inbox/threads" && req.method === "GET") {
+        const rows = perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
+        // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
+        // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
+        return json(ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows);
+      }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -4699,10 +4718,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
       // Step 8: the live sessions of a thread's project, and New message.
-      const newMessage = await live.route(req, path, isGuest(req, via));
+      // Session labels (issue #2450) ride these two for this computer's owner only: a tailnet guest reads them as before.
+      const newMessage = await live.route(req, path, ownerOrLocal(req, via), isGuest(req, via));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
-      const taggable = tagsRoute.route(req, path);
+      const taggable = tagsRoute.route(req, path, ownerOrLocal(req, via));
       if (taggable) return taggable;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);
