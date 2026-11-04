@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_TEXT_COMPLETE_META_KEY, inboxAgentTool, inboxToolCall, inboxToolResultText, parseInboxToolList } from "@plannotator/shared/inbox/connection";
-import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_ACTION_ON, inboxBoardRequestBlock } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS } from "./inbox-mcp";
 
@@ -455,6 +455,45 @@ describe("the Board page's routes: New card and the look", () => {
       ["Billing", null],
       ["Code review", null],
     ]);
+  });
+
+  // The owner, 2026-11-04: on clearing out, "Only on like a board --help or a hook nudge when agents create
+  // initiatives ... Try not to bloat main instruction or main tool description." What regresses: the line on every
+  // join (noise), a retry that made nothing claiming it did, or the sentence creeping back into what every request carries.
+  test("the answer nudges only when this call made the initiative; every request's text carries no such sentence", async () => {
+    const { card, server } = await world();
+    const nudge = 'Made initiative "Billing". When its work is done, delete it (initiative_delete); its cards stay.';
+    const made = await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" });
+    expect(made.content[0]!.text.split("\n").at(-1)).toBe(nudge);
+    expect(made.structuredContent.initiative_hint).toBe(nudge);
+
+    const quiet = async (result: Result) => {
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0]!.text).not.toContain("delete it");
+      expect(result.structuredContent.initiative_hint).toBeUndefined();
+    };
+    await quiet(await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" }));
+    const joined = await card({ op: "create", title: "Invoices", initiative: "billing" });
+    await quiet(joined);
+    const id = joined.structuredContent.card.id as string;
+    await quiet(await card({ op: "say", card_id: id, say: "started" }));
+    await quiet(await card({ op: "say", card_id: id, initiative: "" }));
+    await quiet(await card({ op: "say", card_id: id, initiative: "Billing" }));
+    const moved = await card({ op: "say", card_id: id, initiative: "Refunds" });
+    expect(moved.content[0]!.text.split("\n").at(-1)).toBe(nudge.replace("Billing", "Refunds"));
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    const text = await response.text();
+    const data = text.split("\n").find((line) => line.startsWith("data:"));
+    const tools = parseInboxToolList(JSON.parse(data ? data.slice(5) : text).result);
+    const sentence = /work is done|delete it/;
+    expect(JSON.stringify(tools)).not.toMatch(sentence);
+    expect(JSON.stringify(inboxAgentTool(tools))).not.toMatch(sentence);
+    expect(inboxBoardRequestBlock("msg_x")).not.toMatch(sentence);
   });
 
   // The owner, 2026-11-04: agents "clear initiatives out". The failures guarded: a delete that takes cards with it, or

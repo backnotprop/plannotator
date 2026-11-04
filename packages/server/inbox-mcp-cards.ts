@@ -22,6 +22,7 @@ import {
   inboxAgentName,
   inboxCardRefsOf,
   inboxCardColumnOf,
+  inboxCardInitiativeMadeNudge,
   inboxCardTitleHint,
   INBOX_CARD_INITIATIVE_FIELD,
   INBOX_CARD_INITIATIVE_RULE,
@@ -200,11 +201,15 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const by: InboxAuthor = { kind: "agent", host: input.agent_host?.trim() || null, session, name: inboxStoredAgentName(input.agent_name) };
   // A title that reads like a sentence gets a hint after the card line (approved 2026-10-27; never refused).
   const initiativeName = (id: string) => store.initiative(id)?.name ?? null;
+  // Every initiative before this call, deleted ones too: one the answered card is in that is not among them, this call made.
+  const knownInitiatives = new Set(store.initiatives().map((initiative) => initiative.id));
   const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);
+    const madeName = wire.initiative && !knownInitiatives.has(wire.initiative) ? initiativeName(wire.initiative) : null;
+    const nudge = madeName === null ? null : inboxCardInitiativeMadeNudge(madeName);
     return {
-      text: `${verb}:\n${cardLineText(wire, initiativeName)}${hint ? `\n${hint}` : ""}`,
-      structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}) },
+      text: `${verb}:\n${cardLineText(wire, initiativeName)}${hint ? `\n${hint}` : ""}${nudge ? `\n${nudge}` : ""}`,
+      structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}), ...(nudge ? { initiative_hint: nudge } : {}) },
     };
   };
 

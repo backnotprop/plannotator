@@ -341,4 +341,6 @@ test("no shipped skill teaches thread steps, which are off by default", () => {
 test("the skill's card section carries the initiative rule word for word", () => {
   expect(skillDoc).toContain(INBOX_CARD_INITIATIVE_RULE);
   expect(skillDoc).toContain("--initiative <name>");
+  // Clearing out is in `plannotator card --help` and the nudge only (the owner: "Try not to bloat main instruction").
+  expect(skillDoc).not.toMatch(/work is done, delete|\bdelete it \(/);
 });

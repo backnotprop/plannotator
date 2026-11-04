@@ -125,11 +125,24 @@ export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
  * Words approved by the owner (q-f1ff983a, msg_01M6MCACRRYAJJ3PNS25BH4AZ7,
  * with "Not all cards need an initiative:" for the draft's opening). Change
  * them here only (the skill, being markdown, pastes the rule;
- * plannotator-skill-reference.test.ts checks it still does). The last
- * sentence, on clearing out, is a draft awaiting the owner's OK.
+ * plannotator-skill-reference.test.ts checks it still does).
  */
 export const INBOX_CARD_INITIATIVE_RULE =
-  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it. When an initiative's work is done, delete it (`initiative_delete`); its cards stay.";
+  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it.";
+
+/**
+ * Clearing initiatives out. The owner, 2026-11-04: "Only on like a board --help
+ * or a hook nudge when agents create initiatives ... Try not to bloat main
+ * instruction or main tool description." So it is in `plannotator card --help`
+ * and, per call, in the answer to a call that just made an initiative
+ * (inboxCardInitiativeMadeNudge), and nowhere the rule goes.
+ */
+export const INBOX_CARD_INITIATIVE_CLEAR_OUT = "When an initiative's work is done, delete it (`initiative_delete`); its cards stay.";
+
+/** The line an agent's call gets when it just made an initiative; joining one gets none. */
+export function inboxCardInitiativeMadeNudge(name: string): string {
+  return `Made initiative ${JSON.stringify(name)}. When its work is done, delete it (initiative_delete); its cards stay.`;
+}
 
 /** What the `initiative` field takes, before the rule. */
 export const INBOX_CARD_INITIATIVE_FIELD =
