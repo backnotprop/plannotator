@@ -128,6 +128,9 @@ interface CommentPopoverProps {
   /** Opt-in: the header's text in place of the quoted `contextText` (an image
    *  region's "Region 3 · 356 × 486 px"). Absent → the quote, as always. */
   headerText?: string;
+  /** Opt-in: why the last submit failed (Shape: a Change it that did not reach the server), shown under the
+   *  header with `role="alert"` while the person's words stay in the box. Absent → nothing, as always. */
+  errorText?: string;
   /** Opt-in: `side` opens the popover beside the anchor (right, else left),
    *  falling back to below/above when neither side has room (an image region
    *  in the image viewer). Absent → below/above, as always. */
@@ -234,6 +237,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   captureStrayKeys = false,
   yieldState,
   headerText,
+  errorText,
   placement = 'below',
   zIndex,
   autoFocus = true,
@@ -628,6 +632,13 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
       ? `"${contextText.length > 50 ? contextText.slice(0, 50) + '...' : contextText}"`
       : 'Comment');
 
+  // Inline colour: no new utility class reaches the guides.show viewer CSS this file is scanned into.
+  const errorRow = errorText ? (
+    <p role="alert" data-comment-popover-error="true" className="px-3 pt-2 text-xs" style={{ color: 'var(--destructive)' }}>
+      {errorText}
+    </p>
+  ) : null;
+
   const canSubmit =
     hasUnsavedContent ||
     (allowEmptySubmit && initialText.trim().length > 0);
@@ -736,6 +747,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
             </div>
           </div>
 
+          {errorRow}
           {chipsRow}
 
           {/* Textarea */}
@@ -894,6 +906,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
         </div>
       </div>
 
+      {errorRow}
       {chipsRow}
 
       {/* Textarea */}

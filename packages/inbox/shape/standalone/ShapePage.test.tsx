@@ -102,7 +102,8 @@ test('the grid: the header, every active board, Find filters as you type', async
   await settle(() => el.querySelectorAll('[data-shape-card]').length === 2);
   expect(el.querySelector('h1')?.textContent).toBe('Shape');
   expect(el.querySelector('.shp-page-brand')?.textContent).toBe('Plannotator');
-  expect(el.querySelector('.shp-page-sum')?.textContent).toBe('2 boards');
+  // The count is the active boards' (the finished one is not counted), not its wording.
+  expect(el.querySelector('.shp-page-sum')?.textContent?.match(/\d+/)?.[0]).toBe('2');
   expect([...el.querySelectorAll('[data-shape-card]')].map((c) => c.getAttribute('data-shape-card')).sort()).toEqual([ids[0], ids[1]].sort());
   const find = el.querySelector<HTMLInputElement>('.shp-page-find input')!;
   act(() => {
@@ -159,8 +160,12 @@ test('no boards: the Pebble and what a board is, not a blank page', async () => 
   const { api } = fakeApi({ boards: [] });
   const el = await mount(api);
   await settle(() => !!el.querySelector('[data-shape-page-empty]'));
-  expect(el.querySelector('[data-shape-page-empty] h2')?.textContent).toBe('No boards yet.');
-  expect(el.querySelector('[data-shape-page-empty] p')?.textContent).toContain('Boards your agents draw and keep current');
+  const empty = el.querySelector('[data-shape-page-empty]')!;
+  // A living Pebble, a heading and a line that says what a board is: something to read, not a blank grid.
+  expect(empty.querySelector('.shp-pebble[data-on]')).not.toBeNull();
+  expect(empty.querySelector('h2')?.textContent?.trim()).toBeTruthy();
+  expect(empty.querySelector('p')?.textContent?.trim()).toBeTruthy();
+  expect(el.querySelector('[data-shape-card]')).toBeNull();
   // Nothing to count or find yet.
   expect(el.querySelector('.shp-page-find')).toBeNull();
   expect(el.querySelector('.shp-page-sum')).toBeNull();

@@ -16,6 +16,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { isShapeId } from "@plannotator/shared/shape/format";
 import { createShapeStore, shapesDirOf } from "@plannotator/shared/shape/store";
+import { selfCommand } from "./inbox-command";
 import { runningShapeServer, startShapeServer, type RunningShapeServer } from "@plannotator/server/shape";
 
 const START_TIMEOUT_MS = 10_000;
@@ -87,8 +88,7 @@ function defaultSpawn(dataDir: string): void {
   const dir = shapesDirOf(dataDir);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const log = openSync(join(dir, SHAPE_SERVER_LOG), "a", 0o600);
-  const script = process.argv[1];
-  const self = script && /\.(?:[cm]?[jt]s)$/.test(script) ? [process.execPath, script] : [process.execPath];
+  const self = selfCommand();
   const child = spawn(self[0]!, [...self.slice(1), "shape", "serve"], {
     detached: true,
     // Never the caller's folder: a long-lived process would hold the agent's project as its working directory.
@@ -152,13 +152,13 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
 }
 
 /** `plannotator shape serve` (internal): the Shapes server in this process, until it is idle. */
-export async function runShapeServe(deps: { dataDir: string; page: () => string; version: string }): Promise<number> {
+export async function runShapeServe(deps: { dataDir: string; pageGzip: () => Uint8Array; version: string }): Promise<number> {
   if (await runningShapeServer(deps.dataDir)) return 0;
   let resolveExit: (code: number) => void = () => {};
   const exited = new Promise<number>((r) => (resolveExit = r));
   const server = await startShapeServer({
     dataDir: deps.dataDir,
-    page: deps.page,
+    pageGzip: deps.pageGzip,
     version: deps.version,
     onIdle: () => {
       server.stop();

@@ -2,9 +2,9 @@
  * The standalone Shape page's requests (packages/server/shape.ts): the same
  * Shape routes the Inbox mounts, on the Shapes server, plus its own
  * `/api/shape-server` (who it is, and the `serverSession` every write carries,
- * so a page left open across a restart gets a 409 instead of writing to
- * another server's boards).
+ * so a page left open across a restart gets a 409 instead of writing blind).
  */
+import { SERVER_SESSION_MISMATCH_CODE } from '@plannotator/core/server-session';
 import type { ShapeNote } from '@plannotator/core/shape';
 import type { InboxShapeSummary, ShapeLoadedWire } from '../../api';
 
@@ -47,18 +47,37 @@ export function createShapePageApi(options: { fetch?: (path: string, init?: Requ
 
   const get = async <T>(path: string, signal?: AbortSignal) =>
     read<T>(await doFetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
-  const post = async <T>(path: string, body: Record<string, unknown>) =>
-    read<T>(
-      await doFetch(path, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-        body: JSON.stringify(serverSession ? { ...body, serverSession } : body),
-      }),
-    );
+  const send = async (path: string, body: Record<string, unknown>) =>
+    doFetch(path, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      body: JSON.stringify(serverSession ? { ...body, serverSession } : body),
+    });
+  /**
+   * A write. A 409 `session_mismatch` means another Shapes server answers on this address now (most often this
+   * data dir's, restarted after its idle exit; the event stream already reconnected to it) and it saved nothing. The
+   * page takes that server's `serverSession` and sends once more. Safe: every write names a board by its id
+   * (`shp_` + a ULID), so a server of another data dir has no such board and refuses it (404); the same store
+   * takes it. A second refusal is the caller's to show.
+   */
+  const post = async <T>(path: string, body: Record<string, unknown>) => {
+    const first = await send(path, body);
+    if (first.status === 409) {
+      const refused = (await first.clone().json().catch(() => null)) as { code?: unknown } | null;
+      if (refused?.code === SERVER_SESSION_MISMATCH_CODE) {
+        const live = await read<ShapeServerInfoWire>(await doFetch('/api/shape-server', { headers: { Accept: 'application/json' }, cache: 'no-store' }));
+        if (live.serverSession && live.serverSession !== serverSession) {
+          serverSession = live.serverSession;
+          return read<T>(await send(path, body));
+        }
+      }
+    }
+    return read<T>(first);
+  };
   const at = (id: string) => `/api/shapes/${encodeURIComponent(id)}`;
 
   return {
-    /** Who serves this page. The first answer's `serverSession` is the page's for good. */
+    /** Who serves this page. The first answer's `serverSession` is the page's, until a write finds a restarted server. */
     async info(signal?: AbortSignal): Promise<ShapeServerInfoWire> {
       const info = await get<ShapeServerInfoWire>('/api/shape-server', signal);
       serverSession ??= info.serverSession;

@@ -282,8 +282,10 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
+// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
+// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
 // @ts-ignore - Bun import attribute for file
-import shapeHtmlPath from "../dist/shape.html" with { type: "file" };
+import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -292,7 +294,8 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
-const shapeHtmlContent = embeddedPage(shapeHtmlPath);
+let shapeHtmlGz: Buffer | undefined;
+const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -369,7 +372,7 @@ const rawArgs = process.argv.slice(2);
     );
   }
   if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
-    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), page: shapeHtmlContent, version: getCliVersion() ?? "dev" }));
+    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
   }
   if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
     process.exit(
