@@ -207,6 +207,11 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
+import { prCommandRuntime } from "./pr";
+import { createInboxPullLinks } from "./inbox-pull-links";
+import { INBOX_PULL_OWNER_KEYS_MAX } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -425,6 +430,11 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /**
+   * Tests: the `gh` / `glab` a review posted to the forge runs through (Pull requests' Post to GitHub/GitLab; the review
+   * app's providers, `submitPRReview`). Default the Bun command runtime (pr.ts).
+   */
+  prRuntime?: PRRuntime;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -474,6 +484,36 @@ export interface InboxServerOptions {
  * 3 s to spare (a slow click, a slow network), so an Undo never reaches an agent.
  */
 export const INBOX_SET_ASIDE_DELAY_MS = 10_000;
+
+/** A review posted to the forge from the Inbox: its main comment (GitHub refuses one over 65,536), and its comments. */
+const PULL_REVIEW_BODY_MAX = 65_536;
+const PULL_REVIEW_COMMENTS_MAX = 500;
+const PULL_REVIEW_POSTED_MAX = 1_000;
+
+/** The review's line comments as the review app builds them (`PRReviewFileComment`), or null when any is malformed. */
+function pullReviewComments(value: unknown): PRReviewFileComment[] | null {
+  if (value === undefined) return [];
+  if (!Array.isArray(value) || value.length > PULL_REVIEW_COMMENTS_MAX) return null;
+  const line = (n: unknown) => typeof n === "number" && Number.isInteger(n) && n > 0 && n < 10_000_000;
+  const side = (v: unknown) => v === "LEFT" || v === "RIGHT";
+  const out: PRReviewFileComment[] = [];
+  for (const item of value) {
+    if (!item || typeof item !== "object") return null;
+    const c = item as Record<string, unknown>;
+    if (typeof c.path !== "string" || c.path.length === 0 || c.path.length > 1000 || !line(c.line) || !side(c.side) || typeof c.body !== "string" || c.body.length > PULL_REVIEW_BODY_MAX) return null;
+    if (c.start_line !== undefined && !line(c.start_line)) return null;
+    if (c.start_side !== undefined && !side(c.start_side)) return null;
+    out.push({
+      path: c.path,
+      line: c.line as number,
+      side: c.side as "LEFT" | "RIGHT",
+      body: c.body,
+      ...(c.start_line !== undefined ? { start_line: c.start_line as number } : {}),
+      ...(c.start_side !== undefined ? { start_side: c.start_side as "LEFT" | "RIGHT" } : {}),
+    });
+  }
+  return out;
+}
 
 /** Settings' Archived block: rows per page of `GET /api/inbox/threads/archived`, and the most one page may ask for. */
 export const INBOX_ARCHIVED_PAGE = 50;
@@ -951,6 +991,54 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
   const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
+  // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
+  // The project roots whose origin the Pull requests list has waited for once.
+  const pullRepoRead = new Set<string>();
+  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
+  const postedReviews = new Set<string>();
+  // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
+  const pullOwners = createInboxPullLinks(dataDir);
+  const pullLinkStore: InboxPullLinkStore = {
+    threadsOf: (id) => store.threadsOf(id),
+    threadMessageIds: (id) => store.threadMessageIds(id),
+    message: (id) => store.message(id),
+    threadSubject: (id) => store.threadSubject(id),
+    threadProject: (id) => {
+      const root = store.message(id);
+      return root && root.thread_id === id ? store.canonicalProjectId(root.project_id) : null;
+    },
+  };
+  // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
+  // A project's origin is read once before its first list (the cache is read-behind), so the first open after a
+  // start is not empty; after that the cache's own refresh keeps it.
+  const pullProjects = async (): Promise<{ projectsByRepo: Map<string, string[]>; wanted: InboxPullRepo[] }> => {
+    const projectsByRepo = new Map<string, string[]>();
+    const wanted: InboxPullRepo[] = [];
+    const projectsNow = store.allProjects();
+    const reposNow = await Promise.all(
+      projectsNow.map(async (project) => {
+        const repo = repos.get(project.root);
+        if (repo || pullRepoRead.has(project.root)) return repo;
+        pullRepoRead.add(project.root);
+        return repos.refresh(project.root);
+      }),
+    );
+    for (const [i, project] of projectsNow.entries()) {
+      const repo = reposNow[i];
+      if (!repo?.host) continue;
+      const key = `${repo.host}/${repo.display}`.toLowerCase();
+      const id = store.canonicalProjectId(project.id);
+      const ids = projectsByRepo.get(key);
+      if (ids) {
+        if (!ids.includes(id)) ids.push(id);
+        continue;
+      }
+      projectsByRepo.set(key, [id]);
+      wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: id });
+    }
+    return { projectsByRepo, wanted };
+  };
 
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
@@ -3376,6 +3464,144 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!result) throw new InboxError("validation_error", "url: an https link to an issue, pull request or merge request.", { field: "url" });
         return json({ serverSession, ...result });
       }
+      // Pull requests (inbox-pulls.ts; approval "inbox-code-review-direction", items 4 and 5): the PRs of the
+      // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
+      // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
+      // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/pulls/diff") {
+          const key = url.searchParams.get("key") ?? "";
+          const scope = url.searchParams.get("scope") ?? "layer";
+          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          try {
+            return json({ serverSession, ...(await pulls.diff(key, scope)) });
+          } catch (cause) {
+            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
+            throw cause;
+          }
+        }
+        const { projectsByRepo, wanted } = await pullProjects();
+        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
+        const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
+        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
+      }
+      // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
+      // live session, or to an agent it launches) just started for it. The Inbox keeps that choice
+      // (inbox/pull-links.json); verdicts and Reply go there. Same guards as the list.
+      if (path === "/api/inbox/pulls/owner") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const keys = Array.isArray(body.keys) ? body.keys : null;
+        if (!keys || keys.length === 0 || keys.length > INBOX_PULL_OWNER_KEYS_MAX || !keys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 600)) {
+          throw new InboxError("validation_error", `keys: 1 to ${INBOX_PULL_OWNER_KEYS_MAX} pull request keys from the list.`, { field: "keys" });
+        }
+        // `validate_only` with `project_id`: may these PRs go to an agent in that project? Asked before the hand-off is
+        // sent, so nothing reaches an agent that the Inbox would then refuse to keep as the PRs' owner.
+        const validateOnly = body.validate_only === true;
+        const threadId = typeof body.thread_id === "string" ? body.thread_id : "";
+        const projectId = validateOnly
+          ? typeof body.project_id === "string" && store.project(body.project_id)
+            ? store.canonicalProjectId(body.project_id)
+            : null
+          : threadId
+            ? pullLinkStore.threadProject(threadId)
+            : null;
+        if (!projectId) {
+          throw validateOnly
+            ? new InboxError("validation_error", "project_id: a project in the Inbox.", { field: "project_id" })
+            : new InboxError("validation_error", "thread_id: a thread in the Inbox.", { field: "thread_id" });
+        }
+        const { projectsByRepo, wanted } = await pullProjects();
+        // A key this Inbox has not read yet (it restarted since the window's list): read the list once, then look again.
+        if ((keys as string[]).some((key) => !pulls.find(key))) await pulls.list(wanted, { refresh: false });
+        let theirs = true;
+        for (const key of keys as string[]) {
+          const pull = pulls.find(key);
+          if (pull && pull.mine) theirs = false;
+          if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+          if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
+            const field = validateOnly ? "project_id" : "thread_id";
+            throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
+          }
+        }
+        if (validateOnly) return json({ serverSession, ok: true });
+        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
+        pullOwners.set(keys as string[], threadId, { ask: (body.ask as "guide" | "custom" | undefined) ?? null, theirs });
+        return json({ serverSession, ok: true });
+      }
+      // Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end): the review the person
+      // wrote in the Inbox goes on the pull request, as `plannotator review <PR url>` posts it (the review app's
+      // providers). The Inbox's only write to a forge: as the person's own gh / glab account, so only the owner may
+      // (on this computer, or the owner over the tailnet); every other gh / glab call the Inbox makes reads.
+      if (path === "/api/inbox/pulls/review") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        const key = typeof body.key === "string" && body.key.length > 0 && body.key.length <= 600 ? body.key : null;
+        if (!key) throw new InboxError("validation_error", "key: a pull request key from the list.", { field: "key" });
+        const action = parsePRReviewAction(body.action);
+        if (!action) throw new InboxError("validation_error", "action: approve, comment or request_changes.", { field: "action" });
+        const text = typeof body.body === "string" ? body.body : "";
+        if (text.length > PULL_REVIEW_BODY_MAX) throw new InboxError("validation_error", `body: at most ${PULL_REVIEW_BODY_MAX} characters.`, { field: "body" });
+        const fileComments = pullReviewComments(body.fileComments);
+        if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
+        const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
+        if (!pulls.find(key)) await pulls.list((await pullProjects()).wanted, { refresh: false });
+        const pull = pulls.find(key);
+        if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
+        if (pull.state !== "open" && pull.state !== "draft") return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
+        // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
+        // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
+        // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
+        const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
+        if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+        const headSha = typeof body.head_sha === "string" && heads.includes(body.head_sha) ? body.head_sha : null;
+        if (!headSha) return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        const ref: PRRef | null =
+          pull.platform === "github"
+            ? (() => {
+                const [owner, repo] = pull.repo.split("/");
+                return owner && repo ? { platform: "github" as const, host: pull.host, owner, repo, number: pull.number } : null;
+              })()
+            : { platform: "gitlab" as const, host: pull.host, projectPath: pull.repo, iid: pull.number };
+        if (!ref) return json({ error: "That pull request's repository can't be read here.", code: "pull_unknown" }, 404);
+        // The same review twice (a second click, a replayed request): refused, never posted again. Kept while this
+        // Inbox runs, for a review that fully went.
+        const fingerprint = JSON.stringify([pull.key, headSha, action, text, fileComments, fileLevelComments]);
+        if (postedReviews.has(fingerprint)) return json({ error: "This review is already on the pull request.", code: "already_posted" }, 409);
+        try {
+          const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
+          if (submission.status === "complete") {
+            postedReviews.add(fingerprint);
+            while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
+          }
+          // The list reads the forge again on its next look: the review moved the PR's state there.
+          return json({ serverSession, ok: true, prUrl: pull.url, submission });
+        } catch (cause) {
+          const message = cause instanceof Error ? cause.message : "The review was not posted.";
+          return json({ error: message, code: "pull_review_failed" }, 502);
+        }
+      }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
       // refused like the other read routes. The phone's door and agents send no fetch metadata.
@@ -3916,7 +4142,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (store.thread(threadMatch[1]!)) imageCapture.schedule(threadMatch[1]!);
         const thread = perfPhase("thread", () => store.windowThread(threadMatch[1]!));
         if (!thread) return json({ error: "No such thread.", code: "thread_not_found" }, 404);
-        const withRepo = { ...thread, project: { ...thread.project, repo: repos.get(thread.project.root) } };
+        // `pull_theirs`: the person handed this thread only teammates' PRs, so its reviews take no verdict.
+        // `pull_keys` (Code review on): the PRs it owns, which its review may be posted to (Post to GitHub/GitLab).
+        const pullKeys = codeReviewOn() ? pullOwners.keys(thread.thread_id) : [];
+        const withRepo = {
+          ...thread,
+          project: { ...thread.project, repo: repos.get(thread.project.root) },
+          ...(pullOwners.theirs(thread.thread_id) ? { pull_theirs: true as const } : {}),
+          ...(pullKeys.length > 0 ? { pull_keys: pullKeys } : {}),
+        };
         // `row` (additive): the thread's list row, also for an archived thread, which the window's list leaves out.
         const row = store.listRow(thread.thread_id);
         return json({ serverSession, cursor: store.cursor(), thread: withRepo, row: row && withSnooze(row) });

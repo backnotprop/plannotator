@@ -243,6 +243,7 @@ packages/ui/utils/diagramAnchor.test.ts
 packages/ui/utils/diagramAnchorGraphviz.test.ts
 packages/ui/hooks/useAnnotationHighlighter.diagramSkip.test.tsx
 packages/ui/hooks/useAnnotationHighlighter.blankSelection.test.tsx
+packages/ui/hooks/useAnnotationHighlighter.reselectOverlap.test.tsx
 packages/ui/components/Viewer.diagramLazyRestore.test.tsx
 packages/ui/components/Viewer.diagramAnchorHostile.test.tsx
 packages/ui/components/CommentPopover.skillReferences.test.tsx
@@ -492,6 +493,7 @@ packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
 packages/inbox/voiceDebugLog.test.ts
+packages/inbox/voiceMiss.test.ts
 packages/ui/components/RenderedMarkdown.softLineBreaks.test.tsx
 packages/inbox/personLineBreaks.test.tsx
 packages/inbox/aboutPrivacy.test.tsx
@@ -500,5 +502,6 @@ packages/inbox/boardReveal.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
+packages/inbox/pulls/pullReview.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx

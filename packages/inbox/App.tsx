@@ -148,6 +148,10 @@ import { parseSettingsHash, settingsHash, type SettingsSection } from './setting
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
+import { PullsPage } from './pulls/PullsPage';
+import { PullReview } from './pulls/PullReview';
+import { usePulls } from './pulls/usePulls';
+import { pullGroups } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
@@ -283,7 +287,14 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls' | 'shapes';
+  /**
+   * Pull requests (`#pulls`, Code review on): the stack open beside the list (`&stack=`, its top layer's key),
+   * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
+   */
+  stack?: string | null;
+  layer?: string | null;
+  scope?: 'layer' | 'stack';
   /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
@@ -351,6 +362,11 @@ function routeOf(fullHash: string): Route {
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
+  if (params.has('pulls')) {
+    const stack = params.get('stack') || null;
+    const layer = stack ? params.get('layer') || null : null;
+    return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+  }
   if (params.has('board')) return { page: 'board', project: params.get('project') || null, thread: null, board: boardViewOf(params.get('board')), card: params.get('card') };
   const thread = params.get('thread');
   const fileId = thread ? params.get('file') : null;
@@ -383,6 +399,12 @@ function hashOf(route: Route): string {
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
+  else if (route.page === 'pulls')
+    hash =
+      'pulls' +
+      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -4276,6 +4298,16 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
+  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read only while
+  // the page is open, never from a tailnet guest's page (it runs this computer's gh / glab).
+  const codeReviewOn = settings?.code_review?.on === true;
+  const pullsShown = codeReviewOn && !guestPage;
+  const pulls = usePulls(route.page === 'pulls' && pullsShown);
+  // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
+  useEffect(() => {
+    if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.page, settings !== null, pullsShown]);
   useEffect(() => {
     if (!firstRun || guestPage) return;
     let last = Date.now();
@@ -5187,6 +5219,46 @@ function Inbox() {
         marks={settings !== null && !guestPage}
       />
     );
+  } else if (route.page === 'pulls' && pullsShown && route.stack && route.layer) {
+    main = (
+      <PullReview
+        model={pulls.model}
+        modelError={pulls.error}
+        stackId={route.stack}
+        layerKey={route.layer}
+        scope={route.scope ?? 'layer'}
+        onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
+        onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onSent={() => {
+          close({ ...route, layer: null, scope: 'layer' });
+          showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
+        }}
+      />
+    );
+  } else if (route.page === 'pulls' && pullsShown) {
+    main = (
+      <PullsPage
+        state={pulls}
+        stackId={route.stack ?? null}
+        project={route.project}
+        projects={projects}
+        projectNames={projectNames}
+        phone={phone}
+        onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
+        onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
+        onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
+        onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
+        onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
+        onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
+        onLaunch={(keys, projectIds, body, askLine, opener) => openCompose({ body, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
+        onHanded={(session) => {
+          rememberSent(session);
+          pulls.reload();
+        }}
+      />
+    );
+  } else if (route.page === 'pulls') {
+    main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'shapes') {
     // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
     main = (
@@ -5616,6 +5688,9 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (nothing reads while the page is closed).
+            onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
+            pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
             onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
@@ -5928,6 +6003,13 @@ function Inbox() {
                 .then(() => refreshCards())
                 .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not linked to the card', phoneLead: 'Not linked to the card', detail: 'Open the thread from the Inbox.' }, 7000));
             }
+            // Launch an agent from Pull requests: the new thread is the PRs' agent's, so verdicts and Reply go there.
+            if (sent.pullKeys && sent.pullKeys.length > 0) {
+              void inboxApi
+                .pullOwner(sent.pullKeys, sent.threadId, sent.pullAsk ?? undefined)
+                .then(() => pulls.reload())
+                .catch(() => showToast({ icon: 'warn', lead: 'Sent, but not tied to the pull request', phoneLead: 'Not tied to the pull request', detail: 'Open the thread from the Inbox.' }, 7000));
+            }
           }}
           onSaved={composeSaved}
           onDeleted={(draft) => {
@@ -6011,4 +6093,9 @@ export function InboxApp() {
       </TooltipProvider>
     </ThemeProvider>
   );
+}
+
+/** The sidebar's Pull requests count: the rows on the person in the last read. */
+function pullsOnYou(model: import('@plannotator/core/inbox-types').InboxPullsAnswer): number {
+  return pullGroups(model, null).on_you.length;
 }
