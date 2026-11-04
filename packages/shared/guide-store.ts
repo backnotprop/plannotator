@@ -369,6 +369,49 @@ export function buildSavedGuideSnapshot(repoKey: string, envelope: SavedGuideEnv
 }
 
 /**
+ * Put a guide written outside a review session (`plannotator guide import`)
+ * on a repo shelf, so the next review of that repository lists it under
+ * Guides like one it generated. The inverse of buildSavedGuideSnapshot: the
+ * snapshot's patch becomes the sibling `.patch` (written first, as everywhere
+ * else), its provenance the envelope's. Null on a failed write.
+ */
+export function saveImportedGuide(
+  repoKey: string,
+  snapshot: GuideSnapshot,
+  opts: { label: string; prUrl?: string; now?: number },
+): { id: string } | null {
+  const now = opts.now ?? Date.now();
+  const { reviewed, ...guide } = snapshot.guide;
+  const id = makeGuideId(guide.title, now);
+  if (!saveGuidePatch(repoKey, id, snapshot.review.rawPatch)) return null;
+  const generator = snapshot.generator ?? {};
+  const generatedAt = generator.generatedAt ? Date.parse(generator.generatedAt) : NaN;
+  const headSha = snapshot.source.headSha;
+  const envelope: SavedGuideEnvelope = {
+    version: 1,
+    savedAt: now,
+    label: opts.label,
+    title: guide.title,
+    ...(generator.engine ? { engine: generator.engine } : {}),
+    ...(generator.model ? { model: generator.model } : {}),
+    ...(headSha ? { headSha } : {}),
+    ...(opts.prUrl ? { prUrl: opts.prUrl } : {}),
+    ...(Number.isFinite(generatedAt) ? { generatedAt } : {}),
+    ...(generator.customInstructions ? { customInstructions: generator.customInstructions } : {}),
+    review: {
+      gitRef: snapshot.review.gitRef,
+      ...(snapshot.review.diffType !== undefined ? { diffType: snapshot.review.diffType } : {}),
+      ...(snapshot.review.base !== undefined ? { base: snapshot.review.base } : {}),
+      source: snapshot.source,
+      patchFile: `${id}.patch`,
+    },
+    guide: guide as CodeGuideOutput,
+    reviewed: coerceReviewed(reviewed, guide.sections.length),
+  };
+  return saveGuide(repoKey, id, envelope) ? { id } : null;
+}
+
+/**
  * Locate a saved guide by id across every repo shelf — for the CLI, which has
  * no session and therefore no repo key. Ids embed a timestamp + slug, so
  * collisions across shelves are practically impossible; the first match wins.

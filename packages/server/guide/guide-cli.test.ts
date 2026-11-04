@@ -3,7 +3,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadGuide, saveGuide, saveGuidePatch, type SavedGuideEnvelope } from "@plannotator/shared/guide-store";
+import { createGuideStoreSession, loadGuide, saveGuide, saveGuidePatch, type SavedGuideEnvelope } from "@plannotator/shared/guide-store";
 import { decompress } from "@plannotator/shared/compress";
 import { decrypt } from "@plannotator/shared/crypto";
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
@@ -204,6 +204,69 @@ describe("plannotator guide", () => {
     expect((await runGuideCli(["export", "--guide", "guide.json"], {}, workDir)).code).toBe(2);
     expect((await runGuideCli(["export", "--guide", "guide.json", "--patch", "guide.patch", "--id", "x"], {}, workDir)).code).toBe(2);
     expect((await runGuideCli(["export", "--guide", "missing.json", "--patch", "guide.patch"], {}, workDir)).code).toBe(1);
+  });
+
+  // What regresses: an imported guide lands on a shelf the review session
+  // never reads, so it silently never shows up under Guides.
+  describe("import", () => {
+    const session = (pr: { url: string; headSha: string; label: string } | null = null) =>
+      createGuideStoreSession({
+        runGit: async (args, cwd) => {
+          try {
+            return execFileSync("git", args, { cwd, encoding: "utf-8", stdio: ["ignore", "pipe", "ignore"] });
+          } catch {
+            return null;
+          }
+        },
+        getGitCwd: () => workDir,
+        getPRInfo: () => pr,
+        getBranchLabel: () => undefined,
+        getFallbackDir: () => workDir,
+        writesEnabled: () => true,
+      });
+
+    test("import --guide/--patch is listed by a review of the same repository, and exports like a generated guide", async () => {
+      execFileSync("git", ["init", "-q", "-b", "feature/refresh"], { cwd: workDir });
+      execFileSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", "commit", "-q", "--allow-empty", "-m", "init"], { cwd: workDir });
+      execFileSync("git", ["remote", "add", "origin", "git@github.com:acme/widgets.git"], { cwd: workDir });
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify(AUTHORED));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+
+      const res = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch"], {}, workDir, { now: "2026-08-15T00:00:00.000Z" });
+      expect(res.code).toBe(0);
+      const id = res.stdout!.trim();
+
+      const rows = await session().listSaved();
+      expect(rows.map((r) => ({ id: r.id, label: r.label, title: r.title, moved: r.moved }))).toEqual([
+        { id, label: "feature/refresh", title: "Token refresh", moved: false },
+      ]);
+      const exported = await runGuideCli(["export", "--id", id, "--out", "-"], {}, workDir);
+      expect(embeddedSnapshot(exported.stdout!).review.rawPatch).toBe(TWO_FILE_PATCH);
+    });
+
+    test("import --pr is shelved with that PR's repository and labelled with the PR", async () => {
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify(AUTHORED));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+      const url = "https://github.com/acme/widgets/pull/7";
+      const res = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", url], {}, workDir);
+      expect(res.code).toBe(0);
+
+      const rows = await session({ url, headSha: "", label: "PR #7" }).listSaved();
+      expect(rows.map((r) => r.label)).toEqual(["PR #7"]);
+      expect(loadGuide("github.com__acme__widgets", res.stdout!.trim())?.prUrl).toBe(url);
+    });
+
+    test("import refuses --id (exit 2), an unknown PR URL and an invalid guide (exit 1), and saves nothing", async () => {
+      writeFileSync(join(workDir, "guide.json"), JSON.stringify(AUTHORED));
+      writeFileSync(join(workDir, "guide.patch"), TWO_FILE_PATCH);
+      expect((await runGuideCli(["import", "--id", "x"], {}, workDir)).code).toBe(2);
+      const badPr = await runGuideCli(["import", "--guide", "guide.json", "--patch", "guide.patch", "--pr", "https://example.com/x"], {}, workDir);
+      expect(badPr.code).toBe(1);
+      expect(badPr.stderr).toContain("https://example.com/x");
+      writeFileSync(join(workDir, "bad.json"), JSON.stringify({ ...AUTHORED, sections: [{ title: "S", overview: "o", diffs: [{ file: "src/nope.ts", summary: "" }] }] }));
+      expect((await runGuideCli(["import", "--guide", "bad.json", "--patch", "guide.patch"], {}, workDir)).code).toBe(1);
+      expect(existsSync(join(dataDir, "guides"))).toBe(false);
+    });
   });
 
   describe("share / unshare", () => {

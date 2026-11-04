@@ -1,5 +1,5 @@
 /**
- * `plannotator guide <list|export|share|unshare>` — portable Guided Review
+ * `plannotator guide <list|export|share|unshare|import>` — portable Guided Review
  * exports and share links from the command line (decision record D9; guide
  * share hosting contract §7): the same pure export function and the same
  * upload the UI uses, callable without a running review server. Three
@@ -32,7 +32,18 @@ import {
   type GuideSnapshotSource,
 } from "@plannotator/shared/guide-format";
 import { GUIDE_VIEWER_MANIFEST } from "@plannotator/shared/guide-viewer-manifest";
-import { buildSavedGuideSnapshot, findSavedGuideById, listAllSavedGuides, updateGuideShare, type SavedGuideShare } from "@plannotator/shared/guide-store";
+import {
+  buildSavedGuideSnapshot,
+  deriveGuideRepoKeyFallback,
+  deriveGuideRepoKeyFromPRUrl,
+  deriveGuideRepoKeyFromRemote,
+  findSavedGuideById,
+  listAllSavedGuides,
+  saveImportedGuide,
+  updateGuideShare,
+  type SavedGuideShare,
+} from "@plannotator/shared/guide-store";
+import { getMRLabel, getMRNumberLabel, parsePRUrl } from "@plannotator/shared/pr-types";
 import { parseRemoteUrl } from "@plannotator/shared/repo";
 import { loadConfig, resolveGuideShareUrl, resolveSharingEnabled } from "@plannotator/shared/config";
 import { validateGuideOutput } from "./guide-review";
@@ -53,6 +64,10 @@ export const GUIDE_CLI_USAGE = [
   "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch | -> | --snapshot <snapshot.json>",
   "                          [--public] [--ttl <7d | 24h | 30m | 3600>] [--json]",
   "  plannotator guide unshare <id> --token <deleteToken>",
+  "  plannotator guide import --guide <guide.json> --patch <diff.patch | -> | --snapshot <snapshot.json> [--pr <url>]",
+  "",
+  "Import saves a guide written elsewhere where `plannotator review` finds it: the next review of",
+  "this repository (or of --pr) lists it under Guides. Prints the saved id.",
   "",
   "Export a Guided Review as one portable HTML file (the viewer loads from guides.show),",
   "or share it as a link on guides.show (or your own deployment of it: PLANNOTATOR_GUIDE_SHARE_URL,",
@@ -77,10 +92,12 @@ export const GUIDE_CLI_USAGE = [
   "                     Default: the link stays until you unshare it.",
   "  --json             Print { id, url, deleteToken, expiresAt? } instead of the bare URL",
   "  --token <t>        (unshare) The delete token printed when the guide was shared",
+  "  --pr <url>         (import) The PR the guide is of: it is shelved with that repository's guides and",
+  "                     labelled with the PR. Default: the snapshot's own PR, else this directory's repository.",
   "",
   "Sharing is refused while PLANNOTATOR_SHARE=disabled (or `share: \"disabled\"` in config.json).",
   "",
-  "Exit codes: 0 done · 1 not found / not exportable / invalid guide or snapshot / share service error · 2 usage",
+  "Exit codes: 0 done · 1 not found / not exportable / invalid guide, snapshot or PR URL / share service error / could not save · 2 usage",
 ].join("\n");
 
 function takeOption(args: string[], name: string): { value?: string; rest: string[] } | { error: string } {
@@ -462,6 +479,43 @@ export async function runGuideUnshare(argv: string[], env: NodeJS.ProcessEnv = p
   return { code: 0, stdout: "Removed\n" };
 }
 
+/**
+ * `plannotator guide import`: validate a guide written elsewhere exactly as
+ * export does, then save it on the shelf a review session reads, keyed the
+ * way the session keys it (PR url, else origin remote, else the repo
+ * directory). Nothing else loads an authored guide into a review.
+ */
+export function runGuideImport(argv: string[], cwd = process.cwd(), io: GuideCliIo = {}): GuideCliResult {
+  const prOpt = takeOption(argv, "--pr");
+  if ("error" in prOpt) return { code: 2, stderr: `${prOpt.error}\n\n${GUIDE_CLI_USAGE}\n` };
+  const parsedSource = parseSourceArgs(prOpt.rest);
+  if (!parsedSource.ok) return parsedSource.result;
+  if (parsedSource.args.id) return { code: 2, stderr: `import takes --guide with --patch, or --snapshot; a saved guide is already imported.\n\n${GUIDE_CLI_USAGE}\n` };
+  if (parsedSource.args.rest.length > 0) return { code: 2, stderr: `Unknown argument: ${parsedSource.args.rest[0]}\n\n${GUIDE_CLI_USAGE}\n` };
+  const source = loadSnapshotSource(parsedSource.args, cwd, io);
+  if (!source.ok) return source.result;
+  const { snapshot } = source;
+
+  const prUrl = prOpt.value ?? snapshot.source.pr?.url;
+  let repoKey: string;
+  let label: string;
+  if (prUrl) {
+    const ref = parsePRUrl(prUrl);
+    const key = deriveGuideRepoKeyFromPRUrl(prUrl);
+    if (!ref || !key) return { code: 1, stderr: `Not a pull or merge request URL Plannotator recognizes: ${prUrl}\n` };
+    repoKey = key;
+    label = `${getMRLabel(ref)} ${getMRNumberLabel(ref)}`;
+  } else {
+    const remote = git(["remote", "get-url", "origin"], cwd);
+    repoKey = (remote && deriveGuideRepoKeyFromRemote(remote)) || deriveGuideRepoKeyFallback(git(["rev-parse", "--show-toplevel"], cwd) ?? cwd);
+    label = snapshot.source.branch ?? "local";
+  }
+
+  const saved = saveImportedGuide(repoKey, snapshot, { label, ...(prUrl ? { prUrl } : {}), ...(io.now ? { now: Date.parse(io.now) } : {}) });
+  if (!saved) return { code: 1, stderr: `Could not save the guide under ${repoKey}.\n` };
+  return { code: 0, stdout: `${saved.id}\n`, stderr: `Saved ${snapshot.guide.title} for ${label} (${repoKey}). It is listed under Guides in the next review of that repository.\n` };
+}
+
 export async function runGuideCli(argv: string[], env: NodeJS.ProcessEnv = process.env, cwd = process.cwd(), io: GuideCliIo = {}): Promise<GuideCliResult> {
   const [sub, ...rest] = argv;
   if (sub === "list") {
@@ -471,5 +525,6 @@ export async function runGuideCli(argv: string[], env: NodeJS.ProcessEnv = proce
   if (sub === "export") return runGuideExport(rest, env, cwd, io);
   if (sub === "share") return runGuideShare(rest, env, cwd, io);
   if (sub === "unshare") return runGuideUnshare(rest, env, io);
+  if (sub === "import") return runGuideImport(rest, cwd, io);
   return { code: 2, stderr: `${GUIDE_CLI_USAGE}\n` };
 }
