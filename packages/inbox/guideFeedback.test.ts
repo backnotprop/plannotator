@@ -33,7 +33,13 @@ const comments: CodeAnnotation[] = [
   { id: 'd', type: 'comment', scope: 'line', filePath: 'package.json', lineStart: 1, lineEnd: 1, side: 'new', text: 'This token.', tokenText: 'name', charStart: 3, charEnd: 7, createdAt: 4 },
 ];
 
+const globals: CodeAnnotation[] = [
+  { id: 'g1', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: 'Split the retry into its own PR.', createdAt: 5 },
+  { id: 'g2', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: 'The guard reads well.', createdAt: 6 },
+];
+
 function record(annotation: CodeAnnotation, title = 'Token refresh', messageId = 'msg_1'): InboxAnnotationRecord {
+  const global = annotation.scope === 'general';
   return {
     id: annotation.id,
     project_id: 'prj_1',
@@ -42,7 +48,7 @@ function record(annotation: CodeAnnotation, title = 'Token refresh', messageId =
     attachment_id: '',
     path: annotation.filePath,
     version: 'f'.repeat(64),
-    guide: { title, file: annotation.filePath, side: annotation.side, line_start: annotation.lineStart, line_end: annotation.lineEnd },
+    guide: { title, file: annotation.filePath, side: annotation.side, line_start: annotation.lineStart, line_end: annotation.lineEnd, ...(global ? { scope: 'general' as const } : {}) },
     annotation: annotation as unknown as Record<string, unknown>,
     created_at: '2026-10-11T00:00:00.000Z',
     updated_at: '2026-10-11T00:00:00.000Z',
@@ -101,9 +107,50 @@ describe('guided-review comments as feedback', () => {
     expect(attachmentFeedback([files], [{ id: 'att_1', path: '/p/notes.md', name: 'notes.md', kind: 'markdown' } as never], new Map(), '/p')).not.toContain('guided review');
   });
 
+  test("global comments come first, under Global comments, in the review app's own export", () => {
+    // Given newest first: both exports put them in the order they were made, ahead of every file.
+    const mixed = [comments[0]!, globals[1]!, comments[2]!, globals[0]!];
+    const sections = guideCommentSections(mixed);
+    expect(sections).toBe(exportReviewFeedback([comments[0]!, globals[0]!, comments[2]!, globals[1]!]).replace(/^# Code Review Feedback\n\n/, ''));
+    expect(sections.startsWith('## Global comments\n\nSplit the retry into its own PR.\n\nThe guard reads well.\n\n## src/auth.ts')).toBe(true);
+    expect(sections).not.toContain('Line 0');
+  });
+
+  test('the guided review section counts global comments, and says what comes first', () => {
+    const text = guideFeedback([record(globals[0]!), record(comments[0]!), record(globals[1]!)]);
+    expect(text).toContain('"Token refresh" you sent: first the global comments, on the whole review, then the comments on its diffs, one section per file.');
+    expect(text.indexOf('## Global comments')).toBeLessThan(text.indexOf('## src/auth.ts'));
+    expect(text.indexOf('Split the retry')).toBeLessThan(text.indexOf('## src/auth.ts'));
+    expect(text.indexOf('The guard reads well.')).toBeLessThan(text.indexOf('## src/auth.ts'));
+    // Only global comments: no line-number note, still sent.
+    const only = guideFeedback([record(globals[0]!)]);
+    expect(only).toContain('under "Global comments": they are on the whole review, not on a line or a file.');
+    expect(only).not.toContain('Line numbers');
+    expect(attachmentFeedback([record(globals[0]!)], [], new Map(), '/p')).toContain('Split the retry into its own PR.');
+    // Without any, the line under the heading is as it was.
+    expect(guideFeedback([record(comments[0]!)])).toContain('The following comments are on the diffs of the guided review "Token refresh" you sent, one section per file.');
+  });
+
+  test("the reply's list tags a global comment and quotes no code", () => {
+    expect(recordTag(record(globals[0]!))).toBe('global');
+    expect(recordQuote(record(globals[0]!))).toBe('');
+  });
+
   test("the reply's list names a comment's lines and quotes its first line", () => {
     expect(recordTag(record(comments[1]!))).toBe('lines 3-5');
     expect(recordQuote(record(comments[1]!))).toBe('a …');
     expect(recordQuote(record(comments[0]!))).toBe('if (expired) refresh();');
   });
+});
+
+// A record written before the store checked its fields can hold a label's decorations as a string (or a label that is
+// not one). The export reads them defensively: one bad comment must never make every Send on the thread fail.
+test('a stored comment with a string decorations or a non-string label still exports', () => {
+  const bad = [
+    { ...globals[0]!, id: 'g-bad', conventionalLabel: 'issue', decorations: 'blocking' },
+    { id: 'l-bad', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 3, lineEnd: 3, side: 'new', text: 'Guard it.', createdAt: 9, conventionalLabel: 7, decorations: { x: 1 } },
+  ] as unknown as CodeAnnotation[];
+  const text = guideFeedback(bad.map((a) => record(a)));
+  expect(text).toContain(`## Global comments\n\n**issue:** ${globals[0]!.text}`);
+  expect(text).toContain('### Line 3 (new)\nGuard it.');
 });
