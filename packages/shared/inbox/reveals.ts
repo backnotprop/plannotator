@@ -1,8 +1,9 @@
 /**
  * The queue of one-time feature reveals for people who come back (approval "inbox-feature-reveal", 2026-11-03): Snooze
- * (its announcement), then the Board, then thread steps. Pure, so a test can move the clock; the Inbox server
- * (packages/server/inbox.ts) builds the state from config.json and the store, reports `revealNext` to the page
- * (`GET /api/inbox/settings` `reveal.next`) and spends the claim with `revealMayClaim` (`POST /api/inbox/reveal`).
+ * (its announcement), then the Board, then the Checklist (thread steps, approval "inbox-checklist-reveal"). Pure, so a
+ * test can move the clock; the Inbox server (packages/server/inbox.ts) builds the state from config.json and the
+ * store, reports `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`) and spends the claim with
+ * `revealMayClaim` (`POST /api/inbox/reveal`).
  *
  * The rules:
  *  - One due at a time: the first entry, in table order, whose "who" holds (a release build, tenure since first use,
@@ -36,10 +37,10 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   { id: "snooze", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // The owner: "ok board can be 3 days, snooze 2". The claim turns the Board on (inboxBoard unset -> true).
   { id: "board", tenureMs: 3 * DAY_MS, minThreads: 5, enabled: true },
-  // The Checklist (thread steps): proposed, not approved (.ops/research/checklist-reveal, `ChecklistIntro`). Five days
-  // and the Board's five threads; the claim would turn the Checklist on (inboxSteps unset -> true). Off until the owner
-  // approves it: never next, never claimed, and no word of it reaches an agent.
-  { id: "steps", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: false },
+  // The Checklist (thread steps), approval "inbox-checklist-reveal" (2026-11-04): 5 days ("lands around day 6") and the
+  // Board's 5 threads; the Board need not be on. The claim turns the Checklist on (inboxSteps unset -> true, never
+  // false), then `ChecklistIntro` opens. Until the claim no word of it reaches an agent.
+  { id: "steps", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
 ];
 
 /** Never two reveals within this long on one machine. */

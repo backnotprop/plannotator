@@ -2018,8 +2018,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
         // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
         board: boardUndecided() && !reveals?.board?.shownAt,
-        // The Checklist (proposal, .ops/research/checklist-reveal): never decided by the person and never revealed.
-        // The queue's entry is off until approved (reveals.ts), so this is read but never acted on.
+        // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
+        // need not be on.
         steps: stepsUndecided() && !reveals?.steps?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
@@ -2067,7 +2067,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
   };
   /**
-   * The Checklist's reveal (proposal; its queue entry is off until approved): the claim turns the Checklist on (unset ->
+   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim turns the Checklist on (unset ->
    * true, its one automatic write; never false) and stamps the spacing clock, in one save, as the Board's does. Every
    * window hears the switch at once (`event: capabilities`); agents get the steps field from their next session.
    */

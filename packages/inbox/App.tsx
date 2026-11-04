@@ -4091,8 +4091,8 @@ function Inbox() {
     heldBack: revealHeldBack,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
-  // The Checklist reveal (proposal; its queue entry is off until approved): the Board's moment; the claim turns the
-  // Checklist on, then ChecklistIntro opens.
+  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim turns the Checklist on,
+  // then ChecklistIntro opens.
   const stepsReveal = useStepsReveal({
     due: snoozeIntroLatch.current?.next === 'steps',
     listLoaded: snoozeIntroLatch.current !== null,

@@ -252,7 +252,7 @@ export interface StepsRevealInput extends Omit<BoardRevealInput, 'onBoardOn'> {
 }
 
 /**
- * The Checklist reveal (proposal; its queue entry is off until approved): the Board's calm moment and gate (back on
+ * The Checklist reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's calm moment and gate (back on
  * the list after reading a thread, 60 s into the page, 5 rows or more). The claim turns the Checklist on, then the
  * page opens `ChecklistIntro`.
  */

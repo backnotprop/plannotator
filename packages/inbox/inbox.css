@@ -6332,7 +6332,7 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
 
-/* The Checklist's reveal (proposal; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
+/* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real
    ones (.ib-stp, .ib-st-btn). */
 .ib-ci-art { padding-bottom: 18px; }

@@ -8,7 +8,7 @@ import { StepsPie } from './StepsMarks';
 import { StepsLists } from './StepsList';
 
 /**
- * The Checklist's one-time reveal (proposal, .ops/research/checklist-reveal; not approved): the Board's first-visit
+ * The Checklist's one-time reveal (approval "inbox-checklist-reveal", 2026-11-04): the Board's first-visit
  * dialog's frame, type and buttons (`.ib-bi`), over a small thread foot whose checklist ticks itself from 1/4 to 4/4,
  * with its list open for a moment. Shown once, after the claim turned the Checklist on: "Open Settings" lands on
  * Settings → Capabilities, where its switch now reads on; "Got it" closes. Every way out is final. No keyboard
