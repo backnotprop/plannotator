@@ -527,7 +527,7 @@ test('round 2: the redrawn Overview tags its changed parts; a Show me picture st
   await expect(part(sheet(page), 'cstay')).toHaveAttribute('data-shp-tag', 'changed since asked');
   await expect(part(sheet(page), 'cmail')).toHaveAttribute('data-shp-tag', 'changed since asked');
   await expect(part(sheet(page), 'fail')).not.toHaveAttribute('data-shp-tag', /./);
-  await shot(page, '07-r2');
+  await shot(page, '07-r2', ['light', 'dark']);
   // A part whose lines moved opens them where they are now (12–13 → 13–14).
   await part(sheet(page), 'fail').click();
   await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText('3rd retry fails · retry-worker.ts lines 13–14');
@@ -580,7 +580,7 @@ test('the picture moves by its header like the window, stays in the pane, keeps 
     expect(Math.round(box.x - home.x)).toBe(-240);
     expect(Math.round(box.y - home.y)).toBe(70);
     await page.waitForTimeout(500);
-    await shot(page, '09-dragged');
+    await shot(page, '09-dragged', ['light', 'dark']);
 
     // Past the pane's edge: it stops at the edge.
     await page.mouse.move(box.x + 300, box.y + 30);
@@ -642,6 +642,16 @@ test('a phone at 390 px: the popover and the picture', async ({ browser }) => {
     await shot(page, 'phone-04-drawn', ['light', 'dark']);
     // A phone's picture is a sheet: it does not move.
     await expect(sheet(page).locator('.ib-sm-sheet-h')).not.toHaveAttribute('data-show-me-drag', /.*/);
+
+    // Round 2 on a phone: the stacked picture as asked, its tags inside their parts.
+    await page.goto(`${world.url}#thread=${round2.thread_id}`);
+    await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
+    await expect(page.locator(`[data-review-message="${round2.message_id}"]`)).toBeVisible();
+    await selectLines(page, WORKER, 17, 18);
+    await chooser(page).getByRole('button', { name: 'Show me' }).click();
+    await expect(sheet(page)).toContainText('As asked in round 1.');
+    await expect(part(sheet(page), 'cstay')).toHaveAttribute('data-shp-tag', 'changed since asked');
+    await shot(page, 'phone-07-r2', ['light', 'dark']);
     expect(errors).toEqual([]);
   } finally {
     await context.close();

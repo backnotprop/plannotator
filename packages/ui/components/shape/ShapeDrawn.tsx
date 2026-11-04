@@ -32,6 +32,9 @@ export interface MarkState {
   noted: ReadonlySet<string>;
 }
 
+/** A tagged part's top padding at least: the tag (2 px down, about 19 px tall) and a gap above the part's words. */
+const TAG_ROOM = 28;
+
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
 /**
@@ -95,9 +98,11 @@ img { max-width: 100%; }
 .board.reduce .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
 .board.reduce .mk.fresh { animation: none; background-size: 100% 100%; }
 
-/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.stale: its code moved on). */
-.mk.stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: 4px; }
-.mk[data-shp-tag]::after { content: attr(data-shp-tag); position: absolute; top: -11px; right: 10px; z-index: 1; font: 600 10.5px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .04em; text-transform: uppercase; padding: 4px 6px; border-radius: 6px; background: var(--mark); color: var(--primary-foreground); white-space: nowrap; pointer-events: none; }
+/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.stale: its code moved on).
+   The ring and the tag stay inside the part's own box, so they never cover a connector's label or a neighbour; the
+   tag gets room at the top of the part (the host's effect pads it), and an untagged part keeps its layout. */
+.mk.stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: -5px; }
+.mk[data-shp-tag]::after { content: attr(data-shp-tag); position: absolute; top: 2px; right: 8px; z-index: 1; font: 600 10.5px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .04em; text-transform: uppercase; padding: 4px 6px; border-radius: 6px; background: var(--mark); color: var(--primary-foreground); white-space: nowrap; pointer-events: none; }
 .mk.stale[data-shp-tag]::after { background: color-mix(in oklab, var(--warning, var(--mark)) 22%, var(--paper)); color: color-mix(in oklab, var(--warning, var(--mark)) 60%, var(--ink)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning, var(--mark)) 50%, transparent); }
 
 /* A part that opens code. */
@@ -337,9 +342,21 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       const tag = isStale ? staleTag : marks.fresh.has(id) ? freshTag : undefined;
       if (tag) {
         el.setAttribute('data-shp-tag', tag);
-        // The tag sits on the part's corner: a part the drawing left in the flow becomes its containing block.
+        // The tag sits in the part's corner: a part the drawing left in the flow becomes its containing block.
         if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
-      } else el.removeAttribute('data-shp-tag');
+        // Room for it above the part's own words, kept to put back when the tag goes.
+        if (!el.hasAttribute('data-shp-pad')) {
+          el.setAttribute('data-shp-pad', el.style.paddingTop);
+          const top = parseFloat(getComputedStyle(el).paddingTop) || 0;
+          if (top < TAG_ROOM) el.style.paddingTop = `${TAG_ROOM}px`;
+        }
+      } else {
+        el.removeAttribute('data-shp-tag');
+        if (el.hasAttribute('data-shp-pad')) {
+          el.style.paddingTop = el.getAttribute('data-shp-pad') ?? '';
+          el.removeAttribute('data-shp-pad');
+        }
+      }
     }
   }, [marks, stale, freshTag, staleTag, contentKey]);
 
