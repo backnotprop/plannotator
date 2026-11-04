@@ -392,7 +392,7 @@ function AgentGroup({
           ? 'would create'
           : 'no note yet'
         : note.state === 'manual'
-          ? 'copy by hand'
+          ? 'copy yourself'
           : note.state === 'unavailable'
           ? 'no file yet'
           : ''
@@ -610,7 +610,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
           <Icon name="chevR" />
           Not found on this computer
           <span className="ib-mut">
-            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one by hand
+            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one yourself
           </span>
         </button>
         {more && context && (

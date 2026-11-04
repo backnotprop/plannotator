@@ -270,7 +270,7 @@ test('plannotator inbox connects the agents found; the note is asked once per ag
     await page.goto(`${url}#settings/agents`);
     const cursorSettings = page.locator('[data-agent="cursor"]');
     const cursorNoteRow = cursorSettings.locator('.ib-agrow').filter({ hasText: 'Note in its instructions' });
-    await expect(cursorNoteRow).toContainText('Customize → Rules in Cursor · copy by hand');
+    await expect(cursorNoteRow).toContainText('Customize → Rules in Cursor · copy yourself');
     await expect(cursorNoteRow.getByRole('switch')).toHaveCount(0);
     await cursorSettings.getByRole('button', { name: 'Show note' }).click();
     await expect(cursorSettings.locator('.ib-agnote')).toContainText("Plannotator can't see, update or remove that copy.");

@@ -269,7 +269,7 @@ test.skipIf(!hasDom)('the band\'s Settings → Agents link: the dialog closes as
   expect(seen).toMatchObject({ closed: 1, settings: 1 });
 });
 
-test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says it is copied by hand; its copy has no markers', async () => {
+test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says it is copied yourself; its copy has no markers', async () => {
   const { el } = mount([CODEX, CURSOR]);
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
