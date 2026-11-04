@@ -12,7 +12,7 @@
  *    the state where the old header offered a data-destroying Approve.
  *  - `Request changes…` must deliver the note as a `scope:'general'`
  *    CodeAnnotation with the ''/0/0 sentinels riding the annotations array
- *    AND inside the exported `## General` section, one render after the
+ *    AND inside the exported `## Global comments` section, one render after the
  *    commit — a same-tick submit posts the pre-note payload and silently
  *    drops it (#1449 transport).
  *  - The discard confirm must post the bare approval (empty annotations), and
@@ -425,8 +425,8 @@ describe.if(hasDom)("review decision control (agent mode)", () => {
       lineEnd: 0,
       text: "rebase on main before merging",
     });
-    // The export the agent reads carries the note under ## General.
-    expect(body.feedback).toContain("## General");
+    // The export the agent reads carries the note under ## Global comments.
+    expect(body.feedback).toContain("## Global comments");
     expect(body.feedback).toContain("rebase on main before merging");
   });
 
