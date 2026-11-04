@@ -256,6 +256,17 @@ describe('trackKeyboard', () => {
       w.flush();
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
 
+      // The same stale reading again, cleared this time by focus leaving the field.
+      w.root.clientHeight = 660;
+      w.win.fire('orientationchange');
+      w.flush();
+      expect(w.root.dataset.ibKeyboardPin).toBe('tight');
+      w.root.clientHeight = 390;
+      w.timers.clear();
+      w.doc.fire('focusout');
+      w.flush();
+      expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
+
       // A real keyboard: the event's read and the re-read agree, and the pin holds.
       w.root.clientHeight = 660;
       w.keyboardUp();
@@ -265,9 +276,19 @@ describe('trackKeyboard', () => {
       w.later();
       expect(w.root.dataset.ibKeyboardPin).toBe('tight');
       expect(w.style.get('--ib-vvh')).toBe('257px');
+
+      // Two events in a row leave one re-read pending, and the cleanup cancels it: nothing reads after it.
+      w.vv.fire('resize');
+      w.flush();
+      w.vv.fire('resize');
+      w.flush();
+      expect(w.timers.size).toBe(1);
       stop();
       expect(w.timers.size).toBe(0);
+      w.later();
+      expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
       expect(w.doc.has('focusin')).toBe(false);
+      expect(w.doc.has('focusout')).toBe(false);
     });
   });
 });
