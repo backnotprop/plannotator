@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_HOST_NAMES, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -202,7 +202,7 @@ export const INBOX_SESSION_LABEL_MAX = 60;
  * separators and bidi controls stripped (the same characters a thread name
  * refuses), trimmed, at most INBOX_SESSION_LABEL_MAX characters. Null for
  * anything that is not a string, that leaves nothing visible, or that reads
- * as someone else (`impersonatesInboxAuthor`).
+ * as the person (`readsAsYou`).
  */
 export function cleanInboxSessionLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
@@ -211,17 +211,18 @@ export function cleanInboxSessionLabel(value: unknown): string | null {
   const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
   const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
   const visible = label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim();
-  return visible && !impersonatesInboxAuthor(visible) ? label : null;
+  return visible && !readsAsYou(visible) ? label : null;
 }
 
 /**
- * A label that reads as the person ("You") or as an agent ("Claude Code", "pi"), ignoring case and spacing.
- * A label is display only, but a message's author shows it, and Claude Code's comes from the session's
- * transcript, which its own model can append to: so a session may never be named as the person or an agent.
+ * A label that reads as the person: "You", ignoring case, spacing and zero-width characters. A label is display
+ * only, but a message's author shows it where the person's own messages say "You", and Claude Code's comes from
+ * the session's transcript, which its own model can append to. An agent's name stays allowed (a session named "Pi"
+ * or "Codex" is a real name); the agent's mark beside the name, and "Claude Code · Review" where two sessions share
+ * a label, tell those apart.
  */
-function impersonatesInboxAuthor(label: string): boolean {
-  const key = label.replace(/\s+/gu, " ").toLowerCase();
-  return key === "you" || Object.entries(INBOX_HOST_NAMES).some(([host, name]) => key === host.toLowerCase() || key === name.toLowerCase());
+function readsAsYou(label: string): boolean {
+  return label.replace(/[\s\p{Default_Ignorable_Code_Point}]+/gu, "").toLowerCase() === "you";
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();

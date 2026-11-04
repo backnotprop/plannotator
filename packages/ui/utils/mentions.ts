@@ -197,11 +197,10 @@ export function survivingMentions(
   tagged: readonly MentionPerson[],
 ): readonly MentionPerson[] {
   const tokens = tagged.map(mentionToken);
-  // A token stands only as a whole token: not the start of a longer word
-  // ("@Fix" in "@Fixes"), and not the start of a longer tagged token
-  // ("@Fix" in "@Fix login" when "Fix login" is tagged too).
+  // An occurrence that is the start of a longer tagged token belongs to that
+  // token ("@Fix" in "@Fix login" when "Fix login" is tagged too). Anything
+  // else still counts as before, whatever follows it ("@Ann2", "@Annさん").
   const standsAt = (token: string, at: number) =>
-    !WORD_CHAR.test(text.charAt(at + token.length)) &&
     !tokens.some((other) => other.length > token.length && other.startsWith(token) && text.startsWith(other, at));
   return tagged.filter((_, index) => {
     const token = tokens[index]!;
@@ -211,6 +210,3 @@ export function survivingMentions(
     return false;
   });
 }
-
-/** A character that continues a word, so a token followed by it is part of a longer word. */
-const WORD_CHAR = /[\p{L}\p{N}_]/u;

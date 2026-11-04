@@ -7,7 +7,8 @@
  *
  * It is display only and not proof of who wrote: no tool takes a label, but Claude Code's comes from the session's
  * transcript (its latest `custom-title` line), which the session's own model can append to. So the server refuses a
- * label that reads as "You" or an agent's name, and nothing routes or decides on one.
+ * label that reads as "You", the agent's mark stays beside every name, two sessions sharing a label say their agent
+ * where it matters, and nothing routes or decides on one.
  *
  * Every row and thread reads one map, the list's `session_labels` (App puts each list read here), so a rename shows
  * everywhere at once and a session that ended keeps its name while the Inbox runs. The map has no prototype and is

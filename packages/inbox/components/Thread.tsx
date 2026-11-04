@@ -5369,7 +5369,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           // A named session writes as its label (issue #2450), the agent's mark beside it and its name on hover;
           // the session's poll names it, and an unnamed one reads as it always did. Display only: no tool takes a
           // label, but Claude Code's comes from the transcript, which the session's own model can append to, so it
-          // never proves who wrote (the agent's name stays on hover, and the server refuses "You" and agent names).
+          // never proves who wrote (the agent's mark stays beside it and its name on hover, and the server refuses "You").
           const authorLabel = message.author.kind === 'agent' ? labelOf(sessionLabels, message.author.session) : null;
           const name = isAgent ? (authorLabel ?? agentName(message.author)) : 'You';
           const nameTip = authorLabel ? labelledAgent(authorLabel, message.author.kind === 'agent' ? message.author.host : null) : name;

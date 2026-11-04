@@ -398,7 +398,7 @@ export function sessionNamesAfterCommand(
  * no transcript path, so it is worked out from Claude Code's own layout
  * (`claudeTranscriptPaths`). Because the session's own model can append such a
  * line too, the label it gives is display only; the server refuses one that
- * reads as "You" or an agent's name.
+ * reads as "You".
  *
  * Cheap on purpose, since every poll asks: a stat, and nothing more while the
  * file has not changed size. When it did, one `/bin/sh` reads only the bytes
@@ -502,8 +502,9 @@ export class TranscriptTitle {
   private readThrough = -1
   /** The file's inode at the last read: another one is a rewrite (a new file under the same name). */
   private fileId: string | null = null
-  /** Failed reads in a row, and when the next may run. */
+  /** Failed reads in a row of this region (reset when it is skipped), of any region (reset only by a read that works), and when the next may run. */
   private failures = 0
+  private streak = 0
   private retryAt = Number.NEGATIVE_INFINITY
   private title: string | null = null
 
@@ -557,20 +558,26 @@ export class TranscriptTitle {
     // Read through: a last line with no newline yet starts the next read (`offset`), but only once the file grows.
     this.readThrough = size
     this.failures = 0
+    this.streak = 0
     this.retryAt = Number.NEGATIVE_INFINITY
     return this.title
   }
 
-  /** A read that failed keeps the last title. It waits longer each time, and a region that keeps failing is skipped. */
+  /**
+   * A read that failed keeps the last title. The wait doubles with every failure in a row (`streak`, which only a
+   * read that works resets) up to TRANSCRIPT_TITLE_RETRY_MAX_MS, and a region that fails
+   * TRANSCRIPT_TITLE_FAILURES_MAX times in a row (`failures`, reset when it is skipped) is skipped.
+   */
   private async failed(size: number): Promise<string | null> {
     this.failures += 1
+    this.streak += 1
     if (this.failures >= TRANSCRIPT_TITLE_FAILURES_MAX) {
       this.offset = size
       this.fresh = false
       this.readThrough = size
       this.failures = 0
     }
-    const wait = Math.min(TRANSCRIPT_TITLE_RETRY_MAX_MS, TRANSCRIPT_TITLE_RETRY_MS * 2 ** Math.max(0, this.failures - 1))
+    const wait = Math.min(TRANSCRIPT_TITLE_RETRY_MAX_MS, TRANSCRIPT_TITLE_RETRY_MS * 2 ** Math.min(30, this.streak - 1))
     this.retryAt = (await this.host.now()) + wait
     return this.title
   }

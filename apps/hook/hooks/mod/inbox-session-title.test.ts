@@ -11,6 +11,7 @@ import {
   TRANSCRIPT_TITLE_FIRST_READ_BYTES,
   TRANSCRIPT_TITLE_FAILURES_MAX,
   TRANSCRIPT_TITLE_LOCATE_RETRY_MS,
+  TRANSCRIPT_TITLE_RETRY_MAX_MS,
   TRANSCRIPT_TITLE_RETRY_MS,
   TranscriptTitle,
 } from './inbox'
@@ -256,10 +257,54 @@ describe('the title in the transcript', () => {
     for (let i = 0; i < 5; i++) await titles.read()
     expect(runs).toBe(TRANSCRIPT_TITLE_FAILURES_MAX)
     expect(await titles.read()).toBe('Kept')
-    // New bytes after it are read as usual once the shell answers again.
+    // New bytes after it are read as usual once the shell answers again (after the wait still running).
+    clock.now += TRANSCRIPT_TITLE_RETRY_MAX_MS
     timingOut = false
     appendFileSync(path, title('After the slow part'))
     expect(await titles.read()).toBe('After the slow part')
+  })
+
+  test('the wait keeps doubling across skipped regions, up to the most, and a read that works starts it over', async () => {
+    const path = transcript(title('Kept'))
+    const { host, clock } = realHost()
+    let failing = true
+    let runs = 0
+    const titles = new TranscriptTitle({ ...host, run: async (argv, init) => ((runs += 1), failing ? { exitCode: 143, stdout: '', stderr: '' } : host.run(argv, init)) }, SESSION, async () => [path])
+    const waits: number[] = []
+    for (let i = 0; i < 9; i++) {
+      // The file keeps growing, so a skipped region never stops the next try.
+      appendFileSync(path, chatter(`work ${i}`))
+      const before = runs
+      let waited = 0
+      // Step until the next run, in seconds: the wait that run took.
+      while (runs === before) {
+        await titles.read()
+        if (runs === before) {
+          clock.now += 1_000
+          waited += 1_000
+        }
+      }
+      waits.push(waited)
+    }
+    const max = TRANSCRIPT_TITLE_RETRY_MAX_MS
+    const r = TRANSCRIPT_TITLE_RETRY_MS
+    expect(waits).toEqual([0, r, 2 * r, 4 * r, 8 * r, 16 * r, 32 * r, max, max].map((ms) => Math.min(ms, max)))
+    // A read that works: the next failure waits the first wait again.
+    failing = false
+    clock.now += max
+    appendFileSync(path, title('Back'))
+    expect(await titles.read()).toBe('Back')
+    failing = true
+    appendFileSync(path, chatter('again'))
+    await titles.read()
+    const after = runs
+    appendFileSync(path, chatter('and again'))
+    clock.now += r - 1_000
+    await titles.read()
+    expect(runs).toBe(after)
+    clock.now += 1_000
+    await titles.read()
+    expect(runs).toBe(after + 1)
   })
 })
 

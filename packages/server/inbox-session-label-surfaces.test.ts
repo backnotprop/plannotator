@@ -270,17 +270,22 @@ describe("the windows are told", () => {
   }, 20_000);
 });
 
-describe("a label never reads as someone else", () => {
-  test('"You" or an agent\'s name, in any case or spacing, is no label; a label that only contains one is kept', async () => {
-    const { server, project } = await threeNamed();
-    const refused = ["You", "you", " YOU ", "Claude Code", "claude  code", "claude-code", "PI", "Codex", "opencode", "T3 Code"];
-    for (const label of refused) {
+describe("a label never reads as the person", () => {
+  test('"You" in any case, spacing or zero-width disguise is no label; an agent\'s name, like "Pi", is a real name and stays', async () => {
+    const { server, project, threadId } = await threeNamed();
+    for (const label of ["You", "you", " YOU ", "Y o u", "Y​ou", "⁠you﻿"]) {
       await poll(server, "ses-login", project, label);
       const list = await read(server, "local", "/api/inbox/threads");
-      expect(list.session_labels["ses-login"], label).toBeUndefined();
+      expect(list.session_labels["ses-login"], JSON.stringify(label)).toBeUndefined();
     }
-    await poll(server, "ses-login", project, "Pi config cleanup");
-    expect((await read(server, "local", "/api/inbox/threads")).session_labels["ses-login"]).toBe("Pi config cleanup");
+    for (const label of ["Pi", "Claude", "Codex", "Cursor", "Your login fix"]) {
+      await poll(server, "ses-login", project, label);
+      expect((await read(server, "local", "/api/inbox/threads")).session_labels["ses-login"]).toBe(label);
+      // #2467's To picker keeps it as well.
+      const sessions = await read(server, "local", "/api/inbox/sessions");
+      expect(JSON.stringify(sessions)).toContain(`"label":"${label}"`);
+    }
+    expect(liveLabels(await read(server, "local", `/api/inbox/threads/${threadId}/taggable`))["ses-login"]).toBe("Your login fix");
   });
 });
 
