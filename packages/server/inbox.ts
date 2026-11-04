@@ -3825,12 +3825,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
 
       /**
-       * Not a permission question, or the person's own call: a window's (the page's own Origin, this Host, and this
-       * run's serverSession) or a paired device's through the device door (its token already checked).
+       * Not a permission question, or the person's own call: a paired device's through the device door (its token
+       * already checked), or a window's (the page's own Origin, this Host, and this run's serverSession) that is
+       * this computer's or its owner's over the tailnet. A tailnet guest never answers one: an Allow, Auto or Full
+       * runs tools on the owner's computer, as a Start does.
        */
       const answeredFromWindow = (request: Request, body: Record<string, unknown>, target: InboxMessage | null | undefined): boolean => {
         if (target?.author.kind !== "agent" || !isInboxPermissionSession(target.author.session)) return true;
-        return fromDeviceDoor.has(request) || isWindowRequest(request, body, serverSession);
+        return fromDeviceDoor.has(request) || (ownerOrLocal(request, via) && isWindowRequest(request, body, serverSession));
       };
 
       const messageMatch = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/(picks|reply|reask|resolve)$/.exec(path);
