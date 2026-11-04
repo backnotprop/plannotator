@@ -484,17 +484,29 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
+   * agent draws and keeps current. Off unless the person turns it on. On: the
+   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
+   * group in the search, the `/api/shapes` routes and the shape skill in the
+   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
+   * readings, like the Board's: unset (off), `true`, `false`. Written by
+   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
+   */
+  inboxShape?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
    * on this machine (list options, voice, Snooze, the Board), the 48 h
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
+   * `steps.shownAt`: the Checklist reveal was claimed.
    */
   inboxReveals?: {
     lastShownAt?: string;
     waitingSince?: { snooze?: string; board?: string; steps?: string };
     board?: { shownAt?: string };
+    steps?: { shownAt?: string };
   };
   inboxSound?: {
     enabled?: boolean;

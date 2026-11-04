@@ -228,6 +228,9 @@ import { INBOX_WHATS_NEW_IMAGE_PATH, whatsNewImageRoute } from "./inbox-whats-ne
 import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical";
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { handleInboxTourRequest } from "./inbox-tour";
+import { createBunShapeRoutes } from "./shape-routes";
+import { shapeEventFrame } from "@plannotator/shared/shape/routes";
+import { shapeAgentName } from "@plannotator/shared/shape/routes";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -410,6 +413,8 @@ export interface InboxServerOptions {
   steps?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
+  /** Shape, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
+  shape?: boolean;
   /**
    * `plannotator inbox --tailscale`: publish over the tailnet for this run
    * whatever PLANNOTATOR_INBOX_TAILSCALE / config.json `inboxTailscale` say
@@ -540,6 +545,8 @@ export interface InboxServer {
   /** The Qwen Code wake (inbox-qwen-wake.ts): tests run its sweep. */
   qwenWake: InboxQwenWake;
   t3Wake: InboxT3Wake;
+  /** Shape's watch of the boards: tests read how many windows it reads the store for. */
+  shapeWatchers: () => number;
   stop: () => void;
 }
 
@@ -822,6 +829,18 @@ export function inboxUsedBefore(dataDir: string): boolean {
   return config.inboxNotifications !== undefined || config.inboxTool !== undefined;
 }
 
+/**
+ * HELD FOR 0.28.50: DELETE THIS FUNCTION IN 0.28.50. The owner decided (2026-11-04) to hold Code review and Shape
+ * back from 0.28.49. Their Settings → Capabilities switches show only to a person who already has that feature on,
+ * or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read, the save's answer and the windows' `event:
+ * capabilities` leave the key out, and Settings draws no row for an absent key. `told`: this request or event is the
+ * switch's own save, so a person who turns a shown switch off hears it. The row may go at the next load.
+ * In 0.28.50, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
+ */
+function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
+  return on || told || process.env.PLANNOTATOR_INBOX_PREVIEW === "1" ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
+}
+
 /** Start the Inbox server and write the registry. */
 export async function startInboxServer(options: InboxServerOptions = {}): Promise<InboxServer> {
   const dataDir = options.dataDir ?? getPlannotatorDataDir();
@@ -928,8 +947,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
-  /** The steps switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. */
-  const capabilityListeners = new Set<() => void>();
+  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held for 0.28.50 (heldSwitch). */
+  const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
   /** Event streams open now (health's `event_streams`): Inbox tabs of one origin share one. */
@@ -2103,8 +2122,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     saveConfig({ inboxCodeReview: on });
     if ((loadConfig().inboxCodeReview === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
     // Every window follows at once (its Settings switch, the review cards, the "/" list).
-    if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener();
+    if (was !== codeReviewOn()) for (const listener of capabilityListeners) listener("code_review");
     return { on: codeReviewOn() };
+  };
+
+  /**
+   * Shape (approval "shape-inbox-placement"): on only when the person turned
+   * it on (config.json `inboxShape`). Off or unset: no `/api/shapes` route
+   * answers (404, as if absent), the window shows no Pebble, row or search
+   * group, and no agent text names it. Read on every request.
+   */
+  const shapeOn = () => options.shape ?? loadConfig().inboxShape === true;
+  const saveShape = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: shapeOn() };
+    const was = shapeOn();
+    saveConfig({ inboxShape: on });
+    if ((loadConfig().inboxShape === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== shapeOn()) for (const listener of capabilityListeners) listener("shape");
+    return { on: shapeOn() };
   };
 
   /**
@@ -2114,6 +2153,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the person's (or an earlier reveal's), and a test's `board` option decides it too.
    */
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
+  /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
+  const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   const revealState = (now: Date): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -2132,6 +2173,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // Every undecided owner (the owner: "the board we just show every user"), also someone who saw the first-visit
         // dialog before the Board was a switch: their claim turns it on without the dialog (`claimReveal`).
         board: boardUndecided() && !reveals?.board?.shownAt,
+        // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
+        // need not be on.
+        steps: stepsUndecided() && !reveals?.steps?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
     };
@@ -2161,6 +2205,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimReveal = (id: RevealId, owner: boolean): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
+    if (id === "steps") return claimStepsReveal(owner);
     if (id !== "board" || !owner || !snoozeIntroRelease) return false;
     const now = new Date();
     if (!revealMayClaim("board", revealState(now), now) || !boardUndecided()) return false;
@@ -2175,6 +2220,23 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Not written (a read-only data dir): showing it anyway would show it on every load.
     const saved = loadConfig();
     return !seen && saved.inboxBoard === true && saved.inboxReveals?.board?.shownAt === at;
+  };
+  /**
+   * The Checklist's reveal (approval "inbox-checklist-reveal", 2026-11-04): the claim turns the Checklist on (unset ->
+   * true, its one automatic write; never false) and stamps the spacing clock, in one save, as the Board's does. Every
+   * window hears the switch at once (`event: capabilities`); agents get the steps field from their next session.
+   */
+  const claimStepsReveal = (owner: boolean): boolean => {
+    if (!owner || !snoozeIntroRelease) return false;
+    const now = new Date();
+    if (!revealMayClaim("steps", revealState(now), now) || !stepsUndecided()) return false;
+    const at = now.toISOString();
+    const config = loadConfig();
+    saveConfig({ inboxSteps: true, inboxReveals: { ...config.inboxReveals, lastShownAt: at, steps: { shownAt: at } } });
+    const saved = loadConfig();
+    const on = saved.inboxSteps === true && saved.inboxReveals?.steps?.shownAt === at;
+    if (on) for (const listener of capabilityListeners) listener();
+    return on;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -2282,8 +2344,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: { on: boardOn() },
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
-    /** Code review (config.json `inboxCodeReview`): off unless the person turned it on. */
-    code_review: { on: codeReviewOn() },
+    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held for 0.28.50: absent while off. */
+    ...heldSwitch("code_review", codeReviewOn()),
+    ...heldSwitch("shape", shapeOn()),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
     tour: tourState(),
     /** Settings → Prompts: the Inbox reminder (editable by the owner) and the plan, review and annotate prompts. */
@@ -2432,7 +2495,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = () => send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() }, code_review: { on: codeReviewOn() } })}\n\n`);
+        // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
+        // opens no second connection (sharedEvents.ts holds every tab to one). Only while Shape is on, and only for the
+        // owner's window (here, or the owner over the tailnet): a tailnet guest, refused the routes, hears no board ids
+        // and starts no polling. Off, nothing polls.
+        const shapesFor = ownerOrLocal(req, via);
+        let stopShapes: (() => void) | null = null;
+        const syncShapes = () => {
+          if (windowId && shapesFor && shapeOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
+          else if (!shapeOn() && stopShapes) {
+            stopShapes();
+            stopShapes = null;
+          }
+        };
+        syncShapes();
+        const onCapabilities = (changed?: "code_review" | "shape") => {
+          syncShapes();
+          const frame = { steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
+        };
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
@@ -2464,6 +2545,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
           capabilityListeners.delete(onCapabilities);
+          stopShapes?.();
+          stopShapes = null;
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();
@@ -2869,6 +2952,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A Qwen Code session too, until its registry record goes (inbox-qwen-wake.ts).
     wakeOnlyStatus: (session) => codexWake.status(session) ?? qwenWake.status(session) ?? t3Wake.status(session),
     uncertainItemsOf: (session) => [...codexWake.uncertainItems(session), ...qwenWake.uncertainItems(session), ...t3Wake.uncertainItems(session)],
+  });
+
+  // Shape (approval "shape-inbox-placement"): the boards' routes and event feed, mounted only while Shape is on.
+  // The drawing session's state, for the board's Ask footer: its own session, else the thread's owner.
+  const shapes = createBunShapeRoutes({
+    dataDir,
+    sessionOf: (shape) => {
+      const session = shape.session?.id ?? (shape.thread ? store.threadOwner(shape.thread)?.session ?? null : null);
+      const connection = session ? live.connectionOf(session) : null;
+      return { state: !connection ? "gone" : connection.busy ? "busy" : "live", agent: shapeAgentName(shape.session) };
+    },
   });
 
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
@@ -3659,11 +3753,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.board === undefined &&
           body.steps === undefined &&
           body.code_review === undefined &&
+          body.shape === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, code_review, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
@@ -3672,6 +3767,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.steps !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
+        // Shape too (the shape skill, the routes): the owner's to change.
+        if (body.shape !== undefined && !owner) return localOnly();
         if (body.voice !== undefined && !owner) throw voiceOwnerOnly();
         // Updating changes this computer: the owner's to change.
         if (updateSwitches && !owner) return localOnly();
@@ -3713,6 +3810,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
+        if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
         if (body.voice !== undefined) voice.save(body.voice, true);
         const tailnet = tailscaleChange === undefined ? tailscale.state() : tailscale.set(tailscaleChange.on, { via, replaceExposed: tailscaleChange.replaceExposed });
@@ -3733,9 +3831,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
+        const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, code_review: codeReview, voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -3798,7 +3897,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
         const owner = ownerOrLocal(req, via);
         const show = claimReveal(id, owner);
-        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() } });
+        return json({ show, reveal: { next: revealNow(owner) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
       }
 
       // The Board's first-visit dialog (approval "inbox-board", intro amendment): the first page on this
@@ -3817,11 +3916,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ show: loadConfig().inboxBoardIntro?.shownAt === at });
       }
 
+      // Shape (packages/server/shape-routes.ts): off, every path is the unknown-route 404, as if absent. The person's
+      // own window only: another site is refused (reads too: a board names files and folders), and a tailnet guest.
+      if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {
+        if (!shapeOn()) return json({ error: "Not found", code: "not_found" }, 404);
+        const crossSite = crossSiteCardRead(req);
+        if (crossSite) return crossSite;
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (req.method === "POST") {
+          const body = await req.clone().json().catch(() => null);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        }
+        const answered = await shapes.route(req, url);
+        if (answered) return answered;
+        return json({ error: "Not found", code: "not_found" }, 404);
+      }
+
       // Search: a read route (and the recent searches the window writes on opening a result).
       const searched = await search.handle(req, url);
       if (searched) return searched;
       // The composers' skill picker and the SKILL.md a Send pastes in (inbox-skills.ts): read routes.
-      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn() });
+      const skills = inboxSkillsRoute(req, url, { codeReview: codeReviewOn(), shape: shapeOn() });
       if (skills) return skills;
 
       // Compose: live sessions in every project, a new thread, Send to another session, drafts and uploads.
@@ -4682,7 +4797,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     tailnetStopFailedPort = tailscale.stop().failedPort;
   };
 
-  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, stop };
+  return { port, url: baseUrl, token, serverSession, portChanged, store, registry, tailscale, connectAgents, search: search.index, imageCapture, codexWake, qwenWake, t3Wake, shapeWatchers: () => shapes.watch.watching(), stop };
 }
 
 /** Print where the Inbox is, and open it when a person asked for it. */

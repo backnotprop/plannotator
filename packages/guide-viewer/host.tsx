@@ -103,6 +103,13 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderSectionFooter?: (index: number) => React.ReactNode | null;
   /**
+   * A section card's file column when the chapter has no files in the diff (a
+   * guide written before the change exists: Shape's Code view lists the files
+   * each step plans). Called with the card's index; answering null (or
+   * absent) shows the usual "No chapter files in the current diff".
+   */
+  renderSectionEmpty?: (index: number) => React.ReactNode | null;
+  /**
    * Draws a guide link the chain cannot follow itself (a `symbol:` link, a
    * `code:` link to a file outside the guide): the VS Code extension asks
    * the language server. Answering null (or absent) shows the link's label

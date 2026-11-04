@@ -5,6 +5,7 @@
  * writing into a store it did not read.
  */
 
+import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import type {
@@ -409,6 +410,8 @@ export interface SettingsModel {
   steps?: { on: boolean };
   /** Code review (config.json `inboxCodeReview`, approval "inbox-code-review-direction"): off unless the person turned it on. Absent from an older Inbox (off then). */
   code_review?: { on: boolean };
+  /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
+  shape?: { on: boolean };
   /**
    * Settings → General: "Open Plannotator at plannotator.localhost" (#2184): config.json
    * `urlHost: "plannotator.localhost"`. `env` is PLANNOTATOR_URL_HOST and `url_host`
@@ -1101,6 +1104,15 @@ export const inboxApi = {
   saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
+  saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
+  // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
+  shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
+  shape: (id: string, n?: number) => get<ShapeLoadedWire>(`/api/shapes/${encodeURIComponent(id)}${n ? `?n=${n}` : ''}`),
+  shapeNote: (id: string, input: Record<string, unknown>) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/notes`, input),
+  shapeAnswer: (id: string, input: { re: string; text: string; from: { host: string; id: string } }) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/answer`, input),
+  shapeSeen: (id: string, n: number) => post<{ seen: number | null }>(`/api/shapes/${encodeURIComponent(id)}/seen`, { n }),
+  shapeCodeFile: (id: string, path: string) => get<{ content: string }>(`/api/shapes/${encodeURIComponent(id)}/code/file?path=${encodeURIComponent(path)}`),
+  shapeCodeHover: (id: string, request: Record<string, unknown>) => post<unknown>(`/api/shapes/${encodeURIComponent(id)}/code/hover`, request),
   /**
    * A thread's steps, each session's list with its presence now (approval "inbox-thread-steps"). A linked
    * machine's thread has none here (its read is not forwarded), and an Inbox older than steps answers 404: both
@@ -1409,7 +1421,7 @@ export const inboxApi = {
   /** The one-time Snooze announcement, as the list options dialog: only the first claim ever gets `show: true`. */
   claimSnoozeIntro: () => post<{ show: boolean; snooze_intro: { due: boolean } }>(inboxUrl('/snooze-intro'), {}),
   /** A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). The Board's turns the Board on. */
-  claimReveal: (id: InboxRevealId) => post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean } }>(inboxUrl('/reveal'), { id }),
+  claimReveal: (id: InboxRevealId) => post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), { id }),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),
@@ -1653,7 +1665,9 @@ export interface InboxEventHandlers {
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`, today thread steps); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { steps?: { on: boolean }; code_review?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { steps?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } }) => void;
+  /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
+  onShapes?: (ids: string[]) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1689,7 +1703,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1774,11 +1788,20 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { steps?: { on?: unknown }; code_review?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { steps?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
+          ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
         });
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'shapes':
+      try {
+        const data = JSON.parse(frame.data) as { ids?: unknown };
+        if (Array.isArray(data.ids)) handlers.onShapes?.(data.ids.filter((id): id is string => typeof id === 'string'));
       } catch {
         // A malformed frame changes nothing.
       }
@@ -1879,3 +1902,32 @@ export function subscribeInboxEvents(
   }
   return openInboxEventFrames(cursor, (frame) => dispatchInboxFrame(frame, handlers), win);
 }
+
+// ───────────────────────────── Shape ─────────────────────────────
+
+/** One board in the list (packages/shared/shape/store.ts `ShapeSummary`), with its latest Picture for the grid. */
+export interface InboxShapeSummary {
+  id: string;
+  title: string;
+  project: { name: string; root: string };
+  thread: string | null;
+  state: 'active' | 'finished';
+  updated: string;
+  latest: number;
+  seen: number | null;
+  changed: boolean;
+  drawing: boolean;
+  waiting: number;
+  session: { host: string; id: string } | null;
+  preview?: { picture: ShapeDrawnView | null; refs: ShapeRef[] } | null;
+}
+
+/** `GET /api/shapes/:id`. */
+export interface ShapeLoadedWire {
+  shape: ShapeRecord;
+  version: ShapeVersion;
+  seen: number | null;
+  notes: ShapeNote[];
+  session: { state: 'live' | 'busy' | 'gone'; agent: string };
+}
+

@@ -26,10 +26,12 @@
       "#surface-guide-reader": ["./guide/surface-reader-module.d.ts"],
       "#search-palette": ["./search/SearchPalette.tsx"],
       // Post to GitHub/GitLab (the review app's dialog); PlatformPost.tsx is checked by tsconfig.guide.json.
-      "#platform-post": ["./guide/platform-post-module.d.ts"]
+      "#platform-post": ["./guide/platform-post-module.d.ts"],
+      // The board's shape; the board itself is checked by tsconfig.guide.json.
+      "#shape-board": ["./shape/board-module.d.ts"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
   // guideFeedback.test.ts compares the window's export with review-editor's, which does not compile under these settings.
-  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guide/PlatformPost.tsx", "guideFeedback.test.ts"]
+  "exclude": ["node_modules", "dist", "guide/GuideReader.tsx", "guide/SurfaceGuideReader.tsx", "guide/PlatformPost.tsx", "shape/ShapeBoard.tsx", "guideFeedback.test.ts"]
 }

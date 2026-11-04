@@ -113,7 +113,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { revealArmed, useBoardReveal } from './reveal';
+import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
 import { openSnoozeMenu } from './snoozeIntroTry';
 import { adoptSavedRows, hearRowsEvent, listLookReadMark, readListLook, writeMenuLook } from './listLook';
 import { GuidePane } from './components/GuidePane';
@@ -154,6 +154,7 @@ import { usePulls } from './pulls/usePulls';
 import { pullGroups } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
 import { boardViewOf, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
@@ -169,6 +170,12 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { createInboxShapeHost } from './shape/inboxShapeHost';
+import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { useInboxShapes } from './shape/useInboxShapes';
+import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
+import type { SearchShape } from './search/model';
+import { connectCommand } from './connectPrompt';
 
 // The Inbox has no /api/config and no browser-agent tools: settings stay in
 // the page's own cookies, except the theme, which goes to config.json `theme`
@@ -226,6 +233,14 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** Who hears the event stream's `event: shapes` (the window has one stream; useInboxShapes listens here). */
+const shapeFrameListeners = new Set<(ids: string[]) => void>();
+const subscribeShapeFrames = (listener: (ids: string[]) => void) => {
+  shapeFrameListeners.add(listener);
+  return () => {
+    shapeFrameListeners.delete(listener);
+  };
+};
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
@@ -272,7 +287,7 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls' | 'shapes';
   /**
    * Pull requests (`#pulls`, Code review on): the stack open beside the list (`&stack=`, its top layer's key),
    * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
@@ -280,6 +295,11 @@ interface Route {
   stack?: string | null;
   layer?: string | null;
   scope?: 'layer' | 'stack';
+  /**
+   * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
+   * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
+   */
+  shape?: string | null;
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -340,6 +360,7 @@ function routeOf(fullHash: string): Route {
   if (params.has('whats-new')) return { page: 'whats-new', project: null, thread: null, version: params.get('whats-new') };
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
+  if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
   if (params.has('pulls')) {
     const stack = params.get('stack') || null;
@@ -356,6 +377,7 @@ function routeOf(fullHash: string): Route {
     thread,
     file: fileId ? { id: fileId, version: params.get('v') === 'sent' ? 'sent' : 'current', focus: params.get('at'), linked: params.get('linked'), view: parseFileView(params.get('view')), set: params.get('set') } : null,
     guide: thread ? params.get('guide') : null,
+    shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
     card: thread ? params.get('card') : null,
@@ -371,6 +393,7 @@ function hashOf(route: Route): string {
   if (route.page === 'settings') hash = settingsHash({ section: route.section ?? null, pair: route.pair });
   else if (route.page === 'whats-new') hash = new URLSearchParams({ 'whats-new': route.version ?? '' }).toString();
   else if (route.page === 'drafts') hash = 'drafts';
+  else if (route.page === 'shapes') hash = route.shape ? `shapes&shape=${encodeURIComponent(route.shape)}` : 'shapes';
   else if (route.page === 'board')
     hash =
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
@@ -401,6 +424,7 @@ function hashOf(route: Route): string {
       if (route.file.set) params.set('set', route.file.set);
     }
     if (route.thread && route.guide) params.set('guide', route.guide);
+    if (route.thread && route.shape) params.set('shape', route.shape);
     // A thread opened from a Board card: its way back is the card (`&card=crd_…`).
     if (route.thread && route.card) params.set('card', route.card);
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
@@ -1511,6 +1535,18 @@ function Inbox() {
    */
   const boardEnabled = settings ? (settings.board ? settings.board.on : true) : null;
   boardOnRef.current = boardEnabled === true;
+  // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
+  // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
+  const shapeOn = settings?.shape?.on === true && settings.guest !== true;
+  const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
+  const shapeHost = useMemo(
+    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
+    [shapes.subscribe, settings?.mcp_command],
+  );
+  // A `#shapes` link while Shape is off (or never on): the list, in its place.
+  useEffect(() => {
+    if (settings && !shapeOn && route.page === 'shapes') writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
+  }, [settings, shapeOn, route.page]);
   useEffect(() => {
     if (boardEnabled !== true) {
       // Off (or not known yet): no card is read, and none kept from before it was turned off.
@@ -1813,10 +1849,10 @@ function Inbox() {
         onRows: (rows, rev) => hearRowsEvent(rows, rev, () => void refreshSettings()),
         // A capability switch saved here or in another window (approval "inbox-thread-steps"): every window follows.
         onCapabilities: (capabilities) => {
-          const { steps, code_review: codeReview } = capabilities;
-          // Code review moves the "/" list: the next box reads the catalog again.
-          if (codeReview) reloadSkillCatalog();
-          if (steps || codeReview) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}) } : current));
+          const { steps, code_review: codeReview, shape } = capabilities;
+          // Code review and Shape move the "/" list: the next box reads the catalog again.
+          if (codeReview || shape) reloadSkillCatalog();
+          if (steps || codeReview || shape) setSettings((current) => (current ? { ...current, ...(steps ? { steps } : {}), ...(codeReview ? { code_review: codeReview } : {}), ...(shape ? { shape } : {}) } : current));
           else void refreshSettings();
         },
         onStatus: (next, nextUpdated, nextRestart, nextAgents, nextFailing) => {
@@ -1840,7 +1876,13 @@ function Inbox() {
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
+        // Shape's boards changed (only sent while Shape is on).
+        onShapes: (ids) => {
+          for (const listener of shapeFrameListeners) listener(ids);
+        },
         onConnect: () => {
+          // A reconnect may have missed `event: shapes`: the boards are read again.
+          for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
           emitAskChange(null);
           stepsBus.emit('*');
@@ -2189,6 +2231,14 @@ function Inbox() {
         pageBackRef.current();
         return;
       }
+      // Shape's grid and a board open over it (approval "shape-landing-grid": Esc returns). The board's own Escape
+      // (its panel, its draw-in) runs first and marks the key used.
+      if (event.key === 'Escape' && routeRef.current.page === 'shapes') {
+        const from = keyTarget(event);
+        if (event.defaultPrevented || isComposingKey(event) || modalOpen() || (from && (isEditableTarget(from) || inOverlay(from)))) return;
+        closeTo(routeRef.current.shape ? { ...routeRef.current, shape: null } : { page: 'inbox', project: null, thread: null });
+        return;
+      }
       // An open file owns Escape (the HTML viewer's ladder, the composers).
       if (event.key !== 'Escape' || !routeRef.current.thread || routeRef.current.file) return;
       // Something inside the thread already used this Escape (the reply's choice at Send goes back to the reply).
@@ -2203,6 +2253,11 @@ function Inbox() {
       // (approval "inbox-thread-artifacts": one more rung before Escape closes the thread).
       // A thread in full screen leaves it before it closes (the sidebar and the list come back, the thread stays).
       const now = routeRef.current;
+      // A board open over the thread closes first, back to the thread.
+      if (now.shape) {
+        closeTo({ ...now, shape: null });
+        return;
+      }
       if (!now.guide && !now.artifacts && threadFullRef.current) {
         leaveFullRef.current();
         return;
@@ -3821,6 +3876,19 @@ function Inbox() {
     }
   };
 
+  const toggleShape = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, shape: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveShape(next);
+      reloadSkillCatalog();
+      setSettings((current) => (current ? { ...current, shape: saved.shape } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   const toggleExperimental = async (next: boolean) => {
     setSettingsError(null);
     setSettings((current) => (current ? { ...current, experimental: { decision_mode: { on: next, env: current.experimental?.decision_mode.env ?? null } } } : current));
@@ -4130,6 +4198,21 @@ function Inbox() {
     heldBack: revealHeldBack,
     onBoardOn: () => setSettings((current) => (current ? { ...current, board: { on: true } } : current)),
   });
+  // The Checklist reveal (approval "inbox-checklist-reveal"): the Board's moment; the claim turns the Checklist on,
+  // then ChecklistIntro opens.
+  const stepsReveal = useStepsReveal({
+    due: snoozeIntroLatch.current?.next === 'steps',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
+  });
   /** Try it: the dialog closes, then the real Snooze menu opens (snoozeIntroTry.ts); it never snoozes anything itself. */
   const trySnoozeIntro = () => {
     const left = snoozeIntro.target;
@@ -4168,7 +4251,9 @@ function Inbox() {
     snoozeIntro.stage !== 'open' &&
     snoozeIntro.stage !== 'claimed' &&
     boardReveal.stage !== 'open' &&
-    boardReveal.stage !== 'claimed';
+    boardReveal.stage !== 'claimed' &&
+    stepsReveal.stage !== 'open' &&
+    stepsReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -4650,6 +4735,27 @@ function Inbox() {
   };
   leaveFullRef.current = leaveFull;
   const backToCard = () => close({ page: 'board', project: route.boardProject ?? null, thread: null, board: route.board ?? 'lanes', card: fromCard });
+  // ⌘K's "Shape" group: the boards whose title or project the words find, newest change first.
+  const searchShapes = useCallback(
+    (q: string): SearchShape[] =>
+      filterShapeItems(
+        (shapes.shapes ?? []).filter((s) => s.state === 'active').map((s) => ({ s, title: s.title, project: s.project.name })),
+        q,
+      )
+        .slice(0, 5)
+        .map(({ s }) => ({
+          id: s.id,
+          title: s.title,
+          project: s.project.name,
+          meta: s.thread ? (s.drawing ? 'drawing now' : shapeAgo(s.updated)) : 'no thread',
+          hash: s.thread ? `#thread=${encodeURIComponent(s.thread)}&shape=${encodeURIComponent(s.id)}` : `#shapes&shape=${encodeURIComponent(s.id)}`,
+          picture: s.preview?.picture ?? null,
+          refs: s.preview?.refs ?? [],
+        })),
+    [shapes.shapes],
+  );
+  // The board open over its thread or over the grid (Shape on only).
+  const shapeLayerId = shapeOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
@@ -4931,6 +5037,7 @@ function Inbox() {
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
+        onToggleShape={(next) => void toggleShape(next)}
         agents={agents}
         onAgents={setAgents}
         onPrompts={(prompts) => setSettings((current) => (current ? { ...current, prompts } : current))}
@@ -5122,6 +5229,14 @@ function Inbox() {
     );
   } else if (route.page === 'pulls') {
     main = <div className="ib-listcol" aria-busy="true" />;
+  } else if (route.page === 'shapes') {
+    // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
+    main = (
+      <ShapeGridPage
+        shapes={shapeOn ? shapes.shapes : null}
+        onOpen={(s) => go(s.thread ? { page: 'inbox', project: null, thread: s.thread, shape: s.id } : { page: 'shapes', project: null, thread: null, shape: s.id })}
+      />
+    );
   } else if (route.page === 'drafts') {
     main = (
       <DraftsPage
@@ -5339,6 +5454,12 @@ function Inbox() {
             filesChanged={filesChanged}
             onReplyOpened={() => setReplyFor(null)}
             askButton={ask.button}
+            shapeButton={(() => {
+              const board = shapeOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
+              if (!board) return null;
+              const open = route.shape === board.id;
+              return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
+            })()}
             askFileButton={ask.fileButton}
             replyWords={askReply?.threadId === thread.thread_id ? askReply.words : null}
             onReplyWordsTaken={() => setAskReply(null)}
@@ -5540,6 +5661,8 @@ function Inbox() {
             // Pull requests: a row only while Code review is on; its count is the last read's "On you" (nothing reads while the page is closed).
             onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
+            onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
+            shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
@@ -5569,7 +5692,17 @@ function Inbox() {
           )
         }
       >
-        <main className="ib-main">{main}</main>
+        <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
+          {main}
+          {shapeLayerId && (
+            <ShapeLayer
+              host={shapeHost}
+              id={shapeLayerId}
+              thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+              onClose={() => close({ ...routeRef.current, shape: null })}
+            />
+          )}
+        </main>
       </SidebarShell>
       <UsagePeek
         anchor={usageRow}
@@ -5638,6 +5771,16 @@ function Inbox() {
       )}
       {snoozeIntro.stage === 'open' && <SnoozeIntro rows={snoozeIntroPicture} projectNames={projectNames} phone={phone} onTry={trySnoozeIntro} onClose={snoozeIntro.close} />}
       {boardReveal.stage === 'open' && <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} />}
+      {stepsReveal.stage === 'open' && (
+        <ChecklistIntro
+          phone={phone}
+          onClose={stepsReveal.close}
+          onSettings={() => {
+            stepsReveal.close();
+            go({ page: 'settings', project: null, thread: null, section: 'capabilities' });
+          }}
+        />
+      )}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}
@@ -5817,6 +5960,7 @@ function Inbox() {
         onOpenResult={openSearchResult}
         actions={paletteActions}
         onAction={(action) => openCompose(action.kind === 'message' ? { session: action.target.session } : {}, searchOpener.current)}
+        shapes={shapeOn ? searchShapes : undefined}
       />
       {compose && (
         <ComposeDialog

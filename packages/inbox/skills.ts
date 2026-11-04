@@ -34,6 +34,7 @@ import {
   type SkillExportContent,
 } from '@plannotator/ui/utils/skillReferences';
 import { inboxReviewSkill } from '@plannotator/core/inbox-review';
+import { shapeSkill } from '@plannotator/core/shape-skill';
 import { inboxApi } from './api';
 import { annotationOf } from './attachments';
 
@@ -87,12 +88,12 @@ export interface InboxSkillSources {
 
 /**
  * A Plannotator skill's instructions (root `plannotator`: the review skills the
- * Inbox lists while Code review is on), from the window's own text, never read
+ * Inbox lists while Code review is on, and `/shape` while Shape is on), from the window's own text, never read
  * from disk. Undefined for any other skill.
  */
 export function builtinSkillContent(ref: SkillCatalogEntry): SkillExportContent | undefined {
   if (ref.root !== 'plannotator') return undefined;
-  const skill = inboxReviewSkill(ref.name);
+  const skill = inboxReviewSkill(ref.name) ?? shapeSkill(ref.name);
   return skill ? { content: skill.body, truncated: false, dir: '', path: '' } : undefined;
 }
 
