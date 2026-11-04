@@ -7,9 +7,10 @@ import { katexWoff2Only } from '../../build/katex-woff2-only';
 import { packedInboxApp } from '../../build/pack-inbox';
 
 /**
- * What the window and the phone's surface (vite.surface.config.ts) build with
- * alike. Each adds how its page is put together: the window packs its code
- * split scripts behind the page (below), the surface inlines everything.
+ * What the window, the phone's surface (vite.surface.config.ts) and the Shape
+ * page (vite.shape.config.ts) build with alike. Each adds how its page is put
+ * together: the window packs its code split scripts behind the page (below),
+ * the surface and the Shape page inline everything.
  */
 export const sharedConfig = defineConfig({
   server: {

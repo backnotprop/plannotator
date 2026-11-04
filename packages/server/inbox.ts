@@ -132,7 +132,7 @@ import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggest
 import { createInboxTidy } from "./inbox-tidy";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
-import { InboxError } from "@plannotator/shared/inbox/schema";
+import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxPromptsModel, parseInboxPromptsChange, saveInboxPromptsChange } from "./inbox-prompts";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly, inboxTidyStepsOnlyWakes } from "@plannotator/shared/inbox/tidy";
@@ -212,6 +212,7 @@ import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type Inbo
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -440,6 +441,8 @@ export interface InboxServerOptions {
   prRuntime?: PRRuntime;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
+  /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
+  pullAvatars?: Partial<PullAvatarOptions>;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
   /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
@@ -1004,6 +1007,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
+  const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
   /** Reviews posted to a forge while this Inbox runs (PR key, head, action, body): an identical one is refused. */
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
@@ -1017,6 +1022,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const root = store.message(id);
       return root && root.thread_id === id ? store.canonicalProjectId(root.project_id) : null;
     },
+    // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
+    sessionLive: (session) => live.isSessionLive(session),
   };
   // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
   // A project's origin is read once before its first list (the cache is read-behind), so the first open after a
@@ -3507,13 +3514,33 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/avatar") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        // A PR author's picture (the list's top-left spot): only a login the last list showed on that host, fetched by
+        // the Inbox from the URL the forge gave (inbox-pull-avatars.ts); the window's CSP never loads a remote image.
+        if (path === "/api/inbox/pulls/avatar") {
+          const host = url.searchParams.get("host") ?? "";
+          const login = url.searchParams.get("login") ?? "";
+          if (host.length === 0 || host.length > 255) throw new InboxError("validation_error", "host: a forge host from the list.", { field: "host" });
+          if (login.length === 0 || login.length > 100) throw new InboxError("validation_error", "login: an author's login from the list.", { field: "login" });
+          if (!pullAvatars.known(host, login)) return json({ error: "No such author in the list.", code: "avatar_unknown" }, 404);
+          const picture = await pullAvatars.get(host, login);
+          if (!picture.ok) return json({ error: "No picture for this author.", code: "avatar_miss", miss: picture.miss }, 404);
+          return new Response(picture.body, {
+            headers: {
+              "content-type": picture.type,
+              "cache-control": "private, max-age=86400",
+              "x-content-type-options": "nosniff",
+              "content-security-policy": "sandbox; default-src 'none'",
+              "cross-origin-resource-policy": "same-origin",
+            },
+          });
+        }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
           const scope = url.searchParams.get("scope") ?? "layer";
@@ -3528,6 +3555,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
+        pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};

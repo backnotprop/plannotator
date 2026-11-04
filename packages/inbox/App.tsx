@@ -4314,11 +4314,12 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
-  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read only while
-  // the page is open, never from a tailnet guest's page (it runs this computer's gh / glab).
+  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
+  // page is open, and for the sidebar's count once at start and on focus; never from a tailnet guest's page (it runs
+  // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown);
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
@@ -5722,7 +5723,7 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (nothing reads while the page is closed).
+            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
             onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}

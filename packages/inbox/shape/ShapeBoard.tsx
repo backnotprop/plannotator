@@ -21,8 +21,21 @@ function HoverCard(props: ShapeCodeHoverCardProps) {
   );
 }
 
-export default function ShapeBoard({ host, id, onClose, renderThread }: ShapeBoardProps) {
-  return <ShapeSurface key={id} host={host} id={id} onClose={onClose} CodeGuide={ShapeCodeGuide} CodeHoverCard={HoverCard} renderThread={renderThread} />;
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate }: ShapeBoardProps) {
+  return (
+    <ShapeSurface
+      key={id}
+      host={host}
+      id={id}
+      onClose={onClose}
+      CodeGuide={ShapeCodeGuide}
+      CodeHoverCard={HoverCard}
+      renderThread={renderThread}
+      initialView={initialView}
+      initialPanel={initialPanel}
+      onNavigate={onNavigate}
+    />
+  );
 }
 
 // Held to the shape the window's typecheck reads.

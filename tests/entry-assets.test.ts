@@ -357,7 +357,7 @@ describe('review entry assets', () => {
   // dist/ is gitignored, so this skips cleanly on an unbuilt checkout. The CI
   // job that builds the bundles runs this file right after the build so the
   // assertion is not silently optional there.
-  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html'];
+  const bundles = ['apps/review/dist/index.html', 'apps/hook/dist/index.html', 'apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html'];
   for (const path of bundles) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} ships no inlined WebAssembly`, () => {
       // Asserted on a boolean, not the string: these bundles are ~20MB and a
@@ -406,9 +406,11 @@ describe('review entry assets', () => {
     });
   }
 
-  // The phone's surface stays one self-contained page (vite-plugin-singlefile):
-  // a native shell loads it with no server and no network behind it.
-  for (const path of ['apps/hook/dist/surface.html']) {
+  // The phone's surface and the Shape page stay one self-contained page each
+  // (vite-plugin-singlefile): a native shell loads the surface with no server
+  // and no network behind it, and the Shape page's server serves it whole, with
+  // no asset route behind it.
+  for (const path of ['apps/hook/dist/surface.html', 'apps/hook/dist/shape.html']) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} stays single-file`, () => {
       const html = readFileSync(resolve(root, path), 'utf8');
       const facts = { path, packed: html.includes(PACKED_ASSETS_MARKER), linksAssets: /(?:src|href)="\/assets\//.test(html) };

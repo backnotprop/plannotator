@@ -64,7 +64,7 @@ const ALLOWED: Record<Op, readonly string[]> = {
 
 export function parseShapeCommand(argv: readonly string[]): { ok: true; command: ParsedShapeCommand } | { ok: false; error: string } {
   const op = argv[0] as Op | undefined;
-  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done or list." };
+  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done, list or open." };
   const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false, re: null, text: null };
   const positional: string[] = [];
   for (let i = 1; i < argv.length; i++) {
