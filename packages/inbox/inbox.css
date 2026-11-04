@@ -7372,7 +7372,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-review .ib-rsplit, .ib-review.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
   .ib-review .ib-rrail { display: none; }
   .ib-rv-phonebar { display: grid; gap: 8px; padding: 10px 12px 0; }
-  .pn-inbox .ib-rv-jump { height: 44px; width: 100%; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 16px; }
+  .pn-inbox .ib-rv-jump { height: 44px; width: 100%; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-16-in, 16px); }
   .ib-review .ib-vhead .ib-from { display: none; }
   .ib-review .ib-vhead .ib-fn { flex: 1; }
   .ib-rvcard { padding: 12px 14px 14px; }
