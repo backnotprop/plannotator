@@ -919,18 +919,20 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
 
 const VOID = new Set(['area', 'br', 'col', 'hr', 'img', 'input', 'source', 'track', 'wbr', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'use', 'stop']);
 
+/** The named references read here; any other stays as written (and a check that cares refuses it). */
+const NAMED_REFS: Readonly<Record<string, string>> = { nbsp: '\u00a0', lt: '<', LT: '<', gt: '>', GT: '>', quot: '"', QUOT: '"', apos: "'", amp: '&', AMP: '&', rarr: '→' };
+
+/**
+ * Character references decoded once, as a browser does (`&#38;#x2F;` is
+ * `&#x2F;`, not `/`): numeric ones with or without their `;`, the named ones
+ * above; and a NULL is U+FFFD, as a browser reads it in an attribute.
+ */
 function decodeEntities(text: string): string {
   return text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&rarr;/g, '→')
-    // A browser reads a numeric reference with or without its `;`.
-    .replace(/&#(\d+);?/g, (_, d: string) => codePoint(Number(d).toString(16)))
-    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => codePoint(h))
-    .replace(/&amp;/g, '&');
+    .replace(/\0/g, '\ufffd')
+    .replace(/&(?:#(\d+);?|#[xX]([0-9a-fA-F]+);?|([A-Za-z][A-Za-z0-9]*);)/g, (whole, d: string | undefined, h: string | undefined, name: string | undefined) =>
+      d !== undefined ? codePoint(Number(d).toString(16)) : h !== undefined ? codePoint(h) : (NAMED_REFS[name!] ?? whole),
+    );
 }
 
 const fold = (text: string) => text.replace(/\s+/g, ' ').trim();

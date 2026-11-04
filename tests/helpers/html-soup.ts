@@ -3,7 +3,9 @@
  * pieces that move an HTML parser (comments and their odd ends, raw-text and
  * RCDATA elements, noscript, script escapes, quotes, end tags with
  * attributes, svg, math, CDATA), with a fresh `data-code` value each time, so
- * a code missed names its case. Seeded, so a failure comes back.
+ * a code missed names its case; some values carry a character reference or a
+ * NULL, so a value read otherwise than the browser reads it is a miss too.
+ * Seeded, so a failure comes back.
  */
 
 /** A small seeded generator (mulberry32). */
@@ -28,6 +30,9 @@ const PIECES = [
   '"', "'", "=", " ", "/", ">", "<", "x", "text", "&quot;", "\n",
 ];
 
+/** What a value may carry: references a browser decodes once (`&#38;#x2F;` stays `&#x2F;`), and a NULL. */
+const VALUE_TAILS = ["&amp;", "&AMP;", "&nbsp;", "&lt;", "&QUOT;", "&#38;#x2F;", "&#x41;", "&#65;", "&#0;", "\u0000", "&amp;lt;"];
+
 /** Markup of 4 to 17 pieces; `code()` names each `data-code` value. */
 export function htmlSoup(next: () => number, code: () => string): string {
   let html = "";
@@ -35,10 +40,11 @@ export function htmlSoup(next: () => number, code: () => string): string {
   for (let k = 0; k < count; k++) {
     const roll = next();
     if (roll < 0.22) {
-      const c = code();
+      const c = next() < 0.3 ? `${code()}${VALUE_TAILS[Math.floor(next() * VALUE_TAILS.length)]}` : code();
       const form = Math.floor(next() * 3);
       html += form === 0 ? ` data-code="${c}"` : form === 1 ? ` data-code='${c}'` : ` data-code=${c}`;
     } else if (roll < 0.3) html += `<div data-code="${code()}">`;
+    else if (roll < 0.32) html += "\u0000";
     else html += PIECES[Math.floor(next() * PIECES.length)]!;
   }
   return html;
