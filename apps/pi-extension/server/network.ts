@@ -150,8 +150,9 @@ export function getServerPort(): {
 	return { port: ports[0], portSource };
 }
 
+/** Only an explicit remote override exposes the server; SSH forwarding uses loopback. */
 export function getServerHostname(): string {
-	return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
+	return getRemoteOverride() === true ? "0.0.0.0" : LOOPBACK_HOST;
 }
 
 /**
@@ -166,7 +167,7 @@ export function getLocalUrlHostname(): string | undefined {
 
 /** Compose the display-only URL advertised for a bound server port. */
 export function buildAdvertisedUrl(port: number): string {
-	return resolveAdvertisedSessionUrl(port, isRemoteSession());
+	return resolveAdvertisedSessionUrl(port, isRemoteSession(), getServerHostname() === LOOPBACK_HOST);
 }
 
 const MAX_RETRIES = 5;

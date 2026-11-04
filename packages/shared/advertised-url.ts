@@ -8,6 +8,7 @@ const IPV4_LOOPBACK_RE = /^127(?:\.\d{1,3}){3}$/;
 const IPV4_MAPPED_LOOPBACK_RE = /^\[::ffff:7f[0-9a-f]{2}:[0-9a-f]{1,4}\]$/;
 
 let warnedLocalAdvertisedUrlOverride = false;
+let warnedLoopbackRemoteHost = false;
 
 function localhostUrl(port: number): string {
   return `http://localhost:${port}`;
@@ -33,7 +34,7 @@ function publicUrlAppliesToPort(port: number): boolean {
  *     other urlHost are ignored with a once-per-process warning: a local
  *     session binds loopback, so a proxy or tailnet name cannot reach it.
  */
-export function resolveAdvertisedSessionUrl(port: number, isRemote: boolean): string {
+export function resolveAdvertisedSessionUrl(port: number, isRemote: boolean, bindsLoopback = !isRemote): string {
   const config = loadConfig();
 
   if (!isRemote) {
@@ -64,7 +65,14 @@ export function resolveAdvertisedSessionUrl(port: number, isRemote: boolean): st
     remoteHost !== undefined && isAutoUrlHost(remoteHost)
       ? resolveAutoHostCached()
       : remoteHost;
-  return host === undefined ? localhostUrl(port) : `http://${host}:${port}`;
+  const url = host === undefined ? localhostUrl(port) : `http://${host}:${port}`;
+  if (bindsLoopback && !isLocalOnlyAdvertisedUrl(url) && !warnedLoopbackRemoteHost) {
+    warnedLoopbackRemoteHost = true;
+    process.stderr.write(
+      `[plannotator] Warning: SSH detection keeps the server on 127.0.0.1. The advertised URL ${JSON.stringify(url)} requires forwarding or a proxy; PLANNOTATOR_URL_HOST does not publish the server. Use SSH port forwarding or --tailscale (Bun CLI). Set PLANNOTATOR_REMOTE=1 only if you intend to expose the unauthenticated server on all interfaces.\n`,
+    );
+  }
+  return url;
 }
 
 /** Return whether an advertised URL still points only at the server machine. */
