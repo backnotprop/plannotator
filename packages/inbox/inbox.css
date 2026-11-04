@@ -433,11 +433,15 @@ button.ib-mut { border-radius: 6px; }
 /* Floating (the peek, a phone's sheet), the sidebar keeps room on its right; docked, the panes' gutter is that room. */
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
 /* Workspaces' TaterSpriteSidebar: 24 frames of 77x88 at 2x shown 44 px high
-   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion. */
-.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; transform: scaleX(-1); animation: ib-tater-sidebar 3.5s steps(24) infinite; }
-@keyframes ib-tater-sidebar { to { background-position: -924px 0; } }
+   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion.
+   The strip slides inside a one-frame window by `transform`, so the compositor runs the loop:
+   no style or paint work on the page each frame (a `background-position` loop restyled 60 times a second).
+   The strip takes no margin: `.ib-brand span` below gives spans a -4 px one. */
+.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; overflow: hidden; transform: scaleX(-1); }
+.ib-brand .ib-tater-strip { display: block; margin-left: 0; width: 924px; height: 44px; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; animation: ib-tater-sidebar 3.5s steps(24) infinite; }
+@keyframes ib-tater-sidebar { to { transform: translateX(-924px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ib-brand .ib-tater { animation: none; }
+  .ib-brand .ib-tater-strip { animation: none; }
 }
 .ib-brand b { font-weight: 650; font-size: var(--ib-fs-15, 15px); letter-spacing: -0.005em; }
 .ib-brand span { color: var(--muted-foreground); font-weight: 500; font-size: var(--ib-fs-15, 15px); margin-left: -4px; }

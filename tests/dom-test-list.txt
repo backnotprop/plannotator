@@ -141,6 +141,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
