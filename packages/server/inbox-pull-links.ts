@@ -2,7 +2,10 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at } } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask? } } }
+ *
+ * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
+ * (`custom`); the stack view says it until the review arrives.
  *
  * Written whole to a temp file, then renamed over the old one. A file that
  * cannot be read is moved aside (`pull-links.json.unreadable-<time>`), never
@@ -17,16 +20,19 @@ export const INBOX_PULL_LINKS_FILE = "pull-links.json";
 /** At most this many PRs keep an owner: the oldest choices go first. */
 export const INBOX_PULL_LINKS_MAX = 2_000;
 
+export type InboxPullAsk = "guide" | "custom";
+
 export interface InboxPullOwner {
   thread_id: string;
   at: string;
+  ask?: InboxPullAsk;
 }
 
 export interface InboxPullLinks {
   get(key: string): InboxPullOwner | null;
   all(): ReadonlyMap<string, InboxPullOwner>;
   /** Every key given now belongs to `threadId` (a stack handed over at once). */
-  set(keys: readonly string[], threadId: string, at?: string): void;
+  set(keys: readonly string[], threadId: string, ask?: InboxPullAsk | null, at?: string): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -43,7 +49,9 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       if (parsed.v !== 1 || !parsed.links || typeof parsed.links !== "object") throw new Error("not a pull links file");
       for (const [key, value] of Object.entries(parsed.links)) {
         const owner = value as Partial<InboxPullOwner>;
-        if (typeof owner?.thread_id === "string" && typeof owner.at === "string") links.set(key, { thread_id: owner.thread_id, at: owner.at });
+        if (typeof owner?.thread_id === "string" && typeof owner.at === "string") {
+          links.set(key, { thread_id: owner.thread_id, at: owner.at, ...(owner.ask === "guide" || owner.ask === "custom" ? { ask: owner.ask } : {}) });
+        }
       }
     } catch {
       try {
@@ -66,11 +74,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   return {
     get: (key) => load().get(key) ?? null,
     all: () => load(),
-    set(keys, threadId, at = new Date().toISOString()) {
+    set(keys, threadId, ask = null, at = new Date().toISOString()) {
       const map = load();
       for (const key of keys) {
         map.delete(key);
-        map.set(key, { thread_id: threadId, at });
+        map.set(key, { thread_id: threadId, at, ...(ask ? { ask } : {}) });
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);

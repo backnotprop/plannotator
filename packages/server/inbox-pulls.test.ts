@@ -24,7 +24,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxPullsAnswer } from "@plannotator/core/inbox-types";
+import { inboxId, type InboxPullsAnswer } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { createInboxPulls, GITHUB_SEARCH_MAX_CHARS, githubPullSearches, INBOX_PULL_DIFF_MAX_BYTES, INBOX_PULLS_FRESH_MS, parseGithubPulls, parseGitlabPulls, safeBranch } from "./inbox-pulls";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
@@ -39,7 +39,8 @@ afterEach(async () => {
   for (const client of clients.splice(0)) await client.close().catch(() => {});
   for (const server of servers.splice(0)) server.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
-  process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
+  if (savedDataDir === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+  else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
 
 const ghPull = (number: number, fields: Record<string, unknown> = {}) => ({
@@ -140,9 +141,11 @@ async function world(options: { codeReview?: boolean; answer?: unknown; tailscal
   const pulls = async (query = "") => fetch(`${base}/api/inbox/pulls${query}`);
   const setCodeReview = (on: boolean) =>
     fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code_review: { on } }) });
-  const own = (keys: string[], threadId: string) =>
-    fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, thread_id: threadId }) });
-  return { root, project, dataDir, base, server, forge: f, send, pulls, own, setCodeReview };
+  const own = (keys: string[], threadId: string, extra: Record<string, unknown> = {}) =>
+    fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, thread_id: threadId, ...extra }) });
+  const check = (keys: string[], projectId: string) =>
+    fetch(`${base}/api/inbox/pulls/owner`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ keys, project_id: projectId, validate_only: true }) });
+  return { root, project, dataDir, base, server, forge: f, send, pulls, own, check, setCodeReview };
 }
 
 describe("off", () => {
@@ -213,6 +216,45 @@ describe("on", () => {
     // Kept on disk, so a new Inbox on the same folder still knows it.
     const saved = JSON.parse(await Bun.file(join(w.dataDir, "inbox", "pull-links.json")).text()) as { links: Record<string, { thread_id: string }> };
     expect(saved.links[keys[0]!]?.thread_id).toBe(handed);
+  });
+
+  test("the hand-off's ask is kept with the owner and served on its link", async () => {
+    const w = await world({ codeReview: true });
+    const handed = await w.send("Ready.", "handed");
+    await w.pulls();
+    expect((await w.own(["github.com/northwind/billing-svc#412"], handed, { ask: "custom" })).status).toBe(200);
+    expect((await w.own(["github.com/northwind/billing-svc#413"], handed, { ask: "anything" })).status).toBe(422);
+    const answer = (await (await w.pulls()).json()) as InboxPullsAnswer;
+    expect(answer.links["github.com/northwind/billing-svc#412"]).toMatchObject({ via: "owner", ask: "custom" });
+  });
+
+  test("checked before the send: validate_only writes nothing, refuses another project, and needs no thread", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "handed");
+    await w.pulls();
+    const projectId = w.server.store.allProjects()[0]!.id;
+    expect((await w.check(["github.com/northwind/billing-svc#412"], projectId)).status).toBe(200);
+    expect((await w.check(["github.com/northwind/billing-svc#412"], "prj_01M4H6G73M9H3Z32T859E72NOP")).status).toBe(422);
+    expect(await Bun.file(join(w.dataDir, "inbox", "pull-links.json")).exists()).toBe(false);
+  });
+
+  test("after a restart, before the window read the list again: the owner route reads it and keeps the owner", async () => {
+    const w = await world({ codeReview: true });
+    const handed = await w.send("Ready.", "handed");
+    // A new Inbox has not read the forge yet: the key is unknown to it until the route reads the list once.
+    expect(w.forge.graphql()).toHaveLength(0);
+    expect((await w.own(["github.com/northwind/billing-svc#412"], handed)).status).toBe(200);
+    expect(w.forge.graphql()).toHaveLength(1);
+  });
+
+  test("a draft started from Launch an agent keeps its pull requests", async () => {
+    const w = await world({ codeReview: true });
+    const pulls = { keys: ["github.com/northwind/billing-svc#412"], projects: ["prj_1"], ask_line: "/review-curate" };
+    const saved = await fetch(`${w.base}/api/inbox/drafts/${inboxId("drf")}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: "Own it", to: null, project: null, files: [], base: null, pulls }) });
+    expect(saved.status).toBe(200);
+    expect(((await saved.json()) as { draft: { pulls?: unknown } }).draft.pulls).toEqual(pulls);
+    const bad = await fetch(`${w.base}/api/inbox/drafts/${inboxId("drf")}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: "x", to: null, project: null, files: [], base: null, pulls: { keys: [] } }) });
+    expect(bad.status).toBe(422);
   });
 
   test("Hand to an agent refuses a PR the list never named, a thread that is not there, and no PR at all", async () => {
@@ -596,6 +638,14 @@ describe("who may read it", () => {
       expect(handGuest.status).toBe(403);
       expect(f.calls).toEqual([]);
       expect((await through(OWNER)).status).toBe(200);
+      // The owner over the tailnet may hand a PR over: past the guards, the route answers on the request itself.
+      const handOwner = await fetch(`http://127.0.0.1:${listener}/api/inbox/pulls/owner`, {
+        method: "POST",
+        headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": OWNER, "Content-Type": "application/json" },
+        body: JSON.stringify({ keys: ["github.com/northwind/billing-svc#412"], thread_id: "msg_01M4H6G73M9H3Z32T859E72NOP" }),
+      });
+      expect(handOwner.status).toBe(422);
+      expect(((await handOwner.json()) as { field?: string; code?: string }).code).not.toBe("local_only");
     } finally {
       if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
       else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;

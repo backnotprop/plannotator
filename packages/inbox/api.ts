@@ -1383,7 +1383,9 @@ export const inboxApi = {
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
   /** The person handed a PR (a stack's open layers) to an agent: `threadId` is the thread compose's Send (or Hand to an agent) just started for it. */
-  pullOwner: (keys: readonly string[], threadId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId }),
+  pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
+  /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
+  pullOwnerCheck: (keys: readonly string[], projectId: string) => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], project_id: projectId, validate_only: true }),
   seeBoard: (throughSeq: number) => post<{ seen_seq: number }>(inboxUrl('/cards/seen'), { through_seq: throughSeq }),
   /** The Board's first-visit dialog: the first page on this computer to ask gets `show: true`, once per machine. */
   claimBoardIntro: () => post<{ show: boolean }>(inboxUrl('/board/intro'), {}),
@@ -1428,7 +1430,7 @@ export const inboxApi = {
   snooze: (threadId: string, until: string | null, at?: string) =>
     post<{ snoozed: { until: string; at: string } | null }>(threadUrl(threadId, '/snooze'), { until, ...(at ? { at } : {}) }),
   discardReplyDraft: (threadId: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/threads/${encodeURIComponent(threadId)}/draft/delete`), {}),
-  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; board_request?: true }) =>
+  saveDraft: (id: string, input: { body: string; to: InboxDraft['to']; project: InboxDraft['project']; files: DraftFileInput[]; base: string | null; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true }) =>
     post<{ draft: DraftView }>(inboxUrl(`/drafts/${encodeURIComponent(id)}`), { ...input }),
   deleteDraft: (id: string) => post<{ ok: true; deleted: boolean }>(inboxUrl(`/drafts/${encodeURIComponent(id)}/delete`), {}),
   /** `timeoutMs`: given up after it (InboxReadTimeout), for a read a Send waits on. */

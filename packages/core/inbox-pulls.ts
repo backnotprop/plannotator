@@ -81,8 +81,10 @@ export interface InboxPullLink {
   agent: { host: string | null; session: string | null; name: string | null } | null;
   /** The agent's last message there: what Reply answers, and its words, cut. */
   last: { message_id: string; preview: string; at: string } | null;
-  /** The thread's latest Guided Review, when the agent sent one. */
-  guide: { message_id: string; title: string; steps: number } | null;
+  /** The thread's latest Guided Review, when the agent sent one; `review`: sent for a verdict (it opens as Start review). */
+  guide: { message_id: string; title: string; steps: number; review: boolean } | null;
+  /** `owner` only: what the hand-off asked for first (a guided review, or the person's own curation); absent for an older choice. */
+  ask?: "guide" | "custom";
 }
 
 /** One host the Inbox asked, and as whom. */
@@ -131,6 +133,18 @@ export function inboxPullLabel(pull: Pick<InboxPull, "platform" | "number">): st
 }
 
 const repoKey = (pull: Pick<InboxPull, "host" | "repo">) => `${pull.host}/${pull.repo}`.toLowerCase();
+
+/** At most this many PRs are handed to one agent at once (a stack's open layers): the owner route refuses more. */
+export const INBOX_PULL_OWNER_KEYS_MAX = 20;
+
+const BRANCH_NAME = /^[A-Za-z0-9._\/-]{1,250}$/;
+/**
+ * A branch name safe to put in a command (a compare) or in words an agent reads: letters, digits and `._/-` only,
+ * no `..`, never starting with `-` or `/`. A forge's branch name is its author's text: anything else is left out.
+ */
+export function inboxPullSafeBranch(name: string): boolean {
+  return BRANCH_NAME.test(name) && !name.includes("..") && !name.startsWith("-") && !name.startsWith("/");
+}
 
 /** The key of a repository on a host, as `InboxPullsAnswer.projects` holds it. */
 export function inboxPullRepoKey(host: string, repo: string): string {

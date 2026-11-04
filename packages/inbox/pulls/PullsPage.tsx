@@ -20,13 +20,14 @@
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { inboxPullLandsNext, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullLandsNext, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import type { InboxComposeSession } from '@plannotator/core/inbox-types';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
 import { hostLabel } from '../compose/model';
+import { builtinSkillContent, composeInboxSkillsBlock, INBOX_MESSAGE_SKILL_AUDIENCE, withSkillsBlock } from '../skills';
 import { RefMarkIcon } from '../board/RefMark';
 import { ProjectFilter } from '../board/ProjectFilter';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -44,11 +45,14 @@ import {
   forgeName,
   handoffKeys,
   inboxPullLabel,
+  PULL_HANDOFF_CUSTOM_MAX,
   layerBaseWords,
   layerPill,
   linkAgentName,
   pullGroups,
+  pullHandoffAskLine,
   pullHandoffMessage,
+  type PullHandoffAsk,
   repoName,
   rowLine,
   stackLink,
@@ -75,7 +79,7 @@ export interface PullsPageProps {
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
   /** Launch an agent: compose's New thread, with the hand-off's words and the PRs it is for. */
-  onLaunch: (keys: readonly string[], body: string, opener: HTMLElement) => void;
+  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement) => void;
   /** Hand to an agent sent the hand-off to `session`: the list reads the new thread. */
   onHanded: (session: string) => void;
 }
@@ -315,6 +319,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const agent = linkAgentName(link);
   // The Board is optional: a card shows only while the Board is on and one links a layer (the answer has none otherwise).
   const card = stack.layers.map((l) => model.cards?.[l.key]).find((c) => !!c) ?? null;
+  // The agent's guided review for a verdict, when it sent one; until then, what the hand-off asked for.
+  const reviewGuide = link?.guide?.review ? link.guide : null;
+  const asked = link?.via === 'owner' && link.ask && !reviewGuide ? (link.ask === 'custom' ? 'custom curation on the way' : 'guided review on the way') : null;
   const now = useRelativeClock(true);
   const next = inboxPullLandsNext(stack);
   const start = startLayer(stack);
@@ -383,34 +390,38 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               </Tip>
             ) : null)}
         </div>
-        {link?.last && (
-          <div className="ib-pr-said" data-pulls-said="">
+        {link && (
+          <div className="ib-pr-said" data-pulls-said="" data-pulls-said-waiting={link.last ? undefined : ''}>
             <div className="ib-pr-said-h">
               {link.agent && <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />}
               <b>{agent ?? 'Agent'}</b>
-              {link.thread_subject && (
-                <span className="ib-mut" dir="auto">
-                  in {link.thread_subject}
+              {asked ? (
+                <span className="ib-mut" data-pulls-ask={link.ask}>
+                  · {asked}
                 </span>
+              ) : link.last ? (
+                <>
+                  {link.thread_subject && (
+                    <span className="ib-mut" dir="auto">
+                      in {link.thread_subject}
+                    </span>
+                  )}
+                  <span className="ib-mut">· {relativeTime(link.last.at, now)}</span>
+                </>
+              ) : (
+                <span className="ib-mut">has it · no answer yet</span>
               )}
-              <span className="ib-mut">· {relativeTime(link.last.at, now)}</span>
             </div>
-            <p dir="auto">{link.last.preview}</p>
-            {link.guide && (
+            {link.last && !asked && <p dir="auto">{link.last.preview}</p>}
+            {link.guide && !reviewGuide && (
               <button type="button" className="ib-pr-guide" onClick={() => props.onOpenGuide(link.thread_id, link.guide!.message_id)} data-pulls-guide="">
                 <Icon name="map" size={14} />
                 Guided Review <span className="ib-mut">{plural(link.guide.steps, 'step')}</span>
               </button>
             )}
-          </div>
-        )}
-        {link && !link.last && (
-          <div className="ib-pr-said" data-pulls-said="" data-pulls-said-waiting="">
-            <div className="ib-pr-said-h">
-              {link.agent && <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: link.agent.host }} tip={false} />}
-              <b>{agent ?? 'Agent'}</b>
-              <span className="ib-mut">has it · no answer yet</span>
-            </div>
+            {openLayers.length > 0 && (
+              <HandOver stack={stack} projects={stackProjects(model, stack)} phone={phone} label="Hand to another agent" onLaunch={() => {}} onHanded={props.onHanded} onReload={props.state.reload} />
+            )}
           </div>
         )}
         {!link && openLayers.length > 0 && (
@@ -418,28 +429,34 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             stack={stack}
             projects={stackProjects(model, stack)}
             phone={phone}
-            onLaunch={(opener) => props.onLaunch(handoffKeys(stack), pullHandoffMessage(stack), opener)}
+            onLaunch={(opener) => props.onLaunch(handoffKeys(stack), stackProjects(model, stack), pullHandoffMessage(stack), pullHandoffAskLine(stack, { kind: 'guide' }), opener)}
             onHanded={props.onHanded}
+            onReload={props.state.reload}
           />
         )}
         {openLayers.length > 0 && start && (
           <div className="ib-pr-actions">
-            <button type="button" className="ib-btn ib-pri" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-review-layers="">
-              {many ? 'Review layer by layer' : 'Review'}
-            </button>
+            {reviewGuide ? (
+              // The agent's guided review arrived: it is the review (phase 1's Start review), a stack's chapters its layers.
+              <button type="button" className="ib-btn ib-pri" onClick={() => props.onOpenGuide(link!.thread_id, reviewGuide.message_id)} data-pulls-start-review="">
+                Start review
+              </button>
+            ) : (
+              <button type="button" className="ib-btn ib-pri" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-review-layers="">
+                {many ? 'Review layer by layer' : 'Review'}
+              </button>
+            )}
             {many && (
               <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, top.key, 'stack')} data-pulls-review-stack="">
                 <Icon name="layers" size={15} />
                 Whole stack
               </button>
             )}
-            {many && <span className="ib-pr-note">Starts at {inboxPullLabel(start)}{start.key === next?.key ? ', the next to land.' : '.'}</span>}
           </div>
         )}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
             <b>{many ? 'Landing order' : 'Pull request'}</b>
-            {many && <span className="ib-mut">The bottom lands first</span>}
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
@@ -457,11 +474,19 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   );
 }
 
+/** Phase 1's approved /review-curate instructions, as the skills block a Send adds for a `/review-curate` it carries. */
+function reviewCurateBlock(): string {
+  const entry = { name: 'review-curate', root: 'plannotator' as const, humanOnly: true };
+  const content = builtinSkillContent(entry);
+  return content ? composeInboxSkillsBlock([entry], new Map([[entry.name, content]]), INBOX_MESSAGE_SKILL_AUDIENCE) : '';
+}
+
 /** Compose's live sessions, and whether the Inbox can launch an agent (the launch stack's `launch` block, when on). */
 interface HandTargets {
-  sessions: InboxComposeSession[];
+  sessions: HandSession[];
   launch: boolean;
 }
+type HandSession = InboxComposeSession & { project_id: string };
 
 /**
  * "No agent yet": nobody owns the PR here. Hand to an agent sends the hand-off (`pullHandoffMessage`) to one of the
@@ -469,7 +494,41 @@ interface HandTargets {
  * thread with the same words, to start an agent through compose's own launch (shown only while the Inbox can). A
  * teammate's PR can be handed over too: its thread is for discussion, and it never takes a verdict here.
  */
-function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxPullStack; projects: readonly string[]; phone: boolean; onLaunch: (opener: HTMLElement) => void; onHanded: (session: string) => void }) {
+function NoAgent(props: { stack: InboxPullStack; projects: readonly string[]; phone: boolean; onLaunch: (opener: HTMLElement) => void; onHanded: (session: string) => void; onReload: () => void }) {
+  return (
+    <div className="ib-pr-said ib-pr-noagent" data-pulls-no-agent="">
+      <HandOver {...props} label="Hand to an agent" lead={<span className="ib-pr-noagent-l">No agent yet</span>} launch />
+    </div>
+  );
+}
+
+/**
+ * Hand to an agent (no owner yet) or Hand to another agent (one owns it): a menu of the project's live sessions, the
+ * button and menu New message uses. The pick is checked with the Inbox first (these PRs, an agent in that project),
+ * then the hand-off goes to that session as a new thread, then the thread is kept as the PRs' owner; a refusal before
+ * the send sends nothing. A stack of more open PRs than one hand-off takes is refused before anything is sent.
+ */
+function HandOver({
+  stack,
+  projects,
+  phone,
+  label,
+  lead,
+  launch,
+  onLaunch,
+  onHanded,
+  onReload,
+}: {
+  stack: InboxPullStack;
+  projects: readonly string[];
+  phone: boolean;
+  label: string;
+  lead?: React.ReactNode;
+  launch?: boolean;
+  onLaunch: (opener: HTMLElement) => void;
+  onHanded: (session: string) => void;
+  onReload: () => void;
+}) {
   const [targets, setTargets] = useState<HandTargets | null>(null);
   const [open, setOpen] = useState(false);
   const [sending, setSending] = useState<string | null>(null);
@@ -481,10 +540,12 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
     try {
       const model = await inboxApi.composeSessions();
       const wanted = new Set(projects);
-      const sessions = model.projects.filter((g) => g.project.id && wanted.has(g.project.id)).flatMap((g) => g.sessions);
+      const sessions = model.projects
+        .filter((g) => g.project.id && wanted.has(g.project.id))
+        .flatMap((g) => g.sessions.map((session) => ({ ...session, project_id: g.project.id! })));
       // Launch rides compose's sessions answer once the Inbox can launch (additive; absent on an Inbox without it).
-      const launch = (model as { launch?: { agents?: unknown[] } }).launch;
-      setTargets({ sessions, launch: Array.isArray(launch?.agents) && launch.agents.length > 0 });
+      const offer = (model as { launch?: { agents?: unknown[] } }).launch;
+      setTargets({ sessions, launch: Array.isArray(offer?.agents) && offer.agents.length > 0 });
     } catch {
       setTargets({ sessions: [], launch: false });
     }
@@ -508,15 +569,36 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
       window.removeEventListener('mousedown', onDown);
     };
   }, [open]);
-  const teammate = stack.layers.every((l) => !l.mine || (l.state !== 'open' && l.state !== 'draft'));
-  const hand = async (session: InboxComposeSession) => {
+  const keys = handoffKeys(stack);
+  // What the hand-off asks for first: a guided review (the default) or the person's own curation.
+  const [askKind, setAskKind] = useState<'guide' | 'custom'>('guide');
+  const [words, setWords] = useState('');
+  const ask: PullHandoffAsk = askKind === 'custom' ? { kind: 'custom', words } : { kind: 'guide' };
+  const askName = useId();
+  const tooMany = keys.length > INBOX_PULL_OWNER_KEYS_MAX ? `A stack of more than ${INBOX_PULL_OWNER_KEYS_MAX} open pull requests can't be handed over here.` : null;
+  const hand = async (session: HandSession) => {
     if (sending) return;
+    if (tooMany) {
+      setError(tooMany);
+      return;
+    }
     setSending(session.session);
     setError(null);
     keyRef.current ??= newUuid();
     try {
-      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body: pullHandoffMessage(stack), idempotency_key: keyRef.current });
-      await inboxApi.pullOwner(handoffKeys(stack), sent.thread_id);
+      // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
+      await inboxApi.pullOwnerCheck(keys, session.project_id);
+      // The ask's instructions are phase 1's /review-curate, carried as the skills block a Send adds for it.
+      const body = withSkillsBlock(pullHandoffMessage(stack, ask), reviewCurateBlock());
+      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: keyRef.current });
+      try {
+        await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
+      } catch (cause) {
+        // The Inbox restarted in between and has not read the list again: read it, then keep the owner once more.
+        if (!(cause instanceof InboxApiError) || cause.code !== 'pull_unknown') throw cause;
+        onReload();
+        await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
+      }
       keyRef.current = null;
       setOpen(false);
       onHanded(session.session);
@@ -528,16 +610,9 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
   };
   const sessions = targets?.sessions ?? [];
   return (
-    <div className="ib-pr-said ib-pr-noagent" data-pulls-no-agent="">
-      <div className="ib-pr-said-h">
-        <b>No agent yet</b>
-      </div>
-      <p className="ib-pr-noagent-p">
-        {teammate
-          ? `Give it to an agent to read it with you. Its thread is for talking it over: the verdict stays on ${forgeName(stack)}.`
-          : 'Give it to an agent to own. Your verdicts and replies go to its thread.'}
-      </p>
+    <>
       <div className="ib-pr-noagent-acts" ref={wrap}>
+        {lead}
         <button
           type="button"
           className="ib-btn"
@@ -550,10 +625,10 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
           data-pulls-hand=""
         >
           <Icon name="reply" size={15} />
-          Hand to an agent
+          {label}
           <Icon name="chevD" size={14} />
         </button>
-        {targets?.launch && (
+        {launch && targets?.launch && (
           <button type="button" className="ib-btn" onClick={(event) => onLaunch(event.currentTarget)} data-pulls-launch="">
             <Icon name="compose" size={15} />
             Launch an agent
@@ -561,8 +636,29 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
         )}
         {open && (
           <div className={`ib-menu ib-nmpop ib-pr-handmenu${phone ? '' : ' ib-pr-handmenu-d'}`} role="menu" aria-label="Hand it to a live agent" data-pulls-hand-menu="">
+            <div className="ib-pr-ask" data-pulls-ask-choice={askKind}>
+              <div className="ib-seg" role="radiogroup" aria-label="Ask for">
+                {(['guide', 'custom'] as const).map((value) => (
+                  <label key={value} className="ib-seg-o" data-on={askKind === value ? '' : undefined} data-pulls-ask-option={value}>
+                    <input type="radio" name={askName} checked={askKind === value} onChange={() => setAskKind(value)} />
+                    {value === 'guide' ? 'Guided review' : 'Custom curation'}
+                  </label>
+                ))}
+              </div>
+              {askKind === 'custom' && (
+                <input
+                  type="text"
+                  className="ib-pr-askin"
+                  value={words}
+                  maxLength={PULL_HANDOFF_CUSTOM_MAX}
+                  placeholder="/review-curate …"
+                  aria-label="Custom curation"
+                  onChange={(event) => setWords(event.target.value)}
+                  data-pulls-ask-words=""
+                />
+              )}
+            </div>
             <div className="ib-mh">{sessions.length > 0 ? 'Live agents in this project' : 'No live agent in this project'}</div>
-            {sessions.length === 0 && <p className="ib-pr-handnone">Start one in the project's folder, or launch one.</p>}
             {sessions.map((session) => (
               <button
                 type="button"
@@ -570,7 +666,7 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
                 className="ib-mi"
                 key={session.session}
                 data-pulls-hand-session={session.session}
-                disabled={sending !== null}
+                disabled={sending !== null || (askKind === 'custom' && !words.trim())}
                 onClick={() => void hand(session)}
               >
                 <HostMark host={session.host} />
@@ -595,7 +691,7 @@ function NoAgent({ stack, projects, phone, onLaunch, onHanded }: { stack: InboxP
           {error}
         </div>
       )}
-    </div>
+    </>
   );
 }
 

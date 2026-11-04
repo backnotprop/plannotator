@@ -44,6 +44,7 @@ import {
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
+  inboxPullSafeBranch,
   type InboxPullCard,
   type InboxPullLink,
   type InboxPullReview,
@@ -307,10 +308,10 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
 }
 
-const BRANCH = /^[A-Za-z0-9._\/-]{1,250}$/;
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
-export const safeBranch = (name: string) => BRANCH.test(name) && !name.includes("..") && !name.startsWith("-") && !name.startsWith("/");
+/** Core's branch check (`inboxPullSafeBranch`): the compare and the hand-off's words take the same names. */
+export const safeBranch = inboxPullSafeBranch;
 
 /** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
 export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number) => Promise<RefCommandResult & { tooLarge?: boolean }>;
@@ -607,7 +608,7 @@ export function linkInboxPulls(
   pulls: readonly InboxPull[],
   store: InboxPullLinkStore,
   projectsByRepo: ReadonlyMap<string, readonly string[]>,
-  owners: ReadonlyMap<string, { thread_id: string }> = new Map(),
+  owners: ReadonlyMap<string, { thread_id: string; ask?: "guide" | "custom" }> = new Map(),
 ): Record<string, InboxPullLink> {
   const links: Record<string, InboxPullLink> = {};
   if (pulls.length === 0) return links;
@@ -648,7 +649,7 @@ export function linkInboxPulls(
       project_id: projectId,
       agent: last && last.author.kind === "agent" ? { host: last.author.host, session: last.author.session, name: last.author.name } : to ? { host: to.host, session: to.session, name: null } : null,
       last: last ? { message_id: last.id, preview: previewOf(last.body), at: last.created_at } : null,
-      guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections } : null,
+      guide: guide?.guide ? { message_id: guide.id, title: guide.guide.title, steps: guide.guide.sections, review: guide.guide.review === true } : null,
     };
   };
 
@@ -656,7 +657,7 @@ export function linkInboxPulls(
     const owner = owners.get(pull.key);
     const ownerProject = owner ? store.threadProject(owner.thread_id) : null;
     if (owner && ownerProject) {
-      links[pull.key] = linkOf("owner", owner.thread_id, ownerProject);
+      links[pull.key] = { ...linkOf("owner", owner.thread_id, ownerProject), ...(owner.ask ? { ask: owner.ask } : {}) };
       continue;
     }
     const url = urlThread.get(pull.key);

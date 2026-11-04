@@ -409,9 +409,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           )}
           {!canDecide && (
             <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-              {layer.mine
-                ? `No agent thread is tied to this pull request here, so the diff reads without a verdict. Review it on ${forgeName(stack)}.`
-                : `This is ${layer.author ?? 'a teammate'}'s pull request, so the diff reads here without a verdict. Review it on ${forgeName(stack)}.`}
+              {layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s pull request`}
             </p>
           )}
           {sendError && (

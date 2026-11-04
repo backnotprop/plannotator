@@ -9,6 +9,7 @@ import {
   inboxPullItems,
   inboxPullLabel,
   inboxPullLandsNext,
+  inboxPullSafeBranch,
   inboxPullStacks,
   type InboxPull,
   type InboxPullGroups,
@@ -83,46 +84,116 @@ export function handoffKeys(stack: InboxPullStack): string[] {
   return stack.layers.filter((l) => l.state === 'open' || l.state === 'draft').map((l) => l.key);
 }
 
-const firstName = (pull: Pick<InboxPull, 'author'>) => pull.author ?? 'a teammate';
+/** Control characters (a line break among them) become a space; bidirectional controls are dropped. */
+const TITLE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
+const TITLE_BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** A title in the hand-off is cut to this many characters. */
+export const PULL_HANDOFF_TITLE_MAX = 100;
+
+/**
+ * A PR's title as the hand-off quotes it: the author's text, never words of the person's own. One line (control and
+ * bidirectional characters out, whitespace collapsed), at most `PULL_HANDOFF_TITLE_MAX` characters, inside an
+ * inline code span whose fence is longer than any run of backticks in it, so no markdown in it renders.
+ */
+export function pullTitleCode(title: string): string {
+  let one = title.replace(TITLE_CONTROL, ' ').replace(TITLE_BIDI, '').replace(/\s+/g, ' ').trim();
+  const chars = [...one];
+  if (chars.length > PULL_HANDOFF_TITLE_MAX) one = `${chars.slice(0, PULL_HANDOFF_TITLE_MAX - 1).join('').trimEnd()}…`;
+  if (!one) one = '(no title)';
+  const longest = Math.max(0, ...(one.match(/`+/g) ?? []).map((run) => run.length));
+  const fence = '`'.repeat(longest + 1);
+  const pad = one.startsWith('`') || one.endsWith('`') ? ' ' : '';
+  return `${fence}${pad}${one}${pad}${fence}`;
+}
+
+/** A branch name as a code span, or null when it is not one `inboxPullSafeBranch` passes (then it is left out). */
+function branchCode(name: string): string | null {
+  return inboxPullSafeBranch(name) ? `\`${name}\`` : null;
+}
+
+const LOGIN = /^[A-Za-z0-9](?:[A-Za-z0-9._-]{0,62})$/;
+/** The author's login when it is one (GitHub's or GitLab's letters), else "a teammate". */
+const authorOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? pull.author : 'a teammate');
+const possessiveOf = (pull: Pick<InboxPull, 'author'>) => (pull.author && LOGIN.test(pull.author) ? `${pull.author}'s` : "a teammate's");
+const REPO = /^[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
+
+/** The PR's web page when it is one on the PR's own host (`https://<host>/…`, no spaces or markdown), else null. */
+function pullUrl(pull: Pick<InboxPull, 'url' | 'host'>): string | null {
+  return pull.url.startsWith(`https://${pull.host}/`) && /^https:\/\/[^\s<>()[\]`"']+$/.test(pull.url) ? pull.url : null;
+}
+
+/** What a hand-off asks the agent for first: a guided review (the default), or the person's own curation. */
+export type PullHandoffAsk = { kind: 'guide' } | { kind: 'custom'; words: string };
+
+/** The person's own words for a custom curation are kept to this many characters. */
+export const PULL_HANDOFF_CUSTOM_MAX = 1000;
+
+/**
+ * The ask's line: phase 1's `/review-curate` (its approved instructions go with the message as the skills block),
+ * with the guided review's words (a stack: layer by layer, in landing order) or the person's own.
+ */
+export function pullHandoffAskLine(stack: InboxPullStack, ask: PullHandoffAsk): string {
+  if (ask.kind === 'custom') {
+    const words = ask.words.trim().slice(0, PULL_HANDOFF_CUSTOM_MAX);
+    return words ? `/review-curate ${words}` : '/review-curate';
+  }
+  const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
+  if (open.length > 1) return "/review-curate Walk it layer by layer, in landing order: one chapter per layer, on that layer's own diff, with what to watch in it.";
+  return open.every((l) => !l.mine) ? `/review-curate Include what I might ask ${authorOf(open[0] ?? stack.layers[0]!)}.` : '/review-curate';
+}
 
 /**
  * The opening message of the thread a PR is handed to (Hand to an agent, Launch an agent): what it is, where,
- * and what the agent may do with it. Only the person's own open layers are the agent's to change; a teammate's
- * is for discussion: never pushed to, commented on or approved. DRAFT agent text (REPORT): the words reach the
- * agent as the person's New message.
+ * the ask (`pullHandoffAskLine`: first a guided review, sent through phase 1's review path so it opens as Start
+ * review), and what the agent may do after. Only the person's own open layers are the agent's to change; a
+ * teammate's is for discussion: never pushed to, commented on or approved. Everything from the forge is quoted,
+ * never written as the person's words: titles through `pullTitleCode`, branches only when safe, logins and links
+ * only when they are what they claim. DRAFT agent text: the words reach the agent as the person's New message.
  */
-export function pullHandoffMessage(stack: InboxPullStack): string {
+export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = { kind: 'guide' }): string {
   const open = stack.layers.filter((l) => l.state === 'open' || l.state === 'draft');
   const layers = open.length > 0 ? open : [stack.layers[stack.layers.length - 1]!];
   const mine = layers.some((l) => l.mine);
-  const where = stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`;
-  const cut = (title: string) => {
-    const one = title.replace(/\s+/g, ' ').trim();
-    return one.length > 100 ? `${one.slice(0, 99)}…` : one;
+  const repo = REPO.test(stack.repo) ? stack.repo : 'its repository';
+  const where = stack.host === 'github.com' ? repo : `${stack.host}/${repo}`;
+  const noun = stack.platform === 'gitlab' ? 'merge request' : 'pull request';
+  const at = (pull: InboxPull) => {
+    const url = pullUrl(pull);
+    return url ? `: ${url}` : '';
   };
+  const what = layers.length > 1 ? "the stack's open layers, each on its own diff" : `this ${noun}'s diff against its base branch`;
+  const whose = layers.length > 1 ? `the changes are the stack's, not ones you made` : `the change is the ${noun}'s, not one of yours`;
+  const first = `First, send me a guided review of ${what} (${whose}):\n${pullHandoffAskLine(stack, ask)}`;
   if (!mine) {
     const pull = layers[0]!;
-    const who = firstName(pull);
     const head =
       layers.length === 1
-        ? `Help me review ${pullNoun(pull)}: ${cut(pull.title)}\n\nIt is ${who}'s, in ${where}: ${pull.url}`
-        : `Help me review ${who}'s stack, ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${cut(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
-    return `${head}\n\nRead the change, then reply here with what it does, what looks risky, and what I might ask ${who}. This thread is for our discussion only: don't push to the branch, comment on the ${stack.platform === 'gitlab' ? 'merge request' : 'pull request'}, or approve it.`;
+        ? `Help me review ${pullNoun(pull)}: ${pullTitleCode(pull.title)}\n\nIt is ${possessiveOf(pull)}, in ${where}${at(pull)}`
+        : `Help me review ${possessiveOf(pull)} stack, ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${pullTitleCode(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
+    return `${head}\n\n${first}\n\nThis thread is for our discussion only: don't push to the branch, comment on the ${noun}, or approve it.`;
   }
   const pull = layers[0]!;
+  const branches = [branchCode(pull.head), branchCode(pull.base)];
+  const single = branches[0] ? ` (branch ${branches[0]}${branches[1] ? `, into ${branches[1]}` : ''})` : branches[1] ? ` (into ${branches[1]})` : '';
   const head =
     layers.length === 1
-      ? `Own ${pullNoun(pull)}: ${cut(pull.title)}\n\nIt is mine, in ${where}: ${pull.url} (branch ${pull.head}, into ${pull.base}).`
-      : `Own the stack ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${cut(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
+      ? `Own ${pullNoun(pull)}: ${pullTitleCode(pull.title)}\n\nIt is mine, in ${where}${at(pull)}${single}.`
+      : `Own the stack ${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}: ${pullTitleCode(layers[0]!.title)}\n\n${layerLines(layers, stack, where)}`;
   const teammates = layers.filter((l) => !l.mine);
   const theirs = teammates.length > 0 ? ` ${teammates.map(inboxPullLabel).join(', ')} ${teammates.length === 1 ? 'is' : 'are'} a teammate's: read ${teammates.length === 1 ? 'it' : 'them'}, never change ${teammates.length === 1 ? 'it' : 'them'}.` : '';
-  return `${head}\n\nRead the change, then reply here with what it does and anything to fix before it lands. I review it in the Plannotator Inbox: my verdicts and replies come to this thread, and you act on them in ${layers.length === 1 ? `that ${stack.platform === 'gitlab' ? 'merge request' : 'pull request'}'s branch` : 'the branch of the layer they name'}.${theirs} Don't merge anything.`;
+  return `${head}\n\n${first}\n\nAfter that, my verdicts and replies come to this thread; act on them in ${layers.length === 1 ? `that ${noun}'s branch` : 'the branch of the layer they name'}.${theirs} Don't merge anything.`;
 }
 
-/** The stack's open layers, bottom (lands first) up, one numbered line each. */
+/** The stack's open layers, bottom (lands first) up, one numbered line each: each title quoted the same way. */
 function layerLines(layers: readonly InboxPull[], stack: InboxPullStack, where: string): string {
-  const lines = layers.map((l, i) => `${i + 1}. ${inboxPullLabel(l)} ${l.title.replace(/\s+/g, ' ').trim()}: ${l.url} (branch ${l.head}${l.mine ? '' : `, ${firstName(l)}'s`})`);
-  return `A stack in ${where}, landing from the bottom up into ${stack.open_base}:\n${lines.join('\n')}`;
+  const lines = layers.map((l, i) => {
+    const branch = branchCode(l.head);
+    const notes = [branch ? `branch ${branch}` : null, l.mine ? null : possessiveOf(l)].filter(Boolean).join(', ');
+    const url = pullUrl(l);
+    return `${i + 1}. ${inboxPullLabel(l)} ${pullTitleCode(l.title)}${url ? `: ${url}` : ''}${notes ? ` (${notes})` : ''}`;
+  });
+  const base = branchCode(stack.open_base);
+  return `A stack in ${where}, landing from the bottom up${base ? ` into ${base}` : ''}:\n${lines.join('\n')}`;
 }
 
 /** The repository's own name (`billing-svc` for `northwind/billing-svc`). */

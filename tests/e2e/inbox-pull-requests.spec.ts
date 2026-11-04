@@ -59,6 +59,7 @@ interface World {
   forge: string;
   projects: { billing: string; web: string; ledger: string };
   threads: { stack: string; vite: string; csv: string };
+  patches: { locale: string; rtl: string };
   claude: SimAgent;
   codex: SimAgent;
   polls: Poll[];
@@ -503,6 +504,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     forge: forgeDir,
     projects: { billing: billing.dir, web: web.dir, ledger: ledger.dir },
     threads: { stack: String(stackThread.thread_id), vite: String(viteThread.thread_id), csv: String(csvThread.thread_id) },
+    patches: { locale, rtl },
     claude,
     codex,
     polls,
@@ -623,7 +625,25 @@ test('the stack view with the Board off: layers from main up, Lands next, the ag
   await shot(page, '3-stack-board-off');
 });
 
-test('a PR with no agent: Hand to an agent lists the project\'s live sessions, and the pick owns it from then on', async () => {
+/** The agent's guided review of a one-file PR, sent as phase 1's review (`review: true`), in reply to the hand-off. */
+async function sendReview(agent: SimAgent, projectPath: string, replyTo: string, patch: string, file: string, title: string): Promise<void> {
+  await agent.submitGuide({
+    project_path: projectPath,
+    reply_to: replyTo,
+    patch,
+    body: '1 of 1 changed files needs you.',
+    guide: {
+      title,
+      intent: 'What the pull request changes, and what to watch.',
+      sections: [{ title: 'The one change', overview: 'Read the new lines; the rest of the file is unchanged.', diffs: [{ file, summary: 'The change.' }] }],
+      review: { gitRef: 'main...HEAD', base: 'main' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+}
+
+test('a PR with no agent: the ask (Guided review / Custom curation), Hand to an agent, "on the way", and the review arriving as Start review', async () => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -632,9 +652,7 @@ test('a PR with no agent: Hand to an agent lists the project\'s live sessions, a
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   const none = pane.locator('[data-pulls-no-agent]');
-  await expect(none).toContainText('No agent yet');
-  await expect(none.locator('[data-pulls-hand]')).toBeVisible();
-  await expect(none.locator('[data-pulls-launch]')).toBeVisible();
+  await expect(none).toHaveText(/^No agent yet\s*Hand to an agent\s*Launch an agent$/);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await shot(page, '4-no-agent');
   await none.locator('[data-pulls-hand]').click();
@@ -642,22 +660,40 @@ test('a PR with no agent: Hand to an agent lists the project\'s live sessions, a
   // Only web-app's live sessions: billing-svc's is another project's.
   await expect(menu.locator('[data-pulls-hand-session]')).toHaveCount(2);
   await expect(menu.locator('[data-pulls-hand-session="ses-billing-claude"]')).toHaveCount(0);
-  await shot(page, '5-hand-menu');
+  await expect(menu.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
+  await shot(page, '5-ask-picker');
+  await menu.locator('[data-pulls-ask-option="custom"]').click();
+  await menu.locator('[data-pulls-ask-words]').fill('only the fallback chain, and a test for a missing locale');
+  await shot(page, '5a-ask-custom');
+  await menu.locator('[data-pulls-ask-option="guide"]').click();
   await menu.locator('[data-pulls-hand-session="ses-web-claude"]').click();
   await expect(none).toHaveCount(0);
   const chip = pane.locator('[data-pulls-thread]');
   await expect(chip).toBeVisible();
-  await expect(pane.locator('[data-pulls-said-waiting]')).toContainText('Claude Code');
+  await expect(pane.locator('[data-pulls-said]')).toContainText(/Claude Code\s*· guided review on the way/);
   const threadId = String(await chip.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
-  expect(String(opening.body)).toContain('Own pull request #869: Fall back to English for missing strings');
-  expect(String(opening.body)).toContain('https://github.com/northwind/web-app/pull/869');
-  // Kept: a fresh read still ties it to that thread.
+  const words = String(opening.body);
+  expect(words).toContain('Own pull request #869: `Fall back to English for missing strings`');
+  expect(words).toContain('https://github.com/northwind/web-app/pull/869');
+  expect(words).toContain('\n/review-curate\n');
+  expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
+  // Kept: a fresh read still ties it to that thread, and says what was asked.
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  // The row says the agent has it (it did not open it), with the agent's name as written.
   await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Claude Code has it · your review');
-  await shot(page, '5b-handed', ['light']);
+  await expect(page.locator('[data-pulls-stack] [data-pulls-said-waiting]')).toContainText('guided review on the way');
+  await shot(page, '6-on-the-way');
+
+  // The agent's guided review arrives through phase 1's path: on the PR it is Start review.
+  await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
+  await page.reload();
+  const startReview = page.locator('[data-pulls-stack] [data-pulls-start-review]');
+  await expect(startReview).toBeVisible();
+  await expect(page.locator('[data-pulls-stack] [data-pulls-ask]')).toHaveCount(0);
+  await shot(page, '6a-start-review');
+  await startReview.click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('guide=');
   await page.unroute('**/api/inbox/sessions*');
 });
 
@@ -674,7 +710,7 @@ test('the Board on, a card linking the stack: a quiet Board chip beside its thre
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
   await expect(pane.locator('[data-pulls-thread]')).toHaveText(/^Thread\s*Retry failed charges$/);
-  await shot(page, '6-stack-board-on');
+  await shot(page, '6b-stack-board-on');
 });
 
 test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from the lowest open layer, and Approve into the agent\'s thread', async () => {
@@ -769,12 +805,14 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     const none = page.locator('[data-pulls-stack] [data-pulls-no-agent]');
-    await expect(none).toContainText('the verdict stays on GitHub');
-    await expect(none.locator('[data-pulls-launch]')).toBeVisible();
-    await shot(page, 'phone-4-no-agent', ['light']);
+    await expect(none).toHaveText(/^No agent yet\s*Hand to an agent\s*Launch an agent$/);
+    await shot(page, 'phone-4-no-agent');
     await none.locator('[data-pulls-hand]').click();
     await expect(none.locator('[data-pulls-hand-session]')).toHaveCount(2);
-    await shot(page, 'phone-5-hand-menu', ['light']);
+    await shot(page, 'phone-5-ask-picker');
+    await none.locator('[data-pulls-ask-option="custom"]').click();
+    await none.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
+    await shot(page, 'phone-5a-ask-custom', ['light']);
     await page.keyboard.press('Escape');
     // Every control in the review's strip and foot is a 44 px target or more on a phone.
     for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
@@ -796,7 +834,7 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
   }
 });
 
-test('the walkthrough video: the switch, the list, a stack with the Board off, a PR handed to an agent, layer by layer', async ({ browser }) => {
+test('the walkthrough video (35 s): a PR with no agent, the ask, handed over, its guided review arriving as Start review', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'video');
   await setBoard(false);
@@ -805,44 +843,36 @@ test('the walkthrough video: the switch, the list, a stack with the Board off, a
   await offerLaunch(page);
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
-    await page.request.post(`${world.url}api/inbox/settings`, { data: { code_review: { on: false } } });
-    await page.goto(`${world.url}#settings/capabilities`);
-    await pause(1500);
-    const toggle = page.locator('[data-settings-code-review]').getByRole('switch');
-    await toggle.click();
-    await expect(toggle).toHaveAttribute('aria-checked', 'true');
-    await pause(1500);
-    await page.goto(world.url);
-    await pause(1000);
-    await page.locator('[data-pulls-nav]').click();
+    await page.goto(`${world.url}#pulls`);
     await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-    await pause(2500);
+    await pause(2000);
     await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
-    await pause(3500);
-    // A teammate's PR with no agent: hand it to one of web-app's live sessions.
+    await pause(2500);
+    // A teammate's PR with no agent.
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await pause(2500);
-    await page.locator('[data-pulls-hand]').click();
+    const pane = page.locator('[data-pulls-stack]');
+    await pane.locator('[data-pulls-hand]').click();
     await pause(2500);
-    await page.locator('[data-pulls-hand-session="ses-web-pi"]').click();
-    await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toBeVisible();
-    await pause(3000);
-    await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
+    await pane.locator('[data-pulls-ask-option="custom"]').click();
+    await pause(800);
+    await pane.locator('[data-pulls-ask-words]').pressSequentially('what changes for Arabic and Hebrew', { delay: 40 });
     await pause(1500);
-    await page.locator('[data-pulls-stack]').getByRole('button', { name: 'Review layer by layer' }).click();
-    const review = page.locator('[data-pull-review]');
-    await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
-    await pause(3000);
-    await review.locator('[data-review-files] li').nth(1).click();
+    await pane.locator('[data-pulls-ask-option="guide"]').click();
     await pause(1500);
-    await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
-    await pause(2000);
-    await review.locator('[data-pull-scope-choice="stack"]').click();
+    await pane.locator('[data-pulls-hand-session="ses-web-claude"]').click();
+    const chip = pane.locator('[data-pulls-thread]');
+    await expect(chip).toBeVisible();
+    await expect(pane.locator('[data-pulls-said]')).toContainText('guided review on the way');
+    await pause(3000);
+    const threadId = String(await chip.getAttribute('data-pulls-thread'));
+    const opening = await world.claude.nextReply(threadId);
+    await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
+    await page.reload();
+    await expect(page.locator('[data-pulls-stack] [data-pulls-start-review]')).toBeVisible();
     await pause(2500);
-    await review.locator('[data-pull-scope-choice="layer"]').click();
-    await pause(1500);
-    await review.getByRole('button', { name: 'Pull requests' }).first().click();
-    await pause(2000);
+    await page.locator('[data-pulls-stack] [data-pulls-start-review]').click();
+    await pause(5000);
   } finally {
     await context.close();
   }

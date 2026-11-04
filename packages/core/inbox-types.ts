@@ -2437,6 +2437,12 @@ export interface InboxDraft {
    * any other draft.
    */
   card?: { id: string; title: string };
+  /**
+   * The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread.
+   * `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review
+   * line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
+   */
+  pulls?: { keys: string[]; projects: string[]; ask_line: string };
   /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
   board_request?: true;
 }

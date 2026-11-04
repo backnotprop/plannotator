@@ -209,6 +209,7 @@ import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favico
 import { createCardMarks } from "./inbox-card-marks";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { INBOX_PULL_OWNER_KEYS_MAX } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -3380,21 +3381,39 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const keys = Array.isArray(body.keys) ? body.keys : null;
-        if (!keys || keys.length === 0 || keys.length > 20 || !keys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 600)) {
-          throw new InboxError("validation_error", "keys: 1 to 20 pull request keys from the list.", { field: "keys" });
+        if (!keys || keys.length === 0 || keys.length > INBOX_PULL_OWNER_KEYS_MAX || !keys.every((k: unknown) => typeof k === "string" && k.length > 0 && k.length <= 600)) {
+          throw new InboxError("validation_error", `keys: 1 to ${INBOX_PULL_OWNER_KEYS_MAX} pull request keys from the list.`, { field: "keys" });
         }
+        // `validate_only` with `project_id`: may these PRs go to an agent in that project? Asked before the hand-off is
+        // sent, so nothing reaches an agent that the Inbox would then refuse to keep as the PRs' owner.
+        const validateOnly = body.validate_only === true;
         const threadId = typeof body.thread_id === "string" ? body.thread_id : "";
-        const threadProject = threadId ? pullLinkStore.threadProject(threadId) : null;
-        if (!threadProject) throw new InboxError("validation_error", "thread_id: a thread in the Inbox.", { field: "thread_id" });
-        const { projectsByRepo } = await pullProjects();
+        const projectId = validateOnly
+          ? typeof body.project_id === "string" && store.project(body.project_id)
+            ? store.canonicalProjectId(body.project_id)
+            : null
+          : threadId
+            ? pullLinkStore.threadProject(threadId)
+            : null;
+        if (!projectId) {
+          throw validateOnly
+            ? new InboxError("validation_error", "project_id: a project in the Inbox.", { field: "project_id" })
+            : new InboxError("validation_error", "thread_id: a thread in the Inbox.", { field: "thread_id" });
+        }
+        const { projectsByRepo, wanted } = await pullProjects();
+        // A key this Inbox has not read yet (it restarted since the window's list): read the list once, then look again.
+        if ((keys as string[]).some((key) => !pulls.find(key))) await pulls.list(wanted, { refresh: false });
         for (const key of keys as string[]) {
           const pull = pulls.find(key);
           if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
-          if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(threadProject)) {
-            throw new InboxError("validation_error", "thread_id: a thread in a project of that pull request's repository.", { field: "thread_id" });
+          if (!(projectsByRepo.get(`${pull.host}/${pull.repo}`.toLowerCase()) ?? []).includes(projectId)) {
+            const field = validateOnly ? "project_id" : "thread_id";
+            throw new InboxError("validation_error", `${field}: ${validateOnly ? "a project" : "a thread in a project"} of that pull request's repository.`, { field });
           }
         }
-        pullOwners.set(keys as string[], threadId);
+        if (validateOnly) return json({ serverSession, ok: true });
+        if (body.ask !== undefined && body.ask !== "guide" && body.ask !== "custom") throw new InboxError("validation_error", "ask: guide or custom.", { field: "ask" });
+        pullOwners.set(keys as string[], threadId, (body.ask as "guide" | "custom" | undefined) ?? null);
         return json({ serverSession, ok: true });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
