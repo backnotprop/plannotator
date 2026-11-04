@@ -426,8 +426,10 @@ export function sanitizeGuideSection(raw: unknown): GuideSection | null {
   const s = raw as Record<string, unknown>;
   const title = typeof s.title === "string" ? s.title : "";
   const overview = typeof s.overview === "string" ? s.overview : "";
-  // Map to `{ file, summary? }` only — stray model-emitted fields never reach
-  // the client. A missing/non-string/blank summary is simply omitted (the UI
+  // Map to `{ file, summary?, notes? }` only — other stray model-emitted fields
+  // never reach the client. (Prototype: a guide job's schema has no notes, so a
+  // job's well-formed stray notes would pass unchecked against the hunks; a
+  // real change drops them on the job path.) A missing/non-string/blank summary is simply omitted (the UI
   // renders nothing for it), never a reason to drop the ref or fail the guide.
   const diffs: GuideDiffRef[] = Array.isArray(s.diffs)
     ? s.diffs
