@@ -717,6 +717,26 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
 
   });
 
+  test("a call that is over (`item/completed`) names no card: the same tool and arguments asked again in the turn with no call in progress waits on Terminal", async () => {
+    const preview = { kind: "mcpToolCall" as const, tool: "preview", arguments: { path: "/docs" } };
+    const w = world({ config: { prompts: [preview, { ...preview, started: false }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    answerCard(w.store, cardsOf(w.store, root, threadId)[0]!.id, INBOX_PERMISSION_ALLOW_ONCE);
+    let state: string | undefined;
+    for (let i = 0; i < 100 && state !== "waiting_terminal"; i++) {
+      w.launch.sweep(true);
+      state = (await w.launch.runOf(root.id))?.state;
+      if (state !== "waiting_terminal") await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()).toHaveLength(1);
+    expect(state).toBe("waiting_terminal");
+    expect(cardsOf(w.store, root, threadId)).toHaveLength(1);
+  });
+
   test("an MCP tool call the card cannot match (no `item/started` for it) or another approval kind riding elicitation gets no card: Codex waits on Terminal", async () => {
     for (const prompt of [
       { kind: "mcpToolCall" as const, tool: "search", arguments: { query: "x" }, started: false },

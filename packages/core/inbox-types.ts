@@ -600,10 +600,22 @@ export interface InboxMessage {
    */
   ask_words?: string;
   /**
+   * On such a reply (one Send may answer several of the thread's cards): the
+   * cards whose answer went to Codex with this reply's answers
+   * (`recordAskAnswer`), and the answers Codex's answer had no place for
+   * (Other on a question that takes none, a form field with a note), by card
+   * and question key. Written as Codex takes each card's answer; the reply
+   * is settled (delivered to the card's identity, or gone on to the thread)
+   * only once no card it answered still waits on Codex.
+   */
+  ask_taken?: string[];
+  ask_forward?: { message_id: string; key: string }[];
+  /**
    * On such a reply gone on to the Codex thread itself (`forwardAskReply`):
    * what the thread's turn carries instead of the whole body, only what
-   * Codex's answer could not carry (those answers, `ask_words`). The body
-   * stays the person's whole reply, shown in the thread and in read_thread.
+   * Codex's answer could not carry (the `ask_forward` answers, across every
+   * card the reply answered, and `ask_words`). The body stays the person's
+   * whole reply, shown in the thread and in read_thread.
    */
   forward_body?: string;
   /**

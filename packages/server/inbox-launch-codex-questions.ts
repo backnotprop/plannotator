@@ -22,7 +22,8 @@
  *    note after them; a skipped question with no answers.
  *  - elicitation: `accept` with `content` (an enum's value, a string's text, a boolean), or `cancel` when the
  *    person skipped every field or one Codex requires (its TUI cannot send a form missing one; Esc cancels).
- * The reply that carried the answer is marked delivered to the card's identity only once it went. The
+ * The reply that carried the answer is marked delivered to the card's identity only once it went, and the
+ * answer of every other card it answered too (one Send answers all of a thread's open cards). The
  * person's words are never dropped: "Other…" text on a question that takes none (no `isOther`, a form's
  * choice) answers it as skipped, and a note on a form has no place in it, so that reply goes on to the thread
  * itself (`InboxStore.forwardAskReply`) and the Inbox's wake delivers it as the next turn, like any reply.
@@ -338,11 +339,16 @@ export function createCodexQuestions(
     pending.delete(p.key);
     if (p.rpcId !== null) byRpc.delete(String(p.rpcId));
   };
-  /** The card's questions answered and sent whose reply never reached Codex (one gone on to the thread as a turn is the thread's wake's). */
+  /** A reply gone on to the Codex thread itself (`forwardAskReply`): the thread's wake delivers it. */
+  const forwarded = (reply: InboxMessage) => !!reply.to && !isInboxAskSession(reply.to.session);
+  /**
+   * The card's questions answered and sent whose answer never reached Codex: the reply is not delivered, not gone
+   * on to the thread, and Codex did not take this card's answer with it (`ask_taken`).
+   */
   const undelivered = (messageId: string): InboxQuestion[] =>
     store.questionsOf(messageId).filter((q) => {
       const reply = q.state === "sent" && q.sent_reply_id ? store.message(q.sent_reply_id) : undefined;
-      return !!reply && !reply.delivery && !(reply.to && !isInboxAskSession(reply.to.session));
+      return !!reply && !reply.delivery && !forwarded(reply) && !(reply.ask_taken ?? []).includes(messageId);
     });
 
   const notTakenKey = (messageId: string) => `perm-not-taken-${messageId}`;
@@ -413,34 +419,62 @@ export function createCodexQuestions(
   /** A reply that carries something besides its answers (its own words, feedback, files): Codex's answer has no place for it. */
   const carriesMore = (reply: InboxMessage | null | undefined): boolean => !!reply && (!!reply.ask_words || (reply.attachments?.length ?? 0) > 0);
 
-  /** The reply goes on to the Codex thread as its next turn, carrying only what Codex's answer did not (`keys`, its own words). */
-  const forwardReply = (replyId: string, host: string, threadId: string, keys: readonly string[]) => {
+  /** The replies that sent answers on a card. */
+  const repliesOf = (cardId: string): string[] => [...new Set(store.questionsOf(cardId).map((q) => q.sent_reply_id).filter((id): id is string => !!id))];
+
+  /** The Codex question cards a reply sent answers on (one Send answers every card of the thread's Codex questions at once). */
+  const cardsAnswered = (reply: InboxMessage): string[] =>
+    store.threadMessageIds(reply.thread_id).filter((id) => {
+      const m = store.message(id);
+      return m?.author.kind === "agent" && isInboxAskSession(m.author.session) && store.questionsOf(id).some((q) => q.sent_reply_id === reply.id);
+    });
+
+  /**
+   * A reply is settled once some card it answered had its answer taken by Codex (`ask_taken`) and none still waits
+   * on Codex. Then it is delivered to the cards' identity, or, when it holds words Codex's answers had no place
+   * for (`ask_forward`, from any of its cards) or words of its own, it goes on to the thread itself as its next
+   * turn, carrying just those. Never before: one Send can answer two cards that Codex takes one at a time. A
+   * reply that answers no question (words, feedback or files alone) never answers Codex's request, so it goes on
+   * at once.
+   */
+  const settle = (replyId: string, threadId: string) => {
+    const reply = store.message(replyId);
+    if (!reply || reply.author.kind !== "person" || reply.delivery || forwarded(reply)) return;
+    const asked = reply.reply_to ? store.message(reply.reply_to) : null;
+    if (asked?.author.kind !== "agent" || !asked.author.host || !isInboxAskSession(asked.author.session)) return;
+    const cards = cardsAnswered(reply);
+    const taken = reply.ask_taken ?? [];
+    if (cards.length > 0) {
+      if (taken.length === 0) return;
+      if (cards.some((id) => !taken.includes(id) && [...pending.values()].some((p) => p.messageId === id && !p.answered))) return;
+    }
+    const forward = (reply.ask_forward?.length ?? 0) > 0 || carriesMore(reply);
+    if (!forward && cards.length === 0) return;
     try {
-      store.forwardAskReply(replyId, { host, session: threadId }, keys);
-      log(`Inbox launch: reply ${replyId} goes on to Codex as a turn (words its answer could not carry)`);
+      if (forward) {
+        store.forwardAskReply(replyId, { host: asked.author.host, session: threadId });
+        log(`Inbox launch: reply ${replyId} goes on to Codex as a turn (words its answer could not carry)`);
+      } else {
+        store.recordDelivery(replyId, { host: asked.author.host, session: asked.author.session! });
+      }
+      options.onChange();
     } catch {
-      // Already delivered or gone on: the words stand.
+      // Already delivered or gone on: the answer stands.
     }
   };
 
   /**
-   * The reply (or replies) that carried the answer went to Codex: delivered, to the card's identity. One with
-   * words the answer had no place for goes on to the thread itself instead, so the Inbox's wake delivers it as
-   * the thread's next turn, like any reply.
+   * The answer to a card went to Codex: each reply that carried it records that (and the words the answer had no
+   * place for), then is settled if no other card it answered still waits.
    */
   const delivered = (p: Pending, forward: ReadonlyMap<string, readonly string[]>) => {
-    const card = store.message(p.messageId!);
-    if (card?.author.kind !== "agent" || !card.author.host || !card.author.session) return;
-    for (const replyId of new Set(store.questionsOf(p.messageId!).map((q) => q.sent_reply_id).filter((id): id is string => !!id))) {
-      if (forward.has(replyId) || carriesMore(store.message(replyId))) {
-        forwardReply(replyId, card.author.host, p.threadId, forward.get(replyId) ?? []);
-        continue;
-      }
+    for (const replyId of repliesOf(p.messageId!)) {
       try {
-        store.recordDelivery(replyId, { host: card.author.host, session: card.author.session });
+        store.recordAskAnswer(replyId, p.messageId!, forward.get(replyId) ?? []);
       } catch {
-        // Already recorded or delivered: the answer stands.
+        // Delivered or gone on already: the answer stands.
       }
+      settle(replyId, p.threadId);
     }
   };
 
@@ -559,18 +593,17 @@ export function createCodexQuestions(
           log(`Inbox launch: Codex ${p.method} resolved with no answers after Codex's wait`);
         }
       }
-      // A reply to a card that answers none of its questions (words, feedback or files alone): it never answers
-      // Codex's request, so it goes on to the thread as a turn now, never left waiting on a card.
+      // Every reply to a card not settled yet. One that answers none of the cards' questions (words, feedback or
+      // files alone) never answers Codex's request, so it goes on to the thread as a turn now.
       for (const root of options.roots()) {
         const ref = root.launch!.session_ref;
         if (!ref) continue;
         for (const id of store.threadMessageIds(root.thread_id)) {
           const reply = store.message(id);
-          if (!reply || reply.author.kind !== "person" || !reply.reply_to || reply.delivery || (reply.to && !isInboxAskSession(reply.to.session))) continue;
+          if (!reply || reply.author.kind !== "person" || !reply.reply_to || reply.delivery || forwarded(reply)) continue;
           const card = store.message(reply.reply_to);
-          if (card?.author.kind !== "agent" || !card.author.host || !isInboxAskSession(card.author.session) || !carriesMore(reply)) continue;
-          if (store.questionsOf(card.id).some((q) => q.sent_reply_id === reply.id)) continue;
-          forwardReply(reply.id, card.author.host, ref, []);
+          if (card?.author.kind !== "agent" || !isInboxAskSession(card.author.session)) continue;
+          settle(reply.id, ref);
         }
       }
       const since = options.connectedAt();

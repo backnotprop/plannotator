@@ -156,7 +156,8 @@ describe("the transport", () => {
     const launch = { id: "lch_01J00000000000000000000001", agent: "codex" as const, session_ref: THREAD, folder: dir, scratch: false, started_at: new Date().toISOString() };
     const root = store.startPersonThread({ project_id: project.id, body: "Fix the rounding.", to: { host: "codex", session: THREAD }, idempotency_key: "send-1", launch }).message;
     const answers: [number | string, unknown][] = [];
-    const link = { up: true };
+    /** `refuse`: the requests whose answer cannot go yet (Codex takes the others). */
+    const link = { up: true, refuse: new Set<number | string>() };
     const clock = { now: Date.now() };
     const state: { status: CodexThreadStatus | null; connectedAt: number | null } = { status: null, connectedAt: null };
     const make = () =>
@@ -169,7 +170,7 @@ describe("the transport", () => {
         host: { stateOf: () => null, readAt: () => 0 },
         onChange: () => {},
         now: () => clock.now,
-        respond: (id, result) => link.up && answers.push([id, result]) > 0,
+        respond: (id, result) => link.up && !link.refuse.has(id) && answers.push([id, result]) > 0,
         status: () => state.status,
         connectedAt: () => state.connectedAt,
       });
@@ -351,6 +352,51 @@ describe("the transport", () => {
     expect(t.store.message(wordsOnly.id)!.forward_body).toBe("Give me a minute, checking the ledger.");
     expect(t.store.questionsOf(third.id)[0]!.state).toBe("open");
     expect(t.answers).toHaveLength(2);
+  });
+
+  test("one Send that answers two cards: Codex takes each card's answer, and the turn carries the words of both that the answers had no place for, once both are taken", () => {
+    const t = transport();
+    const q = t.make();
+    // The older card: a question that takes no Other. The newer: a form whose choice label has a spaced dash.
+    q.asked(1, CODEX_USER_INPUT, userInput([question("rounding", "Round refunds how?", [{ label: "Banker's", description: "" }, { label: "Half up", description: "" }], { isOther: false })]));
+    q.asked(2, CODEX_ELICITATION, form({ type: "object", properties: { mode: { type: "string", title: "Mode", oneOf: [{ const: "merge", title: "Merge — keep both" }, { const: "replace", title: "Replace" }] } } }));
+    const [older, newer] = t.cards();
+    const a = t.store.questionsOf(older!.id)[0]!;
+    const b = t.store.questionsOf(newer!.id)[0]!;
+    const merge = b.choices[0]!.label;
+    expect(merge).toContain("\u2060");
+    const savedA = t.store.savePicks(older!.id, [{ key: a.key, revision: a.revision, answer: { v: 1, key: a.key, kind: "single", prompt: a.prompt, selected: [], other: "Neither, do Z" } }], { unsentOnly: true });
+    const savedB = t.store.savePicks(newer!.id, [{ key: b.key, revision: b.revision, answer: { v: 1, key: b.key, kind: "single", prompt: b.prompt, selected: [merge], note: "and tag the merge" } }], { unsentOnly: true });
+    // The window's Send: one reply for the session, to its newest card, answering both.
+    const reply = t.store.sendReply(newer!.id, {
+      idempotency_key: "both",
+      questions: [
+        { message_id: older!.id, key: a.key, revision: savedA[0]!.revision },
+        { key: b.key, revision: savedB[0]!.revision },
+      ],
+      words: "Some words.",
+    }).reply;
+    // Codex takes the older card's answer first: the reply waits for the newer card's before it goes on.
+    t.link.refuse.add(2);
+    q.sweep();
+    expect(t.answers).toEqual([[1, { answers: { rounding: { answers: [] } } }]]);
+    expect(t.store.message(reply.id)!.to?.session).not.toBe(THREAD);
+    t.link.refuse.clear();
+    q.sweep();
+    expect(t.answers).toEqual([
+      [1, { answers: { rounding: { answers: [] } } }],
+      [2, { action: "accept", content: { mode: "merge" }, _meta: null }],
+    ]);
+    const sent = t.store.message(reply.id)!;
+    expect(sent.to).toEqual({ host: "codex", session: THREAD });
+    expect(sent.delivery ?? null).toBeNull();
+    // Both cards' words, and the reply's own; never the card's word joiner.
+    expect(sent.forward_body).toContain("Neither, do Z");
+    expect(sent.forward_body).toContain("and tag the merge");
+    expect(sent.forward_body).toContain("Some words.");
+    expect(sent.forward_body).not.toContain("\u2060");
+    expect(t.followUps(older!.id)).toEqual([]);
+    expect(t.followUps(newer!.id)).toEqual([]);
   });
 
   test("marking the thread read never answers for the person: the card stays open and Codex keeps waiting; one the archive closed waits too, until the person answers it", () => {

@@ -5881,17 +5881,8 @@ export class InboxStore {
     return next;
   }
 
-  /**
-   * Launch: the person's reply to a launched Codex thread's own question (a
-   * `perm:ask:` card) held words Codex's answer had no place for. The same
-   * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
-   * it as the thread's next turn, like any reply; that turn carries only
-   * what the answer could not (`forward_body`): the answers to `keys` (the
-   * card's questions Codex took as skipped, or a form's note) and the reply's
-   * own words (`ask_words`), never the answers Codex already has. Only such a
-   * reply, and only while not delivered. The same address writes nothing.
-   */
-  forwardAskReply(replyId: string, to: InboxAddressee, keys: readonly string[] = []): InboxMessage {
+  /** A person's reply, not delivered, that answers or replies to a launched Codex thread's own question (a `perm:ask:` card). */
+  private askReply(replyId: string): InboxMessage {
     const message = this.messages.get(replyId);
     if (!message) throw new InboxError("message_not_found", `No message ${replyId}.`);
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
@@ -5899,16 +5890,56 @@ export class InboxStore {
       throw new InboxError("not_addressed", `${replyId} is not a reply to a launched session's own question.`);
     }
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    return message;
+  }
+
+  /**
+   * Launch: the answer to a launched Codex thread's own question (`cardId`)
+   * went to Codex with this reply's answers on it. `forwardKeys`: that
+   * card's questions whose words the answer had no place for. Both kept on
+   * the reply (`ask_taken`, `ask_forward`), since one Send can answer
+   * several cards that Codex takes one at a time. Nothing changes when
+   * already recorded.
+   */
+  recordAskAnswer(replyId: string, cardId: string, forwardKeys: readonly string[]): InboxMessage {
+    const message = this.askReply(replyId);
+    const taken = [...new Set([...(message.ask_taken ?? []), cardId])];
+    const known = message.ask_forward ?? [];
+    const added = forwardKeys.filter((key) => !known.some((f) => f.message_id === cardId && f.key === key)).map((key) => ({ message_id: cardId, key }));
+    if (taken.length === (message.ask_taken ?? []).length && added.length === 0) return message;
+    const next: InboxMessage = { ...message, ask_taken: taken, ...(known.length + added.length > 0 ? { ask_forward: [...known, ...added] } : {}) };
+    this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /**
+   * Launch: the person's reply to a launched Codex thread's own question (a
+   * `perm:ask:` card) held words Codex's answer had no place for. The same
+   * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
+   * it as the thread's next turn, like any reply; that turn carries only
+   * what the answer could not (`forward_body`): the `ask_forward` answers,
+   * from every card the reply answered, and the reply's own words
+   * (`ask_words`). Only such a reply, and only while not delivered. The
+   * same address writes nothing.
+   */
+  forwardAskReply(replyId: string, to: InboxAddressee): InboxMessage {
+    const message = this.askReply(replyId);
     if (message.to?.session === to.session && message.to.host === to.host) return message;
-    const records = this.questionRecords(asked.id).filter((r) => keys.includes(r.key) && r.sent_reply_id === replyId && r.answer);
-    const forwardBody = composeInboxReplyBody({
-      questions: records,
-      sent: records.map((r) => r.answer!),
-      earlier: [],
-      words: message.ask_words,
-      stillOpen: [],
-      replyTo: asked.id,
-    }).replace(/\u2060/g, "");
+    const groups: { message_id: string; questions: InboxQuestionRecord[]; sent: QuestionAnswer[]; earlier: QuestionAnswer[] }[] = [];
+    for (const { message_id, key } of message.ask_forward ?? []) {
+      const record = this.questionRecords(message_id).find((r) => r.key === key && r.sent_reply_id === replyId && r.answer);
+      if (!record) continue;
+      let group = groups.find((g) => g.message_id === message_id);
+      if (!group) groups.push((group = { message_id, questions: [], sent: [], earlier: [] }));
+      group.questions.push(record);
+      group.sent.push(record.answer!);
+    }
+    // In thread order, as a reply's answers on several messages always are.
+    const order = this.threadMessageIds(message.thread_id);
+    groups.sort((a, b) => order.indexOf(a.message_id) - order.indexOf(b.message_id));
+    const forwardBody = composeInboxReplyBody({ questions: [], sent: [], earlier: [], messages: groups, words: message.ask_words, stillOpen: [], replyTo: message.reply_to! })
+      // The card's word joiner (a dashed label kept whole) never goes to Codex.
+      .replace(/\u2060/g, "");
     const at = this.stamp();
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, forward_body: forwardBody, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);

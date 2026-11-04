@@ -24,6 +24,8 @@ import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import type { LaunchDelivery } from "./inbox-launch-host";
+import { inboxAskSession } from "@plannotator/core/inbox-permission";
+import { CODEX_USER_INPUT, codexAskOf } from "./inbox-launch-codex-questions";
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
 const OTHER_THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5c";
@@ -831,6 +833,27 @@ describe("a thread the Inbox launched", () => {
     w.server.store.startPersonThread({ project_id: project.id, body: "Fix that.", to: { host: "codex", session: THREAD }, idempotency_key: "p2" });
     await w.server.codexWake.sweep();
     expect(queues(w.fake).map((call) => argOf(call.args, "thread"))).toEqual([THREAD]);
+  });
+
+  test("a reply to Codex's own question that goes on to the thread: its turn carries only what Codex's answer could not, never the answers Codex took", async () => {
+    const asked: string[] = [];
+    const w = await world({ deliver: async (_session, text) => (asked.push(text), "delivered") });
+    const project = w.server.store.ensureProject({ name: "ledger", root: w.project });
+    const root = w.server.store.startPersonThread({ project_id: project.id, body: "Fix it.", to: { host: "codex", session: THREAD }, idempotency_key: "p1" }).message;
+    w.server.store.recordDelivery(root.id, { host: "codex", session: THREAD });
+    const ask = codexAskOf(CODEX_USER_INPUT, { threadId: THREAD, turnId: "t1", itemId: "call_1", isBlocking: true, autoResolutionMs: null, questions: [{ id: "build", header: "Build", question: "Which build?", isOther: true, isSecret: false, options: [{ label: "Fast", description: "" }, { label: "Full", description: "" }] }] })!;
+    const card = w.server.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "codex", session: inboxAskSession(THREAD), name: "Codex" }, permission: true, body: ask.body, reply_to: root.id, idempotency_key: "card-1" }).message;
+    const q = w.server.store.questionsOf(card.id)[0]!;
+    const saved = w.server.store.savePicks(card.id, [{ key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: "single", prompt: q.prompt, selected: ["Full"] } }], { unsentOnly: true });
+    const reply = w.server.store.sendReply(card.id, { idempotency_key: "r1", questions: [{ key: q.key, revision: saved[0]!.revision }], words: "And log what you skip." }).reply;
+    // Codex took the pick; the words go on to the thread as its next turn.
+    w.server.store.recordAskAnswer(reply.id, card.id, []);
+    w.server.store.forwardAskReply(reply.id, { host: "codex", session: THREAD });
+    expect(w.server.store.message(reply.id)!.body).toContain("Full");
+    await w.server.codexWake.sweep();
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toContain("And log what you skip.");
+    expect(asked[0]).not.toContain("Full");
   });
 
   test("a delivery its host says may have gone (no answer) is kept and never sent again, across a restart, nor queued", async () => {
