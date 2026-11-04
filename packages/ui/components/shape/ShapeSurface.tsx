@@ -68,6 +68,12 @@ const ViewIcon = ({ id }: { id: ShapeViewId }) => {
   if (id === 'reqs') return <svg {...p}><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" strokeWidth={3} /></svg>;
   return <svg {...p}><path d="M8 7l-5 5 5 5M16 7l5 5-5 5" /></svg>;
 };
+/** The globe Plannotator draws on its "Global comment" buttons. */
+const GlobeIcon = () => (
+  <svg width="14" height="14" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true" style={{ flex: 'none' }}>
+    <path strokeLinecap="round" strokeLinejoin="round" d="M12 21a9.004 9.004 0 008.716-6.747M12 21a9.004 9.004 0 01-8.716-6.747M12 21c2.485 0 4.5-4.03 4.5-9S14.485 3 12 3m0 18c-2.485 0-4.5-4.03-4.5-9S9.515 3 12 3m0 0a8.997 8.997 0 017.843 4.582M12 3a8.997 8.997 0 00-7.843 4.582m15.686 0A11.953 11.953 0 0112 10.5c-2.998 0-5.74-1.1-7.843-2.918m15.686 0A8.959 8.959 0 0121 12c0 .778-.099 1.533-.284 2.253m0 0A17.919 17.919 0 0112 16.5c-3.162 0-6.133-.815-8.716-2.247m0 0A9.015 9.015 0 013 12c0-1.605.42-3.113 1.157-4.418" />
+  </svg>
+);
 const ChatIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>;
 const RefsIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="3" /><path d="M13 7h8M13 17h8" /><circle cx="7" cy="17" r="3" /></svg>;
 
@@ -494,7 +500,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     return `${where} · “${t.text.length > 48 ? `${t.text.slice(0, 46)}…` : t.text}”`;
   };
 
-  // ── general comments: the whole board, or the whole Code view ──
+  // ── global comments: the whole board, or the whole Code view ──
+  // The words, globe and look of Plannotator's other "Global comment" buttons.
   const [general, setGeneral] = useState<{ el: HTMLElement; view: ShapeViewId | null } | null>(null);
   const generalButton = (forView: ShapeViewId | null) => (
     <button
@@ -505,10 +512,11 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         setTarget(null);
         setGeneral({ el: e.currentTarget, view: forView });
       }}
-      title={forView ? 'A comment on the whole guide' : 'A comment on the whole board'}
+      title="Add global comment"
       aria-haspopup="dialog"
     >
-      + General comment
+      <GlobeIcon />
+      <span>Global comment</span>
     </button>
   );
 
@@ -745,8 +753,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 {answerReady && <span className="shp-ready-dot" aria-hidden="true" />}
               </button>
               {phone && (
-                <button type="button" className="shp-tbtn" onClick={(e) => { setTarget(null); setGeneral({ el: e.currentTarget, view: null }); }} title="A comment on the whole board" aria-label="General comment" disabled={finished}>
-                  <span className="tl">+</span>
+                <button type="button" className="shp-tbtn" onClick={(e) => { setTarget(null); setGeneral({ el: e.currentTarget, view: null }); }} title="Add global comment" aria-label="Global comment" disabled={finished}>
+                  <GlobeIcon />
                 </button>
               )}
             </div>
@@ -780,7 +788,6 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               anchorEl={general.el}
               contextText=""
               isGlobal
-              placeholder="Add a general comment..."
               headerText={general.view ? `${shapeViewLabel(general.view)} · the whole guide` : 'The whole board'}
               allowImages={false}
               submitLabel="Change it"

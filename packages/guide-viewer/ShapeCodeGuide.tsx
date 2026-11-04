@@ -28,7 +28,7 @@ export interface ShapeCodeGuideProps {
   /** The line a file opens at in the whole-file viewer, or null when the host cannot open it. */
   openLine?: (path: string) => number | null;
   onOpenFile?: (path: string, line: number) => void;
-  /** Controls at the guide header's right (the board's "+ General comment"). */
+  /** Controls at the guide header's right (the board's "Global comment"). */
   headerActions?: React.ReactNode;
 }
 

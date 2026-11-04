@@ -27,8 +27,8 @@
 .shp-quiet-btn:disabled, .shp-general:disabled { opacity: .5; cursor: default; }
 .shp-root :is(button, a, [tabindex]):focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
 
-/* The general comment: as quiet as code review's "+ General comment". */
-.shp-general { height: 26px; padding: 0 8px; font-size: 11.5px; font-weight: 500; white-space: nowrap; flex: none; }
+/* "Global comment": the look of the document viewer's and the guide's button. */
+.shp-general { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; background: color-mix(in oklab, var(--muted) 50%, transparent); font-size: 12px; font-weight: 500; white-space: nowrap; flex: none; transition: background-color .15s, color .15s; }
 
 /* ── the Pebble ── */
 .shp-pebble { overflow: visible; display: block; }
@@ -193,13 +193,6 @@ button.shp-hb:hover { background: var(--muted); }
 .shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
 .shp-root.panel-open:not(.phone) .shp-dock, .shp-root.panel-open:not(.phone) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
 .shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
-/* The open panel floats over the board's right side; the views make room so nothing hides under it. */
-.shp-root.panel-open:not(.phone) .shp-view:not(.v-code) { padding-right: calc(var(--pw) + 36px); }
-.shp-root.panel-open:not(.phone) .shp-guidewrap { padding-right: calc(var(--pw) + 24px); }
-.shp-root.panel-open:not(.phone) .shp-codeview { padding-right: calc(var(--pw) + 32px); }
-/* The header's actions stay in reach beside the open panel. */
-.shp-root.panel-open:not(.phone) .shp-top { padding-right: calc(var(--pw) + 8px); }
-.shp-top { transition: padding-right .32s cubic-bezier(.2,.8,.2,1); }
 
 /* ── reference bubbles and the References list ── */
 .shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;

@@ -71,7 +71,7 @@ export function ShapeCode({
   annotations: CodeAnnotation[];
   onComment: (input: CodeFileAnnotationInput) => void;
   onAsk: (input: CodeFileAnnotationInput) => void;
-  /** The Code view's own "+ General comment" (on the whole guide). */
+  /** The Code view's own "Global comment" (on the whole guide). */
   generalComment: React.ReactNode;
   phone: boolean;
 }) {
