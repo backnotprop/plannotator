@@ -29,3 +29,15 @@ export function useImageResolver(): ImageResolver | null {
 /** Classes for the inert placeholder an `unavailable` image renders as. */
 export const UNAVAILABLE_IMAGE_CLASS =
   "inline-flex items-center gap-1 my-1 rounded border border-dashed border-border px-2 py-0.5 text-xs text-muted-foreground";
+
+/** Trusted hosts may preserve videos while resolving only image URLs. */
+export const PreserveResolvedVideosContext = createContext(false);
+
+/**
+ * With a resolver, keep `<picture><source>` and `<img srcset>` in raw HTML and
+ * pass each `srcset` candidate URL through the resolver, instead of dropping
+ * them (a candidate it calls `unavailable` drops that `srcset`). Lets a
+ * README-style dark-mode `<source media="(prefers-color-scheme: dark)">` keep
+ * working. Absent (false), they are dropped as before.
+ */
+export const ResolvedResponsiveImagesContext = createContext(false);

@@ -132,22 +132,8 @@ function tokenStyle(token: ThemedTokenish): string {
  * cached highlights.
  */
 export function highlightToHtml(code: string, lang: string, theme: string): string | null {
-  const mod = pierre;
-  if (!mod || !ready.has(pairKey(lang, theme))) return null;
-  const highlighter = mod.getHighlighterIfLoaded();
-  if (!highlighter) {
-    // The shared highlighter was disposed out from under us; everything we
-    // believed was attached is gone with it.
-    ready.clear();
-    return null;
-  }
-  let lines: ThemedTokenish[][];
-  try {
-    lines = highlighter.codeToTokens(code, { lang, theme }).tokens as ThemedTokenish[][];
-  } catch {
-    ready.delete(pairKey(lang, theme));
-    return null;
-  }
+  const lines = themedLines(code, lang, theme);
+  if (!lines) return null;
 
   // Invariant: the rendered text must be byte-identical to the source. The
   // annotation layer addresses these blocks by text offset, so a tokenizer that
@@ -169,6 +155,60 @@ export function highlightToHtml(code: string, lang: string, theme: string): stri
     }
   }
   return plain === code ? html : null;
+}
+
+/** Shiki's tokens for `code`, or null when the pair is not attached (or the tokenizer threw). */
+function themedLines(code: string, lang: string, theme: string): ThemedTokenish[][] | null {
+  const mod = pierre;
+  if (!mod || !ready.has(pairKey(lang, theme))) return null;
+  const highlighter = mod.getHighlighterIfLoaded();
+  if (!highlighter) {
+    // The shared highlighter was disposed out from under us; everything we
+    // believed was attached is gone with it.
+    ready.clear();
+    return null;
+  }
+  try {
+    return highlighter.codeToTokens(code, { lang, theme }).tokens as ThemedTokenish[][];
+  } catch {
+    ready.delete(pairKey(lang, theme));
+    return null;
+  }
+}
+
+/** One styled stretch of a highlighted string: `code.slice(start, end)` drawn in `style`. */
+export interface HighlightRun {
+  start: number;
+  end: number;
+  style: string;
+}
+
+/**
+ * `highlightToHtml` as data: the styled runs over `code`, by offset, or null
+ * under the same conditions. For a renderer that lays its own marks over the
+ * colours (the config-file diff view), where an HTML string cannot be split.
+ * Unstyled text has no run.
+ */
+export function highlightToRuns(code: string, lang: string, theme: string): HighlightRun[] | null {
+  const lines = themedLines(code, lang, theme);
+  if (!lines) return null;
+  const runs: HighlightRun[] = [];
+  let at = 0;
+  let plain = '';
+  for (let i = 0; i < lines.length; i++) {
+    if (i > 0) {
+      at += 1;
+      plain += '\n';
+    }
+    for (const token of lines[i]!) {
+      const style = tokenStyle(token);
+      if (style) runs.push({ start: at, end: at + token.content.length, style });
+      at += token.content.length;
+      plain += token.content;
+    }
+  }
+  // The same invariant as highlightToHtml: offsets must name the source's own characters.
+  return plain === code ? runs : null;
 }
 
 /**
