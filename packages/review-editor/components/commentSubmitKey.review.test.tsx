@@ -2,7 +2,7 @@
  * "Enter saves a comment" (#1934) on code review's comment composers,
  * against the REAL components (DOM-gated, DOM_TESTS=1): the line-comment
  * toolbar (also the Inbox's guide comments), its expanded dialog, a file
- * comment's edit box, the sidebar's "+ General comment", and an outdated
+ * comment's edit box, the sidebar's "+ Global comment", and an outdated
  * comment's edit box.
  *
  * Shared cases (off / on / Shift+Enter / Cmd+Enter / IME) come from
@@ -170,7 +170,7 @@ describeCommentSubmitKeys('review file comment edit', async (text) => {
   return { field: () => must('[data-annotation-id="f1"] textarea'), saves: () => edits.length };
 }, { skip });
 
-// --- The sidebar: "+ General comment" and an outdated comment's edit box ---
+// --- The sidebar: "+ Global comment" and an outdated comment's edit box ---
 
 describeCommentSubmitKeys('review sidebar general comment', async (text) => {
   const added: string[] = [];

@@ -15,6 +15,7 @@ import { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { BRIDGE_PROTOCOL_VERSION, BRIDGE_SCRIPT } from './bridge-script';
 import type { BridgeUnavailableInfo } from './HtmlViewer';
+import type { ViewerHandle } from '../Viewer';
 
 const hasDom = typeof document !== 'undefined';
 const htmlViewerModule = hasDom ? await import('./HtmlViewer') : null;
@@ -56,11 +57,13 @@ async function mount(props: MountProps) {
   const host = document.createElement('div');
   document.body.appendChild(host);
   const root = createRoot(host);
+  const handle = React.createRef<ViewerHandle>();
   mountedRoots.push(root);
   const render = async (next: MountProps) => {
     await act(async () => {
       root.render(
         <HtmlViewer
+          ref={handle}
           rawHtml={next.rawHtml ?? DEFAULT_HTML}
           annotations={[]}
           onAddAnnotation={() => {}}
@@ -93,7 +96,7 @@ async function mount(props: MountProps) {
     });
   };
   const banner = () => host.querySelector<HTMLElement>('[data-bridge-error]');
-  return { host, iframe, postReady, postedToIframe, banner, rerender };
+  return { host, iframe, handle, postReady, postedToIframe, banner, rerender };
 }
 
 function captureWarnings(): string[] {
@@ -107,6 +110,38 @@ function captureWarnings(): string[] {
 const wait = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
 
 describe.if(hasDom)('HtmlViewer bridgeScriptUrl', () => {
+  test('printing is available only after the current document bridge is ready', async () => {
+    const { handle, postReady, postedToIframe, rerender } = await mount({ bridgeScriptUrl: ASSET_URL });
+    expect(handle.current?.print).toBeUndefined();
+    await postReady({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
+    expect(typeof handle.current?.print).toBe('function');
+    handle.current?.print?.();
+    expect(postedToIframe.at(-1)).toEqual({ type: 'plannotator-bridge-print' });
+    await rerender({ rawHtml: '<html><head></head><body>Next document</body></html>' });
+    expect(handle.current?.print).toBeUndefined();
+    await postReady({ type: 'plannotator-bridge-ready', protocolVersion: BRIDGE_PROTOCOL_VERSION });
+    expect(typeof handle.current?.print).toBe('function');
+  });
+
+  // The owner's rule: a new sheet per section only for a page that carries
+  // the host-theme marker (Plannotator's own explainers). An arbitrary page
+  // of many short sections must not print one per sheet; every page still
+  // gets the no-clip rule.
+  test('section page breaks are injected only into a document with the host-theme marker', async () => {
+    const body = '<body><section>One</section><section>Two</section></body></html>';
+    const marked = await mount({
+      rawHtml: `<!doctype html><html><head><meta name="plannotator-theme" content="host"></head>${body}`,
+    });
+    const markedSrcdoc = marked.iframe.getAttribute('srcdoc') ?? '';
+    expect(markedSrcdoc).toContain('section ~ section');
+    expect(markedSrcdoc).toContain('overflow: visible !important');
+
+    const plain = await mount({ rawHtml: `<!doctype html><html><head><title>FAQ</title></head>${body}` });
+    const plainSrcdoc = plain.iframe.getAttribute('srcdoc') ?? '';
+    expect(plainSrcdoc).not.toContain('section ~ section');
+    expect(plainSrcdoc).toContain('overflow: visible !important');
+  });
+
   test('the srcdoc loads the bridge by URL instead of inlining it', async () => {
     const { iframe } = await mount({ bridgeScriptUrl: ASSET_URL });
     const srcdoc = iframe.getAttribute('srcdoc') ?? '';
