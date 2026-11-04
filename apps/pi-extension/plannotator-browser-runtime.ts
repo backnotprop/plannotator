@@ -42,6 +42,15 @@ export function hasReviewBrowserHtml(): boolean {
 	return hasReadableAsset(reviewHtmlPath, reviewHtmlContent);
 }
 
+/**
+ * Tests only: serve `html` as the built plan/annotation UI, so a test can start
+ * a real session without writing a stub into the extension folder. Pass
+ * undefined in the test's cleanup to read the built file again.
+ */
+export function setPlanBrowserHtmlForTests(html: string | undefined): void {
+	planHtmlContent = html;
+}
+
 /** Read and cache the built plan/annotation/archive UI on first use. */
 export function getPlanBrowserHtml(): string {
 	const content = readBrowserAsset(planHtmlPath, planHtmlContent);
