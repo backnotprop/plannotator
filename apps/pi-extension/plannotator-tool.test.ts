@@ -80,6 +80,8 @@ interface Launch {
 	bundle?: string[];
 	recent?: Array<{ messageId: string; text: string }>;
 	gate: boolean | undefined;
+	/** The `clientLease` argument (annotate and last only). */
+	clientLease?: boolean;
 	sessionBridge: unknown;
 	url: string;
 }
@@ -153,19 +155,19 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 
 	// Real servers; only the browser launch is skipped.
 	const startAnnotation: NonNullable<PlannotatorExtensionDeps["startAnnotation"]> = async (
-		_ctx, filePath, markdown, mode, folderPath, _sourceInfo, _converted, gate, _rawHtml, _renderHtml, _convertHtml, _recent, _live, sessionBridge, bundleFiles,
+		_ctx, filePath, markdown, mode, folderPath, _sourceInfo, _converted, gate, _rawHtml, _renderHtml, _convertHtml, _recent, _live, sessionBridge, bundleFiles, _announced, clientLease,
 	) => {
 		const server = await startAnnotateServer({ markdown, filePath, mode, folderPath, gate, bundleFiles, htmlContent: MINIMAL_HTML });
 		servers.push(server);
-		launches.push({ kind: "annotate", text: filePath, mode, bundle: bundleFiles?.map((file) => file.path), gate, sessionBridge, url: server.url });
+		launches.push({ kind: "annotate", text: filePath, mode, bundle: bundleFiles?.map((file) => file.path), gate, clientLease, sessionBridge, url: server.url });
 		return { url: server.url, waitForDecision: server.waitForDecision, stop: server.stop, hostControl: server.hostControl };
 	};
 	const startLastMessageAnnotation: NonNullable<PlannotatorExtensionDeps["startLastMessageAnnotation"]> = async (
-		_ctx, lastText, gate, recentMessages, sessionBridge,
+		_ctx, lastText, gate, recentMessages, sessionBridge, _announced, clientLease,
 	) => {
 		const server = await startAnnotateServer({ markdown: lastText, filePath: "last-message", mode: "annotate-last", gate, recentMessages, htmlContent: MINIMAL_HTML });
 		servers.push(server);
-		launches.push({ kind: "last", text: lastText, recent: recentMessages, gate, sessionBridge, url: server.url });
+		launches.push({ kind: "last", text: lastText, recent: recentMessages, gate, clientLease, sessionBridge, url: server.url });
 		return { url: server.url, waitForDecision: server.waitForDecision, stop: server.stop, hostControl: server.hostControl };
 	};
 	const startCodeReview: NonNullable<PlannotatorExtensionDeps["startCodeReview"]> = async (_ctx, reviewOptions = {}) => {
@@ -221,6 +223,10 @@ function createHarness(options: { sessionId?: string; hasUI?: boolean; branch?: 
 		},
 		goStale() {
 			stale = true;
+		},
+		/** Pi replaced this session (/new, /resume): its `session_shutdown` runs. */
+		async shutdown() {
+			for (const handler of handlers.get("session_shutdown") ?? []) await handler({ reason: "new" }, ctx);
 		},
 		async startSession() {
 			for (const handler of handlers.get("session_start") ?? []) await handler({ reason: "startup" }, ctx);
@@ -496,6 +502,50 @@ describe("plannotator tool on Pi", () => {
 			});
 		}
 	}
+
+	// A host whose replaced `pi` never throws after /new (the stale guard came
+	// late, #2553): the opener's session_shutdown is the signal, so feedback
+	// still reaches the replacement with the switched-session header instead
+	// of the dead session.
+	for (const action of ["annotate", "last"] as const) {
+		test(`${action} feedback goes to the replacement when the opener shut down, even if its pi never throws`, async () => {
+			const origin = createHarness({ branch: [assistant("a1", [{ type: "text", text: "Original answer." }])] });
+			origin.writeFile("notes.md", "# Notes\n");
+			await origin.startSession();
+			await origin.call({ action, ...(action === "annotate" ? { target: "notes.md" } : {}) });
+			await origin.shutdown();
+			const replacement = createHarness();
+			await replacement.startSession();
+
+			await postJson(`${origin.launches[0]!.url}/api/feedback`, {
+				feedback: "Clarify the original review.", annotations: [], approved: false,
+			});
+			await until(() => replacement.sent.length > 0);
+			expect(origin.sent).toHaveLength(0);
+			expect(replacement.sent).toHaveLength(1);
+			expect(replacement.sent[0]!.text).toContain("browser tab opened before Pi switched sessions");
+		});
+	}
+
+	// The tool and the slash commands return at once, so a gated review they
+	// open must survive tab loss: no client lease. The event bus keeps it (it
+	// awaits the decision; see plannotator-browser.test.ts).
+	test("the tool and the slash commands open gated annotate and last sessions without the client lease", async () => {
+		const harness = createHarness({ branch: [assistant("a1", [{ type: "text", text: "Original answer." }])] });
+		harness.writeFile("notes.md", "# Notes\n");
+		await harness.startSession();
+		await harness.call({ action: "annotate", target: "notes.md", gate: true });
+		// The tool's `last` takes no gate; it still opens without the lease.
+		await harness.call({ action: "last" });
+		await harness.command("plannotator-annotate", "notes.md --gate");
+		await harness.command("plannotator-last", "--gate");
+		expect(harness.launches.map((launch) => [launch.kind, !!launch.gate, launch.clientLease])).toEqual([
+			["annotate", true, false],
+			["last", false, false],
+			["annotate", true, false],
+			["last", true, false],
+		]);
+	});
 
 	test("review feedback carried only in the text (PR description or editor notes, no annotations) reaches the agent through the tool path", async () => {
 		const harness = createHarness();

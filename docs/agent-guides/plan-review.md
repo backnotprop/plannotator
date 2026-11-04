@@ -224,13 +224,21 @@ names every file (`Files:` + `annotateBundleTargetText`). A session without
 UI (print/JSON mode) never has the tool active (see above), and a call that
 reaches it anyway is refused, since nothing could deliver the decision later.
 
-**Tab loss and feedback delivery.** Pi's annotation sessions do not enable the
-blocking CLI's client lease, even with `gate: true`: closing a tab or losing a
-tunnel leaves the review open until an explicit decision or close. Feedback
-tries the opener's `pi.sendUserMessage` first. Only if that throws does it use
-the current-session fallback, so an Oh My Pi in-process subagent cannot take
-feedback from a still-live opener. A replaced Pi runtime still falls back to
-the current session with the existing switched-session header.
+**Tab loss and feedback delivery.** Annotation sessions opened by the
+`plannotator` tool and the slash commands do not enable the blocking CLI's
+client lease, even with `gate: true`: they return at once, so closing a tab or
+losing a tunnel leaves the review open until an explicit decision or close.
+They pass `clientLease: false` to `startMarkdownAnnotationSession` /
+`startLastMessageAnnotationSession`. Callers that await the decision (the
+`plannotator:request` event bus, `openMarkdownAnnotation`,
+`openLastMessageAnnotation`) keep the default, so a gated review whose tab is
+gone still settles as dismissed after 30 s (#1143). Feedback tries the
+opener's `pi.sendUserMessage` first. Only if that throws does it use the
+current-session fallback, so an Oh My Pi in-process subagent cannot take
+feedback from a still-live opener. A known-dead opener (its
+`session_shutdown` ran, or its `ctx` throws) goes to the current session
+first, so a host whose replaced `pi` never throws still delivers to the
+replacement, with the switched-session header.
 
 **Sessions, list and close.** Every review the extension opens (tool,
 commands, `plannotator_submit_plan`) is recorded in ONE process-wide registry
