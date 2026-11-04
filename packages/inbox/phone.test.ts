@@ -76,6 +76,9 @@ function events() {
 function fakeWindow(userAgent: string) {
   const vv = { height: 660, offsetTop: 0, scale: 1, ...events() };
   const scrolls: [number, number][] = [];
+  // trackKeyboard's late re-read (RECHECK_MS): held here and run by `later`, so no real timer outlives the test.
+  const timers = new Map<number, () => void>();
+  let timerId = 0;
   const win = {
     visualViewport: vv,
     innerHeight: 660,
@@ -84,6 +87,13 @@ function fakeWindow(userAgent: string) {
       scrolls.push([x, y]);
       win.scrollY = y;
       vv.offsetTop = y;
+    },
+    setTimeout: (fn: () => void) => {
+      timers.set(++timerId, fn);
+      return timerId;
+    },
+    clearTimeout: (id: number) => {
+      timers.delete(id);
     },
     // A phone in portrait: PHONE_QUERY matches.
     matchMedia: () => ({ matches: true, addEventListener() {}, removeEventListener() {} }),
@@ -120,7 +130,14 @@ function fakeWindow(userAgent: string) {
     frames = [];
     for (const fn of run) fn();
   };
-  return { vv, win, root, doc, style, scrolls, globals, keyboardUp, keyboardDown, flush };
+  /** The re-read's time comes: its timers run, then the frame they asked for. */
+  const later = () => {
+    const run = [...timers.values()];
+    timers.clear();
+    for (const fn of run) fn();
+    flush();
+  };
+  return { vv, win, root, doc, style, scrolls, timers, globals, keyboardUp, keyboardDown, flush, later };
 }
 
 function withFakeWindow(userAgent: string, run: (w: ReturnType<typeof fakeWindow>) => void): void {
@@ -204,6 +221,53 @@ describe('trackKeyboard', () => {
       stop();
       expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
       expect(w.doc.has('touchmove')).toBe(false);
+    });
+  });
+
+  test('a rotation whose layout height WebKit reports late: the pin read from the stale height clears on the re-read', () => {
+    withFakeWindow(IPHONE, (w) => {
+      const stop = trackKeyboard();
+      // On its side with no keyboard: the visual viewport is 390 at once, clientHeight still the portrait 660.
+      w.vv.height = 390;
+      w.win.fire('orientationchange');
+      w.flush();
+      expect(w.root.dataset.ibKeyboardPin).toBe('tight');
+      // clientHeight catches up with no event of its own.
+      w.root.clientHeight = 390;
+      w.later();
+      expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
+      expect(w.root.dataset.ibKeyboard).toBeUndefined();
+      expect(w.style.has('--ib-vvh')).toBe(false);
+      expect(w.doc.has('touchmove')).toBe(false);
+      stop();
+    });
+  });
+
+  test('a stale pin also clears when a field takes or loses focus; a real keyboard stays pinned on the re-read', () => {
+    withFakeWindow(IPHONE, (w) => {
+      const stop = trackKeyboard();
+      w.vv.height = 390;
+      w.win.fire('orientationchange');
+      w.flush();
+      w.root.clientHeight = 390;
+      // The re-read lost (say the page was busy): a tap on a question's radio moves focus, and that reads again.
+      w.timers.clear();
+      w.doc.fire('focusin');
+      w.flush();
+      expect(w.root.dataset.ibKeyboardPin).toBeUndefined();
+
+      // A real keyboard: the event's read and the re-read agree, and the pin holds.
+      w.root.clientHeight = 660;
+      w.keyboardUp();
+      w.vv.fire('resize');
+      w.flush();
+      expect(w.root.dataset.ibKeyboardPin).toBe('tight');
+      w.later();
+      expect(w.root.dataset.ibKeyboardPin).toBe('tight');
+      expect(w.style.get('--ib-vvh')).toBe('257px');
+      stop();
+      expect(w.timers.size).toBe(0);
+      expect(w.doc.has('focusin')).toBe(false);
     });
   });
 });
