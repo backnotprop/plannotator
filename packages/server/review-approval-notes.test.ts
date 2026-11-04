@@ -33,7 +33,7 @@ const MINIMAL_HTML = "<html><body>Plannotator</body></html>";
 const PATCH = "diff --git a/src/parse.ts b/src/parse.ts\n@@ -1 +1 @@\n-a\n+b\n";
 
 const NOTE_TEXT = "Approved — consider extracting the parser helper in a follow-up.";
-const APPROVAL_FEEDBACK = `# Code Review Feedback\n\n## General\n\n${NOTE_TEXT}\n`;
+const APPROVAL_FEEDBACK = `# Code Review Feedback\n\n## Global comments\n\n${NOTE_TEXT}\n`;
 const NOTE = {
   id: "review-note-1",
   type: "comment",

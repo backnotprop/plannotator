@@ -6271,7 +6271,15 @@ const App: React.FC = () => {
     submitted, isApiMode, documentReadOnly, isEditingMarkdown, handleSaveEditedSourceFile, displayedMarkdown, annotationsOutput,
   ]);
 
-  // Cmd/Ctrl+P keyboard shortcut — print plan
+  const handlePrint = useCallback(() => {
+    if (isHtmlSurface && viewerRef.current?.print) {
+      viewerRef.current.print();
+    } else {
+      window.print();
+    }
+  }, [isHtmlSurface]);
+
+  // Cmd/Ctrl+P keyboard shortcut — print the active document
   useEffect(() => {
     const handlePrintShortcut = (e: KeyboardEvent) => {
       const blocked = showExport ||
@@ -6280,14 +6288,14 @@ const App: React.FC = () => {
       if (!shouldPrintOnKey(e, blocked)) return;
 
       e.preventDefault();
-      window.print();
+      handlePrint();
     };
 
     window.addEventListener('keydown', handlePrintShortcut);
     return () => window.removeEventListener('keydown', handlePrintShortcut);
   }, [
     showExport, showSourceFileEditWarning, showExitWarning, showAgentWarning,
-    showPermissionModeSetup, pendingPasteImage, submitted,
+    showPermissionModeSetup, pendingPasteImage, submitted, handlePrint,
   ]);
 
   const agentName = useMemo(() => getAgentName(origin), [origin]);
@@ -6723,7 +6731,6 @@ const App: React.FC = () => {
   const handleOpenSettings = useCallback(() => setMobileSettingsOpen(true), []);
   const handleCloseSettings = useCallback(() => setMobileSettingsOpen(false), []);
   const handleOpenExport = useCallback(() => { setInitialExportTab(undefined); setShowExport(true); }, []);
-  const handlePrint = useCallback(() => window.print(), []);
   const handleOpenImport = useCallback(() => setShowImport(true), []);
   const handleSaveToObsidian = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('obsidian'), []);
   const handleSaveToOctarine = useCallback(() => headerHandlersRef.current.handleQuickSaveToNotes('octarine'), []);
