@@ -7406,3 +7406,160 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-rvcard { border: 1px solid CanvasText; }
   .ib-rv-mark[data-done] { background: Highlight; color: HighlightText; }
 }
+
+/* Pull requests (approval "inbox-code-review-direction", items 4 and 5; concept B take 1; PullsPage.tsx,
+   PullReview.tsx). Drawn only while Settings → Capabilities → Code review is on. The list is the Inbox list's own
+   column, bands and three-line rows; a stack's third line is a chain of the Board's PR marks. The stack view is a
+   thread pane's place: a bar, the stack, the landing order, and Reply at the foot. */
+.ib-prlist .ib-lhead { gap: 10px; padding-right: 14px; }
+.ib-prlist .ib-lhead h1 { flex: 0 1 auto; outline: none; }
+/* The project filter keeps its words ("All projects"); the count gives way first. */
+.ib-prlist .ib-lhead .ib-bpf { flex: none; max-width: 160px; }
+.ib-pr-onyou { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--ib-wait-fg, var(--warning)); white-space: nowrap; }
+.ib-prlist .ib-lbody { display: flex; flex-direction: column; }
+.ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+.ib-pr-empty p { margin: 0 0 4px; }
+.ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
+.ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
+.ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
+.ib-mrow.ib-prrow { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--ib-hair); }
+.ib-mrow.ib-prrow .ib-l1 { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); }
+.ib-mrow.ib-prrow .ib-l1 .ib-from { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
+.ib-mrow.ib-prrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-mrow.ib-prrow .ib-title { font-size: var(--ib-fs-15, 15px); overflow-wrap: anywhere; }
+.ib-mrow.ib-prrow.ib-u .ib-title { font-weight: 600; }
+.ib-mrow.ib-prrow .ib-l3 { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-mrow.ib-prrow .ib-pv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prrow .ib-lead { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-pr-av { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); border-radius: var(--ib-mark-20-r, 6px); background: color-mix(in oklch, var(--primary) 14%, var(--card)); color: var(--primary); font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; letter-spacing: -0.02em; }
+.ib-pr-chain { display: inline-flex; align-items: center; flex: none; }
+.ib-pr-link { display: inline-flex; align-items: center; }
+.ib-pr-dash { width: 6px; height: 1.5px; margin: 0 2px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 50%, transparent); }
+.ib-pr-fold { margin-top: 12px; }
+.pn-inbox .ib-pr-foldbtn { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); text-align: left; }
+.pn-inbox .ib-pr-foldbtn:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-pr-foldbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pr-foldbtn .ib-n { color: var(--muted-foreground); }
+.ib-pr-foot { display: flex; align-items: center; gap: 6px; flex: none; min-height: 40px; padding: 4px 14px 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-pr-foot-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-pr-refresh[data-refreshing] .ib-ic { animation: ib-pr-spin 0.9s linear infinite; }
+@keyframes ib-pr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-pr-refresh[data-refreshing] .ib-ic { animation: none; opacity: 0.5; } }
+
+.ib-prpane { overflow: hidden; }
+.ib-pr-bar { display: flex; align-items: center; gap: 8px; height: 52px; flex: none; padding: 0 12px 0 18px; border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.pn-inbox .ib-pr-ext { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 8px; margin-left: -8px; border-radius: 7px; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; text-decoration: none; }
+.pn-inbox .ib-pr-ext:hover { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-pr-ext:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-pr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
+.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
+.ib-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-pr-meta > * { min-width: 0; }
+.ib-pr-agent { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
+.pn-inbox .ib-pr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 9px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-pr-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox button.ib-pr-chip:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
+.pn-inbox button.ib-pr-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-pr-said { margin-top: 18px; padding: 14px 16px; border-radius: 12px; background: color-mix(in oklch, var(--muted) 55%, var(--card)); }
+.ib-pr-said-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-pr-said p { margin: 6px 0 0; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
+.pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
+.pn-inbox .ib-pr-guide:hover { background: var(--ib-hover-s, var(--muted)); }
+.ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.pn-inbox .ib-pr-actions .ib-btn { height: 36px; padding: 0 15px; font-size: var(--ib-fs-14, 14px); }
+.ib-pr-note { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pr-order { margin-top: 26px; }
+.ib-pr-order-h { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; font-size: var(--ib-fs-13, 13px); }
+.ib-pr-order-h .ib-mut { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-ladder { list-style: none; margin: 10px 0 0; padding: 0; position: relative; }
+/* The rail the marks hang on, from the top layer down to the base branch. */
+.ib-pr-ladder::before { content: ""; position: absolute; left: 17px; top: 18px; bottom: 12px; width: 2px; border-radius: 1px; background: color-mix(in oklch, var(--border) 85%, transparent); }
+.ib-pr-layer { position: relative; }
+.pn-inbox .ib-pr-lrow { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px 10px 10px 8px; border-radius: 10px; text-align: left; color: var(--foreground); }
+.pn-inbox button.ib-pr-lrow:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 55%, transparent)); }
+.pn-inbox button.ib-pr-lrow:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pr-lmark { position: relative; z-index: 1; width: 20px; height: 22px; align-items: center; justify-content: center; background: var(--card); }
+.ib-pr-lmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ib-pr-l1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--ib-fs-14-5, 14.5px); line-height: 22px; }
+.ib-pr-num { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-pr-lt { font-weight: 550; overflow-wrap: anywhere; min-width: 0; }
+.ib-pr-layer[data-state="merged"] .ib-pr-lt, .ib-pr-layer[data-state="closed"] .ib-pr-lt { font-weight: 400; color: var(--muted-foreground); }
+.ib-pr-l2 { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pr-l2 .ib-add { color: var(--success); }
+.ib-pr-l2 .ib-del { color: var(--destructive); }
+.ib-pr-checks { display: inline-flex; align-items: center; gap: 4px; }
+.ib-pr-checks[data-checks="success"] { color: var(--success); }
+.ib-pr-checks[data-checks="failure"] { color: var(--destructive); }
+.ib-pr-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 600; white-space: nowrap; flex: none; background: var(--muted); color: var(--muted-foreground); }
+.ib-pr-lrow > .ib-pr-pill { margin-top: 1px; }
+.ib-pr-pill[data-tone="next"] { background: color-mix(in oklch, var(--success) 16%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
+.ib-pr-pill[data-tone="you"] { background: color-mix(in oklch, var(--warning) 20%, var(--card)); color: color-mix(in oklch, var(--warning) 45%, var(--foreground)); }
+.ib-pr-pill[data-tone="ok"] { background: color-mix(in oklch, var(--success) 14%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
+.ib-pr-pill[data-tone="bad"] { background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
+.ib-pr-base { display: flex; align-items: center; gap: 12px; padding: 6px 10px 2px 8px; color: var(--muted-foreground); }
+.ib-pr-base code { font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
+.ib-pr-dot { position: relative; z-index: 1; width: 20px; display: inline-flex; justify-content: center; }
+.ib-pr-dot::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in oklch, var(--muted-foreground) 70%, transparent); background: var(--card); }
+.ib-pr-replyfoot { flex: none; padding: 12px 22px 16px; border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-pr-replyrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pn-inbox .ib-pr-replybtn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-pr-replybtn:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
+.pn-inbox .ib-pr-replybtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-pr-replybtn b { font-weight: 600; }
+.ib-pr-sent { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pn-inbox .ib-pr-linkbtn { padding: 0; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
+.ib-pr-replybox { display: grid; gap: 8px; }
+.pn-inbox .ib-pr-replyin { width: 100%; min-height: 72px; max-height: 40vh; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
+.pn-inbox .ib-pr-replyin:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-pr-replyacts { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); }
+
+/* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. */
+.ib-viewer.ib-prreview { grid-template-rows: 46px auto minmax(0, 1fr) auto; }
+.ib-prr-fn { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; }
+.ib-prr-fn bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prr-num { color: var(--muted-foreground); font-weight: 500; }
+.ib-prr-strip { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-prr-layers { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ib-prr-lstep { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-prr-layer { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-prr-layer:not(:disabled):hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklch, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
+.pn-inbox .ib-prr-layer:disabled { cursor: default; }
+.pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-prr-lt { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+.ib-prr-scope { flex: none; }
+.ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prlist { width: 100%; }
+  /* The band under the head says "On you 3"; the head keeps its title and the project filter. */
+  .ib-pr-onyou { display: none; }
+  .ib-pr-bar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0 4px; }
+  .pn-inbox .ib-pr-bar .ib-iconbtn, .pn-inbox .ib-pr-ext { min-width: 44px; min-height: 44px; justify-content: center; }
+  .ib-pr-body { padding: 18px 16px 24px; }
+  .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
+  .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
+  .pn-inbox .ib-pr-actions .ib-btn { height: 44px; }
+  .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
+  .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
+  .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-pr-replybtn { height: 44px; }
+  .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-pr-replyacts .ib-btn { height: 44px; }
+  .ib-pr-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
+  .pn-inbox .ib-pr-foldbtn { height: 44px; }
+  .ib-prr-strip { flex-wrap: wrap; padding: 6px 8px; }
+  .ib-prr-scope { flex: 1 1 100%; }
+  .ib-prr-scope .ib-seg-o { flex: 1; justify-content: center; height: 36px; }
+  .pn-inbox .ib-prr-layer { height: 40px; }
+  .ib-prr-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .ib-prr-where { white-space: normal; }
+  .pn-inbox .ib-prr-foot .ib-btn { height: 44px; }
+}
+@media (forced-colors: active) {
+  .ib-pr-pill, .pn-inbox .ib-pr-chip, .ib-pr-said { border: 1px solid CanvasText; }
+  .ib-pr-ladder::before, .ib-pr-dash { background: CanvasText; }
+}

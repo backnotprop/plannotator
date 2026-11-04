@@ -41,6 +41,8 @@ export * from "./inbox-steps";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Pull requests (code review in the Inbox, phase 2), the same way.
+export * from "./inbox-pulls";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;

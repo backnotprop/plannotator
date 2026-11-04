@@ -30,13 +30,19 @@ import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'pulls';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /**
+   * Pull requests (approval "inbox-code-review-direction", item 4): the row under Board, shown only with
+   * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
+   */
+  onPulls?: () => void;
+  pullsCount?: number;
   projectId: string | null;
   /** The machine the list shows (the Machines filter), or null for every machine. */
   machineId?: string | null;
@@ -381,6 +387,23 @@ export function Sidebar(props: SidebarProps) {
         >
           <Icon name="board" />
           Board
+        </button>
+      )}
+      {props.onPulls && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'pulls' ? ' ib-on' : ''}`}
+          onClick={pick(props.onPulls)}
+          aria-current={props.page === 'pulls' ? 'page' : undefined}
+          data-pulls-nav=""
+        >
+          <Icon name="pullRequest" />
+          Pull requests
+          {(props.pullsCount ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
+              {formatCount(props.pullsCount ?? 0)}
+            </span>
+          )}
         </button>
       )}
       {(props.draftsCount ?? 0) > 0 && props.onDrafts && (

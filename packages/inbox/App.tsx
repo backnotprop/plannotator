@@ -148,6 +148,10 @@ import { parseSettingsHash, settingsHash, type SettingsSection } from './setting
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
+import { PullsPage } from './pulls/PullsPage';
+import { PullReview } from './pulls/PullReview';
+import { usePulls } from './pulls/usePulls';
+import { pullGroups } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { CardChip } from './board/CardChip';
@@ -268,7 +272,14 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls';
+  /**
+   * Pull requests (`#pulls`, Code review on): the stack open beside the list (`&stack=`, its top layer's key),
+   * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
+   */
+  stack?: string | null;
+  layer?: string | null;
+  scope?: 'layer' | 'stack';
   /** The Board's list (`#board`, `#board=done`, `#board=cancelled`; `#board=shipped` before the rename opens Done, `#board=icebox` from before v2 Cancelled). */
   board?: BoardView;
   /** The opened Board card (`#board&card=crd_…`), or on a thread the card it was opened from (its "‹ Board" way back). */
@@ -330,6 +341,11 @@ function routeOf(fullHash: string): Route {
   if (params.has('tour')) return { page: 'tour', project: null, thread: null, step: tourStepOf(params.get('tour')) };
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
+  if (params.has('pulls')) {
+    const stack = params.get('stack') || null;
+    const layer = stack ? params.get('layer') || null : null;
+    return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+  }
   if (params.has('board')) return { page: 'board', project: params.get('project') || null, thread: null, board: boardViewOf(params.get('board')), card: params.get('card') };
   const thread = params.get('thread');
   const fileId = thread ? params.get('file') : null;
@@ -360,6 +376,12 @@ function hashOf(route: Route): string {
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
+  else if (route.page === 'pulls')
+    hash =
+      'pulls' +
+      (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -4161,6 +4183,16 @@ function Inbox() {
   const overTailnet = settings?.via === 'tailnet';
   // For a tailnet guest the agents route is local only: nothing to read again.
   const guestPage = tailnetGuest(settings);
+  // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read only while
+  // the page is open, never from a tailnet guest's page (it runs this computer's gh / glab).
+  const codeReviewOn = settings?.code_review?.on === true;
+  const pullsShown = codeReviewOn && !guestPage;
+  const pulls = usePulls(route.page === 'pulls' && pullsShown);
+  // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
+  useEffect(() => {
+    if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.page, settings !== null, pullsShown]);
   useEffect(() => {
     if (!firstRun || guestPage) return;
     let last = Date.now();
@@ -5050,6 +5082,41 @@ function Inbox() {
         marks={settings !== null && !guestPage}
       />
     );
+  } else if (route.page === 'pulls' && pullsShown && route.stack && route.layer) {
+    main = (
+      <PullReview
+        model={pulls.model}
+        modelError={pulls.error}
+        stackId={route.stack}
+        layerKey={route.layer}
+        scope={route.scope ?? 'layer'}
+        onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
+        onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onSent={() => {
+          close({ ...route, layer: null, scope: 'layer' });
+          showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
+        }}
+      />
+    );
+  } else if (route.page === 'pulls' && pullsShown) {
+    main = (
+      <PullsPage
+        state={pulls}
+        stackId={route.stack ?? null}
+        project={route.project}
+        projects={projects}
+        projectNames={projectNames}
+        phone={phone}
+        onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
+        onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
+        onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
+        onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
+        onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
+        onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
+      />
+    );
+  } else if (route.page === 'pulls') {
+    main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'drafts') {
     main = (
       <DraftsPage
@@ -5465,6 +5532,9 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
+            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (nothing reads while the page is closed).
+            onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
+            pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
             onProject={(projectId) =>
@@ -5844,4 +5914,9 @@ export function InboxApp() {
       </TooltipProvider>
     </ThemeProvider>
   );
+}
+
+/** The sidebar's Pull requests count: the rows on the person in the last read. */
+function pullsOnYou(model: import('@plannotator/core/inbox-types').InboxPullsAnswer): number {
+  return pullGroups(model, null).on_you.length;
 }

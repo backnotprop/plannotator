@@ -207,6 +207,8 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
+import { createBranchReader, createInboxPulls, InboxPullsError, linkInboxPulls, type InboxPullRepo } from "./inbox-pulls";
+import { runtime as gitRuntime } from "./git";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -420,6 +422,8 @@ export interface InboxServerOptions {
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
   refRunner?: RefRunner;
+  /** Tests: how Pull requests reads a folder's checked-out branch (default `git rev-parse --abbrev-ref HEAD`, inbox-pulls.ts). */
+  pullBranch?: (folder: string) => Promise<string | null>;
   /** Tests: how a person's web link's favicon is fetched (inbox-card-favicons.ts): a scripted fetch and DNS, never the network. */
   cardFavicons?: CardFaviconOptions;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
@@ -932,6 +936,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const cardFavicons = createCardFavicons(options.cardFavicons ?? {});
   // The Board's lane marks (inbox-card-marks.ts): GitHub batched per repository, GitLab through the hover cards.
   const cardMarks = createCardMarks({ refCards, ...(options.refRunner ? { run: options.refRunner } : {}) });
+  // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
+  // The project roots whose origin the Pull requests list has waited for once.
+  const pullRepoRead = new Set<string>();
+  const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
+  const pullBranch = createBranchReader(
+    options.pullBranch ??
+      (async (folder) => {
+        const result = await gitRuntime.runGit(["rev-parse", "--abbrev-ref", "HEAD"], { cwd: folder, timeoutMs: 3_000, interaction: "forbid" });
+        return result.exitCode === 0 ? result.stdout.trim() || null : null;
+      }),
+  );
 
   // Where a path an agent named files its messages: its repository (a linked
   // worktree folds into its main repository's project) or the folder, cached
@@ -3288,6 +3303,54 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const result = await refCards.get(href);
         if (!result) throw new InboxError("validation_error", "url: an https link to an issue, pull request or merge request.", { field: "url" });
         return json({ serverSession, ...result });
+      }
+      // Pull requests (inbox-pulls.ts; approval "inbox-code-review-direction", items 4 and 5): the PRs of the
+      // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
+      // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
+      // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/pulls/diff") {
+          const key = url.searchParams.get("key") ?? "";
+          const scope = url.searchParams.get("scope") ?? "layer";
+          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          try {
+            return json({ serverSession, ...(await pulls.diff(key, scope)) });
+          } catch (cause) {
+            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : 502);
+            throw cause;
+          }
+        }
+        const projectsByRepo = new Map<string, string>();
+        const wanted: InboxPullRepo[] = [];
+        // A project's origin is read once before its first list (the cache is read-behind), so the
+        // first open after a start is not empty; after that the cache's own refresh keeps it.
+        const projectsNow = store.allProjects();
+        const reposNow = await Promise.all(
+          projectsNow.map(async (project) => {
+            const repo = repos.get(project.root);
+            if (repo || pullRepoRead.has(project.root)) return repo;
+            pullRepoRead.add(project.root);
+            return repos.refresh(project.root);
+          }),
+        );
+        for (const [i, project] of projectsNow.entries()) {
+          const repo = reposNow[i];
+          if (!repo?.host) continue;
+          const key = `${repo.host}/${repo.display}`.toLowerCase();
+          if (projectsByRepo.has(key)) continue;
+          projectsByRepo.set(key, store.canonicalProjectId(project.id));
+          wanted.push({ host: repo.host.toLowerCase(), repo: repo.display, project_id: store.canonicalProjectId(project.id) });
+        }
+        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        const links = await linkInboxPulls(listed.pulls, { listCards: () => store.listCards(), threadsOf: (id) => store.threadsOf(id), threadMessageIds: (id) => store.threadMessageIds(id), message: (id) => store.message(id), threadSubject: (id) => store.threadSubject(id), project: (id) => store.project(id), cursor: () => store.cursor() }, projectsByRepo, pullBranch);
+        return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo) });
       }
       if (path === "/api/inbox/events" && req.method === "GET") {
       // Another site's page must not hold (or time) a stream of everything the Inbox holds:
