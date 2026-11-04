@@ -86,6 +86,11 @@ const navOrder = (page: Page) => page.locator('.ib-side .ib-nav').evaluateAll((e
 test('on with 4 boards: the row under Board, the grid, the Pebble, the board over the thread, links kept in, a change delivered', async ({ browser }) => {
   const w = await world({ shape: true, boards: 'many' });
   const { context, page, errors } = await open(browser, w);
+  // The boards' changes ride the Inbox's one event stream: the window opens no second one (Chrome's six per host).
+  const ownStreams: string[] = [];
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/shapes/events') ownStreams.push(request.url());
+  });
   await page.goto(w.url);
   const row = page.locator('[data-shape-nav]');
   await expect(row).toBeVisible();
@@ -157,6 +162,7 @@ test('on with 4 boards: the row under Board, the grid, the Pebble, the board ove
   await expect(page).toHaveURL(new RegExp(`#thread=${w.threads.kettle}&shape=${w.boards.kettle}$`));
   await expect(page.locator(`[data-shape-layer="${w.boards.kettle}"]`)).toBeVisible();
 
+  expect(ownStreams).toEqual([]);
   expect(errors).toEqual([]);
   await context.close();
 });

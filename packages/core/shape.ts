@@ -298,7 +298,8 @@ export type ShapeCheck<T> = { ok: true; value: T } | { ok: false; errors: string
  * the sanitizer; `dialog` and `select` (its picker) open in the top layer,
  * over the whole app, past the frame's containment and clip.
  */
-const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform', 'dialog', 'select'];
+// `area` and `map`: an image map's `<area href>` is a link the board's guard would have to know too; a drawing has `<a>`.
+const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform', 'dialog', 'select', 'area', 'map'];
 export const SHAPE_FORBIDDEN_TAGS: readonly string[] = FORBIDDEN_TAGS;
 
 /** Attributes that lift a part into the top layer (a popover, a modal), over the app: dropped. */

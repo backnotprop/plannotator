@@ -224,6 +224,7 @@ import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
+import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
 import {
   agentSpec,
@@ -2392,7 +2393,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const onRows = (rows: readonly InboxRowsOption[], rev: number) => send(`event: rows\ndata: ${JSON.stringify({ rows, rev })}\n\n`);
         if (windowId) rowsListeners.add(onRows);
         // The steps switch was saved (any window's): every window reads its settings and the open thread's steps again. Windows only.
-        const onCapabilities = () => send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() }, code_review: { on: codeReviewOn() }, shape: { on: shapeOn() } })}\n\n`);
+        // Shape's boards changed (a version, a note, a delivery, seen): `event: shapes` on this one stream, so a window
+        // opens no second connection (sharedEvents.ts holds every tab to one). Only while Shape is on: off, nothing polls.
+        let stopShapes: (() => void) | null = null;
+        const syncShapes = () => {
+          if (windowId && shapeOn() && !stopShapes) stopShapes = shapes.watch.subscribe((ids) => send(shapeEventFrame(ids)));
+          else if (!shapeOn() && stopShapes) {
+            stopShapes();
+            stopShapes = null;
+          }
+        };
+        syncShapes();
+        const onCapabilities = () => {
+          syncShapes();
+          send(`event: capabilities\ndata: ${JSON.stringify({ steps: { on: stepsOn() }, code_review: { on: codeReviewOn() }, shape: { on: shapeOn() } })}\n\n`);
+        };
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
@@ -2424,6 +2439,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           snoozeListeners.delete(onSnoozes);
           rowsListeners.delete(onRows);
           capabilityListeners.delete(onCapabilities);
+          stopShapes?.();
+          stopShapes = null;
           deliveryListeners.delete(sendDeliveries);
           stopMachines();
           leave();

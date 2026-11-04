@@ -9,7 +9,10 @@
  *    stream says so, and the "/" list names `/shape`;
  *  - on: another site is refused, reads included (a board names files and
  *    folders);
- *  - on → off: the routes answer 404 again and the boards are kept.
+ *  - on → off: the routes answer 404 again and the boards are kept;
+ *  - a window hears board changes on the Inbox's one event stream, only while on;
+ *  - a tailnet guest is refused, the owner over the tailnet is not; a write from a
+ *    page of a restarted Inbox is refused (409).
  *
  * What regresses: an Inbox that serves boards (or offers agents the skill)
  * while the person never turned Shape on, or a switch that deletes boards.
@@ -23,6 +26,7 @@ import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { createShapeStore } from "@plannotator/shared/shape/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { inboxSkillCatalog } from "./inbox-skills";
+import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -140,3 +144,116 @@ test("the skill's JSON example is a board the store accepts", () => {
   const checked = checkShapeBoard(parsed);
   expect(checked.ok ? [] : checked.errors).toEqual([]);
 });
+
+/** Read a stream until `want` shows or `ms` pass; the text read. */
+async function readUntil(response: Response, want: string, ms: number): Promise<string> {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let text = "";
+  const deadline = Date.now() + ms;
+  while (!text.includes(want) && Date.now() < deadline) {
+    const chunk = await Promise.race([reader.read(), new Promise<null>((r) => setTimeout(() => r(null), Math.max(1, deadline - Date.now())))]);
+    if (!chunk || chunk.done) break;
+    text += decoder.decode(chunk.value);
+  }
+  await reader.cancel().catch(() => {});
+  return text;
+}
+
+test("a window hears its boards on the Inbox's one event stream (no second connection), and only while Shape is on", async () => {
+  // On: a change to a board is `event: shapes` on /api/inbox/events, naming it.
+  const on = await world({ inboxShape: true });
+  const stream = await fetch(`${on.base}/api/inbox/events?window=shape-frames-on`);
+  const reading = readUntil(stream, "event: shapes", 8_000);
+  await new Promise((r) => setTimeout(r, 300));
+  expect((await on.post(`/api/shapes/${on.id}/notes`, { kind: "change", v: 1, view: "picture", text: "Two whistles" })).status).toBe(200);
+  const heard = await reading;
+  expect(heard).toContain("event: shapes");
+  expect(heard).toContain(on.id);
+
+  // Off: the same change in the store says nothing on the stream.
+  const off = await world(null);
+  const quiet = await fetch(`${off.base}/api/inbox/events?window=shape-frames-off`);
+  const listening = readUntil(quiet, "event: shapes", 2_500);
+  await new Promise((r) => setTimeout(r, 300));
+  createShapeStore({ dataDir: off.dataDir }).addNote(off.id, { kind: "change", v: 1, view: "picture", text: "Two whistles" });
+  expect(await listening).not.toContain("event: shapes");
+});
+
+test("a tailnet guest is refused every Shape route; the owner over the tailnet is not", async () => {
+  const MAGIC = "macbook-pro.tail0000.ts.net";
+  const OWNER = "ramos@example.com";
+  const GUEST = "guest@example.com";
+  const savedTailscale = process.env.PLANNOTATOR_INBOX_TAILSCALE;
+  delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+  try {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-shape-guest-")));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    mkdirSync(dataDir, { recursive: true });
+    writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true, inboxTailscale: true, inboxTailscaleAllow: [GUEST] }));
+    process.env.PLANNOTATOR_DATA_DIR = dataDir;
+    const made = createShapeStore({ dataDir }).update({ board, project: { root, name: "app" }, session: { id: "ses_a", host: "claude-code" } });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    const server = await startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale(MAGIC, OWNER) });
+    servers.push(server);
+    const listener = server.tailscale.listenerPort();
+    expect(listener).not.toBeNull();
+    const through = (login: string, path: string) =>
+      fetch(`http://127.0.0.1:${listener}${path}`, { headers: { Host: `${MAGIC}:${server.port}`, "Tailscale-User-Login": login, Origin: `https://${MAGIC}:${server.port}` } });
+    for (const path of ["/api/shapes", `/api/shapes/${made.id}`]) {
+      const guest = await through(GUEST, path);
+      expect(guest.status).toBe(403);
+      expect((await through(OWNER, path)).status).toBe(200);
+    }
+  } finally {
+    if (savedTailscale === undefined) delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+    else process.env.PLANNOTATOR_INBOX_TAILSCALE = savedTailscale;
+  }
+});
+
+test("a Shape write from a page of an Inbox that restarted is refused (409), and writes nothing", async () => {
+  const w = await world({ inboxShape: true });
+  const before = ((await (await w.get(`/api/shapes/${w.id}`)).json()) as { notes: unknown[] }).notes.length;
+  for (const [path, body] of [
+    [`/api/shapes/${w.id}/notes`, { kind: "change", v: 1, view: "picture", text: "Two whistles" }],
+    [`/api/shapes/${w.id}/seen`, { n: 1 }],
+    [`/api/shapes/${w.id}/state`, { state: "finished" }],
+  ] as const) {
+    expect((await w.post(path, { ...body, serverSession: "another" })).status).toBe(409);
+  }
+  const after = (await (await w.get(`/api/shapes/${w.id}`)).json()) as { notes: unknown[]; shape: { state: string } };
+  expect(after.notes.length).toBe(before);
+  expect(after.shape.state).toBe("active");
+});
+
+test("with Code review on and Shape off, the / list has the review skills and no /shape", async () => {
+  const none = () => [];
+  const names = async (response: Response) => ((await response.json()) as { skills: { name: string }[] }).skills.map((s) => s.name);
+  const reviewOnly = await names(inboxSkillCatalog(true, none, false));
+  expect(reviewOnly.length).toBeGreaterThan(0);
+  expect(reviewOnly).not.toContain("shape");
+  expect(await names(inboxSkillCatalog(true, none, true))).toContain("shape");
+});
+
+/** A scripted `tailscale` serving this Inbox over a tailnet `magic` name, `owner` its login (as inbox-board-routes.test.ts). */
+function scriptedTailscale(magic: string, owner: string): TailscaleRunner {
+  const serve = new Map<number, string>();
+  return (args) => {
+    const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+    if (args[0] === "status") return ok(JSON.stringify({ Self: { DNSName: `${magic}.`, UserID: 42 }, User: { "42": { ID: 42, LoginName: owner } } }));
+    if (args[1] === "status") {
+      if (serve.size === 0) return ok("{}");
+      return ok(
+        JSON.stringify({
+          TCP: Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }])),
+          Web: Object.fromEntries([...serve].map(([p, proxy]) => [`${magic}:${p}`, { Handlers: { "/": { Proxy: proxy } } }])),
+        }),
+      );
+    }
+    const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+    if (args.includes("off")) serve.delete(httpsPort);
+    else serve.set(httpsPort, args.at(-1)!);
+    return ok(`https://${magic}:${httpsPort}/\n`);
+  };
+}

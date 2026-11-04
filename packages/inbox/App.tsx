@@ -229,6 +229,14 @@ const DRAFTS_REFRESH_MS = 10_000;
 const EMPTY_SET: ReadonlySet<string> = new Set();
 /** How long the refresh icon shows after a click on Inbox: one turn (inbox.css `ib-refresh-turn`, 500 ms), then back to the inbox icon. */
 const REFRESH_SPIN_MS = 600;
+/** Who hears the event stream's `event: shapes` (the window has one stream; useInboxShapes listens here). */
+const shapeFrameListeners = new Set<(ids: string[]) => void>();
+const subscribeShapeFrames = (listener: (ids: string[]) => void) => {
+  shapeFrameListeners.add(listener);
+  return () => {
+    shapeFrameListeners.delete(listener);
+  };
+};
 /** After the live region said "Reconnecting…", it says it again only past this (a network that comes and goes). */
 const RECONNECT_SAY_GAP_MS = 10 * 60_000;
 /** How long a page over the tailnet says that a restart has not come back: long enough to read away from the computer. */
@@ -1506,8 +1514,9 @@ function Inbox() {
   const boardEnabled = settings ? (settings.board ? settings.board.on : true) : null;
   boardOnRef.current = boardEnabled === true;
   // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
-  const shapeOn = settings?.shape?.on === true && (settings.via ?? 'local') === 'local';
-  const shapes = useInboxShapes(shapeOn);
+  // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
+  const shapeOn = settings?.shape?.on === true && settings.guest !== true;
+  const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
   const shapeHost = useMemo(
     () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
     [shapes.subscribe, settings?.mcp_command],
@@ -1845,7 +1854,13 @@ function Inbox() {
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
+        // Shape's boards changed (only sent while Shape is on).
+        onShapes: (ids) => {
+          for (const listener of shapeFrameListeners) listener(ids);
+        },
         onConnect: () => {
+          // A reconnect may have missed `event: shapes`: the boards are read again.
+          for (const listener of shapeFrameListeners) listener([]);
           reportWindow();
           emitAskChange(null);
           stepsBus.emit('*');

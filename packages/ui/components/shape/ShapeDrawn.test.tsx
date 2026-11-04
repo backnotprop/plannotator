@@ -15,7 +15,8 @@
  * - while pointing (Change it / Ask), a marked part opens the code instead of
  *   being picked, or a bad `data-code` reaches the host;
  * - a drawing's `#…` link changes the host page's hash (the Inbox's route), or
- *   its https link opens in the same tab (leaving the Inbox).
+ *   its https link opens in the same tab (leaving the Inbox), or an image map's
+ *   `<area href>` gets past either.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -170,6 +171,33 @@ describe.skipIf(!hasDom)('a drawn view', () => {
       expect(opened).toEqual([['https://example.com/kettle', '_blank', 'noopener,noreferrer']]);
     } finally {
       window.open = realOpen;
+      window.location.hash = '';
+    }
+  });
+
+  test("an image map's <area href> is refused by the store and the sanitizer, and the guard holds any href it is handed", async () => {
+    const { shapeHtmlProblems } = await import('@plannotator/core/shape');
+    const map = '<img src="files/a.png" usemap="#m"><map name="m"><area shape="rect" coords="0,0,10,10" href="#settings"><area href="files/a.png"></map>';
+    expect(shapeHtmlProblems(map)).toEqual(expect.arrayContaining(['<area> is not allowed', '<map> is not allowed']));
+    expect(drawnModule!.sanitizeShapeHtml(map)).not.toMatch(/<area|<map/i);
+    // A board from a host that skipped the store: an element with an href reaching the drawing still moves nothing.
+    window.location.hash = '#thread=msg_keep';
+    try {
+      const { board } = await draw({ html: '<p id="settings">Kettle</p>' });
+      const area = document.createElement('area');
+      area.setAttribute('href', '#settings');
+      const file = document.createElement('area');
+      file.setAttribute('href', 'files/a.png');
+      board.querySelector('p')!.append(area, file);
+      for (const el of [area, file]) {
+        const click = new MouseEvent('click', { bubbles: true, cancelable: true, composed: true });
+        await act(async () => {
+          el.dispatchEvent(click);
+        });
+        expect(click.defaultPrevented).toBe(true);
+      }
+      expect(window.location.hash).toBe('#thread=msg_keep');
+    } finally {
       window.location.hash = '';
     }
   });

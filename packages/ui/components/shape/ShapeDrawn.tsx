@@ -129,7 +129,7 @@ const CONFIG = {
   // HTML inside an SVG's foreignObject (a label in a box) is kept.
   HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ADD_ATTR: ['pathLength', 'target'],
-  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select'],
+  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select', 'area', 'map'],
   // Nothing may open in the top layer: it sits over the whole app, past the frame's containment and clip.
   FORBID_ATTR: [...SHAPE_DROPPED_ATTRS, ...SHAPE_TOP_LAYER_ATTRS],
 };
@@ -376,9 +376,12 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
       // A drawing's link never moves the page it sits on: `#…` scrolls inside the drawing (never the host's
       // hash, which is the Inbox's route), an http(s) link opens in a new tab, and anything else does nothing.
-      const link = path.find((t): t is Element => t instanceof Element && t.localName === 'a' && (t.hasAttribute('href') || t.hasAttribute('xlink:href')));
+      // Any element with an href is held (an `<area>` the store and sanitizer refuse would still be caught); only a
+      // link (`<a>`, `<area>`) is followed, the way below. Another element's href (`<use href="#icon">`) moves nothing.
+      const withHref = path.filter((t): t is Element => t instanceof Element && (t.hasAttribute('href') || t.hasAttribute('xlink:href')));
+      if (withHref.length) e.preventDefault();
+      const link = withHref.find((t) => t.localName === 'a' || t.localName === 'area');
       if (link) {
-        e.preventDefault();
         const href = (link.getAttribute('href') ?? link.getAttribute('xlink:href') ?? '').trim();
         if (href.startsWith('#')) {
           const id = decodeURIComponent(href.slice(1));

@@ -2,11 +2,12 @@
  * This Inbox's boards, live, while Shape is on (Settings → Capabilities).
  * Off, nothing is read and no stream is open: the routes answer 404 then.
  *
- * One event stream per window (`/api/shapes/events`): it re-reads the list
- * when a board changes and tells every open board (the host's `events`).
+ * No stream of its own: the Inbox's one event stream (sharedEvents.ts) carries
+ * `event: shapes`, which the window hands to `frames`. A change re-reads the
+ * list and tells every open board (the host's `events`).
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { inboxApi, subscribeShapeEvents, type InboxShapeSummary } from '../api';
+import { inboxApi, type InboxShapeSummary } from '../api';
 
 /** The sidebar row shows from this many boards (approval "shape-inbox-placement"). */
 export const SHAPE_ROW_MIN_BOARDS = 3;
@@ -25,7 +26,8 @@ export interface InboxShapes {
   refresh: () => void;
 }
 
-export function useInboxShapes(on: boolean): InboxShapes {
+/** `frames`: listen to the window's `event: shapes` (an empty list: read everything again); returns the unsubscribe. */
+export function useInboxShapes(on: boolean, frames: (listener: (ids: string[]) => void) => () => void): InboxShapes {
   const [shapes, setShapes] = useState<InboxShapeSummary[] | null>(null);
   const listeners = useRef(new Set<(ids: string[]) => void>());
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -50,7 +52,7 @@ export function useInboxShapes(on: boolean): InboxShapes {
       return;
     }
     refresh();
-    const stop = subscribeShapeEvents((ids) => {
+    const stop = frames((ids) => {
       for (const listener of listeners.current) listener(ids);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(refresh, 60);
@@ -60,7 +62,7 @@ export function useInboxShapes(on: boolean): InboxShapes {
       reading.current?.abort();
       if (timer.current) clearTimeout(timer.current);
     };
-  }, [on, refresh]);
+  }, [on, refresh, frames]);
 
   const subscribe = useCallback((listener: (ids: string[]) => void) => {
     listeners.current.add(listener);

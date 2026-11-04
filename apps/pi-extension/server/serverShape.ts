@@ -38,6 +38,12 @@ const piShapeCode: NonNullable<ShapeRouteDeps["code"]> = {
 	},
 };
 
+/**
+ * NOT MOUNTED, and must not be until it has what the Bun Inbox has around it: Pi has no Shape switch (the Inbox's
+ * Settings → Capabilities → Shape, config `inboxShape`: off answers 404), no owner check (a tailnet guest is
+ * refused there) and no `serverSession` check on writes (409 for a page of a restarted server). Whoever mounts
+ * this adds all three first.
+ */
 export function createPiShapeRoutes(options: { dataDir: string; heartbeatMs?: number; watchMs?: number; sessionOf?: ShapeRouteDeps["sessionOf"] }) {
 	const store: ShapeStore = createShapeStore({ dataDir: options.dataDir });
 	const watch = createShapeWatch(store, { intervalMs: options.watchMs });
@@ -92,8 +98,17 @@ export function createPiShapeRoutes(options: { dataDir: string; heartbeatMs?: nu
 				return true;
 			}
 			if ("file" in answer) {
-				res.writeHead(200, { "Content-Type": answer.file.contentType, "Cross-Origin-Resource-Policy": "same-origin", "Content-Security-Policy": "sandbox", ...NO_STORE });
-				createReadStream(answer.file.path).pipe(res);
+				// Opened before the head is written: a file gone between the check and the read is a 404, and an error
+				// mid-read ends the response instead of an unhandled 'error' event taking the process down.
+				const file = createReadStream(answer.file.path);
+				file.on("error", () => {
+					if (!res.headersSent) sendJson(res, 404, { error: "Not found", code: "not_found" });
+					else res.destroy();
+				});
+				file.once("open", () => {
+					res.writeHead(200, { "Content-Type": answer.file.contentType, "Cross-Origin-Resource-Policy": "same-origin", "Content-Security-Policy": "sandbox", ...NO_STORE });
+					file.pipe(res);
+				});
 				return true;
 			}
 			sendJson(res, answer.status, answer.body);

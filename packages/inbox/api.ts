@@ -1644,6 +1644,8 @@ export interface InboxEventHandlers {
   onRows?: (rows: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`, today thread steps); never called by an older Inbox. */
   onCapabilities?: (capabilities: { steps?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } }) => void;
+  /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
+  onShapes?: (ids: string[]) => void;
   /**
    * Linked machines (`machines=1`): a record from another machine's own stream, with that machine's own seq
    * (never this Inbox's). `live: false` is a resync after a reconnect: never a notification.
@@ -1679,7 +1681,7 @@ export interface InboxEventWindow {
 
 /** The event stream's named frames, as they arrive (and as the tab that holds the shared stream passes them on). */
 // `heartbeat`: a window's stream beats every 10 s (packages/server/inbox.ts); heard by liveStream.ts, handled by nothing.
-export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
+export const INBOX_EVENT_FRAMES = ['hello', 'record', 'status', 'reach', 'deliveries', 'drafts', 'ask', 'pins', 'snoozes', 'rows', 'capabilities', 'shapes', 'machine', 'machines', 'outbox', 'heartbeat'] as const;
 export type InboxEventFrameName = (typeof INBOX_EVENT_FRAMES)[number];
 export interface InboxEventFrame {
   name: InboxEventFrameName;
@@ -1770,6 +1772,14 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
         });
+      } catch {
+        // A malformed frame changes nothing.
+      }
+      return;
+    case 'shapes':
+      try {
+        const data = JSON.parse(frame.data) as { ids?: unknown };
+        if (Array.isArray(data.ids)) handlers.onShapes?.(data.ids.filter((id): id is string => typeof id === 'string'));
       } catch {
         // A malformed frame changes nothing.
       }
@@ -1899,20 +1909,3 @@ export interface ShapeLoadedWire {
   session: { state: 'live' | 'busy' | 'gone'; agent: string };
 }
 
-/** The boards' event feed: `ids` changed (an agent's version, a note picked up, a seen). Returns the close. */
-export function subscribeShapeEvents(onChange: (ids: string[]) => void): () => void {
-  if (typeof EventSource !== 'function') return () => {};
-  const source = new EventSource('/api/shapes/events');
-  const listener = (event: MessageEvent) => {
-    try {
-      const data = JSON.parse(String(event.data)) as { ids?: unknown };
-      if (Array.isArray(data.ids)) onChange(data.ids.filter((id): id is string => typeof id === 'string'));
-    } catch {
-      // a torn frame: the next one carries the state
-    }
-  };
-  source.addEventListener('shapes', listener as EventListener);
-  // A reconnect may have missed frames: read everything again.
-  source.addEventListener('hello', () => onChange([]));
-  return () => source.close();
-}
