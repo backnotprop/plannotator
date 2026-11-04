@@ -27,9 +27,6 @@ export interface InboxReviewIndexStore {
   canonicalProjectId(projectId: string): string;
 }
 
-/** The sources read from snapshot blobs are kept for at most this many reviews. */
-const SOURCE_CACHE_MAX = 2000;
-
 /**
  * One thread's reviews, or null when no agent sent a review in it. `sourceOf`
  * gives a review's source when its guide ref does not carry one (an older
@@ -63,9 +60,11 @@ export function inboxReviewThreadOf(
       continue;
     }
     if (!latestReview || message.author.kind !== "person") continue;
-    answered = { message_id: message.id, at: message.created_at };
     const mark = message.review_verdict;
-    if (mark && mark.of === latestReview.id) verdict = { verdict: mark.verdict, comments: mark.comments, message_id: message.id, at: message.created_at };
+    // A verdict on an earlier review card answers that card, not the newest one.
+    if (mark && mark.of !== latestReview.id) continue;
+    answered = { message_id: message.id, at: message.created_at };
+    if (mark) verdict = { verdict: mark.verdict, comments: mark.comments, message_id: message.id, at: message.created_at };
   }
   if (!first || !latestReview) return null;
   const guide = latestReview.guide!;
@@ -98,33 +97,37 @@ export interface InboxReviewIndex {
 
 export function createInboxReviewIndex(store: InboxReviewIndexStore): InboxReviewIndex {
   let built: { cursor: number; reloads: number; threads: InboxReviewThread[] } | null = null;
-  const sources = new Map<string, InboxReviewSource | null>();
-  // An older review's source, from its snapshot (read once per blob; gone or unreadable: unknown).
-  const sourceOf = (message: InboxMessage): InboxReviewSource | null => {
-    const sha = message.guide?.sha256;
-    if (!sha) return null;
-    if (sources.has(sha)) return sources.get(sha)!;
-    let source: InboxReviewSource | null = null;
-    try {
-      const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha), "utf8"));
-      if (parsed.ok) source = inboxReviewSourceOf(parsed.value);
-    } catch {
-      // Gone from the store: the review is listed without its source.
-    }
-    if (sources.size >= SOURCE_CACHE_MAX) sources.delete(sources.keys().next().value!);
-    sources.set(sha, source);
-    return source;
-  };
+  // Older reviews' sources read from their snapshots, by blob hash. Only the latest review of each indexed thread is
+  // read, and each rebuild keeps only those, so the cache is as large as the index and a blob is never read twice.
+  let sources = new Map<string, InboxReviewSource | null>();
   return {
     threads() {
       const cursor = store.cursor();
       const reloads = store.reloadCount();
       if (built && built.cursor === cursor && built.reloads === reloads) return built.threads;
+      const kept = new Map<string, InboxReviewSource | null>();
+      const sourceOf = (message: InboxMessage): InboxReviewSource | null => {
+        const sha = message.guide?.sha256;
+        if (!sha) return null;
+        let source = sources.has(sha) ? sources.get(sha)! : kept.get(sha);
+        if (source === undefined) {
+          source = null;
+          try {
+            const parsed = parseGuideSnapshotJson(readFileSync(inboxBlobPath(store.dir, sha), "utf8"));
+            if (parsed.ok) source = inboxReviewSourceOf(parsed.value);
+          } catch {
+            // Gone from the store: the review is listed without its source.
+          }
+        }
+        kept.set(sha, source);
+        return source;
+      };
       const threads: InboxReviewThread[] = [];
       for (const threadId of store.threadIds()) {
         const thread = inboxReviewThreadOf(store, threadId, sourceOf);
         if (thread) threads.push(thread);
       }
+      sources = kept;
       built = { cursor, reloads, threads };
       return threads;
     },

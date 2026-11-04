@@ -15,6 +15,11 @@
  *    On you on round 2 → Ready to land);
  *  - an approved review of the person's linked PR left On you;
  *  - a listed PR with no review thread shown as reviewed;
+ *  - an approval lost once the person writes again ("Thanks!");
+ *  - a verdict on an earlier review card taken as answering the newest;
+ *  - a review sent after the thread was archived hidden from Reviews;
+ *  - a review whose PR merged still listed;
+ *  - a deleted thread still listed (the index kept after a re-read);
  *  - an older review (its guide ref without `source`) listed without the
  *    source its snapshot names.
  */
@@ -69,8 +74,16 @@ const ghPull = (number: number, fields: Record<string, unknown> = {}) => ({
   ...fields,
 });
 
-/** dana's #412 (her agent's), and #869 nobody reviewed; gh signed in to github.com only, glab nowhere. */
-const GH_ANSWER = { data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412), ghPull(869)] }, merged: { nodes: [] } } };
+/** dana's #412 (her agent's), #869 nobody reviewed, and #300 she merged; gh signed in to github.com only, glab nowhere. */
+const GH_ANSWER = {
+  data: {
+    viewer: { login: "dana" },
+    requested: { nodes: [] },
+    authored: { nodes: [ghPull(412), ghPull(869)] },
+    merged: { nodes: [ghPull(300, { state: "MERGED", mergedAt: "2026-11-03T12:00:00Z" })] },
+  },
+};
+const MERGED_URL = "https://github.com/northwind/billing-svc/pull/300";
 
 function forge() {
   const calls: { cli: string; args: string[] }[] = [];
@@ -115,7 +128,11 @@ async function world() {
     ((await client.callTool({ name, arguments: { project_path: project, ...agent, ...args } })) as { structuredContent: { message_id: string; thread_id: string } }).structuredContent;
   const post = (path: string, body: unknown) => fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   const setCodeReview = (on: boolean) => post("/api/inbox/settings", { code_review: { on } });
-  const sendReview = (thread: string, key: string, body?: string) => call("submit_guide", { ...GUIDE_BRIEF_EXAMPLE, ...(body ? { body } : {}), thread, idempotency_key: key, review: true });
+  const sendReview = (thread: string, key: string, body?: string, extra: Record<string, unknown> = {}) =>
+    call("submit_guide", { ...GUIDE_BRIEF_EXAMPLE, ...(body ? { body } : {}), thread, idempotency_key: key, review: true, ...extra });
+  /** A review of a PR: the guide's source names it. */
+  const prGuide = (url: string, number: number) => ({ guide: { ...GUIDE_BRIEF_EXAMPLE.guide, source: { kind: "pr", pr: { url, number, platform: "github" } } } });
+  const say = (messageId: string, key: string, words: string) => post(`/api/inbox/messages/${messageId}/reply`, { idempotency_key: key, words });
   const verdict = (reviewId: string, key: string, review_verdict: "approved" | "changes_requested") =>
     post(`/api/inbox/messages/${reviewId}/reply`, { idempotency_key: key, words: "Verdict.", review_verdict });
   const reviews = async (): Promise<InboxReviewsAnswer> => {
@@ -123,7 +140,7 @@ async function world() {
     expect(res.status).toBe(200);
     return (await res.json()) as InboxReviewsAnswer;
   };
-  return { project, dataDir, base, forge: f, originReads: () => originReads, call, post, setCodeReview, sendReview, verdict, reviews };
+  return { project, dataDir, base, forge: f, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
 }
 
 const rowsOf = (answer: InboxReviewsAnswer, threadId: string): InboxReviewRow[] => answer.rows.filter((row) => row.thread_id === threadId);
@@ -182,7 +199,7 @@ describe("on", () => {
     await w.setCodeReview(true);
     // The agent opened #412 in its thread (its own URL link), then sent its review there.
     const opened = await w.call("send_message", { body: `Opened ${PULL_URL}`, thread: "retries" });
-    const r1 = await w.sendReview("retries", "r1");
+    const r1 = await w.sendReview("retries", "r1", undefined, w.prGuide(PULL_URL, 412));
     const key = "github.com/northwind/billing-svc#412";
 
     // The pulls page alone: linked, checks done, so On you, before and after any verdict.
@@ -201,6 +218,60 @@ describe("on", () => {
     answer = await w.reviews();
     rows = rowsOf(answer, opened.thread_id);
     expect(rows[0]).toMatchObject({ move: "ready", reason: "approved" });
+  });
+
+  test("an approval holds through the chat after it", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    expect((await w.verdict(r1.message_id, "v1", "approved")).status).toBe(200);
+    // The agent asks something, the person says yes, then thanks it.
+    const asked = await w.call("send_message", { body: "Merge it now?", reply_to: r1.message_id });
+    expect((await w.say(asked.message_id, "s1", "Yes.")).status).toBe(200);
+    expect((await w.say(asked.message_id, "s2", "Thanks!")).status).toBe(200);
+    expect(rowsOf(await w.reviews(), r1.thread_id)[0]).toMatchObject({ move: "ready", reason: "approved" });
+  });
+
+  test("a verdict on an earlier review card does not answer the newest", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    const r2 = await w.sendReview("retries", "r2", "Round two.");
+    expect((await w.verdict(r1.message_id, "v1", "approved")).status).toBe(200);
+    const [row] = rowsOf(await w.reviews(), r1.thread_id);
+    expect(row).toMatchObject({ move: "on_you", reason: "review_ready" });
+    expect(row!.review).toMatchObject({ latest_review_id: r2.message_id, verdict: null, answered: null });
+  });
+
+  test("an archived review thread leaves Reviews; a review sent after the archive brings it back", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    expect((await w.post(`/api/inbox/messages/${r1.thread_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(rowsOf(await w.reviews(), r1.thread_id)).toHaveLength(0);
+    const r2 = await w.call("submit_guide", { ...GUIDE_BRIEF_EXAMPLE, body: "Round two.", reply_to: r1.message_id, idempotency_key: "r2", review: true });
+    expect(r2.thread_id).toBe(r1.thread_id);
+    const rows = rowsOf(await w.reviews(), r1.thread_id);
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ move: "on_you" });
+    expect(rows[0]!.review).toMatchObject({ round: 2, latest_review_id: r2.message_id });
+  });
+
+  test("a review whose PR merged leaves Reviews", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const opened = await w.call("send_message", { body: `Opened ${MERGED_URL}`, thread: "landed" });
+    await w.sendReview("landed", "r1", undefined, w.prGuide(MERGED_URL, 300));
+    expect(rowsOf(await w.reviews(), opened.thread_id)).toHaveLength(0);
+  });
+
+  test("a deleted review thread leaves Reviews", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const r1 = await w.sendReview("retries", "r1");
+    expect(rowsOf(await w.reviews(), r1.thread_id)).toHaveLength(1);
+    expect((await w.post(`/api/inbox/threads/${r1.thread_id}/delete`, {})).status).toBe(200);
+    expect(rowsOf(await w.reviews(), r1.thread_id)).toHaveLength(0);
   });
 });
 

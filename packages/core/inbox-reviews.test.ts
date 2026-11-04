@@ -3,13 +3,18 @@
  *  - a review waiting on the person not On you, or still On you after they
  *    sent feedback or approved (the audit's "an approved linked PR stays On
  *    you": the pulls rule alone keeps it there);
- *  - an approval read from an older answer once the person wrote again;
+ *  - an approval lost once the person writes again ("Thanks!"), sticking the
+ *    row in With your agents;
  *  - an approved review shown Ready to land while the forge still holds the
  *    person's PR (changes asked, checks failing or running);
  *  - a teammate's PR put in Ready to land, or its review request lost from On you;
  *  - a review thread listed twice (once as a thread, once as its PR), a PR the
  *    person handed over shown as not reviewed, or a listed PR shown as reviewed;
- *  - an archived review thread listed with no open PR left;
+ *  - an archived review thread listed with no open PR left, or a review sent
+ *    after the archive (the Inbox brings the thread back) hidden;
+ *  - a review whose PR merged still listed as Ready to land or On you;
+ *  - a PR merely mentioned in a review thread claimed into its row, hiding a
+ *    teammate's "asked for your review" row;
  *  - a source field that an agent made multi-line or unbounded.
  */
 import { describe, expect, test } from "bun:test";
@@ -87,11 +92,11 @@ describe("inboxReviewMove", () => {
     // Comments or words sent without a verdict are feedback too.
     expect(inboxReviewMove(review({ thread_id: "t", answered: { message_id: "m", at: "2026-11-04T11:00:00.000Z" } }))).toEqual({ move: "agents", reason: "feedback_sent" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }))).toEqual({ move: "ready", reason: "approved" });
-    // The person wrote again after approving ("one more thing"): the agent has it.
-    expect(inboxReviewMove(review({ thread_id: "t", ...approved("t"), answered: { message_id: "later", at: "2026-11-04T12:00:00.000Z" } }))).toEqual({
-      move: "agents",
-      reason: "feedback_sent",
-    });
+    // The person wrote again after approving ("Thanks!", a yes to the agent): the verdict still decides.
+    const chat = { message_id: "later", at: "2026-11-04T12:00:00.000Z" };
+    expect(inboxReviewMove(review({ thread_id: "t", ...approved("t"), answered: chat }))).toEqual({ move: "ready", reason: "approved" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...approved("t"), answered: chat }), [pr({ number: 9, checks: "failure" })])).toEqual({ move: "on_you", reason: "failing" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...changes("t"), answered: chat }))).toEqual({ move: "agents", reason: "feedback_sent" });
   });
 
   test("an approved review of the person's linked PR leaves On you, where the pulls rule alone keeps it", () => {
@@ -134,9 +139,9 @@ describe("inboxReviewRows", () => {
     const handed = pr({ number: 875 });
     const stacks = inboxPullStacks([low, top, theirs, lone, handed]);
     const rows = inboxReviewRows({
-      threads: [review({ thread_id: "t_review" }), review({ thread_id: "t_local", source: { kind: "local" } })],
+      threads: [review({ thread_id: "t_review", source: { kind: "pr", pr: { url: top.url } } }), review({ thread_id: "t_local", source: { kind: "local" } })],
       stacks,
-      // The agent's own thread names #413; #875 was handed to a thread whose review has not arrived.
+      // The agent's own thread names #413 and reviewed it; #875 was handed to a thread whose review has not arrived.
       links: { [top.key]: link("t_review"), [handed.key]: link("t_handed", "owner") },
     });
     const byId = new Map(rows.map((row) => [row.id, row]));
@@ -160,9 +165,54 @@ describe("inboxReviewRows", () => {
 
   test("an archived review thread leaves Reviews unless it still owns an open PR", () => {
     const pull = pr({ number: 412 });
-    const threads = [review({ thread_id: "t_done", resolved_at: "2026-11-04T12:00:00.000Z" }), review({ thread_id: "t_pr", resolved_at: "2026-11-04T12:00:00.000Z" })];
+    const threads = [
+      review({ thread_id: "t_done", resolved_at: "2026-11-04T12:00:00.000Z" }),
+      review({ thread_id: "t_pr", resolved_at: "2026-11-04T12:00:00.000Z", source: { kind: "pr", pr: { url: pull.url } } }),
+    ];
     const rows = inboxReviewRows({ threads, stacks: inboxPullStacks([pull]), links: { [pull.key]: link("t_pr") } });
     expect(rows.map((r) => r.id)).toEqual(["t_pr"]);
+  });
+
+  test("a review sent after the archive brings the thread back to Reviews, as the Inbox brings it back", () => {
+    const back = review({ thread_id: "t_back", round: 2, latest_review_id: "t_back_r2", reviewed_at: "2026-11-04T13:00:00.000Z", updated_at: "2026-11-04T13:00:00.000Z", resolved_at: "2026-11-04T12:00:00.000Z" });
+    const rows = inboxReviewRows({ threads: [back], stacks: [], links: {} });
+    expect(rows.map((r) => [r.id, r.move])).toEqual([["t_back", "on_you"]]);
+  });
+
+  test("a review whose PR landed leaves Reviews, answered or not; an open stack layer above it stays a row", () => {
+    const merged = pr({ number: 412, head: "retry/schedule", state: "merged", merged_at: "2026-11-04T12:00:00.000Z" });
+    const open = pr({ number: 413, head: "retry/backoff", base: "retry/schedule" });
+    const lone = pr({ number: 500, head: "docs", state: "merged", merged_at: "2026-11-04T12:00:00.000Z" });
+    const threads = [
+      review({ thread_id: "t_stack", source: { kind: "pr", pr: { url: merged.url } }, ...approved("t_stack") }),
+      review({ thread_id: "t_lone", source: { kind: "pr", pr: { url: lone.url } } }),
+    ];
+    // The list keeps merged PRs (`pulls`); a merged PR under no open stack is in no stack.
+    const rows = inboxReviewRows({
+      threads,
+      pulls: [merged, open, lone],
+      stacks: inboxPullStacks([merged, open, lone]),
+      links: { [merged.key]: link("t_stack"), [lone.key]: link("t_lone", "owner") },
+    });
+    expect(rows.map((r) => [r.id, r.reviewed])).toEqual([[open.key, false]]);
+  });
+
+  test("a PR merely mentioned in a review thread is not claimed; one the review is of, or handed over, is", () => {
+    const theirs = pr({ number: 880, mine: false, requested: true, author: "tomas", head: "rtl" });
+    const mine = pr({ number: 412, head: "retry-jitter" });
+    const handed = pr({ number: 413, head: "other" });
+    const rows = inboxReviewRows({
+      // A local review of branch retry-jitter whose thread also names tomas's PR.
+      threads: [review({ thread_id: "t_local" }), review({ thread_id: "t_handed", source: { kind: "local", branch: "elsewhere" } })],
+      stacks: inboxPullStacks([theirs, mine, handed]),
+      links: { [theirs.key]: link("t_local"), [mine.key]: link("t_local"), [handed.key]: link("t_handed", "owner") },
+    });
+    const byId = new Map(rows.map((row) => [row.id, row]));
+    expect(byId.get(theirs.key)).toMatchObject({ reviewed: false, move: "on_you", reason: "requested" });
+    // The review's branch is #412's head: that PR is the review's.
+    expect(byId.get("t_local")!.pull_keys).toEqual([mine.key]);
+    expect(byId.get("t_handed")!.pull_keys).toEqual([handed.key]);
+    expect(rows).toHaveLength(3);
   });
 
   test("a verdict moves the row between groups", () => {

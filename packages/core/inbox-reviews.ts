@@ -206,27 +206,28 @@ export interface InboxReviewsAnswer {
 }
 
 /**
- * Whose move a review thread is. `pulls`: the PRs the thread owns (none for a
- * local review). `review` null: a thread the person handed a PR to, whose
- * review has not arrived (the agent is curating).
+ * Whose move a review thread is. `pulls`: the open PRs the thread owns (none
+ * for a local review). `review` null: a thread the person handed a PR to,
+ * whose review has not arrived (the agent is curating).
  *
- * The person's own answer decides first: no answer yet is On you; feedback
- * (changes requested, comments or words) is With your agents; an approval is
- * Ready to land unless the forge holds the person's own PR (a reviewer asked
- * for changes or its checks failed: On you; checks running, a draft, or
- * reviewers still to answer: Waiting on others). A review of only a
- * teammate's PRs takes no verdict here: answered, it is On you while their
- * review of it is asked of the person, else Waiting on others.
+ * The person's own answer decides first: no answer yet is On you. Once they
+ * gave the latest review a verdict, the verdict decides, whatever chat follows
+ * it ("Thanks!", a yes to the agent's question): changes requested is With
+ * your agents; an approval is Ready to land unless the forge holds the
+ * person's own PR (a reviewer asked for changes or its checks failed: On you;
+ * checks running, a draft, or reviewers still to answer: Waiting on others).
+ * An answer with no verdict (comments or words) is With your agents. A review
+ * of only a teammate's PRs takes no verdict here: answered, it is On you
+ * while their review of it is asked of the person, else Waiting on others.
  */
 export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonly InboxPull[] = []): { move: InboxReviewMove; reason: InboxReviewReason } {
   if (!review) return { move: "agents", reason: "curating" };
-  if (!review.answered) return { move: "on_you", reason: "review_ready" };
+  if (!review.answered && !review.verdict) return { move: "on_you", reason: "review_ready" };
   const open = pulls.filter(inboxPullIsOpen);
   if (open.length > 0 && open.every((pull) => !pull.mine)) {
     return open.some((pull) => pull.requested) ? { move: "on_you", reason: "requested" } : { move: "waiting", reason: "others" };
   }
-  const approved = review.verdict?.verdict === "approved" && review.verdict.message_id === review.answered.message_id;
-  if (!approved) return { move: "agents", reason: "feedback_sent" };
+  if (review.verdict?.verdict !== "approved") return { move: "agents", reason: "feedback_sent" };
   const own = open.filter((pull) => pull.mine);
   if (own.some((pull) => pull.review === "changes_requested")) return { move: "on_you", reason: "changes" };
   if (own.some((pull) => pull.checks === "failure")) return { move: "on_you", reason: "failing" };
@@ -234,6 +235,23 @@ export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonl
   if (own.some((pull) => pull.state === "draft")) return { move: "waiting", reason: "draft" };
   if (own.some((pull) => pull.review === "review_required" && pull.reviewers.length > 0)) return { move: "waiting", reason: "forge_review" };
   return { move: "ready", reason: "approved" };
+}
+
+const bareUrl = (url: string) => url.replace(/[#?].*$/, "").replace(/\/+$/, "").toLowerCase();
+
+/**
+ * The review is of this PR: its source names the PR (`source.pr`), or its
+ * branch is the PR's head branch (in the PR's repository, when the source
+ * names one). A PR's URL merely mentioned in the thread is not enough.
+ */
+export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<InboxPull, "url" | "head" | "repo">): boolean {
+  if (!source) return false;
+  if (source.pr) return bareUrl(source.pr.url) === bareUrl(pull.url);
+  if (!source.branch || source.branch !== pull.head) return false;
+  if (!source.repo) return true;
+  const repo = source.repo.toLowerCase();
+  const of = pull.repo.toLowerCase();
+  return repo === of || of.endsWith(`/${repo}`);
 }
 
 /** A PR row (no review thread): On you when a teammate asked for the person's review, else not reviewed. */
@@ -261,73 +279,73 @@ const latest = (times: readonly string[]) => times.reduce((a, b) => (b > a ? b :
 
 /**
  * The Reviews rows: one per review thread (with the PRs it owns), one per
- * thread handed a PR whose review has not arrived, and one per stack no
- * review thread owns (not reviewed). `links`: the pulls list's links (the
- * person's owner choice, else the agent's own URL), by pull key. A resolved
- * thread is left out unless it still owns an open PR.
+ * thread handed a PR whose review has not arrived, and one per stack no row
+ * owns (not reviewed). `links`: the pulls list's links (the person's owner
+ * choice, else the agent's own URL), by pull key. `pulls`: every PR the list
+ * read, merged ones included (default: the stacks' layers).
+ *
+ * - A thread owns a PR the person handed it (`via: "owner"`); through the
+ *   agent's own URL only when the thread's latest review is of that PR
+ *   (`inboxReviewIsOf`), so a PR merely mentioned stays its own row.
+ * - Landed: a thread whose PRs are all merged or closed leaves Reviews (the
+ *   work is done; the thread stays in the Inbox, and the approved page has no
+ *   group for done work).
+ * - Archived: a resolved thread is left out while its latest review is no
+ *   newer than the archive, unless it still owns an open PR. A review sent
+ *   after the archive brings it back, as the Inbox brings the thread back.
  */
 export function inboxReviewRows(input: {
   threads: readonly InboxReviewThread[];
   stacks: readonly InboxPullStack[];
   links: Readonly<Record<string, InboxPullLink>>;
+  pulls?: readonly InboxPull[];
   /** The pulls rule's reason per stack (`inboxPullItems`), by stack id. */
   pullReasons?: ReadonlyMap<string, InboxPullReason>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
-  // Per thread: the stacks whose layers it owns, and which layers.
-  const owned = new Map<string, { stacks: InboxPullStack[]; keys: string[]; link: InboxPullLink }>();
-  const unowned: InboxPullStack[] = [];
-  for (const stack of input.stacks) {
-    let claimed = false;
-    for (const layer of stack.layers) {
-      const link = input.links[layer.key];
-      // A thread with a review owns its PRs however they were linked; a thread with none yet only when the person handed them over.
-      if (!link || (!byThread.has(link.thread_id) && link.via !== "owner")) continue;
-      claimed = true;
-      const entry = owned.get(link.thread_id) ?? { stacks: [], keys: [], link };
-      if (!entry.stacks.includes(stack)) entry.stacks.push(stack);
-      entry.keys.push(layer.key);
-      owned.set(link.thread_id, entry);
-    }
-    if (!claimed) unowned.push(stack);
+  const all = new Map<string, InboxPull>();
+  for (const pull of input.pulls ?? input.stacks.flatMap((s) => s.layers)) if (!all.has(pull.key)) all.set(pull.key, pull);
+  // Per thread: the PRs it owns, and the link that ties them.
+  const owned = new Map<string, { pulls: InboxPull[]; link: InboxPullLink }>();
+  for (const pull of all.values()) {
+    const link = input.links[pull.key];
+    if (!link) continue;
+    const thread = byThread.get(link.thread_id);
+    if (link.via !== "owner" && !(thread && inboxReviewIsOf(thread.source, pull))) continue;
+    const entry = owned.get(link.thread_id) ?? { pulls: [], link };
+    entry.pulls.push(pull);
+    owned.set(link.thread_id, entry);
   }
+  const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));
 
   const rows: InboxReviewRow[] = [];
+  const attached = new Set<string>();
   const reasonOf = (stacks: readonly InboxPullStack[]) => (stacks[0] ? input.pullReasons?.get(stacks[0].id) ?? null : null);
-  for (const thread of input.threads) {
-    const own = owned.get(thread.thread_id);
-    const pulls = own ? own.stacks.flatMap((s) => s.layers).filter((p) => own.keys.includes(p.key)) : [];
-    if (thread.resolved_at && !pulls.some(inboxPullIsOpen)) continue;
-    rows.push({
-      id: thread.thread_id,
-      reviewed: true,
-      ...inboxReviewMove(thread, pulls),
-      thread_id: thread.thread_id,
-      review: thread,
-      stacks: own?.stacks ?? [],
-      pull_keys: own?.keys ?? [],
-      link: own?.link ?? null,
-      pull_reason: reasonOf(own?.stacks ?? []),
-      updated_at: latest([thread.updated_at, ...pulls.map((p) => p.updated_at)]),
-    });
-  }
-  for (const [threadId, own] of owned) {
-    if (byThread.has(threadId)) continue;
-    const pulls = own.stacks.flatMap((s) => s.layers).filter((p) => own.keys.includes(p.key));
+  const push = (threadId: string, review: InboxReviewThread | null, own: { pulls: InboxPull[]; link: InboxPullLink } | undefined) => {
+    const pulls = own?.pulls ?? [];
+    const open = pulls.filter(inboxPullIsOpen);
+    // Landed: every PR it owns merged or closed.
+    if (pulls.length > 0 && open.length === 0) return;
+    if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
+    const stacks = stacksOf(open);
+    for (const stack of stacks) attached.add(stack.id);
     rows.push({
       id: threadId,
       reviewed: true,
-      ...inboxReviewMove(null, pulls),
+      ...inboxReviewMove(review, open),
       thread_id: threadId,
-      review: null,
-      stacks: own.stacks,
-      pull_keys: own.keys,
-      link: own.link,
-      pull_reason: reasonOf(own.stacks),
-      updated_at: latest([own.link.last?.at ?? "", ...pulls.map((p) => p.updated_at)]),
+      review,
+      stacks,
+      pull_keys: pulls.filter((p) => stacks.some((s) => s.layers.some((l) => l.key === p.key))).map((p) => p.key),
+      link: own?.link ?? null,
+      pull_reason: reasonOf(stacks),
+      updated_at: latest([review?.updated_at ?? own?.link.last?.at ?? "", ...open.map((p) => p.updated_at)]),
     });
-  }
-  for (const stack of unowned) {
+  };
+  for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
+  for (const [threadId, own] of owned) if (!byThread.has(threadId)) push(threadId, null, own);
+  for (const stack of input.stacks) {
+    if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.
     const link =
       [...stack.layers].reverse().map((layer) => (inboxPullIsOpen(layer) ? input.links[layer.key] : undefined)).find((l): l is InboxPullLink => !!l) ??
