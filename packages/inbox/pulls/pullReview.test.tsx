@@ -19,7 +19,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { INBOX_REVIEW_SKILL_TEXTS } from '@plannotator/core/inbox-review';
 import type { StartThreadInput } from '../api';
-import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
+import { handoffKeys, handoffStack, layerVerdictLink, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
@@ -724,6 +724,40 @@ test.skipIf(!hasDom)('a thread name another open thread has: the hand-off still 
   expect(sentPaths()).toEqual(['/pulls/owner', '/messages', '/messages', '/pulls/owner']);
 });
 
+test.skipIf(!hasDom)("a tree: the chain to the top goes first; then its sibling has no agent yet and is handed on its own", async () => {
+  const tree = TREE();
+  const [l412, l413, l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
+  mount(<Page answer={{ ...model, pulls: tree.layers, links: {} }} stackId={tree.id} />);
+  await settle();
+  await handTo('ses_billing');
+  await settle();
+  expect(posted[0]!.body).toMatchObject({ keys: [l412.key, l414.key], validate_only: true });
+  expect(posted[1]!.body.thread_name).toBe('Review #412, #414: Layer 412');
+  act(() => root?.unmount());
+  host?.remove();
+  posted = [];
+  // That thread has #412 and #414: the view shows it, and #413, which it was never told about, can be handed by itself.
+  const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_a', last: null };
+  mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned } }} stackId={tree.id} />);
+  await settle();
+  expect(el('[data-pulls-thread]').getAttribute('data-pulls-thread')).toBe('thr_a');
+  expect(el('[data-pulls-no-agent]').textContent).toBe('No agent yet for #413');
+  expect(document.querySelectorAll('[data-pulls-open-diff]')).toHaveLength(1);
+  await handTo('ses_billing');
+  await settle();
+  expect(posted[0]!.body).toMatchObject({ keys: [l413.key], validate_only: true });
+  expect(posted[1]!.body.thread_name).toBe('Review #413: Layer 413');
+  expect(String(posted[1]!.body.body)).toContain('\n- Number: #413\n');
+  expect(posted[2]!.body).toMatchObject({ keys: [l413.key], thread_id: 'thr_new' });
+  act(() => root?.unmount());
+  host?.remove();
+  // Each layer has a thread: nothing is left to hand.
+  mount(<Page answer={{ ...model, pulls: tree.layers, links: { [l412.key]: owned, [l414.key]: owned, [l413.key]: { ...owned, thread_id: 'thr_b' } } }} stackId={tree.id} />);
+  await settle();
+  expect(document.querySelector('[data-pulls-no-agent]')).toBeNull();
+  expect(document.querySelector('[data-pulls-handoff]')).toBeNull();
+});
+
 test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the diff; a pill only picks; the last agent is picked first next time', async () => {
   sessionsAnswer = { ...sessionsAnswer, projects: [{ project: { id: 'prj_1', name: 'billing-svc', root: '/home/dana/billing-svc' }, sessions: [liveSession('ses_a', 'prj_1'), liveSession('ses_b', 'prj_1')] }] };
   const reviewed: string[] = [];
@@ -1164,29 +1198,90 @@ test('the thread name: "Review #869: <title>", a stack "Review #412 to #414: <ti
   expect(name).not.toMatch(/[\n\r\u202E]/);
 });
 
-// --- A tree (two open PRs on one branch): the hand-off is the chain up to the layer the view is open on ---
+// --- A tree (two open PRs on one branch): the chain to its top first, then the sibling left out, on its own ---
 
-test('a tree stack hands over only the chain to the layer it is open on: the list, "to" and "in list order" stay true', () => {
-  const tree = inboxPullStacks([pull(412, { head: 'kid' }), pull(413, { head: 'kid-a', base: 'kid' }), pull(414, { head: 'kid-b', base: 'kid' })])[0]!;
+/** #413 and #414 both on #412's branch. */
+const TREE = () => inboxPullStacks([pull(412, { head: 'kid' }), pull(413, { head: 'kid-a', base: 'kid' }), pull(414, { head: 'kid-b', base: 'kid' })])[0]!;
+
+test('a tree hands over the chain to its top, named "Review #412, #414", then its sibling #413 on its own', () => {
+  const tree = TREE();
+  const [l412, l413, l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
   expect(tree.layers.map((l) => l.number)).toEqual([412, 413, 414]);
-  const toB = handoffStack(tree, tree.layers[2]!.key);
-  expect(handoffKeys(toB)).toEqual([tree.layers[0]!.key, tree.layers[2]!.key]);
-  const text = pullHandoffMessage(toB);
+  const first = handoffStack(tree, {})!;
+  expect(handoffKeys(first)).toEqual([l412.key, l414.key]);
+  const text = pullHandoffMessage(first);
   expect(text.split('\n').filter((line) => /^- #\d/.test(line)).map((line) => line.slice(0, 6))).toEqual(['- #412', '- #414']);
   expect(text).not.toContain('#413');
   expect(text).toContain("\n1. Send me a guided review of the whole stack's diff, from main to kid-b, using /review-curate");
   expect(text).toContain('\n- Lands into: main, in list order\n');
-  expect(pullHandoffThreadName(toB, null)).toBe('Review #412 to #414: Layer 412');
-  // Open on #413: its own chain.
-  const toA = handoffStack(tree, tree.layers[1]!.key);
-  expect(handoffKeys(toA)).toEqual([tree.layers[0]!.key, tree.layers[1]!.key]);
-  expect(pullHandoffMessage(toA)).toContain('from main to kid-a, using');
-  // Open on the bottom, or on no layer: the stack's own top's chain (its id).
-  expect(handoffKeys(handoffStack(tree, tree.layers[0]!.key))).toEqual([tree.layers[0]!.key]);
-  expect(handoffKeys(handoffStack(tree, null))).toEqual(handoffKeys(toB));
-  // A chain is handed over whole, whichever layer the view is open on.
+  // Not "#412 to #414": that reads as if #413 were in it.
+  expect(pullHandoffThreadName(first, null, tree)).toBe('Review #412, #414: Layer 412');
+  // Once a thread has #412 and #414, #413 is what is left: on its own, its diff against #412's branch.
+  const handed = { [l412.key]: linkTo('thr_a', 'msg_a'), [l414.key]: linkTo('thr_a', 'msg_a') };
+  const sibling = handoffStack(tree, handed)!;
+  expect(handoffKeys(sibling)).toEqual([l413.key]);
+  expect(pullHandoffMessage(sibling)).toContain('\n- Number: #413\n');
+  expect(pullHandoffMessage(sibling)).toContain('\n- Branch: kid-a, into kid\n');
+  expect(pullHandoffMessage(sibling)).toContain('\n1. Send me a guided review of its diff against kid, using /review-curate');
+  expect(pullHandoffThreadName(sibling, null, tree)).toBe('Review #413: Layer 413');
+  // Hand to another agent moves what that thread has, and only that.
+  expect(handoffKeys(handoffStack(tree, handed, 'thr_a')!)).toEqual([l412.key, l414.key]);
+  const all = { ...handed, [l413.key]: linkTo('thr_b', 'msg_b') };
+  expect(handoffStack(tree, all)).toBeNull();
+  expect(handoffKeys(handoffStack(tree, all, 'thr_b')!)).toEqual([l413.key]);
+  // A chain is one stack: handed over whole, and nothing is left once a thread has it.
   const chain = inboxPullStacks(stack)[0]!;
-  expect(handoffStack(chain, stack[0]!.key)).toBe(chain);
+  expect(handoffStack(chain, {})).toBe(chain);
+  expect(handoffStack(chain, { [stack[2]!.key]: link })).toBeNull();
+  expect(handoffStack(chain, { [stack[2]!.key]: link }, link.thread_id)).toBe(chain);
+});
+
+test("a tree's verdict: #413 has no agent while only #412 and #414's thread exists, never that thread", () => {
+  const tree = TREE();
+  const [l412, l413, l414] = tree.layers as [InboxPull, InboxPull, InboxPull];
+  const handed = { [l412.key]: linkTo('thr_a', 'msg_a'), [l414.key]: linkTo('thr_a', 'msg_a') };
+  expect(layerVerdictLink(l413, tree, handed)).toBeNull();
+  expect(layerVerdictLink(l412, tree, handed)?.thread_id).toBe('thr_a');
+  // A layer under the linked one on its chain still falls back to it (its Whole stack holds it).
+  expect(layerVerdictLink(l412, tree, { [l414.key]: linkTo('thr_a', 'msg_a') })?.thread_id).toBe('thr_a');
+  expect(layerVerdictLink(l413, tree, { ...handed, [l413.key]: linkTo('thr_b', 'msg_b') })?.thread_id).toBe('thr_b');
+});
+
+test('the thread name says "to" only for a straight run of the stack\'s layers, and a long list of numbers stays in the limit', () => {
+  // #415 on #413, #414 beside #413: the chain to the top skips #414.
+  const tree = inboxPullStacks([pull(412, { head: 'k' }), pull(413, { head: 'k-a', base: 'k' }), pull(414, { head: 'k-b', base: 'k' }), pull(415, { head: 'k-c', base: 'k-a' })])[0]!;
+  expect(tree.layers.map((l) => l.number)).toEqual([412, 413, 414, 415]);
+  expect(pullHandoffThreadName(handoffStack(tree, {})!, null, tree)).toBe('Review #412, #413, #415: Layer 412');
+  // Nine-digit numbers, a deep chain beside a sibling: the numbers are cut with ", …", the whole name within the limit.
+  const n = 100_000_000;
+  const deep = inboxPullStacks([
+    pull(n, { head: 'r', title: 'T'.repeat(200) }),
+    pull(n + 1, { head: 's', base: 'r' }),
+    ...Array.from({ length: 12 }, (_, i) => pull(n + 2 + i, { head: `c${i}`, base: i === 0 ? 'r' : `c${i - 1}` })),
+  ])[0]!;
+  const name = pullHandoffThreadName(handoffStack(deep, {})!, null, deep);
+  expect(name.startsWith(`Review #${n}, #${n + 2}, `)).toBe(true);
+  expect(name).toContain(', …: TTT');
+  expect(name).not.toContain(`#${n + 1}`);
+  expect([...name].length).toBeLessThanOrEqual(INBOX_THREAD_NAME_MAX);
+});
+
+test('a title is cut between graphemes (never inside an emoji sequence or a flag); one that draws nothing is "(no title)"', () => {
+  const family = '\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}';
+  const flag = '\u{1F1FA}\u{1F1F8}';
+  for (const tail of [family, flag, 'é']) {
+    const cut = pullTitleLine(`${'x'.repeat(PULL_HANDOFF_TITLE_MAX - 2)}${tail}${tail} more`);
+    expect(cut).toBe(`${'x'.repeat(PULL_HANDOFF_TITLE_MAX - 2)}…`);
+  }
+  // A grapheme that fits whole stays whole.
+  expect(pullTitleLine(`${'x'.repeat(PULL_HANDOFF_TITLE_MAX - 4)}${flag}${'y'.repeat(9)}`)).toBe(`${'x'.repeat(PULL_HANDOFF_TITLE_MAX - 4)}${flag}y…`);
+  for (const blank of ['​​', '‍﻿ ⁠', '️­ㅤ']) expect(pullTitleLine(blank)).toBe('(no title)');
+  expect(pullHandoffThreadName(inboxPullStacks([pull(869, { title: '​‌' })])[0]!, null)).toBe('Review #869: (no title)');
+  // The thread name's own cut (a long head leaves the title less room than its own 100) keeps a family whole too.
+  const title = `${'x'.repeat(85)}${family}${family}`;
+  expect(pullTitleLine(title)).toBe(title);
+  const name = pullHandoffThreadName(inboxPullStacks([pull(123456789, { title, head: 'a' }), pull(123456790, { title, head: 'b', base: 'a' })])[0]!, null);
+  expect(name).toBe(`Review #123456789 to #123456790: ${'x'.repeat(85)}…`);
 });
 
 test('a GitHub Enterprise host: the host before the repository, and the link only on that host', () => {

@@ -55,7 +55,7 @@ import {
   pullHandoffMessage,
   pullHandoffThreadName,
   handoffStack,
-  isOpenPull,
+  openLayers,
   type PullHandoffAsk,
   repoName,
   rowLine,
@@ -329,10 +329,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const now = useRelativeClock(true);
   const next = inboxPullLandsNext(stack);
   const start = startLayer(stack);
-  const openLayers = stack.layers.filter(isOpenPull);
-  // What a hand-off is about: the whole stack, or in a tree the chain up to the layer this view is open on.
-  const handed = handoffStack(stack, props.stackId);
-  const top = openLayers[openLayers.length - 1] ?? stack.layers[stack.layers.length - 1]!;
+  const open = openLayers(stack);
+  // What a hand-off is about (`handoffStack`): the layers no agent has yet (a chain: the whole stack, while no agent has
+  // it; a tree: the chain to its top, then a sibling left out of it, on its own), and those the agent has (Hand again).
+  const rest = handoffStack(stack, model.links);
+  const again = link ? handoffStack(stack, model.links, link.thread_id) : null;
+  const top = open[open.length - 1] ?? stack.layers[stack.layers.length - 1]!;
   const titleId = useId();
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => {
@@ -340,7 +342,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     if (phone) heading.current?.focus({ preventScroll: true });
   }, [stack.id, phone]);
   const forge = forgeName(stack);
-  const many = openLayers.length > 1;
+  const many = open.length > 1;
   // "Hand to another agent": the two lines open again, under the agent that has it.
   const [rehand, setRehand] = useState(false);
   // After a hand-off, focus moves to the status line that says who has it (the hand-off's controls are gone).
@@ -367,6 +369,33 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
       )}
     </>
   ) : null;
+  // One hand-off line: the layers no agent has yet ("Ask for"), or the agent's own again ("Hand again for", without it).
+  const handLine = (of: InboxPullStack, rehanding: boolean, diff: ReactNode) => {
+    const projects = stackProjects(model, stack);
+    // A sibling handed on its own takes its title from its own layers, never from the other agent's thread.
+    const threadName = pullHandoffThreadName(of, rehanding ? link : null, stack);
+    return (
+      <HandLine
+        key={rehanding && link ? `again:${link.thread_id}` : `first:${handoffKeys(of).join(' ')}`}
+        stack={of}
+        projects={projects}
+        lead={rehanding ? 'Hand again for' : 'Ask for'}
+        owners={rehanding && link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
+        launch={!rehanding}
+        threadName={threadName}
+        onLaunch={(body, opener) => props.onLaunch(handoffKeys(of), projects, body, pullHandoffAskLine(of, { kind: 'guide' }), opener, threadName)}
+        onHanded={(session) => {
+          // Focus goes to the status line when the agent it names changes (a first hand-off, or Hand again).
+          if (!link || rehanding) focusSaid.current = true;
+          setRehand(false);
+          props.onHanded(session);
+        }}
+        onCancel={rehanding ? () => setRehand(false) : undefined}
+        onReload={props.state.reload}
+        diff={diff}
+      />
+    );
+  };
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -401,7 +430,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </span>
           )}
           <span>{plural(stack.layers.length, stack.platform === 'gitlab' ? 'merge request' : 'pull request')}</span>
-          {!link && openLayers.length > 0 && <span data-pulls-no-agent="">No agent yet</span>}
+          {rest && <span data-pulls-no-agent="">{link ? `No agent yet for ${openLayers(rest).map(inboxPullLabel).join(', ')}` : 'No agent yet'}</span>}
           {/* Each chip says what it opens ("Thread", "Board"), with its own mark: a thread and its card often share a title. */}
           {link && (
             <Tip content="Open the agent's thread">
@@ -437,7 +466,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
               ) : (
                 <span className="ib-mut">· no answer yet</span>
               )}
-              {openLayers.length > 0 && !rehand && (
+              {again && !rehand && (
                 <>
                   <span className="ib-mut" aria-hidden="true">
                     ·
@@ -461,29 +490,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             )}
           </div>
         )}
-        {openLayers.length > 0 && (!link || rehand) && (
-          <HandLine
-            key={link ? `again:${link.thread_id}` : 'first'}
-            stack={handed}
-            projects={stackProjects(model, stack)}
-            lead={link ? 'Hand again for' : 'Ask for'}
-            owners={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
-            launch={!link}
-            threadName={pullHandoffThreadName(handed, link)}
-            onLaunch={(body, opener) =>
-              props.onLaunch(handoffKeys(handed), stackProjects(model, stack), body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, pullHandoffThreadName(handed, link))
-            }
-            onHanded={(session) => {
-              focusSaid.current = true;
-              setRehand(false);
-              props.onHanded(session);
-            }}
-            onCancel={link ? () => setRehand(false) : undefined}
-            onReload={props.state.reload}
-            diff={openDiff}
-          />
-        )}
-        {openLayers.length > 0 && link && !rehand && (
+        {!link && rest && handLine(rest, false, openDiff)}
+        {rehand && again && handLine(again, true, openDiff)}
+        {open.length > 0 && link && !rehand && (
           <div className="ib-pr-actions">
             {reviewGuide && (
               // The agent's guided review arrived: it is the review (phase 1's Start review), a stack's chapters its layers.
@@ -494,6 +503,8 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             {openDiff}
           </div>
         )}
+        {/* A tree's sibling the agent was never handed (#413 beside #412 and #414): it can be handed on its own. */}
+        {link && !rehand && rest && handLine(rest, false, null)}
         <div className="ib-pr-order">
           <div className="ib-pr-order-h">
             <b>{many ? 'Landing order' : 'Pull request'}</b>

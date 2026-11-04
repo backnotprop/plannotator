@@ -7,6 +7,7 @@
 import {
   INBOX_THREAD_NAME_MAX,
   inboxPullGroups,
+  inboxPullIsOpen,
   inboxPullItems,
   inboxPullLabel,
   inboxPullLandsNext,
@@ -36,8 +37,8 @@ export function pullRows(groups: InboxPullGroups): InboxPullItem[] {
   return [...groups.on_you, ...groups.ready, ...groups.waiting];
 }
 
-/** Open or a draft: a PR still to land. */
-export const isOpenPull = (pull: Pick<InboxPull, 'state'>): boolean => pull.state === 'open' || pull.state === 'draft';
+/** Open or a draft: a PR still to land (core's `inboxPullIsOpen`, the one rule the server and the stacks use too). */
+export const isOpenPull = inboxPullIsOpen;
 
 /** A stack's layers still to land, bottom first (a merged or closed one is done). */
 export function openLayers(stack: Pick<InboxPullStack, 'layers'>): InboxPull[] {
@@ -55,16 +56,38 @@ export function stackLink(stack: InboxPullStack, links: Readonly<Record<string, 
 
 /**
  * Where a verdict on one layer goes: that layer's own agent thread, else the stack's (among the person's own
- * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge).
+ * layers only); null for a teammate's PR, which never takes a verdict here (the person reviews it on the forge). In a
+ * tree the stack's thread is only that of a layer above it on its own chain (whose diff holds it): a thread handed #412
+ * and #414 was never told about their sibling #413, so #413 has no agent until it is handed on its own.
  */
 export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>): InboxPullLink | null {
   if (!layer.mine) return null;
   if (links[layer.key]) return links[layer.key]!;
+  const open = openLayers(stack);
+  const tree = isTree(open);
   for (let i = stack.layers.length - 1; i >= 0; i--) {
     const other = stack.layers[i]!;
-    if (other.mine && isOpenPull(other) && links[other.key]) return links[other.key]!;
+    if (!other.mine || !isOpenPull(other) || !links[other.key]) continue;
+    if (!tree || !isOpenPull(layer) || chainTo(open, other).includes(layer)) return links[other.key]!;
   }
   return null;
+}
+
+/** The open layer a layer is based on (its base is that layer's head), or null. */
+function parentIn(open: readonly InboxPull[], pull: InboxPull): InboxPull | null {
+  return open.find((other) => other.key !== pull.key && other.head === pull.base) ?? null;
+}
+
+/** Two open PRs on one branch: the open layers are not one chain (each based on the one under it). */
+function isTree(open: readonly InboxPull[]): boolean {
+  return !open.every((pull, i) => i === 0 || parentIn(open, pull) === open[i - 1]);
+}
+
+/** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
+function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
+  const chain: InboxPull[] = [];
+  for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
+  return chain;
 }
 
 /** The agent's name as the Inbox writes it ("Claude Code", "Codex"), or the name it gave itself. */
@@ -98,18 +121,39 @@ export function handoffKeys(stack: InboxPullStack): string[] {
 /** Control characters (a line break among them) become a space; bidirectional controls are dropped. */
 const TITLE_CONTROL = /[\u0000-\u001F\u007F-\u009F\u2028\u2029]/g;
 const TITLE_BIDI = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+/** What draws nothing: whitespace and the zero-width characters (U+200B, U+FEFF, a joiner, a variation selector…). */
+const TITLE_INVISIBLE = /[\p{White_Space}\p{Default_Ignorable_Code_Point}]/gu;
 /** A title in the hand-off is cut to this many characters. */
 export const PULL_HANDOFF_TITLE_MAX = 100;
 
+let graphemes: Intl.Segmenter | null = null;
+/**
+ * `text` within `max` characters (code points, the unit the server and the name chip count), cut with "…" between two
+ * graphemes: never inside an emoji sequence (a ZWJ family, a flag's two letters) or between a letter and its marks.
+ */
+function cutText(text: string, max: number): string {
+  if ([...text].length <= max) return text;
+  graphemes ??= new Intl.Segmenter(undefined, { granularity: 'grapheme' });
+  let kept = '';
+  let count = 0;
+  for (const { segment } of graphemes.segment(text)) {
+    const size = [...segment].length;
+    if (count + size > max - 1) break;
+    kept += segment;
+    count += size;
+  }
+  return `${kept.trimEnd()}…`;
+}
+
 /**
  * A PR's title as the hand-off writes it: plain text on one line (control and bidirectional characters out,
- * whitespace collapsed, so a title can never start a line of its own), at most `PULL_HANDOFF_TITLE_MAX` characters.
+ * whitespace collapsed, so a title can never start a line of its own), at most `PULL_HANDOFF_TITLE_MAX` characters
+ * (`cutText`). A title that draws nothing (only whitespace or zero-width characters) is "(no title)".
  */
 export function pullTitleLine(title: string): string {
-  let one = title.replace(TITLE_CONTROL, ' ').replace(TITLE_BIDI, '').replace(/\s+/g, ' ').trim();
-  const chars = [...one];
-  if (chars.length > PULL_HANDOFF_TITLE_MAX) one = `${chars.slice(0, PULL_HANDOFF_TITLE_MAX - 1).join('').trimEnd()}…`;
-  return one || '(no title)';
+  const one = title.replace(TITLE_CONTROL, ' ').replace(TITLE_BIDI, '').replace(/\s+/g, ' ').trim();
+  if (one.replace(TITLE_INVISIBLE, '') === '') return '(no title)';
+  return cutText(one, PULL_HANDOFF_TITLE_MAX);
 }
 
 /** A branch name when `inboxPullSafeBranch` passes it, else null (then it is left out). */
@@ -143,19 +187,31 @@ function handoffLayers(stack: InboxPullStack): InboxPull[] {
 }
 
 /**
- * The stack a hand-off is about. Its open layers in one chain (each based on the one under it): the whole stack. A
- * tree (two open PRs on one branch): only the chain from the bottom up to `target` (the layer the stack view is open
- * on, else the stack's top), the layers whose diff the review's Whole stack reads for that layer, so the list,
- * step 1's "to" branch and "in list order" stay true. The merged layers under it stay.
+ * The stack a hand-off is about: the open layers no agent's thread has yet (`thread` null: No agent yet), or the ones
+ * `thread` has (Hand to another agent); null when there are none.
+ * - A chain (each open layer based on the one under it) is one stack: handed over whole, and once a thread has it
+ *   (`stackLink`) nothing of it is left to hand.
+ * - A tree (two open PRs on one branch): the topmost open layer that thread has (or no thread has), down its chain
+ *   while the layers under it are that thread's too (or no thread's). Those are the layers the review's Whole stack
+ *   reads for it, so the list, step 1's "from" and "to" branches and "in list order" stay true. First the chain to the
+ *   top (#412 and #414), then their sibling #413 on its own: its base is #412's branch, another thread's.
+ * The merged layers under the stack stay when the hand-off starts at its bottom.
  */
-export function handoffStack(stack: InboxPullStack, target: string | null): InboxPullStack {
+export function handoffStack(stack: InboxPullStack, links: Readonly<Record<string, InboxPullLink>>, thread: string | null = null): InboxPullStack | null {
   const open = openLayers(stack);
-  const parentOf = (pull: InboxPull) => open.find((other) => other.key !== pull.key && other.head === pull.base) ?? null;
-  if (open.every((pull, i) => i === 0 || parentOf(pull) === open[i - 1])) return stack;
-  const tip = open.find((l) => l.key === target) ?? open.find((l) => l.key === stack.id) ?? open[open.length - 1]!;
-  const chain: InboxPull[] = [];
-  for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentOf(at)) chain.unshift(at);
-  return { ...stack, layers: [...stack.layers.filter((l) => !isOpenPull(l)), ...chain] };
+  if (open.length === 0) return null;
+  if (!isTree(open)) return thread !== null || !stackLink(stack, links) ? stack : null;
+  const whose = (pull: InboxPull) => links[pull.key]?.thread_id ?? null;
+  const tip = [...open].reverse().find((l) => whose(l) === thread);
+  if (!tip) return null;
+  const layers: InboxPull[] = [];
+  for (const at of chainTo(open, tip).reverse()) {
+    if (whose(at) !== thread) break;
+    layers.unshift(at);
+  }
+  return layers[0]!.base === stack.open_base
+    ? { ...stack, layers: [...stack.layers.filter((l) => !isOpenPull(l)), ...layers] }
+    : { ...stack, layers, base: layers[0]!.base, open_base: layers[0]!.base };
 }
 
 /**
@@ -233,14 +289,33 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
  * #414: <title>" (its bottom and top open layers), the title the Pull requests list shows (`stackTitle`) on one
  * line (`pullTitleLine`), cut so the whole name fits the thread-name limit (`INBOX_THREAD_NAME_MAX`). The same for
  * a custom curation. Sent as the person's own name (`thread_name`), so the list shows it and no agent renames it.
+ * `stack` is the hand-off's (`handoffStack`), `whole` the stack it is from: "#412 to #414" only for a straight run of
+ * `whole`'s open layers; a tree's chain that skips one (#413) lists its numbers instead, "Review #412, #414: <title>".
  */
-export function pullHandoffThreadName(stack: InboxPullStack, link: InboxPullLink | null): string {
+export function pullHandoffThreadName(stack: InboxPullStack, link: InboxPullLink | null, whole: InboxPullStack = stack): string {
   const layers = handoffLayers(stack);
-  const numbers = layers.length > 1 ? `${inboxPullLabel(layers[0]!)} to ${inboxPullLabel(layers[layers.length - 1]!)}` : inboxPullLabel(layers[0]!);
+  const labels = layers.map(inboxPullLabel);
+  const all = openLayers(whole);
+  const at = all.findIndex((l) => l.key === layers[0]!.key);
+  const straight = at >= 0 && layers.every((l, i) => all[at + i]?.key === l.key);
+  const numbers = labels.length === 1 ? labels[0]! : straight ? `${labels[0]} to ${labels[labels.length - 1]}` : numberList(labels);
   const head = `Review ${numbers}: `;
-  const title = [...pullTitleLine(stackTitle(stack, link))];
-  const room = INBOX_THREAD_NAME_MAX - [...head].length;
-  return `${head}${title.length > room ? `${title.slice(0, room - 1).join('').trimEnd()}…` : title.join('')}`;
+  return `${head}${cutText(pullTitleLine(stackTitle(stack, link)), INBOX_THREAD_NAME_MAX - [...head].length)}`;
+}
+
+/** A tree hand-off's numbers in its thread's name stay within this many characters. */
+const NAME_NUMBERS_MAX = 60;
+
+/** "#412, #414", cut with ", …" to `NAME_NUMBERS_MAX` characters (the first number always shows). */
+function numberList(labels: readonly string[]): string {
+  const all = labels.join(', ');
+  if (all.length <= NAME_NUMBERS_MAX) return all;
+  let kept = labels[0]!;
+  for (const label of labels.slice(1)) {
+    if (`${kept}, ${label}, …`.length > NAME_NUMBERS_MAX) break;
+    kept = `${kept}, ${label}`;
+  }
+  return `${kept}, …`;
 }
 
 /** "- Author: me" when one person wrote every layer, else "- Authors: me (#412, #413), tomas (#414)". */

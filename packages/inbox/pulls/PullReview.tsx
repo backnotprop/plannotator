@@ -38,7 +38,7 @@ import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
-import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, openLayers, pullGroups, pullVerdictReply } from './model';
+import { findStack, forgeName, inboxPullLabel, isOpenPull, layerVerdictLink, linkAgentName, nextLayer, openLayers, pullGroups, pullVerdictReply } from './model';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 const GuideReader = lazy(() => import('#guide-reader'));
@@ -374,7 +374,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <nav className="ib-prr-layers" aria-label="Layers, bottom first">
           {stack.layers.map((l, i) => {
             const here = l.key === layer.key;
-            const reviewable = l.state === 'open' || l.state === 'draft';
+            const reviewable = isOpenPull(l);
             return (
               <span key={l.key} className="ib-prr-lstep">
                 {i > 0 && <Icon name="chevR" size={12} />}
