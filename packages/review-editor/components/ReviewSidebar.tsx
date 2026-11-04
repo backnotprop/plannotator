@@ -50,8 +50,8 @@ interface ReviewSidebarProps {
   /** "+ Global comment": commit a durable scope:'general' review-level
    *  comment to the session (spec §3.3). When present, the affordance renders
    *  in the General section header AND in the all-empty state — the state it
-   *  is most useful in. */
-  /** Returns false when the comment was not added: the words stay in the box. */
+   *  is most useful in. Returns false when the comment was not added: the
+   *  words stay in the box. */
   onAddGeneralComment?: (text: string) => boolean | void;
   feedbackMarkdown?: string;
   width?: number;
