@@ -925,14 +925,24 @@ const NAMED_REFS: Readonly<Record<string, string>> = { nbsp: '\u00a0', lt: '<', 
 /**
  * Character references decoded once, as a browser does (`&#38;#x2F;` is
  * `&#x2F;`, not `/`): numeric ones with or without their `;`, the named ones
- * above; and a NULL is U+FFFD, as a browser reads it in an attribute.
+ * above; and a NULL is U+FFFD, as a browser reads it in an attribute. A
+ * numeric one in 128–159 is the windows-1252 character, as a browser reads it
+ * (`&#150;` is an en dash, not a C1 control).
  */
 function decodeEntities(text: string): string {
   return text
     .replace(/\0/g, '\ufffd')
     .replace(/&(?:#(\d+);?|#[xX]([0-9a-fA-F]+);?|([A-Za-z][A-Za-z0-9]*);)/g, (whole, d: string | undefined, h: string | undefined, name: string | undefined) =>
-      d !== undefined ? codePoint(Number(d).toString(16)) : h !== undefined ? codePoint(h) : (NAMED_REFS[name!] ?? whole),
+      d !== undefined ? numericRef(Number(d).toString(16)) : h !== undefined ? numericRef(h) : (NAMED_REFS[name!] ?? whole),
     );
+}
+
+/** 128–159 as windows-1252 (the HTML standard's table; the five it leaves out stay as they are). */
+const WINDOWS_1252_C1 = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
+
+function numericRef(hex: string): string {
+  const n = parseInt(hex, 16);
+  return n >= 0x80 && n <= 0x9f ? WINDOWS_1252_C1[n - 0x80]! : codePoint(hex);
 }
 
 const fold = (text: string) => text.replace(/\s+/g, ' ').trim();
