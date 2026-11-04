@@ -120,7 +120,7 @@ test.skipIf(!hasDom)('several agents: the band, every agent ticked (Claude Code 
   expect(dialog().getAttribute('aria-labelledby')).toBe(el.querySelector('.ib-anote-head h2')!.id);
   expect([...el.querySelectorAll('.ib-anote-band p')].map((p) => p.textContent)).toEqual([
     'Connected Codex and Gemini CLI to the Inbox.',
-    'Pi needs connecting by hand: Settings → Agents',
+    'Pi needs connecting yourself: Settings → Agents',
   ]);
   expect(title(el)).toBe('Tell your agents about the Inbox');
   expect(rowsOf(el)).toEqual([
@@ -269,11 +269,11 @@ test.skipIf(!hasDom)('the band\'s Settings → Agents link: the dialog closes as
   expect(seen).toMatchObject({ closed: 1, settings: 1 });
 });
 
-test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says it is copied by hand; its copy has no markers', async () => {
+test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agent a note is written for; Cursor\'s row says to copy it yourself; its copy has no markers', async () => {
   const { el } = mount([CODEX, CURSOR]);
   expect(rowsOf(el)).toEqual([
     { name: 'Codex', path: '~/.codex/AGENTS.md', state: 'Adds to end', ticked: true },
-    { name: 'Cursor', path: undefined, state: 'Copy by hand', ticked: true },
+    { name: 'Cursor', path: undefined, state: 'Copy yourself', ticked: true },
   ]);
   expect(el.querySelector('[data-agent="cursor"] .ib-anote-sub')?.textContent).toBe('Nothing is written here: you paste the note into Customize → Rules.');
   expect(primary(el).textContent).toBe('Add to Codex');
@@ -293,7 +293,7 @@ test.skipIf(!hasDom)('Cursor with another agent: the primary names only the agen
   await flush();
   expect(calls[0]!.body).toEqual({ add: ['codex', 'cursor'], asked: ['codex', 'cursor'], seen: false });
   expect(title(el)).toBe('Added the note to Codex');
-  expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Copy by hand']);
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Added', 'Copy yourself']);
   expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Each agent reads it from its next session. Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
   const copy = el.querySelector('[data-anote-copy] pre')!;
   expect(copy.textContent).toBe('## Plannotator Inbox');
@@ -307,7 +307,7 @@ test.skipIf(!hasDom)('Cursor alone: worded as a copy, never as an add; the note 
   const { el } = mount([CURSOR]);
   expect(title(el)).toBe('Copy the note into Cursor?');
   expect(el.querySelector('.ib-anote-desc')?.textContent).not.toContain('add');
-  expect(rowsOf(el)).toEqual([{ name: 'Cursor', path: undefined, state: 'Copy by hand', ticked: null }]);
+  expect(rowsOf(el)).toEqual([{ name: 'Cursor', path: undefined, state: 'Copy yourself', ticked: null }]);
   expect(primary(el).textContent).toBe('Show the note to copy');
   act(() => button(el, 'Show the note').click());
   expect(el.querySelector('.ib-anote-note pre')?.textContent).toBe('## Plannotator Inbox');
@@ -315,7 +315,7 @@ test.skipIf(!hasDom)('Cursor alone: worded as a copy, never as an add; the note 
   act(() => primary(el).click());
   await flush();
   expect(title(el)).toBe('Copy the note into Cursor');
-  expect(rowsOf(el).map((r) => r.state)).toEqual(['Copy by hand']);
+  expect(rowsOf(el).map((r) => r.state)).toEqual(['Copy yourself']);
   expect(el.querySelector('[data-anote-copy] pre')?.textContent).toBe('## Plannotator Inbox');
   expect(el.querySelector('.ib-anote-doneline')?.textContent).toBe("Copy the note below into Customize → Rules in Cursor. Plannotator can't see, update or remove that copy.");
   expect(el.querySelector('.ib-anote-later')?.textContent).toBe('Remove the copy in Cursor yourself when you no longer want it.');
