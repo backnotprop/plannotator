@@ -65,6 +65,11 @@ export interface ShapeHost {
   resumePrompt?(id: string): string;
   /** Copy text (the host's clipboard). */
   copy?(text: string): Promise<void> | void;
+  /**
+   * Once the session ended, nothing answers an Ask here: the question waits for the agent (the Inbox, which has
+   * no Ask AI fallback). Absent: a host whose Ask AI answers then, and the panel says so.
+   */
+  askWaitsWhenEnded?: boolean;
 }
 
 export interface ShapeCodeHoverRequest {

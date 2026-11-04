@@ -45,7 +45,7 @@ import { ShapeRequirements } from './ShapeRequirements';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefsCtx, type RefsState } from './refs';
 import { ShapeInline } from './inline';
-import type { ShapeEvent, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
+import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
 
 const DRAW_MS = 1500; // the longest draw-in, for Esc
 const DRAWN_MS = DRAW_MS + 1400; // when a view counts as drawn (its draw-in class is dropped)
@@ -119,6 +119,11 @@ function marksFor(all: MarkState, view: ShapeViewId): MarkState {
 }
 
 const without = (s: ReadonlySet<string>, drop: readonly string[]) => new Set([...s].filter((x) => !drop.includes(x)));
+
+/** The Ask panel's words once the session ended: what answers a question then depends on the host. */
+export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): string {
+  return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
+}
 
 export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
@@ -596,9 +601,9 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const provider = useMemo<AIProviderOption[]>(() => [{
     id: 'shape-session',
     name: 'session-bridge',
-    label: session.state === 'gone' ? 'Session ended · Ask AI answers; changes wait for the agent' : `Ask this session · ${agent}`,
+    label: session.state === 'gone' ? shapeEndedLabel(host) : `Ask this session · ${agent}`,
     sessionBridge: { host: agent, status: session.state === 'gone' ? 'gone' : session.state === 'busy' ? 'busy' : 'ready', modes: { turn: true, transient: true } },
-  }], [session.state, agent]);
+  }], [session.state, agent, host]);
 
   const waiting = notes.filter(shapeNoteWaits).length;
   const bringUpToDate = async () => {

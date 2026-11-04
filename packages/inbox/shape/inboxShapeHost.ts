@@ -164,6 +164,8 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     async copy(text) {
       await copyTextToClipboard(text);
     },
+    // No Ask AI fallback here: with the session gone, a question waits for the agent's `shape answer`.
+    askWaitsWhenEnded: true,
   };
 }
 
