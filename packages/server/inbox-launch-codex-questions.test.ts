@@ -395,8 +395,113 @@ describe("the transport", () => {
     expect(sent.forward_body).toContain("and tag the merge");
     expect(sent.forward_body).toContain("Some words.");
     expect(sent.forward_body).not.toContain("\u2060");
+    // Under Codex's own question text: never the Inbox's message ids or card lines, which Codex never saw.
+    expect(sent.forward_body).toContain("Round refunds how?");
+    expect(sent.forward_body).not.toContain("msg_");
+    expect(sent.forward_body).not.toContain("(line");
     expect(t.followUps(older!.id)).toEqual([]);
     expect(t.followUps(newer!.id)).toEqual([]);
+  });
+
+  test("an Inbox restart while a reply waits on a card Codex has not taken: it keeps waiting; the words of that card go once Codex takes it, or the card says they were not taken", () => {
+    for (const comesBack of [true, false]) {
+      const t = transport();
+      const q = t.make();
+      q.asked(1, CODEX_USER_INPUT, { ...userInput([question("a", "Ship it?", [{ label: "Yes", description: "" }, { label: "No", description: "" }])]), itemId: "call_a" });
+      const bParams = {
+        ...userInput([
+          question("b1", "Round how?", [{ label: "Banker's", description: "" }, { label: "Half up", description: "" }], { isOther: false }),
+          question("b2", "Which accounts?", [{ label: "All", description: "" }, { label: "EU", description: "" }]),
+        ]),
+        itemId: "call_b",
+      };
+      q.asked(2, CODEX_USER_INPUT, bParams);
+      const [cardA, cardB] = t.cards();
+      const a = t.store.questionsOf(cardA!.id)[0]!;
+      const [b1, b2] = t.store.questionsOf(cardB!.id);
+      const savedA = t.store.savePicks(cardA!.id, [{ key: a.key, revision: a.revision, answer: { v: 1, key: a.key, kind: "single", prompt: a.prompt, selected: ["Yes"] } }], { unsentOnly: true });
+      const savedB = t.store.savePicks(cardB!.id, [{ key: b1!.key, revision: b1!.revision, answer: { v: 1, key: b1!.key, kind: "single", prompt: b1!.prompt, selected: [], other: "B-ONE WORDS" } }], { unsentOnly: true });
+      // One Send: card A, B's first question (B's second left open), and words of the person's own.
+      const reply = t.store.sendReply(cardB!.id, {
+        idempotency_key: "half",
+        questions: [{ message_id: cardA!.id, key: a.key, revision: savedA[0]!.revision }, { key: b1!.key, revision: savedB[0]!.revision }],
+        words: "Own words.",
+      }).reply;
+      q.sweep();
+      expect(t.answers).toEqual([[1, { answers: { a: { answers: ["Yes"] } } }]]);
+      const held = () => {
+        const m = t.store.message(reply.id)!;
+        return (m.delivery ?? null) === null && m.to?.session !== THREAD;
+      };
+      expect(held()).toBe(true);
+
+      // The Inbox restarts: a new transport, nothing pending in memory. The reply still waits on card B.
+      t.state.connectedAt = t.clock.now;
+      t.state.status = null;
+      const again = t.make();
+      again.sweep();
+      expect(held()).toBe(true);
+
+      if (comesBack) {
+        // Codex sends B again; the person answers its second question; Codex takes B.
+        again.asked(3, CODEX_USER_INPUT, bParams);
+        const savedB2 = t.store.savePicks(cardB!.id, [{ key: b2!.key, revision: b2!.revision, answer: { v: 1, key: b2!.key, kind: "single", prompt: b2!.prompt, selected: ["All"] } }], { unsentOnly: true });
+        const second = t.store.sendReply(cardB!.id, { idempotency_key: "rest", questions: [{ key: b2!.key, revision: savedB2[0]!.revision }] }).reply;
+        t.clock.now += 10_000;
+        t.state.status = { type: "idle" };
+        again.sweep();
+        again.sweep();
+        expect(t.answers[1]).toEqual([3, { answers: { b1: { answers: [] }, b2: { answers: ["All"] } } }]);
+        const sent = t.store.message(reply.id)!;
+        expect(sent.to).toEqual({ host: "codex", session: THREAD });
+        expect(sent.forward_body).toContain("B-ONE WORDS");
+        expect(sent.forward_body).toContain("Own words.");
+        expect(sent.forward_body).not.toContain("Ship it?");
+        expect(t.store.message(second.id)!.delivery).toMatchObject({ session: `perm:ask:${THREAD}` });
+        expect(t.followUps(cardB!.id)).toEqual([]);
+      } else {
+        // B never comes back: it goes, saying its answer was not taken; the reply's own words still go on.
+        t.clock.now += 10_000;
+        t.state.status = { type: "idle" };
+        again.sweep();
+        again.sweep();
+        expect(t.followUps(cardB!.id)).toContain(CODEX_ASK_NOT_TAKEN);
+        const sent = t.store.message(reply.id)!;
+        expect(sent.to).toEqual({ host: "codex", session: THREAD });
+        expect(sent.forward_body).toBe("Own words.");
+      }
+      // Card A's answer reached Codex: never said not taken, however the restart's sweep reads it.
+      expect(t.followUps(cardA!.id)).toEqual([]);
+    }
+  });
+
+  test("a card that goes before Codex takes its answer: a reply with nothing else is never marked delivered; one with words of its own still goes on to the thread", () => {
+    const t = transport();
+    const q = t.make();
+    q.asked(1, CODEX_USER_INPUT, choice);
+    q.asked(2, CODEX_USER_INPUT, { ...choice, itemId: "call_2" });
+    const [plain, worded] = t.cards();
+    t.answer(plain!.id, [{ label: "Half up" }]);
+    t.answer(worded!.id, [{ label: "Banker's" }], "And check the ledger.");
+    t.link.refuse.add(1);
+    t.link.refuse.add(2);
+    q.sweep();
+    q.turnEnded(THREAD);
+    q.sweep();
+    expect(t.answers).toEqual([]);
+    const plainReply = t.store.message(t.store.questionsOf(plain!.id)[0]!.sent_reply_id!)!;
+    expect(plainReply.delivery ?? null).toBeNull();
+    expect(plainReply.to?.session).not.toBe(THREAD);
+    expect(t.followUps(plain!.id)).toContain(CODEX_ASK_NOT_TAKEN);
+    const wordedReply = t.store.message(t.store.questionsOf(worded!.id)[0]!.sent_reply_id!)!;
+    expect(wordedReply.to).toEqual({ host: "codex", session: THREAD });
+    expect(wordedReply.forward_body).toBe("And check the ledger.");
+    expect(t.followUps(worded!.id)).toContain(CODEX_ASK_NOT_TAKEN);
+    // Said not taken: a request sent again for it never takes that answer after all.
+    t.link.refuse.clear();
+    q.asked(3, CODEX_USER_INPUT, choice);
+    q.sweep();
+    expect(t.answers).toEqual([]);
   });
 
   test("marking the thread read never answers for the person: the card stays open and Codex keeps waiting; one the archive closed waits too, until the person answers it", () => {

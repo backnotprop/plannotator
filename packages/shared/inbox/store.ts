@@ -110,7 +110,7 @@ import {
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
-import type { QuestionAnswer } from "@plannotator/core/question-block";
+import { QUESTION_ANSWERS_HEADING, formatQuestionAnswerLines, type QuestionAnswer } from "@plannotator/core/question-block";
 import { INBOX_ASK_SESSION_PREFIX, INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxAskSession, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { sanitizeTag } from "@plannotator/core/project";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -5917,29 +5917,28 @@ export class InboxStore {
    * `perm:ask:` card) held words Codex's answer had no place for. The same
    * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
    * it as the thread's next turn, like any reply; that turn carries only
-   * what the answer could not (`forward_body`): the `ask_forward` answers,
-   * from every card the reply answered, and the reply's own words
-   * (`ask_words`). Only such a reply, and only while not delivered. The
+   * what the answer could not (`forward_body`): the reply's own words
+   * (`ask_words`), then the `ask_forward` answers of every card the reply
+   * answered, each under Codex's own question text. Only such a reply, and only while not delivered. The
    * same address writes nothing.
    */
   forwardAskReply(replyId: string, to: InboxAddressee): InboxMessage {
     const message = this.askReply(replyId);
     if (message.to?.session === to.session && message.to.host === to.host) return message;
-    const groups: { message_id: string; questions: InboxQuestionRecord[]; sent: QuestionAnswer[]; earlier: QuestionAnswer[] }[] = [];
-    for (const { message_id, key } of message.ask_forward ?? []) {
-      const record = this.questionRecords(message_id).find((r) => r.key === key && r.sent_reply_id === replyId && r.answer);
-      if (!record) continue;
-      let group = groups.find((g) => g.message_id === message_id);
-      if (!group) groups.push((group = { message_id, questions: [], sent: [], earlier: [] }));
-      group.questions.push(record);
-      group.sent.push(record.answer!);
-    }
-    // In thread order, as a reply's answers on several messages always are.
+    // Each answer under Codex's own question text, never the Inbox's message ids or card lines (Codex saw neither),
+    // in thread order and card order.
     const order = this.threadMessageIds(message.thread_id);
-    groups.sort((a, b) => order.indexOf(a.message_id) - order.indexOf(b.message_id));
-    const forwardBody = composeInboxReplyBody({ questions: [], sent: [], earlier: [], messages: groups, words: message.ask_words, stillOpen: [], replyTo: message.reply_to! })
-      // The card's word joiner (a dashed label kept whole) never goes to Codex.
-      .replace(/\u2060/g, "");
+    const records = (message.ask_forward ?? [])
+      .map(({ message_id, key }) => this.questionRecords(message_id).find((r) => r.key === key && r.sent_reply_id === replyId && r.answer))
+      .filter((r): r is InboxQuestionRecord => !!r)
+      .sort((a, b) => order.indexOf(a.message_id) - order.indexOf(b.message_id) || a.position - b.position);
+    const parts: string[] = [];
+    if (message.ask_words?.trim()) parts.push(message.ask_words.trim());
+    if (records.length > 0) {
+      parts.push([`## ${QUESTION_ANSWERS_HEADING}`, ...records.map((r) => `### ${r.prompt.replace(/\s+/g, " ").trim()}\n${formatQuestionAnswerLines(r.answer!).trimEnd()}`)].join("\n\n"));
+    }
+    // The card's word joiner (a dashed label kept whole) never goes to Codex.
+    const forwardBody = parts.join("\n\n").replace(/\u2060/g, "");
     const at = this.stamp();
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, forward_body: forwardBody, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);

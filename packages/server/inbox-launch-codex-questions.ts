@@ -342,29 +342,36 @@ export function createCodexQuestions(
   /** A reply gone on to the Codex thread itself (`forwardAskReply`): the thread's wake delivers it. */
   const forwarded = (reply: InboxMessage) => !!reply.to && !isInboxAskSession(reply.to.session);
   /**
-   * The card's questions answered and sent whose answer never reached Codex: the reply is not delivered, not gone
-   * on to the thread, and Codex did not take this card's answer with it (`ask_taken`).
+   * The card's questions answered and sent whose answer never reached Codex: Codex did not take this card's answer
+   * with the reply that sent it (`ask_taken`). A reply gone on to the thread carries no answer of a card not taken.
    */
   const undelivered = (messageId: string): InboxQuestion[] =>
     store.questionsOf(messageId).filter((q) => {
       const reply = q.state === "sent" && q.sent_reply_id ? store.message(q.sent_reply_id) : undefined;
-      return !!reply && !reply.delivery && !forwarded(reply) && !(reply.ask_taken ?? []).includes(messageId);
+      return !!reply && !(reply.ask_taken ?? []).includes(messageId);
     });
 
   const notTakenKey = (messageId: string) => `perm-not-taken-${messageId}`;
-  /** An answer of the card that never reached Codex, not yet said. */
-  const notTakenDue = (messageId: string): boolean => {
-    if (undelivered(messageId).length === 0) return false;
+  /** The card's note that an answer never reached Codex is there. */
+  const saidNotTaken = (messageId: string): boolean => {
     const card = store.message(messageId);
-    return !!card && !store.threadMessageIds(card.thread_id).some((id) => store.message(id)?.idempotency_key === notTakenKey(messageId));
+    return !!card && store.threadMessageIds(card.thread_id).some((id) => store.message(id)?.idempotency_key === notTakenKey(messageId));
   };
+  /** An answer of the card that never reached Codex, not yet said. */
+  const notTakenDue = (messageId: string): boolean => undelivered(messageId).length > 0 && !saidNotTaken(messageId);
+  /** The card went (withdrawn, or said not taken): no answer of it goes to Codex any more, from the store, so across a restart too. */
+  const cardGone = (messageId: string): boolean => store.questionsOf(messageId).some((q) => q.state === "superseded") || saidNotTaken(messageId);
 
   /** The card goes: its open questions withdrawn, and an answer sent that never reached Codex said so, once. */
   const gone = (messageId: string, why: string) => {
     questions.withdraw(messageId, why);
-    if (!notTakenDue(messageId)) return;
-    const card = store.message(messageId)!;
-    if (card.author.kind !== "agent") return;
+    if (notTakenDue(messageId)) sayNotTaken(messageId);
+  };
+
+  /** One note under the card from its identity: an answer sent on it never reached Codex. */
+  const sayNotTaken = (messageId: string) => {
+    const card = store.message(messageId);
+    if (card?.author.kind !== "agent" || saidNotTaken(messageId)) return;
     try {
       store.sendMessage({ project_id: card.project_id, author: card.author, permission: true, body: CODEX_ASK_NOT_TAKEN, reply_to: messageId, idempotency_key: notTakenKey(messageId) });
       log(`Inbox launch: an answer to Codex question ${messageId} never reached Codex`);
@@ -430,12 +437,13 @@ export function createCodexQuestions(
     });
 
   /**
-   * A reply is settled once some card it answered had its answer taken by Codex (`ask_taken`) and none still waits
-   * on Codex. Then it is delivered to the cards' identity, or, when it holds words Codex's answers had no place
-   * for (`ask_forward`, from any of its cards) or words of its own, it goes on to the thread itself as its next
-   * turn, carrying just those. Never before: one Send can answer two cards that Codex takes one at a time. A
-   * reply that answers no question (words, feedback or files alone) never answers Codex's request, so it goes on
-   * at once.
+   * A reply is settled once every card it answered had its answer taken by Codex (`ask_taken`) or went (`cardGone`,
+   * its note saying the answer was not taken), read from the store so a restart never lets it go early. Then,
+   * when it holds words Codex's answers had no place for (`ask_forward`, from any of its cards) or words of its
+   * own, it goes on to the thread itself as its next turn, carrying just those; otherwise it is delivered to the
+   * cards' identity when Codex took some answer of it, and left undelivered when none. Never before: one Send can
+   * answer two cards that Codex takes one at a time. A reply that answers no question (words, feedback or files
+   * alone) never answers Codex's request, so it goes on at once.
    */
   const settle = (replyId: string, threadId: string) => {
     const reply = store.message(replyId);
@@ -444,12 +452,10 @@ export function createCodexQuestions(
     if (asked?.author.kind !== "agent" || !asked.author.host || !isInboxAskSession(asked.author.session)) return;
     const cards = cardsAnswered(reply);
     const taken = reply.ask_taken ?? [];
-    if (cards.length > 0) {
-      if (taken.length === 0) return;
-      if (cards.some((id) => !taken.includes(id) && [...pending.values()].some((p) => p.messageId === id && !p.answered))) return;
-    }
+    if (cards.some((id) => !taken.includes(id) && !cardGone(id))) return;
     const forward = (reply.ask_forward?.length ?? 0) > 0 || carriesMore(reply);
-    if (!forward && cards.length === 0) return;
+    // No words to carry and no answer Codex took: nothing reached Codex (the card's note says so).
+    if (!forward && taken.length === 0) return;
     try {
       if (forward) {
         store.forwardAskReply(replyId, { host: asked.author.host, session: threadId });
@@ -471,8 +477,11 @@ export function createCodexQuestions(
     for (const replyId of repliesOf(p.messageId!)) {
       try {
         store.recordAskAnswer(replyId, p.messageId!, forward.get(replyId) ?? []);
-      } catch {
-        // Delivered or gone on already: the answer stands.
+      } catch (error) {
+        // Settled already (it never is while a card it answered waits): words the answer had no place for cannot
+        // go with it any more, so the card says they were not taken rather than losing them unsaid.
+        log(`Inbox launch: could not record ${p.messageId}'s answer on ${replyId}: ${error instanceof Error ? error.message : String(error)}`);
+        if ((forward.get(replyId)?.length ?? 0) > 0) sayNotTaken(p.messageId!);
       }
       settle(replyId, p.threadId);
     }
@@ -573,8 +582,8 @@ export function createCodexQuestions(
           continue;
         }
         const qs = store.questionsOf(p.messageId);
-        // Withdrawn (Stop, Delete) or never ours to answer any more.
-        if (qs.some((q) => q.state === "superseded")) continue;
+        // Withdrawn (Stop, Delete), or said not taken: never ours to answer any more.
+        if (cardGone(p.messageId)) continue;
         const done = resultOf(p);
         if (done !== null) {
           if (p.rpcId === null || !options.respond(p.rpcId, done.result)) continue;
