@@ -132,7 +132,7 @@ export interface DecisionNoteFieldProps {
  * The shared multi-line note field: two rows at rest, grows to 144px, then
  * scrolls. Controlled — the owner keeps the text so stepping back does not
  * discard a half-typed note. Exported separately because a third consumer
- * (the review sidebar's "+ General comment") composes it outside the control.
+ * (the review sidebar's "+ Global comment") composes it outside the control.
  */
 export const DecisionNoteField: React.FC<DecisionNoteFieldProps> = ({
   text,

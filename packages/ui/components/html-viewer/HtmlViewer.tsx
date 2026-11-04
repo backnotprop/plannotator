@@ -22,6 +22,7 @@ import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
+import { hashDraftScope } from "../../utils/draftScopeHash";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -59,6 +60,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  injectPrintDefaults,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -481,6 +483,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Increment on every bridge-ready event so srcdoc navigations re-send
     // state even though the iframe element and its WindowProxy are reused.
     const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const [printReady, setPrintReady] = useState(false);
     const [iframeFocused, setIframeFocused] = useState(false);
     const [vimBridgePhase, setVimBridgePhase] =
       useState<VimSelectionHudContext>("inactive");
@@ -491,6 +494,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
+      draftKey: string;
     } | null>(null);
 
     // Live proxied-app mode: the iframe navigates a real origin, so the
@@ -561,8 +565,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
+      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+
+    useLayoutEffect(() => {
+      setPrintReady(false);
+    }, [srcdoc]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -827,6 +835,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             );
           }
           setIframeReadyVersion((version) => version + 1);
+          setPrintReady(true);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
           setVimHelpOpen(false);
@@ -1187,6 +1196,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
+      print: !liveMode && printReady ? () => postToBridge({ type: `${PREFIX}print` }) : undefined,
       // Shared/draft restores respect the live page filter too.
       applySharedAnnotations: (anns: Annotation[]) =>
         hook.applyAnnotations(forCurrentPage(anns)),
@@ -1257,7 +1267,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             onClick={() => {
               const anchorEl = globalCommentButtonRef.current;
               if (!anchorEl) return;
-              setGlobalCommentPopover({ anchorEl, contextText: "" });
+              // One kept draft per live-app URL (src), else per document: a
+              // hash of its text, taken only when the composer opens, so two
+              // documents never share a draft.
+              const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
+              setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -1274,6 +1288,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     return (
       <>
         <div
+          data-print-html={liveMode ? undefined : ""}
           className={`relative w-full${fullViewport ? " h-full flex flex-col" : ""}`}
           style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
@@ -1355,6 +1370,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
                 colorScheme: "auto",
@@ -1472,6 +1488,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
+              // The words typed survive a close (Escape, X) and come back on reopen.
+              draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}
