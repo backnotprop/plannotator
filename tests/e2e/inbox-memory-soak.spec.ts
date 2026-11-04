@@ -29,7 +29,11 @@
  *    code and fills its caches once);
  *  - the heap right after the window opens is over OPEN_CEILING_MB;
  *  - a main-thread task takes over LONG_TASK_LIMIT_MS while messages arrive
- *    (PerformanceObserver `longtask`, the forced collections left out);
+ *    after the warm-up (PerformanceObserver `longtask`). Two kinds of task
+ *    are left out: the forced collections, and every task during the page
+ *    load and the first WARMUP messages. Those first tasks parse the large
+ *    list and load the thread view's code once, so a slow first load is not
+ *    a hang. The frame and response checks below still cover the warm-up;
  *  - the window draws no frame within FRAME_TIMEOUT_MS of a request;
  *  - a new thread's row (after Show), or a message in the open thread, is
  *    not on screen within RESPONSE_TIMEOUT_MS of the agent's send returning;
@@ -147,18 +151,25 @@ test('the window keeps its memory flat and keeps answering through a long run of
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const url = started.stdout.trim().replace(/\/+$/, '');
+  // A scratch data dir never takes the person's Inbox port.
+  expect(url).not.toContain(':59812');
 
   const projects = ['checkout-web', 'ledger-api', 'docs-site'].map((name) => scratchProject(join(root, 'src'), name));
-  const agents = await Promise.all(
-    [
-      { name: 'Claude Code', host: 'claude-code' },
-      { name: 'Pi', host: 'pi' },
-      { name: 'Codex', host: 'codex' },
-    ].map((a) => SimAgent.connect({ binary, env, ...a })),
-  );
-
+  const agents: SimAgent[] = [];
   let page: RawPage | undefined;
   try {
+    // Inside the try: when one connect fails, the shims that did start are closed in the finally below.
+    const connected = await Promise.allSettled(
+      [
+        { name: 'Claude Code', host: 'claude-code' },
+        { name: 'Pi', host: 'pi' },
+        { name: 'Codex', host: 'codex' },
+      ].map((a) => SimAgent.connect({ binary, env, ...a })),
+    );
+    for (const c of connected) if (c.status === 'fulfilled') agents.push(c.value);
+    const refused = connected.find((c): c is PromiseRejectedResult => c.status === 'rejected');
+    if (refused) throw refused.reason;
+
     page = await launchRawChromium();
     await page.call('Page.addScriptToEvaluateOnNewDocument', { source: LONG_TASK_RECORDER });
     const p = page;
