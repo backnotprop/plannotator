@@ -388,7 +388,8 @@ describe("plannotator skill: Shape section", () => {
   test("an old copy with other words (a source change since the last run) is replaced, not kept beside the new one", () => {
     const released = renderSkillSections(skillDoc, { shapeReleased: true });
     const stale = released
-      .replace(SHAPE_SKILL_DESCRIPTION_PHRASE, "Shape boards (an older wording),")
+      // Two old copies one after another (two runs that each failed to take the last one out).
+      .replace(SHAPE_SKILL_DESCRIPTION_PHRASE, "Shape boards (an older wording), Shape boards (an even older one),")
       .replace(SHAPE_SKILL_SECTION, "## plannotator shape\n\nAn older section.\n\n```bash\nplannotator shape --help\n```\n");
     expect(stale).not.toBe(released);
     expect(renderSkillSections(stale, { shapeReleased: true })).toBe(released);

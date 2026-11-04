@@ -16,7 +16,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { isShapeId } from "@plannotator/shared/shape/format";
 import { createShapeStore, shapesDirOf } from "@plannotator/shared/shape/store";
-import { runningShapeServer, shapeServerOpenPages, startShapeServer, type ShapeServerEntry } from "@plannotator/server/shape";
+import { runningShapeServer, startShapeServer, type RunningShapeServer } from "@plannotator/server/shape";
 
 const START_TIMEOUT_MS = 10_000;
 const START_LOCK = "server.start.lock";
@@ -102,7 +102,7 @@ function defaultSpawn(dataDir: string): void {
 }
 
 /** The running Shapes server, starting one detached when none runs. Throws when it cannot start. */
-export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "spawnServer" | "startTimeoutMs">): Promise<ShapeServerEntry> {
+export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "spawnServer" | "startTimeoutMs">): Promise<RunningShapeServer> {
   const running = await runningShapeServer(deps.dataDir);
   if (running) return running;
   const release = takeStartLock(deps.dataDir);
@@ -133,7 +133,7 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
     err(`not_found: No shape ${parsed.id}. List them with \`plannotator shape list\`.`);
     return 1;
   }
-  let entry: ShapeServerEntry;
+  let entry: RunningShapeServer;
   try {
     entry = await ensureShapeServer(deps);
   } catch (error) {
@@ -141,9 +141,8 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
     return 1;
   }
   const url = shapePageUrl(entry.url, parsed.id);
-  if (deps.reuseOpenPage && ((await shapeServerOpenPages(entry)) ?? 0) > 0) {
-    if (parsed.json) out(JSON.stringify({ url, opened: false }));
-    else out(url);
+  if (deps.reuseOpenPage && (entry.pages ?? 0) > 0) {
+    out(url);
     return 0;
   }
   const opened = await deps.openUrl(url);

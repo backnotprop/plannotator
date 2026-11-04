@@ -28,8 +28,8 @@ const DESCRIPTION_ANCHOR = "Guided Reviews, ";
 const SECTION_ANCHOR = "## Other subcommands\n";
 /** The section's heading. An old copy is found by it, whatever its text, and replaced. */
 export const SHAPE_SECTION_HEADING = "## plannotator shape";
-/** An old copy of the phrase, whatever its words: "Shape boards (…), " right after the anchor. */
-const OLD_PHRASE = /(?<=Guided Reviews, )Shape boards \([^)]*\), /;
+/** An old copy of the phrase, whatever its words: "Shape boards (…), " right after the anchor: every copy, one after another or not. */
+const OLD_PHRASE = /(?<=Guided Reviews, )(?:Shape boards \([^)]*\), )+/g;
 
 export interface SkillSectionOptions {
   /** `shape` is released (not in HIDDEN_SUBCOMMANDS). */
@@ -58,7 +58,7 @@ export function renderSkillSections(doc: string, options: SkillSectionOptions): 
   if (!doc.includes(`\n${SECTION_ANCHOR}`)) throw new Error(`SKILL.md has no "${SECTION_ANCHOR.trim()}" heading to put the Shape section before`);
 
   if (!SHAPE_SKILL_SECTION.startsWith(`${SHAPE_SECTION_HEADING}\n`)) throw new Error(`SHAPE_SKILL_SECTION must start with "${SHAPE_SECTION_HEADING}"`);
-  if (!OLD_PHRASE.test(`${DESCRIPTION_ANCHOR}${SHAPE_SKILL_DESCRIPTION_PHRASE} `)) throw new Error("SHAPE_SKILL_DESCRIPTION_PHRASE no longer matches the pattern that removes an old copy");
+  if (`${DESCRIPTION_ANCHOR}${SHAPE_SKILL_DESCRIPTION_PHRASE} `.replace(OLD_PHRASE, "") !== DESCRIPTION_ANCHOR) throw new Error("SHAPE_SKILL_DESCRIPTION_PHRASE no longer matches the pattern that removes an old copy");
 
   // Take both out first, by heading and by shape, not by text: a run after a source change (or a release) replaces them.
   let out = doc.replace(OLD_PHRASE, "");

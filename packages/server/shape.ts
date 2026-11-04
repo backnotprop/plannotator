@@ -130,33 +130,28 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
+ * A running Shapes server and, from the same answer, how many pages are open on it: null when that cannot be read
+ * (an older server without the field), and the caller then opens a page as if none were.
+ */
+export interface RunningShapeServer extends ShapeServerEntry {
+  pages: number | null;
+}
+
+/**
  * The running Shapes server of this data dir, or null: its process is alive and
  * its port answers as a Shapes server. A stale `server.json` (its pid gone, or
  * another program on the port) reads as none.
  */
-export async function runningShapeServer(dataDir: string, timeoutMs = 1500): Promise<ShapeServerEntry | null> {
+export async function runningShapeServer(dataDir: string, timeoutMs = 1500): Promise<RunningShapeServer | null> {
   const entry = readShapeServerEntry(dataDir);
   if (!entry || !isProcessAlive(entry.pid)) return null;
   try {
     const response = await fetch(`http://${LOOPBACK}:${entry.port}${SHAPE_SERVER_INFO_PATH}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return null;
     const info = (await response.json()) as Partial<ShapeServerInfo>;
-    return info.shape_server === 1 ? entry : null;
-  } catch {
-    return null;
-  }
-}
-
-/**
- * How many pages are open on this running server, or null when that cannot be read (an older server without the
- * field, no answer in time, or another program on the port): the caller then opens a page as if none were.
- */
-export async function shapeServerOpenPages(entry: Pick<ShapeServerEntry, "port">, timeoutMs = 1000): Promise<number | null> {
-  try {
-    const response = await fetch(`http://${LOOPBACK}:${entry.port}${SHAPE_SERVER_INFO_PATH}`, { signal: AbortSignal.timeout(timeoutMs) });
-    if (!response.ok) return null;
-    const info = (await response.json()) as Partial<ShapeServerInfo>;
-    return info.shape_server === 1 && typeof info.pages === "number" && Number.isInteger(info.pages) && info.pages >= 0 ? info.pages : null;
+    if (info.shape_server !== 1) return null;
+    const pages = typeof info.pages === "number" && Number.isInteger(info.pages) && info.pages >= 0 ? info.pages : null;
+    return { ...entry, pages };
   } catch {
     return null;
   }
