@@ -293,8 +293,16 @@ export type ShapeCheck<T> = { ok: true; value: T } | { ok: false; errors: string
 // One allowlist, used twice: here on the store side, so the agent hears at
 // once which field is wrong, and by the board's sanitizer when it draws.
 
-/** Tags a drawing may not hold. `animate` and `set` can rewrite an href after the sanitizer. */
-const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform'];
+/**
+ * Tags a drawing may not hold. `animate` and `set` can rewrite an href after
+ * the sanitizer; `dialog` and `select` (its picker) open in the top layer,
+ * over the whole app, past the frame's containment and clip.
+ */
+const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform', 'dialog', 'select'];
+export const SHAPE_FORBIDDEN_TAGS: readonly string[] = FORBIDDEN_TAGS;
+
+/** Attributes that lift a part into the top layer (a popover, a modal), over the app: dropped. */
+export const SHAPE_TOP_LAYER_ATTRS: readonly string[] = ['popover', 'popovertarget', 'popovertargetaction', 'command', 'commandfor', 'interestfor', 'interesttarget'];
 
 /** Attributes that load something and have no safe use on a board: dropped. */
 export const SHAPE_DROPPED_ATTRS: readonly string[] = ['srcset', 'imagesrcset', 'poster', 'ping', 'lowsrc', 'dynsrc', 'longdesc'];
@@ -349,10 +357,40 @@ function codePoint(hex: string): string {
   return n > 0 && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff) ? String.fromCodePoint(n) : '\ufffd';
 }
 
-/** CSS as its tokenizer reads it: comments gone, escapes read (`u\72l(` is `url(`), lower case. */
-function cssKey(css: string): string {
-  return css
-    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '')
+/**
+ * CSS without its comments. A `/*` inside a string is text, not a comment,
+ * so strings are stepped over (with their escapes) while comments go.
+ */
+function stripCssComments(css: string): string {
+  let out = '';
+  let quote: string | null = null;
+  for (let i = 0; i < css.length; i++) {
+    const ch = css[i]!;
+    if (ch === '\\') {
+      out += css.slice(i, i + 2);
+      i++;
+    } else if (quote) {
+      out += ch;
+      if (ch === quote || ch === '\n') quote = null;
+    } else if (ch === '"' || ch === "'") {
+      quote = ch;
+      out += ch;
+    } else if (ch === '/' && css[i + 1] === '*') {
+      const end = css.indexOf('*/', i + 2);
+      i = end < 0 ? css.length : end + 1;
+    } else out += ch;
+  }
+  return out;
+}
+
+/**
+ * CSS as its tokenizer reads it: escapes read (`u\72l(` is `url(`), lower
+ * case, and comments gone outside strings. `keepComments` reads it with them
+ * left in, a second look the checks also take, so no comment reading of ours
+ * can hide a url.
+ */
+function cssKey(css: string, keepComments = false): string {
+  return (keepComments ? css : stripCssComments(css))
     .replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(\r\n|[\n\r\f])|([\s\S]))/g, (_, hex?: string, _nl?: string, ch?: string) =>
       hex ? codePoint(hex) : ch ?? '',
     )
@@ -371,13 +409,16 @@ function cssUrls(key: string): string[] {
  */
 export function shapeCssProblems(css: string): string[] {
   const out: string[] = [];
-  const key = cssKey(css);
-  if (/@import/.test(key)) out.push('@import is not allowed');
-  if (/@font-face/.test(key)) out.push('@font-face is not allowed');
-  if (/image-set\s*\(/.test(key)) out.push('image-set() is not allowed; use url() with a data:image');
-  if (/(?:^|[^\w-])src\s*\(/.test(key)) out.push('src() is not allowed; use url() with a data:image');
-  if (cssUrls(key).some((u) => !u.startsWith('#') && !DATA_IMAGE_RE.test(u))) out.push('url() may name only a #fragment or a data:image (png, jpeg, gif, webp)');
-  if (/expression\s*\(|-moz-binding|behavior\s*:/.test(key)) out.push('scripted CSS is not allowed');
+  const keys = [cssKey(css), cssKey(css, true)];
+  const any = (test: (key: string) => boolean) => keys.some(test);
+  if (any((k) => /@import/.test(k))) out.push('@import is not allowed');
+  if (any((k) => /@font-face/.test(k))) out.push('@font-face is not allowed');
+  if (any((k) => /image-set\s*\(/.test(k))) out.push('image-set() is not allowed; use url() with a data:image');
+  if (any((k) => /(?:^|[^\w-])src\s*\(/.test(k))) out.push('src() is not allowed; use url() with a data:image');
+  if (any((k) => cssUrls(k).some((u) => !u.startsWith('#') && !DATA_IMAGE_RE.test(u)))) out.push('url() may name only a #fragment or a data:image (png, jpeg, gif, webp)');
+  if (any((k) => /expression\s*\(|-moz-binding|behavior\s*:/.test(k))) out.push('scripted CSS is not allowed');
+  // A customizable select's picker opens in the top layer, over the app.
+  if (any((k) => /base-select|::?picker\s*\(/.test(k))) out.push('a select picker (base-select, ::picker) is not allowed');
   if (/<\/style/i.test(css)) out.push('</style> is not allowed');
   return out;
 }
@@ -387,9 +428,9 @@ export function shapeCssProblems(css: string): string[] {
  * `marker-*`…) may use `url(#id)` and nothing else that loads.
  */
 export function shapePaintAllowed(value: string): boolean {
-  const key = cssKey(value);
-  if (/image-set\s*\(|(?:^|[^\w-])src\s*\(/.test(key)) return false;
-  return cssUrls(key).every((u) => u.startsWith('#'));
+  return [cssKey(value), cssKey(value, true)].every(
+    (key) => !/image-set\s*\(|(?:^|[^\w-])src\s*\(/.test(key) && cssUrls(key).every((u) => u.startsWith('#')),
+  );
 }
 
 /** Attributes that only ever hold words. */
@@ -411,7 +452,13 @@ export function shapeHtmlProblems(html: string): string[] {
   const lower = html.toLowerCase();
   for (const tag of FORBIDDEN_TAGS) {
     if (new RegExp(`<${tag}[\\s>/]`).test(lower)) {
-      add(tag === 'style' ? '<style> is not allowed here; put rules in the view\'s css' : `<${tag}> is not allowed`);
+      add(
+        tag === 'style'
+          ? '<style> is not allowed here; put rules in the view\'s css'
+          : tag === 'dialog' || tag === 'select'
+            ? `<${tag}> is not allowed (it opens over the whole app); draw it`
+            : `<${tag}> is not allowed`,
+      );
     }
   }
   if (/<[^>]*\son[a-z]+\s*=/i.test(html)) add('event handler attributes (on…=) are not allowed');
@@ -430,7 +477,8 @@ export function shapeHtmlProblems(html: string): string[] {
         add(`${tag} ${name}: write characters plainly, not as named references like &colon;`);
         continue;
       }
-      if (SHAPE_DROPPED_ATTRS.includes(name)) add(`${name} is not allowed (it loads from outside the board); use one src`);
+      if (SHAPE_TOP_LAYER_ATTRS.includes(name)) add(`${name} is not allowed (it lifts a part over the whole app)`);
+      else if (SHAPE_DROPPED_ATTRS.includes(name)) add(`${name} is not allowed (it loads from outside the board); use one src`);
       else if (SHAPE_URL_ATTRS.includes(name)) {
         const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
         if (!shapeUrlAllowed(value, link)) {

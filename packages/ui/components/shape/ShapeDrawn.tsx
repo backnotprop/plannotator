@@ -18,6 +18,7 @@ import {
   shapePaintAllowed,
   shapeUrlAllowed,
   SHAPE_DROPPED_ATTRS,
+  SHAPE_TOP_LAYER_ATTRS,
   SHAPE_URL_ATTRS,
   type ShapeCodeTarget,
   type ShapeDrawnView,
@@ -128,13 +129,14 @@ const CONFIG = {
   // HTML inside an SVG's foreignObject (a label in a box) is kept.
   HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ADD_ATTR: ['pathLength', 'target'],
-  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform'],
-  FORBID_ATTR: [...SHAPE_DROPPED_ATTRS],
+  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform', 'dialog', 'select'],
+  // Nothing may open in the top layer: it sits over the whole app, past the frame's containment and clip.
+  FORBID_ATTR: [...SHAPE_DROPPED_ATTRS, ...SHAPE_TOP_LAYER_ATTRS],
 };
 const WORDS_ONLY = /^(?:data-|aria-)|^(?:title|alt|class|id|role|lang|dir)$/;
 
 function attributeAllowed(tag: string, name: string, value: string): boolean {
-  if (SHAPE_DROPPED_ATTRS.includes(name)) return false;
+  if (SHAPE_DROPPED_ATTRS.includes(name) || SHAPE_TOP_LAYER_ATTRS.includes(name)) return false;
   if (SHAPE_URL_ATTRS.includes(name)) {
     // An image input loads its src; no input needs one.
     if (tag === 'input') return false;

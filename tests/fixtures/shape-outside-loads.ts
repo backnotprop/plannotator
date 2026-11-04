@@ -1,7 +1,8 @@
 /**
  * Drawings that try to load (or run) something from outside a Shape board:
  * the independent review's probe payloads for #2585, plus their near
- * variants. The store must refuse each one by field (`shapeHtmlProblems`,
+ * variants, and the second pass's: comments inside strings, and parts that
+ * open in the top layer (over the whole app). The store must refuse each one by field (`shapeHtmlProblems`,
  * `shapeCssProblems`), and the board's sanitizer must neuter each one. The
  * host is `.invalid`, which never resolves; the tests never attach these to a
  * live page, so nothing is fetched either way.
@@ -53,6 +54,17 @@ export const SHAPE_OUTSIDE_HTML: readonly string[] = [
   '<table background="https://evil.invalid/t.png"><tr><td>t</td></tr></table>',
   '<a href="#x" ping="https://evil.invalid/p">pinged</a>',
   '<math><mtext><table><mglyph><style><img src=x onerror=alert(1)></style></mglyph></table></mtext></math>',
+  // A `/*` inside a string is not a comment: the url after it loads.
+  '<div style="content:\'/*\';background:url(https://evil.invalid/cmt)">c</div>',
+  '<div style="content:&quot;/*&quot;;background:url(https://evil.invalid/cmt)">c</div>',
+  // The top layer: over the whole app, past the frame's containment and clip.
+  '<button popovertarget="pp">open</button><div id="pp" popover>FULL SCREEN FAKE</div>',
+  '<button popovertarget="pp" popovertargetaction="show">open</button><div id="pp" popover="manual">FAKE</div>',
+  '<button commandfor="dd" command="show-modal">open</button><dialog id="dd">MODAL</dialog>',
+  '<dialog open>MODAL</dialog>',
+  '<button interestfor="tip">hover</button><div id="tip" popover="hint">FAKE</div>',
+  '<button interesttarget="tip">hover</button><div id="tip" popover>FAKE</div>',
+  '<select><option>a</option></select>',
 ];
 
 export const SHAPE_OUTSIDE_CSS: readonly string[] = [
@@ -69,6 +81,13 @@ export const SHAPE_OUTSIDE_CSS: readonly string[] = [
   '@font-face{font-family:x;src:url(https://evil.invalid/f.woff)}',
   '@font-face{font-family:x;src:local(x)}',
   '.a{background:url(data:image/svg+xml,%3Csvg%3E%3Cimage href=%22https://evil.invalid/z%22/%3E%3C/svg%3E)}',
+  // A `/*` inside a string, closed later or never.
+  '.a{content:"/*"} .b{background:url(https://evil.invalid/cmt)} .c{content:"*/"}',
+  '.a{content:"/*"} .b{background:url(https://evil.invalid/cmt-unclosed)}',
+  ".a{content:'/*'} @import 'https://evil.invalid/a.css';",
+  '.a{content:"\\"/*"} .b{background:image-set("https://evil.invalid/i.png" 1x)}',
+  // A customizable select's picker opens in the top layer.
+  'select{appearance:base-select} ::picker(select){position:fixed;inset:0}',
 ];
 
 /** What a drawing may hold: the board's own files, fragments, data images and https links. */

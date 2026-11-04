@@ -5,7 +5,8 @@
  *   its own <style> (every payload of the review's probe, in
  *   tests/fixtures/shape-outside-loads.ts, comes out neutered; the board's
  *   own files, fragments, data images and https links stay);
- * - the view's css escapes its frame (`:host { position: fixed }` over the app);
+ * - the view's css escapes its frame (`:host { position: fixed }` over the app),
+ *   or a part opens in the top layer (a popover, a dialog, a select's picker);
  * - the view's css leaks out of its shadow root, or css that loads from
  *   outside the board is kept;
  * - a bubble for a reference the board does not have shows as a dead number;
@@ -87,7 +88,7 @@ describe.skipIf(!hasDom)('a drawn view', () => {
 
   test('every probe payload comes out neutered (sanitized as a string, never attached)', () => {
     const { sanitizeShapeHtml } = drawnModule!;
-    const LEFT = new RegExp(`${OUTSIDE_HOST.replace('.', '\\.')}|javascript|alert|data:text|svg\\+xml|passwd|\\son\\w+=|<style|<source|<animate|<set\\b|srcset|poster|ping=|formaction|background=`, 'i');
+    const LEFT = new RegExp(`${OUTSIDE_HOST.replace('.', '\\.')}|javascript|alert|data:text|svg\\+xml|passwd|\\son\\w+=|<style|<source|<animate|<set\\b|srcset|poster|ping=|formaction|background=|popover|command|interest|<dialog|<select`, 'i');
     const kept = SHAPE_OUTSIDE_HTML.map((html) => [html, sanitizeShapeHtml(html)] as const).filter(([, out]) => LEFT.test(out));
     expect(kept).toEqual([]);
   });
