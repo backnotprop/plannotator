@@ -6,7 +6,7 @@
  *   visit): a person who just opened the thread and presses Enter must never allow a prompt.
  * - An answer still goes out where `crypto.randomUUID` does not exist (plain http to an address
  *   other than localhost): its reply's key comes from `newUuid`.
- * - Its header's Stop and its answers are the owner's: a tailnet guest's page shows neither, as the server refuses both.
+ * - Its header's Stop is the owner's: a tailnet guest's page has none, as the server answers it `owner_only`.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -226,17 +226,14 @@ test.skipIf(!hasDom)('Allow once is sent where crypto.randomUUID does not exist 
   }
 });
 
-test.skipIf(!hasDom)("the card's header Stop and its answers are the owner's: a tailnet guest's page shows neither", async () => {
+test.skipIf(!hasDom)("the card's header Stop is the owner's: a tailnet guest's page has none", async () => {
   const thread = threadOf(card(CARD_1, 'bun run --cwd apps/inbox build', 1));
   await render(thread, idsOf(thread));
   // Compared as booleans (see `focused`).
   expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-run-stop]`)).toBe(true);
-  expect(once(CARD_1)!.closest('footer')!.hidden).toBe(false);
   act(() => root!.unmount());
   host!.remove();
   await render(thread, idsOf(thread), true);
-  expect(!!host!.querySelector(`[data-message-id="${CARD_1}"] [data-permission]`)).toBe(true);
+  expect(!!once(CARD_1)).toBe(true);
   expect(!!host!.querySelector('[data-run-stop]')).toBe(false);
-  // Allow once, Deny, Auto and Full: hidden, as the server refuses a guest's answer.
-  expect(once(CARD_1)!.closest('footer')!.hidden).toBe(true);
 });
