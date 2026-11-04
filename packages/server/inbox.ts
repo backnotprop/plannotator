@@ -129,6 +129,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
+import { createInboxListVersions } from "./inbox-list-delta";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -1151,6 +1152,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     inbox_id: machines.selfId,
     machine_links: 1,
   });
+
+  /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
+  const listVersions = createInboxListVersions();
 
   const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
   /**
@@ -3426,7 +3430,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url))));
+      if (path === "/api/inbox/threads" && req.method === "GET") {
+        const projectFilter = projectFilterOf(url);
+        const archivedMode = archivedModeOf(url);
+        const merged = url.searchParams.get("machines") === "1";
+        const snoozedMode = snoozedModeOf(url);
+        const model = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
+        // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts). Without it, as before.
+        const since = url.searchParams.get("since");
+        if (since === null) return json(model);
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
+      }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);

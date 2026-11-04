@@ -7,6 +7,7 @@
 
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
+import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import type {
   InboxCardMark,
@@ -214,6 +215,8 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
+  list_version?: string;
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
@@ -1034,6 +1037,16 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
   return post<{ recent_searches: string[] }>(inboxUrl('/search/recent'), input);
 }
 
+/** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
+const listReader = createListReader<ListModel>((since) =>
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+);
+
+/** Tests only: the next list read is a whole one. */
+export function resetListReads(): void {
+  listReader.reset();
+}
+
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
@@ -1047,8 +1060,9 @@ export const inboxApi = {
   // project naming this Inbox; an older Inbox ignores the parameter.
   // `snoozed=exclude` the same way: snoozed threads come apart from the sections, for the band under Quiet. The rule
   // runs here again with this window's clock, which is the one the person reads the time on.
+  // Only the rows changed since the list this window holds, and one read for calls close together (listRead.ts).
   list: () =>
-    get<ListModel>(inboxUrl('/threads?archived=exclude&snoozed=exclude&machines=1')).then((read) => {
+    listReader.read().then((read) => {
       const model = read.snoozed ? { ...read, ...inboxSectionsAsOf(read.sections, read.snoozed) } : read;
       learnMachines(model);
       return model;

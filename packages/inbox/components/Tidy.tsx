@@ -31,17 +31,32 @@ export interface TidyController {
   refresh: () => void;
   /** Combine each ticked pair, `from` into `into`, with one Undo. The window's: answers why it stopped, or null. */
   combine?: (pairs: readonly InboxTidyCombine[]) => Promise<string | null>;
+  /** The menu or the popover opened or closed: what it shows is read while it is open (useTidy). */
+  shown?: (open: boolean) => void;
+  /** The person is about to open the menu (a pointer on ⋮, or focus): a list or Board read meanwhile is read now. */
+  warm?: () => void;
 }
 
 /** How long the window polls a run's progress. */
 const TIDY_POLL_MS = 10 * 60_000;
 
-/** Reads who Tidy would ask in `scope` again whenever `version` changes (a list or Board read), and every few seconds while a run is under way. */
+/**
+ * Reads who Tidy would ask in `scope`: when it opens, and every few seconds
+ * while a run is under way. A list or Board read (`version` changes) reads it
+ * again while the menu or the popover shows it (#2593: not after every agent
+ * message); while they are closed it only marks the plan stale, read as the
+ * person reaches for ⋮ (`warm`) or opens it (`shown`).
+ */
 export function useTidy(scope: string | null, surface: TidySurface, version: unknown, enabled = true): TidyController {
   const [plan, setPlan] = useState<InboxTidyPlan | null>(null);
   const seq = useRef(0);
+  /** A list or Board read happened since the plan was last read. */
+  const stale = useRef(false);
+  /** The menu or the popover is open. */
+  const open = useRef(false);
   const refresh = useCallback(() => {
     const mine = ++seq.current;
+    stale.current = false;
     inboxApi
       .tidy(scope, surface)
       .then((next) => {
@@ -49,11 +64,32 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
       })
       .catch(() => {});
   }, [scope, surface]);
+  /** The scope (its `refresh`) the plan was last read for while enabled; null after a disable, so a return reads it again. */
+  const readFor = useRef<typeof refresh | null>(null);
   useEffect(() => {
-    if (!enabled) return;
+    if (!enabled) {
+      readFor.current = null;
+      return;
+    }
+    // Only the list or Board moved, and nothing shows the plan: read it when something does.
+    if (readFor.current === refresh && !open.current) {
+      stale.current = true;
+      return;
+    }
+    readFor.current = refresh;
     const timer = setTimeout(refresh, 250);
     return () => clearTimeout(timer);
   }, [refresh, version, enabled]);
+  const warm = useCallback(() => {
+    if (enabled && stale.current) refresh();
+  }, [enabled, refresh]);
+  const shown = useCallback(
+    (now: boolean) => {
+      open.current = now;
+      if (now) warm();
+    },
+    [warm],
+  );
   const run = plan?.run ?? null;
   // Poll while a run goes, for 10 minutes at most: an agent that cannot say it
   // is done (Codex, MCP only) would otherwise keep it going all day. List and
@@ -84,7 +120,7 @@ export function useTidy(scope: string | null, surface: TidySurface, version: unk
     },
     [scope, surface, refresh],
   );
-  return { surface, scope, plan, run, start, refresh };
+  return { surface, scope, plan, run, start, refresh, shown, warm };
 }
 
 
@@ -157,10 +193,26 @@ export function TidyMenu({
   const count = plan?.count ?? 0;
   // Still reading (plan null): enabled, so the menu does not flash disabled on load.
   const canOpen = plan === null || run !== null || count > 0;
+  // What the menu and the popover show is read while one of them is open (useTidy).
+  const { shown, warm } = tidy;
+  const showing = menuOpen || popOpen;
+  useEffect(() => {
+    shown?.(showing);
+  }, [shown, showing]);
+  useEffect(() => () => shown?.(false), [shown]);
   return (
     <>
       <Menu.Root open={menuOpen} onOpenChange={setMenuOpen} modal={false}>
-        <Menu.Trigger ref={trigger} className={`ib-tidytrig ${className}`} aria-label="More" data-tidy-menu="" data-open={popOpen ? '' : undefined}>
+        <Menu.Trigger
+          ref={trigger}
+          className={`ib-tidytrig ${className}`}
+          aria-label="More"
+          data-tidy-menu=""
+          data-open={popOpen ? '' : undefined}
+          onPointerEnter={warm}
+          onPointerDown={warm}
+          onFocus={warm}
+        >
           <Icon name="dots" size={phone ? 20 : 18} />
         </Menu.Trigger>
         <Menu.Portal container={portal ?? undefined}>
