@@ -97,6 +97,28 @@ describe("shape read", () => {
     expect(JSON.parse((await w.run("read", id, "--notes")).out).notes).toEqual([]);
   });
 
+  test("notes whose hand-over fails (a closed pipe) still wait for the next read", async () => {
+    const w = world();
+    const { id } = JSON.parse((await w.run("update", "--file", w.board("b.json", "whistles once"))).out);
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    createShapeStore({ dataDir }).addNote(id, { kind: "change", v: 1, view: "picture", part: "p-whistle", text: "Twice" });
+
+    const err: string[] = [];
+    const broken = await runShapeCommand(["read", id, "--notes"], {
+      dataDir,
+      cwd: w.project,
+      env: {},
+      stdout: () => Promise.reject(Object.assign(new Error("write EPIPE"), { code: "EPIPE" })),
+      stderr: (t) => err.push(t),
+      projectRootOf: async (folder) => ({ root: folder, name: basename(folder) }),
+    });
+    expect(broken).toBe(1);
+    expect(err.join()).toStartWith("output_failed:");
+    expect(JSON.parse((await w.run("read", id, "--notes")).out).notes.map((n: { text: string }) => n.text)).toEqual(["Twice"]);
+    expect(JSON.parse((await w.run("read", id, "--notes")).out).notes).toEqual([]);
+  });
+
   test("with no id, a session reads its own newest shape, not another session's", async () => {
     const mine = world({ PI_SESSION_ID: "sess-mine" });
     const { id: own } = JSON.parse((await mine.run("update", "--file", mine.board("a.json", "mine"))).out);
@@ -131,5 +153,10 @@ describe("parseShapeCommand", () => {
     expect(parseShapeCommand(["read", "--base", "2"])).toMatchObject({ ok: false });
     expect(parseShapeCommand(["update", "--id", "shp_x"])).toMatchObject({ ok: false, error: "shape update needs --file <board.json>." });
     expect(parseShapeCommand(["update", "--file", "b.json", "--thread", "not-a-message"])).toMatchObject({ ok: false });
+  });
+
+  test("--through takes a message id, as --thread does", () => {
+    expect(parseShapeCommand(["update", "--file", "b.json", "--through", "../../x"])).toMatchObject({ ok: false, error: "--through takes an Inbox message id (msg_…)." });
+    expect(parseShapeCommand(["update", "--file", "b.json", "--through", "msg_01JC0000000000000000000000"])).toMatchObject({ ok: true });
   });
 });

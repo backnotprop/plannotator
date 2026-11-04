@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxProjectKey } from "../inbox/project-key";
@@ -154,10 +154,14 @@ describe("notes", () => {
     expect(change.ok && general.ok).toBe(true);
     expect(store.list()[0]!.waiting).toBe(1);
 
-    const taken = store.takeWaiting(first.id);
-    expect(taken.map((n) => n.text)).toEqual(["Make it twice", "Is this for the office kettle too?"]);
-    expect(taken.every((n) => n.delivered)).toBe(true);
-    expect(store.takeWaiting(first.id)).toEqual([]);
+    // Reading them marks nothing: a hand-over that fails leaves them waiting.
+    const waiting = store.waiting(first.id);
+    expect(waiting.map((n) => n.text)).toEqual(["Make it twice", "Is this for the office kettle too?"]);
+    expect(store.waiting(first.id)).toHaveLength(2);
+    const marked = store.markDelivered(first.id, waiting.map((n) => n.id));
+    expect(marked.every((n) => n.delivered)).toBe(true);
+    expect(store.waiting(first.id)).toEqual([]);
+    expect(store.markDelivered(first.id, waiting.map((n) => n.id))).toEqual([]);
     expect(store.list()[0]!.waiting).toBe(0);
     // Delivery appends; the note keeps its place and its words.
     expect(store.notes(first.id).map((n) => n.text)).toEqual(["Make it twice", "Is this for the office kettle too?"]);
@@ -184,7 +188,21 @@ describe("cited images", () => {
     expect(target).toMatch(/^files\/[0-9a-f]{10}-shot\.png$/);
     const path = store.filePath(result.id, target);
     expect(path && readFileSync(path).length).toBe(4);
-    expect(store.filePath(result.id, "../shape.json")).toBeNull();
+    for (const outside of ["../shape.json", "files/../shape.json", "files/a/b.png", "files\\..\\shape.json", "/etc/passwd", ".lock"]) {
+      expect([outside, store.filePath(result.id, outside)]).toEqual([outside, null]);
+    }
+  });
+
+  test("an image is a file on this computer: a URL or a path out of files/ is refused by field", () => {
+    const { store } = storeAt(scratch());
+    const refs: ShapeBoard["refs"] = [
+      { n: 1, kind: "image", title: "Remote", target: "https://evil.invalid/a.png" },
+      { n: 2, kind: "image", title: "Steps", target: "files/ok.png", images: [{ src: "//evil.invalid/b.png", alt: "b" }, { src: "files/../shape.json", alt: "c" }] },
+    ];
+    const result = store.update({ board: { ...board(), refs }, project, sourceDir: scratch() });
+    expect(result.ok).toBe(false);
+    if (result.ok || result.code !== "invalid") return;
+    expect(result.errors.map((e) => e.slice(0, e.indexOf(":")))).toEqual(["refs[0].target", "refs[1].images[0].src", "refs[1].images[1].src"]);
   });
 
   test("a missing image refuses the update and leaves no half-made shape", () => {
@@ -194,5 +212,60 @@ describe("cited images", () => {
     const result = store.update({ board: withImage, project, sourceDir: scratch() });
     expect(result).toMatchObject({ ok: false, code: "invalid" });
     expect(readdirSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root)))).toEqual([]);
+  });
+});
+
+describe("the lock", () => {
+  // Processes, not calls: the lock is for several CLI processes at once.
+  function lockedShape() {
+    const dataDir = scratch();
+    const { store } = storeAt(dataDir);
+    const first = store.update({ board: board(), project });
+    if (!first.ok) throw new Error("setup");
+    const folder = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), first.id);
+    // A lock left by a process that died a minute ago.
+    writeFileSync(join(folder, ".lock"), "dead");
+    const old = new Date(Date.now() - 60_000);
+    utimesSync(join(folder, ".lock"), old, old);
+    return { dataDir, store, id: first.id, folder };
+  }
+
+  function updaters(dataDir: string, id: string, count: number) {
+    const worker = join(scratch(), "worker.ts");
+    writeFileSync(
+      worker,
+      `import { createShapeStore } from ${JSON.stringify(join(import.meta.dir, "store.ts"))};
+const [dataDir, id, n] = process.argv.slice(2);
+const board = { title: "t", claim: "c", views: { picture: { html: \`<p data-mark="a">w\${n}</p>\` } } };
+const r = createShapeStore({ dataDir }).update({ board, id, base: 1, project: ${JSON.stringify(project)} });
+console.log(r.ok ? "OK" : r.code);`,
+    );
+    const runs = Array.from({ length: count }, (_, i) =>
+      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "" } }),
+    );
+    return Promise.all(runs.map(async (p) => (await new Response(p.stdout).text()).trim()));
+  }
+
+  test("a stale lock is broken once: of many updates from the same base, exactly one lands", async () => {
+    const { dataDir, store, id, folder } = lockedShape();
+    const outs = await updaters(dataDir, id, 8);
+    expect(outs.filter((o) => o === "OK")).toHaveLength(1);
+    expect(outs.filter((o) => o === "stale_base")).toHaveLength(7);
+    expect(store.versions(id)).toHaveLength(2);
+    expect(readdirSync(folder).filter((f) => f.startsWith(".lock"))).toEqual([]);
+  });
+
+  test("while another process is breaking a stale lock, a waiter leaves it alone and waits", async () => {
+    const { dataDir, store, id, folder } = lockedShape();
+    // Someone is breaking it right now.
+    writeFileSync(join(folder, ".lock.break"), "");
+    const done = updaters(dataDir, id, 1);
+    await Bun.sleep(400);
+    expect(readFileSync(join(folder, ".lock"), "utf8")).toBe("dead");
+    expect(store.versions(id)).toHaveLength(1);
+    // The breaker finishes; the waiter takes the lock and lands.
+    rmSync(join(folder, ".lock.break"));
+    rmSync(join(folder, ".lock"));
+    expect(await done).toEqual(["OK"]);
   });
 });

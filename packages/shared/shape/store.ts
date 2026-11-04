@@ -18,7 +18,7 @@
  * change to one shape holds that shape's lock file. A torn last line (a crash
  * mid-append) is skipped on read, and the next append starts on a new line.
  */
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import {
   appendFileSync,
   closeSync,
@@ -58,6 +58,7 @@ export const SHAPE_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp"]);
 const LOCK_WAIT_MS = 5000;
 const LOCK_STALE_MS = 30_000;
+const MESSAGE_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export interface ShapeSummary {
   id: string;
@@ -124,12 +125,26 @@ export interface ShapeStore {
   addNote(id: string, input: unknown): ShapeNoteResult;
   answer(id: string, input: { re: string | null; text: string; from: ShapeSession }): ShapeNoteResult;
   notes(id: string): ShapeNote[];
-  /** The notes waiting for an agent (Change it, Ask), marked delivered as they are handed over. */
-  takeWaiting(id: string): ShapeNote[];
+  /**
+   * The notes waiting for an agent (Change it, Ask). Reading them marks
+   * nothing: the caller hands them over, then calls `markDelivered`, so a
+   * hand-over that fails (a closed pipe) leaves them waiting. Two readers at
+   * once may both get them: delivery is at least once.
+   */
+  waiting(id: string): ShapeNote[];
+  /** Mark these notes delivered (the ones not delivered yet); the notes as marked. */
+  markDelivered(id: string, noteIds: readonly string[]): ShapeNote[];
   /** A file under the shape's files/ folder, path-guarded; null when absent or outside. */
   filePath(id: string, name: string): string | null;
 }
 
+// The lock is a file holding its owner's token. A lock older than
+// LOCK_STALE_MS is broken, but only under a second lock (`.lock.break`) and
+// only if it is still stale when looked at again there, so two waiters can
+// never both break it and each take a fresh lock. The owner removes the lock
+// only while it still holds its own token. `sleep` blocks the thread: the
+// store is called from the CLI, one command per process; a server that calls
+// it must call it off its event loop.
 function sleep(ms: number) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
@@ -182,20 +197,45 @@ function appendLine(path: string, value: unknown) {
   appendFileSync(path, `${prefix}${JSON.stringify(value)}\n`, { mode: 0o600 });
 }
 
+function lockAge(path: string): number | null {
+  try {
+    return Date.now() - statSync(path).mtimeMs;
+  } catch {
+    return null;
+  }
+}
+
+function breakIfStale(lock: string) {
+  if ((lockAge(lock) ?? 0) <= LOCK_STALE_MS) return;
+  const breaker = `${lock}.break`;
+  let fd: number;
+  try {
+    fd = openSync(breaker, "wx", 0o600);
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+    // A breaker that died mid-break: its lock goes the same way, later.
+    if ((lockAge(breaker) ?? 0) > LOCK_STALE_MS) rmSync(breaker, { force: true });
+    return;
+  }
+  try {
+    if ((lockAge(lock) ?? 0) > LOCK_STALE_MS) rmSync(lock, { force: true });
+  } finally {
+    closeSync(fd);
+    rmSync(breaker, { force: true });
+  }
+}
+
 function withLock<T>(dir: string, fn: () => T): T {
   const lock = join(dir, ".lock");
+  const token = `${process.pid}.${randomUUID()}`;
   const start = Date.now();
-  let fd: number | null = null;
-  while (fd === null) {
+  for (;;) {
     try {
-      fd = openSync(lock, "wx", 0o600);
+      writeFileSync(lock, token, { flag: "wx", mode: 0o600 });
+      break;
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
-      try {
-        if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) rmSync(lock, { force: true });
-      } catch {
-        // gone already
-      }
+      breakIfStale(lock);
       if (Date.now() - start > LOCK_WAIT_MS) throw new Error(`shape store: ${dir} stayed locked for ${LOCK_WAIT_MS} ms`);
       sleep(15);
     }
@@ -203,8 +243,11 @@ function withLock<T>(dir: string, fn: () => T): T {
   try {
     return fn();
   } finally {
-    closeSync(fd);
-    rmSync(lock, { force: true });
+    try {
+      if (readFileSync(lock, "utf8") === token) rmSync(lock, { force: true });
+    } catch {
+      // broken as stale while we held it, or the folder is gone (remove)
+    }
   }
 }
 
@@ -254,7 +297,16 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     if (!board.refs?.length) return { board, errors };
     const files = join(folder, "files");
     const keep = (src: string, field: string): string => {
-      if (/^(?:https?:|data:)/i.test(src) || src.startsWith("files/")) return src;
+      if (src.startsWith("files/")) {
+        if (!/^files\/[^/\\%?#.][^/\\%?#]*$/.test(src)) errors.push(`${field}: "${src.slice(0, 80)}" is not one file under files/`);
+        return src;
+      }
+      if (/^data:image\/(?:png|jpeg|gif|webp)[;,]/i.test(src)) return src;
+      // A board loads nothing from outside: an image is a file on this computer, copied in.
+      if (/^[a-z][a-z0-9+.-]+:|^\/\/|^\\\\/i.test(src)) {
+        errors.push(`${field}: "${src.slice(0, 80)}" is a URL; an image must be a file on this computer (it is copied into the board)`);
+        return src;
+      }
       const path = isAbsolute(src) ? src : sourceDir ? resolve(sourceDir, src) : null;
       if (!path) {
         errors.push(`${field}: a relative image path needs the board file's folder`);
@@ -298,6 +350,8 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   function update(input: ShapeUpdateInput): ShapeUpdateResult {
     const checked = checkShapeBoard(input.board);
     if (!checked.ok) return { ok: false, code: "invalid", errors: checked.errors };
+    const ids = (["thread", "through"] as const).filter((k) => input[k] != null && !MESSAGE_ID_RE.test(input[k]!));
+    if (ids.length) return { ok: false, code: "invalid", errors: ids.map((k) => `${k}: must be an Inbox message id (msg_…)`) };
     const at = iso();
 
     if (!input.id) {
@@ -505,7 +559,8 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   function remove(id: string): boolean {
     const folder = shapeDir(id);
     if (!folder) return false;
-    rmSync(folder, { recursive: true, force: true });
+    // Under the shape's lock, so no write lands in a folder being removed.
+    withLock(folder, () => rmSync(folder, { recursive: true, force: true }));
     if (existsSync(seenPath)) {
       withLock(dir, () => {
         const all = seen();
@@ -579,14 +634,22 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return folder ? notesOf(folder) : [];
   }
 
-  function takeWaiting(id: string): ShapeNote[] {
+  const waitsForAgent = (n: ShapeNote) => n.from === "you" && (n.kind === "change" || n.kind === "ask") && !n.delivered;
+
+  function waiting(id: string): ShapeNote[] {
     const folder = shapeDir(id);
-    if (!folder) return [];
+    return folder ? notesOf(folder).filter(waitsForAgent) : [];
+  }
+
+  function markDelivered(id: string, noteIds: readonly string[]): ShapeNote[] {
+    const folder = shapeDir(id);
+    if (!folder || !noteIds.length) return [];
+    const wanted = new Set(noteIds);
     return withLock(folder, () => {
       const at = iso();
-      const waiting = notesOf(folder).filter((n) => n.from === "you" && (n.kind === "change" || n.kind === "ask") && !n.delivered);
-      for (const note of waiting) appendLine(join(folder, "chat.jsonl"), { ...note, delivered: at });
-      return waiting.map((n) => ({ ...n, delivered: at }));
+      const marked = notesOf(folder).filter((n) => wanted.has(n.id) && waitsForAgent(n));
+      for (const note of marked) appendLine(join(folder, "chat.jsonl"), { ...note, delivered: at });
+      return marked.map((n) => ({ ...n, delivered: at }));
     });
   }
 
@@ -599,5 +662,5 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     return existsSync(path) ? path : null;
   }
 
-  return { dir, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, takeWaiting, filePath };
+  return { dir, update, get, read, versions, list, latestFor, drawing, setState, remove, seen, markSeen, addNote, answer, notes, waiting, markDelivered, filePath };
 }

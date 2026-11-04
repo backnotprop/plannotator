@@ -2,7 +2,7 @@
 // and the same numbers in the panel's References list. Hovering a bubble
 // lights its row; a row flashes its bubble; Open shows it in the real viewer.
 import React, { createContext, useContext } from 'react';
-import type { ShapeRef, ShapeRefKind } from '@plannotator/core/shape';
+import { shapeLinkUrl, type ShapeRef, type ShapeRefKind } from '@plannotator/core/shape';
 
 export interface RefsState {
   refs: readonly ShapeRef[];
@@ -29,7 +29,7 @@ export function Bubble({ n }: { n: number }) {
   };
   // A PR or link is a real link, so the host's GitHub hover card (RefHoverCards) opens on it.
   if (ref.kind === 'pr' || ref.kind === 'link') {
-    return <a {...common} href={ref.target} target="_blank" rel="noreferrer">{n}</a>;
+    return <a {...common} href={shapeLinkUrl(ref.target) ?? undefined} target="_blank" rel="noreferrer">{n}</a>;
   }
   return (
     <button type="button" {...common} title={ref.title} onClick={(e) => { e.stopPropagation(); r.onOpen(n); }}>
@@ -70,7 +70,7 @@ export function RefList({ onShow, canOpen }: { onShow: (n: number) => void; canO
             </span>
           </button>
           {ref.kind === 'pr' || ref.kind === 'link' ? (
-            <a className="shp-ref-open" href={ref.target} target="_blank" rel="noreferrer">Open</a>
+            <a className="shp-ref-open" href={shapeLinkUrl(ref.target) ?? undefined} target="_blank" rel="noreferrer">Open</a>
           ) : canOpen(ref) ? (
             <button type="button" className="shp-ref-open" onClick={() => r.onOpen(ref.n)}>Open</button>
           ) : null}

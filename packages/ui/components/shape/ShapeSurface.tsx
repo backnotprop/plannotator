@@ -14,7 +14,10 @@
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   diffShapeVersions,
+  isShapeProjectPath,
+  shapeLinkUrl,
   shapeNoteWaits,
+  shapeUrlAllowed,
   shapeViewLabel,
   SHAPE_VIEWS,
   type ShapeCodeTarget,
@@ -36,7 +39,7 @@ import { PopoutDialog } from '../PopoutDialog';
 import type { AIChatEntry } from '../../hooks/useAIChat';
 import type { AIProviderOption } from '../../utils/aiProvider';
 import type { CodeAnnotation, EditorMode, InputMethod } from '../../types';
-import { Pebble, reducedMotion } from './Pebble';
+import { Pebble, useReducedMotion } from './Pebble';
 import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeRequirements } from './ShapeRequirements';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
@@ -48,16 +51,23 @@ const DRAW_MS = 1500; // the longest draw-in, for Esc
 const DRAWN_MS = DRAW_MS + 1400; // when a view counts as drawn (its draw-in class is dropped)
 const ERASE_MS = 420;
 
-function usePhone() {
-  const query = '(max-width: 640px)';
-  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && !!window.matchMedia?.(query).matches);
-  useEffect(() => {
-    const mq = window.matchMedia?.(query);
-    if (!mq) return;
-    const on = () => setPhone(mq.matches);
-    mq.addEventListener('change', on);
-    return () => mq.removeEventListener('change', on);
-  }, []);
+const PHONE_MAX = 640;
+
+/**
+ * The phone layout (a bottom sheet, short labels) goes by the board's own
+ * width, not the window's: a narrow Inbox pane on a desktop gets it too.
+ */
+function usePhone(el: HTMLElement | null) {
+  const [phone, setPhone] = useState(() => typeof window !== 'undefined' && window.innerWidth <= PHONE_MAX);
+  useLayoutEffect(() => {
+    if (!el) return;
+    const measure = () => setPhone(el.clientWidth <= PHONE_MAX);
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [el]);
   return phone;
 }
 
@@ -111,8 +121,14 @@ function marksFor(all: MarkState, view: ShapeViewId): MarkState {
 const without = (s: ReadonlySet<string>, drop: readonly string[]) => new Set([...s].filter((x) => !drop.includes(x)));
 
 export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
-  const phone = usePhone();
-  const reduce = useMemo(() => reducedMotion(), []);
+  const rootRef = useRef<HTMLDivElement | null>(null);
+  const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
+  const attachRoot = useCallback((el: HTMLDivElement | null) => {
+    rootRef.current = el;
+    setRootEl(el);
+  }, []);
+  const phone = usePhone(rootEl);
+  const reduce = useReducedMotion();
 
   const [loaded, setLoaded] = useState<ShapeLoaded | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -160,7 +176,6 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const [codeNotes, setCodeNotes] = useState<CodeAnnotation[]>([]);
   const [copied, setCopied] = useState(false);
 
-  const rootRef = useRef<HTMLDivElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
   const later = useCallback((fn: () => void, ms: number) => {
@@ -321,6 +336,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     go('code');
   }, [go]);
 
+  // The host reads files in the project only: a board from anywhere cannot ask for /etc or ../.
+  const readProjectFile = useCallback(
+    async (path: string) => (isShapeProjectPath(path) ? (await host.readFile?.(id, path)) ?? null : null),
+    [host, id],
+  );
+
   // A drawn part with `data-code`: the Code view's whole file when it has one, else the file viewer.
   const openCodeTarget = useCallback(async (at: ShapeCodeTarget) => {
     const v = versionRef.current;
@@ -328,14 +349,14 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       openCode(at.path, at.line);
       return;
     }
-    const contents = await host.readFile?.(id, at.path);
+    const contents = await readProjectFile(at.path);
     if (contents != null) setViewer({ kind: 'file', path: at.path, contents, line: at.line, token: Date.now() });
-  }, [host, id, openCode]);
+  }, [readProjectFile, host, openCode]);
 
   // Esc: close the panel; otherwise skip the drawing while it plays.
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
-      if (e.key !== 'Escape' || target || viewer) return;
+      if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
       if (panelRef.current) {
         setPanel(null);
         return;
@@ -404,18 +425,20 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         later(() => setMsgFlash(null), 1800);
       }, 260);
     } else if (r.kind === 'image') {
-      setViewer({ kind: 'image', ref: r });
+      // Only an image the board keeps (files/…) or carries (data:image); nothing from outside.
+      if (shapeUrlAllowed(r.target)) setViewer({ kind: 'image', ref: { ...r, images: r.images?.filter((im) => shapeUrlAllowed(im.src)) } });
     } else if (r.kind === 'file') {
-      const contents = await host.readFile?.(id, r.target);
+      const contents = await readProjectFile(r.target);
       if (contents != null) setViewer({ kind: 'file', path: r.target, contents, line: r.line, token: Date.now() });
     } else if (r.kind === 'diff') {
       const patch = versionRef.current?.views.code?.patch;
       const one = patch ? parseDiffToFiles(patch).find((f) => f.path === r.target) : undefined;
       if (one) setViewer({ kind: 'diff', path: one.path, patch: one.patch });
     } else {
-      window.open(r.target, '_blank', 'noreferrer');
+      const url = shapeLinkUrl(r.target);
+      if (url) window.open(url, '_blank', 'noreferrer');
     }
-  }, [refs, renderThread, openPanel, later, reduce, host, id]);
+  }, [refs, renderThread, openPanel, later, reduce, readProjectFile]);
 
   const canOpen = useCallback((r: ShapeRef) => {
     if (r.kind === 'message') return !!renderThread;
@@ -635,7 +658,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         file={phase === 'leaving' ? null : file}
         onOpenFile={(path, line) => setFile({ path, line, token: Date.now() })}
         onCloseFile={() => setFile(null)}
-        readFile={host.readFile ? (path) => host.readFile!(id, path) : undefined}
+        readFile={host.readFile ? readProjectFile : undefined}
         codeHover={host.codeHover ? (req) => host.codeHover!(id, req) : undefined}
         annotations={codeNotes}
         onComment={codeInput('change')}
@@ -652,7 +675,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   return (
     <RefsCtx.Provider value={refsState}>
-      <div ref={rootRef} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
+      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>

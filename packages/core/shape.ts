@@ -288,7 +288,115 @@ const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
 
 export type ShapeCheck<T> = { ok: true; value: T } | { ok: false; errors: string[] };
 
-const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal'];
+// ─── what a drawing may load: only what the board holds ───
+//
+// One allowlist, used twice: here on the store side, so the agent hears at
+// once which field is wrong, and by the board's sanitizer when it draws.
+
+/** Tags a drawing may not hold. `animate` and `set` can rewrite an href after the sanitizer. */
+const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'style', 'template', 'portal', 'source', 'animate', 'set', 'animatemotion', 'animatetransform'];
+
+/** Attributes that load something and have no safe use on a board: dropped. */
+export const SHAPE_DROPPED_ATTRS: readonly string[] = ['srcset', 'imagesrcset', 'poster', 'ping', 'lowsrc', 'dynsrc', 'longdesc'];
+
+/** Attributes that hold a URL: each must pass `shapeUrlAllowed`. */
+export const SHAPE_URL_ATTRS: readonly string[] = ['src', 'href', 'xlink:href', 'action', 'formaction', 'background', 'data', 'cite', 'codebase', 'manifest', 'icon', 'usemap', 'profile', 'archive', 'classid'];
+
+/** A URL as a URL parser reads it: the parser drops tabs and newlines anywhere, so `ht\ttps:` is `https:`. */
+function urlKey(value: string): string {
+  return value.replace(/[\u0000-\u0020\u007f]/g, '').toLowerCase();
+}
+
+const DATA_IMAGE_RE = /^data:image\/(?:png|jpeg|gif|webp)[;,]/;
+/** A file the board keeps: `files/<name>`, one name (the store's own rule: no folder, no dot first) and no escapes. */
+const BOARD_FILE_RE = /^files\/[^/\\%?#.][^/\\%?#]*$/;
+
+/**
+ * May a drawing's URL attribute hold this value? Only what the board holds:
+ * `files/<name>`, `#fragment`, or a `data:image/` PNG, JPEG, GIF or WebP. A
+ * link (`<a href>`) may also point out, over https. Anything else (another
+ * scheme, `//host`, `\\host`, `https:host`, a path) is refused.
+ */
+export function shapeUrlAllowed(value: string, link = false): boolean {
+  const key = urlKey(value);
+  if (key.startsWith('#') || DATA_IMAGE_RE.test(key) || BOARD_FILE_RE.test(key)) return true;
+  if (!link || !key.startsWith('https://')) return false;
+  try {
+    const url = new URL(value.trim());
+    return url.protocol === 'https:' && !!url.hostname;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * A reference's URL as the board opens it: http(s) with a host, else null.
+ * The store checks this too; the board checks again where it opens one,
+ * since a host can hand it a board from anywhere.
+ */
+export function shapeLinkUrl(target: string): string | null {
+  if (!/^https?:\/\//.test(urlKey(target))) return null;
+  try {
+    const url = new URL(target.trim());
+    return (url.protocol === 'https:' || url.protocol === 'http:') && url.hostname ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function codePoint(hex: string): string {
+  const n = parseInt(hex, 16);
+  return n > 0 && n <= 0x10ffff && (n < 0xd800 || n > 0xdfff) ? String.fromCodePoint(n) : '\ufffd';
+}
+
+/** CSS as its tokenizer reads it: comments gone, escapes read (`u\72l(` is `url(`), lower case. */
+function cssKey(css: string): string {
+  return css
+    .replace(/\/\*[\s\S]*?(?:\*\/|$)/g, '')
+    .replace(/\\(?:([0-9a-fA-F]{1,6})(?:\r\n|[ \t\n\r\f])?|(\r\n|[\n\r\f])|([\s\S]))/g, (_, hex?: string, _nl?: string, ch?: string) =>
+      hex ? codePoint(hex) : ch ?? '',
+    )
+    .toLowerCase();
+}
+
+/** The values a CSS text hands to `url(…)`, read as a URL parser reads them. */
+function cssUrls(key: string): string[] {
+  return [...key.matchAll(/url\s*\(\s*["']?([^)"']*)/g)].map((m) => urlKey(m[1] ?? ''));
+}
+
+/**
+ * What a view's CSS (or a `style` attribute) may not hold: imports, fonts,
+ * scripted CSS and anything that loads from outside. `url()` may name only a
+ * `#fragment` or a data:image. Escapes and comments are read first.
+ */
+export function shapeCssProblems(css: string): string[] {
+  const out: string[] = [];
+  const key = cssKey(css);
+  if (/@import/.test(key)) out.push('@import is not allowed');
+  if (/@font-face/.test(key)) out.push('@font-face is not allowed');
+  if (/image-set\s*\(/.test(key)) out.push('image-set() is not allowed; use url() with a data:image');
+  if (/(?:^|[^\w-])src\s*\(/.test(key)) out.push('src() is not allowed; use url() with a data:image');
+  if (cssUrls(key).some((u) => !u.startsWith('#') && !DATA_IMAGE_RE.test(u))) out.push('url() may name only a #fragment or a data:image (png, jpeg, gif, webp)');
+  if (/expression\s*\(|-moz-binding|behavior\s*:/.test(key)) out.push('scripted CSS is not allowed');
+  if (/<\/style/i.test(css)) out.push('</style> is not allowed');
+  return out;
+}
+
+/**
+ * A presentation attribute (`fill`, `mask`, `filter`, `clip-path`,
+ * `marker-*`…) may use `url(#id)` and nothing else that loads.
+ */
+export function shapePaintAllowed(value: string): boolean {
+  const key = cssKey(value);
+  if (/image-set\s*\(|(?:^|[^\w-])src\s*\(/.test(key)) return false;
+  return cssUrls(key).every((u) => u.startsWith('#'));
+}
+
+/** Attributes that only ever hold words. */
+const TEXT_ATTRS = new Set(['title', 'alt', 'class', 'id', 'role', 'lang', 'dir']);
+
+const TAG_RE = /<([a-zA-Z][\w:-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+const ATTR_RE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+)))?/g;
 
 /**
  * What a drawn view's HTML may not hold: scripts, event handlers, and anything
@@ -297,32 +405,62 @@ const FORBIDDEN_TAGS = ['script', 'iframe', 'frame', 'object', 'embed', 'link', 
  */
 export function shapeHtmlProblems(html: string): string[] {
   const out: string[] = [];
+  const add = (p: string) => {
+    if (!out.includes(p)) out.push(p);
+  };
   const lower = html.toLowerCase();
   for (const tag of FORBIDDEN_TAGS) {
     if (new RegExp(`<${tag}[\\s>/]`).test(lower)) {
-      out.push(tag === 'style' ? '<style> is not allowed here; put rules in the view\'s css' : `<${tag}> is not allowed`);
+      add(tag === 'style' ? '<style> is not allowed here; put rules in the view\'s css' : `<${tag}> is not allowed`);
     }
   }
-  if (/<[^>]*\son[a-z]+\s*=/i.test(html)) out.push('event handler attributes (on…=) are not allowed');
-  if (/javascript\s*:/i.test(html)) out.push('javascript: URLs are not allowed');
-  if (/\s(?:src|srcset|poster|xlink:href)\s*=\s*["']?\s*(?:https?:)?\/\//i.test(html)) out.push('nothing may load from outside the board (an http src)');
-  if (/<(?:image|use|feimage)\b[^>]*\shref\s*=\s*["']?\s*(?:https?:)?\/\//i.test(html)) out.push('nothing may load from outside the board (an http href on SVG)');
+  if (/<[^>]*\son[a-z]+\s*=/i.test(html)) add('event handler attributes (on…=) are not allowed');
+  if (/javascript\s*:/i.test(html)) add('javascript: URLs are not allowed');
+  for (const t of html.matchAll(TAG_RE)) {
+    const tag = t[1]!.toLowerCase();
+    const attrs = [...(t[2] ?? '').matchAll(ATTR_RE)].map((a) => ({ name: a[1]!.toLowerCase(), raw: a[2] ?? a[3] ?? a[4] ?? '' }));
+    if (tag === 'input' && attrs.some((a) => a.name === 'type' && decodeEntities(a.raw).trim().toLowerCase() === 'image')) add('<input type="image"> is not allowed');
+    for (const { name, raw } of attrs) {
+      if (name.startsWith('data-') || name.startsWith('aria-') || name.startsWith('on') || TEXT_ATTRS.has(name)) continue;
+      const value = decodeEntities(raw);
+      const shown = value.slice(0, 80);
+      const checked = name === 'style' || SHAPE_URL_ATTRS.includes(name) || /url|image-set|src|\\/i.test(value);
+      // A named character reference this check cannot read (`&colon;`) could hide a scheme or a `(`.
+      if (checked && /&[a-z][a-z0-9]*;/i.test(value)) {
+        add(`${tag} ${name}: write characters plainly, not as named references like &colon;`);
+        continue;
+      }
+      if (SHAPE_DROPPED_ATTRS.includes(name)) add(`${name} is not allowed (it loads from outside the board); use one src`);
+      else if (SHAPE_URL_ATTRS.includes(name)) {
+        const link = tag === 'a' && (name === 'href' || name === 'xlink:href');
+        if (!shapeUrlAllowed(value, link)) {
+          add(`<${tag} ${name}="${shown}">: nothing may load from outside the board; use files/<name>, #id or a data:image${link ? ' (a link may be https://)' : ''}`);
+        }
+      } else if (name === 'style') {
+        for (const p of shapeCssProblems(value)) add(`<${tag} style>: ${p}`);
+      } else if (!shapePaintAllowed(value)) add(`<${tag} ${name}="${shown}">: only url(#id) is allowed here`);
+    }
+  }
   for (const m of html.matchAll(/\sdata-code\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
     const value = m[1] ?? m[2] ?? '';
-    if (!parseShapeCodeTarget(value)) out.push(`data-code="${value.slice(0, 80)}" is not a file and line in the project (write path#L42)`);
+    if (!parseShapeCodeTarget(value)) add(`data-code="${value.slice(0, 80)}" is not a file and line in the project (write path#L42)`);
   }
   return out;
 }
 
-/** What a view's CSS may not hold: imports and outside resources. */
-export function shapeCssProblems(css: string): string[] {
-  const out: string[] = [];
-  if (/@import/i.test(css)) out.push('@import is not allowed');
-  if (/url\(\s*(?!["']?\s*(?:#|data:image\/))/i.test(css)) out.push('url() may name only #fragment or a data:image');
-  if (/expression\s*\(|-moz-binding|behavior\s*:/i.test(css)) out.push('scripted CSS is not allowed');
-  if (/<\/style/i.test(css)) out.push('</style> is not allowed');
-  return out;
+/**
+ * A path in the project, relative to its root: `src/a.ts`. Not absolute
+ * (`/x`, `C:/x`, `~/x`), no `.` or `..` part, no backslash (a UNC path or a
+ * Windows `..\`), no `%` escape, no URL scheme and no control character.
+ */
+export function isShapeProjectPath(path: string): boolean {
+  if (!path || path.length > 500 || path !== path.trim()) return false;
+  if (/[\u0000-\u001f\u007f\\%]/.test(path)) return false;
+  if (path.startsWith('/') || path.startsWith('~') || /^[a-z][a-z0-9+.-]*:/i.test(path)) return false;
+  return path.split('/').every((part) => part !== '' && part !== '.' && part !== '..');
 }
+
+const PROJECT_PATH_RULE = 'must be a path in the project, relative to its root (src/a.ts): no leading / or ~, no drive or scheme, no . or .. part, no backslash or %';
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -374,6 +512,16 @@ class Checker {
       return undefined;
     }
     return value;
+  }
+  /** A path in the project (`isShapeProjectPath`). */
+  path(value: unknown, field: string): string | undefined {
+    const path = this.text(value, field, 500);
+    if (path === undefined) return undefined;
+    if (!isShapeProjectPath(path)) {
+      this.fail(field, `"${path.slice(0, 80)}" ${PROJECT_PATH_RULE}`);
+      return undefined;
+    }
+    return path;
   }
   id(value: unknown, field: string): string | undefined {
     if (typeof value !== 'string' || !PART_ID_RE.test(value)) {
@@ -452,7 +600,7 @@ function checkReqs(c: Checker, value: unknown, field: string): ShapeRequirements
       if (it.code !== undefined && it.code !== null) {
         if (!isRecord(it.code)) c.fail(`${f}.code`, 'must be { path, line }');
         else {
-          const path = c.text(it.code.path, `${f}.code.path`, 500);
+          const path = c.path(it.code.path, `${f}.code.path`);
           const line = c.int(it.code.line, `${f}.code.line`, 1, 10_000_000);
           if (path && line) code = { path, line };
         }
@@ -501,14 +649,14 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
       const outDiffs: CodeGuideOutput['sections'][number]['diffs'] = [];
       diffs.forEach((d, j) => {
         if (!isRecord(d)) return c.fail(`${f}.diffs[${j}]`, 'must be { file, summary }');
-        const file = c.text(d.file, `${f}.diffs[${j}].file`, 500);
+        const file = c.path(d.file, `${f}.diffs[${j}].file`);
         const summary = c.text(d.summary, `${f}.diffs[${j}].summary`, 600, false);
         if (file) outDiffs.push({ file, ...(summary ? { summary } : {}) });
       });
       if (st) outSections.push({ title: st, overview: ov, diffs: outDiffs });
     });
     const unplaced = c.list(g.unplacedFiles, `${field}.guide.unplacedFiles`, 500);
-    const unplacedFiles = unplaced?.filter((p): p is string => typeof p === 'string');
+    const unplacedFiles = unplaced?.filter((p, i): p is string => typeof p === 'string' && c.path(p, `${field}.guide.unplacedFiles[${i}]`) !== undefined);
     if (title) guide = { title, intent, sections: outSections, ...(unplacedFiles?.length ? { unplacedFiles } : {}) };
   }
   const patch = c.text(value.patch, `${field}.patch`, SHAPE_LIMITS.patch, false);
@@ -523,7 +671,7 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
           c.fail(ff, 'must be { path, kind }');
           return [];
         }
-        const path = c.text(f.path, `${ff}.path`, 500);
+        const path = c.path(f.path, `${ff}.path`);
         if (f.kind !== 'new' && f.kind !== 'change') c.fail(`${ff}.kind`, 'must be "new" or "change"');
         return path && (f.kind === 'new' || f.kind === 'change') ? [{ path, kind: f.kind }] : [];
       });
@@ -538,7 +686,7 @@ function checkCode(c: Checker, value: unknown, field: string): ShapeCodeView | u
         c.fail(`${field}.files[${i}]`, 'must be { path, line? }');
         return [];
       }
-      const path = c.text(f.path, `${field}.files[${i}].path`, 500);
+      const path = c.path(f.path, `${field}.files[${i}].path`);
       const line = c.int(f.line, `${field}.files[${i}].line`, 1, 10_000_000, false);
       return path ? [{ path, ...(line ? { line } : {}) }] : [];
     });
@@ -570,8 +718,9 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
     const title = c.text(r.title, `${f}.title`, SHAPE_LIMITS.refText);
     const sub = c.text(r.sub, `${f}.sub`, SHAPE_LIMITS.refText, false);
     const target = c.text(r.target, `${f}.target`, SHAPE_LIMITS.target);
-    if (target && (kind === 'pr' || kind === 'link') && !/^https?:\/\//i.test(target)) c.fail(`${f}.target`, 'must be an http(s) URL');
+    if (target && (kind === 'pr' || kind === 'link') && !shapeLinkUrl(target)) c.fail(`${f}.target`, 'must be an http(s) URL');
     if (target && /^\s*javascript:/i.test(target)) c.fail(`${f}.target`, 'javascript: is not allowed');
+    if (target && (kind === 'file' || kind === 'diff') && !isShapeProjectPath(target)) c.fail(`${f}.target`, `"${target.slice(0, 80)}" ${PROJECT_PATH_RULE}`);
     const line = c.int(r.line, `${f}.line`, 1, 10_000_000, false);
     let images: ShapeRef['images'];
     const imgs = c.list(r.images, `${f}.images`, SHAPE_LIMITS.images);
@@ -644,8 +793,9 @@ function decodeEntities(text: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;|&apos;/g, "'")
     .replace(/&rarr;/g, '→')
-    .replace(/&#(\d+);/g, (_, d: string) => String.fromCodePoint(Number(d)))
-    .replace(/&#x([0-9a-f]+);/gi, (_, h: string) => String.fromCodePoint(parseInt(h, 16)))
+    // A browser reads a numeric reference with or without its `;`.
+    .replace(/&#(\d+);?/g, (_, d: string) => codePoint(Number(d).toString(16)))
+    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => codePoint(h))
     .replace(/&amp;/g, '&');
 }
 
@@ -727,14 +877,14 @@ export interface ShapeCodeTarget {
 
 /**
  * Reads a part's `data-code` ("src/snooze.ts#L42", "src/snooze.ts#L42-L48"
- * or "src/snooze.ts:42"). Null when it is not one: an absolute path, `..`, a
- * URL or no line.
+ * or "src/snooze.ts:42"). Null when it is not one: a path outside the
+ * project (`isShapeProjectPath`: absolute, `..`, a backslash), a URL or no line.
  */
 export function parseShapeCodeTarget(value: string | null | undefined): ShapeCodeTarget | null {
   const m = (value ?? '').trim().match(/^([^#:\s][^#:]*?)(?:#L(\d+)(?:-L?(\d+))?|:(\d+)(?:-(\d+))?)$/);
   if (!m) return null;
   const path = m[1]!;
-  if (path.startsWith('/') || /^[a-z][a-z0-9+.-]*:/i.test(path) || path.split('/').includes('..')) return null;
+  if (!isShapeProjectPath(path)) return null;
   const line = Number(m[2] ?? m[4]);
   const end = m[3] ?? m[5];
   if (!Number.isSafeInteger(line) || line < 1) return null;

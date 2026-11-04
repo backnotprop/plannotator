@@ -6,7 +6,7 @@
 // turn, one slow cycle every 7 s, small enough to read as alive, not busy.
 // While the board is being redrawn (`reshaping`) the same cycle runs at 1.6 s.
 // Reduced motion: no morph at all; state shows as fill and colour only.
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 const RIM: [number, number, number][] = [[-112, 0.42, 0.44], [-48, 0.47, 0.37], [12, 0.45, 0.4], [80, 0.36, 0.42], [150, 0.44, 0.4], [204, 0.47, 0.38]];
 const BODY = 0.7, K = 19, FLAT = 0.86;
@@ -57,8 +57,23 @@ function curve(p: [number, number][]): string {
 pts(0, 0); // measure the fit once, at rest, so the morph never pumps
 export const PEBBLE_REST = curve(pts(0, 0));
 
-export const reducedMotion = () =>
-  typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+const REDUCE_QUERY = '(prefers-reduced-motion: reduce)';
+
+export const reducedMotion = (): boolean => typeof window !== 'undefined' && !!window.matchMedia?.(REDUCE_QUERY).matches;
+
+/** The person's reduced-motion setting, following it when it changes. */
+export function useReducedMotion(): boolean {
+  const [reduce, setReduce] = useState(reducedMotion);
+  useEffect(() => {
+    const mq = typeof window !== 'undefined' ? window.matchMedia?.(REDUCE_QUERY) : undefined;
+    if (!mq) return;
+    const on = () => setReduce(mq.matches);
+    on();
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+  return reduce;
+}
 
 /**
  * The mark. `alive`: Shape mode is on (slow breathing). `reshaping`: the
@@ -66,13 +81,14 @@ export const reducedMotion = () =>
  */
 export function Pebble({ alive, reshaping, size = 20, className = '' }: { alive: boolean; reshaping?: boolean; size?: number; className?: string }) {
   const ref = useRef<SVGPathElement>(null);
+  const reduce = useReducedMotion();
   const state = useRef({ alive, reshaping: !!reshaping });
   state.current = { alive, reshaping: !!reshaping };
 
   useEffect(() => {
     const el = ref.current;
     if (!el) return;
-    if (reducedMotion()) { el.setAttribute('d', PEBBLE_REST); return; }
+    if (reduce) { el.setAttribute('d', PEBBLE_REST); return; }
     let raf = 0, last = performance.now(), phase = 0, amp = 0;
     let visible = true;
     const io = new IntersectionObserver(([e]) => { visible = e.isIntersecting; });
@@ -89,7 +105,7 @@ export function Pebble({ alive, reshaping, size = 20, className = '' }: { alive:
     };
     raf = requestAnimationFrame(step);
     return () => { cancelAnimationFrame(raf); io.disconnect(); };
-  }, []);
+  }, [reduce]);
 
   return (
     <svg className={`shp-pebble ${className}`} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" data-on={alive || undefined} data-busy={reshaping || undefined}>

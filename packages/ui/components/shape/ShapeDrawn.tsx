@@ -11,8 +11,19 @@
 // `data-code="src/a.ts#L42"` calls the host's `onCode` with that file and line.
 import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import DOMPurify from 'dompurify';
-import { parseShapeCodeTarget, shapeCssProblems, type ShapeCodeTarget, type ShapeDrawnView, type ShapeRef } from '@plannotator/core/shape';
-import { reducedMotion } from './Pebble';
+import {
+  parseShapeCodeTarget,
+  shapeCssProblems,
+  shapeLinkUrl,
+  shapePaintAllowed,
+  shapeUrlAllowed,
+  SHAPE_DROPPED_ATTRS,
+  SHAPE_URL_ATTRS,
+  type ShapeCodeTarget,
+  type ShapeDrawnView,
+  type ShapeRef,
+} from '@plannotator/core/shape';
+import { useReducedMotion } from './Pebble';
 
 export interface MarkState {
   fresh: ReadonlySet<string>;
@@ -103,26 +114,42 @@ img { max-width: 100%; }
 // `isSupported` is no proof (a partial DOM reports true and sanitizes
 // nothing), so the sanitizer proves itself on a known bad drawing first; if
 // the proof fails, the board shows no drawing rather than an unsanitized one.
+//
+// Nothing loads from outside the board: every URL attribute goes through the
+// format's allowlist (`files/…`, `#…`, a data:image; a link may be https), a
+// `style` attribute through the view-css rules, and any other attribute may
+// use only `url(#id)`. The values reach the hook decoded, as the page reads them.
 let purifier: ReturnType<typeof DOMPurify> | null | undefined;
-const PROOF_INPUT = '<b onclick="x()">kept</b><script>x()</script><img src="https://evil.test/i.png"><style>p{}</style>';
-const PROOF_FAILED = /onclick|<script|evil\.test|<style/i;
+const PROOF_INPUT =
+  '<b onclick="x()">kept</b><script>x()</script><img src="https:evil.invalid/i.png"><img srcset="https://evil.invalid/s.png 2x"><i style="background:u\\72l(//evil.invalid/a)">i</i><style>p{}</style>';
+const PROOF_FAILED = /onclick|<script|evil\.invalid|<style|srcset/i;
 const CONFIG = {
   ADD_TAGS: ['foreignObject'],
   // HTML inside an SVG's foreignObject (a label in a box) is kept.
   HTML_INTEGRATION_POINTS: { foreignobject: true, 'annotation-xml': true },
   ADD_ATTR: ['pathLength', 'target'],
-  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template'],
+  FORBID_TAGS: ['style', 'script', 'iframe', 'frame', 'object', 'embed', 'link', 'meta', 'base', 'form', 'template', 'source', 'animate', 'set', 'animateMotion', 'animateTransform'],
+  FORBID_ATTR: [...SHAPE_DROPPED_ATTRS],
 };
+const WORDS_ONLY = /^(?:data-|aria-)|^(?:title|alt|class|id|role|lang|dir)$/;
+
+function attributeAllowed(tag: string, name: string, value: string): boolean {
+  if (SHAPE_DROPPED_ATTRS.includes(name)) return false;
+  if (SHAPE_URL_ATTRS.includes(name)) {
+    // An image input loads its src; no input needs one.
+    if (tag === 'input') return false;
+    return shapeUrlAllowed(value, tag === 'a' && (name === 'href' || name === 'xlink:href'));
+  }
+  if (name === 'style') return shapeCssProblems(value).length === 0;
+  return WORDS_ONLY.test(name) || shapePaintAllowed(value);
+}
 
 function sanitizer(): ReturnType<typeof DOMPurify> | null {
   if (purifier !== undefined) return purifier;
   const p = DOMPurify(window);
   p.addHook('uponSanitizeAttribute', (node, data) => {
-    // Nothing loads from outside the board; a link may still point out.
-    if (/^(src|srcset|poster|href|xlink:href)$/i.test(data.attrName) && /^\s*(https?:)?\/\//i.test(data.attrValue)) {
-      const isLink = (node as Element).tagName?.toLowerCase() === 'a' && /^href$/i.test(data.attrName);
-      if (!isLink) data.keepAttr = false;
-    }
+    const tag = ((node as Element).localName ?? (node as Element).tagName ?? '').toLowerCase();
+    if (!attributeAllowed(tag, data.attrName.toLowerCase(), data.attrValue)) data.keepAttr = false;
   });
   const proof = p.sanitize(PROOF_INPUT, CONFIG);
   purifier = PROOF_FAILED.test(proof) || !proof.includes('kept') ? null : p;
@@ -194,10 +221,12 @@ function useFit(ref: React.RefObject<HTMLElement | null>, enabled: boolean) {
 }
 
 const noop = () => {};
+const FRAME_CONTAIN: React.CSSProperties = { contain: 'layout', clipPath: 'inset(-24px)' };
 
 export function ShapeDrawn(props: ShapeDrawnProps) {
   const { drawn, phase = 'drawn', skip = false, pinpoint = false, marks = NO_MARKS, refs = [], refHover = null, refFlash = null } = props;
-  const reduce = props.reduce ?? reducedMotion();
+  const systemReduce = useReducedMotion();
+  const reduce = props.reduce ?? systemReduce;
   const frameRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
   const rootRef = useRef<ShadowRoot | null>(null);
@@ -325,8 +354,11 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       const n = Number(b.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) return;
-      if (ref.kind === 'pr' || ref.kind === 'link') window.open(ref.target, '_blank', 'noreferrer');
-      else handlers.current.onRefOpen?.(n);
+      if (ref.kind !== 'pr' && ref.kind !== 'link') handlers.current.onRefOpen?.(n);
+      else {
+        const url = shapeLinkUrl(ref.target);
+        if (url) window.open(url, '_blank', 'noreferrer');
+      }
     };
     const openCode = (el: HTMLElement) => {
       const at = parseShapeCodeTarget(el.getAttribute('data-code'));
@@ -388,8 +420,20 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     };
   }, [contentKey]);
 
+  // The frame contains the drawing: its css styles the shadow host (`:host`),
+  // and without this `:host { position: fixed; inset: 0 }` (or a huge
+  // transform) would lay the drawing over the whole app. Layout containment
+  // makes the frame the box anything fixed is placed in, and the clip keeps
+  // every pixel within 24px of the frame: room for a ring, a focus outline
+  // or a border a pixel over, which paint containment would cut. Inline, so
+  // it holds even where the host page has not loaded shape.css.
   return (
-    <div ref={frameRef} className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}`} onPointerLeave={() => props.onHoverMark?.(null)}>
+    <div
+      ref={frameRef}
+      className={`shp-drawn${canvas ? ' canvas' : ''}${useTall ? ' tall' : ''}`}
+      style={FRAME_CONTAIN}
+      onPointerLeave={() => props.onHoverMark?.(null)}
+    >
       <div className="shp-drawn-fit" style={scaled && fit ? { width: drawn.width! * k, height: drawn.height! * k } : undefined}>
         <div ref={hostRef} className="shp-drawn-host" />
       </div>
