@@ -7373,6 +7373,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-decide { display: inline-flex; flex: none; }
 /* Where a pull request's review goes (the owner's answer C on #2590): the forge or the agent, chosen at the end. */
 .ib-rv-dest { flex: none; }
+.ib-rv-decide[data-review-posts] { gap: 6px; }
 .ib-rv-dest .ib-seg-o { gap: 5px; }
 .ib-rv-dest .ib-rv-dest-mark { width: 14px; height: 14px; flex: none; }
 .ib-rv-dest .ib-atile { width: 16px; height: 16px; background: transparent; }

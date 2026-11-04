@@ -89,6 +89,8 @@ interface Forge {
   calls: { cli: string; args: string[] }[];
   graphql: () => { cli: string; args: string[] }[];
   fail: string | null;
+  /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
+  heads: string[] | null;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -96,9 +98,11 @@ function forge(answer: unknown = GH_ANSWER): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
+    heads: null,
     graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (cli === "gh" && args.includes("graphql")) {
@@ -208,6 +212,7 @@ function gitlabForge(): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
+    heads: null,
     graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
@@ -376,8 +381,10 @@ describe("on", () => {
     const before = w.forge.calls.length;
     const layer = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#413")}&scope=layer`);
     expect(layer.status).toBe(200);
-    const layerAnswer = (await layer.json()) as { patch: string; base: string; head: string };
+    const layerAnswer = (await layer.json()) as { patch: string; base: string; head: string; head_sha: string | null };
     expect(layerAnswer.patch).toBe("diff of repos/northwind/billing-svc/pulls/413\n");
+    // The layer's head, read before and after its patch.
+    expect(layerAnswer.head_sha).toBe("413".padStart(40, "a"));
     const stack = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#413")}&scope=stack`);
     const stackAnswer = (await stack.json()) as { patch: string; base: string; head: string };
     expect(stackAnswer.patch).toBe("diff of repos/northwind/billing-svc/compare/main...retry/backoff\n");
@@ -387,7 +394,8 @@ describe("on", () => {
 
     const unknown = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/elsewhere/thing#9")}&scope=layer`);
     expect(unknown.status).toBe(404);
-    expect(w.forge.calls.length).toBe(before + 2);
+    // The layer: its head, its patch, its head again; the stack: its compare.
+    expect(w.forge.calls.length).toBe(before + 4);
   });
 });
 
@@ -714,6 +722,54 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls).toHaveLength(1);
     expect((await w.review({ ...review, body: "Ship it, and watch the retries." })).status).toBe(200);
     expect(w.post.calls).toHaveLength(2);
+  });
+
+  test("a second review at the same head with the same main comment but another line comment posts (200)", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const one = { path: "src/retry.ts", line: 12, side: "RIGHT", body: "Cap the backoff." };
+    const two = { path: "src/retry.ts", line: 20, side: "RIGHT", body: "Log the attempt." };
+    const review = { key: PR412, head_sha: SHA412, action: "comment", body: "See inline comments." };
+    expect((await w.review({ ...review, fileComments: [one] })).status).toBe(200);
+    expect((await w.review({ ...review, fileComments: [two] })).status).toBe(200);
+    expect(w.post.calls).toHaveLength(2);
+  });
+
+  test("posted at the head of the patch the person read, which the forge moved past the list; a head never read is refused", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const pushed = "b".repeat(40);
+    w.forge.heads = [pushed, pushed];
+    const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
+    expect(diff.head_sha).toBe(pushed);
+    const res = await w.review({ key: PR412, head_sha: pushed, action: "comment", body: "On the pushed commit.", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "Here." }] });
+    expect(res.status).toBe(200);
+    expect((w.post.calls[0]!.input as { commit_id: string }).commit_id).toBe(pushed);
+    const never = await w.review({ key: PR412, head_sha: "c".repeat(40), action: "approve", body: "" });
+    expect(((await never.json()) as { code: string }).code).toBe("pull_moved");
+    expect(w.post.calls).toHaveLength(1);
+  });
+
+  test("a push between the head reads leaves the patch's head unknown", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.forge.heads = ["b".repeat(40), "c".repeat(40)];
+    const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
+    expect(diff.head_sha).toBeNull();
+  });
+
+  test("a merged PR is refused (409 pull_closed) and runs nothing", async () => {
+    const merged = { data: { ...GH_ANSWER.data, merged: { nodes: [ghPull(411, { state: "MERGED", mergedAt: "2026-11-02T10:00:00Z" })] } } };
+    const w = await world({ codeReview: true, answer: merged });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const res = await w.review({ key: "github.com/northwind/billing-svc#411", head_sha: "411".padStart(40, "a"), action: "approve", body: "" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_closed");
+    expect(w.post.calls).toEqual([]);
   });
 
   test("GitLab: a note, a discussion per line comment, then the approval", async () => {

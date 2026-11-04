@@ -140,6 +140,10 @@ function writeForge(dir: string) {
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
     'fi',
+    // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
+    '  echo "gh head $4" >> "$calls"; printf "%040d\\n" "${4##*/}"; exit 0',
+    'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
     '  f="$dir/gh-$(name "$4").patch"',
@@ -1015,7 +1019,8 @@ test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment
     await pause(1200);
     await page.locator('[data-pulls-stack] [data-pulls-review-layers]').click();
     await pause(1200);
-    await commentOn(page, 'src/settings/Layout.tsx', 3, 'ms-6 flips with dir; check the sidebar in Hebrew too.');
+    // Not the review the test above posted (the Inbox refuses the same review twice).
+    await commentOn(page, 'src/settings/Layout.tsx', 3, 'Mirror the sidebar icons too, for Arabic and Hebrew.');
     await pause(1500);
     await review.locator('[data-review-posts] [data-decision-caret]').click();
     await pause(900);

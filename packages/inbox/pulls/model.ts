@@ -325,6 +325,16 @@ function pullSubject(target: PullReviewTarget): string {
 }
 
 /**
+ * What a hand-off sent from compose (+ New agent) asked for: a guided review when the words still hold the guided
+ * line (`ask_line`) as a line of its own, else a custom curation. A line, not a substring: a custom curation's
+ * `/review-curate <words>` contains the own-PR guided line `/review-curate`.
+ */
+export function pullLaunchAsk(body: string, askLine: string): 'guide' | 'custom' {
+  const wanted = askLine.trim();
+  return wanted !== '' && body.split('\n').some((line) => line.trim() === wanted) ? 'guide' : 'custom';
+}
+
+/**
  * The person's verdict on a PR layer (or a stack), as the reply into the
  * agent's thread: the verdict words, the note, then the comments in the
  * review app's export (`guideCommentSections`), under "Feedback on <noun>".

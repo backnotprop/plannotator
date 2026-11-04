@@ -173,9 +173,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const canDecide = !!link?.last;
   // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
   // teammate's, with or without an agent. The person chooses at the end where the review goes.
-  const canPost = !!postablePull(layer);
+  // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
+  // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead).
+  const postHead = scope === 'layer' ? (diff?.head_sha ?? null) : (layer?.head_sha ?? null);
+  const canPost = !!postablePull(layer) && (!diff || !!postHead);
   const [picked, pick] = useReviewDestination();
-  const ending = reviewEnding(layer, canDecide, picked);
+  const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
   const save = (annotation: CodeAnnotation) => write({ comments: [...comments.filter((c) => c.id !== annotation.id), annotation] });
@@ -346,6 +349,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             }
             comments={comments}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
+            headSha={postHead}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}

@@ -18,7 +18,7 @@ import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { INBOX_REVIEW_SKILL_TEXTS } from '@plannotator/core/inbox-review';
-import { PULL_HANDOFF_TITLE_MAX, pullHandoffMessage, pullTitleCode } from './model';
+import { PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullLaunchAsk, pullTitleCode } from './model';
 
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
@@ -113,6 +113,8 @@ const liveSession = (session: string, _project: string) => ({ session, host: 'cl
 let sessionsAnswer: Record<string, unknown> = {};
 /** What `POST /api/inbox/pulls/review` answers (Post to GitHub/GitLab), and its status. */
 let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
+/** The head commit the layer patch is read at (`InboxPullDiffAnswer.head_sha`). */
+let diffHead: string | null = 'a'.repeat(40);
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -129,6 +131,7 @@ beforeEach(() => {
   };
   shown.length = 0;
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
+  diffHead = 'a'.repeat(40);
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = new URL(String(input), 'http://127.0.0.1');
@@ -145,7 +148,7 @@ beforeEach(() => {
       const scope = url.searchParams.get('scope')!;
       asked.push({ key, scope });
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
-      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch });
+      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -305,6 +308,30 @@ test.skipIf(!hasDom)("a teammate's PR posts the full verdict: Approve goes on th
   expect(el('[data-review-posts] [data-decision-primary]').textContent).toContain('Post Comments');
 });
 
+test.skipIf(!hasDom)("the post is pinned to the head of the patch read, not the list's older one", async () => {
+  const listed = 'a'.repeat(40);
+  const read = 'c'.repeat(40);
+  diffHead = read;
+  // Its own push time: the window keeps a patch read a moment ago per push.
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: listed, updated_at: '2026-11-03T12:00:00.000Z' };
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
+  await settle();
+  await act(async () => el('[data-review-posts] [data-decision-primary]').click());
+  await settle();
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(posted.filter((p) => p.path.endsWith('/pulls/review')).map((p) => p.body.head_sha)).toEqual([read]);
+});
+
+test.skipIf(!hasDom)('a patch whose head the forge did not pin down posts nothing: Open on GitHub instead', async () => {
+  diffHead = null;
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: 'a'.repeat(40), updated_at: '2026-11-03T12:30:00.000Z' };
+  mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
+  await settle();
+  expect(document.querySelector('[data-review-posts]')).toBeNull();
+  expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(theirs.url);
+});
+
 test.skipIf(!hasDom)('a new push after a post offers the decision again', async () => {
   const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
   const answer = (head: string) => ({ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? { ...theirs, head_sha: head } : p)) });
@@ -312,7 +339,14 @@ test.skipIf(!hasDom)('a new push after a post offers the decision again', async 
     const [now, setNow] = useState(answer(SHA));
     return (
       <>
-        <button type="button" data-test-push="" onClick={() => setNow(answer('b'.repeat(40)))} />
+        <button
+          type="button"
+          data-test-push=""
+          onClick={() => {
+            diffHead = 'b'.repeat(40);
+            setNow({ ...answer('b'.repeat(40)), pulls: answer('b'.repeat(40)).pulls.map((p) => (p.number === 880 ? { ...p, updated_at: '2026-11-03T11:00:00.000Z' } : p)) });
+          }}
+        />
         <PullReview model={now} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />
       </>
     );
@@ -678,6 +712,19 @@ test.skipIf(!hasDom)("a note drafted on one layer does not ride into the next la
 });
 
 // --- P2-F: a PR's title is its author's text, quoted, never the person's words ---
+
+test("+ New agent's Send: a custom curation is recorded as custom, the guided line only when it is a line of its own", () => {
+  const own = inboxPullStacks([pull(412)])[0]!;
+  const guideLine = pullHandoffAskLine(own, { kind: 'guide' });
+  expect(guideLine).toBe('/review-curate');
+  expect(pullLaunchAsk(pullHandoffMessage(own, { kind: 'guide' }), guideLine)).toBe('guide');
+  // `/review-curate Check the fallback` holds `/review-curate` as a substring: still a custom curation.
+  expect(pullLaunchAsk(pullHandoffMessage(own, { kind: 'custom', words: 'Check the fallback' }), guideLine)).toBe('custom');
+  const layered = inboxPullStacks(stack)[0]!;
+  const stackLine = pullHandoffAskLine(layered, { kind: 'guide' });
+  expect(pullLaunchAsk(pullHandoffMessage(layered, { kind: 'guide' }), stackLine)).toBe('guide');
+  expect(pullLaunchAsk(pullHandoffMessage(layered, { kind: 'custom', words: 'Only the SQL' }), stackLine)).toBe('custom');
+});
 
 test('a hostile title is one line, cut, inside a code span; an unsafe branch and a bad link are left out', () => {
   const hostile = pull(7, {

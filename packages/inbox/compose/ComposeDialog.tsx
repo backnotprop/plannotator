@@ -60,6 +60,7 @@ import {
   type ComposeTarget,
 } from './model';
 import { newUuid } from '../uuid';
+import { pullLaunchAsk } from '../pulls/model';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -354,7 +355,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         ...(draft ? { draft_id: draft.id } : {}),
         ...(boardChip && boardRequest ? { board_request: true as const } : {}),
       });
-      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: pulls ? (body.includes(pulls.ask_line) ? 'guide' : 'custom') : null });
+      props.onSent({ threadId: result.thread_id, session: target.session, host: target.host, projectName: result.project?.name ?? target.project.name, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: pulls ? pullLaunchAsk(body, pulls.ask_line) : null });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();

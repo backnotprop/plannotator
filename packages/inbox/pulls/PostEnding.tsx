@@ -74,20 +74,34 @@ export interface PostEndingProps {
   onPick: (next: ReviewDestination) => void;
   /** The review went on the PR: the host clears its comments and says so. */
   onPosted: (result: { action: PlatformAction; url: string; label: string }) => void;
+  /**
+   * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
+   * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
+   */
+  headSha?: string | null;
+  /** The server said the PR moved past the commit posted to (`pull_moved`): the host reads it again. */
+  onMoved?: () => void;
 }
 
-export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick, onPosted }: PostEndingProps) {
+export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, onPick, onPosted, headSha, onMoved }: PostEndingProps) {
   const phone = usePhone();
-  const target = useMemo(() => postablePull(pull), [pull]);
+  const target = useMemo(() => {
+    const listed = postablePull(pull);
+    if (!listed || headSha === undefined) return listed;
+    return headSha ? { ...listed, head_sha: headSha } : null;
+  }, [pull, headSha]);
   const rules = target ? platformRules(target) : null;
   const destination: ReviewDestination = !target ? 'agent' : !agent ? 'forge' : picked;
   const choose = onPick;
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
-  // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written.
+  // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
+  // comment already posted at this head is not posted again; a follow-up carries only what is new (or a main comment).
   const [done, setDone] = useState<{ key: string; head: string; action: PlatformAction; ids: ReadonlySet<string> } | null>(null);
-  const isDone = !!done && !!target && done.key === target.key && done.head === target.head_sha && comments.every((c) => done.ids.has(c.id));
+  const sameHead = !!done && !!target && done.key === target.key && done.head === target.head_sha;
+  const comments = useMemo(() => (sameHead ? all.filter((c) => !done!.ids.has(c.id)) : all), [sameHead, all, done]);
+  const isDone = sameHead && comments.length === 0;
   const name = useId();
 
   const spec = useMemo(
@@ -155,10 +169,25 @@ export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
           {isDone ? (
-            <button type="button" className="ib-btn ib-sm ib-rv-posted-done" disabled data-review-posted-done={done!.action}>
-              <Icon name="checkCircle" size={14} />
-              {postedWords({ label: rules.label, action: done!.action })}
-            </button>
+            <>
+              <button type="button" className="ib-btn ib-sm ib-rv-posted-done" disabled data-review-posted-done={done!.action}>
+                <Icon name="checkCircle" size={14} />
+                {postedWords({ label: rules.label, action: done!.action })}
+              </button>
+              {/* A follow-up: a main comment only (the dialog needs one when there is nothing new to post). */}
+              <button
+                type="button"
+                className="ib-btn ib-sm"
+                disabled={busy || !!open}
+                onClick={() => {
+                  setMounted(true);
+                  setOpen({ action: 'comment', chooseEvent: false });
+                }}
+                data-review-post-followup=""
+              >
+                Comment…
+              </button>
+            </>
           ) : (
             <DecisionControl spec={spec} handlers={handlers} busy={busy || !!open} isLoading={false} labelBreakpoint="md" />
           )}
@@ -171,12 +200,24 @@ export function PostEnding({ pull, agent, comments, anchor, busy, picked, onPick
             open={open}
             comments={comments}
             anchor={anchor}
-            post={inboxApi.pullReviewPost}
+            post={async (request) => {
+              const response = await inboxApi.pullReviewPost(request);
+              if (response.status === 409 && onMoved) {
+                const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+                if (answer?.code === 'pull_moved') {
+                  setOpen(null);
+                  onMoved();
+                }
+              }
+              return response;
+            }}
             onClose={() => setOpen(null)}
             onPosted={(result) => {
               setOpen(null);
-              setDone({ key: target.key, head: target.head_sha, action: result.action, ids: new Set(comments.map((c) => c.id)) });
-              onPosted({ ...result, label: rules.label });
+              // A follow-up comment after an approval still reads as the approval.
+              const action = sameHead && result.action === 'comment' ? done!.action : result.action;
+              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameHead ? done!.ids : []), ...comments.map((c) => c.id)]) });
+              onPosted({ ...result, action, label: rules.label });
             }}
           />
         </Suspense>

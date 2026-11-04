@@ -3484,8 +3484,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (pull.state !== "open" && pull.state !== "draft") return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
-        if (!pull.head_sha) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
-        if (body.head_sha !== pull.head_sha) return json({ error: "This pull request has new commits since you read it. Read it again, then post.", code: "pull_moved" }, 409);
+        // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
+        // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
+        const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
+        if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+        const headSha = typeof body.head_sha === "string" && heads.includes(body.head_sha) ? body.head_sha : null;
+        if (!headSha) return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
         const ref: PRRef | null =
           pull.platform === "github"
             ? (() => {
@@ -3496,10 +3500,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!ref) return json({ error: "That pull request's repository can't be read here.", code: "pull_unknown" }, 404);
         // The same review twice (a second click, a replayed request): refused, never posted again. Kept while this
         // Inbox runs, for a review that fully went.
-        const fingerprint = JSON.stringify([pull.key, pull.head_sha, action, text]);
+        const fingerprint = JSON.stringify([pull.key, headSha, action, text, fileComments, fileLevelComments]);
         if (postedReviews.has(fingerprint)) return json({ error: "This review is already on the pull request.", code: "already_posted" }, 409);
         try {
-          const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, pull.head_sha, action, text, fileComments, fileLevelComments);
+          const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
           if (submission.status === "complete") {
             postedReviews.add(fingerprint);
             while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);

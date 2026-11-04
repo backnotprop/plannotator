@@ -125,6 +125,11 @@ export interface InboxPullDiffAnswer {
   base: string;
   head: string;
   patch: string;
+  /**
+   * The head commit this layer's patch is of, read from the forge just before and just after the patch (null when
+   * they differ, when the forge did not say, and for the whole stack). A review posted from it is pinned to it.
+   */
+  head_sha?: string | null;
 }
 
 export type InboxPullDiffScope = "layer" | "stack";

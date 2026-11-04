@@ -86,19 +86,30 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
   const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
+  // `pull_moved` on a post: the PR was pushed since it was read here. Read again from the forge, then offered at its new
+  // head (the review's comments ride the body, so they do not depend on the commit).
+  const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
+  const [reread, setReread] = useState(0);
   useEffect(() => {
-    setPostPull(null);
+    if (reread === 0) setPostPull(null);
     if (!postKey) return;
     const controller = new AbortController();
-    inboxApi.pulls(false, controller.signal).then(
+    inboxApi.pulls(reread > 0, controller.signal).then(
       (answer) => {
-        if (!controller.signal.aborted) setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? null);
+        if (controller.signal.aborted) return;
+        setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? null);
+        if (reread > 0) setMoved('read');
       },
       () => {
         // The list could not be read: the agent's ending alone, as before.
+        if (!controller.signal.aborted && reread > 0) setMoved('failed');
       },
     );
     return () => controller.abort();
+  }, [postKey, reread]);
+  useEffect(() => {
+    setMoved(null);
+    setReread(0);
   }, [postKey]);
   const [picked, pick] = useReviewDestination();
   const ending = reviewEnding(postPull, verdict, picked);
@@ -340,7 +351,14 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
             busy={sending || route.open}
             picked={picked}
             onPick={pick}
-            onPosted={(result) => setPosted({ label: result.label, url: result.url, action: result.action })}
+            onPosted={(result) => {
+              setMoved(null);
+              setPosted({ label: result.label, url: result.url, action: result.action });
+            }}
+            onMoved={() => {
+              setMoved('reading');
+              setReread((n) => n + 1);
+            }}
           />
         ) : (
           !readOnly &&
@@ -465,6 +483,15 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                 )}
               </select>
             </div>
+          )}
+          {moved && (
+            <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
+              {moved === 'reading'
+                ? 'This pull request has new commits since you opened this review. Reading it again…'
+                : moved === 'read'
+                  ? 'This pull request has new commits since you opened this review. Read again: your review now posts to its newest commit.'
+                  : 'This pull request has new commits, and it could not be read again. Try again in a moment.'}
+            </p>
           )}
           {posted && (
             <div className="ib-prr-posted" role="status" data-pull-review-posted={posted.action}>

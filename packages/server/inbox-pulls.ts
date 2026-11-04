@@ -313,6 +313,8 @@ export interface InboxPulls {
   find(key: string): InboxPull | null;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
+  readHead(key: string): string | null;
 }
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
@@ -385,6 +387,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const holdUntil = new Map<string, number>();
   const signed = new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>> }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
+  const readHeads = new Map<string, string>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
 
@@ -492,6 +495,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     find(key) {
       return known.get(key) ?? null;
     },
+    readHead: (key) => readHeads.get(key) ?? null,
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
@@ -532,6 +536,20 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
+      // A layer's head commit, read around its patch: a push between the two reads leaves it unknown (no post).
+      const headNow = async (): Promise<string | null> => {
+        const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
+        if (!read || read.exitCode !== 0) return null;
+        if (pull.platform === "github") return shaOf(read.stdout.trim());
+        try {
+          const mr = obj(JSON.parse(read.stdout));
+          return shaOf(mr.sha) ?? shaOf(obj(mr.diff_refs).head_sha);
+        } catch {
+          return null;
+        }
+      };
+      const headBefore = scope === "layer" ? await headNow() : null;
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -556,7 +574,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
         }
       }
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch };
+      const headAfter = headBefore ? await headNow() : null;
+      const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+      if (head_sha) readHeads.set(key, head_sha);
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, ...(scope === "layer" ? { head_sha } : {}) };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);

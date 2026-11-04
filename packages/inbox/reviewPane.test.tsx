@@ -72,6 +72,10 @@ let replyAnswer: () => Response = () => Response.json({ reply: {}, questions: []
 let backs = 0;
 /** Post to GitHub/GitLab: what went to `POST /api/inbox/pulls/review`, and the list the review reads its PR from. */
 let reviewPosts: Record<string, unknown>[] = [];
+/** The answer to the next `POST /pulls/review`, and the head the pull list reads (a refresh included). */
+let reviewReply: () => Response = () => Response.json({ ok: true, prUrl: 'https://github.com/acme/ledger/pull/880', submission: { status: 'complete' } });
+let listHead = 'a'.repeat(40);
+let listReads: string[] = [];
 const PR_KEY = 'github.com/acme/ledger#880';
 const PR = {
   key: PR_KEY, platform: 'github', host: 'github.com', repo: 'acme/ledger', number: 880, url: 'https://github.com/acme/ledger/pull/880', title: 'RTL layout',
@@ -84,6 +88,9 @@ beforeEach(() => {
   savedFetch = globalThis.fetch;
   posted = [];
   reviewPosts = [];
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  listHead = 'a'.repeat(40);
+  listReads = [];
   window.localStorage.clear();
   others = [OTHER];
   backs = 0;
@@ -94,7 +101,7 @@ beforeEach(() => {
     if (init?.method === 'POST') {
       if (path.endsWith('/pulls/review')) {
         reviewPosts.push(JSON.parse(String(init.body)));
-        return Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+        return reviewReply();
       }
       if (path.endsWith('/reply')) {
         posted.push(JSON.parse(String(init.body)));
@@ -102,7 +109,10 @@ beforeEach(() => {
       }
       return Response.json({});
     }
-    if (path.endsWith('/api/inbox/pulls')) return Response.json({ fetched_at: null, hosts: [], pulls: [PR], links: {}, projects: {}, cards: {} });
+    if (/\/api\/inbox\/pulls(\?|$)/.test(path)) {
+      listReads.push(path);
+      return Response.json({ fetched_at: null, hosts: [], pulls: [{ ...PR, head_sha: listHead }], links: {}, projects: {}, cards: {} });
+    }
     if (path.includes('/guide')) return Response.json({ message_id: REVIEW, guide: message.guide, snapshot });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     if (path.includes('/sessions')) {
@@ -191,6 +201,46 @@ test.skipIf(!hasDom)("a teammate's PR posts its full verdict on GitHub, while it
   expect(reviewPosts[0]).toMatchObject({ key: PR_KEY, head_sha: PR.head_sha, action: 'approve' });
   expect(posted).toEqual([]);
   expect(document.querySelector('[data-pull-review-posted]')?.textContent).toContain('Approved on GitHub');
+});
+
+/** Types into the open dialog's main comment, as a person does (React reads the input event). */
+function typeMainComment(words: string) {
+  const box = document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!;
+  Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, 'value')!.set!.call(box, words);
+  box.dispatchEvent(new Event('input', { bubbles: true }));
+}
+const dialogButton = (words: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words)!;
+
+test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push since (pull_moved) reads the PR again and posts at its new head', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(document.querySelector('[data-review-posted-done]')?.textContent).toContain('Approved on GitHub');
+  // Only the main comment changed: a follow-up, with no line comments posted again.
+  await click('[data-review-post-followup]');
+  act(() => typeMainComment('Also: the sidebar icons.'));
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'comment', fileComments: [] });
+  expect(String(reviewPosts.at(-1)!.body)).toContain('Also: the sidebar icons.');
+  expect(document.querySelector('[data-review-posted-done]')?.textContent).toContain('Approved on GitHub');
+
+  // Pushed since: the post is refused, the PR is read again from the forge, and the next post goes at the new head.
+  reviewReply = () => Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-post-followup]');
+  act(() => typeMainComment('One more.'));
+  await act(async () => dialogButton('Post Comments').click());
+  await settle();
+  expect(listReads.at(-1)).toContain('refresh=1');
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
 });
 
 test.skipIf(!hasDom)('a thread that owns the person\'s PR offers both endings: its agent by default, GitHub on a pick', async () => {
