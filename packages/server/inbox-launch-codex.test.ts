@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
+import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_NO_LONGER_WAITING, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
@@ -773,5 +773,149 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     again.store.sendReply(root.id, { words: "Three.", idempotency_key: "reply-3" });
     await until(() => starts().length === before + 2);
     expect(fromLogin()).toBe(true);
+  });
+});
+
+// ── Codex's own questions (inbox-launch-codex-questions.ts), round trips with the fake app-server ──
+
+describe.skipIf(process.platform === "win32")("Codex's own questions behind LaunchHost", () => {
+  const ROUNDING = { id: "rounding", header: "Rounding", question: "Round refunds how?", isOther: true, options: [{ label: "Banker's rounding (Recommended)", description: "Matches the ledger" }, { label: "Half up", description: "Simpler" }] };
+  const asks = (store: InboxStore, root: InboxMessage, threadId: string) =>
+    messagesOf(store, root.thread_id).filter((m) => m.author.session === `perm:ask:${threadId}` && store.questionsOf(m.id).length > 0);
+  const notes = (store: InboxStore, cardId: string) => messagesOf(store, store.message(cardId)!.thread_id).filter((m) => m.reply_to === cardId && m.author.kind === "agent" && !m.body.includes(":::")).map((m) => m.body);
+  /** The window's way: each question's pick (a label, Other… words, or a free text), then one Send. */
+  const answerAsk = (store: InboxStore, cardId: string, picks: ({ label: string } | { other: string } | { text: string })[]) => {
+    const qs = store.questionsOf(cardId);
+    const entries = qs.map((q, i) => {
+      const p = picks[i]!;
+      return { key: q.key, revision: q.revision, answer: { v: 1 as const, key: q.key, kind: q.kind as "single" | "text", prompt: q.prompt, selected: "label" in p ? [p.label] : [], ...("other" in p ? { other: p.other } : {}), ...("text" in p ? { text: p.text } : {}) } };
+    });
+    const saved = store.savePicks(cardId, entries, { unsentOnly: true });
+    store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: saved.map((q) => ({ key: q.key, revision: q.revision })) });
+  };
+  const sweepUntil = async (launch: World["launch"], check: () => boolean) => {
+    for (let i = 0; i < 100 && !check(); i++) {
+      launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(check()).toBe(true);
+  };
+  const settled = (w: World, method: string) => w.codex.approvals().filter((a) => a.method === method);
+
+  test("a single-choice requestUserInput is a question card in the thread; the pick goes back as Codex's own label, and Codex's turn goes on with it", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(card.author).toMatchObject({ kind: "agent", host: "codex", name: "Codex" });
+    const q = w.store.questionsOf(card.id)[0]!;
+    expect(q.prompt).toBe("Round refunds how?");
+    expect(q.choices.map((c) => [c.label, c.recommended])).toEqual([["Banker's rounding", true], ["Half up", false]]);
+    // The run line: Codex waits on the person's answer.
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    expect(await w.launch.runOf(root.id)).toMatchObject({ state: "waiting_answer", agent: "codex" });
+    answerAsk(w.store, card.id, [{ label: "Half up" }]);
+    await sweepUntil(w.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]).toMatchObject({ threadId, result: { answers: { rounding: { answers: ["Half up"] } } }, how: "answered" });
+    await until(() => w.codex.turns().some((t) => t.ended === "completed"));
+    // Delivered to the card, never handed to Codex again as a turn.
+    expect(w.store.message(w.store.questionsOf(card.id)[0]!.sent_reply_id!)!.delivery).toMatchObject({ session: `perm:ask:${threadId}` });
+    expect(w.codex.turns().filter((t) => t.how)).toHaveLength(1);
+  });
+
+  test("free text: a question with no options is answered in the card's text box, and a choice's Other… is the person's own words", async () => {
+    const free = { id: "flag", header: "Name", question: "What should the flag be called?", isOther: false, options: null };
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [free, ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(w.store.questionsOf(card.id).map((q) => q.kind)).toEqual(["text", "single"]);
+    answerAsk(w.store, card.id, [{ text: "refund_cents" }, { other: "Round at the end of the month" }]);
+    await sweepUntil(w.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]!.result).toEqual({ answers: { flag: { answers: ["refund_cents"] }, rounding: { answers: ["Round at the end of the month"] } } });
+  });
+
+  test("an MCP elicitation form is a card of its fields; the answer goes back as accept with their values", async () => {
+    const request = {
+      mode: "form",
+      _meta: null,
+      message: "Where should the release notes go?",
+      requestedSchema: { type: "object", properties: { folder: { type: "string", title: "Folder" }, format: { type: "string", title: "Format", oneOf: [{ const: "md", title: "Markdown" }, { const: "html", title: "HTML" }] } }, required: ["folder"] },
+    };
+    const w = world({ config: { prompts: [{ kind: "elicitation", serverName: "docs", request }] } });
+    const root = await w.send("Write the notes.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Write the notes."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(card.body.startsWith("Where should the release notes go?")).toBe(true);
+    expect(w.store.questionsOf(card.id).map((q) => q.prompt)).toEqual(["Folder", "Format"]);
+    answerAsk(w.store, card.id, [{ text: "docs/releases" }, { label: "Markdown" }]);
+    await sweepUntil(w.launch, () => settled(w, "mcpServer/elicitation/request").length === 1);
+    expect(settled(w, "mcpServer/elicitation/request")[0]!.result).toEqual({ action: "accept", content: { folder: "docs/releases", format: "md" }, _meta: null });
+  });
+
+  test("unanswered: Codex keeps waiting (its question blocks, as in its own TUI); the card stays open", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    for (let i = 0; i < 20; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()).toEqual([]);
+    expect(w.store.questionsOf(asks(w.store, root, threadId)[0]!.id)[0]!.state).toBe("open");
+    expect(w.codex.threads()[threadId]!.turns.at(-1)!.status).toBe("inProgress");
+  });
+
+  test("the session goes away: Stop interrupts the turn and the card is withdrawn (no longer answerable), never answered", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    await w.post(root.launch!.id, "stop");
+    await until(() => w.codex.turns().some((t) => t.ended === "interrupted"));
+    expect(w.store.questionsOf(card.id)[0]!.state).toBe("superseded");
+    expect(notes(w.store, card.id)).toEqual([INBOX_PERMISSION_NO_LONGER_WAITING]);
+    expect(w.codex.approvals()[0]!.how).toBe("interrupted");
+  });
+
+  test("the Inbox restarts mid-question: the open card stays; Codex sends the request again (the same id) and the answer reaches it", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const again = w.restart();
+    // The window reads the thread first: that read opens the new connection, which rejoins the thread (the request comes again).
+    await again.launch.runOf(root.id);
+    await until(() => w.codex.rpc("thread/resume").length > 0);
+    answerAsk(again.store, asks(again.store, root, threadId)[0]!.id, [{ label: "Banker's rounding" }]);
+    await sweepUntil(again.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]).toMatchObject({ result: { answers: { rounding: { answers: ["Banker's rounding (Recommended)"] } } }, how: "answered" });
+    expect(asks(again.store, root, threadId)).toHaveLength(1);
+  });
+
+  test("the request is gone while the Inbox is down (Codex's daemon stopped): the card is withdrawn, no longer answerable", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    await w.daemonDown();
+    const again = w.restart();
+    await again.launch.runOf(root.id);
+    await sweepUntil(again.launch, () => again.store.questionsOf(card.id)[0]!.state === "superseded");
+    expect(notes(again.store, card.id)).toEqual([INBOX_PERMISSION_NO_LONGER_WAITING]);
+    expect(w.codex.approvals()).toEqual([]);
   });
 });

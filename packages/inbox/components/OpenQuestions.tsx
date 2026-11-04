@@ -19,7 +19,7 @@ import {
   type OpenQuestionPlace,
   type OpenQuestionState,
 } from '../openQuestions';
-import { isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { isInboxAskSession, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { Tip } from './Tip';
 import { pickWords } from './ReplacedQuestion';
 import { decideThreadLabel } from '../decisions/entry';
@@ -139,7 +139,8 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
   const n = questions.length;
   const a = actions.length;
   // Only a launched agent's permission prompts wait (no other question, no action item): "1 permission waiting" (screen 09).
-  const permission = a === 0 && n > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id));
+  // A launched agent's own question (`perm:ask:…`) is an ordinary question: it counts as one.
+  const permission = a === 0 && n > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id) && !isInboxAskSession(q.question.asked_by_agent_id));
   const reaskTipId = useId();
   const skipTipId = useId();
   // The long form first on a phone too (owner, 2026-10-30: "it should say both"); "5 open" and "5" when it does not fit.

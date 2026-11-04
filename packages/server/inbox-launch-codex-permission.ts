@@ -32,6 +32,7 @@ import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
+  isInboxAskSession,
   isInboxPermissionSession,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
@@ -288,7 +289,10 @@ export function createCodexPermissions(
         const status = options.status(ref);
         // Not read since connecting (nothing known), or waiting on an approval: its request may still come again.
         if (!status || (status.type === "active" && status.activeFlags?.includes("waitingOnApproval"))) continue;
-        for (const { message } of openPermissionQuestions(store, root.thread_id)) if (!held.has(message.id)) questions.withdraw(message.id, INBOX_PERMISSION_NO_LONGER_WAITING);
+        // Codex's own questions (`perm:ask:…`) are inbox-launch-codex-questions.ts's to withdraw.
+        for (const { message } of openPermissionQuestions(store, root.thread_id)) {
+          if (!held.has(message.id) && !(message.author.kind === "agent" && isInboxAskSession(message.author.session))) questions.withdraw(message.id, INBOX_PERMISSION_NO_LONGER_WAITING);
+        }
       }
     },
 

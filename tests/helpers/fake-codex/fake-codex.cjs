@@ -9,7 +9,7 @@
  *  - config.json    what the test asks for (see FakeCodexConfig in index.ts)
  *  - calls.jsonl    one line per CLI call: argv, cwd, env names
  *  - rpc.jsonl      one line per JSON-RPC request the daemon took: method, params, and whether it answered
- *  - approvals.jsonl  one line per approval request settled: method, params, result, how
+ *  - approvals.jsonl  one line per server request settled (approval, requestUserInput, elicitation): method, params, result, how
  *  - turns.jsonl    one line per turn: thread, turn, text, how it started (turn/start or queue), how it ended
  *  - replies.jsonl  one line per Inbox reply a turn posted
  *  - threads.json   the daemon's threads (kept across a daemon restart, as Codex keeps its rollouts)
@@ -30,11 +30,12 @@
  * no "jsonrpc" field, as Codex): initialize, thread/start (writes the
  * folder's trust into config.toml as Codex does unless config.toml or the
  * request's `config.projects` already trusts it), thread/resume (re-sends a
- * pending approval, a new request id, the same item and approval ids),
+ * pending request as it was: the same request id and params, as Codex),
  * thread/unsubscribe, thread/read, thread/loaded/list, thread/delete,
  * thread/name/set, turn/start, turn/interrupt (never answers with no turn
  * running), turn/steer. A turn plays config `prompts` in order (each a server
- * request to every subscribed connection; it waits for an answer), then
+ * request to every subscribed connection: an approval, a requestUserInput or
+ * an MCP elicitation; it waits for an answer), then
  * after `workMs` (and while `hold`) posts the reply to the Inbox's MCP
  * `send_message` (reply_to the wake's message id, with Codex's `_meta`),
  * found from the thread's `mcp_servers.plannotator-inbox.env.PLANNOTATOR_DATA_DIR`
@@ -191,12 +192,15 @@ function daemon() {
     }
   };
 
-  /** A server request to every subscriber (the same id to all, as Codex's broadcast), re-sent to a connection that resumes. */
-  const ask = (thread, method, params) =>
+  /**
+   * A server request to every subscriber (the same id to all, as Codex's broadcast), re-sent to a connection that resumes.
+   * The thread waits on an approval (`waitingOnApproval`, an MCP elicitation too), or on the person's input (`waitingOnUserInput`).
+   */
+  const ask = (thread, method, params, flag = "waitingOnApproval") =>
     new Promise((resolve) => {
       const id = nextRequest++;
       thread.pending = { id, method, params, resolve };
-      setStatus(thread, { type: "active", activeFlags: ["waitingOnApproval"] });
+      setStatus(thread, { type: "active", activeFlags: [flag] });
       for (const c of conns) if (thread.subscribers.has(c)) c.send({ id, method, params });
       // The person answers in `codex resume` (config localAnswer: this thread): Codex settles it itself.
       const local = () => {
@@ -226,6 +230,12 @@ function daemon() {
       return ask(thread, "item/fileChange/requestApproval", { ...base, reason: spec.reason || null, grantRoot: null });
     }
     if (spec.kind === "permissions") return ask(thread, "item/permissions/requestApproval", { ...base, cwd: thread.cwd, reason: spec.reason || null, permissions: spec.permissions || {} });
+    // The model's own question (request_user_input): its call id is the item; blocking unless the spec says not.
+    if (spec.kind === "userInput") {
+      return ask(thread, "item/tool/requestUserInput", { threadId: thread.id, turnId: turn.id, itemId, questions: spec.questions, isBlocking: spec.isBlocking !== false, autoResolutionMs: null }, "waitingOnUserInput");
+    }
+    // An MCP server's form: no item; the request (mode, message, requestedSchema, _meta) flattened in.
+    if (spec.kind === "elicitation") return ask(thread, "mcpServer/elicitation/request", { threadId: thread.id, turnId: turn.id, serverName: spec.serverName || "docs", ...spec.request });
     return ask(thread, "item/commandExecution/requestApproval", { ...base, cwd: thread.cwd, command: spec.command, reason: spec.reason || null });
   };
 
@@ -248,7 +258,15 @@ function daemon() {
       for (const spec of config().prompts || []) {
         if (running.interrupted) break;
         const result = await prompt(thread, turn, spec);
-        outcomes.push(result && result.decision ? result.decision : result && result.permissions ? `permissions ${JSON.stringify(result.permissions)}` : "none");
+        outcomes.push(
+          result && result.decision
+            ? result.decision
+            : result && result.permissions
+              ? `permissions ${JSON.stringify(result.permissions)}`
+              : result && (result.answers || result.action)
+                ? JSON.stringify(result)
+                : "none",
+        );
       }
       const until = Date.now() + (config().workMs ?? 300);
       while (!running.interrupted && (Date.now() < until || config().hold)) await sleep(50);
@@ -314,14 +332,13 @@ function daemon() {
       load(thread);
       if (params.config) thread.config = { ...thread.config, ...params.config };
       thread.subscribers.add(c);
-      // A pending approval is sent again to the connection that rejoined: a new request id, the same item.
+      // A pending request is sent again to the connection that rejoined, as it was: the same request id and
+      // params (Codex's `replay_requests_to_connection_for_thread`).
       if (thread.pending) {
-        const again = nextRequest++;
         const p = thread.pending;
         setTimeout(() => {
           if (thread.pending !== p) return;
-          p.id = again;
-          c.send({ id: again, method: p.method, params: p.params });
+          c.send({ id: p.id, method: p.method, params: p.params });
         }, 30);
       }
       return { thread: view(thread, !params.excludeTurns), model: "fake", cwd: thread.cwd, approvalPolicy: thread.approvalPolicy, sandbox: { type: "workspaceWrite" } };

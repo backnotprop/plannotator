@@ -1,7 +1,8 @@
 /**
  * The Codex host for launch (PLAN "Codex", HOST.md "Codex on the same
  * interface"): `createCodexLaunchHost`, the `LaunchHost` the engine holds as
- * `codex`. Its approval requests are inbox-launch-codex-permission.ts.
+ * `codex`. Its approval requests are inbox-launch-codex-permission.ts; its
+ * own questions (requestUserInput, MCP elicitation) inbox-launch-codex-questions.ts.
  *
  * Codex's own shared app-server daemon keeps the thread (`codex app-server
  * daemon start`: idempotent, one JSON object on stdout). The Inbox talks
@@ -36,10 +37,11 @@
 
 import { existsSync, lstatSync, readFileSync, realpathSync, statSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, parseCodexCliVersion, type InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { INBOX_CODEX_HOST, INBOX_CODEX_NAME, parseCodexCliVersion, type InboxLaunchRecord, type InboxMessage } from "@plannotator/core/inbox-types";
 import { getDefaultPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { codexHome, createAgentEnvironmentFor, INBOX_MCP_SERVER_NAME, readCodexEntry } from "./inbox-agents";
 import { createCodexPermissions } from "./inbox-launch-codex-permission";
+import { createCodexQuestions } from "./inbox-launch-codex-questions";
 import { launchSpawnEnv, type LaunchEnv } from "./inbox-launch-env";
 import { launchNoteText, writeLaunchNote, type LaunchAvailability, type LaunchDelivery, type LaunchHost, type LaunchHostContext, type LaunchHostResult, type LaunchPermissionContext } from "./inbox-launch-host";
 import type { InboxRunHostState } from "@plannotator/core/inbox-run-line";
@@ -389,6 +391,8 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
   let connectedAt = 0;
   let closing = false;
   let permissions: ReturnType<typeof createCodexPermissions> | null = null;
+  /** Codex's own questions (requestUserInput, MCP elicitation): inbox-launch-codex-questions.ts. */
+  let asks: ReturnType<typeof createCodexQuestions> | null = null;
   let permissionContext: LaunchPermissionContext | null = null;
 
   /** The person's CODEX_HOME: the last login shell's, else the Inbox's, else `~/.codex`. */
@@ -437,18 +441,21 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
         view.turnId = null;
         if (view.subscribed) view.polls += 1;
         permissions?.turnEnded(threadId);
+        asks?.turnEnded(threadId);
         if (params.turn?.status === "failed") turnFailed(threadId, params.turn);
         break;
       }
       case "thread/closed":
         setStatus(threadId, { type: "notLoaded" });
         permissions?.turnEnded(threadId);
+        asks?.turnEnded(threadId);
         break;
       case "item/started":
         if (params.item?.type === "fileChange") permissions?.fileChange(params.item.id, params.item.changes);
         break;
       case "serverRequest/resolved":
         permissions?.resolved(params.requestId);
+        asks?.resolved(params.requestId);
         break;
     }
   };
@@ -484,13 +491,17 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       const tryConnect = () =>
         connectCodex(socket(), {
           notification: onNotification,
-          request: (id, method, params) => permissions?.asked(id, method, params),
+          request: (id, method, params) => {
+            if (asks?.asked(id, method, params)) return;
+            permissions?.asked(id, method, params);
+          },
           closed: () => {
             // A late close of an earlier connection: the newer one stays.
             if (connection?.open) return;
             connection = null;
             for (const view of threads.values()) view.subscribed = false;
             permissions?.connectionLost();
+            asks?.connectionLost();
             if (!closing) ctx.log("Inbox launch: the Codex app-server connection closed");
           },
         });
@@ -774,6 +785,7 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
       said.push(unsubscribed);
       view.subscribed = false;
       permissions?.turnEnded(ref);
+      asks?.turnEnded(ref);
       return ok(said.join("; "));
     },
 
@@ -806,16 +818,37 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
 
     permissions(context: LaunchPermissionContext) {
       permissionContext = context;
-      permissions = createCodexPermissions({
+      const respond = (id: number | string, result: unknown) => connection?.respond(id, result) ?? false;
+      const status = (threadId: string) => (connection?.open ? (threads.get(threadId)?.status ?? null) : null);
+      const since = () => (connection?.open ? connectedAt : null);
+      const approvals = createCodexPermissions({
         ...context,
-        respond: (id, result) => connection?.respond(id, result) ?? false,
+        respond,
         steer: (threadId, turnId, text) =>
           void connection?.request("turn/steer", { threadId, expectedTurnId: turnId, input: [{ type: "text", text, text_elements: [] }] }).catch(() => undefined),
-        status: (threadId) => (connection?.open ? (threads.get(threadId)?.status ?? null) : null),
-        connectedAt: () => (connection?.open ? connectedAt : null),
+        status,
+        connectedAt: since,
         rejoin: () => void rejoin().catch(() => undefined),
       });
-      return permissions;
+      const questions = createCodexQuestions({ ...context, respond, status, connectedAt: since });
+      permissions = approvals;
+      asks = questions;
+      // One transport for the engine: Codex's approvals and its own questions.
+      return {
+        ...approvals,
+        sweep() {
+          approvals.sweep();
+          questions.sweep();
+        },
+        withdrawAll(root: InboxMessage) {
+          questions.withdrawAll(root);
+          approvals.withdrawAll(root);
+        },
+        forget(launchId: string) {
+          questions.forget(launchId);
+          approvals.forget?.(launchId);
+        },
+      };
     },
 
     /**

@@ -12,7 +12,7 @@ import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/compon
 import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { INBOX_PERMISSION_FULL, isInboxAskSession, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -4239,7 +4239,8 @@ export function ThreadPane({ notice, thread, machine = null, outbox = NO_OUTBOX,
   // A launched session's permission prompts (with launch on): each is its own card (PermissionCard), the
   // reply that carried its answer is not shown (the card says it), nor the follow-up that withdrew one
   // (the card says that too). While the session waits on one, the card's header is the run line.
-  const isPermMessage = (m: InboxMessageWire) => launchOn && m.author.kind === 'agent' && isInboxPermissionSession(m.author.session);
+  // A launched agent's own question (`perm:ask:…`, Codex's requestUserInput or an MCP elicitation) is an ordinary question card.
+  const isPermMessage = (m: InboxMessageWire) => launchOn && m.author.kind === 'agent' && isInboxPermissionSession(m.author.session) && !isInboxAskSession(m.author.session);
   const permMessages = thread.messages.filter(isPermMessage);
   const permAnswerReplies = new Set(permMessages.flatMap((m) => (m.questions ?? []).map((q) => q.sent_reply_id).filter((id): id is string => !!id)));
   const permWaiting = permMessages.some((m) => (m.questions ?? []).some((q) => q.state === 'open' || q.state === 'picked'));
