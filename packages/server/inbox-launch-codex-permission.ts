@@ -30,9 +30,13 @@
  *
  * An MCP tool call's card is the one Claude Code's MCP prompts get (`mcp__<server>__<tool>` with the call's
  * arguments), matched to exactly one in-progress `mcpToolCall` item of the thread with the request's server
- * and arguments; Allow once is `accept`, Deny `decline` (Codex: the tool call is rejected and the turn goes
- * on). No session choice (Codex's "remember" is not offered). Any other approval riding elicitation (a tool
- * suggestion, browser sign-in) or a call the card cannot match exactly waits on Terminal.
+ * and arguments: a call is held from its `item/started` until its `item/completed`, its turn's end or a
+ * dropped connection (a start missed across a drop never lets an earlier call name the card). Each request is
+ * its own card, keyed by its JSON-RPC id (Codex sends a pending request again with the same id), so one Allow
+ * once never answers another call, however alike. Allow once is `accept`, Deny `decline` (Codex: the tool call
+ * is rejected and the turn goes on). No session choice (Codex's "remember" is not offered). Any other approval
+ * riding elicitation (a tool suggestion, browser sign-in) or a call the card cannot match exactly waits on
+ * Terminal.
  */
 
 import { createHash } from "node:crypto";
@@ -108,9 +112,12 @@ export function codexMcpCallOf(params: Record<string, any>, calls: readonly Code
   return found.at(-1)!;
 }
 
-/** The key of a tool approval: from the request alone (sent again on `thread/resume` with no `item/started`). */
-function codexToolApprovalKey(params: Record<string, any>): string {
-  return codexApprovalKey(params.threadId, params.turnId ?? null, JSON.stringify(["mcp_tool_call", params.serverName ?? null, params.message ?? null, params._meta?.tool_params ?? null]));
+/**
+ * The key of a tool approval: its JSON-RPC id with what it asks. Codex sends a pending request again with the
+ * same id (on `thread/resume`), so that is the same card; another request, an identical call included, never is.
+ */
+export function codexToolApprovalKey(params: Record<string, any>, rpcId: number | string): string {
+  return codexApprovalKey(params.threadId, params.turnId ?? null, JSON.stringify(["mcp_tool_call", rpcId, params.serverName ?? null, params.message ?? null, params._meta?.tool_params ?? null]));
 }
 
 /** The record's line after Approve in Terminal. */
@@ -243,6 +250,7 @@ export function createCodexPermissions(
   turnEnded(threadId: string): void;
   fileChange(itemId: unknown, changes: unknown): void;
   mcpCall(threadId: unknown, turnId: unknown, item: unknown): void;
+  mcpCallEnded(itemId: unknown): void;
   connectionLost(): void;
 } {
   const { store } = options;
@@ -275,7 +283,7 @@ export function createCodexPermissions(
       const root = rootOfThread(params.threadId);
       // Not a launched thread of this Inbox: another client of the daemon answers it.
       if (!root) return;
-      const key = tool ? codexToolApprovalKey(params) : codexApprovalKey(params.threadId, params.itemId, params.approvalId);
+      const key = tool ? codexToolApprovalKey(params, id) : codexApprovalKey(params.threadId, params.itemId, params.approvalId);
       const known = pending.get(key);
       if (known) {
         // Sent again (a dropped connection, `thread/resume`): the same question, answered on this request's id. An
@@ -316,6 +324,8 @@ export function createCodexPermissions(
     },
 
     turnEnded(threadId) {
+      // Its calls are over.
+      for (let i = mcpCalls.length - 1; i >= 0; i--) if (mcpCalls[i]!.threadId === threadId) mcpCalls.splice(i, 1);
       for (const p of [...pending.values()]) {
         if (p.threadId !== threadId) continue;
         drop(p);
@@ -338,7 +348,15 @@ export function createCodexPermissions(
       if (mcpCalls.length > 50) mcpCalls.shift();
     },
 
+    /** `item/completed` for an MCP tool call: no approval of it can follow, so it can never name a card. */
+    mcpCallEnded(itemId) {
+      for (let i = mcpCalls.length - 1; i >= 0; i--) if (mcpCalls[i]!.id === itemId) mcpCalls.splice(i, 1);
+    },
+
     connectionLost() {
+      // A start missed while the connection was down must never leave an earlier call to name a card: only
+      // calls started on the next connection count (a request sent again with none goes to Terminal).
+      mcpCalls.length = 0;
       for (const p of pending.values()) p.rpcId = null;
       byRpc.clear();
     },

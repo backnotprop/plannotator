@@ -239,7 +239,7 @@ function daemon() {
     if (spec.kind === "mcpToolCall") {
       const server = spec.serverName || "docs";
       if (spec.started !== false) notify(thread, "item/started", { threadId: thread.id, turnId: turn.id, item: { type: "mcpToolCall", id: itemId, server, tool: spec.tool, arguments: spec.arguments ?? null, status: "inProgress" } });
-      return ask(thread, "mcpServer/elicitation/request", {
+      const result = await ask(thread, "mcpServer/elicitation/request", {
         threadId: thread.id,
         turnId: turn.id,
         serverName: server,
@@ -248,6 +248,9 @@ function daemon() {
         message: `Allow the ${server} MCP server to run tool "${spec.tool}"?`,
         requestedSchema: { type: "object", properties: {} },
       });
+      // The call ends (run, or rejected) once the approval settles.
+      if (spec.started !== false) notify(thread, "item/completed", { threadId: thread.id, turnId: turn.id, item: { type: "mcpToolCall", id: itemId, server, tool: spec.tool, arguments: spec.arguments ?? null, status: "completed" } });
+      return result;
     }
     // An MCP server's form: no item; the request (mode, message, requestedSchema, _meta) flattened in.
     if (spec.kind === "elicitation") return ask(thread, "mcpServer/elicitation/request", { threadId: thread.id, turnId: turn.id, serverName: spec.serverName || "docs", ...spec.request });

@@ -455,6 +455,9 @@ export function createCodexLaunchHost(ctx: LaunchHostContext) {
         // An MCP tool call: its approval (an elicitation) names only the server and arguments.
         if (params.item?.type === "mcpToolCall") permissions?.mcpCall(params.threadId, params.turnId, params.item);
         break;
+      case "item/completed":
+        if (params.item?.type === "mcpToolCall") permissions?.mcpCallEnded(params.item.id);
+        break;
       case "serverRequest/resolved":
         permissions?.resolved(params.requestId);
         asks?.resolved(params.requestId);

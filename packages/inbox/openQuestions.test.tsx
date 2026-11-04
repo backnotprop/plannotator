@@ -1308,3 +1308,24 @@ test.skipIf(!hasDom)('comments alone: the words are the count, and the pill carr
   expect(foot.querySelector('[data-draft-pill-count]')!.textContent).toBe('1');
   expect(spokenText(foot)).toBe('Draft, 1 comment');
 });
+
+/** A thread whose only open question was asked under `session` (a launched agent's `perm:` identity). */
+const permissionThread = (session: string) =>
+  thread([
+    agent(1, 'Fix the refund rounding.', 1),
+    agent(2, block('Run `bun test`?'), 2, () => ({ asked_by_agent_id: session }), { author: { kind: 'agent', host: 'codex', session, name: 'Codex' } }),
+  ]);
+
+test.skipIf(!hasDom)("a launched agent's permission prompt alone is \"permission waiting\"; its own question (`perm:ask:`) counts as an ordinary open question", async () => {
+  await render(permissionThread('perm:019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b'));
+  // Compared as booleans: a failing toBe on an element prints the whole fiber tree.
+  expect(!!button()).toBe(true);
+  expect(button()!.hasAttribute('data-oq-permission')).toBe(true);
+  act(() => root!.unmount());
+  host!.remove();
+  root = null;
+  await render(permissionThread('perm:ask:019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b'));
+  expect(!!button()).toBe(true);
+  expect(button()!.hasAttribute('data-oq-permission')).toBe(false);
+  expect(button()!.textContent).toContain('1 open question');
+});

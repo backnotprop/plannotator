@@ -398,12 +398,29 @@ export function createCodexQuestions(
    * is still open, picked or closed. A question closed unanswered (the thread archived) never answers for the
    * person: Codex waits, as it does in Terminal. `forward`: the replies whose words the result has no place for.
    */
-  const resultOf = (p: Pending): { result: unknown; forward: Set<string> } | null => {
+  const resultOf = (p: Pending): { result: unknown; forward: Map<string, string[]> } | null => {
     const qs = store.questionsOf(p.messageId!);
     if (qs.length !== p.ask!.fields.length || qs.some((q) => q.state !== "sent")) return null;
     const answers = p.ask!.fields.map((field, i) => codexFieldAnswer(field, qs[i]!));
-    const forward = new Set(qs.flatMap((q, i) => (answers[i]!.forward && q.sent_reply_id ? [q.sent_reply_id] : [])));
+    // Per reply, the questions whose words the result has no place for.
+    const forward = new Map<string, string[]>();
+    qs.forEach((q, i) => {
+      if (answers[i]!.forward && q.sent_reply_id) forward.set(q.sent_reply_id, [...(forward.get(q.sent_reply_id) ?? []), q.key]);
+    });
     return { result: p.method === CODEX_USER_INPUT ? codexUserInputResult(p.ask!, answers) : codexElicitationResult(p.ask!, answers), forward };
+  };
+
+  /** A reply that carries something besides its answers (its own words, feedback, files): Codex's answer has no place for it. */
+  const carriesMore = (reply: InboxMessage | null | undefined): boolean => !!reply && (!!reply.ask_words || (reply.attachments?.length ?? 0) > 0);
+
+  /** The reply goes on to the Codex thread as its next turn, carrying only what Codex's answer did not (`keys`, its own words). */
+  const forwardReply = (replyId: string, host: string, threadId: string, keys: readonly string[]) => {
+    try {
+      store.forwardAskReply(replyId, { host, session: threadId }, keys);
+      log(`Inbox launch: reply ${replyId} goes on to Codex as a turn (words its answer could not carry)`);
+    } catch {
+      // Already delivered or gone on: the words stand.
+    }
   };
 
   /**
@@ -411,15 +428,16 @@ export function createCodexQuestions(
    * words the answer had no place for goes on to the thread itself instead, so the Inbox's wake delivers it as
    * the thread's next turn, like any reply.
    */
-  const delivered = (p: Pending, forward: ReadonlySet<string>) => {
+  const delivered = (p: Pending, forward: ReadonlyMap<string, readonly string[]>) => {
     const card = store.message(p.messageId!);
     if (card?.author.kind !== "agent" || !card.author.host || !card.author.session) return;
     for (const replyId of new Set(store.questionsOf(p.messageId!).map((q) => q.sent_reply_id).filter((id): id is string => !!id))) {
+      if (forward.has(replyId) || carriesMore(store.message(replyId))) {
+        forwardReply(replyId, card.author.host, p.threadId, forward.get(replyId) ?? []);
+        continue;
+      }
       try {
-        if (forward.has(replyId)) {
-          store.forwardAskReply(replyId, { host: card.author.host, session: p.threadId });
-          log(`Inbox launch: reply ${replyId} goes on to Codex as a turn (words its answer could not carry)`);
-        } else store.recordDelivery(replyId, { host: card.author.host, session: card.author.session });
+        store.recordDelivery(replyId, { host: card.author.host, session: card.author.session });
       } catch {
         // Already recorded or delivered: the answer stands.
       }
@@ -539,6 +557,20 @@ export function createCodexQuestions(
           p.answered = true;
           questions.withdraw(p.messageId, INBOX_PERMISSION_NO_LONGER_WAITING);
           log(`Inbox launch: Codex ${p.method} resolved with no answers after Codex's wait`);
+        }
+      }
+      // A reply to a card that answers none of its questions (words, feedback or files alone): it never answers
+      // Codex's request, so it goes on to the thread as a turn now, never left waiting on a card.
+      for (const root of options.roots()) {
+        const ref = root.launch!.session_ref;
+        if (!ref) continue;
+        for (const id of store.threadMessageIds(root.thread_id)) {
+          const reply = store.message(id);
+          if (!reply || reply.author.kind !== "person" || !reply.reply_to || reply.delivery || (reply.to && !isInboxAskSession(reply.to.session))) continue;
+          const card = store.message(reply.reply_to);
+          if (card?.author.kind !== "agent" || !card.author.host || !isInboxAskSession(card.author.session) || !carriesMore(reply)) continue;
+          if (store.questionsOf(card.id).some((q) => q.sent_reply_id === reply.id)) continue;
+          forwardReply(reply.id, card.author.host, ref, []);
         }
       }
       const since = options.connectedAt();

@@ -622,6 +622,22 @@ describe("a launched agent's permission prompt is the owner's to answer (a guest
     expect(w.inbox.store.threadMessageIds(w.inbox.store.message(id)!.thread_id)).toEqual([id]);
   });
 
+  test("a launched Codex thread's own question (`perm:ask:`) is the owner's too: a guest's pick, answer, Other and skip are refused, and the card stays open", async () => {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    const author = { kind: "agent" as const, host: "codex", session: `perm:ask:${PERM_SESSION}`, name: "Codex" };
+    const body = ":::question\nRound refunds how?\n\n- [ ] Banker's rounding\n- [ ] Half up\n:::";
+    const id = w.inbox.store.sendMessage({ project_id: project.id, author, permission: true, body, idempotency_key: "perm-codex-ask-guest" }).message.id;
+    const q = w.inbox.store.questionsOf(id)[0]!;
+    const other = { key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: "single", prompt: q.prompt, selected: [], other: "Neither" } };
+    expect(await answerOf(await picks(w, "guest", id, "Half up"))).toEqual([403, "window_only"]);
+    expect(await answerOf(await send(w, "guest", id, "00000000-0000-4000-8000-000000000211", "Half up"))).toEqual([403, "window_only"]);
+    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000212", words: "", questions: [other] } }))).toEqual([403, "window_only"]);
+    expect(await answerOf(await call(w, "guest", { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: "00000000-0000-4000-8000-000000000213", words: "", skip: [q.key] } }))).toEqual([403, "window_only"]);
+    expect(stateOf(w, id)).toBe("open");
+    expect(w.inbox.store.threadMessageIds(w.inbox.store.message(id)!.thread_id)).toEqual([id]);
+  });
+
   test("the owner answers from this computer's window and over the tailnet", async () => {
     const w = await world({ config: { inboxLaunch: { enabled: true } } });
     const here = ask(w, "local");

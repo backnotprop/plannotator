@@ -593,6 +593,20 @@ export interface InboxMessage {
    */
   by_guest?: true;
   /**
+   * On a person's reply to a launched Codex thread's own question (a
+   * `perm:ask:` card): the words and feedback the reply carries besides its
+   * answers, which Codex's answer to the question has no place for. Set once,
+   * when the reply is written; absent when it has none and on every other message.
+   */
+  ask_words?: string;
+  /**
+   * On such a reply gone on to the Codex thread itself (`forwardAskReply`):
+   * what the thread's turn carries instead of the whole body, only what
+   * Codex's answer could not carry (those answers, `ask_words`). The body
+   * stays the person's whole reply, shown in the thread and in read_thread.
+   */
+  forward_body?: string;
+  /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the

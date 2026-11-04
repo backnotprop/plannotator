@@ -4163,9 +4163,15 @@ export class InboxStore {
       words,
       stillOpen,
     });
-    const body = [withInboxActionsSection(replyBody, this.stagedActionsSection(message, actionsSent, stillOpen)), feedback]
+    const askCard = message.author.kind === "agent" && isInboxAskSession(message.author.session);
+    const composed = [withInboxActionsSection(replyBody, this.stagedActionsSection(message, actionsSent, stillOpen)), feedback]
       .filter((part) => part !== "")
       .join("\n\n");
+    // A launched Codex thread's own question: its card keeps a dashed label whole with a word joiner (U+2060),
+    // which never goes into the person's reply. What the reply carries besides its answers is kept apart, so
+    // it can go on to Codex (forwardAskReply) without the answers Codex already took.
+    const body = askCard ? composed.replace(/\u2060/g, "") : composed;
+    const askWords = askCard ? [words.trim(), feedback].filter((part) => part !== "").join("\n\n").replace(/\u2060/g, "") : "";
 
     // The questions first, so whoever reads the reply finds them already sent.
     // If any of these writes fails, the questions written so far are put back
@@ -4205,6 +4211,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       ...(input.by_guest ? { by_guest: true as const } : {}),
+      ...(askWords ? { ask_words: askWords } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
@@ -5878,10 +5885,13 @@ export class InboxStore {
    * Launch: the person's reply to a launched Codex thread's own question (a
    * `perm:ask:` card) held words Codex's answer had no place for. The same
    * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
-   * it as the thread's next turn, like any reply. Only such a reply, and
-   * only while not delivered. The same address writes nothing.
+   * it as the thread's next turn, like any reply; that turn carries only
+   * what the answer could not (`forward_body`): the answers to `keys` (the
+   * card's questions Codex took as skipped, or a form's note) and the reply's
+   * own words (`ask_words`), never the answers Codex already has. Only such a
+   * reply, and only while not delivered. The same address writes nothing.
    */
-  forwardAskReply(replyId: string, to: InboxAddressee): InboxMessage {
+  forwardAskReply(replyId: string, to: InboxAddressee, keys: readonly string[] = []): InboxMessage {
     const message = this.messages.get(replyId);
     if (!message) throw new InboxError("message_not_found", `No message ${replyId}.`);
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
@@ -5890,8 +5900,17 @@ export class InboxStore {
     }
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
     if (message.to?.session === to.session && message.to.host === to.host) return message;
+    const records = this.questionRecords(asked.id).filter((r) => keys.includes(r.key) && r.sent_reply_id === replyId && r.answer);
+    const forwardBody = composeInboxReplyBody({
+      questions: records,
+      sent: records.map((r) => r.answer!),
+      earlier: [],
+      words: message.ask_words,
+      stillOpen: [],
+      replyTo: asked.id,
+    }).replace(/\u2060/g, "");
     const at = this.stamp();
-    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, forward_body: forwardBody, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);
     return next;
   }

@@ -178,7 +178,7 @@ describe("the transport", () => {
     /** The one-line notes from the card's identity under a card (a later card replying to it is not one). */
     const followUps = (cardId: string) => (store.thread(root.thread_id)?.messages ?? []).filter((m) => m.reply_to === cardId && m.author.kind === "agent" && !m.body.includes(":::question")).map((m) => m.body);
     /** The window's way: each question's pick, then one Send. */
-    const answer = (cardId: string, picks: ((({ label: string } | { other: string } | { text: string }) & { note?: string }) | "skip")[]) => {
+    const answer = (cardId: string, picks: ((({ label: string } | { other: string } | { text: string }) & { note?: string }) | "skip")[], words?: string) => {
       const qs = store.questionsOf(cardId);
       const entries = qs.flatMap((q, i) => {
         const p = picks[i]!;
@@ -191,6 +191,7 @@ describe("the transport", () => {
         idempotency_key: `answer-${cardId}`,
         questions: saved.filter((q) => entries.some((e) => e.key === q.key)).map((q) => ({ key: q.key, revision: q.revision })),
         skip: qs.filter((_, i) => picks[i] === "skip").map((q) => q.key),
+        ...(words ? { words } : {}),
       });
     };
     return { store, root, answers, link, clock, state, make, cards, followUps, answer };
@@ -306,6 +307,50 @@ describe("the transport", () => {
     expect(formReply.to).toEqual({ host: "codex", session: THREAD });
     expect(formReply.body).toContain("the public one");
     expect(formReply.body).toContain("PDF");
+  });
+
+  test("what goes on to Codex as a turn is only what its answer could not carry: never the answers it took, never the card's word joiner; a reply's own words go on too", () => {
+    const t = transport();
+    const q = t.make();
+    // Q1's label has a spaced dash (the card keeps it whole with a word joiner); Q2 takes no Other.
+    q.asked(1, CODEX_USER_INPUT, userInput([
+      question("build", "Which build?", [{ label: "Fast — no checks", description: "" }, { label: "Full", description: "" }]),
+      question("rounding", "Round refunds how?", [{ label: "Banker's", description: "" }, { label: "Half up", description: "" }], { isOther: false }),
+    ]));
+    const card = t.cards()[0]!;
+    const fast = t.store.questionsOf(card.id)[0]!.choices[0]!.label;
+    expect(fast).toContain("\u2060");
+    t.answer(card.id, [{ label: fast }, { other: "Neither: keep whole cents" }]);
+    q.sweep();
+    expect(t.answers).toEqual([[1, { answers: { build: { answers: ["Fast — no checks"] }, rounding: { answers: [] } } }]]);
+    const reply = t.store.message(t.store.questionsOf(card.id)[0]!.sent_reply_id!)!;
+    // The person's reply as shown (and in read_thread): every answer, no word joiner.
+    expect(reply.body).toContain("Fast — no checks");
+    expect(reply.body).not.toContain("\u2060");
+    // The turn: only the answer Codex took as skipped.
+    expect(reply.forward_body).toContain("Neither: keep whole cents");
+    expect(reply.forward_body).not.toContain("Fast");
+    expect(reply.forward_body).not.toContain("\u2060");
+
+    // Answers Codex takes whole, with words of the person's own: Codex gets the answer; the turn, the words alone.
+    q.asked(2, CODEX_USER_INPUT, { ...userInput([question("scope", "Which accounts?", [{ label: "All", description: "" }, { label: "EU only", description: "" }])]), itemId: "call_2" });
+    const second = t.cards()[1]!;
+    t.answer(second.id, [{ label: "EU only" }], "And log what you skip.");
+    q.sweep();
+    expect(t.answers[1]).toEqual([2, { answers: { scope: { answers: ["EU only"] } } }]);
+    const withWords = t.store.message(t.store.questionsOf(second.id)[0]!.sent_reply_id!)!;
+    expect(withWords.to).toEqual({ host: "codex", session: THREAD });
+    expect(withWords.forward_body).toBe("And log what you skip.");
+
+    // Words alone on a card still open: they go on now; the card stays open and Codex keeps waiting on it.
+    q.asked(3, CODEX_USER_INPUT, { ...choice, itemId: "call_3" });
+    const third = t.cards()[2]!;
+    const wordsOnly = t.store.sendReply(third.id, { idempotency_key: "words-3", words: "Give me a minute, checking the ledger." }).reply;
+    q.sweep();
+    expect(t.store.message(wordsOnly.id)!.to).toEqual({ host: "codex", session: THREAD });
+    expect(t.store.message(wordsOnly.id)!.forward_body).toBe("Give me a minute, checking the ledger.");
+    expect(t.store.questionsOf(third.id)[0]!.state).toBe("open");
+    expect(t.answers).toHaveLength(2);
   });
 
   test("marking the thread read never answers for the person: the card stays open and Codex keeps waiting; one the archive closed waits too, until the person answers it", () => {

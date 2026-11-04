@@ -228,6 +228,7 @@ describe("the approval transport", () => {
     const root = store.startPersonThread({ project_id: project.id, body: "Build it.", to: { host: "codex", session: THREAD }, idempotency_key: "send-1", launch }).message;
     const answers: [number | string, unknown][] = [];
     const link = { up: true };
+    const state: { status: { type: string; activeFlags?: string[] } | null; connectedAt: number | null } = { status: null, connectedAt: null };
     const permissions = createCodexPermissions({
       store,
       roots: () => [store.message(root.id)!],
@@ -237,19 +238,115 @@ describe("the approval transport", () => {
       onChange: () => {},
       respond: (id, result) => link.up && answers.push([id, result]) > 0,
       steer: () => {},
-      status: () => null,
-      connectedAt: () => null,
+      status: () => state.status,
+      connectedAt: () => state.connectedAt,
       rejoin: () => {},
     } as never);
-    const cards = () => messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}`);
-    const answer = (cardId: string) => {
+    const cards = () => messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}` && store.questionsOf(m.id).length > 0);
+    const answer = (cardId: string, label: string = INBOX_PERMISSION_ALLOW_ONCE) => {
       const question = store.questionsOf(cardId)[0]!;
-      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [INBOX_PERMISSION_ALLOW_ONCE] };
+      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [label] };
       const saved = store.savePicks(cardId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
       store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] });
     };
-    return { store, root, dir, answers, link, permissions, cards, answer };
+    return { store, root, dir, answers, link, state, permissions, cards, answer };
   }
+
+  /** An MCP tool call's approval as Codex core asks it (`build_mcp_tool_approval_elicitation_request`). */
+  const toolApproval = (server: string, tool: string, args: Record<string, unknown>) => ({
+    threadId: THREAD,
+    turnId: "t1",
+    serverName: server,
+    mode: "form",
+    _meta: { codex_approval_kind: "mcp_tool_call", tool_params: args },
+    message: `Allow the ${server} MCP server to run tool "${tool}"?`,
+    requestedSchema: { type: "object", properties: {} },
+  });
+  const started = (t: ReturnType<typeof transport>, id: string, server: string, tool: string, args: Record<string, unknown>) =>
+    t.permissions.mcpCall(THREAD, "t1", { type: "mcpToolCall", id, server, tool, arguments: args, status: "inProgress" });
+
+  test("each MCP tool approval request is its own card: one Allow once never answers another call, a repeated or a concurrent identical one included", () => {
+    const t = transport();
+    const send = { to: "bob", amount: 100 };
+    started(t, "c1", "pay", "send", send);
+    t.permissions.asked(1, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(1);
+    t.answer(t.cards()[0]!.id);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([[1, { action: "accept", content: null, _meta: null }]]);
+    t.permissions.resolved(1);
+    t.permissions.mcpCallEnded("c1");
+    // The model calls it again, the same arguments, the same turn: a new card, nothing answered for it.
+    started(t, "c2", "pay", "send", send);
+    t.permissions.asked(2, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(2);
+    t.permissions.sweep();
+    expect(t.answers).toHaveLength(1);
+    expect(t.store.questionsOf(t.cards()[1]!.id)[0]!.state).toBe("open");
+    t.answer(t.cards()[1]!.id, INBOX_PERMISSION_DENY);
+    t.permissions.sweep();
+    expect(t.answers[1]).toEqual([2, { action: "decline", content: null, _meta: null }]);
+
+    // Two identical calls at once: two cards, each answered on its own request.
+    started(t, "c3", "pay", "send", send);
+    started(t, "c4", "pay", "send", send);
+    t.permissions.asked(3, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    t.permissions.asked(4, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(4);
+    t.answer(t.cards()[3]!.id, INBOX_PERMISSION_DENY);
+    t.permissions.sweep();
+    expect(t.answers[2]).toEqual([4, { action: "decline", content: null, _meta: null }]);
+    expect(t.answers).toHaveLength(3);
+    // A request Codex sends again (a dropped connection; the same id): the same card, and its answer goes on it.
+    t.permissions.connectionLost();
+    t.permissions.asked(3, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(4);
+    t.answer(t.cards()[2]!.id);
+    t.permissions.sweep();
+    expect(t.answers[3]).toEqual([3, { action: "accept", content: null, _meta: null }]);
+  });
+
+  test("a card never names a call that is over or one seen before a dropped connection: an approval no call in progress matches waits on Terminal", () => {
+    const t = transport();
+    const to = { to: "bob" };
+    // An earlier `preview` of the same arguments; the connection drops, so the start of `send` is missed.
+    started(t, "c1", "pay", "preview", to);
+    t.permissions.connectionLost();
+    t.permissions.asked(5, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    // A call that completed: no later request can name it.
+    started(t, "c2", "pay", "preview", to);
+    t.permissions.mcpCallEnded("c2");
+    t.permissions.asked(6, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    // Nor one of a turn that ended.
+    started(t, "c3", "pay", "preview", to);
+    t.permissions.turnEnded(THREAD);
+    t.permissions.asked(7, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([]);
+  });
+
+  test("after a restart the approval sweep withdraws an open permission card no request is behind, never Codex's own question (`perm:ask:`)", () => {
+    const t = transport();
+    const card = (session: string, key: string) =>
+      t.store.sendMessage({
+        project_id: t.root.project_id,
+        author: { kind: "agent", host: "codex", session, name: "Codex" },
+        permission: true,
+        body: ":::question\nRound refunds how?\n\n- [ ] Banker's\n- [ ] Half up\n:::",
+        reply_to: t.root.id,
+        idempotency_key: key,
+      }).message;
+    const orphan = card(`perm:${THREAD}`, "perm-orphan");
+    const ask = card(`perm:ask:${THREAD}`, "perm-ask");
+    t.state.connectedAt = Date.now() - 60_000;
+    t.state.status = { type: "idle" };
+    t.permissions.sweep();
+    expect(t.store.questionsOf(orphan.id)[0]!.state).toBe("superseded");
+    expect(t.store.questionsOf(ask.id)[0]!.state).toBe("open");
+  });
 
   test("a request Codex sends again (a new id, the same item) is the same card, and the answer goes to the latest id", () => {
     const t = transport();
