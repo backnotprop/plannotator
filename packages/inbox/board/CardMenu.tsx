@@ -1,10 +1,11 @@
 import { Fragment, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { ContextMenu } from '@base-ui/react/context-menu';
 import { Menu } from '@base-ui/react/menu';
-import type { InboxCardColumn, InboxCardWire, InboxListRow } from '@plannotator/core/inbox-types';
+import type { InboxCardColumn, InboxCardWire, InboxInitiative, InboxListRow } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { useContextMenuTrigger, type MenuSlot } from '../components/useContextMenuTrigger';
 import { cardMenuItems, youThread, type CardMenuItem } from './model';
+import { CardInitiativeItems } from './BoardFilter';
 
 export interface CardMenuProps {
   className: string;
@@ -19,6 +20,9 @@ export interface CardMenuProps {
   /** Drop…: the card opens with its reason field open and focused. */
   onDrop: (card: InboxCardWire) => void;
   onOpenThread: (card: InboxCardWire, threadId: string) => void;
+  /** The live initiatives (approval "board-initiatives"): an Initiative submenu above Cancel… once one exists. */
+  initiatives?: readonly InboxInitiative[];
+  onInitiative?: (card: InboxCardWire, initiative: string | null) => void;
   children: ReactNode;
 }
 
@@ -126,8 +130,32 @@ export function CardMenu(props: CardMenuProps) {
             {card &&
               groups.map((group, index) => {
                 if (group[0]?.kind === 'column' && index !== firstColumns) return null;
+                // The Initiative submenu: its own group, just above Cancel….
+                const initiativeGroup = group[0]?.kind === 'drop' && props.onInitiative && (props.initiatives?.length ?? 0) > 0 && (
+                  <>
+                    <Menu.Separator className="ib-pm-sep" />
+                    <Menu.SubmenuRoot>
+                      <Menu.SubmenuTrigger className="ib-pmi" label="Initiative" data-card-menu-action="initiative">
+                        <Icon name="hash" size={15} />
+                        <span className="ib-pmi-l">Initiative</span>
+                        <Icon name="chevR" size={14} className="ib-pmi-check" />
+                      </Menu.SubmenuTrigger>
+                      <Menu.Portal container={portal ?? undefined}>
+                        <Menu.Positioner className="ib-pm-pos" side="right" align="start" sideOffset={2}>
+                          <Menu.Popup className="ib-pm ib-bflt-menu" aria-label="Initiative" data-card-initiative-menu="">
+                            <CardInitiativeItems initiatives={props.initiatives ?? []} value={card.initiative ?? null} onPick={(next) => {
+                              menu.follow(card.id);
+                              props.onInitiative?.(card, next);
+                            }} />
+                          </Menu.Popup>
+                        </Menu.Positioner>
+                      </Menu.Portal>
+                    </Menu.SubmenuRoot>
+                  </>
+                );
                 return (
                   <Fragment key={index}>
+                    {initiativeGroup}
                     {index > 0 && <Menu.Separator className="ib-pm-sep" />}
                     {index === firstColumns ? (
                       <Menu.RadioGroup

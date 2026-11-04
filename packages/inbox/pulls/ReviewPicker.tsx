@@ -113,6 +113,8 @@ export interface ReviewPickerProps {
   stack: InboxPullStack;
   /** The projects the stack's repository is checked out in (its running agents are theirs). */
   projects: readonly string[];
+  /** The review thread's name (`pullHandoffThreadName`). */
+  threadName: string;
   /** The sessions of the ended review thread (its agent, and the one it was moved to): never offered again. */
   exclude: readonly string[];
   /** Labels the picker (the button that opened it says the same). */
@@ -130,7 +132,7 @@ export interface ReviewPickerProps {
 }
 
 /** The picker, inline under the stack's actions: every choice shows, one agent is picked, nothing covers the page. */
-export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, onStarted, onCancel, onSending, onReload }: ReviewPickerProps) {
+export function ReviewPicker({ stack, projects, threadName, exclude, labelId, id, onLaunch, onStarted, onCancel, onSending, onReload }: ReviewPickerProps) {
   const now = useRelativeClock(true);
   const [targets, readAgain] = useReviewTargets(projects, exclude);
   const [askKind, setAskKind] = useState<'guide' | 'custom'>('guide');
@@ -151,7 +153,7 @@ export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, 
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   // One idempotency key per send to one agent: a retry to the same agent reuses it, a new pick gets a new one.
-  const keyRef = useRef<{ session: string; key: string } | null>(null);
+  const keyRef = useRef<{ session: string; key: string; unnamed?: boolean } | null>(null);
   const askName = useId();
   const agentName = useId();
   const box = useRef<HTMLDivElement>(null);
@@ -183,7 +185,15 @@ export function ReviewPicker({ stack, projects, exclude, labelId, id, onLaunch, 
       await inboxApi.pullOwnerCheck(keys, session.project_id);
       // The ask's instructions are phase 1's /review-curate, carried as the skills block a Send adds for it.
       const body = withSkillsBlock(pullHandoffMessage(stack, ask), reviewCurateBlock());
-      const sent = await inboxApi.startThread({ to: { host: session.host, session: session.session }, body, idempotency_key: idempotency.key });
+      const to = { host: session.host, session: session.session };
+      const named = (name: string | undefined) => inboxApi.startThread({ to, body, idempotency_key: idempotency.key, ...(name ? { thread_name: name } : {}) });
+      const sent = await named(idempotency.unnamed ? undefined : threadName).catch((cause: unknown) => {
+        // Another open thread of the project has that name (the PR's earlier review thread): the thread goes without
+        // one, and a retry with this key does too (the same Send).
+        if (!(cause instanceof InboxApiError) || cause.code !== 'thread_name_taken') throw cause;
+        idempotency.unnamed = true;
+        return named(undefined);
+      });
       try {
         await inboxApi.pullOwner(keys, sent.thread_id, ask.kind);
       } catch (cause) {

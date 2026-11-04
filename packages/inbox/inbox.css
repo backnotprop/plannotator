@@ -6143,6 +6143,59 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-bpf[data-set] .ib-bpf-btn { height: 44px; }
   .pn-inbox .ib-bpf-x { width: 44px; height: 44px; margin-right: 0; }
 }
+/* The Board's one filter (board/BoardFilter.tsx, approval "board-initiatives"): an icon at the header's right,
+   the picks as tokens left of it ("# Shape ×"); its menu holds Initiative (with counts) and Project. */
+.ib-bflt { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; }
+.pn-inbox .ib-bflt-btn { position: relative; flex: none; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-bflt-btn:hover, .pn-inbox .ib-bflt-btn[data-popup-open] { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-bflt[data-set] .ib-bflt-btn { color: var(--foreground); }
+.ib-bflt-tok { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; height: 26px; min-width: 0; max-width: 200px; padding: 0 2px 0 9px; border-radius: 7px; background: color-mix(in oklch, var(--muted) 85%, var(--foreground) 6%); color: var(--foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-bflt-tok > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-bflt-tok-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pn-inbox .ib-bflt-tok-x { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-bflt-tok-x:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-bflt-menu { min-width: 228px; max-width: 320px; max-height: min(460px, 70vh); overflow-y: auto; overscroll-behavior: contain; }
+.ib-bflt-menu .ib-pmi-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-bflt-ico { flex: none; width: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+.ib-bflt-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); font-variant-numeric: tabular-nums; }
+.ib-bflt-slot { flex: none; width: 15px; margin-left: auto; }
+.ib-pmi .ib-bflt-n + .ib-bflt-check, .ib-pmi .ib-bflt-n + .ib-bflt-slot { margin-left: 8px; }
+.ib-bflt-act { color: var(--muted-foreground); }
+.ib-bflt-act[data-highlighted] { color: var(--foreground); }
+.ib-bfbar .ib-bflt-tok { max-width: 100%; }
+.ib-bfbar:has(.ib-bflt-tok) { gap: 8px; align-items: center; }
+/* The opened card's initiative: a quiet menu at the end of its who line. */
+.pn-inbox .ib-crdp-ini { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 220px; height: 24px; margin-left: 2px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; cursor: pointer; }
+.pn-inbox .ib-crdp-ini > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-crdp-ini svg.ib-ic { flex: none; }
+.pn-inbox .ib-crdp-ini:hover, .pn-inbox .ib-crdp-ini[data-popup-open] { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-crdp-ini[data-card-initiative]:not([data-card-initiative="none"]) { color: var(--foreground); }
+/* New card on a Board filtered to an initiative: the card starts in it, said at the row's end. */
+.ib-ncd-row .ib-ncd-ini { margin-left: auto; flex: 0 1 auto; max-width: 180px; }
+/* Initiatives (the filter's New initiative… and Edit initiatives…): names edited in place, Delete, a field to add. */
+.pn-inbox dialog.ib-inid { width: min(440px, calc(100vw - 32px)); }
+.ib-inid-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 2px; }
+.ib-inid-row, .ib-inid-add { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.ib-inid-add { margin-top: 10px; }
+.pn-inbox .ib-inid-in { flex: 1; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-inid-row .ib-inid-in:hover { border-color: var(--ib-line); }
+.pn-inbox .ib-inid-in:focus { outline: none; border-color: var(--ring); background: var(--background); }
+.pn-inbox .ib-inid-add .ib-inid-in { border-color: var(--ib-line); }
+.ib-inid-del { flex: none; border: 0; background: none; cursor: pointer; }
+.pn-inbox .ib-inid-del:hover { color: var(--destructive); background: var(--ib-hover); }
+.ib-inid-ask { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; padding: 6px 8px; border-radius: 8px; background: color-mix(in oklab, var(--destructive) 8%, var(--card)); }
+.ib-inid-askt { flex: 1 1 200px; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.45; overflow-wrap: anywhere; }
+.ib-inid-err { margin: 8px 0 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-bflt-btn { width: 44px; height: 44px; }
+  /* Each token's × a whole 44 px touch target: the token is 44 high, the × its full height. */
+  .ib-bfbar .ib-bflt-tok { height: 44px; padding: 0 0 0 12px; border-radius: 10px; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-bfbar .ib-bflt-tok-x { width: 44px; height: 44px; border-radius: 10px; }
+  .ib-pm-pos[data-phone] .ib-bflt-menu { max-width: none; max-height: 70vh; }
+  .ib-pm-pos[data-phone] .ib-pm-glabel { padding: 8px 12px 4px; font-size: var(--ib-fs-13, 13px); }
+  .pn-inbox .ib-inid-in { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-crdp-ini { height: 36px; }
+}
 /* The Board off (a #board link): what it is, and Turn it on. */
 .ib-boff { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 24px 15vh; text-align: center; }
 .ib-boff-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: var(--ib-lr-md, 9px); background: var(--ib-lane-bg); color: var(--muted-foreground); }

@@ -242,7 +242,7 @@ function Switch({ on, label, disabled, busy, onClick }: { on: boolean; label: st
 function viaOf(row: InboxAgentRow): string {
   if (row.reach.kind === 'tool') return row.id === 'pi' ? "Plannotator's extension" : "Plannotator's plugin";
   if (row.reach.kind === 'mcp') return 'MCP server';
-  return 'connected by hand';
+  return 'connected yourself';
 }
 
 function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad' } {
@@ -258,7 +258,7 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
     case 'unreadable':
       return { text: "Can't read its config", tone: 'bad' };
     case 'manual':
-      return { text: 'Connect by hand', tone: 'off' };
+      return { text: 'Connect yourself', tone: 'off' };
     case 'not_connected':
       return { text: 'Not connected', tone: 'off' };
     default:
@@ -370,7 +370,7 @@ function AgentGroup({
         </>
       )
     ) : (
-      'Add it by hand: "Not found on this computer" below has its command.'
+      'Add it yourself: "Not found on this computer" below has its command.'
     );
   // Pi and OpenCode send the tool whole with every request (Claude Code defers it behind tool search): the measured cost.
   const cost = row.id === 'pi' || row.id === 'opencode' ? `Adds the tool to every ${row.label} request: ${inboxToolCostText(row.id)}.` : null;
@@ -392,7 +392,7 @@ function AgentGroup({
           ? 'would create'
           : 'no note yet'
         : note.state === 'manual'
-          ? 'copy by hand'
+          ? 'copy yourself'
           : note.state === 'unavailable'
           ? 'no file yet'
           : ''
@@ -610,7 +610,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
           <Icon name="chevR" />
           Not found on this computer
           <span className="ib-mut">
-            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one by hand
+            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one yourself
           </span>
         </button>
         {more && context && (
