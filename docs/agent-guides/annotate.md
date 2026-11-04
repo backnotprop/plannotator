@@ -9,7 +9,8 @@ OpenCode/Pi: event handler intercepts command
 Input type detected:
   .md/.mdx/.txt → file read from disk
   plain-text config/data formats (.yaml .yml .json .jsonc .json5 .toml .ini .cfg .conf .properties .csv .tsv .log .xml .env.example)
-             → read from disk, rendered as plain text exactly like .txt (.env itself is
+             → read from disk, shown as ONE code block in the file's language (see
+               "Config and data files" below) — not as markdown (.env itself is
                deliberately excluded — it commonly holds secrets and annotate history
                copies file contents; source-code extensions stay with code review)
              All single-file annotate reads and /api/doc document serves are capped at
@@ -49,7 +50,21 @@ Done / Approve (gate) → positive decision recorded (see the decision control b
 
 Supported: section titles, the document header (author/revision lines and attribute entries, with `{name}` substitution), paragraphs and literal (indented) paragraphs, `*`/`-`/`.`/`1.` lists with nesting, checklists and `+` continuation, description lists, `----` `....` `++++` and ```` ``` ```` listings with `[source,lang]`, admonition paragraphs and `[NOTE]` + `====` blocks, `____` quotes, `|===` tables (`cols`, `%header`, implicit header, colspans), block titles, images, links, cross references (a link when the target is another local `.adoc`), footnotes and constrained `*bold*`.
 
-Not supported: `include::` and conditionals (`ifdef`/`ifndef`/`ifeval`/`endif`) are shown as written, never resolved; lists and listings nested inside an admonition block or an `a|` table cell flatten to text; row spans; CSV/DSV tables; callout lists; counters, macros such as `kbd:`/`btn:`/`menu:`, and inline roles show as plain text. The author and revision lines under the title are not shown. The version diff ("Show changes") compares the text through the markdown view, as it does for diagram files. Editing the file in Plannotator is off (source save is markdown/text only), like the other non-markdown types.
+Not supported: `include::` and conditionals (`ifdef`/`ifndef`/`ifeval`/`endif`) are shown as written, never resolved; lists and listings nested inside an admonition block or an `a|` table cell flatten to text; row spans; CSV/DSV tables; callout lists; counters, macros such as `kbd:`/`btn:`/`menu:`, and inline roles show as plain text. The author and revision lines under the title are not shown. The version diff ("Show changes") compares the text through the markdown view, as it does for diagram files. Editing the file in Plannotator is off (source save is markdown/text only), as it is for diagram files.
+
+### Config and data files
+
+The config and data formats (`.yaml` `.yml` `.json` `.jsonc` `.json5` `.toml` `.ini` `.cfg` `.conf` `.properties` `.csv` `.tsv` `.log` `.xml` `.env.example`) are a fifth family in `packages/core/annotatable.ts`, wired like AsciiDoc: annotatable plain text everywhere on the server (resolution, 2MB cap, folders, file browser, bundles, version history), and both servers set `renderAs: "code"` on `/api/plan` and `/api/doc` with the RAW file as the body (`documentRenderKindForPath`). The editor's `blocksForRenderAs` turns that text into ONE code block (`codeDocumentBlocks` in `packages/ui/utils/parser.ts`) in the language `codeDocumentLanguage` names for the path, highlighted by the same Shiki instance fences use, so annotations, drafts and linked docs need no special case. Before, they went through the markdown parser (#1099's first pass): a `#` comment became a heading and a backticked name a code chip. `.txt` stays markdown.
+
+- `.cfg` and `.conf` get no grammar (an nginx `.conf` is not INI; fences are never guessed, #1212), `.properties` uses `ini`, `.env.example` uses `dotenv`.
+- Past `CODE_DOCUMENT_HIGHLIGHT_LIMIT` (128 KB) the block has no language: one Shiki pass over a whole large log or JSON dump would stall the page, so it shows as plain monospace text, still annotatable.
+- The whole file is one block, so a block-span line label would name every line. The block sets `contentStartLine`, and the export (`lineLabelForAnnotation`) and Ask AI's lines (`selectionSourceLines`, given the selected text) count the comment's own lines from its position in the block: a comment on line 6 exports `(line 6)`.
+- That position is measured from the selection, not searched for: `CodeBlock` marks such a block with `data-content-start-line`, and the highlighter stores the selection's real offset in it (the annotation's `startOffset`, and the comment popover's `startOffset` for Ask AI). A line that appears twice therefore names the copy that was selected. A repeated quote with no offset that still holds it gets the file's span, never a guess at the first copy.
+- A draft saved while config files rendered as markdown points at a markdown block. On restore its stored positions fail the text check, the quote search re-attaches it, and the restore report moves it to `block-0` at the painted copy. A quote whose markdown render differs from the raw file text (an escape, an entity, emphasis markers that were dropped) does not match and comes back unanchored. A repeated quote re-attaches to its first copy, because the search has nothing else to go on.
+- Edit Mode stays available, as it was when these rendered as markdown. Source save is still markdown/text only (`SOURCE_SAVE_FILE_REGEX`).
+- The version diff's Rendered and Classic modes show each chunk as code in the same language, and a changed block takes a comment as in markdown (`codeDocument` on `PlanCleanDiffView`; see "Plan Diff" in `server-and-storage.md`). Raw is unchanged. Diagram and AsciiDoc files still diff through the markdown parse.
+- Not changed: a share link renders the text as markdown (the payload carries no path to pick a grammar from).
+- A configured markdown extra (`markdownExtensions`) can never be one of these extensions (built-ins win in `normalizeMarkdownExtensions`), so extras keep rendering as markdown.
 
 ### Annotate header decision control
 
