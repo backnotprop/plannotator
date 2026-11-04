@@ -21,7 +21,8 @@
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -55,7 +56,7 @@ import {
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;

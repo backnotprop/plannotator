@@ -17,7 +17,8 @@
  * shows the guide read-only.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -31,7 +32,7 @@ import { useNarrowerThan } from '../narrower';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface GuidePaneProps {
   thread: InboxThread;

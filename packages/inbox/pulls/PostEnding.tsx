@@ -10,7 +10,8 @@
  * The choice shows only when both can happen: with no agent (or a teammate's PR, whose agent path takes no
  * verdict), posting is the only ending; with no PR to post to, the agent's is.
  */
-import { lazy, Suspense, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { PlatformPostPart } from '../lazyParts';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -25,7 +26,7 @@ import type { PlatformAction } from '../guide/platform-post-types';
 import { platformRules, postablePull, postedWords, resolvePlatformDecisionAction } from './postRules';
 
 // `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
-const PlatformPost = lazy(() => import('#platform-post'));
+const PlatformPost = PlatformPostPart.Part;
 
 export type ReviewDestination = 'forge' | 'agent';
 

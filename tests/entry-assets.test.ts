@@ -201,13 +201,14 @@ describe('review entry assets', () => {
     const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
-    expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
+    // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#guide-reader'))");
     // The surface's reader (one section per screen) and its diagram engine wait the same way.
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
-    expect(read('packages/inbox/shape/ShapeParts.tsx')).toContain("lazy(() => import('#shape-board'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#shape-board'))");
     // The posting dialog waits for the review's ending, and nothing else imports it.
-    expect(read('packages/inbox/pulls/PostEnding.tsx')).toContain("lazy(() => import('#platform-post'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#platform-post'))");
     const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;
     expect(walk('packages/inbox').filter((path) => post.test(read(path)))).toEqual([]);
     // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
@@ -230,7 +231,7 @@ describe('review entry assets', () => {
       );
     const eager = [...walk('packages/inbox'), ...walk('apps/inbox')].filter((path) => palette.test(read(path)));
     expect(eager).toEqual([]);
-    expect(read('packages/inbox/components/SearchHost.tsx')).toContain("lazy(() => import('#search-palette'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#search-palette'))");
     expect(read('packages/inbox/package.json')).toContain('"#search-palette": "./search/SearchPalette.tsx"');
   });
 

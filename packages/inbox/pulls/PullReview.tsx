@@ -18,7 +18,8 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -42,7 +43,7 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullVerdictReply } from './model';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface PullReviewProps {
   model: InboxPullsAnswer | null;

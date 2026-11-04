@@ -8,11 +8,12 @@
  * arrive leaves the palette closed, never the window unmounted.
  */
 
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
+import { SearchPalettePart } from '../lazyParts';
 import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import type { SearchPaletteProps } from '../search/SearchPalette';
 
-const SearchPalette = lazy(() => import('#search-palette'));
+const SearchPalette = SearchPalettePart.Part;
 
 export type { SearchLanding } from '../search/SearchPalette';
 

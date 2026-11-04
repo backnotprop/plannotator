@@ -4,7 +4,8 @@
  * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
  * are the window's.
  */
-import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
@@ -19,7 +20,7 @@ import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
 import { SidebarTrigger } from '../shell/sidebar';
 
-const ShapeBoard = lazy(() => import('#shape-board'));
+const ShapeBoard = ShapeBoardPart.Part;
 const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
 const noop = () => {};
 const noFooter = () => null;
