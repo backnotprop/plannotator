@@ -1857,6 +1857,9 @@ function Inbox() {
             stepsBus.emit(event.thread_id);
             return;
           }
+          // Any other record may be a message that tags a thread (the person's own send too): the next `#`
+          // preview reads the cards again, whatever the 5 s guard says.
+          cardsReadAt.current = 0;
           const now = routeRef.current;
           if (now.page === 'tour' && event?.kind === 'message' && event.first && event.message.author.kind === 'agent') {
             const threadId = event.message.thread_id;

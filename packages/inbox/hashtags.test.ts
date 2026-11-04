@@ -75,6 +75,7 @@ test('review fix 2: double-backtick code and a longer fence around a ``` fence h
 test('URLs hold no tag; a tag starts at a line start, after whitespace or opening punctuation', () => {
   expect(inboxHashtags('https://x.dev/?q=#Shape a-#Shape www.x.dev/#Shape <https://x.dev#Shape> x=#Shape')).toEqual([]);
   expect(inboxHashtags('**#Shape** "#Shape" (#Shape) [#Shape]\n#Shape').length).toBe(5);
+  expect(inboxHashtags('見て（#Shape）と「#Shape」').map((t) => t.tag)).toEqual(['Shape', 'Shape']);
   expect(findHashtagTrigger('a-#sh', 5)).toBeNull();
   expect(findHashtagTrigger('(#sh', 4)).toEqual({ start: 1, query: 'sh' });
 });

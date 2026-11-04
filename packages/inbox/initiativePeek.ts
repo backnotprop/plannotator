@@ -92,8 +92,8 @@ export function initiativePeekModel(
   // Linked since the read (a card picked it up): out of the list and the count too.
   const others = tagged.threads.filter((id) => id !== exclude && !linked.has(id));
   const linkedSince = tagged.threads.filter((id) => id !== exclude && linked.has(id)).length;
-  // The thread being read tags it (its tag opened this), so `total` counts it unless a card links it.
-  const here = exclude !== null && (tagged.threads.includes(exclude) || !linked.has(exclude)) ? 1 : 0;
+  // The thread being read is in `total` only when it is among the tagged threads the read sent.
+  const here = exclude !== null && tagged.threads.includes(exclude) ? 1 : 0;
   const mentions = others
     .map((id) => rows.get(id))
     .filter((row): row is InboxListRow => !!row)

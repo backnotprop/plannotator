@@ -67,6 +67,8 @@ test('threads: the cards read\'s few latest (no card of it links them), minus th
   expect(model.mentions.map((t) => t.id)).toEqual(['t-cancelled-card', 't-1', 't-2'].slice(0, PEEK_THREADS));
   expect(model.mentions[0]!.title).toBe('About t-cancelled-card');
   expect(model.moreMentions).toBe(9 - 1 - 3);
+  // Read in a thread that does not tag it (the tag is quoted from elsewhere): nothing is taken off for it.
+  expect(initiativePeekModel('ini_a', cards, rows, new Map(), sent, 't-other').moreMentions).toBe(9 - 3);
   // Read from another thread (the Board's card panel has none): the one being read is not taken off.
   expect(initiativePeekModel('ini_a', cards, rows, new Map(), sent, null).moreMentions).toBe(9 - 3);
   // A card linking a sent thread since the read: it leaves Threads and the count.

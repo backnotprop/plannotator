@@ -55,6 +55,7 @@ import {
   withInboxActionsSection,
   parseInboxActionBlocks,
   parseInboxDoneRef,
+  INBOX_ACTIONS_HEADING,
 } from "@plannotator/core/inbox-actions";
 import {
   inboxId,
@@ -184,6 +185,8 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
@@ -637,18 +640,32 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   return kept;
 }
 
+/** The headings a Send appends after the person's words (the action items, the annotations' feedback). */
+const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
+  `## ${INBOX_ACTIONS_HEADING}`,
+  `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
+  `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
+]);
+
 /**
- * The person's own words in a message they sent (approval "board-hashtags"): a reply's words, without the
- * reply's first line, the still-open line and the answers section (`splitInboxReplyBody`), the skills block,
- * and what a Send appends after the words under a heading of its own (the actions section, the annotations'
- * feedback, which quote plans and files). Only these tag a card: when the message is sent
- * (`tagThreadCards`) and when a card is made later for its thread (`threadTaggedInitiative`) alike.
+ * The person's own words in a reply as stored (approval "board-hashtags"), for a card made later for its
+ * thread (`threadTaggedInitiative`): without the reply's first line, the still-open line and the answers
+ * section (`splitInboxReplyBody`) and the skills block, cut where a Send appends its own sections (the
+ * action items, the annotations' feedback, which quote plans and files): only at those headings, each after
+ * a blank line, never inside a code fence. The person's own headings and fenced `# comments` stay words.
+ * At send time the reply's words are read directly (`sendReply`), and a New message's body is its words.
  */
 function personWords(body: string): string {
-  const words = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words;
-  const lines = words.split("\n");
-  const heading = lines.findIndex((line) => /^#{1,6}\s/.test(line));
-  return heading >= 0 ? lines.slice(0, heading).join("\n") : words;
+  const lines = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i]!)) {
+      i = codeFenceCloseIndex(lines, i);
+      continue;
+    }
+    if (SEND_APPENDED_HEADINGS.has(lines[i]!.trimEnd()) && (i === 0 || lines[i - 1]!.trim() === "")) return lines.slice(0, i).join("\n");
+  }
+  return lines.join("\n");
 }
 
 export class InboxStore {
@@ -4306,7 +4323,8 @@ export class InboxStore {
       throw error;
     }
     this.endSnooze(message.thread_id);
-    this.tagThreadCards(reply);
+    // The person's words as typed: never the picks, the action items or the feedback the Send adds.
+    this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -5864,7 +5882,7 @@ export class InboxStore {
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
-    this.tagThreadCards(message);
+    this.tagThreadCards(threadId, message.body);
     return { message, replayed: false };
   }
   // ──────────── Tidy ────────────
@@ -6731,9 +6749,8 @@ export class InboxStore {
    * thread's cards in it, as if the person set it on each (a history line
    * each). A cancelled card stays as it is.
    */
-  private tagThreadCards(message: InboxMessage): void {
-    const threadId = message.thread_id;
-    const tagged = inboxTaggedInitiative(personWords(message.body), [...this.initiativesById.values()]);
+  private tagThreadCards(threadId: string, words: string): void {
+    const tagged = inboxTaggedInitiative(words, [...this.initiativesById.values()]);
     if (!tagged) return;
     for (const card of [...this.cards.values()]) {
       if (card.column === "dropped" || !card.threads.includes(threadId)) continue;

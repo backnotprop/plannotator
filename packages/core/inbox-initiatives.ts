@@ -109,7 +109,8 @@ export function inboxInitiativeTaggable(name: string): boolean {
 
 /** What may come right before a tag's `#` (an empty string: the text's start). */
 export function inboxHashtagMayFollow(before: string): boolean {
-  return before === "" || /[\s([{"'\u201C\u2018\u00AB*_~>]/u.test(before);
+  // Full-width and CJK opening brackets too: （「『【〈《〔.
+  return before === "" || /[\s([{"'\u201C\u2018\u00AB*_~>\uFF08\u300C\u300E\u3010\u3008\u300A\u3014]/u.test(before);
 }
 
 /** `match` blanked (same length, spaces; newlines kept), so offsets in the rest of the text stay put. */

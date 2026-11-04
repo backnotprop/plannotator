@@ -144,3 +144,25 @@ test("a thread two cards link: the person's tag puts both in it", () => {
   store.sendReply(asked.id, { words: "Both are #Shape", idempotency_key: "k1" });
   expect([one, two].map((c) => store.cardWire(store.card(c.id)!).initiative)).toEqual([shape.id, shape.id]);
 });
+
+test("review fix 4: the person's own headings and fenced comments never hide a tag they typed, now or for a card made later", () => {
+  const { store, project, shape } = world();
+  const auth = store.createInitiative({ name: "Auth", by: PERSON });
+  const cases: [string, (asked: { id: string; thread_id: string }) => void, string][] = [
+    ["heading", (asked) => store.sendReply(asked.id, { words: "## Plan\n\nThis belongs to #Shape", idempotency_key: "k-h" }), shape.id],
+    ["fence", (asked) => store.sendReply(asked.id, { words: "Run:\n\n```sh\n# install\nnpm i\n```\n\nthen #Shape", idempotency_key: "k-f" }), shape.id],
+    [
+      "new message",
+      (asked) => store.sendNewMessage(asked.thread_id, { body: "# Bug: login breaks\n\nThe redirect loops. #Auth", to: { host: "claude-code", session: "ses_a" }, idempotency_key: "k-n" }),
+      auth.id,
+    ],
+  ];
+  for (const [name, send, expected] of cases) {
+    const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: "Status?", thread: name }).message;
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: name, threads: [asked.thread_id] });
+    send(asked);
+    expect([name, store.cardWire(store.card(card.id)!).initiative]).toEqual([name, expected]);
+    const later = store.createCard({ project_id: project.id, by: AGENT, title: `${name} later`, threads: [asked.thread_id] }).card;
+    expect([name, store.cardWire(later).initiative]).toEqual([name, expected]);
+  }
+});
