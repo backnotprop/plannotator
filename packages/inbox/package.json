@@ -11,7 +11,9 @@
   "imports": {
     "#guide-reader": "./guide/GuideReader.tsx",
     "#surface-guide-reader": "./guide/SurfaceGuideReader.tsx",
-    "#search-palette": "./search/SearchPalette.tsx"
+    "#search-palette": "./search/SearchPalette.tsx",
+    "#platform-post": "./guide/PlatformPost.tsx",
+    "#shape-board": "./shape/ShapeBoard.tsx"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

@@ -30,7 +30,8 @@ export function reviewOutcomeWords(outcome: ReviewOutcome | null): string {
   return comments > 0 ? `Changes requested · ${plural(comments, 'comment')}` : 'Changes requested';
 }
 
-export function ReviewCard({ guide, outcome, onOpen }: { guide: InboxGuideRef; outcome: ReviewOutcome | null; onOpen: () => void }) {
+/** `verdict: false`: a review of a teammate's pull request (`InboxThread.pull_theirs`), which waits on no verdict. */
+export function ReviewCard({ guide, outcome, verdict = true, onOpen }: { guide: InboxGuideRef; outcome: ReviewOutcome | null; verdict?: boolean; onOpen: () => void }) {
   const chapters = guide.chapters ?? [];
   return (
     <div className="ib-rvcard" data-review-card="" data-review-outcome={outcome?.verdict.verdict ?? 'waiting'}>
@@ -39,10 +40,12 @@ export function ReviewCard({ guide, outcome, onOpen }: { guide: InboxGuideRef; o
           <Icon name="code" size={14} />
           Review
         </span>
-        <span className="ib-rvc-state" data-verdict={outcome?.verdict.verdict ?? undefined}>
-          {outcome?.verdict.verdict === 'approved' && <Icon name="check" size={13} />}
-          {reviewOutcomeWords(outcome)}
-        </span>
+        {(verdict || outcome) && (
+          <span className="ib-rvc-state" data-verdict={outcome?.verdict.verdict ?? undefined}>
+            {outcome?.verdict.verdict === 'approved' && <Icon name="check" size={13} />}
+            {reviewOutcomeWords(outcome)}
+          </span>
+        )}
       </div>
       <div className="ib-rvc-title">
         <bdi>{inboxReviewTitleLine(guide.title)}</bdi>

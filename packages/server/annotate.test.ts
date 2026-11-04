@@ -936,6 +936,38 @@ describe("annotate server: folder annotate history", () => {
     }
   });
 
+  test("a config file is served as code and still keeps per-file version history", async () => {
+    // The failure: a new render kind left out of the history gate, so a .toml
+    // in a folder lost its +N/−M badge the day it stopped rendering as markdown.
+    const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-code-"));
+    const docPath = join(folderPath, "config.toml");
+    writeFileSync(docPath, "# Config\n[server]\nport = 8080\n", "utf-8");
+    const project = uniqueProject("code");
+
+    const server = await startAnnotateServer({
+      markdown: "",
+      filePath: folderPath,
+      folderPath,
+      mode: "annotate-folder",
+      htmlContent: MINIMAL_HTML,
+      project,
+    });
+
+    try {
+      const res = await fetch(`${server.url}/api/doc?path=${encodeURIComponent(docPath)}&doc=1`);
+      const json = await res.json() as {
+        renderAs?: string;
+        markdown?: string;
+        versionInfo?: { version: number; totalVersions: number; project: string };
+      };
+      expect(json.renderAs).toBe("code");
+      expect(json.markdown).toBe("# Config\n[server]\nport = 8080\n");
+      expect(json.versionInfo).toEqual({ version: 1, totalVersions: 1, project });
+    } finally {
+      server.stop();
+    }
+  });
+
   test("content matching the latest stored version dedupes (mints nothing) and still serves correct previous-version fields", async () => {
     const folderPath = mkdtempSync(join(tmpdir(), "plannotator-folder-history-dedupe-"));
     const docPath = join(folderPath, "note.md");

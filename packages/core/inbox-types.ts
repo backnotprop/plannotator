@@ -41,31 +41,17 @@ export * from "./inbox-steps";
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
+// Pull requests (code review in the Inbox, phase 2), the same way.
+export * from "./inbox-pulls";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
 
 // ─────────────────────────────── Ids ───────────────────────────────
 
-const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-
-/**
- * A ULID (48-bit millisecond time + 80 random bits, Crockford base32), so ids
- * sort by creation time and a later sync can keep them as they are.
- */
-export function ulid(now: number = Date.now()): string {
-  let time = Math.max(0, Math.floor(now));
-  let timePart = "";
-  for (let i = 0; i < 10; i++) {
-    timePart = CROCKFORD[time % 32] + timePart;
-    time = Math.floor(time / 32);
-  }
-  const bytes = new Uint8Array(16);
-  globalThis.crypto.getRandomValues(bytes);
-  let randomPart = "";
-  for (let i = 0; i < 16; i++) randomPart += CROCKFORD[bytes[i]! % 32];
-  return timePart + randomPart;
-}
+// The id clock lives in ./ulid (Shape uses it too, without the Inbox types).
+export { ulid } from "./ulid";
+import { ulid } from "./ulid";
 
 /** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread. */
 export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx" | "stp";
@@ -1550,6 +1536,17 @@ export interface InboxThread {
    * thread's. Absent from an older Inbox and from the MCP tools.
    */
   archive_seq?: number | null;
+  /**
+   * The window's read only: every pull request the person handed to this thread is a teammate's (Pull requests'
+   * Hand to an agent; the Inbox's own pull list said so when the owner was kept). Its reviews take no verdict:
+   * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
+   */
+  pull_theirs?: true;
+  /**
+   * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
+   * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
+   */
+  pull_keys?: string[];
   messages: InboxMessageWire[];
 }
 
@@ -2435,6 +2432,12 @@ export interface InboxDraft {
    * any other draft.
    */
   card?: { id: string; title: string };
+  /**
+   * The pull requests it was started for (Pull requests' Launch an agent): the Send hands them to the new thread.
+   * `projects`: the projects of their repository (To offers only those); `ask_line`: the hand-off's guided-review
+   * line as it was offered, so a Send whose words no longer hold it is kept as a custom curation.
+   */
+  pulls?: { keys: string[]; projects: string[]; ask_line: string };
   /** Compose's Board chip was on (approval "inbox-compose-board-chip"): the Send asks the agent to track the work on the Board. */
   board_request?: true;
 }

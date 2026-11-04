@@ -458,8 +458,10 @@ export interface PlannotatorConfig {
    * the Inbox's Settings → Capabilities (`POST /api/inbox/settings`
    * `{ board: { on } }`), read on every request. Three readings (approval
    * "inbox-feature-reveal"): unset = not decided yet (off, and the only state
-   * the reveal can turn on), `true` = on, `false` = the person switched it
-   * off. The reveal's claim is the only automatic write, unset -> `true`.
+   * the reveal offers it in), `true` = on, `false` = the person switched it
+   * off. Nothing writes it automatically: the reveal's claim turns nothing
+   * on, and only its dialog's "Turn it on" writes `true` (opt-in, the owner
+   * 2026-11-04).
    */
   inboxBoard?: boolean;
   /**
@@ -484,19 +486,31 @@ export interface PlannotatorConfig {
    */
   inboxCodeReview?: boolean;
   /**
+   * Shape in the Inbox (approval "shape-inbox-placement"): living boards an
+   * agent draws and keeps current. Off unless the person turns it on. On: the
+   * thread header's Pebble, the sidebar's Shape row (3+ boards), the Shape
+   * group in the search, the `/api/shapes` routes and the shape skill in the
+   * reply box's "/" list. Off: none of it, and no agent is told of it. Three
+   * readings, like the Board's: unset (off), `true`, `false`. Written by
+   * Settings → Capabilities (`POST /api/inbox/settings` `{ shape: { on } }`).
+   */
+  inboxShape?: boolean;
+  /**
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
    * on this machine (list options, voice, Snooze, the Board), the 48 h
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
-   * `steps.shownAt`: the Checklist reveal was claimed.
+   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * the claiming page's own key, so that page's retry after a lost answer is
+   * shown it again (any other key is not).
    */
   inboxReveals?: {
     lastShownAt?: string;
     waitingSince?: { snooze?: string; board?: string; steps?: string };
-    board?: { shownAt?: string };
-    steps?: { shownAt?: string };
+    board?: { shownAt?: string; key?: string };
+    steps?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;

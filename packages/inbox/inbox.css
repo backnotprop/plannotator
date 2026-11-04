@@ -7405,10 +7405,24 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-review .ib-vhead .ib-fn { flex: none; }
 .ib-review .ib-vhead .ib-from { min-width: 0; }
 .ib-rv-decide { display: inline-flex; flex: none; }
+/* Where a pull request's review goes (the owner's answer C on #2590): the forge or the agent, chosen at the end. */
+.ib-rv-dest { flex: none; }
+.ib-rv-decide[data-review-posts] { gap: 6px; }
+.ib-rv-dest .ib-seg-o { gap: 5px; }
+.ib-rv-dest .ib-rv-dest-mark { width: 14px; height: 14px; flex: none; }
+.ib-rv-dest .ib-atile { width: 16px; height: 16px; background: transparent; }
+/* A review that went to the forge: done, not offered again (no second post). */
+.pn-inbox .ib-btn.ib-rv-posted-done:disabled { opacity: 1; cursor: default; gap: 6px; color: var(--foreground); background: color-mix(in oklab, var(--success, var(--primary)) 10%, var(--card)); border-color: color-mix(in oklab, var(--success, var(--primary)) 30%, var(--border)); }
+.ib-rv-posted-done .ib-ic { color: var(--success, var(--primary)); }
+.ib-prr-posted { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); background: color-mix(in oklab, var(--success, var(--primary)) 9%, var(--card)); border: 1px solid color-mix(in oklab, var(--success, var(--primary)) 30%, var(--border)); }
+.ib-prr-posted > .ib-ic { color: var(--success, var(--primary)); flex: none; }
+.ib-prr-posted a { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--primary); font-weight: 550; text-decoration: none; }
+.ib-prr-posted a:hover { text-decoration: underline; }
+@media (forced-colors: active) { .ib-prr-posted { border-color: CanvasText; } }
 .ib-rrail { display: flex; flex-direction: column; gap: 10px; min-height: 0; overflow-y: auto; padding: 14px 12px; border-right: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
 .ib-rv-modes { display: flex; }
 .ib-rv-modes .ib-seg-o { flex: 1; justify-content: center; }
-.ib-rv-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
+.ib-rv-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
 .pn-inbox .ib-rv-row { display: flex; align-items: center; gap: 9px; width: 100%; min-height: 34px; padding: 6px 8px; border-radius: 7px; text-align: left; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); }
 .pn-inbox .ib-rv-row:hover { background: var(--ib-hover-s, var(--muted)); }
 .pn-inbox .ib-rv-row[data-on] { background: var(--muted); font-weight: 550; }
@@ -7439,4 +7453,242 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (forced-colors: active) {
   .ib-rvcard { border: 1px solid CanvasText; }
   .ib-rv-mark[data-done] { background: Highlight; color: HighlightText; }
+}
+
+/* Pull requests (approval "inbox-code-review-direction", items 4 and 5; concept B take 1; PullsPage.tsx,
+   PullReview.tsx). Drawn only while Settings → Capabilities → Code review is on. The list is the Inbox list's own
+   column, bands and three-line rows; a stack's third line is a chain of PR marks (the Board's own drawing). The stack view is a
+   thread pane's place: a bar, the stack, the landing order, and Reply at the foot. */
+.ib-prlist .ib-lhead { gap: 10px; padding-right: 14px; }
+.ib-prlist .ib-lhead h1 { flex: none; outline: none; }
+/* The title and its count always fit; the project filter gives way: unset, it is its folder mark and caret
+   ("All projects" stays its accessible name), and a picked project's name is cut with "…" (its tooltip says it). */
+.ib-prlist .ib-lhead .ib-bpf { flex: 0 1 auto; min-width: 0; max-width: 150px; }
+.ib-prlist .ib-lhead .ib-bpf:not([data-set]) .ib-bpf-l { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.pn-inbox .ib-prlist .ib-lhead .ib-bpf:not([data-set]) .ib-bpf-btn { gap: 4px; padding: 0 8px; }
+.ib-pr-onyou { flex: none; font-size: var(--ib-fs-14, 14px); font-weight: 600; color: var(--ib-wait-fg, var(--warning)); white-space: nowrap; }
+.ib-prlist .ib-lbody { display: flex; flex-direction: column; }
+.ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
+.ib-pr-empty p { margin: 0 0 4px; }
+.ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
+.ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
+.ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
+.ib-mrow.ib-prrow { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--ib-hair); }
+.ib-mrow.ib-prrow .ib-l1 { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-14, 14px); }
+.ib-mrow.ib-prrow .ib-l1 .ib-from { flex: 1; min-width: 0; display: inline-flex; align-items: center; gap: 6px; }
+.ib-mrow.ib-prrow .ib-l1 .ib-t { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-mrow.ib-prrow .ib-title { font-size: var(--ib-fs-15, 15px); overflow-wrap: anywhere; }
+.ib-mrow.ib-prrow.ib-u .ib-title { font-weight: 600; }
+.ib-mrow.ib-prrow .ib-l3 { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-mrow.ib-prrow .ib-pv { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prrow .ib-lead { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.ib-pr-av { display: inline-flex; align-items: center; justify-content: center; flex: none; width: var(--ib-mark-20, 20px); height: var(--ib-mark-20, 20px); border-radius: var(--ib-mark-20-r, 6px); background: color-mix(in oklch, var(--primary) 14%, var(--card)); color: var(--primary); font-size: var(--ib-fs-10-5, 10.5px); font-weight: 650; letter-spacing: -0.02em; }
+.ib-pr-chain { display: inline-flex; align-items: center; flex: none; }
+.ib-pr-link { display: inline-flex; align-items: center; }
+.ib-pr-dash { width: 6px; height: 1.5px; margin: 0 2px; border-radius: 1px; background: color-mix(in oklch, var(--muted-foreground) 50%, transparent); }
+.ib-pr-fold { margin-top: 12px; }
+.pn-inbox .ib-pr-foldbtn { display: flex; align-items: center; gap: 8px; width: 100%; height: 34px; padding: 0 12px; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); text-align: left; }
+.pn-inbox .ib-pr-foldbtn:hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-pr-foldbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-pr-foldbtn .ib-n { color: var(--muted-foreground); }
+.ib-pr-foot { display: flex; align-items: center; gap: 6px; flex: none; min-height: 40px; padding: 4px 14px 8px; border-top: 1px solid var(--ib-hair); font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-pr-foot-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-pr-refresh[data-refreshing] .ib-ic { animation: ib-pr-spin 0.9s linear infinite; }
+@keyframes ib-pr-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .ib-pr-refresh[data-refreshing] .ib-ic { animation: none; opacity: 0.5; } }
+
+.ib-prpane { overflow: hidden; }
+.ib-pr-bar { display: flex; align-items: center; gap: 8px; height: 52px; flex: none; padding: 0 12px 0 18px; border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.pn-inbox .ib-pr-ext { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 8px; margin-left: -8px; border-radius: 7px; color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; text-decoration: none; }
+.pn-inbox .ib-pr-ext:hover { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-pr-ext:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+.ib-pr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
+.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
+.ib-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-pr-meta > * { min-width: 0; }
+.ib-pr-agent { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
+.pn-inbox .ib-pr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 9px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-pr-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-pr-chip > .ib-pr-chip-k { flex: none; color: var(--muted-foreground); font-weight: 600; }
+.pn-inbox button.ib-pr-chip:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
+.pn-inbox button.ib-pr-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* The agent that has the PR: one status line, no box (take B), its last words under it. */
+.ib-pr-status { margin-top: 18px; }
+/* Focus lands here after a hand-off: a ring only for the keyboard. */
+.ib-pr-status:focus { outline: none; }
+.ib-pr-status:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 6px; }
+.ib-pr-status-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-pr-status-p { margin: 6px 0 0 25px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
+.pn-inbox .ib-pr-quietlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 40%, transparent); cursor: pointer; }
+.pn-inbox .ib-pr-quietlink:hover { color: var(--foreground); }
+.pn-inbox .ib-pr-quietlink:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+/* The hand-off, inline (take B): "Ask for" then "Hand to", the agents as pills, "+ New agent" dashed and last. */
+.ib-pr-hgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 14px; margin-top: 18px; }
+.ib-pr-lab { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.ib-pr-hline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+.ib-seg.ib-seg-sm .ib-seg-o { height: 26px; padding: 0 9px; font-size: var(--ib-fs-12-5, 12.5px); }
+.pn-inbox .ib-pr-askin { flex: 1; min-width: 220px; max-width: 360px; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+.pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent); border-color: var(--ring); }
+.pn-inbox .ib-pr-agbtn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; white-space: nowrap; }
+.pn-inbox .ib-pr-agbtn:hover:not(:disabled):not([data-disabled]) { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
+.pn-inbox .ib-pr-agbtn:focus-visible, .pn-inbox .ib-pr-agbtn:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-pr-agbtn:disabled, .pn-inbox .ib-pr-agbtn[data-disabled] { opacity: 0.55; cursor: default; }
+/* The agent pills are a radio group (one is picked): the group adds no box, each pill holds its own radio. */
+.ib-pr-agents { display: contents; }
+.pn-inbox label.ib-pr-agbtn { position: relative; cursor: pointer; }
+.pn-inbox .ib-pr-agbtn input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
+.pn-inbox .ib-pr-agbtn input:focus-visible { outline: none; }
+.pn-inbox .ib-pr-agbtn.ib-new { padding-left: 10px; border-style: dashed; color: var(--muted-foreground); }
+/* The picked agent, the one Review hands it to: tinted as an on button is (oklab, so light mode stays violet). */
+.pn-inbox .ib-pr-agbtn[data-on], .pn-inbox .ib-pr-agbtn[data-on]:hover:not([data-disabled]) { border-color: color-mix(in oklab, var(--primary) 55%, transparent); background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--primary); }
+.ib-pr-busy { width: 6px; height: 6px; border-radius: 50%; background: var(--success, #16a34a); }
+.ib-pr-hgrid-err { grid-column: 1 / -1; }
+.pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
+.pn-inbox .ib-pr-guide:hover { background: var(--ib-hover-s, var(--muted)); }
+.ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.pn-inbox .ib-pr-actions .ib-btn { height: 36px; padding: 0 15px; font-size: var(--ib-fs-14, 14px); }
+.ib-pr-note { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pr-order { margin-top: 26px; }
+.ib-pr-order-h { display: flex; align-items: baseline; gap: 12px; justify-content: space-between; font-size: var(--ib-fs-13, 13px); }
+.ib-pr-order-h .ib-mut { font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-ladder { list-style: none; margin: 10px 0 0; padding: 0; position: relative; }
+/* The rail the marks hang on, from the top layer down to the base branch. */
+.ib-pr-ladder::before { content: ""; position: absolute; left: 17px; top: 18px; bottom: 12px; width: 2px; border-radius: 1px; background: color-mix(in oklch, var(--border) 85%, transparent); }
+.ib-pr-layer { position: relative; }
+.pn-inbox .ib-pr-lrow { display: flex; align-items: flex-start; gap: 12px; width: 100%; padding: 10px 10px 10px 8px; border-radius: 10px; text-align: left; color: var(--foreground); }
+.pn-inbox button.ib-pr-lrow:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+/* A row opens its diff: "Open diff ›" at its end, quiet until the row is under the pointer or focused. */
+.ib-pr-lgo { display: inline-flex; align-items: center; gap: 3px; flex: none; align-self: center; margin-left: 8px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox button.ib-pr-lrow:focus-visible .ib-pr-lgo { color: var(--primary); }
+/* Only under a real pointer: a tap leaves no outline behind on a phone. */
+@media (hover: hover) {
+  .pn-inbox button.ib-pr-lrow:hover { background: var(--ib-hover-s, color-mix(in oklch, var(--muted) 55%, transparent)); box-shadow: inset 0 0 0 1px var(--border); }
+  .pn-inbox button.ib-pr-lrow:hover .ib-pr-lgo { color: var(--primary); }
+}
+.ib-pr-lmark { position: relative; z-index: 1; width: 20px; height: 22px; align-items: center; justify-content: center; background: var(--card); }
+.ib-pr-lmain { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.ib-pr-l1 { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--ib-fs-14-5, 14.5px); line-height: 22px; }
+.ib-pr-num { color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+.ib-pr-lt { font-weight: 550; overflow-wrap: anywhere; min-width: 0; }
+.ib-pr-layer[data-state="merged"] .ib-pr-lt, .ib-pr-layer[data-state="closed"] .ib-pr-lt { font-weight: 400; color: var(--muted-foreground); }
+.ib-pr-l2 { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pr-l2 .ib-add { color: var(--success); }
+.ib-pr-l2 .ib-del { color: var(--destructive); }
+.ib-pr-checks { display: inline-flex; align-items: center; gap: 4px; }
+.ib-pr-checks[data-checks="success"] { color: var(--success); }
+.ib-pr-checks[data-checks="failure"] { color: var(--destructive); }
+.ib-pr-pill { display: inline-flex; align-items: center; height: 22px; padding: 0 8px; border-radius: 999px; font-size: var(--ib-fs-12, 12px); font-weight: 600; white-space: nowrap; flex: none; background: var(--muted); color: var(--muted-foreground); }
+.ib-pr-lrow > .ib-pr-pill { margin-top: 1px; }
+.ib-pr-pill[data-tone="next"] { background: color-mix(in oklch, var(--success) 16%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
+.ib-pr-pill[data-tone="you"] { background: color-mix(in oklch, var(--warning) 20%, var(--card)); color: color-mix(in oklch, var(--warning) 45%, var(--foreground)); }
+.ib-pr-pill[data-tone="ok"] { background: color-mix(in oklch, var(--success) 14%, var(--card)); color: color-mix(in oklch, var(--success) 80%, var(--foreground)); }
+.ib-pr-pill[data-tone="bad"] { background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
+.ib-pr-base { display: flex; align-items: center; gap: 12px; padding: 6px 10px 2px 8px; color: var(--muted-foreground); }
+.ib-pr-base code { font-family: var(--font-mono); font-size: var(--ib-fs-13, 13px); }
+.ib-pr-dot { position: relative; z-index: 1; width: 20px; display: inline-flex; justify-content: center; }
+.ib-pr-dot::before { content: ""; width: 9px; height: 9px; border-radius: 50%; border: 1.5px solid color-mix(in oklch, var(--muted-foreground) 70%, transparent); background: var(--card); }
+.ib-pr-replyfoot { flex: none; padding: 12px 22px 16px; border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-pr-replyrow { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+.pn-inbox .ib-pr-replybtn { display: inline-flex; align-items: center; gap: 8px; height: 38px; padding: 0 16px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-pr-replybtn:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
+.pn-inbox .ib-pr-replybtn:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.ib-pr-replybtn b { font-weight: 600; }
+.ib-pr-sent { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pn-inbox .ib-pr-linkbtn { padding: 0; color: var(--primary); text-decoration: underline; text-underline-offset: 2px; font-size: inherit; }
+.ib-pr-replybox { display: grid; gap: 8px; }
+.pn-inbox .ib-pr-replyin { width: 100%; min-height: 72px; max-height: 40vh; resize: vertical; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
+.pn-inbox .ib-pr-replyin:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
+.ib-pr-replyacts { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); }
+
+/* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. */
+.ib-viewer.ib-prreview { grid-template-rows: 46px auto minmax(0, 1fr) auto; }
+/* A PR layer has no curated chapters: the reader's one "Every changed file" card would only repeat the rail's
+   files, so its narrative column goes and the diffs take the width (the rail, as phase 1's All files, navigates). */
+.ib-prreview [data-guide-section-grid] { display: block; }
+.ib-prreview [data-guide-section-narrative] { display: none; }
+.ib-prr-fn { display: inline-flex; align-items: center; gap: 7px; min-width: 0; overflow: hidden; }
+.ib-prr-fn bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-prr-num { color: var(--muted-foreground); font-weight: 500; }
+.ib-prr-strip { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 14px; background: var(--card); border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-prr-layers { display: flex; align-items: center; gap: 2px; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.ib-prr-lstep { display: inline-flex; align-items: center; gap: 2px; flex: none; color: var(--muted-foreground); }
+.pn-inbox .ib-prr-layer { display: inline-flex; align-items: center; gap: 6px; height: 30px; padding: 0 9px; border-radius: 7px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); white-space: nowrap; }
+.pn-inbox .ib-prr-layer:not(:disabled):hover { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
+.pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
+.pn-inbox .ib-prr-layer:disabled { cursor: default; }
+.pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-prr-lt { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
+.ib-prr-scope { flex: none; }
+.ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
+.ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-prlist { width: 100%; }
+  /* The band under the head says "On you 3"; the head keeps its title and the project filter. */
+  .ib-pr-onyou { display: none; }
+  .ib-pr-bar { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 8px 0 4px; }
+  .pn-inbox .ib-pr-bar .ib-iconbtn, .pn-inbox .ib-pr-ext { min-width: 44px; min-height: 44px; justify-content: center; }
+  .ib-pr-body { padding: 18px 16px 24px; }
+  .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
+  .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
+  .pn-inbox .ib-pr-actions .ib-btn { height: 44px; }
+  /* The hand-off on a phone: each label over its line, the pills wrapping, the words a full line. */
+  .ib-pr-hgrid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
+  .ib-pr-hgrid > .ib-pr-lab:nth-of-type(2) { margin-top: 6px; }
+  .pn-inbox .ib-pr-askin { flex-basis: 100%; max-width: none; min-width: 0; font-size: var(--ib-fs-16-in, 16px); height: 44px; }
+  .pn-inbox .ib-pr-agbtn { height: 44px; }
+  .ib-pr-hline .ib-seg-sm .ib-seg-o { height: 40px; }
+  .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
+  .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
+  .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
+  /* Review and Open the diff, each a full line, as the hand-off lines above them. */
+  .ib-pr-handoff .ib-pr-actions > .ib-btn { flex: 1 1 100%; justify-content: center; }
+  .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-pr-replybtn { height: 44px; }
+  .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-pr-replyacts .ib-btn { height: 44px; }
+  .ib-pr-foot { padding-bottom: calc(8px + env(safe-area-inset-bottom)); }
+  .pn-inbox .ib-pr-refresh { min-width: 44px; min-height: 44px; }
+  .pn-inbox .ib-pr-foldbtn { height: 44px; }
+  .ib-prr-strip { flex-wrap: wrap; padding: 6px 8px; }
+  .ib-prr-scope { flex: 1 1 100%; }
+  .ib-prr-scope .ib-seg-o { flex: 1; justify-content: center; height: 36px; }
+  .pn-inbox .ib-prr-layer { height: 40px; }
+  .ib-prr-foot { padding: 8px 12px calc(8px + env(safe-area-inset-bottom)); }
+  .ib-prr-where { white-space: normal; }
+  .pn-inbox .ib-prr-foot .ib-btn { height: 44px; }
+}
+@media (forced-colors: active) {
+  .ib-pr-pill, .pn-inbox .ib-pr-chip { border: 1px solid CanvasText; }
+  .ib-pr-ladder::before, .ib-pr-dash { background: CanvasText; }
+}
+
+/* ───────── Shape (approval "shape-inbox-placement") ───────── */
+.ib-shapebtn { position: relative; }
+.ib-shapebtn.ib-on { color: var(--primary); background: color-mix(in oklab, var(--primary) 12%, transparent); }
+.ib-shape-dot { position: absolute; top: 5px; right: 5px; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--background); }
+.ib-shape-tip b { font-weight: 600; margin-right: 4px; }
+.ib-shape-tip { white-space: nowrap; }
+.ib-main[data-shape-open] { position: relative; }
+.ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
+.ib-shape-layer > * { flex: 1; min-height: 0; }
+.ib-shape-loading { flex: 1; }
+.ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
+.ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
+.ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }
+.ib-shape-who span { color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-shape-page .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
+.ib-shape-find { display: flex; align-items: center; gap: 8px; height: 36px; width: 300px; max-width: 40vw; padding: 0 12px; border-radius: 10px; border: 1px solid var(--border); color: var(--muted-foreground); background: transparent; }
+.ib-shape-find input { all: unset; flex: 1; min-width: 0; font-size: var(--ib-fs-14, 14px); color: var(--foreground); }
+.ib-shape-find input::placeholder { color: var(--muted-foreground); }
+.ib-shape-gridwrap { flex: 1; min-height: 0; overflow: auto; }
+.ib-nav .ib-pebble-ico { display: inline-flex; width: 18px; height: 18px; align-items: center; justify-content: center; }
+.ib-sp-shape-prev { width: 64px; height: 40px; flex: none; border-radius: 6px; overflow: hidden; box-shadow: 0 0 0 1px var(--border); background: color-mix(in oklab, var(--background) 92%, var(--muted)); }
+.ib-sp-shape-prev .shp-thumb { width: 100%; height: 100%; }
+.ib-sp-shape-prev .shp-drawn { --shp-paper: transparent; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-shape-find { width: 46vw; }
+  /* A phone has no gutter around the pane: the board covers it edge to edge. */
+  .ib-shape-layer { inset: 0; border-radius: 0; }
 }

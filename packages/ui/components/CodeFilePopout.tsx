@@ -314,6 +314,11 @@ export interface CodeFileViewProps {
   annotations?: CodeAnnotation[];
   selectedAnnotationId?: string | null;
   onAddAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: an Ask action in the line composer, beside Save (Shape's "Ask"). Absent → Save only, as always. */
+  onAskAnnotation?: (annotation: CodeFileAnnotationInput) => void;
+  /** Opt-in: the line composer's labels (Shape: "Change it" / "Ask"). Absent → "Save" / "Ask AI". */
+  commentSubmitLabel?: string;
+  commentAskLabel?: string;
   onEditAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -363,6 +368,9 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   annotations = [],
   selectedAnnotationId,
   onAddAnnotation,
+  onAskAnnotation,
+  commentSubmitLabel,
+  commentAskLabel,
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
@@ -672,6 +680,20 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
             });
             setPendingComment(null);
           }}
+          submitLabel={commentSubmitLabel}
+          askAILabel={commentAskLabel}
+          onAskAI={onAskAnnotation ? (question) => {
+            onAskAnnotation({
+              filePath: filepath,
+              lineStart: pendingComment.range.start,
+              lineEnd: pendingComment.range.end,
+              text: question,
+              originalCode: pendingComment.originalCode,
+            });
+            setPendingComment(null);
+            return true;
+          } : undefined}
+          askAIContext={onAskAnnotation ? { kind: 'selection', label: pendingComment.contextText, text: pendingComment.originalCode } : undefined}
           onClose={() => setPendingComment(null)}
         />
       )}
