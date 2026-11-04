@@ -38,7 +38,8 @@ function permalinkOf(pull: PlatformPostPull) {
  * The comments as the review app's builder takes them. `diff`: written on this PR's own diff at the commit posted to,
  * so each goes inline where the platform takes it. `guide`: written on an agent's guided review, whose diff the Inbox
  * cannot vouch is this PR's, so each line comment rides the review body with the code it was written on. `stack`: the
- * whole stack's diff, whose lines map to no single PR (the dialog offers them to copy, as the review app does).
+ * whole stack's diff, whose lines map to no single PR (the dialog offers them to copy, as the review app does). A
+ * global comment is on no line, so on any diff it rides the review body (the review app's general comment).
  */
 function asSubmitted(comments: readonly CodeAnnotation[], pull: PlatformPostPull, anchor: PlatformPostProps['anchor']): CodeAnnotation[] {
   return comments.map((c) => ({
@@ -47,7 +48,7 @@ function asSubmitted(comments: readonly CodeAnnotation[], pull: PlatformPostPull
     prNumber: pull.number,
     prTitle: pull.title,
     prRepo: pull.repo,
-    ...(anchor === 'stack' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
+    ...(anchor === 'stack' && (c.scope ?? 'line') !== 'general' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
     ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: 'guide' } : {}),
   }));
 }
@@ -131,9 +132,12 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       }
       if (openPR) settlePendingTab(pending, attempt.openUrls.length > 0 ? attempt.openUrls : [pull.url], window as unknown as TabOpener);
       else closePendingTab(pending);
+      // What went: every comment but the ones the dialog could only offer to copy (the whole stack's line comments).
+      const kept = new Set(plan.orphans.flatMap((group) => group.annotations.map((a) => a.id)));
+      const posted = comments.filter((c) => !kept.has(c.id)).map((c) => c.id);
       setPlan({ targets: [], orphans: [] });
       setGeneral('');
-      onPosted({ action, url: pull.url });
+      onPosted({ action, url: pull.url, posted });
     } finally {
       setSubmitting(false);
     }

@@ -469,6 +469,9 @@ export interface ViewerHandle {
   /** Markdown `Viewer` only: scroll a heading anchor (`#id`) into view.
    *  Returns false when it is not in this document. */
   scrollToAnchor?: (hash: string) => boolean;
+  /** Raw-HTML `HtmlViewer` only: print the document itself so its page breaks
+   *  paginate instead of being flattened inside the host's iframe. */
+  print?: () => void;
   /** `HtmlViewer` only: move a pinned draft to the element around it
    *  (`'parent'`) or back in (`'child'`), for a host that composes
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
