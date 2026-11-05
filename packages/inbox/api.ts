@@ -742,7 +742,6 @@ export class InboxHeldError extends InboxApiError {
 /** What a held write says, by its machine's state. */
 export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
   const name = machine?.name ?? 'the other machine';
-  if (machine?.state === 'revoked') return `Not sent: ${name} removed the link. Link it again to send.`;
   return machine && machine.state !== 'online' && machine.state !== 'connecting'
     ? `Waiting for ${name}: this applies when ${name} is back.`
     : `Sending to ${name}: this applies once ${name} confirms.`;

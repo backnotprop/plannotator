@@ -153,11 +153,10 @@ describe('held answers', () => {
 });
 
 describe('held answers by state', () => {
-  test('connecting is on its way, out of date waits for an update, removed there says it will not go; none says delivered', () => {
+  test('connecting is on its way, out of date waits for an update; none says delivered', () => {
     const held = outbox('k', 'messages/msg_1/reply', 'queued');
     expect(outboxLine(held, machine(MAC, 'MacBook', 'connecting'))!.text).toBe('Sending to MacBook…');
     expect(outboxLine(held, machine(MAC, 'MacBook', 'needs_update'))!.text).toBe('Will send when MacBook is updated');
-    expect(outboxLine(held, machine(MAC, 'MacBook', 'revoked'))!.text).toMatch(/^Not sent: MacBook removed the link/);
     for (const state of ['connecting', 'needs_update', 'revoked', 'offline', 'online'] as const) {
       expect(outboxLine(held, machine(MAC, 'MacBook', state))!.text).not.toMatch(/deliver/i);
     }
