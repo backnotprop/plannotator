@@ -24,16 +24,16 @@ const boardDir = process.env.PLANNOTATOR_SHAPE_BOX_BOARD ?? join(repo, 'tests/e2
 const { defaultBrowserType: _phoneBrowser, ...phone } = devices['iPhone 15'];
 let w: ShapeWorld;
 
-function store(key: string): string {
+function store(key: string, thread = 'snooze'): string {
   const dir = join(w.root, 'boards', key);
   mkdirSync(dir, { recursive: true });
   cpSync(boardDir, dir, { recursive: true });
-  const r = w.shape(['update', '--file', join(dir, 'board.json'), '--project', w.projects.plannotator!, '--thread', w.threads.snooze!]);
+  const r = w.shape(['update', '--file', join(dir, 'board.json'), '--project', w.projects.plannotator!, '--thread', w.threads[thread]!]);
   expect(r.status, r.stderr).toBe(0);
   return (JSON.parse(r.stdout) as { id: string }).id;
 }
 
-async function openBoard(browser: Browser, id: string, options: Parameters<Browser['newContext']>[0] = {}) {
+async function openBoard(browser: Browser, id: string, options: Parameters<Browser['newContext']>[0] = {}, thread = 'snooze') {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'light', ...options });
   await context.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), (route) => route.abort());
   const page = await context.newPage();
@@ -46,7 +46,7 @@ async function openBoard(browser: Browser, id: string, options: Parameters<Brows
   page.on('console', (m) => {
     if (/content security|csp|tainted/i.test(m.text())) problems.push(m.text());
   });
-  await page.goto(`${w.url}#thread=${w.threads.snooze}&shape=${id}`);
+  await page.goto(`${w.url}#thread=${w.threads[thread]}&shape=${id}`);
   await expect(page.locator('.shp-dock')).toBeVisible();
   await page.waitForTimeout(3600); // drawn in
   return { context, page, problems };
@@ -376,15 +376,16 @@ for (const [name, launch] of [
 // Add to reply (owner approval q-3dcdec04 A): the box's words and picture go into the reply of the board's thread, with
 // "Added to your reply · Undo"; the board keeps no note of it. Undo takes out only what its own press added.
 const replyShots = process.env.PLANNOTATOR_SHAPE_BOX_REPLY_SHOTS ?? shots;
-for (const [look, options] of [
-  ['light', {}],
-  ['dark', { colorScheme: 'dark' }],
-  ['390', { viewport: { width: 390, height: 844 } }],
+// Each on its own thread: a reply draft stays with its thread.
+for (const [look, options, thread] of [
+  ['light', {}, 'snooze'],
+  ['dark', { colorScheme: 'dark' }, 'kettle'],
+  ['390', { viewport: { width: 390, height: 844 } }, 'notes'],
 ] as const) {
   test(`Add to reply, ${look}: the box's words and picture land in the reply draft, and Undo takes them out`, async ({ browser }) => {
     mkdirSync(replyShots, { recursive: true });
-    const id = store(`reply-${look}`);
-    const { context, page, problems } = await openBoard(browser, id, options as Parameters<Browser['newContext']>[0]);
+    const id = store(`reply-${look}`, thread);
+    const { context, page, problems } = await openBoard(browser, id, options as Parameters<Browser['newContext']>[0], thread);
     const reply = page.getByRole('textbox', { name: /^Reply to / });
     const files = page.locator('[data-compose-file-name]');
     const toast = page.locator('.ib-toast');
@@ -406,8 +407,8 @@ for (const [look, options] of [
     expect(waiting(id)).toEqual([]);
 
     // A second box, then its Undo: only the second goes.
-    await drag(page, await at(page, 'save', 0.2, 0.3), await at(page, 'save', 0.8, 0.7));
-    await composer(page).locator('textarea').fill('Disable this until the URL has %s.');
+    await drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
+    await composer(page).locator('textarea').fill('Show the engine’s mark here.');
     await composer(page).getByRole('button', { name: 'Add to reply' }).click();
     const undo = page.locator('[data-toast-undo]').last();
     await expect(undo).toBeVisible();
