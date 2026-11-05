@@ -379,11 +379,12 @@ test('the bottom of the viewport: above the first selected line, not on them, in
   await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
   for (const style of ['split', 'unified'] as const) {
     await setStyle(page, style);
-    await line(page, LONG, 25).scrollIntoViewIfNeeded();
-    // The last selected line is the last on screen.
-    await line(page, LONG, 27).evaluate((el) => el.scrollIntoView({ block: 'end' }));
+    // The last selected line is the last on screen: lines near the top of a file the page has only begun to show.
+    await page.locator(`[data-guide-file-shell="${NEXT}"]`).first().scrollIntoViewIfNeeded();
+    await expect(line(page, NEXT, 5)).toBeVisible({ timeout: 30_000 });
+    await line(page, NEXT, 5).evaluate((el) => el.scrollIntoView({ block: 'end' }));
     await page.waitForTimeout(300);
-    await select(page, LONG, 25, 27);
+    await select(page, NEXT, 3, 5);
     const g = await geometry(page);
     const box = clearOfLines(g);
     expect(g.viewport.height - g.bottom, 'no room for it below').toBeLessThan(42);
@@ -501,7 +502,8 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     expect(box.top).toBeGreaterThan(g.bottom);
     expect(box.top - g.bottom).toBeLessThan(12);
     await pictures(page, 'phone', box);
-    await page.touchscreen.tap(195, 8);
+    // The page's left margin: nothing there but the click away.
+    await page.touchscreen.tap(5, 400);
     await expect(bar(page)).toHaveCount(0);
 
     await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'end' }));
