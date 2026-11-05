@@ -5266,8 +5266,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     return () => observer.disconnect();
   }, []);
 
-  // The view's header: in the phone's bar, in a row below the bar elsewhere.
-  const viewSwitch = <ThreadViewSwitch links={linkList.count} artifacts={artifactList.length} linksOn={linksOn} onLinks={(on) => onLinks?.(on)} />;
+  // The view's header: in the phone's bar, in a row below the bar elsewhere. Nothing until the thread's files
+  // are known: before that "Links" would stand alone and then turn into the toggle.
+  const viewSwitch = files !== null && (
+    <ThreadViewSwitch links={linkList.count} artifacts={artifactList.length} linksOn={linksOn} onLinks={(on) => onLinks?.(on)} />
+  );
 
   // The copy menus (CopyMenus.tsx): the header's ⋯ and each open message's.
   const copyHost: CopyMenuHost = {

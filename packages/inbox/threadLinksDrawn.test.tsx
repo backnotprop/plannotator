@@ -48,6 +48,8 @@ const BODY = [
   '',
   '<div><a href="https://html.example.com/p">page</a></div>',
   '',
+  '<div><a href="https://html.example.com/q?x=1&amp;y=2">amp</a> <a href=https://html.example.com/r>bare</a></div>',
+  '',
   ':::note',
   'In a callout https://callout.example.com',
   ':::',

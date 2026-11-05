@@ -54,6 +54,7 @@ export interface ThreadLinks {
   repos: RepoGroup[];
   /** Every other link, a site's links together. */
   others: ThreadLink[];
+  /** What the list shows: every row, and a repository with nothing under it (its name is its row). */
   count: number;
 }
 
@@ -188,11 +189,26 @@ function readInline(text: string, repo: RefRepo, out: WrittenLink[]): void {
   }
 }
 
-/** `<a href>` in a raw HTML block (the renderer draws them through DOMPurify). */
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'" };
+
+/** An attribute's text as the browser reads it; null when it holds an entity this does not know (left out, never guessed). */
+function attributeText(raw: string): string | null {
+  let unknown = false;
+  const text = raw.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);?/gi, (whole, name: string) => {
+    const code = name[0] === '#' ? (name[1] === 'x' || name[1] === 'X' ? parseInt(name.slice(2), 16) : parseInt(name.slice(1), 10)) : null;
+    if (code !== null) return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : ((unknown = true), whole);
+    const named = ENTITIES[name.toLowerCase()];
+    if (named === undefined) unknown = true;
+    return named ?? whole;
+  });
+  return unknown ? null : text;
+}
+
+/** `<a href>` in a raw HTML block (the renderer draws them through DOMPurify): quoted or not, its entities read. */
 function readHtml(html: string, out: WrittenLink[]): void {
-  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)')[^>]*>([\s\S]*?)<\/a>/gi)) {
-    const href = (m[1] ?? m[2] ?? '').trim();
-    if (WEB.test(href)) out.push({ href, words: m[3]!.replace(/<[^>]*>/g, '').trim() || null, fromRef: false });
+  for (const m of html.matchAll(/<a\b[^>]*?\bhref\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const href = attributeText(m[1] ?? m[2] ?? m[3] ?? '')?.trim();
+    if (href && WEB.test(href)) out.push({ href, words: m[4]!.replace(/<[^>]*>/g, '').trim() || null, fromRef: false });
   }
 }
 
@@ -216,6 +232,21 @@ export function linksOfBody(body: string, repo: RefRepo): WrittenLink[] {
   return out;
 }
 
+/** Each message's links, read once per text: an open thread counts its links without reading every message again. */
+const bodyLinks = new Map<string, { body: string; links: WrittenLink[] }>();
+const BODY_LINKS_MAX = 5000;
+
+function linksOfMessage(id: string, body: string, repo: RefRepo): WrittenLink[] {
+  const key = `${repo ? `${repo.host ?? ''}/${repo.display}` : ''}\u0000${id}`;
+  const hit = bodyLinks.get(key);
+  if (hit && hit.body === body) return hit.links;
+  const links = linksOfBody(body, repo);
+  bodyLinks.delete(key);
+  bodyLinks.set(key, { body, links });
+  if (bodyLinks.size > BODY_LINKS_MAX) bodyLinks.delete(bodyLinks.keys().next().value!);
+  return links;
+}
+
 // ── What a link is ──
 
 const NAME = /^[A-Za-z0-9_.-]{1,100}$/;
@@ -234,7 +265,8 @@ function readable(text: string): string {
   } catch {
     // Not percent-encoded after all.
   }
-  return out.replace(/[‪-‮⁦-⁩]/g, '');
+  // Bidi overrides and isolates, direction marks, and the zero-width characters that hide text.
+  return out.replace(/[\u202A-\u202E\u2066-\u2069\u200B-\u200F\u061C\u2060\uFEFF]/g, '');
 }
 
 interface Repository {
@@ -340,6 +372,17 @@ interface Entry {
   platform: ForgePlatform | null;
 }
 
+/** A written link's entry, read once (the cached message's links keep theirs); the list copies it before changing it. */
+const entries = new WeakMap<WrittenLink, Entry | null>();
+function entryOfCached(written: WrittenLink): Entry | null {
+  let entry = entries.get(written);
+  if (entry === undefined) {
+    entry = entryOf(written);
+    entries.set(written, entry);
+  }
+  return entry;
+}
+
 function entryOf(written: WrittenLink): Entry | null {
   const url = parseWeb(written.href);
   if (!url) return null;
@@ -381,12 +424,12 @@ export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'bo
   const seen = new Map<string, Entry>();
   for (let m = messages.length - 1; m >= 0; m--) {
     const message = messages[m]!;
-    for (const written of linksOfBody(message.body, refRepo)) {
-      const entry = entryOf(written);
+    for (const written of linksOfMessage(message.id, message.body, refRepo)) {
+      const entry = entryOfCached(written);
       if (!entry) continue;
       const had = seen.get(entry.key);
       if (!had) {
-        seen.set(entry.key, entry);
+        seen.set(entry.key, { ...entry });
         continue;
       }
       had.title ??= entry.title;
@@ -415,5 +458,8 @@ export function threadLinks(messages: readonly Pick<InboxMessageWire, 'id' | 'bo
   for (const group of repos.values()) {
     group.links.sort((a, b) => KIND_ORDER.indexOf(a.kind!) - KIND_ORDER.indexOf(b.kind!));
   }
-  return { repos: [...repos.values()], others: [...sites.values()].flat(), count: seen.size };
+  const others = [...sites.values()].flat();
+  let count = others.length;
+  for (const group of repos.values()) count += group.links.length || 1;
+  return { repos: [...repos.values()], others, count };
 }

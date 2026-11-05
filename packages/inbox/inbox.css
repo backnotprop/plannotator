@@ -5537,11 +5537,10 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-tl-lead { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-tl-text { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-tl-name { font-weight: 600; }
-.ib-tl-tail { flex: none; max-width: 45%; margin-left: auto; padding-left: 12px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: end; }
+.ib-tl-tail { flex: none; max-width: 45%; margin-left: auto; padding-left: 12px; color: var(--muted-foreground); font-size: var(--ib-fs-12, 12px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; text-align: right; }
 @media (prefers-reduced-motion: reduce) { .pn-inbox .ib-art-tile { transition: none; } }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-art-grid, .ib-pane.ib-withfile .ib-art-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .ib-art-top { margin-bottom: 12px; }
   .pn-inbox a.ib-tl-a { min-height: 40px; font-size: var(--ib-fs-14, 14px); }
   .ib-tl-repo > .ib-tl-rows { padding-left: 20px; }
   .pn-inbox .ib-artswitch { margin: 0 6px 0 auto; flex: none; }

@@ -37,10 +37,15 @@ interface World {
   one: string;
   many: string;
   linksOnly: string;
+  lookalike: string;
   noLinks: string;
   noLinksFiles: string;
 }
 let world: World;
+
+/** A host whose start looks like GitHub; its real domain is its end. */
+const LOOKALIKE_HOST = 'github.com.acme-web-pull-5-secure-login-verify-your-account-now.evil.example';
+const LOOKALIKE = `https://${LOOKALIKE_HOST}/acme/web/pull/5`;
 
 const ago = (hours: number) => new Date(Date.now() - hours * 3_600_000).toISOString();
 
@@ -291,9 +296,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     subject: 'Receipts: where it stands',
     body: 'Merged https://github.com/acme/web/pull/901, and https://github.com/acme/web/issues/902 is still open. Background in [the tax guide](https://docs.stripe.com/tax) and [the old receipts thread](https://forum.example.org/t/receipts/120).',
   });
+  const lookalike = await (await session()).send({
+    project_path: project,
+    subject: 'Login link from a stranger',
+    body: `The repo https://github.com/acme/web, its ${'https://github.com/acme/web/pull/1398'}, and a look-alike: [Sign in again](${LOOKALIKE}).`,
+  });
   const noLinks = await (await session()).send({ project_path: project, subject: 'Nothing to look at yet', body: 'Still working on it. No files and no links in this one, and `https://only-code.example.com` is code.' });
   const noLinksFiles = await (await session()).send({ project_path: project, subject: 'The spec, no links', body: 'The spec, on its own.', attachments: ['docs/checkout-spec.md', 'design/checkout-before.png'] });
-  world = { url, agents, forge, mixed: first.thread_id as string, one: one.thread_id as string, many: many.thread_id as string, linksOnly: linksOnly.thread_id as string, noLinks: noLinks.thread_id as string, noLinksFiles: noLinksFiles.thread_id as string };
+  world = { url, agents, forge, mixed: first.thread_id as string, one: one.thread_id as string, many: many.thread_id as string, linksOnly: linksOnly.thread_id as string, lookalike: lookalike.thread_id as string, noLinks: noLinks.thread_id as string, noLinksFiles: noLinksFiles.thread_id as string };
 });
 
 test.afterAll(async () => {
@@ -473,6 +483,79 @@ test.describe('desktop', () => {
     await artifactsButton(page).click();
     await chosen(page, 'Artifacts');
     await page.keyboard.press('Escape');
+  });
+
+  test('the label waits for the artifacts: no "Links" that turns into the toggle', async ({ browser }: { browser: Browser }) => {
+    // A page of its own: the thread's files are read on its first draw, held here until released.
+    const fresh = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+    const p = await fresh.newPage();
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let asked = false;
+    await p.route(/\/api\/inbox\/threads\/[^/]+\/attachments/, async (route) => {
+      asked = true;
+      await held;
+      await route.continue();
+    });
+    try {
+      await p.goto(`${world.url}#thread=${world.mixed}&artifacts`);
+      await expect(p.locator('[data-artifacts-view] [aria-busy="true"]')).toBeVisible();
+      expect(asked).toBe(true);
+      await p.waitForTimeout(600);
+      await expect(p.locator('[data-artifacts-switch-one]')).toHaveCount(0);
+      await expect(p.locator('[data-artifacts-switch]')).toHaveCount(0);
+    } finally {
+      release();
+    }
+    await expect(p.locator('[data-artifacts-switch]')).toBeVisible();
+    await chosen(p, 'Artifacts');
+    await fresh.close();
+  });
+
+  test('the hidden grid keeps its previews while Links shows', async () => {
+    await open(page, world.mixed, '&artifacts');
+    const previews = page.locator('[data-artifacts-view] img');
+    await expect(previews).toHaveCount(2);
+    await side(page, 'Links').click();
+    await expect(page.locator('[data-links-view]')).toBeVisible();
+    await page.waitForTimeout(800);
+    await expect(previews).toHaveCount(2);
+  });
+
+  test('"Links N" is what the list shows; a look-alike host keeps its real domain in sight', async () => {
+    for (const thread of [world.mixed, world.many]) {
+      await open(page, thread, '&artifacts&links');
+      await expect(rows(page).first()).toBeVisible();
+      const label = await page.locator('[data-artifacts-side="Links"] .ib-artswitch-n, [data-artifacts-switch-one] .ib-artswitch-n').first().textContent();
+      expect(Number(label)).toBe(await page.locator('[data-links-view] [data-thread-link]').count());
+    }
+    // A repository linked on its own and through one of its PRs: one row, and the count says one.
+    await open(page, world.lookalike);
+    await artifactsButton(page).click();
+    await expect(page.locator('[data-artifacts-switch-one]')).toHaveText('Links2');
+    await expect(page.locator('[data-links-view] [data-thread-link]')).toHaveCount(2);
+
+    // The host is cut from its start: its end, the real domain, is on screen.
+    const tail = page.locator('[data-links-view] [data-link-tail]').filter({ hasText: 'evil.example' });
+    const ends = await tail.evaluate((el) => {
+      const text = el.querySelector('bdi')!.firstChild as Text;
+      const box = el.getBoundingClientRect();
+      const at = (i: number) => {
+        const range = document.createRange();
+        range.setStart(text, i);
+        range.setEnd(text, i + 1);
+        return range.getBoundingClientRect();
+      };
+      const last = at(text.length - 1);
+      const first = at(0);
+      return { cut: el.scrollWidth > el.clientWidth + 1, lastIn: last.left >= box.left - 1 && last.right <= box.right + 1, firstIn: first.left >= box.left - 1 };
+    });
+    expect(ends).toEqual({ cut: true, lastIn: true, firstIn: false });
+    // Cut, so its whole address is the tooltip.
+    await tail.hover();
+    await expect(page.locator('[data-pn-tooltip]').filter({ hasText: LOOKALIKE })).toBeVisible();
+    await page.mouse.move(10, 700);
+    await shot(page, '11-lookalike');
   });
 
   test('a PR row has the hover card, over the scripted gh', async () => {

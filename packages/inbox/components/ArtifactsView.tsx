@@ -112,8 +112,9 @@ function useNear<T extends Element>(): [React.RefObject<T | null>, boolean] {
     const load = new IntersectionObserver((entries) => {
       if (entries.some((e) => e.isIntersecting)) setNear(true);
     }, { rootMargin: LOAD_MARGIN });
+    // Hidden (the grid under the view's Links side) is not far away: a tile keeps its preview for the way back.
     const unload = new IntersectionObserver((entries) => {
-      if (entries.every((e) => !e.isIntersecting)) setNear(false);
+      if (entries.every((e) => !e.isIntersecting && (e.boundingClientRect.width > 0 || e.boundingClientRect.height > 0))) setNear(false);
     }, { rootMargin: UNLOAD_MARGIN });
     load.observe(el);
     unload.observe(el);

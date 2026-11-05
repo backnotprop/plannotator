@@ -181,6 +181,38 @@ describe('the list', () => {
     ]);
   });
 
+  test('the count is what the list shows: a repository with links under it is not counted again', () => {
+    const { repos, others, count } = one('https://github.com/acme/web and https://github.com/acme/web/pull/412', 'https://github.com/acme/tokens', 'https://docs.example.com/a');
+    const shown = repos.reduce((n, group) => n + (group.links.length || 1), 0) + others.length;
+    expect(count).toBe(3);
+    expect(count).toBe(shown);
+  });
+
+  test('raw HTML: unquoted and entity-written hrefs read as the browser reads them; an unknown entity is left out', () => {
+    expect(
+      hrefs(
+        [
+          '<p><a href="https://html.example.com/a?x=1&amp;y=2">a</a></p>',
+          '<p><a href=https://html.example.com/b>b</a></p>',
+          '<p><a href="https://html.example.com/&#99;">c</a></p>',
+          '<p><a href="https://html.example.com/d&nbsp;x">d</a></p>',
+        ].join('\n\n'),
+      ),
+    ).toEqual(['https://html.example.com/a?x=1&y=2', 'https://html.example.com/b', 'https://html.example.com/c']);
+  });
+
+  test('zero-width characters and direction marks never reach the shown text', () => {
+    const { others } = one('https://shop.example.com/a%E2%80%8Bb%E2%80%8Fc%D8%9Cd%E2%81%A0e%EF%BB%BFf');
+    expect(others[0]!.text).toBe('abcdef');
+  });
+
+  test('a message whose text changes is read again', () => {
+    const before = threadLinks([{ id: 'same', body: 'https://a.example.com' }], null);
+    const after = threadLinks([{ id: 'same', body: 'https://b.example.com' }], null);
+    expect(before.others[0]!.href).toBe('https://a.example.com');
+    expect(after.others[0]!.href).toBe('https://b.example.com');
+  });
+
   test('a thread with no links has none', () => {
     expect(one('Nothing here. Not even `https://code.example.com`.', 'Or #12, with no repo.').count).toBe(0);
   });

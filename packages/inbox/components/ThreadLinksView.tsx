@@ -64,6 +64,20 @@ function useForgeItem(href: string, wanted: boolean): [React.RefObject<HTMLLIEle
   return [row, item];
 }
 
+/**
+ * A site's or host's name, after the words. Cut from its start, so the end that names the real domain stays
+ * (`…login.evil.example`); its whole address is the tooltip when it is cut.
+ */
+function Tail({ text, href }: { text: string; href: string }) {
+  return (
+    <Tip content={href} cut>
+      <span className="ib-tl-tail" dir="rtl" data-link-tail="">
+        <bdi dir="ltr">{text}</bdi>
+      </span>
+    </Tip>
+  );
+}
+
 function Row({ link }: { link: ThreadLink }) {
   const isRef = link.kind === 'pull' || link.kind === 'issue';
   const [row, item] = useForgeItem(link.href, isRef);
@@ -103,11 +117,7 @@ function Row({ link }: { link: ThreadLink }) {
           </Tip>
         )}
         {stateWords && <span className="ib-sr">, {stateWords}</span>}
-        {link.tail && (
-          <bdi className="ib-tl-tail" dir="auto">
-            {link.tail}
-          </bdi>
-        )}
+        {link.tail && <Tail text={link.tail} href={link.href} />}
       </a>
     </li>
   );
@@ -118,10 +128,11 @@ function Repo({ group }: { group: RepoGroup }) {
   return (
     <section className="ib-tl-repo" data-link-repo={group.path}>
       <h3 className="ib-tl-rh">
-        <a className="ib-tl-a" href={group.href} target="_blank" rel="noopener noreferrer">
+        {/* A repository with nothing under it is its own row, and counts as one. */}
+        <a className="ib-tl-a" href={group.href} target="_blank" rel="noopener noreferrer" data-thread-link={group.links.length === 0 ? '' : undefined}>
           <ForgeMark platform={group.platform} />
           <span className="ib-tl-text ib-tl-name">{group.path}</span>
-          {!publicForge && <span className="ib-tl-tail">{group.host}</span>}
+          {!publicForge && <Tail text={group.host} href={group.href} />}
         </a>
       </h3>
       {group.links.length > 0 && (

@@ -10,6 +10,7 @@
  * Decisions page (`#decisions=…`) opens the list.
  */
 
+import { inboxRefTransport } from './refTransport';
 import { perfFirstList, perfStart, perfThreadOpenDropped, perfThreadOpenStart, perfThreadReadLanded, perfUntilNextFrame } from './perfMarks';
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ActionMark } from './components/ActionChecklist';
@@ -22,7 +23,6 @@ import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
-import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { selectionToolbarShowing } from './selectionToolbar';
 import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
@@ -205,11 +205,7 @@ configurePlannotatorUI({
   // The selection toolbar's Copy copies rich text, in messages and attached files (#1972).
   richCopy: true,
   // Hover cards for issue, PR and MR links: the server fetches with this computer's gh or glab (ref-cards.ts).
-  refCardTransport: async (href, _ref, signal) => {
-    const res = await fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } });
-    if (!res.ok) return null;
-    return (await res.json()) as ForgeRefCardResult;
-  },
+  refCardTransport: inboxRefTransport((href, signal) => fetch(inboxUrl(`/ref?url=${encodeURIComponent(href)}`), { signal, headers: { accept: 'application/json' } })),
   // Images in a message load from the Inbox's per-message route (#1813).
   imageSrcResolver: inboxImageSrcResolver,
   webmcp: { enabled: false, namePrefix: 'plannotator.' },
