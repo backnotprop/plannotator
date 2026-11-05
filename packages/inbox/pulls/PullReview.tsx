@@ -28,7 +28,7 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react'
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
-import { anchorStillMatches, captureAnchor } from '@plannotator/review-editor/utils/codeAnnotationAnchor';
+import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
