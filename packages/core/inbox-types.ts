@@ -2145,6 +2145,33 @@ export type InboxAccountsRead =
  */
 export type InboxMachineAccountsRead = InboxAccountsRead | { state: "offline" } | { state: "needs_update" } | { state: "unreachable" };
 
+/**
+ * `POST /api/inbox/accounts/switch`: the account a person picked, as the window
+ * showed it. `number` is `cswap`'s on this machine; the address, organization
+ * and alias are only matched against a new read before the switch, so a list
+ * that changed since (`cswap swap`, `cswap remove`) switches nothing. An API
+ * key has no address: its alias is what tells it from another.
+ */
+export interface InboxAccountSwitchTarget {
+  number: number;
+  email: string | null;
+  organizationName: string | null;
+  alias: string | null;
+}
+
+/**
+ * Why a switch did not happen, or may not have: a read's failure, or
+ * `changed`, the list no longer has that login under that number (nothing
+ * ran); `renumbered`, it moved between that read and the switch, which went to
+ * another login (the next read shows which); `busy`, another switch is going.
+ * `timed_out` is the person's wait, not the run's: the switch goes on, and the
+ * next read says how it ended.
+ */
+export type InboxAccountSwitchFailure = InboxAccountsFailure | "changed" | "renumbered" | "busy";
+
+/** The switch's answer. No address and no `cswap` words: `number` is the account in use after it. */
+export type InboxAccountSwitch = { state: "switched"; number: number } | { state: "failed"; reason: InboxAccountSwitchFailure } | { state: "not_installed" };
+
 export interface InboxAgentsModel {
   agents: InboxAgentRow[];
   last_report: (InboxConnectReport & { seen?: boolean }) | null;
