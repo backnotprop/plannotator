@@ -84,15 +84,15 @@ async function mount(views: ShapeVersion['views'], props: Partial<React.Componen
 }
 
 describe.if(hasDom)('a host that does not ask for readFirst keeps its board', () => {
-  const asHost = { readFirst: false };
+  const asHost = { readFirst: undefined };
 
   test('a part can be marked at once, with no Annotate button, and the strip keeps its modes', async () => {
     await mount({ picture: PICTURE }, asHost);
-    expect(dock('Annotate')).toBeNull();
-    expect(document.querySelector('.shp-tstrip')).not.toBeNull();
+    expect(!!dock('Annotate')).toBe(false);
+    expect(!!document.querySelector('.shp-tstrip')).toBe(true);
     await click(inDrawing('[data-mark="whistle"]')!);
     for (let i = 0; i < 20 && !popover(); i++) await wait();
-    expect(popover()).not.toBeNull();
+    expect(!!popover()).toBe(true);
   });
 
   test('a number lights and opens: no bubble, no file read on hover, its title kept', async () => {
@@ -103,7 +103,7 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
     expect(num.getAttribute('title')).toBe('The file');
     await act(async () => { num.dispatchEvent(Object.assign(new MouseEvent('pointerover', { bubbles: true, composed: true }), { pointerType: 'mouse' })); });
     await act(() => new Promise((r) => setTimeout(r, 150)));
-    expect(document.querySelector('.shp-peek')).toBeNull();
+    expect(!!document.querySelector('.shp-peek')).toBe(false);
     expect(reads).toEqual([]);
   });
 
@@ -117,7 +117,7 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
       await click(inDrawing('[data-ref="1"]')!);
       await wait();
       expect(opened).toEqual(['https://example.com/a']);
-      expect(document.querySelector('.shp-lightbox, [data-image-lightbox]')).toBeNull();
+      expect(!!document.querySelector('.shp-lightbox, [data-image-lightbox]')).toBe(false);
     } finally {
       window.open = open;
     }
@@ -129,12 +129,13 @@ describe.if(hasDom)('a host that does not ask for readFirst keeps its board', ()
     const load = old.load;
     old.load = async (shapeId: string) => {
       const data = await load.call(old, shapeId);
-      const note = { id: 'n1', kind: 'change', v: 1, view: 'reqs', part: 'r-1', quote: 'Line one', text: 'Change it', state: 'waiting', at: data.version.at, by: 'person' };
+      const note = { id: 'n1', kind: 'ask', v: 1, view: 'reqs', part: 'r-1', quote: 'Line one', text: 'Why this?', from: 'you', re: null, delivered: null, at: data.version.at };
       return { ...data, notes: [note as unknown as ShapeLoaded['notes'][number]] };
     };
     await mount({}, { ...asHost, host: old, initialView: 'reqs' as ShapeViewId, initialPanel: 'ask' });
     expect(document.querySelector('.shp-know')?.textContent).toContain('Line one');
     expect(dock('What to know')?.getAttribute('aria-pressed')).toBe('true');
+    expect(document.body.textContent).toContain('Why this?');
     expect(document.body.textContent).not.toContain('reqs');
   });
 });
@@ -143,7 +144,7 @@ describe.if(hasDom)('annotation: off until asked for', () => {
   test('a click on a part does nothing, and the pointing tools are not in the dock', async () => {
     await mount({ picture: PICTURE });
     await click(inDrawing('[data-mark="whistle"]')!);
-    expect(popover()).toBeNull();
+    expect(!!popover()).toBe(false);
     expect(dock('Annotate')?.getAttribute('aria-pressed')).toBe('false');
     expect(document.querySelectorAll('.shp-tstrip button').length).toBe(1);
   });
@@ -157,9 +158,9 @@ describe.if(hasDom)('annotation: off until asked for', () => {
     await click(inDrawing('[data-mark="whistle"]')!);
     expect(popover()?.textContent).toContain('One whistle');
     await click(dock('Annotate')!);
-    expect(popover()).toBeNull();
+    expect(!!popover()).toBe(false);
     await click(inDrawing('[data-mark="whistle"]')!);
-    expect(popover()).toBeNull();
+    expect(!!popover()).toBe(false);
   });
 
   test('a part inside an SVG can be picked, and its quote is its labels', async () => {
@@ -203,17 +204,17 @@ describe.if(hasDom)('What to know', () => {
     for (const words of ['What I understand', 'Who gets it', 'You, never a guest', 'Second line', 'Open:', 'Nothing.']) expect(know.textContent).toContain(words);
     expect(know.textContent).not.toContain('Empty group');
     expect(know.querySelector('[data-mark="r-two"]')).not.toBeNull();
-    expect(dock('What to know')).not.toBeNull();
+    expect(!!dock('What to know')).toBe(true);
   });
 
   test('an old board with both a Picture and Requirements has the tab, and a board with neither words has none', async () => {
     await mount({ picture: PICTURE });
-    expect(dock('What to know')).toBeNull();
+    expect(!!dock('What to know')).toBe(false);
     act(() => root!.unmount());
     root = null;
     document.body.innerHTML = '';
     await mount({ picture: PICTURE, reqs: { groups: [] } });
-    expect(dock('What to know')).not.toBeNull();
+    expect(!!dock('What to know')).toBe(true);
   });
 
   test('opened on the view a board does not have, it lands on one it does', async () => {
@@ -228,7 +229,7 @@ describe.if(hasDom)('Show more', () => {
 
   test('only a Picture with more has it, and it goes there and back', async () => {
     await mount({ picture: PICTURE });
-    expect(document.querySelector('.shp-more')).toBeNull();
+    expect(!!document.querySelector('.shp-more')).toBe(false);
     act(() => root!.unmount());
     root = null;
     document.body.innerHTML = '';
@@ -237,7 +238,7 @@ describe.if(hasDom)('Show more', () => {
     expect(button.textContent).toBe('Show more');
     await click(button);
     for (let i = 0; i < 40 && !inDrawing('.shp-view [data-mark="deep"], [data-mark="deep"]'); i++) await wait();
-    expect(inDrawing('[data-mark="deep"]')).not.toBeNull();
+    expect(!!inDrawing('[data-mark="deep"]')).toBe(true);
     expect(button.textContent).toBe('Back to the main board');
     await click(button);
     expect(button.textContent).toBe('Show more');
@@ -324,8 +325,8 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     await act(async () => { window.dispatchEvent(esc); });
     expect(esc.defaultPrevented).toBe(true);
     await wait();
-    expect(document.querySelector('.shp-peek')).toBeNull();
-    expect(document.querySelector('.shp-surface')).not.toBeNull();
+    expect(!!document.querySelector('.shp-peek')).toBe(false);
+    expect(!!document.querySelector('.shp-surface')).toBe(true);
   });
 });
 
