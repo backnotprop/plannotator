@@ -3,6 +3,7 @@
  * a row says. The rows themselves are the server's (`GET /api/inbox/reviews`, core's `inboxReviewRows`).
  */
 import {
+  inboxActionInDraft,
   inboxPullIsOpen,
   inboxPullRepoKey,
   type InboxMessageWire,
@@ -190,11 +191,51 @@ export interface ReviewView {
  * nothing. A message new since the last look, or holding an open question, a pick not sent or an open action item,
  * always shows.
  */
+/** The message holds something the person still has to act on or send: a question, a pick, an action item, a staged Done. */
+function waitsOnPerson(message: InboxMessageWire): boolean {
+  if (holdingsOf(message, { delivered: false }).some((holding) => holding.kind === 'open' || holding.kind === 'picks' || holding.kind === 'todo')) return true;
+  return (message.actions ?? []).some(inboxActionInDraft);
+}
+
 export function reviewEarlierHidden(messages: readonly InboxMessageWire[], firstReviewId: string, fresh: ReadonlySet<string>): string[] {
   const at = messages.findIndex((message) => message.id === firstReviewId);
   if (at <= 0) return [];
-  const waits = (message: InboxMessageWire) => holdingsOf(message, { delivered: false }).some((holding) => holding.kind === 'open' || holding.kind === 'picks' || holding.kind === 'todo');
-  return messages.slice(0, at).filter((message) => !fresh.has(message.id) && !waits(message)).map((message) => message.id);
+  return messages.slice(0, at).filter((message) => !fresh.has(message.id) && !waitsOnPerson(message)).map((message) => message.id);
+}
+
+/**
+ * How a thread opens from Reviews, worked out once on top of the Inbox's own fold (`planFolds`), so nothing appears or
+ * disappears while the person is in it. `left`: what stays out of this view. The latest review, and everything waiting
+ * on the person, are open; the first review and everything left over from the runs are drawn. No run names a message
+ * that is left out or that has to show, so "N earlier messages" always says what a click shows.
+ */
+export function reviewOpenPlan(input: {
+  messages: readonly InboxMessageWire[];
+  firstReviewId: string | null;
+  latestReviewId: string | null;
+  fresh: ReadonlySet<string>;
+  folds: { folded: ReadonlySet<string>; hidden: readonly (readonly string[])[] };
+}): { left: string[]; folded: Set<string>; hidden: string[][] } {
+  const { messages, firstReviewId, latestReviewId, fresh, folds } = input;
+  const left = firstReviewId ? reviewEarlierHidden(messages, firstReviewId, fresh) : [];
+  const leftOut = new Set(left);
+  const open = new Set(messages.filter((message) => !leftOut.has(message.id) && (waitsOnPerson(message) || fresh.has(message.id))).map((message) => message.id));
+  if (latestReviewId) open.add(latestReviewId);
+  const shows = new Set(open);
+  if (firstReviewId) shows.add(firstReviewId);
+  const hidden: string[][] = [];
+  for (const run of folds.hidden) {
+    let piece: string[] = [];
+    for (const id of run) {
+      if (leftOut.has(id)) continue;
+      if (shows.has(id)) {
+        if (piece.length > 0) hidden.push(piece);
+        piece = [];
+      } else piece.push(id);
+    }
+    if (piece.length > 0) hidden.push(piece);
+  }
+  return { left, folded: new Set([...folds.folded].filter((id) => !open.has(id))), hidden };
 }
 
 /**

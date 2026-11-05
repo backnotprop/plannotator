@@ -43,6 +43,7 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
   const inFlight = useRef<AbortController | null>(null);
   const lastAt = useRef(0);
   const pendingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const rowsInFlight = useRef<AbortController | null>(null);
   const others = useRef(othersView);
   others.current = othersView;
 
@@ -52,6 +53,8 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
       if (pendingTimer.current) clearTimeout(pendingTimer.current);
       pendingTimer.current = null;
       inFlight.current?.abort();
+      // A late answer from the cache never overwrites this newer read.
+      rowsInFlight.current?.abort();
       const controller = new AbortController();
       inFlight.current = controller;
       lastAt.current = Date.now();
@@ -137,9 +140,18 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
   const reloadRows = useCallback(() => {
     // A read of the whole list in flight brings the rows too.
     if (inFlight.current || (!enabled && !counted)) return;
-    inboxApi.reviews({ cached: true }).then(setReviews, () => {
-      // The next read of the list says what is wrong.
-    });
+    rowsInFlight.current?.abort();
+    const controller = new AbortController();
+    rowsInFlight.current = controller;
+    inboxApi.reviewsCached(controller.signal).then(
+      (rows) => {
+        // Nothing read since the Inbox started (`cold`): the next read of the list brings them.
+        if (!controller.signal.aborted && !('cold' in rows)) setReviews(rows);
+      },
+      () => {
+        // The next read of the list says what is wrong.
+      },
+    );
   }, [enabled, counted]);
   return { model, reviews, error, loading, refresh, reload, reloadRows };
 }

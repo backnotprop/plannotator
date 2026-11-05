@@ -1504,15 +1504,14 @@ export const inboxApi = {
     const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
-  /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
-  /**
-   * The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. `cached`: from what the
-   * forges last answered, with no forge read (the store changed, not the forge).
-   */
-  reviews: (options: { others?: boolean; cached?: boolean } = {}, signal?: AbortSignal) => {
-    const query = [options.others ? 'others=1' : null, options.cached ? 'cached=1' : null].filter(Boolean).join('&');
+  /** The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. */
+  reviews: (options: { others?: boolean } = {}, signal?: AbortSignal) => {
+    const query = options.others ? 'others=1' : '';
     return get<InboxReviewsAnswer>(inboxUrl(`/reviews${query ? `?${query}` : ''}`), signal);
   },
+  /** The rows again from what the forges last answered, with no forge read; `cold`: nothing read since the Inbox started. */
+  reviewsCached: (signal?: AbortSignal) => get<InboxReviewsAnswer | { cold: true }>(inboxUrl('/reviews?cached=1'), signal),
+  /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>

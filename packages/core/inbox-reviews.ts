@@ -335,7 +335,8 @@ export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonl
   const open = pulls.filter(inboxPullIsOpen);
   if (open.length > 0 && open.every((pull) => !pull.mine)) {
     if (open.some((pull) => pull.requested)) return { move: "on_you", reason: "requested" };
-    return open.some((pull) => pull.assigned) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
+    // Assigned stays on the person until they've given a verdict, like a request GitHub clears once they review.
+    return !review.verdict && open.some((pull) => pull.assigned) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
   }
   if (review.verdict?.verdict !== "approved") return { move: "agents", reason: "feedback_sent" };
   const own = open.filter((pull) => pull.mine);
@@ -482,6 +483,10 @@ export function inboxReviewRows(input: {
   owners?: ReadonlyMap<string, { thread_id: string }>;
   /** New reviews on local changes, by thread: open threads only. Each has a row from the moment it starts. */
   started?: ReadonlyMap<string, InboxReviewStart>;
+  /** The thread's agent ended: a started review with no card is curated by no one, so it has no row. */
+  ended?: (threadId: string) => boolean;
+  /** The thread is archived or gone. One that owns PRs and has no review stops curating: its PRs are listed again. */
+  closed?: (threadId: string) => boolean;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
@@ -530,8 +535,9 @@ export function inboxReviewRows(input: {
     });
   };
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
-  for (const [threadId, own] of owned) if (!byThread.has(threadId)) push(threadId, null, own);
-  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId)) push(threadId, null, undefined);
+  // Curating only while someone can: with the agent ended or the thread closed, the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true && !input.closed?.(threadId)) push(threadId, null, own);
+  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && !input.ended?.(threadId)) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.

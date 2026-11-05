@@ -217,7 +217,7 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
-import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
+import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, threadAgent, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
@@ -1041,6 +1041,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
+  const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
@@ -1075,9 +1076,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reposNow = await Promise.all(
       projectsNow.map(async (project) => {
         const repo = repos.get(project.root);
-        if (repo || pullRepoRead.has(project.root)) return repo;
+        // A second list read while the first waits on git waits too: it must not answer "no project is on a forge".
+        if (repo || pullRepoRead.has(project.root)) return repo ?? pullRepoReading.get(project.root);
         pullRepoRead.add(project.root);
-        return repos.refresh(project.root);
+        const reading = repos.refresh(project.root).finally(() => pullRepoReading.delete(project.root));
+        pullRepoReading.set(project.root, reading);
+        return reading;
       }),
     );
     for (const [i, project] of projectsNow.entries()) {
@@ -3783,7 +3787,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         // `cached`: the store changed, not the forge: the rows again from what the forges last answered.
-        const last = url.searchParams.get("cached") === "1" ? lastReviewsRead : null;
+        // Never a forge call: nothing read yet answers `cold`, and the next real read brings the rows.
+        const cached = url.searchParams.get("cached") === "1";
+        if (cached && !lastReviewsRead) return json({ serverSession, cold: true });
+        const last = cached ? lastReviewsRead : null;
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
@@ -3793,14 +3800,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
         pullOwners.land(changes.record, changes.forget);
-        pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
+        if (!cached) pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
+        const closed = (threadId: string) => {
+          const row = store.listRow(threadId);
+          return !row || inboxRowArchived(row);
+        };
         // A New review's row shows until its thread is archived or gone.
         const started = new Map<string, InboxReviewStart>();
         for (const [threadId, start] of pullOwners.started()) {
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), started });
+        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), closed, started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
       // New review's change summary: what `plannotator review` would show for a project's local changes. Same guards.

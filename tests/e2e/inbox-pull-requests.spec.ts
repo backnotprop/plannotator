@@ -1474,6 +1474,7 @@ test('New review: a local review with no card yet leaves the page when its threa
     expect(sent.status()).toBe(200);
     return (await sent.json()) as { thread_id: string; message: { id: string } };
   };
+  await page.request.get(`${world.url}api/inbox/reviews`);
   const on = await start('archive-me');
   expect(await rows()).toContain(on.thread_id);
   expect((await page.request.post(`${world.url}api/inbox/messages/${on.message.id}/resolve`, { data: { resolved: true } })).status()).toBe(200);
@@ -1562,6 +1563,133 @@ test('Reviews: an open question from before the review never stays out of the vi
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'r-card-chapters-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('Reviews: what waits on the person is never hidden, every row shows what it says, and nothing leaves while the person is in the thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  const reviewFor = (thread: string, title: string) =>
+    claude.submitGuide({
+      project_path: world.projects.web,
+      thread,
+      patch: world.patches.locale,
+      body: 'Ready for you.',
+      guide: {
+        title,
+        intent: 'The change.',
+        sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+        review: { gitRef: 'working-tree', base: 'main', branch: 'waits' },
+        generator: { engine: 'claude-code', model: 'claude-opus-5' },
+      },
+      review: true,
+    } as never);
+  const read = async (threadId: string, last: string) => {
+    await page.goto(`${world.url}#thread=${threadId}`);
+    await expect(page.getByText(last)).toBeVisible();
+  };
+  const fresh = async (threadId: string) => {
+    await page.goto(`${world.url}#reviews&thread=${threadId}`);
+    await page.reload();
+    await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  };
+
+  // Six read messages with a question and an action item among them, then a review.
+  const first = await claude.send({ project_path: world.projects.web, thread: 'waits', subject: 'What waits', body: 'Plain note one.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note two.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Before I go on.\n\n:::question\nWhich way do you want it?\n- [ ] Left\n- [ ] Right\n:::' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Something for you.\n\n:::action\n- [ ] Rotate the staging key\n:::' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note three.' });
+  await claude.send({ project_path: world.projects.web, thread: 'waits', body: 'Plain note four.' });
+  await read(first.thread_id, 'Plain note four.');
+  await reviewFor('waits', 'What waits review');
+  await fresh(first.thread_id);
+  await expect(page.getByText('Which way do you want it?').first()).toBeVisible();
+  await expect(page.getByText('Rotate the staging key').first()).toBeVisible();
+  await expect(page.getByText('Plain note one.')).toHaveCount(0);
+  await expect(page.getByText(/\d+ earlier messages?/)).toHaveCount(0);
+  await shot(page, 'r-waits');
+
+  // Ticking Done keeps the message and its way to undo, then and after a reload.
+  const tick = page.locator('[data-action-tick]').first();
+  await tick.click();
+  await expect(tick).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.getByPlaceholder(/^Add a note for /).first()).toBeVisible();
+  await page.reload();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await expect(page.getByText('Rotate the staging key').first()).toBeVisible();
+  await expect(page.locator('[data-action-tick]').first()).toHaveAttribute('aria-pressed', 'true');
+
+  // J and K walk the Reviews rows' threads like the Inbox's list.
+  const other = await claude.send({ project_path: world.projects.web, thread: 'walks', subject: 'Walks', body: 'A note.' });
+  await reviewFor('walks', 'Walks review');
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator(`[data-reviews-kind="reviewed"][data-row="${other.thread_id}"]`)).toBeVisible();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  const threadOf = () => page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  const here = await threadOf();
+  await page.keyboard.press('k');
+  await expect.poll(threadOf).toBe(other.thread_id);
+  await page.keyboard.press('j');
+  await expect.poll(threadOf).toBe(here);
+
+  // Three messages, a review, five more, all read: the card is drawn, and a run's row shows as many as it says.
+  const long = await claude.send({ project_path: world.projects.web, thread: 'longer', subject: 'Longer', body: 'Before one.' });
+  await claude.send({ project_path: world.projects.web, thread: 'longer', body: 'Before two.' });
+  await claude.send({ project_path: world.projects.web, thread: 'longer', body: 'Before three.' });
+  await reviewFor('longer', 'Longer review');
+  for (const word of ['one', 'two', 'three', 'four', 'five']) await claude.send({ project_path: world.projects.web, thread: 'longer', body: `After ${word}.` });
+  await read(long.thread_id, 'After five.');
+  await fresh(long.thread_id);
+  await expect(page.locator('[data-review-card] [data-review-start]')).toBeVisible();
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  const row = page.getByRole('button', { name: /^Show 2 earlier messages/ });
+  await expect(page.getByText('After two.')).toHaveCount(0);
+  await row.click();
+  await expect(page.getByText('After two.')).toBeVisible();
+  await expect(page.getByText('After three.')).toBeVisible();
+  await expect(row).toHaveCount(0);
+
+  // A reply sent from the view takes nothing off the screen, even a message that was new when it opened.
+  const replying = await claude.send({ project_path: world.projects.web, thread: 'replying', subject: 'Replying', body: 'New before the review.' });
+  await reviewFor('replying', 'Replying review');
+  await page.goto(`${world.url}#reviews&thread=${replying.thread_id}`);
+  await page.reload();
+  await expect(page.getByText('New before the review.')).toBeVisible();
+  await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
+  const reply = page.getByRole('textbox', { name: 'Reply to Claude Code' });
+  await reply.fill('Thanks, on it.');
+  await reply.press('ControlOrMeta+Enter');
+  await expect(page.getByText('Thanks, on it.').first()).toBeVisible();
+  await page.waitForTimeout(1500);
+  await expect(page.getByText('New before the review.')).toBeVisible();
+
+  // A deep link waits for the rows, so the thread never shows whole and then folds.
+  let letGo = () => {};
+  const held = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await expect(page.locator('[data-pulls-nav]')).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  letGo();
+  await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  await page.unroute('**/api/inbox/reviews*');
+
+  // Code review off: the thread's view is the off page, live and on a fresh link, and the thread itself loses nothing.
+  await setCodeReview(false);
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await page.reload();
+  await expect(page.getByText('Code review is off')).toBeVisible();
+  await expect(page.locator('[data-review-context]')).toHaveCount(0);
+  await page.goto(`${world.url}#thread=${long.thread_id}`);
+  await expect(page.getByText('Before one.')).toBeVisible();
+  await setCodeReview(true);
 });
 
 test('Reviews with nothing in it: says so, and offers a new review', async () => {

@@ -3,17 +3,6 @@
  * "pr-page-review-with-agent", the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board. The list is ReviewsList.tsx; beside a thread, the pane is the Inbox's own.
  *
- * - The head: "Reviews", and on its right the filter mark (approval
- *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
- *   To review, Others) and the project, kept in the address (`&view=`,
- *   `&project=`) and named once in a quiet line over the list.
- * - The list, in the Inbox list's own rows and bands, grouped by whose move
- *   it is: On you (a teammate asked for the person's review, or the
- *   person's agent opened a PR that waits on them), Ready to land, and a
- *   folded "N waiting on others". A stack is one row: its third line is a
- *   small chain of PR marks in landing order. Top left, always the author's
- *   picture (the owner on #2608); the agent of its review thread is on the
- *   third line, with its mark ("#48201 · Review thread with Claude Code").
  * - The stack view beside it (a phone: in its place): the title, then one
  *   review thread per PR or stack and one button for it, under the title:
  *   "Review with an agent" (the picker: a running agent of this project, or a

@@ -572,6 +572,7 @@ function stripClickSignal(): void {
 
 /** How long after the store changed Reviews' rows are read again (a burst of messages is one read). */
 const REVIEWS_AFTER_STORE_MS = 800;
+const REVIEWS_AFTER_STORE_MAX_MS = 4000;
 
 /** `#pulls…` becomes `#reviews…` in place: the entry is kept, and every old link goes on working (reviewsRoute.ts). */
 function settleReviewsAlias(): void {
@@ -4466,9 +4467,15 @@ function Inbox() {
   const reviewPulls = useMemo(() => reviewBoxPulls(pulls.reviews, new Map((projects ?? []).map((p) => [p.id, p.name]))), [pulls.reviews, projects]);
   // A review arrived, a verdict went: the rows and the sidebar's count follow the store, a moment after it changed.
   const pullsReloadRows = pulls.reloadRows;
+  const rowsWaitingSince = useRef<number | null>(null);
   useEffect(() => {
     if (!pullsShown) return;
-    const timer = setTimeout(pullsReloadRows, REVIEWS_AFTER_STORE_MS);
+    // A moment after the store settles, but a steady stream of messages never holds it off for long.
+    const since = (rowsWaitingSince.current ??= Date.now());
+    const timer = setTimeout(() => {
+      rowsWaitingSince.current = null;
+      pullsReloadRows();
+    }, Math.min(REVIEWS_AFTER_STORE_MS, Math.max(0, since + REVIEWS_AFTER_STORE_MAX_MS - Date.now())));
     return () => clearTimeout(timer);
   }, [shown, thread?.messages.length, pullsShown, pullsReloadRows]);
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
@@ -5211,7 +5218,9 @@ function Inbox() {
   );
 
   // A thread opened from Reviews starts at its review (`reviewViewOf`); it is the same thread, and links back to the Inbox's view of it.
-  const reviewRow = route.reviews && route.thread ? (pulls.reviews?.rows.find((row) => row.reviewed && row.thread_id === route.thread) ?? null) : null;
+  // A link into a thread in Reviews waits for the rows: drawn before them, the whole thread would show and then fold.
+  const reviewRowsPending = !!route.reviews && ((settings === null && !settingsReadFailed) || (pullsShown && !pulls.reviews && !pulls.error));
+  const reviewRow = route.reviews && route.thread && pullsShown ? (pulls.reviews?.rows.find((row) => row.reviewed && row.thread_id === route.thread) ?? null) : null;
   const reviewView =
     reviewRow && thread && thread.thread_id === route.thread
       ? reviewViewOf(reviewRow, thread, {
@@ -5462,7 +5471,7 @@ function Inbox() {
     );
   } else if (route.page === 'reviews' && pullsShown) {
     main = reviewsList(route.project, route.view ?? 'all', null);
-  } else if (route.page === 'reviews' && settings !== null && !guestPage) {
+  } else if ((route.page === 'reviews' || route.reviews) && settings !== null && !guestPage && !codeReviewOn) {
     main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
   } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
@@ -5627,7 +5636,7 @@ function Inbox() {
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
           />
         )}
-        {route.thread && thread && thread.thread_id === route.thread && (
+        {route.thread && thread && thread.thread_id === route.thread && !reviewRowsPending && (
           <ThreadPane
             notice={
               <>
@@ -5653,6 +5662,7 @@ function Inbox() {
             }
             thread={thread}
             codeReview={settings?.code_review?.on === true}
+            inReviews={!!route.reviews}
             reviewView={reviewView}
             onInReviews={pullsShown && !route.reviews ? () => go({ page: 'inbox', reviews: { project: null, view: 'all' }, project: null, thread: thread.thread_id }) : undefined}
             threadSteps={

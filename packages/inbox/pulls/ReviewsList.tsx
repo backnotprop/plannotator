@@ -128,6 +128,7 @@ function ReviewRowItem({
       data-reviews-kind={row.reviewed ? 'reviewed' : 'listed'}
       // The thread's row, for the window's J and K and its way back; a listed PR is no thread.
       data-row={row.reviewed ? (row.thread_id ?? undefined) : undefined}
+      data-thread-id={row.reviewed ? (row.thread_id ?? undefined) : undefined}
       data-pulls-row={stack?.id}
       data-pulls-move={row.move}
       data-pulls-layers={stack ? layers : undefined}
