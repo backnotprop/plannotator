@@ -22,6 +22,7 @@ import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { createInboxLaunch } from "./inbox-launch";
+import { ANSWER_SETTLE_MS, createLaunchPermissions } from "./inbox-launch-claude-permission";
 import { launchNoteText, writeLaunchNote, type LaunchHost, type LaunchHostContext, type LaunchLive, type LaunchTrustOffer } from "./inbox-launch-host";
 import { createLaunchQuestions } from "./inbox-launch-permission";
 
@@ -40,7 +41,7 @@ function setEnv(name: string, value: string) {
 }
 
 /** `homeDir`: the home folder the engine is given, spelled from the real one (a link to it, a trailing slash). */
-function setup(options: { homeDir?: (home: string, root: string) => string } = {}) {
+function setup(options: { homeDir?: (home: string, root: string) => string; adapt?: (host: LaunchHost) => void } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-launch-host-"));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -56,6 +57,7 @@ function setup(options: { homeDir?: (home: string, root: string) => string } = {
   const store = InboxStore.open(dataDir, { now: () => new Date(clock.now) });
   const project = store.ensureProject({ name: "project", root: folder });
   const fake = fakeLaunchHost();
+  options.adapt?.(fake.host);
   /** The login-shell reads the engine made, and the context it gave the hosts. */
   const logins = { count: 0 };
   let context: LaunchHostContext | null = null;
@@ -356,6 +358,78 @@ describe("a second agent behind LaunchHost", () => {
     await expect(launch.permissionRoute(hook, `/api/inbox/launch/${record.id}/permission`)).rejects.toMatchObject({ code: "launch_not_found" });
     // A Send naming it is refused before anything is written.
     expect(() => launch.target({ launch: { agent: "gone-agent", project_id: project.id } })).toThrow(/to\.launch/);
+  });
+});
+
+describe("an answered permission question, with a host that lists its own prompt", () => {
+  const KEY = "k".repeat(64);
+  const WAITING = { status: "waiting", state: "running", waitingFor: "permission prompt" };
+
+  /** Claude Code's permission transport on the engine, its hook played by hand; the host says the session waits on a prompt throughout. */
+  async function waitingOnTheCard() {
+    const view = { reads: 0 };
+    const t = setup({
+      adapt: (host) => {
+        host.permissions = (context) => createLaunchPermissions({ ...context, holdMs: 0 });
+        host.sessions = async () => (view.reads++, () => WAITING);
+      },
+    });
+    const { store, clock, project, fake, launch } = t;
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "Tidy", body: "Tidy.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "Tidy.", to: prepared.to, idempotency_key: "send-1", thread_name: "Tidy", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => store.message(root.id)!.launch!.session_ref === "f1");
+    fake.poll("session-f1", true, clock.now);
+    store.recordDelivery(root.id, { host: FAKE, session: "session-f1" });
+    const launchId = prepared.launch.id;
+    mkdirSync(join(store.dir, "launch", launchId), { recursive: true });
+    writeFileSync(join(store.dir, "launch", launchId, "settings.json"), JSON.stringify({ env: { PLANNOTATOR_LAUNCH_KEY: KEY } }));
+    const event = { session_id: "session-f1", cwd: "/work", hook_event_name: "PermissionRequest", tool_name: "Bash", tool_input: { command: "rm -rf dist" }, permission_suggestions: [] };
+    /** One call of the hook's long poll. */
+    const hook = async (extra: Record<string, unknown>) => {
+      const path = `/api/inbox/launch/${launchId}/permission`;
+      const response = await launch.permissionRoute(new Request(`http://127.0.0.1${path}`, { method: "POST", body: JSON.stringify({ key: KEY, event, ...extra }) }), path);
+      return (await response!.json()) as { status: string; message_id: string };
+    };
+    const { message_id: asked } = await hook({ request_id: "req-00000001" });
+    // The host's read: the session waits on the prompt the card asks.
+    expect((await launch.runOf(root.id))!.state).toBe("waiting_answer");
+    expect(view.reads).toBe(1);
+    clock.now += 1_000;
+    /** The person's answer, the window's way: the pick, then the Send. */
+    const deny = () => {
+      const question = store.questionsOf(asked)[0]!;
+      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: ["Deny"] };
+      const saved = store.savePicks(asked, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
+      store.sendReply(asked, { idempotency_key: "answer-1", questions: [{ key: question.key, revision: saved[0]!.revision }] });
+    };
+    const line = async () => (await launch.runOf(root.id))!.state;
+    return { ...t, view, asked, hook, deny, line };
+  }
+
+  test("from the answer on, the host's read of that prompt never says the session waits on one, even before the hook has taken the answer", async () => {
+    const { clock, asked, hook, deny, line } = await waitingOnTheCard();
+    deny();
+    // The hook's next look is up to 200 ms away (longer when it is between calls).
+    expect(await line()).toBe("working");
+    clock.now += 200;
+    expect(await hook({ message_id: asked })).toMatchObject({ status: "decided" });
+    expect(await line()).toBe("working");
+    clock.now += ANSWER_SETTLE_MS - 1;
+    expect(await line()).toBe("working");
+    // Settled: a new read, and it still lists a prompt, so the session really waits on its own dialog.
+    clock.now += 1;
+    expect(await line()).toBe("waiting_terminal");
+  });
+
+  test("a hook that never takes the answer: once settled, one read says where the session is, with no wait for the host's usual 10 s", async () => {
+    const { clock, view, deny, line } = await waitingOnTheCard();
+    deny();
+    expect(await line()).toBe("working");
+    clock.now += ANSWER_SETTLE_MS;
+    expect(await line()).toBe("waiting_terminal");
+    expect(view.reads).toBe(2);
   });
 });
 

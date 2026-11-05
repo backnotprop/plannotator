@@ -176,6 +176,21 @@ const card = (page: Page) => pane(page).locator('section.pc-card[data-permission
 const record = (page: Page, outcome: string) => pane(page).locator(`[data-perm-record="${outcome}"]`);
 /** The waiting card's answers are armed (they ignore activation for a moment after it appears or takes focus). */
 const armed = (page: Page) => expect(card(page)).toHaveAttribute('data-perm-armed', '', { timeout: 30_000 });
+/** From now on, note every state the thread's run line takes, however briefly: `runLinesSeen` reads them in order. */
+const watchRunLine = (page: Page) =>
+  page.evaluate(() => {
+    const seen: string[] = [];
+    (window as unknown as { __runLines: string[] }).__runLines = seen;
+    const note = () => {
+      for (const el of document.querySelectorAll('section.ib-pane [data-run]')) {
+        const state = el.getAttribute('data-run')!;
+        if (seen.at(-1) !== state) seen.push(state);
+      }
+    };
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-run'] });
+    note();
+  });
+const runLinesSeen = (page: Page) => page.evaluate(() => (window as unknown as { __runLines: string[] }).__runLines);
 /** Whether an element's text sits on one line (every line box at the same top). */
 const oneLine = (target: Locator) =>
   target.evaluate((el) => {
@@ -736,15 +751,17 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     await expect(card(mobile).locator('.pc-row button')).toHaveText(['Deny', 'Deny with a reason', 'Approve in Terminal']);
     await card(mobile).locator('footer').scrollIntoViewIfNeeded();
     await shot(mobile, 'full-launch-safety-check-phone');
-    // A deny counts.
+    // A deny counts. The host's view from before the answer still shows the prompt: never "waiting on a permission
+    // prompt" after it, however briefly, from the click on (a look that starts once the hook has ended sees such a
+    // line only when the window's next read happens to be late).
+    await watchRunLine(page);
     await answer(page, { choice: 'Deny' });
     expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'denied', mode: 'bypassPermissions' });
     await expect(record(page, 'deny')).toContainText('You chose Deny');
-    // The host's view from before the answer still shows the prompt: never "waiting on a permission prompt" after it.
-    for (let i = 0; i < 25; i++) {
-      await expect(pane(page).locator('[data-run="waiting_terminal"]')).toHaveCount(0, { timeout: 100 });
-      await page.waitForTimeout(200);
-    }
+    await page.waitForTimeout(5_000);
+    const lines = await runLinesSeen(page);
+    expect(lines[0]).toBe('waiting_answer');
+    expect(lines).not.toContain('waiting_terminal');
     // Approve in Terminal: the hook says nothing, so Claude's own dialog comes up, and Terminal opens attached to it.
     await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf packages/inbox/build', { timeout: 30_000 });
     await armed(page);
