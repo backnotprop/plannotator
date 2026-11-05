@@ -8084,10 +8084,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-fileshead:has(> .ib-prp-scope) { padding-left: 0; }
 /* All files (guide/PullRepoParts.tsx): the review app's tree, its row rules from review-editor's index.css (which
    this window does not load). */
-.ib-prp-all .review-file-row-main { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
-.ib-prp-all .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
-.ib-prp-all .review-file-row-main > .truncate ~ * { margin-left: -2px; }
-.pn-inbox .ib-prreview .ib-prp-all .file-tree-item.active { background: var(--sidebar-fill-strong); color: var(--foreground); }
+.ib-prp-tree .review-file-row-main { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ib-prp-tree .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-prp-tree .review-file-row-main > .truncate ~ * { margin-left: -2px; }
+.pn-inbox .ib-prreview .ib-prp-tree .file-tree-item.active { background: var(--sidebar-fill-strong); color: var(--foreground); }
 /* A file the PR does not change, over the diff, which keeps its place under it for the way back. */
 .ib-gbody[data-repo-open] { overflow: hidden; }
 .ib-gbody > .ib-prp-repofile { position: sticky; top: 0; z-index: 3; height: 100%; background: var(--background); }

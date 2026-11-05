@@ -1847,11 +1847,11 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
   const short = 'ui.md';
   const long = 'guides-and-shared-ui.md';
-  const deep = 'test/e2e/app-dir/turbopack-worker-self-reference-and-its-fixtures';
+  const deep = 'test/e2e/app-shell/render-worker-reads-its-own-source-and-its-fixtures';
   // A file of a thousand deletions widens the rail's biggest numbers, so a small pair beside it shows any gap.
   const wide = 'src/wide.ts';
   const wideFile = `diff --git a/${wide} b/${wide}\n--- a/${wide}\n+++ b/${wide}\n@@ -1,1000 +1,1 @@\n${'-a\n'.repeat(1000)}+b\n`;
-  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts'), file(`${deep}/a.ts`), file(`${deep}/b.ts`), wideFile].join('');
+  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/core/src/a.rs'), file('src/one.ts'), file(`${deep}/a.ts`), file(`${deep}/b.ts`), wideFile].join('');
   const { context, page } = await stubbedReview(browser, 1440, patch);
   try {
     const rail = page.locator('[data-pull-review] [data-review-files]');

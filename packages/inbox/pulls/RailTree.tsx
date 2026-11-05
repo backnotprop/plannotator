@@ -38,8 +38,8 @@ const pad = (depth: number) => 6 + depth * 10;
 
 /**
  * Where a name gives way when the row is short: a path keeps its last folder and the slash before it, so a cut reads
- * `crates/n…/src/` (`crates/next-api` + `/src/`); a file name
- * its end, as the Inbox's `FileName` cuts one (`turbopack-worker-self-reference` + `.test.ts`), so the end, which tells
+ * `crates/c…/src/` (`crates/core-api` + `/src/`); a file name
+ * its end, as the Inbox's `FileName` cuts one (`render-worker-reads-own-source` + `.test.ts`), so the end, which tells
  * rows apart, stays. A short name has no tail: it is whole or, past all room, cut at its end.
  */
 export function middleCut(text: string): [head: string, tail: string] {
@@ -50,7 +50,7 @@ export function middleCut(text: string): [head: string, tail: string] {
 
 /**
  * A name on one line that gives way in its middle: the head ends in "…", the tail stays. A tail too long for the row
- * on its own (a last folder like `turbopack-worker-self-reference` beside a rail's numbers) gives way in its own middle
+ * on its own (a last folder like `render-worker-reads-own-source` beside a rail's numbers) gives way in its own middle
  * after the head is spent, so its end still shows and nothing is cut at its end.
  */
 function Cut({ text, className }: { text: string; className: string }) {

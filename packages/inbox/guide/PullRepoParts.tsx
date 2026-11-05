@@ -37,7 +37,7 @@ export function PullAllFiles({ pullKey, sha, files, viewed, comments, activePath
   const list = files as DiffFile[];
   const active = activePath ? list.findIndex((file) => file.path === activePath) : -1;
   return (
-    <div ref={scroller} className="ib-prp-files ib-prp-all" data-pull-all-files="">
+    <div ref={scroller} className="ib-prp-files ib-prp-tree" data-pull-all-files="">
       {head}
       {repo.state.status === 'ready' ? (
         <RepoFileTree
