@@ -232,6 +232,7 @@ import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
+import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -2162,7 +2163,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * answers (404, as if absent), the window shows no Pebble, row or search
    * group, and no agent text names it. Read on every request.
    */
-  const shapeOn = () => options.shape ?? loadConfig().inboxShape === true;
+  const shapeOn = () => options.shape ?? shapeSwitchOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
@@ -2170,8 +2171,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const on = (input as { on: boolean }).on;
     if (validateOnly) return { on: shapeOn() };
     const was = shapeOn();
-    saveConfig({ inboxShape: on });
-    if ((loadConfig().inboxShape === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (!setShapeSwitch(on)) throw new InboxError("config_not_saved", SHAPE_SWITCH_NOT_SAVED);
     if (was !== shapeOn()) for (const listener of capabilityListeners) listener("shape");
     return { on: shapeOn() };
   };
