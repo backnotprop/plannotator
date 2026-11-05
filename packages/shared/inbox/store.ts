@@ -3116,8 +3116,11 @@ export class InboxStore {
     if (!reader || message.to || hasTags(message)) return null;
     const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
     if (asked?.author.kind !== "agent" || !asked.author.host || asked.author.session === reader) return null;
-    const wrote = this.latestAgentMessages().get(reader)?.author;
-    const host = this.deliveryPresence?.hostOf?.(reader) ?? (wrote?.kind === "agent" ? wrote.host : null);
+    // Both from the names the Inbox knows: an agent's host is free text, and "Cursor" and "cursor" are one agent.
+    if (!Object.hasOwn(INBOX_HOST_NAMES, asked.author.host)) return null;
+    const known = this.deliveryPresence?.hostOf?.(reader);
+    const wrote = known ? null : this.latestAgentMessages().get(reader)?.author;
+    const host = known ?? (wrote?.kind === "agent" ? wrote.host : null);
     return host && host !== asked.author.host && Object.hasOwn(INBOX_HOST_NAMES, host) ? host : null;
   }
 

@@ -346,6 +346,32 @@ describe("who settled a reply no connection wakes", () => {
     expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
   });
 
+  test("hosts are free text: one the Inbox has no name for, asking or reading, or one spelled two ways, never gets a name", async () => {
+    const { server, client, project } = await setup();
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_lower", CURSOR, "Unrelated.");
+    await agentSends(client, elsewhere, "ses_mystery", { host: "mystery-agent", name: "Mystery", wakes: false }, "Unrelated.");
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+
+    // The asker wrote its host another way: the same agent, so never "Read by Cursor" on a reply to Cursor.
+    const spelled = await agentSends(client, project, "cursor-caps", { host: "Cursor", name: "Cursor", wakes: false }, "Which region?");
+    await personReplies(server, spelled.message_id, "us-east-1", "k1");
+    await reads(client, spelled.thread_id, "ses_lower");
+    expect(await lineOf(server, spelled.thread_id)).toEqual({ read_by: null, state: "delivered" });
+
+    // A host the Inbox cannot name read it: no line can say who.
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which zone?");
+    await personReplies(server, asked.message_id, "a", "k2");
+    await reads(client, asked.thread_id, "ses_mystery");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+    // And a known agent reading a reply to an unknown host: the same, by the asker's side of the rule.
+    const unknown = await agentSends(client, project, "ses_other", { host: "mystery-agent", name: "Mystery", wakes: false }, "Which rack?");
+    await personReplies(server, unknown.message_id, "r1", "k3");
+    await reads(client, unknown.thread_id, "ses_claude");
+    expect(await lineOf(server, unknown.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
   test("the agent it was for: no name, the line stays Delivered", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
