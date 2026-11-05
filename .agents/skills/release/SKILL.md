@@ -144,10 +144,10 @@ Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it 
 After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 
 ```bash
-bun scripts/feedback-related-index.ts
+bun scripts/feedback-search-index.ts
 ```
 
-It reads public release notes, open issue titles and open PR titles with `gh`, and rewrites `packages/inbox/feedbackRelated.data.json`. If `gh` fails or the answer is far smaller than the file already there, it writes nothing and exits 1: fix that before you go on. A `WARNING` about `RELEASE_NOTES_v<version>.md` means the release you are cutting is not in the list: write the notes first and run it again. Glance at the diff, because issue titles are strangers' words that ship in the window. CI and the builds never run this script.
+It reads public release notes, open issue titles and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
 
 ---
 
@@ -192,7 +192,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    chore: bump version to X.Y.Z
    ```
-   Stage only the 9 version-bumped files and `packages/inbox/feedbackRelated.data.json`. Do not stage the release notes file (it's untracked by design).
+   Stage only the 9 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
 2. **Create and push the tag:**
    ```bash
@@ -274,7 +274,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
 Before tagging, verify:
 - [ ] All 9 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
-- [ ] `bun scripts/feedback-related-index.ts` run, and `packages/inbox/feedbackRelated.data.json` in the release commit
+- [ ] `bun scripts/feedback-search-index.ts` run, and `packages/inbox/feedbackSearch.data.json` in the release commit
 - [ ] The published-package floor guard is green (`bun test tests/published-package-floors.test.ts`), and no `engines.node`/`npm`/`opencode`/`vscode`/`bun`, `os`, `cpu`, `libc` or host peer was added or changed on a published package without an `ALLOWED` entry the owner signed off (`engines.vscode` is pinned at `^1.85.0`: a raise stops updates for Cursor, Windsurf and older VS Code). npm silently installs an older version for anyone whose runtime misses such a field: 0.28.32's Pi Node floor kept older-Node users on 0.28.31
 - [ ] Sibling dependencies resolve: `bun run check:sibling-deps @plannotator/opencode @plannotator/pi-extension` passes (it reads npm). When `@plannotator/core` and `@plannotator/ui` ship, publish core before ui, and run it with every package going out (`bun run check:sibling-deps @plannotator/core @plannotator/ui`): ui pins an exact core, and a ui published first fails to install with ETARGET
 - [ ] Never `npm deprecate` the current `latest`: npm then picks the newest non-deprecated version for bare and range installs, so everyone silently stays behind. Ship a new version instead

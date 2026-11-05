@@ -6662,20 +6662,17 @@ kbd[data-keycap]::after { content: attr(data-keycap); }
 /* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
    saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
    dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
-dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
+dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); margin: max(24px, calc(50vh - 208px)) auto auto; }
+/* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show. */
+.ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
+.ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
+.ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-underline-offset: 2px; }
+.ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; border-radius: 3px; }
 .ib-fbk-form .ib-bfield { margin-top: 14px; }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
 .ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-fbk-count.ib-fbk-over { color: var(--destructive); }
-/* "These might help" (FeedbackRelated.tsx). Empty it has no height and no margin: with no match the form is laid out as if it were not there. */
-.ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
-.ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
-.ib-fbk-rel li { margin: 0; padding: 2px 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
-.ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 30%, transparent); text-underline-offset: 2px; }
-.ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
-.ib-fbk-rel li { display: flex; }
-.ib-fbk-rel-line { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-@media (hover: hover) { .ib-fbk-rel a:hover { color: var(--primary); text-decoration-color: currentColor; } }
 .ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
 .ib-fbk-cats { display: inline-flex; gap: 6px; flex: none; }
@@ -6703,16 +6700,17 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
     border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; border-bottom: 0;
   }
   .ib-fbk-phone .ib-dlg-in { padding: 18px calc(16px + env(safe-area-inset-right)) calc(14px + env(safe-area-inset-bottom)) calc(16px + env(safe-area-inset-left)); }
-  /* The whole row is the 44 px target (the link's ::after), its text centered. */
-  .ib-fbk-rel li { position: relative; display: flex; align-items: center; min-height: 44px; padding: 4px 0; font-size: var(--ib-fs-14, 14px); }
+  /* The whole row is a 44 px target. Three lines, so Send stays on screen on a small phone. */
+  .ib-fbk-rel li { padding: 0; line-height: 44px; font-size: var(--ib-fs-14, 14px); }
+  .ib-fbk-rel li:nth-child(n + 4) { display: none; }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
-  /* Over a keyboard: a shorter box and one line leave the line, the "what is sent" line and Send all in the sheet. */
+  /* Over a keyboard: no title, a shorter box and one line, with its room kept, so nothing moves under a thumb and Send and Cancel stay above the keyboard. The line's target reaches over the heading and the gap below it. */
+  :root[data-ib-keyboard] .ib-fbk-phone .ib-dlg-head { display: none; }
   :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
-  /* The line's room is kept while the keyboard is up, so nothing moves under a finger when it lands: the box and Send both stay put. As small as one line allows: the row is 24 px, and its target stays 44 over the heading and the margin below, where nothing else takes a tap. */
   :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: calc(33px + var(--ib-fs-12, 12px) * 1.5); }
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
-  :root[data-ib-keyboard] .ib-fbk-rel li { min-height: 24px; padding: 0; }
-  :root[data-ib-keyboard] .ib-fbk-rel a::after { inset: -10px 0; }
+  :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
+  :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
