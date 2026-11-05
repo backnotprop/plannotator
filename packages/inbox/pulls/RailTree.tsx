@@ -48,13 +48,29 @@ export function middleCut(text: string): [head: string, tail: string] {
   return splitFileName(text);
 }
 
-/** A name on one line that gives way in its middle: the head ends in "…", the tail stays. */
+/**
+ * A name on one line that gives way in its middle: the head ends in "…", the tail stays. A tail too long for the row
+ * on its own (a last folder like `turbopack-worker-self-reference` beside a rail's numbers) gives way in its own middle
+ * after the head is spent, so its end still shows and nothing is cut at its end.
+ */
 function Cut({ text, className }: { text: string; className: string }) {
   const [head, tail] = middleCut(text);
+  const [lead, end] = tail ? splitFileName(tail) : ['', ''];
   return (
     <span className={`ib-prp-cutbox ${className}`}>
       <span className="ib-prp-cut"><bdi>{head}</bdi></span>
-      {tail && <span className="ib-prp-keep"><bdi>{tail}</bdi></span>}
+      {tail && (
+        <span className="ib-prp-keep" data-split={end ? '' : undefined}>
+          {end ? (
+            <>
+              <span className="ib-prp-cut2"><bdi>{lead}</bdi></span>
+              <span className="ib-prp-end"><bdi>{end}</bdi></span>
+            </>
+          ) : (
+            <bdi>{tail}</bdi>
+          )}
+        </span>
+      )}
     </span>
   );
 }
@@ -104,16 +120,15 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
       <li key={key}>
         <Tip content={file.path}>
           <button type="button" className="ib-prp-file" data-seen={seen ? '' : undefined} style={{ paddingLeft: pad(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}`} onClick={() => onSelect(file.path)} data-review-file={file.path}>
+            {/* The review app's row: [viewed][letter] name [comments], its numbers at the row's end. */}
+            <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />
+            <span className="review-change-letter"><ChangeTypeLetter status={file.status} oldPath={file.oldPath} /></span>
             <span className="ib-prp-fname" data-has-dir={dir ? '' : undefined}>
               {dir && <Cut text={dir} className="ib-prp-dir" />}
               <Cut text={name} className="ib-prp-base" />
             </span>
             {n > 0 && <span className="ib-prp-c">{n}</span>}
             <CountColumns additions={file.additions} deletions={file.deletions} />
-            <span className="ib-prp-slot">
-              {file.status && file.status !== 'modified' && <span className="ib-prp-letter"><ChangeTypeLetter status={file.status} oldPath={file.oldPath} /></span>}
-              <span className="ib-prp-view"><ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} /></span>
-            </span>
           </button>
         </Tip>
       </li>
@@ -130,7 +145,6 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
               <svg className={open ? 'ib-prp-open' : ''} width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M9 5l7 7-7 7" /></svg>
               <span className="ib-prp-fname"><Cut text={row.name} className="ib-prp-dirname" /></span>
               <CountColumns additions={row.additions} deletions={row.deletions} tone="quiet" />
-              <span className="ib-prp-slot" aria-hidden="true" />
             </button>
           </Tip>
           {open && <ul className="ib-prp-list">{draw(row.rows)}</ul>}
