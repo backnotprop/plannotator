@@ -955,11 +955,12 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // GitHub and GitLab refuse request changes on your own PR/MR, like approve.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
+  // GitHub refuses request changes on your own PR, like approve. GitLab accepts it.
+  const selfRequestChangesBlocked = prCapabilities?.selfRequestChangesBlocked !== false;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
-    : isOwnPR
+    : isOwnPR && selfRequestChangesBlocked
       ? `You can't request changes on your own ${mrLabel === 'MR' ? 'merge request' : 'pull request'} on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
@@ -5349,8 +5350,8 @@ const ReviewApp: React.FC = () => {
     count: totalAnnotationCount,
     hasFeedback: totalAnnotationCount > 0,
     approvalNotesSupported: false, // ignored by the platform arm
-    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported },
-  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported]);
+    platform: { label: platformLabel, mrLabel, selfAuthored: isOwnPR, requestChangesSupported, selfRequestChangesBlocked },
+  }), [totalAnnotationCount, platformLabel, mrLabel, isOwnPR, requestChangesSupported, selfRequestChangesBlocked]);
 
   const runPlatformDecisionAction = useCallback((id: DecisionActionId) => {
     if (submitted || busyWithPlatformDecision) return;

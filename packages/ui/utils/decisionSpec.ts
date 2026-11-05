@@ -166,6 +166,11 @@ export interface DecisionPlatformInput {
    * too and adds a live "Comment…" row so the empty state is never a dead end.
    */
   requestChangesSupported?: boolean;
+  /**
+   * `false` keeps Request changes live on a self-authored PR (GitLab accepts
+   * it from the author). Absent follows `selfAuthored`.
+   */
+  selfRequestChangesBlocked?: boolean;
 }
 
 export const DECISION_NOTE_PLACEHOLDER = 'Add a note...';
@@ -386,7 +391,9 @@ function buildPlatformSpec(input: DecisionSpecInput, platform: DecisionPlatformI
   const selfReasonShort = `You can't approve your own ${platform.mrLabel}`;
   const requestChangesUnsupported = platform.requestChangesSupported === false;
   // GitHub refuses REQUEST_CHANGES on your own PR, exactly like APPROVE.
-  const requestChangesMuted = selfAuthored && platform.requestChangesSupported === true;
+  const requestChangesMuted = selfAuthored
+    && platform.requestChangesSupported === true
+    && platform.selfRequestChangesBlocked !== false;
   const selfRequestChangesShort = `You can't request changes on your own ${platform.mrLabel}`;
   const postsAsComment = `Posts as a comment; ${platform.label} has no request-changes review`;
 

@@ -400,8 +400,10 @@ export interface PRPlatformCapabilities {
    * `POST /request-changes`.
    */
   requestChanges: boolean;
-  /** The platform refuses approve / request-changes from the PR author. */
+  /** The platform refuses approve from the PR author. */
   selfReviewBlocked: boolean;
+  /** The platform refuses request-changes from the PR author (GitHub only). */
+  selfRequestChangesBlocked: boolean;
   /** File-scoped comments post as file-level threads (else folded into the body). */
   fileLevelComments: boolean;
   /** Per-file "viewed" state syncs to the platform. */
@@ -430,6 +432,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     numberPrefix: "#",
     requestChanges: true,
     selfReviewBlocked: true,
+    selfRequestChangesBlocked: true,
     fileLevelComments: true,
     viewedSync: true,
     artifacts: true,
@@ -443,6 +446,8 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     numberPrefix: "!",
     requestChanges: true,
     selfReviewBlocked: true,
+    // An MR author may mark their own MR as needing changes.
+    selfRequestChangesBlocked: false,
     fileLevelComments: false,
     viewedSync: false,
     artifacts: true,
@@ -458,6 +463,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     // Bitbucket Cloud lets an author approve their own PR (the approval just
     // does not count toward merge checks), so nothing is muted.
     selfReviewBlocked: false,
+    selfRequestChangesBlocked: false,
     // Bitbucket supports file comments, but posting them one by one outside the
     // partial-retry contract is not worth the risk yet: they fold into the body.
     fileLevelComments: false,
