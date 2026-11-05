@@ -189,6 +189,40 @@ test('a desktop: the notice beside the thread is the list\'s, and × hides it fo
   await expect(notice).toHaveCount(0);
 });
 
+/** The next page load is the page of a release whose entry script the Inbox no longer has. */
+async function servePageWithGoneEntry(page: Page, times: number): Promise<{ documents: number }> {
+  const seen = { documents: 0 };
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.fallback();
+    seen.documents += 1;
+    if (seen.documents > times) return route.fallback();
+    const response = await route.fetch();
+    const html = await response.text();
+    const gone = html.replace(/(<script type="module"[^>]*\ssrc=")\/assets\/[^"]+\.js"/, '$1/assets/index-gone.js"');
+    expect(gone, 'the page names its entry script').not.toBe(html);
+    await route.fulfill({ response, body: gone });
+  });
+  return seen;
+}
+
+test('an older page whose entry script is gone reloads by itself onto the Inbox\'s own page, never blank', async ({ browser }) => {
+  const page = await open(browser, false);
+  const seen = await servePageWithGoneEntry(page, 1);
+  await page.goto(url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  expect(seen.documents).toBe(2);
+  await expect(page.locator('[data-stale-page]')).toHaveCount(0);
+});
+
+test('a page that keeps coming back with its entry script gone reloads once, not in a loop', async ({ browser }) => {
+  const page = await open(browser, false);
+  const seen = await servePageWithGoneEntry(page, Number.MAX_SAFE_INTEGER);
+  await page.goto(url);
+  await expect.poll(() => seen.documents).toBe(2);
+  await page.waitForTimeout(2000);
+  expect(seen.documents).toBe(2);
+});
+
 test('the shots: a phone (the list, then a thread) and a desktop, light and dark', async ({ browser }) => {
   for (const scheme of ['light', 'dark'] as const) {
     const phone = await open(browser, true, scheme);
