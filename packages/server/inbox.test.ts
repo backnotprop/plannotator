@@ -12,6 +12,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { questionKey, type QuestionAnswer } from "@plannotator/core/question-block";
 import type { InboxQuestion } from "@plannotator/core/inbox-types";
 import { inboxStatus, readInboxRegistry } from "@plannotator/shared/inbox/registry";
+import { packApp } from "@plannotator/shared/packed-app";
 import { INBOX_SERVER_SESSION_MISMATCH_ERROR } from "@plannotator/core/server-session";
 import { parseInboxQuestionBlocks } from "@plannotator/core/inbox-questions";
 import { INBOX_AGENT_FIELD_DESCRIPTIONS, INBOX_REF_LINK_RULE, inboxAgentTool, parseInboxToolList } from "@plannotator/shared/inbox/connection";
@@ -385,6 +386,28 @@ describe("security refusals, by real requests", () => {
     expect(await page.text()).toContain("data-window-sentinel");
     const api = await fetch(`http://127.0.0.1:${server.port}/api/inbox/projects`, { headers: { Origin: "https://evil.example" } });
     expect(api.headers.get("access-control-allow-origin")).toBeNull();
+  });
+
+  // #2593: the built window is one file with its scripts packed behind the page (build/pack-inbox.ts). The page must
+  // go out without the pack (a raw pack would put every script's text in the document), and each script by its name.
+  test("a packed window: `/` is the page alone under the same CSP, `/assets/<name>` its scripts", async () => {
+    const entry = 'import("./lazy-b.js");export const sentinel="entry-sentinel";';
+    const lazy = 'export default "lazy-sentinel";';
+    const page = '<!doctype html><script type="module" crossorigin src="/assets/entry-a.js"></script><div data-window-sentinel></div>';
+    const server = await start(join(tempRoot(), "data"), {
+      htmlContent: packApp(page, { "/assets/entry-a.js": { type: "text/javascript; charset=utf-8", text: entry }, "/assets/lazy-b.js": { type: "text/javascript; charset=utf-8", text: lazy } }),
+    });
+    const base = `http://127.0.0.1:${server.port}`;
+    const window = await fetch(`${base}/`);
+    expect(window.headers.get("content-security-policy")).toContain("script-src 'self' 'unsafe-inline'");
+    expect(await window.text()).toBe(page);
+    for (const [name, body] of [["entry-a.js", entry], ["lazy-b.js", lazy]] as const) {
+      const script = await fetch(`${base}/assets/${name}`);
+      expect([name, script.status, script.headers.get("content-type"), script.headers.get("x-content-type-options"), await script.text()]).toEqual([name, 200, "text/javascript; charset=utf-8", "nosniff", body]);
+    }
+    // Only a packed name answers: never the page under another path, never a file from disk.
+    expect((await fetch(`${base}/assets/other.js`)).status).toBe(404);
+    expect((await fetch(`${base}/assets/../package.json`)).status).toBe(404);
   });
 
   test("an HTTP/1.0 request with no Host (allowed by the guard) is answered, not a 500", async () => {
