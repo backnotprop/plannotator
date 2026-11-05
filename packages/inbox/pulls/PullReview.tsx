@@ -47,6 +47,8 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { ReviewRailTree } from './ReviewRailTree';
+import { useSheetEscape } from '../shortcuts/useSheetEscape';
+import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
@@ -271,16 +273,25 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setFilesSheet(false);
     filesButton.current?.focus({ preventScroll: true });
   };
-  // Escape closes either sheet, from inside it or from its button (as ReviewPane's), and focus goes back to the button.
-  const onSheetKey = (event: React.KeyboardEvent) => {
-    if (event.key !== 'Escape' || event.defaultPrevented) return;
-    if (folded && sheet) {
-      event.preventDefault();
-      closeComments();
-    } else if (filesSheet) {
-      event.preventDefault();
-      closeFiles();
-    }
+  // Escape closes either sheet, wherever focus is, and focus goes back to its button.
+  useSheetEscape(folded && sheet, closeComments);
+  useSheetEscape(filesSheet, closeFiles);
+  // Tabbing out of a sheet closes it, so focus never lands unseen on what it covers (a click beside it does not).
+  const tabbing = useRef(false);
+  const sheetKeys = {
+    onKeyDown: (event: React.KeyboardEvent) => {
+      tabbing.current = event.key === 'Tab';
+    },
+    onKeyUp: () => {
+      tabbing.current = false;
+    },
+    onBlur: (event: React.FocusEvent<HTMLElement>) => {
+      const left = tabbing.current && event.relatedTarget instanceof Element && !event.currentTarget.contains(event.relatedTarget) && !inOverlay(event.relatedTarget);
+      tabbing.current = false;
+      if (!left) return;
+      setSheet(false);
+      setFilesSheet(false);
+    },
   };
   // Crossing a fold takes away what held focus (a button, or a rail or panel that hides): focus moves to the same
   // thing's other shape, so it never drops to the page.
@@ -473,7 +484,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               setFilesSheet((open) => !open);
               setSheet(false);
             }}
-            onKeyDown={onSheetKey}
             aria-expanded={filesSheet}
             aria-controls={filesSheetId}
             aria-label={`Files, ${files.length}`}
@@ -498,7 +508,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             ref={sheetButton}
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
-            onKeyDown={onSheetKey}
             aria-expanded={sheet}
             aria-controls={sheetId}
             aria-label={`Comments, ${comments.length}`}
@@ -586,7 +595,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           {scopeSwitch}
           {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         </div>
-        <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" onKeyDown={onSheetKey}>
+        <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" {...sheetKeys}>
           <ReviewRailTree
             tree={tree}
             loose={loose}
@@ -654,7 +663,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           )}
         </div>
-        <div className="ib-apanel ib-gpanel" id={sheetId} ref={panelRef} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined} onKeyDown={onSheetKey}>
+        <div className="ib-apanel ib-gpanel" id={sheetId} ref={panelRef} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined} {...sheetKeys}>
           {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>

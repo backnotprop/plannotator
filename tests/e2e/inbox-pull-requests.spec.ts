@@ -61,7 +61,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -941,19 +941,16 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
     const none = { border: '0px', radius: '0px', fill: 'rgba(0, 0, 0, 0)' };
     const [first, second] = [...root.querySelectorAll('[data-guide-file-shell]')];
-    const code = first!.querySelector('diffs-container')!.getBoundingClientRect();
-    const header = second!.querySelector('[slot="header-custom"]')!.getBoundingClientRect();
     return {
       none,
       section: read(root.querySelector('[data-guide-section]')!),
       box: read(root.querySelector('[data-guide-code-view-mounted]')!),
-      seam: header.top - code.bottom,
       hairline: getComputedStyle(second!, '::before').height,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  expect(frame.seam).toBe(1);
+  await expect.poll(() => seams(review)).toEqual([1, 1]);
   expect(frame.hairline).toBe('1px');
   const pane = (await review.locator('.ib-gbody').boundingBox())!;
   const edge = (await sqlShell.boundingBox())!;
@@ -1099,6 +1096,111 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
   return { context, page };
 }
+
+test('nothing but a hairline between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
+  const hunk = (at: number) => `@@ -${at},3 +${at},3 @@\n ctx\n-old\n+new\n ctx\n`;
+  const file = (path: string, ...ats: number[]) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${ats.map(hunk).join('')}`;
+  const patch = [file('one-at-the-top.ts', 1), file('one-further-down.ts', 27), file('two-hunks.ts', 1, 40), file('three-hunks.ts', 10, 40, 80), file('last.ts', 1)].join('');
+  const { context, page } = await stubbedReview(browser, 1440, patch);
+  try {
+    const review = page.locator('[data-pull-review]');
+    await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
+    await expect.poll(() => seams(review)).toEqual([1, 1, 1, 1]);
+    await review.getByRole('radio', { name: 'Unified' }).click();
+    await expect.poll(() => seams(review)).toEqual([1, 1, 1, 1]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('Escape closes an open sheet wherever focus is; what used the key keeps it, and Tab out of a sheet closes it', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const rail = review.locator('.ib-rrail');
+    const files = review.locator('[data-pull-review-files-button]');
+    const panel = review.locator('.ib-gpanel');
+    const comments = review.locator('.ib-vcomments');
+    const esc = () => page.keyboard.press('Escape');
+    // Closed, back on its button, the review still open.
+    const closesToButton = async (sheet: Locator, button: Locator) => {
+      await esc();
+      await expect(sheet).toBeHidden();
+      await expect(button).toBeFocused();
+      await expect(review).toBeVisible();
+    };
+
+    // From its own button.
+    await files.click();
+    await files.focus();
+    await closesToButton(rail, files);
+    await comments.click();
+    await comments.focus();
+    await closesToButton(panel, comments);
+
+    // A click on nothing in the sheet, or on its heading.
+    await files.click();
+    await review.locator('.ib-rv-progress').click();
+    await closesToButton(rail, files);
+    await comments.click();
+    await panel.locator('.ib-sheet-h b').click();
+    await closesToButton(panel, comments);
+
+    // A click on the diff beside it leaves the sheet open, and Escape still closes it.
+    await files.click();
+    await page.mouse.click(760, 500);
+    await expect(rail).toBeVisible();
+    await closesToButton(rail, files);
+
+    // A line's composer takes the first Escape, whichever sheet is open.
+    const line = review.locator('[data-guide-file-shell="src/app.ts"] [data-line-type="change-addition"][data-column-number]').first();
+    await files.click();
+    await page.mouse.move(700, 300);
+    await line.evaluate((el) => el.scrollIntoView({ block: 'center' }));
+    await line.click({ position: { x: 4, y: 4 } });
+    const composer = page.getByPlaceholder('Leave feedback...');
+    await expect(composer).toBeFocused();
+    await esc();
+    await expect(composer).toBeHidden();
+    await expect(rail).toBeVisible();
+    await closesToButton(rail, files);
+
+    // So does the global comment's, on either sheet.
+    const addGlobal = review.locator('[data-guide-global-comment-add]');
+    const global = page.getByPlaceholder('Add a global comment...');
+    for (const [sheet, button] of [[rail, files], [panel, comments]] as const) {
+      await button.click();
+      await addGlobal.click();
+      await expect(global).toBeFocused();
+      await esc();
+      await expect(global).toBeHidden();
+      await expect(sheet).toBeVisible();
+      await closesToButton(sheet, button);
+    }
+
+    // A menu's Escape is the menu's: the decision's other choices over an open sheet.
+    await files.click();
+    await page.getByRole('button', { name: 'More decisions' }).click();
+    await expect(page.getByRole('menu')).toBeVisible();
+    await esc();
+    await expect(page.getByRole('menu')).toBeHidden();
+    await expect(rail).toBeVisible();
+    await page.mouse.click(760, 500);
+    await closesToButton(rail, files);
+
+    // Tab past a sheet's last row closes it: focus never lands unseen on what the sheet covered.
+    await files.click();
+    const rows = review.locator('[data-review-files] button, [data-review-files] [role="checkbox"]');
+    await rows.last().focus();
+    await page.keyboard.press('Tab');
+    await expect(rail).toBeHidden();
+    const landed = await page.evaluate(() => document.activeElement?.tagName);
+    expect(landed).not.toBe('BODY');
+    await expect(review).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
 
 test('every changed file stays in the review: rows for what the tree cannot hold, the diffs in the rail\'s order, Viewed from circle, header and reload', async ({ browser }) => {
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
@@ -1515,6 +1617,13 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
 });
 
 const TEAMMATE = 'github.com/northwind/web-app#880';
+
+/** From each file's code to the next file's header. */
+function seams(review: Locator): Promise<number[]> {
+  return review.locator('[data-guide-file-shell]').evaluateAll((shells) =>
+    shells.slice(1).map((shell, index) => shell.querySelector('[slot="header-custom"]')!.getBoundingClientRect().top - shells[index]!.querySelector('diffs-container')!.getBoundingClientRect().bottom),
+  );
+}
 
 /** A line comment on the layer review's diff: the line's number, then the composer's words. */
 async function commentOn(page: Page, file: string, line: number, words: string): Promise<void> {
