@@ -322,3 +322,77 @@ describe("a thread with one agent behaves as before", () => {
     expect((await row(server, asked.thread_id)).sent?.checked_at).toBeString();
   });
 });
+
+describe("who settled a reply no connection wakes", () => {
+  const lineOf = async (server: InboxServer, threadId: string) => {
+    const delivery = (await row(server, threadId)).delivery!;
+    return { read_by: delivery.read_by ?? null, state: delivery.state };
+  };
+
+  test("another agent's read: still settled, and the row names who read it, so it never claims the agent it was for took it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    // A session of another host, new to this thread; it wrote elsewhere, so the Inbox knows what it is.
+    const other = join(project, "..", "elsewhere");
+    mkdirSync(other, { recursive: true });
+    await agentSends(client, other, "ses_claude", CLAUDE, "Unrelated.");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_claude");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: "claude-code", state: "delivered" });
+    // Another read changes nothing, but the agent it was for reading it does: it has it now.
+    await reads(client, asked.thread_id, "ses_never_seen");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBe("claude-code");
+    await reads(client, asked.thread_id, "cursor-1");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+  });
+
+  test("the agent it was for: no name, the line stays Delivered", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "cursor-1");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a new session id of the same host may be that agent restarted, and an unknown one may too: no name", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_never_seen");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+
+    const again = await agentSends(client, project, "cursor-2", CURSOR, "And which zone?", undefined);
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "cursor-3", CURSOR, "Unrelated.");
+    await personReplies(server, again.message_id, "a", "k2");
+    await reads(client, again.thread_id, "cursor-3");
+    expect(await lineOf(server, again.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a reply to a waking session is never settled by another read, so it never says who read it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses_pi", PI, "Which region?");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_claude");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+    expect((await row(server, asked.thread_id)).delivery?.state).not.toBe("delivered");
+  });
+
+  test("past a reply still owed to a waking session: the settled one still names its reader", async () => {
+    const { server, client, project } = await setup();
+    const first = await agentSends(client, project, "ses_pi", PI, "Pi asks.");
+    const second = await agentSends(client, project, "cursor-1", CURSOR, "Cursor asks.", first.message_id);
+    await personReplies(server, first.message_id, "To Pi.", "k1");
+    await personReplies(server, second.message_id, "To Cursor.", "k2");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await reads(client, first.thread_id, "ses_claude");
+    expect((await thread(server, first.thread_id)).messages.at(-1)?.delivery?.read_by).toBe("claude-code");
+    expect((await lineOf(server, first.thread_id)).read_by).toBe("claude-code");
+  });
+});

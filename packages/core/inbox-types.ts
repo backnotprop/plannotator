@@ -451,6 +451,12 @@ export interface InboxMessage {
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
   /**
+   * The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was
+   * for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a
+   * thread from before this was recorded: those keep "Delivered".
+   */
+  agent_checked_by?: string | null;
+  /**
    * The files an agent attached (send_message's `attachments`), recorded at
    * send time and read only by their ids (see inbox-attachments.ts). Added in
    * step 2: older records lack it.
@@ -873,6 +879,8 @@ export interface InboxAddressee {
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
+  /** Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`). */
+  read_by?: string | null;
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
@@ -1380,6 +1388,11 @@ export interface InboxListRow extends InboxThreadSummary {
      * Absent from an older Inbox.
      */
     wakes?: boolean;
+    /**
+     * Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM").
+     * Absent otherwise, and on a thread from before this was recorded.
+     */
+    read_by?: string;
     /**
      * When the reply tags agents (`InboxMessage.tags`): every session it goes
      * to, the owner first, each with its own delivery ("1 of 3 delivered").
