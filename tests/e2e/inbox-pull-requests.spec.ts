@@ -1912,13 +1912,12 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
   await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
   await expect(page.getByText('unmodified line')).toHaveCount(0);
-  // The file's header sits at the top of its box, with no room left over for a separator that isn't there.
-  const gap = await page.locator('[data-guide-file-shell="src/walk-long.ts"]').first().evaluate((shell) => {
-    const hosts = [shell, ...shell.querySelectorAll('*')];
-    const body = hosts.flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];
-    return body ? body.getBoundingClientRect().top - shell.getBoundingClientRect().top : null;
+  // Two ranges in a file leave no room over its header for a separator that isn't there: it sits as a one-range file's does.
+  const gapOver = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().evaluate((shell) => {
+    const body = [shell, ...shell.querySelectorAll('*')].flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];
+    return body ? body.getBoundingClientRect().top - shell.getBoundingClientRect().top : Number.NaN;
   });
-  expect(gap).toBeLessThan(60);
+  expect(Math.abs((await gapOver('src/walk-long.ts')) - (await gapOver('src/i18n/fallback.ts')))).toBeLessThan(4);
   await page.waitForTimeout(1200);
   await shot(page, 'w-pane');
   // All files: the same code, nothing counted, and no words about changes.
