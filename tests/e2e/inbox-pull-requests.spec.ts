@@ -1302,11 +1302,19 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await expect(panel.locator('[data-pull-details-reviewer="northwind/billing-platform"] .ib-prd-face')).toHaveAttribute('data-square', '');
     // Round, as on the Reviews list.
     expect(await face.evaluate((img) => getComputedStyle(img.closest('.ib-prd-pic')!).borderRadius)).toBe('50%');
-    // A long check's whole name is in reach; the passed ones behind a line.
+    // A check is one line: the job's own name (no workflow before it), cut at its end, its state after it, the whole
+    // name in its tip; the passed ones behind a line.
     const failed = panel.locator('[data-pull-details-check="fail"]');
-    await expect(failed.locator('.ib-prd-rname')).toHaveText(`test / ${longCheck}`);
-    // A failed check reads whole: real ones share their first words, so cut they read the same.
-    expect(await failed.locator('.ib-prd-rname').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    const name = failed.locator('.ib-prd-rname');
+    await expect(name).toHaveText(longCheck);
+    await expect(failed.locator('.ib-prd-rstate')).toHaveText('Failed');
+    expect(await name.evaluate((el) => [el.scrollWidth > el.clientWidth, getComputedStyle(el).textOverflow, getComputedStyle(el).whiteSpace])).toEqual([true, 'ellipsis', 'nowrap']);
+    const line = parseFloat(await name.evaluate((el) => getComputedStyle(el).lineHeight));
+    expect((await failed.boundingBox())!.height).toBeLessThan(line * 2);
+    expect((await failed.locator('.ib-prd-rstate').boundingBox())!.x).toBeGreaterThan((await name.boundingBox())!.x);
+    await name.hover();
+    await expect(page.locator('[data-pn-tooltip]')).toHaveText(`test / ${longCheck}`);
+    await page.mouse.move(0, 0);
     await expect(failed.locator('a')).toHaveAttribute('href', 'https://ci.example/1');
     await expect(failed.locator('a')).toHaveAttribute('target', '_blank');
     await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(0);
@@ -1350,7 +1358,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await context.close();
   }
 
-  // On a phone: one column, people and checks a line each, a long name whole, the title's row is the way in.
+  // On a phone: one column, people and checks a line each, a long name on its one line, the title's row is the way in.
   const phone = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
   try {
     const review = phone.page.locator('[data-pull-review]');
@@ -1361,6 +1369,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await panel.locator('.ib-prd-sum').last().click();
     const name = panel.locator('[data-pull-details-check="fail"] .ib-prd-rname');
     await expect(name).toBeVisible();
+    expect((await panel.locator('[data-pull-details-check="fail"]').boundingBox())!.height).toBeLessThan(parseFloat(await name.evaluate((el) => getComputedStyle(el).lineHeight)) * 2);
     await expect(phone.page.evaluate(() => document.documentElement.scrollWidth)).resolves.toBeLessThanOrEqual(390);
     await panel.locator('[data-pull-details-close]').click();
     await expect(panel).toHaveCount(0);
