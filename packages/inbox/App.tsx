@@ -140,7 +140,7 @@ import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
-import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute } from './history';
+import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
 import { adoptSavedTheme, inboxServerSync } from './theme';
@@ -363,7 +363,7 @@ function readRoute(): Route {
 }
 
 function routeOf(fullHash: string): Route {
-  const hash = fullHash.replace(/^#/, '');
+  const hash = withoutClickSignal(fullHash).replace(/^#/, '');
   const settingsAt = parseSettingsHash(hash);
   if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair, experimental: settingsAt.experimental };
   const params = new URLSearchParams(hash);
@@ -535,6 +535,12 @@ function stripStrayMsg(): void {
   if (!params.has('msg') || params.get('thread')) return;
   const hash = hashOf(readRoute());
   window.history.replaceState(window.history.state, '', hash || window.location.pathname + window.location.search);
+}
+
+/** A notification click's `click=` come back from the browser's own history (history.ts) leaves the address bar. */
+function stripClickSignal(): void {
+  const clean = withoutClickSignal(window.location.hash);
+  if (clean !== window.location.hash) window.history.replaceState(window.history.state, '', clean || window.location.pathname + window.location.search);
 }
 
 /**
@@ -1106,6 +1112,7 @@ function Inbox() {
     const onHash = () => {
       // A Back this window started: its rewrite of the entry it landed on comes first (history.ts settleLanding).
       settleLanding();
+      stripClickSignal();
       stripStrayMsg();
       settleTourEntry();
       const oldExperimental = settleOldExperimental();
@@ -1144,6 +1151,7 @@ function Inbox() {
       setTimeout(() => place(false), 300);
       setTimeout(() => place(false), 1000);
     };
+    stripClickSignal();
     stripStrayMsg();
     settleOldExperimental();
     window.addEventListener('hashchange', onHash);
