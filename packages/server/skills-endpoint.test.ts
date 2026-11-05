@@ -21,6 +21,7 @@ import {
   startAnnotateServer as startPiAnnotateServer,
   startPlanReviewServer as startPiPlanServer,
 } from "../../apps/pi-extension/server";
+import { checkoutIsScratch, makeOutsideScratch } from "../../tests/helpers/outside-scratch";
 
 const SPA_HTML = "<!doctype html><html><body>SPA fallback</body></html>";
 
@@ -40,6 +41,7 @@ const ENV_KEYS = [
   "PLANNOTATOR_DATA_DIR",
   "PLANNOTATOR_PORT",
   "PLANNOTATOR_REMOTE",
+  "PLANNOTATOR_TEST_SANDBOX",
 ] as const;
 const savedEnv: Partial<Record<(typeof ENV_KEYS)[number], string | undefined>> = {};
 
@@ -159,6 +161,33 @@ describe("GET /api/skills route wiring", () => {
         });
       } finally {
         server.stop();
+      }
+    });
+  }
+});
+
+// Both runtimes: Pi runs its own vendored copy of the loader.
+describe.skipIf(checkoutIsScratch)("GET /api/skills under the test sandbox", () => {
+  for (const serverCase of serverCases) {
+    test(`${serverCase.name}: a home that is not scratch is read only outside the sandbox`, async () => {
+      const outside = makeOutsideScratch();
+      const server = await serverCase.start();
+      try {
+        const dir = join(outside, ".claude", "skills", "outside-skill");
+        mkdirSync(dir, { recursive: true });
+        writeFileSync(join(dir, "SKILL.md"), "---\nname: outside-skill\n---\n# outside-skill\n");
+        process.env.HOME = outside;
+        process.env.CLAUDE_CONFIG_DIR = join(outside, ".claude");
+        const names = async () =>
+          ((await (await fetch(`${server.url}/api/skills`)).json()) as { skills: Array<{ name: string }> }).skills.map((s) => s.name);
+
+        process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+        expect(await names()).not.toContain("outside-skill");
+        delete process.env.PLANNOTATOR_TEST_SANDBOX;
+        expect(await names()).toContain("outside-skill");
+      } finally {
+        server.stop();
+        rmSync(outside, { recursive: true, force: true });
       }
     });
   }

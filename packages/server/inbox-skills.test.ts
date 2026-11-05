@@ -7,17 +7,19 @@
  *
  * Every skill folder is a temp HOME made here; HOME, CLAUDE_CONFIG_DIR,
  * CODEX_HOME and XDG_CONFIG_HOME point into it for each test and are put back
- * after, so the person's real skills are never read.
+ * after, so the person's real skills are never read. The sandbox test's other
+ * home is a folder it made in this checkout.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { checkoutIsScratch, makeOutsideScratch } from "../../tests/helpers/outside-scratch";
 
 type Json = Record<string, any>;
 
-const ENV_KEYS = ["HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME"] as const;
+const ENV_KEYS = ["HOME", "CLAUDE_CONFIG_DIR", "CODEX_HOME", "XDG_CONFIG_HOME", "PLANNOTATOR_TEST_SANDBOX"] as const;
 const roots: string[] = [];
 const servers: InboxServer[] = [];
 let savedEnv: Record<string, string | undefined> | null = null;
@@ -106,6 +108,25 @@ describe("GET /api/inbox/skills", () => {
       const post = await fetch(`${w.base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
       expect(post.status).toBe(405);
     }
+  });
+
+  test.skipIf(checkoutIsScratch)("a sandboxed Inbox lists and serves nothing from a home that is not scratch; an Inbox outside the sandbox does", async () => {
+    const w = await setup();
+    const outside = makeOutsideScratch();
+    roots.push(outside);
+    skill(join(outside, ".claude", "skills"), "outside-skill", "description: Not a scratch folder.\n", "# Outside\n");
+    process.env.HOME = outside;
+    process.env.CLAUDE_CONFIG_DIR = join(outside, ".claude");
+
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+    const sandboxed = await w.get("/api/inbox/skills");
+    expect(sandboxed.body.skills.map((s: Json) => s.name)).not.toContain("outside-skill");
+    expect((await w.get("/api/inbox/skills/content?name=outside-skill")).status).toBe(404);
+
+    delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    const real = await w.get("/api/inbox/skills");
+    expect(real.body.skills.map((s: Json) => s.name)).toContain("outside-skill");
+    expect((await w.get("/api/inbox/skills/content?name=outside-skill")).status).toBe(200);
   });
 
   test("no skills installed: an empty list, never an error", async () => {
