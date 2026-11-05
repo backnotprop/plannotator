@@ -30,7 +30,7 @@ export function BroIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose
           </a>
           , repo:{' '}
           <a href={BRO_CREDIT.by} target="_blank" rel="noopener noreferrer">
-            backnotprop
+            backnotprop/bro
           </a>
         </p>
       </div>

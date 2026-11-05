@@ -204,7 +204,7 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     const links = [...card()!.querySelectorAll<HTMLAnchorElement>('a')];
     expect(links.map((a) => [a.textContent, a.getAttribute('href'), a.target, a.rel.includes('noopener')])).toEqual([
       ['@dillon_mullroy', 'https://x.com/dillon_mullroy', '_blank', true],
-      ['backnotprop', 'https://github.com/backnotprop/bro', '_blank', true],
+      ['backnotprop/bro', 'https://github.com/backnotprop/bro', '_blank', true],
     ]);
   });
 
