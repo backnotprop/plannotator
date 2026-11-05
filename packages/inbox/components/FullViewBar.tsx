@@ -12,6 +12,7 @@ const TOOLS_KEYS: ShortcutRef = { scope: inboxFileViewerShortcuts, action: 'togg
 const exitKeys = shortcutAria(EXIT_KEYS);
 import { modKey } from '@plannotator/ui/utils/platform';
 import { Icon } from '../icons';
+import { CommentCount, commentsLabel } from './EarlierSection';
 import { Tip as HoverTip } from './Tip';
 
 /**
@@ -48,9 +49,11 @@ export interface FullViewBarProps {
   armed: boolean;
   /** The pen, on an HTML file that takes comments. */
   onToggleArmed?: () => void;
-  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and no other file has any. */
+  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and has none to list, here or on another file. */
   comments: {
     count: number;
+    /** Comments a Send already carried on this file (earlierComments.ts). Absent or 0: the count is today's. */
+    earlier?: number;
     open: boolean;
     controls: string;
     onToggle: () => void;
@@ -327,13 +330,11 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
               }}
               aria-expanded={comments.open}
               aria-controls={comments.controls}
-              aria-label={`Comments, ${comments.count}`}
+              aria-label={commentsLabel(comments.count, comments.earlier ?? 0)}
               data-full-view-comments=""
             >
               <Icon name="comment" size={iconSize} />
-              <span key={bump} className={bump ? 'ib-bump' : undefined}>
-                {comments.count}
-              </span>
+              <CommentCount count={comments.count} earlier={comments.earlier ?? 0} phone={phone} bump={bump} />
             </button>
           </Tip>
         )}

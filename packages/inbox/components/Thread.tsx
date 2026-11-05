@@ -6234,6 +6234,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         attachments={allFiles}
         // The files' annotations only: a guided-review comment is on the guide's diff, not on a file.
         records={fileRecords}
+        earlierRecords={files?.earlier_annotations}
         mentionSource={commentMentions}
         agent={asker}
         projectName={thread.project.name}
