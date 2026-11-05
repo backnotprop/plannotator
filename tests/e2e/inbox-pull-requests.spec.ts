@@ -1071,6 +1071,11 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   await review.locator('[data-review-destination-choice="forge"]').click();
   await expect(review.locator('[data-review-posts="github"]')).toBeVisible();
   await expect(review.locator('[data-pull-review-foot]')).toContainText('your review goes on the GitHub PR');
+  // GitHub refuses an approval of your own PR, so Approve rests while its caret stays live: one control, one fill.
+  const ownApprove = review.locator('[data-review-posts] [data-decision-primary]');
+  await expect(ownApprove).toHaveAttribute('aria-disabled', 'true');
+  const look = (el: Element) => { const css = getComputedStyle(el); return [css.backgroundColor, css.opacity]; };
+  expect(await ownApprove.evaluate(look)).toEqual(await review.locator('[data-review-posts] [data-decision-caret]').evaluate(look));
   await shot(page, '10-ending-choice');
   {
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
