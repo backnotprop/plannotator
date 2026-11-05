@@ -40,6 +40,8 @@ const shotsDir = resolve(process.env.PLANNOTATOR_E2E_SHOTS_DIR ?? join(repo, '.l
 
 const LONG = 'src/jobs/long-worker.ts';
 const TAIL = 'src/jobs/tail.ts';
+/** In no chapter of the first review: the file the two-file review holds after the worker. */
+const NEXT = 'src/jobs/next-worker.ts';
 
 /** Odd lines change, even ones don't: Unified draws old beside new as it goes, and both layouts have lines near the top. */
 const lineOf = (word: string, n: number) => `export const ${n % 2 ? word : 'same'}${n} = await step(${n}); // a line of the worker, number ${n}`;
@@ -60,9 +62,9 @@ function project(parent: string) {
     }
     git('add', '-A');
   };
-  write({ [LONG]: longFile('before'), [TAIL]: tailFile('before') });
+  write({ [LONG]: longFile('before'), [TAIL]: tailFile('before'), [NEXT]: longFile('before') });
   git('commit', '-q', '-m', 'base');
-  write({ [LONG]: longFile('after'), [TAIL]: tailFile('after') });
+  write({ [LONG]: longFile('after'), [TAIL]: tailFile('after'), [NEXT]: longFile('after') });
   return { path, patch: git('diff', '--cached') };
 }
 
@@ -84,6 +86,8 @@ interface World {
   agent: ScriptedAskAgent;
   context: BrowserContext;
   page: Page;
+  path: string;
+  patch: string;
 }
 
 let world: World;
@@ -141,7 +145,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, deviceScaleFactor: 2, colorScheme: 'light', reducedMotion: 'reduce' });
   const page = await context.newPage();
-  world = { url, thread: sent.structuredContent.thread_id, client, agent, context, page };
+  world = { url, thread: sent.structuredContent.thread_id, client, agent, context, page, path, patch };
 });
 
 test.afterAll(async () => {
@@ -237,8 +241,8 @@ async function closeBar(page: Page): Promise<void> {
   await expect(bar(page)).toHaveCount(0);
 }
 
-async function openReview(page: Page, chapter = 1): Promise<void> {
-  await page.goto(`${world.url}#thread=${world.thread}`);
+async function openReview(page: Page, chapter = 1, thread = world.thread): Promise<void> {
+  await page.goto(`${world.url}#thread=${thread}`);
   await page.locator('[data-review-card]').last().getByRole('button', { name: /review/ }).click();
   await expect(page.locator('[data-review-message]')).toBeVisible();
   await page.locator('[data-review-chapters] li').nth(chapter).click();
@@ -526,7 +530,11 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
 
 test('two files with the same line numbers: scrolled to the next file, the lines and the bar stay with the first', async () => {
   const { page } = world;
-  await openReview(page);
+  // One chapter holding both: scrolling down it hands focus to the next file.
+  const both = { ...guide, sections: [{ title: 'Both files', overview: 'Both.', diffs: [{ file: LONG, summary: 'The worker.' }, { file: NEXT, summary: 'The next one.' }] }] };
+  const sent = (await world.client.callTool({ name: 'submit_guide', arguments: { project_path: world.path, guide: both, patch: world.patch, review: true, thread: 'two-files', subject: 'Two files', body: 'Ready for review.', agent_session: 'ses-bar', agent_host: 'claude-code', agent_name: 'Claude Code' } })) as { isError?: boolean; content?: { text: string }[]; structuredContent: { thread_id: string } };
+  if (sent.isError) throw new Error(sent.content?.map((c) => c.text).join(' '));
+  await openReview(page, 1, sent.structuredContent.thread_id);
   await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
   await setStyle(page, 'split');
   await line(page, LONG, 1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
@@ -536,12 +544,15 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   await expect(inFile(LONG).first()).toBeAttached();
 
   // Scroll with the bar open until the next file takes focus.
-  await line(page, TAIL, 3).evaluate((el) => el.scrollIntoView({ block: 'center' }));
-  await page.waitForTimeout(600);
   await page.mouse.move(1000, 500);
-  await page.mouse.wheel(0, 40);
-  await page.waitForTimeout(600);
-  await expect(inFile(TAIL), 'its numbers painted on the next file').toHaveCount(0);
+  for (let i = 0; i < 40 && !(await inFile(NEXT).count()) && !(await line(page, NEXT, 9).isVisible()); i += 1) {
+    await page.mouse.wheel(0, 300);
+    await page.waitForTimeout(100);
+  }
+  await line(page, NEXT, 9).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.mouse.wheel(0, 200);
+  await page.waitForTimeout(800);
+  await expect(inFile(NEXT), 'its numbers painted on the next file').toHaveCount(0);
   await expect(selpop(page)).toBeHidden();
 
   // Back: the same lines, the bar under them, and Comment goes to this file.
@@ -557,7 +568,7 @@ test('two files with the same line numbers: scrolled to the next file, the lines
   await page.keyboard.press('Meta+Enter');
   await expect(page.locator('.review-toolbar')).toHaveCount(0);
   await expect(page.locator(`[data-guide-file-shell="${LONG}"]`).first().getByText('On the first file.')).toBeVisible();
-  await expect(page.locator(`[data-guide-file-shell="${TAIL}"]`).first().getByText('On the first file.')).toHaveCount(0);
+  await expect(page.locator(`[data-guide-file-shell="${NEXT}"]`).first().getByText('On the first file.')).toHaveCount(0);
 });
 
 test('its lines gone: the bar hides, the header is free, the + rule lifts, and it comes back with them', async () => {
