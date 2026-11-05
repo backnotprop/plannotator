@@ -14,6 +14,7 @@ import DOMPurify from 'dompurify';
 import {
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeKeepSvgWhole,
   shapeLinkUrl,
   shapePaintAllowed,
   shapeUrlAllowed,
@@ -137,6 +138,9 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 .shp-rb.own.flash { animation: shp-rb-own-flash 1.2s ease-out; }
 @keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
+/* A number in an SVG's words. */
+svg tspan.shp-rb { display: inline; fill: var(--mark); }
+svg tspan.shp-rb:hover, svg tspan.shp-rb.lit { text-decoration: underline; }
 /* A finger needs more than 16 px. */
 @media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
 `;
@@ -191,7 +195,29 @@ function sanitizer(): ReturnType<typeof DOMPurify> | null {
 /** An agent's drawing, made safe: no script, handlers, outside loads, frames or <style>. Empty when this page cannot sanitize. */
 export function sanitizeShapeHtml(html: string): string {
   const p = sanitizer();
-  return p ? p.sanitize(html, CONFIG) : '';
+  return p ? p.sanitize(shapeKeepSvgWhole(html), CONFIG) : '';
+}
+
+const SVG_NS = 'http://www.w3.org/2000/svg';
+
+/**
+ * In SVG only a `<text>` shows words, so an empty number among the shapes
+ * (`<g data-ref="1"/>`) goes at the end of the words drawn just before it, as
+ * a `tspan`. Null when no words come before it. A shape (`<circle data-ref>`)
+ * stays where it is: it is the number.
+ */
+function numberInWords(el: Element): Element | null {
+  for (let at = el.previousElementSibling; at; at = at.previousElementSibling) {
+    const words = at.localName === 'text' ? at : [...at.querySelectorAll('text')].pop();
+    if (!words) continue;
+    const spot = el.ownerDocument.createElementNS(SVG_NS, 'tspan');
+    for (const a of el.attributes) if (a.name === 'class' || a.name.startsWith('data-')) spot.setAttribute(a.name, a.value);
+    spot.setAttribute('dx', '5');
+    words.append(spot);
+    el.remove();
+    return spot;
+  }
+  return null;
 }
 
 const markOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t instanceof Element && (t as Element).hasAttribute('data-mark')) as HTMLElement | undefined;
@@ -302,7 +328,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
     for (const el of steps) el.style.setProperty('--i', String(order.indexOf(Number(el.getAttribute('data-step')) || 0)));
     for (const el of board.querySelectorAll<HTMLElement>('[data-mark]')) el.classList.add('mk');
-    for (const el of board.querySelectorAll<HTMLElement>('[data-ref]')) {
+    for (let el of board.querySelectorAll<Element>('[data-ref]')) {
       const n = Number(el.getAttribute('data-ref'));
       const ref = (handlers.current.refs ?? []).find((r) => r.n === n);
       if (!ref) {
@@ -310,8 +336,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
-      else el.classList.add('own');
+      if (!el.children.length && !el.textContent?.trim()) {
+        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = numberInWords(el) ?? el;
+        el.textContent = String(n);
+      } else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
       el.setAttribute('tabindex', '0');
