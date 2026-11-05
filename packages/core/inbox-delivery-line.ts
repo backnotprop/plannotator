@@ -151,6 +151,8 @@ export interface DeliveryLine {
   text: string;
   /** The asking session ended: a clock, not a check. */
   ended?: boolean;
+  /** Its session's connection took it and stopped while delivering it: that session never gets it, so it may move. */
+  stuck?: boolean;
   /** Offer Send now: the session works and its connection can take the reply mid-turn. */
   sendNow?: boolean;
   /**
@@ -235,6 +237,8 @@ export interface DeliveryLineInput {
   readBy?: string | null;
   /** A message addressed to a session that stopped before it took it (compose). */
   undelivered?: { host: string } | null;
+  /** Its session's connection took it and stopped while delivering it (the sessions route's `asker.stuck`). */
+  stuck?: boolean;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
   waitingSince?: string | null;
   /** When the clock toward going in by itself started (the server's); null: it does not go in by itself yet. */
@@ -256,6 +260,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
   const decision = inboxDeliveryState({
     delivered: !!input.deliveredAt,
     undelivered: !!input.undelivered,
+    stuck: !!input.stuck,
     askerEnded: !!input.askerEnded,
     wakes: input.wakes,
     sendingNow: input.sendingNow,
@@ -283,6 +288,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
     state: decision.state,
     text,
     ...(decision.reason === 'ended' ? { ended: true } : {}),
+    ...(decision.reason === 'stuck' ? { stuck: true } : {}),
     ...(decision.reason === 'working' ? { sendNow: decision.sendNow } : {}),
     ...(decision.wait ? { wait: decision.wait } : {}),
     ...(decision.autoAfterMin !== undefined && decision.reason === 'delivered' ? { autoAfterMin: decision.autoAfterMin } : {}),
@@ -321,6 +327,8 @@ export function deliveryText(
     }
     case 'undelivered':
       return `Not delivered. That ${words.undeliveredHost} session stopped before it took this. If it is resumed, it still gets it.`;
+    case 'stuck':
+      return `Not delivered. ${name} stopped while it was taking this, so it won't get it.`;
     case 'ended':
       return `Saved for ${words.endedName}. That session has ended; it gets this only if it's resumed.`;
     case 'reads':

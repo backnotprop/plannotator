@@ -42,6 +42,7 @@ import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_IN
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxClaimAbandoned } from "./inbox-stuck-delivery";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
 /** One live session as the window reads it. */
@@ -116,6 +117,8 @@ interface SeenSession {
   /** The project root its `project_path` resolved to; null when it sent none. */
   root: string | null;
   startedAt: number;
+  /** The `started_at` its last poll said (when its wake started); absent when the poll said none. */
+  wakeStartedAt?: number | null;
   lastSeen: number;
   /** Polls held open now. */
   holding: number;
@@ -507,6 +510,7 @@ export function createInboxLiveSessions(options: {
     if (folder) entry.folder = folder;
     if (root !== null) entry.root = root;
     entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
+    entry.wakeStartedAt = finiteMs(body.started_at);
     entry.lastSeen = at;
     entry.holding += 1;
     entry.polls = (entry.polls ?? 0) + 1;
@@ -609,6 +613,18 @@ export function createInboxLiveSessions(options: {
     const steered = steering.get(session);
     if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
     return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
+  };
+
+  /**
+   * Whether `session`'s connection claimed item `itemId` and will never deliver it (its wake was killed while it
+   * delivered: packages/server/inbox-stuck-delivery.ts). It never goes to that session again; the person may move it.
+   */
+  const stuck = (session: string, itemId: string): boolean =>
+    inboxClaimAbandoned(store.dir, itemId, session, { there: askerLive(session), startedAt: sessions.get(session)?.wakeStartedAt ?? null }, now());
+  /** The person's items in a thread, not taken yet, that `session` claimed and will never deliver (`stuck`); absent when none. */
+  const stuckField = (threadId: string, session: string): { stuck?: string[] } => {
+    const ids = (store.thread(threadId)?.messages ?? []).filter((m) => m.author.kind === "person" && !m.delivery && stuck(session, m.id)).map((m) => m.id);
+    return ids.length > 0 ? { stuck: ids } : {};
   };
 
   /**
@@ -1069,7 +1085,8 @@ export function createInboxLiveSessions(options: {
         project: live.project,
         sessions: live.sessions,
         // `connection` (additive): how that session is connected now, for the line under the person's message ("Queued", "Sending", Send now).
-        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker) } } : {}),
+        // `stuck` (additive, absent when none): its items that session claimed and will never deliver.
+        ...(asker ? { asker: { session: asker, live: askerLive(asker), connection: connectionOf(asker), ...stuckField(sessionsMatch[1]!, asker) } } : {}),
         // `recipients` (additive, "inbox-tag-agents"): how each session a reply tags is connected now, for its own line.
         ...(recipients.length > 0 ? { recipients: Object.fromEntries(recipients.map((session) => [session, connectionOf(session)])) } : {}),
       });
@@ -1168,6 +1185,7 @@ export function createInboxLiveSessions(options: {
     seenWakeOnly,
     liveFor,
     askerLive,
+    stuck,
     replyTarget,
     seenOverMcp,
     route,
