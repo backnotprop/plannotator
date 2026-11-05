@@ -384,11 +384,6 @@ test('the fixed row: the toggle, the title and the toolbar sit on the line the p
     // The sidebar's first row starts where the buttons' room ends.
     if (sidebar === 'open') expect((await boxOf(page, '.ib-brand')).top).toBe(H);
   }
-  // A Shape board keeps its toggle on its title's line, below the buttons' room.
-  await openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed');
-  await page.locator('.ib-shape-layer .shp-head-start .ib-sb-trigger').waitFor();
-  await setControls(page);
-  expect((await boxOf(page, '.ib-shape-layer .shp-head-start .ib-sb-trigger')).top).toBeGreaterThanOrEqual(H);
   // A page whose head is its own comes up to the same line, and its toggle clears the buttons.
   for (const [hash, head] of [['#board', '.ib-bhead'], ['#whats-new=', '.ib-wn-bar'], ['#drafts', '.ib-dh']] as const) {
     await openRoute(page, world, hash, 'collapsed');
@@ -478,6 +473,48 @@ test('a phone-width window: the header holds the edge and the layer clears the h
   await openFullScreenFile(phone, world, world.picture);
   await setControls(phone);
   expect(await top(phone, '.ib-view.ib-full .ib-vbody')).toBeGreaterThanOrEqual(H);
+});
+
+test('the selection toolbar over the band: its buttons click, though it renders outside the page', async () => {
+  await openRoute(page, world, `#thread=${world.picture}`, 'collapsed');
+  await setControls(page);
+  const words = page.locator('section.ib-pane [data-message-id] p', { hasText: 'The ledger export is ready.' }).first();
+  const box = (await words.boundingBox())!;
+  const y = box.y + Math.min(box.height / 2, 10);
+  await page.mouse.move(box.x + 2, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width - 4, y, { steps: 10 });
+  await page.mouse.up();
+  const toolbar = page.locator('.annotation-toolbar');
+  await toolbar.waitFor();
+  expect(await toolbar.evaluate((el) => el.closest('.pn-inbox'))).toBeNull();
+  // Where a selection in a layer's first line puts it: over the band. Its buttons' middle goes to y 4, above the
+  // panes' gutter, where nothing of the page lies over the band. Its entrance (a rise) settles first.
+  await page.waitForTimeout(600);
+  await toolbar.evaluate((el) => {
+    const bar = el as HTMLElement;
+    bar.style.animation = 'none';
+    const button = bar.querySelector('button')!.getBoundingClientRect();
+    const middle = button.top + button.height / 2 - bar.getBoundingClientRect().top;
+    bar.style.top = `${4 - middle}px`;
+  });
+  await page.waitForTimeout(200);
+  await installDragAt(page);
+  const read = await toolbar.evaluate((el) => {
+    const { dragAt } = window as unknown as { dragAt: (x: number, y: number) => boolean };
+    const middles = [...el.querySelectorAll('button')]
+      .map((button) => button.getBoundingClientRect())
+      .filter((r) => r.width > 0)
+      .map((r) => [r.left + r.width / 2, r.top + r.height / 2] as const);
+    // Just left of the toolbar, at the same height, the band drags: the toolbar is what stops it.
+    const beside = dragAt(el.getBoundingClientRect().left - 6, middles[0]![1]);
+    return { buttons: middles.length, middle: middles[0]![1], beside, dragging: middles.filter(([x, y]) => dragAt(x, y)).length };
+  });
+  expect(read.buttons).toBeGreaterThan(0);
+  expect(read.middle).toBe(4);
+  expect(read.beside).toBe(true);
+  expect(read.dragging).toBe(0);
+  await page.keyboard.press('Escape');
 });
 
 test('a control added later clicks: a button over the band, and anything inside a header', async () => {

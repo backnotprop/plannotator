@@ -8186,6 +8186,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox :is(a, button, input, select, textarea, label, summary, iframe, [contenteditable], [tabindex]:not([tabindex="-1"])),
   .pn-inbox :is([role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [role="separator"], [role="textbox"], [role="combobox"]),
   :is(dialog, [popover], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-chat-window]),
+  /* The shared parts' floats render into body, outside .pn-inbox (no-drag inherits to their buttons). */
+  :is(.annotation-toolbar, .code-snippet-preview-window, [data-floating-picker], [data-comment-popover], [data-popover-layer]),
   :is(.ib-peek, .ib-sb-sheet, .ib-sb-scrim, .ib-pm-scrim, .ib-oq-scrim, .ib-contents-scrim, .ib-contents-sheet, .ib-tour-coach, .ib-toast) { -webkit-app-region: no-drag; }
   /* A layer's header reaches up behind the buttons, so the band reads as the header and not as a strip above it. */
   .ib-wlayer > .ib-vhead { position: relative; }
