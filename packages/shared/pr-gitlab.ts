@@ -680,11 +680,9 @@ function graphqlErrors(value: unknown): string[] {
  * `mergeRequestRequestChanges`). Returns the failure message, or null on success.
  */
 async function requestGlMRChanges(run: RunWithInput, ref: GlMRRef): Promise<string | null> {
-  const args = ["api", "graphql", "--method", "POST", "--input", "-", "-H", "Content-Type:application/json"];
-  if (ref.host !== "gitlab.com") args.push("--hostname", ref.host);
   const result = await run(
     "glab",
-    args,
+    apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
     JSON.stringify({ query: REQUEST_CHANGES_MUTATION, variables: { projectPath: ref.projectPath, iid: String(ref.iid) } }),
   );
   if (result.exitCode !== 0) return commandFailure(result);
@@ -737,7 +735,7 @@ export async function submitGlMRReview(
       notePayload,
     );
     if (noteResult.exitCode !== 0) {
-      const msg = noteResult.stderr.trim() || noteResult.stdout.trim() || `exit code ${noteResult.exitCode}`;
+      const msg = commandFailure(noteResult);
       throw new Error(`Failed to post MR note: ${msg}`);
     }
     reviewBodyPosted = true;
@@ -816,7 +814,7 @@ export async function submitGlMRReview(
           );
 
           if (res.exitCode !== 0) {
-            const msg = res.stderr.trim() || res.stdout.trim() || `exit code ${res.exitCode}`;
+            const msg = commandFailure(res);
             throw new Error(`${comment.path}:${comment.line}: ${msg}`);
           }
         }),

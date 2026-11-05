@@ -159,12 +159,11 @@ export interface DecisionPlatformInput {
   /** The viewer authored this PR/MR: approve paths mute, never disappear. */
   selfAuthored: boolean;
   /**
-   * #1611: whether the platform has a real request-changes review (GitHub
-   * does, GitLab does not). `false` makes the request-changes rows say they
-   * post as a comment. Absent keeps the original copy, so a host that never
-   * sets it renders exactly what it rendered before. When supported, a
-   * self-authored PR mutes Request changes too (GitHub refuses it on your own
-   * PR) and adds a live "Comment…" row so the empty state is never a dead end.
+   * #1611: whether the platform has a real request-changes decision. `false`
+   * makes the request-changes rows say they post as a comment. Absent keeps
+   * the original copy, so a host that never sets it renders exactly what it
+   * rendered before. When supported, a self-authored PR mutes Request changes
+   * too and adds a live "Comment…" row so the empty state is never a dead end.
    */
   requestChangesSupported?: boolean;
 }

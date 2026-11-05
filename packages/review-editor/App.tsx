@@ -955,12 +955,12 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // GitHub refuses request changes on your own PR, like approve.
+  // GitHub and GitLab refuse request changes on your own PR/MR, like approve.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`
     : isOwnPR
-      ? `You can't request changes on your own pull request on ${platformLabel}.`
+      ? `You can't request changes on your own ${mrLabel === 'MR' ? 'merge request' : 'pull request'} on ${platformLabel}.`
       : undefined;
   const appVersion = typeof __APP_VERSION__ !== 'undefined' ? __APP_VERSION__ : '0.0.0';
   // The server's update advert (the machine's once-a-day check): the Options

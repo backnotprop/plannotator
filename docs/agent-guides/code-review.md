@@ -134,8 +134,8 @@ same `See inline comments.` placeholder COMMENT gets when the body is empty (Git
 body on both). GitLab posts the note and discussions first, then sets the reviewer state with
 the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
 `request_changes` alone). A platform without a request-changes decision sets
-`requestChangesSupported: false` on the spec's platform input: the menu subtitles say it posts as
-a comment and the dialog's Request changes option is disabled with that reason. GitHub
+`requestChangesSupported: false` on the spec's platform input. The menu subtitles then say it
+posts as a comment, and the dialog's Request changes option is disabled with that reason. GitHub
 refuses REQUEST_CHANGES on your own PR like APPROVE, so with `requestChangesSupported: true` and
 `selfAuthored` the empty-state `Request changes…` mutes with its own reason and a live
 `Comment…` row (`note-with-feedback`, compact id `comment`) keeps the state from being a dead

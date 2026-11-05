@@ -25,8 +25,9 @@ export function postablePull(pull: InboxPull | null | undefined): PlatformPostPu
 
 export function platformRules(pull: PlatformPostPull): PlatformRules {
   const caps = getPRPlatformCapabilities({ platform: pull.platform });
-  // The person's own PR: the forge refuses their approval (and on GitHub their request for changes).
+  // The person's own PR: the forge refuses their approval and their request for changes.
   const selfAuthored = pull.mine && caps.selfReviewBlocked;
+  const noun = caps.changeLabel === 'MR' ? 'merge request' : 'pull request';
   return {
     label: caps.label,
     mrLabel: caps.changeLabel,
@@ -35,7 +36,7 @@ export function platformRules(pull: PlatformPostPull): PlatformRules {
     requestChangesUnavailableReason: !caps.requestChanges
       ? `${caps.label} has no request-changes review; this posts as a comment.`
       : selfAuthored
-        ? `You can't request changes on your own pull request on ${caps.label}.`
+        ? `You can't request changes on your own ${noun} on ${caps.label}.`
         : undefined,
   };
 }
