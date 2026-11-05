@@ -3,8 +3,11 @@
  * apps/hook/server/shape-command.test.ts for the command). What regresses if these fail: a name draws
  * nothing (or something the board's checks then refuse), a logo loses its colour or trips the
  * fixed-colour note, a stamp points outside the board so showing it would fetch something, a board
- * stored again grows a second copy, a missing name goes unsaid, a label's words become markup or sit
- * over a server's slots, or the stamps' copy of the kit's marks drifts from the kit.
+ * stored again grows a second copy, an edited name, label, size or move keeps the old drawing, a
+ * missing name goes unsaid (or is said twice, or only for the picture's wide drawing), a label's words
+ * become markup, show an ampersand twice or sit over a server's slots, one of Object's own names draws
+ * something, a long name stalls the store, a board of the wrong shape is reshaped before the checks
+ * judge it, or the stamps' copy of the kit's marks drifts from the kit.
  */
 import { describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
@@ -111,5 +114,81 @@ describe('stamps', () => {
   test('a label on a server or queue sits under it, not over its slots', () => {
     const { html } = expandShapeStamps('<svg data-draw="queue" x="100" y="50" width="200" height="60" data-label="jobs"/>');
     expect(html).toMatch(/<\/svg><text x="200" y="133[^"]*"[^>]*>jobs<\/text><\/g>$/);
+  });
+  test('an ampersand, a < or a quote in a label shows once, however often the board is stored', () => {
+    const once = expandShapeStamps(thing('database', 0, 0, 160, 120, { label: 'R&D' }) + thing('queue', 0, 200, 200, 60, { label: 'a < b "c"' })).html;
+    expect(once).toContain('>R&amp;D</text>');
+    expect(once).toContain('data-label="R&amp;D"');
+    expect(once).toContain('>a &lt; b &quot;c&quot;</text></g>');
+    expect(expandShapeStamps(once).html).toBe(once);
+    // A name we lack is redrawn empty on every store: what the agent wrote on it stays as written.
+    const missing = '<svg data-icon="serverr" aria-label="R&amp;D" style="font-family:&quot;Inter&quot;" x="1" y="2"/>';
+    const first = expandShapeStamps(missing).html;
+    expect(first).toContain('aria-label="R&amp;D"');
+    expect(first).toContain('style="font-family:&quot;Inter&quot;"');
+    const third = expandShapeStamps(expandShapeStamps(first).html).html;
+    expect(third).toBe(first);
+  });
+
+  test('an edited name, label, size, place or move on a filled element is drawn again; one drawn by hand is left alone', () => {
+    const fresh = (el: string) => expandShapeStamps(el).html;
+    const around = (el: string) => `<g data-mark="a">${el}<rect x="0" y="0" width="9" height="9"/></g>`;
+    const edits: [string, string][] = [
+      ['<svg data-icon="key" x="0" y="0"/>', '<svg data-icon="lock" x="0" y="0"/>'],
+      ['<svg data-logo="stripe" x="0" y="0"/>', '<svg data-logo="redis" x="0" y="0"/>'],
+      ['<svg data-draw="database" x="0" y="0" width="160" height="120" data-label="Postgres"/>', '<svg data-draw="database" x="0" y="0" width="160" height="120" data-label="MySQL"/>'],
+      ['<svg data-draw="database" x="0" y="0" width="160" height="120" data-label="Postgres"/>', '<svg data-draw="database" x="0" y="0" width="200" height="120" data-label="Postgres"/>'],
+      ['<svg data-draw="queue" x="100" y="50" width="200" height="60" data-label="jobs" data-to="300 50"/>', '<svg data-draw="queue" x="120" y="50" width="200" height="60" data-label="jobs" data-to="300 50"/>'],
+      ['<svg data-draw="queue" x="100" y="50" width="200" height="60" data-label="jobs" data-to="300 50"/>', '<svg data-draw="queue" x="100" y="50" width="200" height="60" data-label="jobs" data-to="400 90"/>'],
+      ['<svg data-draw="envelope" x="0" y="0" width="56" height="40" data-label="Event" data-to="300 0"/>', '<svg data-draw="server" x="0" y="0" width="56" height="40" data-label="Event"/>'],
+    ];
+    for (const [before, after] of edits) {
+      const stored = fresh(around(before));
+      // The agent edits the board it read back: the inputs on the filled element change, its drawing does not.
+      const read = stored.replace(/^(<g data-mark="a">)(<g[^>]*>)*<svg[^>]*>/, (open) => {
+        const was = new Map([...before.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+        const now = new Map([...after.matchAll(/([\w-]+)="([^"]*)"/g)].map((m) => [m[1]!, m[2]!]));
+        let edited = open;
+        for (const [k, v] of was) edited = edited.replace(` ${k}="${v}"`, now.has(k) ? ` ${k}="${now.get(k)}"` : '');
+        for (const [k, v] of now) if (!was.has(k)) edited = edited.replace(/ data-stamped=/, ` ${k}="${v}" data-stamped=`);
+        return edited;
+      });
+      expect(read).not.toBe(stored);
+      expect(expandShapeStamps(read).html).toBe(fresh(around(after)));
+    }
+    const byHand = '<svg data-icon="key" viewBox="0 0 24 24"><circle r="3"/></svg>';
+    expect(expandShapeStamps(byHand).html).toBe(byHand);
+  });
+
+  test("Object's own names are names we lack, for icons, logos and drawn things", () => {
+    for (const attr of ['data-icon', 'data-logo', 'data-draw'])
+      for (const name of ['constructor', '__proto__', 'toString', 'hasOwnProperty']) {
+        const r = expandShapeStamps(`<svg ${attr}="${name}" x="0" y="0"/>`);
+        expect(r.missing.length).toBe(1);
+        expect(r.html).toMatch(/^<svg [^>]*data-missing="[^"]*"\/>$/);
+      }
+  });
+
+  test('a name past 64 characters gets no close names, so a long one costs nothing', () => {
+    expect(expandShapeStamps(`<svg data-icon="${'x'.repeat(64)}"/>`).missing[0]).toContain('; close: x');
+    expect(expandShapeStamps(`<svg data-icon="${'x'.repeat(65)}"/>`).missing[0]).not.toContain('close:');
+  });
+
+  test('a missing name in the phone drawing or More is a note too, and each name once', () => {
+    const b = board('<svg data-icon="serverr" x="0" y="0"/><svg data-icon="serverr" x="40" y="0"/><rect x="0" y="0" width="900" height="500"/>') as { views: { picture: Record<string, unknown> } };
+    b.views.picture.tall = { html: '<svg viewBox="0 0 400 800"><svg data-icon="serverr" x="0" y="0"/><svg data-logo="typesensee" x="0" y="40"/></svg>' };
+    const r = checkShapeBoard(expandBoardStamps(b).board);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const notes = shapeBoardNotes(r.value);
+    expect(notes.filter((n) => n.startsWith('data-icon="serverr"')).length).toBe(1);
+    expect(notes.filter((n) => n.startsWith('data-logo="typesensee"')).length).toBe(1);
+  });
+
+  test('a board of the wrong shape reaches the checks as written', () => {
+    for (const odd of [['a'], { title: 'T', views: ['a'] }, { title: 'T', views: { picture: ['<svg data-icon="key"/>'] } }]) {
+      const r = expandBoardStamps(odd);
+      expect(JSON.stringify(r.board)).toBe(JSON.stringify(odd));
+    }
   });
 });

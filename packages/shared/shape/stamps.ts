@@ -1,8 +1,8 @@
 /**
- * Things a drawing names instead of drawing: the store fills them in before it
- * checks the board, so an agent writing SVG by hand gets a real icon, logo or
- * drawn object by name, and the stored board holds plain SVG (no lookup when it
- * is shown, nothing fetched).
+ * Things a drawing names instead of drawing: `plannotator shape update` fills them
+ * in before it checks the board, so an agent writing SVG by hand gets a real icon,
+ * logo or drawn object by name, and the stored board holds plain SVG (no lookup
+ * when it is shown, nothing fetched).
  *
  *   <svg data-icon="database" x="40" y="40" width="28" height="28"/>   a Lucide icon, in the ink (or `style="color:…"`)
  *   <svg data-logo="stripe" x="40" y="40" width="40" height="40"/>     a product's real logo, in its own colour
@@ -10,31 +10,75 @@
  *
  * `data-to="x y"` on any of them sends it from where it is to that point, again
  * and again (an envelope crossing a wire); with reduced motion it stays still, halfway.
- * An empty element only: one that already holds a drawing (a board read back) is
- * left as it is. A name we do not have is left empty with `data-missing` saying
- * so, which `shape update` passes on as a note (`shapeBoardNotes`).
+ * A filled one carries `data-stamped`, a short hash of what it was drawn from (the
+ * name, size, place, label and `data-to`): a board read back and stored again is
+ * left as it is, and one whose name, size, place, label or `data-to` was edited is
+ * drawn again. A name we do not have is left empty with `data-missing` saying so,
+ * which `shape update` passes on as a note (`shapeBoardNotes`).
  */
 import { STAMP_CODEX, STAMP_ICON_ALIASES, STAMP_ICONS, STAMP_LOGOS, STAMP_MARKS } from './stamp-data';
 
 const esc = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+/** Source text as written, made safe inside double quotes or between tags. Its entities are left as they are, so it means the same and a second pass changes nothing. */
+const keep = (raw: string) => raw.replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+const ENTITIES: Record<string, string> = { amp: '&', lt: '<', gt: '>', quot: '"', apos: "'", nbsp: '\u00a0' };
+/** What an attribute's source text says: the basic named entities and numeric ones decoded, any other left as written. */
+const decode = (raw: string) =>
+  raw.replace(/&(?:#(\d{1,7})|#[xX]([0-9a-fA-F]{1,6})|([a-zA-Z]+));/g, (e, d?: string, h?: string, name?: string) => {
+    if (name !== undefined) return own(ENTITIES, name) ?? e;
+    const c = d !== undefined ? Number(d) : parseInt(h!, 16);
+    return c > 0 && c <= 0x10ffff ? String.fromCodePoint(c) : e;
+  });
+/** A table's own entry: `constructor`, `__proto__` and the rest of Object's are no names. */
+const own = <T>(table: Record<string, T>, key: string): T | undefined => (Object.hasOwn(table, key) ? table[key] : undefined);
 const num = (v: string | undefined, d: number) => {
   const n = Number(v);
   return v !== undefined && Number.isFinite(n) ? n : d;
 };
 const r = (n: number) => Math.round(n * 10) / 10;
 
-/** An empty `<svg … data-icon|data-logo|data-draw="…" …/>` (or `…></svg>`), its attributes kept whole. */
+/** A `<svg … data-icon|data-logo|data-draw="…" …>` start tag (empty when `/>` or `></svg>` follows), its attributes kept whole. */
 const STAMP_RE = /<svg\b((?:[^>"']|"[^"]*"|'[^']*')*?)\/?>(?:\s*<\/svg>)?/g;
 const ATTR_RE = /([^\s"'=<>/`]+)(?:\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>"'`=<]+)))?/g;
 
-function attrsOf(text: string): Map<string, string> {
-  const out = new Map<string, string>();
-  for (const m of text.matchAll(ATTR_RE)) out.set(m[1]!.toLowerCase(), m[2] ?? m[3] ?? m[4] ?? '');
-  return out;
+/** An element's attributes: what each says (decoded), and its source text when it came from the drawing. */
+class Attrs {
+  private readonly m = new Map<string, { v: string; raw?: string }>();
+  constructor(text: string) {
+    for (const a of text.matchAll(ATTR_RE)) {
+      const raw = a[2] ?? a[3] ?? a[4] ?? '';
+      this.m.set(a[1]!.toLowerCase(), { v: decode(raw), raw });
+    }
+  }
+  get(k: string) {
+    return this.m.get(k)?.v;
+  }
+  has(k: string) {
+    return this.m.has(k);
+  }
+  set(k: string, v: string) {
+    this.m.set(k, { v });
+  }
+  delete(k: string) {
+    this.m.delete(k);
+  }
+  /** The value as words between tags: the agent's own text kept as written (so `R&amp;D` stays one ampersand), ours escaped. */
+  words(k: string) {
+    const a = this.m.get(k);
+    return a === undefined ? '' : a.raw !== undefined ? keep(a.raw) : esc(a.v);
+  }
+  /** The attributes again, each in double quotes. */
+  text() {
+    return [...this.m].map(([k, a]) => ` ${k}="${a.raw !== undefined ? keep(a.raw) : esc(a.v)}"`).join('');
+  }
 }
 
-function attrText(attrs: Map<string, string>): string {
-  return [...attrs].map(([k, v]) => ` ${k}="${esc(v)}"`).join('');
+/** What a stamp is drawn from, hashed short (FNV-1a): a filled element whose inputs no longer give this is drawn again. */
+function stampKey(attrs: Attrs): string {
+  const what = ['data-icon', 'data-logo', 'data-draw', 'width', 'height', 'x', 'y', 'data-label', 'data-to'].map((k) => attrs.get(k) ?? '\u0000').join('\u0001');
+  let h = 0x811c9dc5;
+  for (let i = 0; i < what.length; i++) h = Math.imul(h ^ what.charCodeAt(i), 0x01000193);
+  return (h >>> 0).toString(36);
 }
 
 /** A few names agents reach for that Lucide spells another way. */
@@ -61,8 +105,12 @@ const LOGO_WORDS: Record<string, string> = {
 
 const LOGO_NAMES = () => ['claude', 'codex', ...Object.keys(STAMP_MARKS).filter((k) => k !== 'claude'), ...Object.keys(STAMP_LOGOS)];
 
+/** Longer than any real name: no suggestions, which would cost its length times every name. */
+const NEAR_MAX = 64;
+
 function near(name: string, names: readonly string[]): string[] {
   const n = name.toLowerCase();
+  if (n.length > NEAR_MAX) return [];
   const hits = names.filter((x) => x.includes(n) || (n.length > 3 && n.includes(x)));
   if (hits.length) return hits.sort((a, b) => a.length - b.length).slice(0, 4);
   const dist = (a: string, b: string) => {
@@ -76,19 +124,18 @@ function near(name: string, names: readonly string[]): string[] {
 
 export function stampIcon(name: string): string | null {
   const key = name.trim().toLowerCase();
-  const found = STAMP_ICONS[key] ?? STAMP_ICONS[STAMP_ICON_ALIASES[key] ?? ''] ?? STAMP_ICONS[ICON_WORDS[key] ?? ''];
-  return found ?? null;
+  return own(STAMP_ICONS, key) ?? own(STAMP_ICONS, own(STAMP_ICON_ALIASES, key) ?? '') ?? own(STAMP_ICONS, own(ICON_WORDS, key) ?? '') ?? null;
 }
 
 /** The logo's inner SVG and its viewBox, or null. */
 export function stampLogo(name: string): { box: string; body: string; title: string } | null {
   const key = name.trim().toLowerCase().replace(/\s+/g, '');
-  const slug = LOGO_WORDS[key] ?? key;
+  const slug = own(LOGO_WORDS, key) ?? key;
   if (slug === 'codex') return { box: '0 0 72 72', body: `<image width="72" height="72" href="${STAMP_CODEX}"/>`, title: 'Codex' };
-  const mark = STAMP_MARKS[slug];
+  const mark = own(STAMP_MARKS, slug);
   // The plain marks (github, gitlab, opencode) draw in the ink, as the kit's mark() does, so they hold on a dark board.
   if (mark) return { box: mark.box, body: `<g style="fill:var(--ink);color:var(--ink)">${mark.body}</g>`, title: slug };
-  const logo = STAMP_LOGOS[slug];
+  const logo = own(STAMP_LOGOS, slug);
   if (!logo) return null;
   const paint = logo.c ? `fill="${logo.c}"` : 'style="fill:var(--ink)"';
   return { box: '0 0 24 24', body: `<path ${paint} d="${logo.d}"/>`, title: logo.t };
@@ -186,31 +233,36 @@ const BELOW = new Set(['server', 'queue', 'envelope']);
 /** What `data-draw` can be. */
 export const SHAPE_DRAWN_OBJECTS: readonly string[] = Object.keys(OBJECTS);
 
-function drawObject(kind: string, attrs: Map<string, string>): string | null {
+/** The wrapper that holds a server's, queue's or envelope's label under it. */
+const LABEL_UNDER = '<g class="shp-lb">';
+
+function drawObject(kind: string, attrs: Attrs): string | null {
   const key = kind.trim().toLowerCase();
-  const o = OBJECTS[OBJECT_WORDS[key] ?? key];
+  const name = own(OBJECT_WORDS, key) ?? key;
+  const o = own(OBJECTS, name);
   if (!o) return null;
   const w = Math.max(10, num(attrs.get('width'), o.w)), h = Math.max(10, num(attrs.get('height'), o.h));
   attrs.set('width', String(w));
   attrs.set('height', String(h));
+  attrs.set('data-stamped', stampKey(attrs));
   const { body, face } = o.draw(w, h);
   const label = attrs.get('data-label');
-  if (label && BELOW.has(OBJECT_WORDS[key] ?? key)) {
+  if (label && BELOW.has(name)) {
     // Its slots, cells or flap fill the face, so the label goes under it, where nothing is drawn.
     const size = 17;
-    const under = `<text x="${r(num(attrs.get('x'), 0) + w / 2)}" y="${r(num(attrs.get('y'), 0) + h + size * 1.35)}" font-size="${size}" font-weight="600" text-anchor="middle">${esc(label)}</text>`;
-    return `<g><svg${attrText(attrs)} viewBox="0 0 ${w} ${h}">${body}</svg>${under}</g>`;
+    const under = `<text x="${r(num(attrs.get('x'), 0) + w / 2)}" y="${r(num(attrs.get('y'), 0) + h + size * 1.35)}" font-size="${size}" font-weight="600" text-anchor="middle">${attrs.words('data-label')}</text>`;
+    return `${LABEL_UNDER}<svg${attrs.text()} viewBox="0 0 ${w} ${h}">${body}</svg>${under}</g>`;
   }
   let words = '';
   if (label) {
     const size = Math.max(12, Math.min(26, face[3] * 0.32, (face[2] * 1.7) / Math.max(4, label.length)));
-    words = `<text x="${r(face[0] + face[2] / 2)}" y="${r(face[1] + face[3] / 2 + size * 0.36)}" font-size="${r(size)}" font-weight="600" text-anchor="middle">${esc(label)}</text>`;
+    words = `<text x="${r(face[0] + face[2] / 2)}" y="${r(face[1] + face[3] / 2 + size * 0.36)}" font-size="${r(size)}" font-weight="600" text-anchor="middle">${attrs.words('data-label')}</text>`;
   }
-  return `<svg${attrText(attrs)} viewBox="0 0 ${w} ${h}">${body}${words}</svg>`;
+  return `<svg${attrs.text()} viewBox="0 0 ${w} ${h}">${body}${words}</svg>`;
 }
 
 /** The moving wrapper for `data-to`: from the element's x, y to the point, again and again (the frame's `.shp-go`). */
-function moving(svg: string, attrs: Map<string, string>): string {
+function moving(svg: string, attrs: Attrs): string {
   const to = (attrs.get('data-to') ?? '').trim().split(/[\s,]+/).map(Number);
   if (to.length !== 2 || !to.every(Number.isFinite)) return svg;
   const dx = r(to[0]! - num(attrs.get('x'), 0)), dy = r(to[1]! - num(attrs.get('y'), 0));
@@ -223,65 +275,117 @@ export interface ShapeStampResult {
   missing: string[];
 }
 
-/** Fills in every empty `data-icon`, `data-logo` and `data-draw` element. */
+/** One element's drawing from its attributes, or the element left empty with `data-missing` (the line goes in `missing`). */
+function stamp(attrs: Attrs, missing: string[]): string {
+  // Ours from an earlier drawing: drawn again from the inputs alone.
+  for (const k of ['data-missing', 'data-stamped', 'data-brand', 'viewbox']) attrs.delete(k);
+  const miss = (line: string) => {
+    missing.push(line);
+    attrs.set('data-missing', line);
+    return `<svg${attrs.text()}/>`;
+  };
+  const icon = attrs.get('data-icon'), logo = attrs.get('data-logo'), draw = attrs.get('data-draw');
+  let filled: string;
+  if (draw !== undefined) {
+    const drawn = drawObject(draw, attrs);
+    if (!drawn) return miss(`data-draw="${draw}": no such drawn object. There are: ${SHAPE_DRAWN_OBJECTS.join(', ')}.`);
+    filled = drawn;
+  } else if (logo !== undefined) {
+    const l = stampLogo(logo);
+    if (!l) {
+      const close = near(logo, LOGO_NAMES());
+      return miss(`data-logo="${logo}": no logo by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Write the product's name as words, and give it an icon.`);
+    }
+    if (!attrs.has('width')) attrs.set('width', '40');
+    if (!attrs.has('height')) attrs.set('height', '40');
+    attrs.set('data-stamped', stampKey(attrs));
+    filled = `<svg data-brand${attrs.text()} viewBox="${l.box}"><title>${esc(l.title)}</title>${l.body}</svg>`;
+  } else {
+    const body = stampIcon(icon ?? '');
+    if (!body) {
+      const close = near(icon ?? '', [...Object.keys(STAMP_ICONS), ...Object.keys(ICON_WORDS)]);
+      return miss(`data-icon="${icon}": no icon by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Icons are Lucide's names (lucide.dev).`);
+    }
+    if (!attrs.has('width')) attrs.set('width', '24');
+    if (!attrs.has('height')) attrs.set('height', '24');
+    for (const [k, v] of [['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '2'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round']] as const) if (!attrs.has(k)) attrs.set(k, v);
+    attrs.set('data-stamped', stampKey(attrs));
+    filled = `<svg${attrs.text()} viewBox="0 0 24 24">${body}</svg>`;
+  }
+  return attrs.has('data-to') ? moving(filled, attrs) : filled;
+}
+
+const MOVING_BEFORE = /<g class="shp-go" style="--dx:-?[\d.]+px;--dy:-?[\d.]+px">$/;
+const LABEL_AFTER = /<text\b[^>]*>[^<]*<\/text><\/g>/y;
+
+/**
+ * Where an earlier stamp's drawing ends, and how far before its `<svg` it starts (its label and
+ * moving wrappers), or null when it is not as we drew it (hand-made, or edited inside): left as it is.
+ */
+function stampedSpan(html: string, from: number, openStart: number, openEnd: number): { start: number; end: number } | null {
+  const close = html.indexOf('</svg>', openEnd);
+  if (close < 0 || html.slice(openEnd, close).includes('<svg')) return null;
+  let start = openStart, end = close + '</svg>'.length;
+  const before = html.slice(from, openStart);
+  if (before.endsWith(LABEL_UNDER)) {
+    LABEL_AFTER.lastIndex = end;
+    const label = LABEL_AFTER.exec(html);
+    if (!label) return null;
+    start -= LABEL_UNDER.length;
+    end += label[0].length;
+  }
+  const go = html.slice(from, start).match(MOVING_BEFORE);
+  if (go) {
+    if (!html.startsWith('</g>', end)) return null;
+    start -= go[0].length;
+    end += '</g>'.length;
+  }
+  return { start, end };
+}
+
+/**
+ * Fills in every empty `data-icon`, `data-logo` and `data-draw` element, and draws again one we
+ * filled before whose inputs were edited since (its `data-stamped` no longer matches them).
+ */
 export function expandShapeStamps(html: string): ShapeStampResult {
   const missing: string[] = [];
   if (!/data-(?:icon|logo|draw)\b/i.test(html)) return { html, missing };
-  const out = html.replace(STAMP_RE, (whole, text: string) => {
-    if (!/data-(?:icon|logo|draw)\b/i.test(text)) return whole;
-    // Already filled (a board read back and stored again): `/>` or `></svg>` with nothing between is all we fill.
-    if (!/\/>$/.test(whole) && !/>\s*<\/svg>$/.test(whole)) return whole;
-    const attrs = attrsOf(text);
-    attrs.delete('data-missing');
-    let filled: string | null = null;
-    const miss = (line: string) => {
-      missing.push(line);
-      attrs.set('data-missing', line);
-      return `<svg${attrText(attrs)}/>`;
-    };
-    const icon = attrs.get('data-icon'), logo = attrs.get('data-logo'), draw = attrs.get('data-draw');
-    if (draw !== undefined) {
-      filled = drawObject(draw, attrs);
-      if (!filled) return miss(`data-draw="${draw}": no such drawn object. There are: ${SHAPE_DRAWN_OBJECTS.join(', ')}.`);
-    } else if (logo !== undefined) {
-      const l = stampLogo(logo);
-      if (l) {
-        if (!attrs.has('width')) attrs.set('width', '40');
-        if (!attrs.has('height')) attrs.set('height', '40');
-        attrs.delete('data-brand');
-        filled = `<svg data-brand${attrText(attrs)} viewBox="${l.box}"><title>${esc(l.title)}</title>${l.body}</svg>`;
-      } else {
-        const close = near(logo, LOGO_NAMES());
-        return miss(`data-logo="${logo}": no logo by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Write the product's name as words, and give it an icon.`);
-      }
-    } else if (icon !== undefined) {
-      const body = stampIcon(icon);
-      if (body) {
-        if (!attrs.has('width')) attrs.set('width', '24');
-        if (!attrs.has('height')) attrs.set('height', '24');
-        for (const [k, v] of [['fill', 'none'], ['stroke', 'currentColor'], ['stroke-width', '2'], ['stroke-linecap', 'round'], ['stroke-linejoin', 'round']]) if (!attrs.has(k!)) attrs.set(k!, v!);
-        filled = `<svg${attrText(attrs)} viewBox="0 0 24 24">${body}</svg>`;
-      } else {
-        const close = near(icon, [...Object.keys(STAMP_ICONS), ...Object.keys(ICON_WORDS)]);
-        return miss(`data-icon="${icon}": no icon by that name${close.length ? `; close: ${close.join(', ')}` : ''}. Icons are Lucide's names (lucide.dev).`);
-      }
+  const re = new RegExp(STAMP_RE.source, 'g');
+  let out = '', at = 0;
+  for (let m = re.exec(html); m; m = re.exec(html)) {
+    const whole = m[0], text = m[1]!;
+    if (!/data-(?:icon|logo|draw)\b/i.test(text)) continue;
+    const attrs = new Attrs(text);
+    if (!attrs.has('data-icon') && !attrs.has('data-logo') && !attrs.has('data-draw')) continue;
+    const empty = /\/>$/.test(whole) || />\s*<\/svg>$/.test(whole);
+    let start = m.index, end = m.index + whole.length;
+    if (!empty) {
+      // Filled: by hand (no data-stamped), or by us from the inputs it still has. Either way, left as it is.
+      const was = attrs.get('data-stamped');
+      if (!was || was === stampKey(attrs)) continue;
+      const span = stampedSpan(html, at, m.index, end);
+      if (!span) continue;
+      ({ start, end } = span);
     }
-    if (!filled) return whole;
-    return attrs.has('data-to') ? moving(filled, attrs) : filled;
-  });
-  return { html: out, missing };
+    out += html.slice(at, start) + stamp(attrs, missing);
+    at = end;
+    re.lastIndex = end;
+  }
+  return { html: out + html.slice(at), missing };
 }
 
 type Drawn = { html?: unknown; tall?: { html?: unknown }; more?: { html?: unknown } };
 
 /** The board with its drawn views' stamps filled in, and what could not be. The board's shape is otherwise untouched. */
 export function expandBoardStamps(board: unknown): { board: unknown; missing: string[] } {
-  if (!board || typeof board !== 'object') return { board, missing: [] };
-  const views = (board as { views?: Record<string, unknown> }).views;
-  if (!views || typeof views !== 'object') return { board, missing: [] };
+  const plain = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
+  // Not a board's shape: left for the checks to refuse as written.
+  if (!plain(board)) return { board, missing: [] };
+  const views = board.views;
+  if (!plain(views)) return { board, missing: [] };
   const missing: string[] = [];
   const fill = <T extends { html?: unknown }>(part: T | undefined): T | undefined => {
-    if (!part || typeof part !== 'object' || typeof part.html !== 'string') return part;
+    if (!plain(part) || typeof part.html !== 'string') return part;
     const r = expandShapeStamps(part.html);
     for (const m of r.missing) if (!missing.includes(m)) missing.push(m);
     return r.html === part.html ? part : { ...part, html: r.html };
@@ -289,9 +393,9 @@ export function expandBoardStamps(board: unknown): { board: unknown; missing: st
   const nextViews: Record<string, unknown> = { ...views };
   for (const id of ['picture', 'how']) {
     const v = views[id] as Drawn | undefined;
-    if (!v || typeof v !== 'object') continue;
+    if (!plain(v)) continue;
     const top = fill(v) as Drawn;
     nextViews[id] = { ...top, ...(v.tall ? { tall: fill(v.tall) } : {}), ...(v.more ? { more: fill(v.more) } : {}) };
   }
-  return { board: { ...(board as object), views: nextViews }, missing };
+  return { board: { ...board, views: nextViews }, missing };
 }

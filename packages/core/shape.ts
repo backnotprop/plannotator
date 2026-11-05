@@ -1289,8 +1289,14 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
-  // A name the store has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing).
-  for (const view of [picture, board.views.how]) for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) notes.push(m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&'));
+  // A name `shape update` has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing),
+  // in any drawing, the phone's and the more's too; each once.
+  const how = board.views.how;
+  for (const view of [picture, picture.tall, picture.more, how, how?.tall, how?.more])
+    for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) {
+      const note = m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      if (!notes.includes(note)) notes.push(note);
+    }
   // A real logo keeps its own colours: the kit's marks say so with data-brand.
   const colours = [picture.html.replace(/<svg data-brand\b.*?<\/svg>/gs, ''), picture.css ?? ''].join(' ').match(/#[0-9a-f]{3,8}\b(?=[^<>]*[;"'}])|\brgba?\(/gi);
   if (colours?.length) notes.push(`The Picture has ${colours.length} fixed colours (such as ${colours[0]}), which break in light or dark. Use var(--ink), var(--grey), var(--mark) and the rest.`);
