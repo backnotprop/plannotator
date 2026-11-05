@@ -196,6 +196,13 @@ function writeForge(dir: string) {
     '  if [ -f "$f" ]; then cat "$f"; exit 0; fi',
     '  echo "HTTP 404: Not Found" >&2; exit 1',
     'fi',
+    // A read shaped by `--jq` on github.com (no --hostname): All files' tree and a file of it, canned as `gh-<endpoint>.json`.
+    'if [ "$1" = api ] && [ "$3" = --jq ]; then',
+    '  echo "gh read $2" >> "$calls"',
+    '  f="$dir/gh-$(name "$2").json"',
+    '  if [ -f "$f" ]; then cat "$f"; exit 0; fi',
+    '  echo "HTTP 404: Not Found" >&2; exit 1',
+    'fi',
     'echo "gh other $1" >> "$calls"; exit 1',
     '',
   ].join('\n');
@@ -637,7 +644,12 @@ test('off (the default): no row, a #pulls link says Code review is off, and no g
   await shot(page, '1-off-no-row');
   page.off('request', watch);
   expect(reads).toEqual([]);
-  expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff '))).toEqual([]);
+  // All files' routes are refused before anything runs, like the list's.
+  for (const route of ['repo-files', 'repo-file']) {
+    const asked = await page.request.get(`${world.url}api/inbox/pulls/${route}?key=${encodeURIComponent(TEAMMATE)}&snapshot=${'880'.padStart(40, '0')}&path=package.json`);
+    expect([asked.status(), ((await asked.json()) as { code?: string }).code]).toEqual([409, 'code_review_off']);
+  }
+  expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff ') || c.includes(' read '))).toEqual([]);
 });
 
 test('an old #pulls link opened fresh, in a new window, becomes #reviews', async () => {
@@ -1163,6 +1175,50 @@ test("the rail: a stack's layers stay in view over a tree of many files; on a ph
   }
 });
 
+test("the rail: Changes | All files, the repository at the head read; a file the PR does not change opens in place of the diff, and Changes brings the diff back", async ({ browser }) => {
+  const patch = 'diff --git a/src/settings/Layout.tsx b/src/settings/Layout.tsx\n--- a/src/settings/Layout.tsx\n+++ b/src/settings/Layout.tsx\n@@ -1 +1 @@\n-a\n+b\n';
+  // #880's head as the fake forge reads it around its patch (the list's `headRefOid`).
+  const head = '880'.padStart(40, '0');
+  const canned = (endpoint: string, value: unknown) => {
+    const file = join(world.forge, `gh-${endpoint.replace(/[/.%?&=]/g, '_')}.json`);
+    writeFileSync(file, JSON.stringify(value));
+    return file;
+  };
+  const text = '{\n  "name": "web-app-settings"\n}\n';
+  const files = [
+    canned(`repos/northwind/web-app/git/trees/${head}?recursive=1`, { truncated: false, paths: ['package.json', 'src/i18n/fallback.ts', 'src/settings/Layout.tsx'] }),
+    canned(`repos/northwind/web-app/contents/package.json?ref=${head}`, { type: 'file', sha: 'd'.repeat(40), size: text.length, encoding: 'base64', content: Buffer.from(text).toString('base64') }),
+  ];
+  await setCodeReview(true);
+  const { context, page } = await stubbedReview(browser, 1440, patch);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const rail = review.locator('.ib-rrail');
+    // The review app's switch at the rail's head: Changes, with the PR's count, on.
+    await expect(rail.locator('[data-tree-scope="changes"]')).toHaveText('Changes1');
+    await expect(rail.locator('[data-tree-scope="changes"]')).toHaveAttribute('aria-pressed', 'true');
+    await expect(rail.locator('[data-tree-scope="all"]')).toHaveText('All files');
+    // All files: the repository at the head the patch was read at, a file the PR does not change among them.
+    await rail.locator('[data-tree-scope="all"]').click();
+    await expect(rail.locator('[data-repo-file="package.json"]')).toBeVisible();
+    expect(forgeCalls()).toContain(`gh read repos/northwind/web-app/git/trees/${head}?recursive=1`);
+    // Picked, it shows whole in place of the diff, in the review app's file view.
+    await rail.locator('[data-repo-file="package.json"]').click();
+    const shown = review.locator('[data-pull-repo-file="package.json"]');
+    await expect(shown.locator('[data-not-in-review]')).toBeVisible();
+    await expect(shown).toContainText('web-app-settings');
+    await expect(review.locator('[data-guide-file-shell]').first()).toBeHidden();
+    // Changes: the PR's own files, and the diff where it was.
+    await rail.locator('[data-tree-scope="changes"]').click();
+    await expect(shown).toHaveCount(0);
+    await expect(rail.locator('[data-review-files]')).toBeVisible();
+    await expect(review.locator('[data-guide-file-shell]').first()).toBeVisible();
+  } finally {
+    await context.close();
+    for (const file of files) rmSync(file, { force: true });
+  }
+});
+
 test('the rail: a long path gives way in its middle, on one line, its name whole while it fits, and no row fades', async ({ browser }) => {
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
   const short = 'ui.md';
@@ -1383,7 +1439,8 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
     await files.focus();
     await closes();
     await files.click();
-    await review.locator('.ib-prp-fileshead').click();
+    // A click on nothing in the sheet: the head's right end, clear of its Changes | All files switch.
+    await review.locator('.ib-prp-fileshead').click({ position: { x: (await review.locator('.ib-prp-fileshead').boundingBox())!.width - 2, y: 6 } });
     await closes();
     // Focus never lands unseen on what the sheet covered.
     await files.click();
@@ -1408,7 +1465,7 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     const railOrder = await paths();
     // Git has README.md first: the tree puts the folder first, and the three files it has no node for come after it.
     expect(railOrder).toEqual(['src/app.ts', 'src/extraordinarily-long-module-file-name-for-the-rail-12.ts', 'a-link', 'aaa.ts', 'docs', 'README.md', 'a-link', 'docs/guide/intro.md', 'docs/index.md']);
-    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('Changes9All files');
     // A row the tree could not place reads as its full path.
     await expect(review.locator('[data-review-file="docs/guide/intro.md"]')).toContainText('docs/guide/intro.md');
     // The diffs follow the rail, each path drawn once.
@@ -1446,7 +1503,7 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     await expect(circle).toBeVisible();
     await circle.click();
     await expect(circle).toHaveAttribute('aria-checked', 'true');
-    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files1 viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('Changes9All files1 viewed');
     await expect(review.locator('[data-review-file="src/app.ts"]')).toHaveAttribute('aria-label', 'src/app.ts, viewed');
     await expect(header).toHaveAttribute('title', /not viewed/);
     expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
@@ -1454,16 +1511,16 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     // A path with two rows counts twice, so every row can end viewed.
     await review.locator('[data-review-file="a-link"]').first().hover();
     await review.locator('[data-review-file="a-link"] [role="checkbox"]').first().click();
-    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files3 viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('Changes9All files3 viewed');
 
     // A reload keeps them; the header's button takes the tick back off the circle.
     await page.reload();
     await expect(header).toBeVisible({ timeout: 30_000 });
     await expect(circle).toHaveAttribute('aria-checked', 'true');
-    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files3 viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('Changes9All files3 viewed');
     await header.click();
     await expect(circle).toHaveAttribute('aria-checked', 'false');
-    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files2 viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('Changes9All files2 viewed');
   } finally {
     await context.close();
   }
