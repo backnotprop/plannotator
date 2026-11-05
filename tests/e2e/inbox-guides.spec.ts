@@ -687,10 +687,13 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   const slack = await box.evaluate((el) => {
     const outer = el.getBoundingClientRect();
     const code = el.querySelector('diffs-container')!.getBoundingClientRect();
-    return { above: code.top - outer.top, below: outer.bottom - code.bottom };
+    const header = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-diffs-header]')!;
+    return { above: code.top - outer.top, below: outer.bottom - code.bottom, line: getComputedStyle(header, '::after').content };
   });
   expect(slack.above).toBeLessThanOrEqual(17);
   expect(slack.below).toBeLessThanOrEqual(17);
+  // The line under a file header shows only while the header is stuck.
+  expect(slack.line).toBe('none');
   await arrow.click();
   await expect.poll(height).toBeGreaterThan(closed);
   expect(await scrollTop()).toBe(place);
@@ -730,12 +733,14 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
     };
     walk(el);
     const scrollers = within.filter((kid) => /auto|scroll/.test(getComputedStyle(kid).overflowY) && kid.scrollHeight > kid.clientHeight + 1);
-    const header = within.find((kid) => kid.hasAttribute('data-diffs-header'))!.getBoundingClientRect();
+    const headerEl = within.find((kid) => kid.hasAttribute('data-diffs-header'))!;
+    const header = headerEl.getBoundingClientRect();
     const rows = within.filter((kid) => kid.hasAttribute('data-column-number')).map((kid) => kid.getBoundingClientRect());
-    return { scrollers: scrollers.length, headerFromTop: Math.round(header.top - paneTop), rows: rows.length, onScreen: rows.filter((r) => r.top >= paneTop && r.bottom <= window.innerHeight).length };
+    return { scrollers: scrollers.length, headerFromTop: Math.round(header.top - paneTop), headerLine: getComputedStyle(headerEl, '::after').height, rows: rows.length, onScreen: rows.filter((r) => r.top >= paneTop && r.bottom <= window.innerHeight).length };
   });
   expect(seen.scrollers).toBe(0);
   expect(seen.headerFromTop).toBe(0);
+  expect(seen.headerLine).toBe('1px');
   expect(seen.onScreen).toBeGreaterThan(10);
   // Pierre's own window: only rows near the viewport are drawn.
   expect(seen.rows).toBeLessThan(900);
