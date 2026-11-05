@@ -7881,7 +7881,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The flat PR view: the code review app's layering, measured against it on one diff (the owner: "Plannotator is the
    baseline you have to meet"). The review area is --background; a file is its header and code, edge to edge, with no
    card, and a hairline at the seam (the approved mock's, diffshub's). The bars are the review app's half-card. */
-.ib-viewer.ib-prreview .ib-vhead { background: color-mix(in oklab, var(--card) 50%, var(--background)); }
 .ib-prreview .ib-gbody > .w-full { padding-inline: 0; padding-bottom: 0; }
 .ib-prreview [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) { background: transparent; padding: 0; }
