@@ -171,6 +171,9 @@ export function buildLineBgOverrides(intensity: DiffLineBgIntensity, mode: 'ligh
   `;
 }
 
+/** Pierre's own display for the slot, until a host's selection bar is open (comments.css). */
+const SELECTION_BAR_PLUS_CSS = `[data-gutter-utility-slot] { display: var(--review-selection-plus, flex); }`;
+
 /**
  * Pierre's gutter comment button (`[data-utility-button]`) is `1lh` square —
  * 20px at the default line height — plus a 4px leftward bleed on its invisible
@@ -229,6 +232,7 @@ export function usePierreTheme(options?: {
       [data-separator='line-info'] { margin-block: 4px !important; }
       ${buildLineBgOverrides(lineBgIntensity, resolvedMode ?? 'dark')}
       ${compactTouchCSS}
+      ${SELECTION_BAR_PLUS_CSS}
     `};
   });
 
@@ -340,6 +344,7 @@ export function usePierreTheme(options?: {
           ${buildLineBgOverrides(lineBgIntensity, resolvedMode)}
 
           ${compactTouchCSS}
+          ${SELECTION_BAR_PLUS_CSS}
         `,
       });
     });

@@ -5,7 +5,10 @@
  *   once on a selection;
  * - Show me or Ask reaches the host with the wrong file, lines or side, or
  *   leaves the chooser (or a comment box) open over the picture;
- * - Comment no longer opens the comment box for the same lines.
+ * - Comment no longer opens the comment box for the same lines;
+ * - the bar stops reading the lines the diff painted (the side the selection
+ *   ends on, this selection's diff when another has lines painted too), or stops
+ *   falling back on the pointer when it can read none.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -50,7 +53,35 @@ function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectio
   return ref;
 }
 
-const chooser = () => document.querySelector('[data-selection-chooser]');
+const chooser = () => document.querySelector<HTMLElement>('[data-selection-chooser]');
+const frames = async (n = 8) => {
+  for (let i = 0; i < n; i += 1) await act(() => new Promise<void>((done) => requestAnimationFrame(() => done())));
+};
+
+/** A diff with these lines painted, each at the place given, the way Pierre draws them. */
+function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; top: number; left: number }[]) {
+  const host = document.createElement('diffs-container');
+  document.body.appendChild(host);
+  const shadow = host.attachShadow({ mode: 'open' });
+  for (const row of rows) {
+    const code = document.createElement('div');
+    code.setAttribute('data-code', '');
+    if (row.column) code.setAttribute(`data-${row.column}`, '');
+    const at = (el: HTMLElement, left: number, right: number) => {
+      el.setAttribute('data-selected-line', '');
+      el.getBoundingClientRect = () => ({ top: row.top, bottom: row.top + 20, left, right, width: right - left, height: 20, x: left, y: row.top, toJSON: () => ({}) });
+      code.appendChild(el);
+    };
+    const gutter = document.createElement('div');
+    gutter.setAttribute('data-column-number', String(row.line));
+    at(gutter, row.left - 41, row.left);
+    const text = document.createElement('div');
+    text.setAttribute('data-line', String(row.line));
+    // Scrolled sideways: the code's own left has gone under the gutter; the gutter has not moved.
+    at(text, row.left - 200, row.left + 400);
+    shadow.appendChild(code);
+  }
+}
 const commentBox = () => document.querySelector('.review-toolbar');
 
 describe.skipIf(!hasDom)('the selection chooser', () => {
@@ -94,5 +125,64 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
     act(() => document.querySelector<HTMLButtonElement>('[data-selection-action="comment"]')!.click());
     expect(chooser()).toBeNull();
     expect(commentBox()).not.toBeNull();
+  });
+
+  describe('where it sits', () => {
+    const placed = () => ({ top: chooser()!.style.top, left: chooser()!.style.left, transform: chooser()!.style.transform, hidden: chooser()!.style.visibility });
+
+    test('under the painted lines, at the start of their code, and not until it has read them', async () => {
+      const ref = mount({ onShowMe: () => {} });
+      // Nothing painted yet: unseen, not flashed at the pointer.
+      expect(placed().hidden).toBe('hidden');
+      paintedDiff([{ line: 16, top: 300, left: 803 }, { line: 18, top: 340, left: 803 }]);
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions' }));
+      await frames();
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('Split paints both columns: it goes by the side the selection ends on', async () => {
+      paintedDiff([
+        { column: 'deletions', line: 18, top: 340, left: 100 },
+        { column: 'additions', line: 18, top: 340, left: 803 },
+      ]);
+      const ref = mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().left).toBe('803px');
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'deletions' }));
+      await frames();
+      expect(placed().left).toBe('100px');
+      act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions', endSide: 'deletions' }));
+      await frames();
+      expect(placed().left).toBe('100px');
+    });
+
+    test("another diff's painted lines don't take it: this selection's last line does", async () => {
+      paintedDiff([{ line: 5, top: 100, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+    });
+
+    test('nothing on the diff to read: the pointer, centred, on screen', async () => {
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().hidden).toBe('');
+      expect(placed().transform).toBe('translateX(-50%)');
+    });
+
+    test('it follows its lines when they move, with nothing to announce it', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().top).toBe('366px');
+      const rows = [...document.querySelector('diffs-container')!.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      for (const row of rows) {
+        const was = row.getBoundingClientRect();
+        row.getBoundingClientRect = () => ({ ...was, top: 240, bottom: 260, y: 240 });
+      }
+      await frames(3);
+      expect(placed().top).toBe('266px');
+    });
   });
 });

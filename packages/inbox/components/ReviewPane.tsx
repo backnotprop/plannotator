@@ -40,7 +40,6 @@ import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
-import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
@@ -288,7 +287,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
                     onAsk(`${baseName(selection.filePath)} ${selection.lineStart === selection.lineEnd ? 'line' : 'lines'} ${inboxReviewLines([selection.lineStart, selection.lineEnd])}: `),
                 }
               : {}),
-            showMeIcon: <Pebble alive={false} size={15} />,
           }
         : undefined,
     [showMe.state.canAsk, onAsk],
