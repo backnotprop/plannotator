@@ -66,21 +66,25 @@ let world: World;
 
 const minutesAgo = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
-const savedChat = (threadId: string, session: string, host: string, minutes: number, question: string, answer: string | null, seen: boolean): InboxAskConversation => ({
-  v: 1,
-  thread_id: threadId,
-  seen_at: seen ? minutesAgo(minutes) : null,
-  turns: [
-    {
-      id: `saved-${threadId.slice(-12)}`,
-      at: minutesAgo(minutes + 1),
-      session,
-      host,
-      question,
-      ...(answer ? { answer, answered_at: minutesAgo(minutes) } : {}),
-    },
-  ],
-});
+const savedChat = (threadId: string, session: string, host: string, minutes: number, question: string, answer: string | null, seen: boolean): InboxAskConversation => {
+  // One reading of the clock: an answer a millisecond after its seen_at is unread.
+  const answeredAt = minutesAgo(minutes);
+  return {
+    v: 1,
+    thread_id: threadId,
+    seen_at: seen ? answeredAt : null,
+    turns: [
+      {
+        id: `saved-${threadId.slice(-12)}`,
+        at: minutesAgo(minutes + 1),
+        session,
+        host,
+        question,
+        ...(answer ? { answer, answered_at: answeredAt } : {}),
+      },
+    ],
+  };
+};
 
 async function shot(page: Page, name: string, scheme: 'light' | 'dark') {
   await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
