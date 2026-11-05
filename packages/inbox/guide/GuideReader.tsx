@@ -13,14 +13,15 @@
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
- * through the chain's `renderSectionTab`); a phone draws every diff Unified
+ * through the chain's `renderSectionTab`; under `threadHeading`, every open
+ * chapter with diffs does); a phone draws every diff Unified
  * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
  * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
@@ -33,7 +34,9 @@ import type {
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
+import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/CommentPopover';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
@@ -41,6 +44,7 @@ import type { DiffSelectionActions } from '@plannotator/review-editor/components
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
+import { reviewSourceLine } from './sourceLine';
 import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
@@ -94,8 +98,9 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    fileOpenIn?: (filePath: string) => ReactNode;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -111,6 +116,7 @@ export const GuideDiff: FC<
       {...props}
       readOnly={!comments}
       commentOnly={!!comments}
+      fileOpenIn={fileOpenIn}
       contextExpansionAvailable={false}
       diffStyle={diffStyle}
       diffOverflow={diffOverflow}
@@ -136,11 +142,6 @@ export const GuideDiff: FC<
   );
 };
 
-/** The provenance line guides.show draws under the counts: repository, branch, the reviewed range. */
-function sourceLine(snapshot: GuideSnapshot): string {
-  return [snapshot.source.repo, snapshot.source.branch, snapshot.review.gitRef].filter(Boolean).join(' · ');
-}
-
 function newCommentId(): string {
   return `ann-guide-${typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`}`;
 }
@@ -149,11 +150,12 @@ function newCommentId(): string {
  * A review's "All files" (code review in the Inbox): every changed file in the patch's order, under one heading, so
  * the same chain draws the same diffs and comments without the agent's chapters.
  */
-function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }[]): CodeGuideData {
+function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }[], threadHeading: boolean): CodeGuideData {
   return {
     title: snapshot.guide.title,
     intent: '',
-    sections: [{ title: 'Every changed file', overview: 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
+    // Under a top bar whose switch says All files: no heading of its own (the pane's CSS draws one column, no card).
+    sections: [{ title: threadHeading ? '' : 'Every changed file', overview: threadHeading ? '' : 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
     unplacedFiles: [],
     reviewed: [false],
   };
@@ -167,26 +169,30 @@ export default function GuideReader({
   mode = 'walkthrough',
   reveal = null,
   viewed,
+  fileOpenIn,
   selectionActions,
   renderOverviewDiagram,
   renderOverviewFigure,
+  renderHeadActions,
   highlight = null,
   bare = false,
+  threadHeading = false,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
-      intent: snapshot.guide.intent,
+      // The thread's heading has one title: a guide with no intent keeps its name there (a narrow bar has no title).
+      intent: threadHeading ? snapshot.guide.intent || snapshot.guide.title : snapshot.guide.intent,
       ...(snapshot.guide.overview && { overview: snapshot.guide.overview }),
       sections: snapshot.guide.sections,
       unplacedFiles: snapshot.guide.unplacedFiles,
       reviewed: [...snapshot.guide.reviewed],
     }),
-    [snapshot.guide],
+    [snapshot.guide, threadHeading],
   );
-  const everyFile = useMemo(() => allFilesGuide(snapshot, files), [snapshot, files]);
+  const everyFile = useMemo(() => allFilesGuide(snapshot, files, threadHeading), [snapshot, files, threadHeading]);
   const guide = mode === 'files' ? everyFile : walkthrough;
   const ticks = useMemo(
     () => (mode === 'files' ? [false] : guide.sections.map((_, i) => reviewed[i] ?? snapshot.guide.reviewed[i] ?? false)),
@@ -309,12 +315,20 @@ export default function GuideReader({
   }, [commentFile, reveal]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
-  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab.
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab (the review: every open chapter).
   const phone = usePhone();
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
+  // The review: every open chapter with diffs carries it too, so a jump to a chapter lands with the control attached.
+  const renderSectionTab = useCallback(
+    (index: number, card: { folded: boolean; diffs: number; title: string }) => {
+      if (index === 0) return <DiffStyleSwitch icons={threadHeading} name={threadHeading ? 'ib-diff-style-0' : undefined} />;
+      if (!threadHeading || card.folded || card.diffs === 0) return null;
+      return <DiffStyleSwitch icons name={`ib-diff-style-${index}`} label={`Diff layout, ${card.title}`} />;
+    },
+    [threadHeading],
+  );
 
   const getDiffRendererProps = useCallback(
     ({ file, focused }: GuideDiffRendererContext): {
@@ -322,8 +336,10 @@ export default function GuideReader({
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -343,7 +359,7 @@ export default function GuideReader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -381,27 +397,35 @@ export default function GuideReader({
       ...(phone ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
+      ...(renderHeadActions ? { renderHeadActions } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
   );
+
+  // The window's wrap for a code span, for the viewer's own inline parser.
+  const codeSpan = useContext(CodeSpanContext);
 
   return (
     <GuideHostProvider value={host}>
+      <GuideCodeSpanContext.Provider value={codeSpan}>
       <GuideView
         guide={guide}
         reviewed={ticks}
         onToggleReviewed={toggle}
-        engineLabel={engineLabel(snapshot.generator?.engine, snapshot.generator?.model)}
+        // All files under the thread's heading: the repository, branch and range alone (no agent's chapters to credit).
+        engineLabel={threadHeading && mode === 'files' ? undefined : engineLabel(snapshot.generator?.engine, snapshot.generator?.model)}
         focusedFile={focusedFile}
         onFocusFile={setFocusedFile}
-        sourceLine={sourceLine(snapshot)}
+        sourceLine={reviewSourceLine(snapshot)}
         bare={bare}
+        threadHeading={threadHeading}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />
+      </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover
           anchorEl={globalAnchor}

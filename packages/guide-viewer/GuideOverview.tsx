@@ -13,14 +13,19 @@ import type { GuideLinkRenderer } from './renderInlineMarkdown';
  * the page here: prose goes through the inline markdown renderer, a diagram's
  * source is text.
  */
-export const GuideOverview: React.FC<{ overview: GuideOverviewData; renderLink: GuideLinkRenderer }> = ({ overview, renderLink }) => {
+export const GuideOverview: React.FC<{
+  overview: GuideOverviewData;
+  renderLink: GuideLinkRenderer;
+  /** No "Overview" label above the prose (GuideView `threadHeading`: the host's chapter menu names it). The host styles `gv-` names. */
+  plain?: boolean;
+}> = ({ overview, renderLink, plain = false }) => {
   const host = useGuideHost();
   const diagram = overview.diagram;
   const drawn = diagram ? host.renderOverviewDiagram?.(diagram) ?? null : null;
   return (
-    <section data-guide-overview aria-label="Overview" className="mt-6">
-      <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Overview</h2>
-      <div className="mt-2 max-w-[72ch] space-y-2.5">{renderMarkdownProse(overview.text, { renderLink })}</div>
+    <section data-guide-overview aria-label="Overview" className={plain ? 'gv-overview' : 'mt-6'}>
+      {!plain && <h2 className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground/70">Overview</h2>}
+      <div className={plain ? 'gv-prose' : 'mt-2 max-w-[72ch] space-y-2.5'}>{renderMarkdownProse(overview.text, { renderLink })}</div>
       {diagram && (
         <div data-guide-overview-diagram={diagram.kind} className="mt-4">
           {drawn ??
