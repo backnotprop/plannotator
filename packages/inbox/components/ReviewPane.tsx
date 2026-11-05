@@ -106,8 +106,6 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-/** Where Split | Unified is held under the top bar (inbox.css `.ib-rv-held`). */
-
 export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
@@ -158,6 +156,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const [sending, setSending] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
   const bodyRef = useRef<HTMLDivElement>(null);
+  const contentRef = useRef<HTMLDivElement>(null);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
   const [sheet, setSheet] = useState(false);
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
@@ -219,9 +218,10 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     read();
     body.addEventListener('scroll', read, { passive: true });
     for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
-    // A taller or shorter window changes which tabs are in view with no scroll.
+    // Which tabs are in view changes with no scroll too: a taller or shorter window, and a file or chapter that folds.
     const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
     resized?.observe(body);
+    if (contentRef.current) resized?.observe(contentRef.current);
     return () => {
       resized?.disconnect();
       cancelAnimationFrame(frame);
@@ -740,6 +740,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
             </div>
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <div ref={contentRef}>
             <ReaderPart diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
@@ -759,6 +760,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
               />
               </OpenInCodeSpans>
             </ReaderPart>
+            </div>
           ) : null}
         </div>
         <div

@@ -7689,13 +7689,14 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-walk .ib-vhead > .ib-sp { flex: 1 1 0; min-width: 0; }
 /* The height the diff renderer reserves for a file's header (review-editor's index.css sets it in the review app). */
 .ib-rv-walk .ib-gbody { --panel-header-h: 33px; }
-.ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 0 100 auto; min-width: 0; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
-.ib-rv-walk .ib-vhead > .ib-rv-nav { flex: none; display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: -2px; }
+/* The title asks for no room: it takes what is free, up to its own width, so the chapter name gives way only after it. */
+.ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 1000 1 0; max-width: max-content; min-width: 0; text-overflow: ellipsis; font-size: var(--ib-fs-13, 13px); font-weight: 400; color: var(--muted-foreground); }
+.ib-rv-walk .ib-vhead > .ib-rv-nav { flex: 0 1 auto; display: inline-flex; align-items: center; gap: 6px; min-width: 0; margin-left: -2px; }
 .ib-rv-nav .ib-rv-modes { flex: none; }
 .ib-rv-nav > [data-review-jump] { min-width: 0; }
 .pn-inbox .ib-rj-btn { display: inline-flex; align-items: center; gap: 6px; min-width: 0; max-width: 340px; height: 32px; padding: 0 8px 0 10px; border-radius: 8px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
 .pn-inbox .ib-rj-btn:hover, .pn-inbox .ib-rj-btn[aria-expanded='true'] { background: var(--ib-hover-s, var(--muted)); }
-.pn-inbox .ib-rj-btn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.pn-inbox .ib-rj-btn:focus-visible { outline: 1.5px solid color-mix(in oklch, var(--ring) 55%, transparent); outline-offset: -1.5px; }
 .ib-rj-lead { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-rj-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ib-rj-mono { font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12-5, 12.5px); }
@@ -7705,7 +7706,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    the bar holds the same facts. */
 @media (min-width: 768px) and (max-width: 959px) {
   .ib-rv-nav ~ .ib-rv-titlesep, .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title { display: none; }
-  .ib-rv-walk .ib-vhead > .ib-rv-nav { flex: 0 1 auto; }
 }
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
@@ -7728,6 +7728,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 /* The menu portals to the body, outside .pn-inbox. Long titles wrap and many chapters scroll; the count stays. */
 .ib-rj-menu[data-review-jump-menu] { display: flex; flex-direction: column; width: 380px; max-width: calc(100vw - 16px); padding: 6px; border-radius: 12px; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.28); }
+.ib-rj-menu[data-review-jump-menu]:focus-visible { outline: none; }
 .ib-rj-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; max-height: min(480px, 70vh); overflow-y: auto; overscroll-behavior: contain; }
 [data-review-jump-menu] .ib-rj-row { display: flex; align-items: center; gap: 10px; min-height: 36px; padding: 6px 8px; border-radius: 8px; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 400; color: var(--foreground); cursor: pointer; }
 [data-review-jump-menu] .ib-rj-row[data-highlighted] { background: var(--ib-hover-s, var(--muted)); color: var(--foreground); }
@@ -7781,9 +7782,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 }
 @media (min-width: 1024px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 272px minmax(0, 1fr); } }
 @media (min-width: 1360px) { .ib-rv-walk [data-guide-section-grid] { grid-template-columns: 296px minmax(0, 1fr); } }
-/* A jump lands with air under the top bar: the card's edge clear of it (the file sits inside the card's padding). */
 /* A long unbroken chapter name wraps in the notes column instead of running under the diffs. */
 .ib-rv-walk [data-guide-section-narrative] h3 { min-width: 0; overflow-wrap: anywhere; }
+/* A jump lands with air under the top bar: the card's edge clear of it (the file sits inside the card's padding). */
 .ib-rv-walk [data-guide-file-shell] { scroll-margin-top: 30px; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 16px; }
 /* A jump to a chapter lands on its first file, with the chapter's tab above it in view. */

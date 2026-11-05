@@ -60,7 +60,7 @@ export function DiffStyleSwitch({
   return (
     <span className={`ib-seg ib-gtab${icons ? ' ib-gtab-marks' : ''}`} role="radiogroup" aria-label={label} data-diff-style-switch={style}>
       {CHOICES.map((choice) => (
-        <Tip key={choice.id} content={choice.tip}>
+        <Tip key={choice.id} content={choice.tip} side={icons ? 'bottom' : undefined}>
           <label className="ib-seg-o" data-on={style === choice.id ? '' : undefined} data-diff-style={choice.id}>
             <input
               type="radio"
