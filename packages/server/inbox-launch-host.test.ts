@@ -552,7 +552,7 @@ describe("Trust folder (`trustOffer`)", () => {
 /**
  * Which how-to Claude Code's real host and the engine pick for a start refused for trust (`RunLine` turns the flags into
  * words: packages/inbox/runTrustHowto.test.tsx). The failure this catches: a folder whose trust would land on home, or
- * `/`, told to run Claude Code there, which can't help; or anyone else losing the words that do help them.
+ * `/`, told to run Claude Code there, which would trust all of home (or `/`); or anyone else losing the words that help them.
  */
 describe("the trust how-to, from Claude Code's own trust key", () => {
   const LAUNCH_ID = "lch_0123456789ABCDEFGHJKMNPQRS";
@@ -588,7 +588,8 @@ describe("the trust how-to, from Claude Code's own trust key", () => {
 
   test("a folder with no repo of its own under a repo rooted at home, and home itself in that repo", async () => {
     expect(await refusedIn((home) => (homeRepo(home), inside(home, "projects", "foo")))).toEqual(COVERS_HOME);
-    expect(await refusedIn((home) => (homeRepo(home), home))).toEqual(COVERS_HOME);
+    // Home in that repo carries both flags: a window from before the new one keeps its home sentence, never "run it here".
+    expect(await refusedIn((home) => (homeRepo(home), home))).toEqual({ ...COVERS_HOME, home: true });
   });
 
   test("the file-system root", async () => {

@@ -5,8 +5,8 @@
  * would be wrong; anywhere else, running the agent there is the way. The failure this catches: both
  * sentences shown together, or the wrong one for the folder, or another agent named as Claude Code.
  *
- * A folder whose trust would land on a repository rooted at home, and `/`, get a third sentence: running the agent
- * there can't help, and in that repository "a folder inside it" can't either.
+ * A folder whose trust would land on a repository rooted at home, and `/`, get a third sentence: accepting the agent's
+ * prompt there would trust all of home (or `/`), and in that repository "a folder inside it" lands on home too.
  *
  * The three sentences are pinned on purpose: the owner chose their exact words.
  *
@@ -76,4 +76,8 @@ test.skipIf(!hasDom)('trust that would cover home, or `/`: only the sentence tha
   act(() => root?.unmount());
   host?.remove();
   expect(howto(failedUntrusted({ folder: '/', trust_covers_home: true }))).toBe(COVERS_HOME);
+  act(() => root?.unmount());
+  host?.remove();
+  // Home in a repo rooted there carries both flags (the older flag for a window from before this one).
+  expect(howto(failedUntrusted({ folder: '/Users/me', home_folder: true, trust_covers_home: true }))).toBe(COVERS_HOME);
 });

@@ -194,7 +194,7 @@ export interface LaunchHost {
   trusts(folder: string): boolean;
   /** Trust this folder from the Inbox, when the host can: null, or no member, leaves Open in Terminal alone. */
   trustOffer?(target: LaunchTrustTarget): LaunchTrustOffer | null;
-  /** The launch's folder is the file-system root, or its trust would land on a repository rooted at home: running the agent there can't help. */
+  /** The launch's folder is the file-system root, or its trust would land on a repository rooted at home: accepting the agent's own prompt there would trust all of home (or `/`), so the how-to steers away from it. */
   trustCoversHome?(target: LaunchTrustTarget): boolean;
   /**
    * Make the session for a launch, with the person's login env. No first turn: the root is moved to the
