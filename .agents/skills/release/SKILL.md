@@ -139,6 +139,16 @@ The DeepSeek Harness plugin is checked like the other packages: the release work
 
 Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it has independent versioning. The Droid manifest (`apps/droid-plugin/.factory-plugin/plugin.json`) is exempt too: Droid tracks the plugin by the marketplace's git commit and treats `version` as metadata.
 
+### Refresh the Feedback form's "These might help" list
+
+After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
+
+```bash
+bun scripts/feedback-search-index.ts
+```
+
+It reads public release notes, open issue titles and open and merged PR titles with `gh`, and rewrites `packages/inbox/feedbackSearch.data.json`. If `gh` fails or nothing comes back, the file stays as it is.
+
 ---
 
 ## Phase 3: Build
@@ -182,7 +192,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    chore: bump version to X.Y.Z
    ```
-   Stage only the 9 version-bumped files. Do not stage the release notes file (it's untracked by design).
+   Stage only the 9 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
 2. **Create and push the tag:**
    ```bash
@@ -264,6 +274,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
 Before tagging, verify:
 - [ ] All 9 version files bumped consistently, `.github/plugin/marketplace.json` included (`bun run check:release-version` passes)
+- [ ] `bun scripts/feedback-search-index.ts` run, and `packages/inbox/feedbackSearch.data.json` in the release commit
 - [ ] The published-package floor guard is green (`bun test tests/published-package-floors.test.ts`), and no `engines.node`/`npm`/`opencode`/`vscode`/`bun`, `os`, `cpu`, `libc` or host peer was added or changed on a published package without an `ALLOWED` entry the owner signed off (`engines.vscode` is pinned at `^1.85.0`: a raise stops updates for Cursor, Windsurf and older VS Code). npm silently installs an older version for anyone whose runtime misses such a field: 0.28.32's Pi Node floor kept older-Node users on 0.28.31
 - [ ] Sibling dependencies resolve: `bun run check:sibling-deps @plannotator/opencode @plannotator/pi-extension` passes (it reads npm). When `@plannotator/core` and `@plannotator/ui` ship, publish core before ui, and run it with every package going out (`bun run check:sibling-deps @plannotator/core @plannotator/ui`): ui pins an exact core, and a ui published first fails to install with ETARGET
 - [ ] Never `npm deprecate` the current `latest`: npm then picks the newest non-deprecated version for bare and range installs, so everyone silently stays behind. Ship a new version instead

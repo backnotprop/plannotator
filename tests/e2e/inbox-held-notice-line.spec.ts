@@ -67,6 +67,8 @@ test.beforeAll(async () => {
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
+    // HOME stays the runner's: the sandbox keeps this Inbox out of its skill folders.
+    PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };
 

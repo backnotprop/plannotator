@@ -11,6 +11,12 @@
  *  - PRs of repositories that are not Inbox projects in the list;
  *  - a second forge read inside the fresh window, or none after a refresh;
  *    a rate limit not holding the host, or the last answer lost on a failure;
+ *  - an Others search run unscoped, past GitHub's length limit or past its
+ *    few searches (the most active repositories first); Others failing or
+ *    timing out taking the person's own lists with it, or read more often
+ *    than every 5 min while its view is closed; a GraphQL error read as a
+ *    whole answer; Others' PRs marked as the person's or asked of them; an
+ *    assigned PR losing its mark; the GraphQL budget's hold blocking diffs;
  *  - a PR not tied to the thread the person handed it to, or to its agent's
  *    own thread through its URL; one tied by anything else (a branch, a
  *    Board card, another project's thread); a Board card shown while the
@@ -29,10 +35,19 @@ import { startInboxServer, type InboxServer } from "./inbox";
 import {
   compareBranch,
   createInboxPulls,
+  type InboxPulls,
   GITHUB_SEARCH_MAX_CHARS,
   githubPullSearches,
+  byActivity,
+  githubOthersSearches,
+  GITLAB_PROJECTS_PER_QUERY,
+  gitlabOthersQueries,
   INBOX_PULL_DIFF_MAX_BYTES,
   INBOX_PULLS_FRESH_MS,
+  INBOX_PULLS_OTHERS_CALLS_MAX,
+  INBOX_PULLS_OTHERS_DEADLINE_MS,
+  INBOX_PULLS_OTHERS_FRESH_MS,
+  INBOX_PULLS_RATE_FLOOR,
   linkInboxPulls,
   parseGithubPulls,
   parseGitlabPulls,
@@ -98,11 +113,31 @@ const GH_ANSWER = {
   },
 };
 
+/** A call of the Others read (its own query), apart from the person's own lists. */
+const othersCall = (args: readonly string[]) => args.some((a) => a.startsWith("query=query InboxPullsOthers"));
+
+/** The background reads finish (the fakes answer at once): what the next list sees. */
+const settle = () => new Promise((done) => setTimeout(done, 0));
+/** One list, its background Others read let finish, then the next list: what the window gets on its next read. */
+async function listSettled(pulls: InboxPulls, repos: Parameters<InboxPulls["list"]>[0], options?: Parameters<InboxPulls["list"]>[1]) {
+  await pulls.list(repos, options);
+  await settle();
+  return pulls.list(repos, options);
+}
+
 interface Forge {
   run: RefRunner;
   calls: { cli: string; args: string[] }[];
+  /** The person's own list reads. */
   graphql: () => { cli: string; args: string[] }[];
+  /** The Others reads. */
+  others: () => { cli: string; args: string[] }[];
   fail: string | null;
+  /** What an Others read answers (default: nothing open); `othersFail` fails it (stderr). */
+  othersAnswer: unknown;
+  othersFail: string | null;
+  /** How long a GitHub Others read takes, in ms (default: at once). */
+  othersDelayMs?: number;
   /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
 }
@@ -112,13 +147,21 @@ function forge(answer: unknown = GH_ANSWER): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
+    othersAnswer: { data: { viewer: { login: "dana" }, others0: { issueCount: 0, nodes: [] } } },
+    othersFail: null,
     heads: null,
-    graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
+    graphql: () => f.calls.filter((c) => c.args.includes("graphql") && !othersCall(c.args)),
+    others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
       if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
+      if (cli === "gh" && othersCall(args)) {
+        if (f.othersDelayMs) await Bun.sleep(f.othersDelayMs);
+        if (f.othersFail) return { stdout: "", stderr: f.othersFail, exitCode: 1 };
+        return { stdout: JSON.stringify(f.othersAnswer), stderr: "", exitCode: 0 };
+      }
       if (cli === "gh" && args.includes("graphql")) {
         if (f.fail) return { stdout: "", stderr: f.fail, exitCode: 1 };
         return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
@@ -236,12 +279,19 @@ function gitlabForge(): Forge {
   const f: Forge = {
     calls: [],
     fail: null,
+    othersAnswer: { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 1, nodes: [GL_MR(61)] } } } },
+    othersFail: null,
     heads: null,
-    graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
+    graphql: () => f.calls.filter((c) => c.args.includes("graphql") && !othersCall(c.args)),
+    others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
       if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: "", stderr: "not logged in", exitCode: 1 };
+      if (cli === "glab" && othersCall(args)) {
+        if (f.othersFail) return { stdout: "", stderr: f.othersFail, exitCode: 1 };
+        return { stdout: JSON.stringify(f.othersAnswer), stderr: "", exitCode: 0 };
+      }
       if (cli === "glab" && args.includes("graphql")) {
         return { stdout: JSON.stringify({ data: { currentUser: { username: "dana", requested: { nodes: [GL_MR(61)] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
       }
@@ -377,7 +427,8 @@ describe("on", () => {
     // No project is on GitLab, so glab is not even asked whether it is signed in.
     expect(w.forge.calls.filter((c) => c.cli === "glab")).toEqual([]);
     expect(answer.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880]);
-    expect(answer.hosts).toEqual([{ cli: "gh", host: "github.com", login: "dana" }]);
+    // Others is read in the background, never waited for: the answer says it is on its way.
+    expect(answer.hosts).toEqual([{ cli: "gh", host: "github.com", login: "dana", others_pending: true }]);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.thread_id).toBe(thread);
     expect(answer.links["github.com/northwind/billing-svc#413"]?.via).toBe("url");
     expect(answer.links["github.com/northwind/billing-svc#413"]?.agent?.host).toBe("claude-code");
@@ -447,6 +498,31 @@ describe("on", () => {
     expect(w.forge.graphql()).toHaveLength(0);
     expect((await w.own(["github.com/northwind/billing-svc#412"], handed)).status).toBe(200);
     expect(w.forge.graphql()).toHaveLength(1);
+  });
+
+  test("after a restart, an Others PR: the owner route waits for the Others read in flight, then finds it", async () => {
+    const w = await world({ codeReview: true });
+    const handed = await w.send("Look at Mei's.", "handed");
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
+    w.forge.othersDelayMs = 150;
+    // The list answers before Others lands (it never waits); the route waits for that read instead of a 404.
+    expect((await w.own(["github.com/northwind/billing-svc#900"], handed)).status).toBe(200);
+    expect(w.forge.others()).toHaveLength(1);
+    // A key no read names is still unknown, with no new Others read.
+    const unknown = await w.own(["github.com/northwind/billing-svc#999"], handed);
+    expect(unknown.status).toBe(404);
+    expect(((await unknown.json()) as { code: string }).code).toBe("pull_unknown");
+    expect(w.forge.others()).toHaveLength(1);
+  });
+
+  test("after a restart, the review route waits for the Others read in flight before saying an Others PR is unknown", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "handed");
+    w.forge.othersAnswer = { data: { viewer: { login: "dana" }, others0: { issueCount: 1, nodes: [ghPull(900, { author: { login: "mei" } })] } } };
+    w.forge.othersDelayMs = 150;
+    const res = await w.review({ key: "github.com/northwind/billing-svc#900", action: "comment", body: "Looks fine.", head_sha: "nope" });
+    // Found (and open), so the answer is about the commit, never pull_unknown.
+    expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
   });
 
   test("a draft started from Launch an agent keeps its pull requests", async () => {
@@ -789,7 +865,7 @@ describe("the worst case (break-ui on #2590)", () => {
     const pulls = createInboxPulls({ run: f.run, now: () => now });
     const first = await pulls.list(repos);
     expect(first.pulls).toEqual([]);
-    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable" }]);
+    expect(first.hosts).toEqual([{ cli: "gh", host: "github.com", login: null, error: "unavailable", others_pending: true }]);
     now += 31_000;
     f.fail = null;
     expect((await pulls.list(repos)).pulls).toHaveLength(3);
@@ -842,6 +918,8 @@ describe("the worst case (break-ui on #2590)", () => {
     expect(parsed.capped).toEqual({ shown: 3, total: 60 });
     const run: RefRunner = async (cli, args) => {
       if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      // Others has no answer (it failed): only the person's own searches' count is known.
+      if (cli === "glab" && othersCall(args)) return { stdout: "", stderr: "boom", exitCode: 1 };
       if (cli === "glab" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "not logged in", exitCode: 1 };
     };
@@ -984,22 +1062,331 @@ describe("the worst case (break-ui on #2590)", () => {
 
 describe("the searches (scoped to the projects' repositories)", () => {
   test("repo: qualifiers while they fit, newest first; past GitHub's limit, unscoped", () => {
-    const scoped = githubPullSearches(Date.parse("2026-11-03T00:00:00Z"), ["northwind/billing-svc", "Northwind/Web-App"]);
-    for (const q of Object.values(scoped)) {
+    const own = githubPullSearches(Date.parse("2026-11-03T00:00:00Z"), ["northwind/billing-svc", "Northwind/Web-App"]);
+    for (const q of Object.values(own)) {
       expect(q).toContain("sort:updated-desc");
       expect(q).toContain("repo:northwind/billing-svc repo:northwind/web-app");
       expect(q.length).toBeLessThanOrEqual(GITHUB_SEARCH_MAX_CHARS);
     }
+    expect(own.assigned).toContain("assignee:@me");
     const many = Array.from({ length: 12 }, (_, i) => `northwind/service-number-${i}`);
     for (const q of Object.values(githubPullSearches(0, many))) expect(q).not.toContain("repo:");
   });
 
-  test("the query carries the projects' repositories", async () => {
+  test("Others: never unscoped, at most a few searches under GitHub's limit, the repositories in the order given (each once); none without repositories", () => {
+    const many = Array.from({ length: 500 }, (_, i) => `northwind/service-number-${i}`);
+    const { searches, covered } = githubOthersSearches(many);
+    expect(searches).toHaveLength(INBOX_PULLS_OTHERS_CALLS_MAX);
+    const named: string[] = [];
+    for (const q of searches) {
+      expect(q.length).toBeLessThanOrEqual(GITHUB_SEARCH_MAX_CHARS);
+      expect(q).toMatch(/^is:pr is:open archived:false sort:updated-desc repo:/);
+      expect(q).not.toContain("@me");
+      named.push(...q.split(" ").filter((t) => t.startsWith("repo:")));
+    }
+    // The first repositories (the most active, as the reader orders them), each once; the rest not read.
+    expect(named.sort()).toEqual(covered.map((r) => `repo:${r}`).sort());
+    expect(covered).toEqual(many.slice(0, covered.length));
+    expect(covered.length).toBeLessThan(many.length);
+    const few = githubOthersSearches(["northwind/a", "northwind/b"]);
+    expect(few).toEqual({ searches: ["is:pr is:open archived:false sort:updated-desc repo:northwind/a repo:northwind/b"], covered: ["northwind/a", "northwind/b"] });
+    expect(githubOthersSearches([])).toEqual({ searches: [], covered: [] });
+  });
+
+  test("GitLab Others: a few projects to a query, at most a few queries, numbered across them; a path is only ever a string", () => {
+    const projects = Array.from({ length: 100 }, (_, i) => `northwind/p-${i}`);
+    const { queries, covered } = gitlabOthersQueries(projects);
+    expect(queries).toHaveLength(INBOX_PULLS_OTHERS_CALLS_MAX);
+    expect(covered).toEqual(projects.slice(0, GITLAB_PROJECTS_PER_QUERY * INBOX_PULLS_OTHERS_CALLS_MAX));
+    for (const q of queries) expect(q).toContain("currentUser { username }");
+    expect(queries[1]).toContain(`p${GITLAB_PROJECTS_PER_QUERY}: project(fullPath: "northwind/p-${GITLAB_PROJECTS_PER_QUERY}")`);
+    expect(gitlabOthersQueries(['a/b") { x } q: project(fullPath: "c']).queries[0]).toContain('p0: project(fullPath: "a/bxqprojectfullpathc")');
+    expect(gitlabOthersQueries([]).queries).toEqual([]);
+  });
+
+  test("the most recently active repositories first, then the ones nothing is known of, by name", () => {
+    const pulls = [
+      { repo: "northwind/old", updated_at: "2026-10-01T00:00:00Z" },
+      { repo: "Northwind/Hot", updated_at: "2026-11-03T00:00:00Z" },
+      { repo: "northwind/old", updated_at: "2026-10-20T00:00:00Z" },
+    ];
+    expect(byActivity(["northwind/zeta", "northwind/old", "northwind/alpha", "northwind/hot"], pulls)).toEqual(["northwind/hot", "northwind/old", "northwind/alpha", "northwind/zeta"]);
+  });
+
+  test("the person's own query carries the projects' repositories and nothing of Others; Others is its own call", async () => {
     const w = await world({ codeReview: true });
     await w.send("Hello.", "hello");
     await w.pulls();
     const args = w.forge.graphql()[0]!.args;
     expect(args.find((a) => a.startsWith("authored="))).toContain("repo:northwind/billing-svc");
+    expect(args.find((a) => a.startsWith("assigned="))).toContain("assignee:@me");
+    expect(args.some((a) => a.startsWith("others"))).toBe(false);
+    expect(args.find((a) => a.startsWith("query="))).not.toContain("others0");
+    const others = w.forge.others();
+    expect(others).toHaveLength(1);
+    expect(others[0]!.args.find((a) => a.startsWith("others0="))).toContain("repo:northwind/billing-svc");
+    expect(others[0]!.args.some((a) => a.startsWith("others1="))).toBe(false);
+  });
+
+  test("the route honours ?others=1: with the Others view open, Others is read as the list is; without it, not before 5 min", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Hello.", "hello");
+    await w.pulls();
+    await settle();
+    expect(w.forge.others()).toHaveLength(1);
+    setSystemTime(new Date(Date.now() + INBOX_PULLS_FRESH_MS + 1_000));
+    try {
+      await w.pulls();
+      expect(w.forge.graphql()).toHaveLength(2);
+      expect(w.forge.others()).toHaveLength(1);
+      await w.pulls("?others=1");
+      expect(w.forge.others()).toHaveLength(2);
+    } finally {
+      setSystemTime();
+    }
+  });
+});
+
+describe("Mine, To review and Others (the list's filters)", () => {
+  const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+  const othersOf = (issueCount: number, nodes: unknown[]) => ({ data: { viewer: { login: "dana" }, others0: { issueCount, nodes } } });
+
+  test("GitHub: Others' PRs are neither the person's nor asked of them; the person's own lists say what one is to them", async () => {
+    const own = {
+      data: {
+        viewer: { login: "dana" },
+        requested: { nodes: [ghPull(880, { author: { login: "tomas" } })] },
+        assigned: { nodes: [ghPull(891, { author: { login: "jun" } })] },
+        authored: { nodes: [ghPull(412)] },
+        merged: { nodes: [] },
+      },
+    };
+    const others = othersOf(4, [ghPull(900, { author: { login: "mei" } }), ghPull(880, { author: { login: "tomas" } }), ghPull(891, { author: { login: "jun" } }), ghPull(412)]);
+    const parsed = parseGithubPulls(JSON.stringify(others), "github.com", "others")!;
+    expect(parsed.open_total).toBe(4);
+    expect(parsed.pulls.every((p) => !p.requested && !p.assigned)).toBe(true);
+    // The person's own answer read as Others: nothing of theirs is taken from it.
+    expect(parseGithubPulls(JSON.stringify(own), "github.com", "others")!.pulls).toEqual([]);
+    const f = forge(own);
+    f.othersAnswer = others;
+    const listed = await listSettled(createInboxPulls({ run: f.run }), repos);
+    const by = Object.fromEntries(listed.pulls.map((p) => [p.number, p]));
+    expect(listed.pulls).toHaveLength(4);
+    expect(by[900]).toMatchObject({ mine: false, requested: false });
+    expect(by[900]!.assigned).toBeUndefined();
+    expect(by[880]).toMatchObject({ mine: false, requested: true });
+    expect(by[891]).toMatchObject({ mine: false, requested: false, assigned: true });
+    expect(by[412]).toMatchObject({ mine: true, requested: false });
+  });
+
+  test("GitLab: the projects' MRs merge across the Others queries; the person's own lists keep assigned", () => {
+    const user = { data: { currentUser: { username: "dana", requested: { nodes: [] }, authored: { nodes: [] }, assigned: { nodes: [GL_MR(64)] }, merged: { nodes: [] } } } };
+    const first = { data: { currentUser: { username: "dana" }, p0: { mergeRequests: { count: 2, nodes: [GL_MR(64), GL_MR(58)] } } } };
+    const more = { data: { currentUser: { username: "dana" }, p1: { mergeRequests: { count: 3, nodes: [GL_MR(7, { project: { fullPath: "northwind/web" }, webUrl: "https://gitlab.com/northwind/web/-/merge_requests/7" })] } } } };
+    const parsed = parseGitlabPulls([JSON.stringify(first), JSON.stringify(more)], "gitlab.com", "others")!;
+    expect(parsed.pulls.map((p) => p.number).sort((a, b) => a - b)).toEqual([7, 58, 64]);
+    expect(parsed.open_total).toBe(5);
+    // One query's answer not one: the whole Others read is not.
+    expect(parseGitlabPulls([JSON.stringify(first), "not json"], "gitlab.com", "others")).toBeNull();
+    expect(parseGitlabPulls(JSON.stringify(user), "gitlab.com")!.pulls[0]).toMatchObject({ assigned: true, mine: false });
+  });
+
+  test("a GraphQL error is a failed read, even with data: the last answer stays, never a list missing a part", async () => {
+    const withError = { ...GH_ANSWER, errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", path: ["authored"], message: "Resource limits exceeded" }] };
+    expect(parseGithubPulls(JSON.stringify(withError), "github.com")).toBeNull();
+    expect(parseGitlabPulls(JSON.stringify({ data: { currentUser: { username: "dana" } }, errors: [{ message: "Query has complexity of 300" }] }), "gitlab.com")).toBeNull();
+    let now = 1_000_000;
+    let answer: unknown = GH_ANSWER;
+    const f = forge();
+    const run: RefRunner = async (cli, args, env) =>
+      cli === "gh" && args.includes("graphql") && !othersCall(args) ? (f.calls.push({ cli, args }), { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 }) : f.run(cli, args, env);
+    const pulls = createInboxPulls({ run, now: () => now });
+    expect((await pulls.list(repos)).pulls).toHaveLength(3);
+    answer = withError;
+    now += INBOX_PULLS_FRESH_MS;
+    const failed = await pulls.list(repos);
+    expect(failed.hosts[0]!.error).toBe("unavailable");
+    expect(failed.pulls).toHaveLength(3);
+  });
+
+  test("Others failing (an error, a GraphQL error) never fails the person's own lists; its last answer stays", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    f.othersAnswer = othersOf(1, [ghPull(900, { author: { login: "mei" } })]);
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    const first = await listSettled(pulls, repos);
+    expect(first.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
+
+    // Others answers a GraphQL error: the own lists are read and shown; Others' last answer is kept and said.
+    f.othersAnswer = { ...othersOf(1, []), errors: [{ type: "RESOURCE_LIMITS_EXCEEDED", message: "Resource limits exceeded" }] };
+    now += INBOX_PULLS_OTHERS_FRESH_MS;
+    const second = await listSettled(pulls, repos);
+    expect(f.graphql()).toHaveLength(2);
+    expect(f.others()).toHaveLength(2);
+    expect(second.hosts[0]!.error).toBeUndefined();
+    expect(second.hosts[0]!).toMatchObject({ others_error: "unavailable", others_last_read: new Date(1_000_000).toISOString() });
+    expect(second.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
+
+    // Others never answered at all: the own lists stand alone, and the host says Others is missing (no last read).
+    const fresh = forge();
+    fresh.othersFail = "HTTP 502: Bad Gateway";
+    const alone = await listSettled(createInboxPulls({ run: fresh.run }), repos);
+    expect(alone.pulls).toHaveLength(3);
+    expect(alone.hosts[0]!.error).toBeUndefined();
+    expect(alone.hosts[0]!.others_error).toBe("unavailable");
+    expect(alone.hosts[0]!.others_last_read).toBeUndefined();
+  });
+
+  test("a hung Others read never holds the list: the own lists answer at once (the real deadline), Others' last answer with them", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    f.othersAnswer = othersOf(1, [ghPull(900, { author: { login: "mei" } })]);
+    let hang = false;
+    let letGo: () => void = () => {};
+    const hung = new Promise<void>((done) => (letGo = done));
+    const run: RefRunner = async (cli, args, env) => {
+      if (othersCall(args) && hang) await hung;
+      return f.run(cli, args, env);
+    };
+    const pulls = createInboxPulls({ run, now: () => now });
+    try {
+      await listSettled(pulls, repos);
+      hang = true;
+      now += INBOX_PULLS_OTHERS_FRESH_MS;
+      const started = performance.now();
+      const listed = await pulls.list(repos, { refresh: true, others: true });
+      expect(performance.now() - started).toBeLessThan(1_000);
+      expect(f.graphql()).toHaveLength(2);
+      // The own lists, and Others' last answer (#900), while the new Others read hangs.
+      expect(listed.pulls.map((p) => p.number).sort()).toEqual([412, 413, 880, 900]);
+      expect(listed.hosts[0]).toMatchObject({ others_pending: true });
+      expect(listed.hosts[0]!.error).toBeUndefined();
+    } finally {
+      letGo();
+    }
+  });
+
+  test("the whole Others read has one deadline: past it, Others is said as failed and its read can run again", async () => {
+    const f = forge();
+    let asked = 0;
+    let letGo: () => void = () => {};
+    const hung = new Promise<void>((done) => (letGo = done));
+    const run: RefRunner = async (cli, args, env) => {
+      if (othersCall(args)) {
+        asked += 1;
+        // Hangs past the deadline.
+        await hung;
+      }
+      return f.run(cli, args, env);
+    };
+    const realSetTimeout = globalThis.setTimeout;
+    // The deadline's timer fires at once; every other timer as asked.
+    globalThis.setTimeout = ((fn: () => void, ms?: number) => realSetTimeout(fn, ms === INBOX_PULLS_OTHERS_DEADLINE_MS ? 1 : ms)) as unknown as typeof setTimeout;
+    try {
+      const pulls = createInboxPulls({ run });
+      const first = await pulls.list(repos);
+      expect(first.pulls).toHaveLength(3);
+      expect(first.hosts[0]).toMatchObject({ others_pending: true });
+      await new Promise((done) => realSetTimeout(done, 20));
+      const listed = await pulls.list(repos);
+      expect(asked).toBe(1);
+      expect(listed.pulls).toHaveLength(3);
+      expect(listed.hosts[0]!.error).toBeUndefined();
+      expect(listed.hosts[0]!.others_error).toBe("unavailable");
+      expect(listed.hosts[0]!.others_pending).toBeUndefined();
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      letGo();
+    }
+  });
+
+  test("Others is read every 5 min at most, or as often as the list while the Others view is open; a new repository set reads it again", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    await pulls.list(repos);
+    expect(f.others()).toHaveLength(1);
+    now += INBOX_PULLS_FRESH_MS;
+    await pulls.list(repos, { refresh: true });
+    expect(f.graphql()).toHaveLength(2);
+    expect(f.others()).toHaveLength(1);
+    // The Others view is open: Others is read as the list is.
+    now += INBOX_PULLS_FRESH_MS;
+    await pulls.list(repos, { others: true });
+    expect(f.others()).toHaveLength(2);
+    await pulls.list(repos, { others: true });
+    expect(f.others()).toHaveLength(2);
+    // The view closed: the 5 minutes again.
+    now += INBOX_PULLS_FRESH_MS;
+    await pulls.list(repos);
+    expect(f.others()).toHaveLength(2);
+    now += INBOX_PULLS_OTHERS_FRESH_MS;
+    await pulls.list(repos);
+    expect(f.others()).toHaveLength(3);
+    await pulls.list([...repos, { host: "github.com", repo: "northwind/web-app", project_id: "prj_2" }]);
+    expect(f.others()).toHaveLength(4);
+  });
+
+  test("a big Others read is bounded: 500 repositories, one request of at most 3 searches, the most active repositories first", async () => {
+    const many = Array.from({ length: 500 }, (_, i) => ({ host: "github.com", repo: `northwind/service-number-${i}`, project_id: "prj_1" }));
+    // The person's own PR is in the last repository by name: the most active, so it is searched first.
+    const hot = many.at(-1)!.repo;
+    const f = forge({ data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412, { repository: { nameWithOwner: hot }, url: `https://github.com/${hot}/pull/412` })] }, assigned: { nodes: [] }, merged: { nodes: [] } } });
+    const listed = await listSettled(createInboxPulls({ run: f.run }), many);
+    const others = f.others();
+    expect(others).toHaveLength(1);
+    const searches = others[0]!.args.filter((a) => /^others\d+=/.test(a));
+    expect(searches.length).toBeLessThanOrEqual(INBOX_PULLS_OTHERS_CALLS_MAX);
+    expect(searches[0]).toContain(`repo:${hot} `);
+    // Not every repository was read: how many open PRs there are is not known.
+    // Only Others left PRs out: the person's own lists are whole (`of: "others"`).
+    expect(listed.hosts[0]!.capped).toEqual({ shown: 1, total: null, of: "others" });
+  });
+
+  test("the Others count is the whole when every repository was searched: more open PRs than came back says how many the list shows, of how many", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ghPull(3000 + i, { author: { login: "mei" }, headRefName: `o${i}` }));
+    const own = { data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } };
+    const f = forge(own);
+    f.othersAnswer = othersOf(140, many);
+    expect((await listSettled(createInboxPulls({ run: f.run }), repos)).hosts[0]!.capped).toEqual({ shown: 101, total: 140, of: "others" });
+    const all = forge(own);
+    all.othersAnswer = othersOf(2, [ghPull(900, { author: { login: "mei" } }), ghPull(412)]);
+    expect((await listSettled(createInboxPulls({ run: all.run }), repos)).hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("a new set of repositories whose Others read fails shows no count from the old set", async () => {
+    const many = Array.from({ length: 100 }, (_, i) => ghPull(3000 + i, { author: { login: "mei" }, headRefName: `o${i}` }));
+    const own = { data: { viewer: { login: "dana" }, requested: { nodes: [] }, authored: { nodes: [ghPull(412)] }, assigned: { nodes: [] }, merged: { nodes: [] } } };
+    const f = forge(own);
+    f.othersAnswer = othersOf(140, many);
+    const pulls = createInboxPulls({ run: f.run });
+    expect((await listSettled(pulls, repos)).hosts[0]!.capped).toEqual({ shown: 101, total: 140, of: "others" });
+    f.othersFail = "HTTP 502: Bad Gateway";
+    const more = [...repos, { host: "github.com", repo: "northwind/web-app", project_id: "prj_2" }];
+    const after = await listSettled(pulls, more);
+    expect(after.hosts[0]!.others_error).toBe("unavailable");
+    expect(after.hosts[0]!.capped).toBeUndefined();
+  });
+
+  test("GitHub's budget nearly spent: list reads wait until it fills, the answer still shown; a layer's diff is not held", async () => {
+    let now = Date.parse("2026-11-03T10:00:00Z");
+    const reset = new Date(now + 20 * 60_000).toISOString();
+    const f = forge({ ...GH_ANSWER, data: { ...GH_ANSWER.data, rateLimit: { cost: 9, remaining: INBOX_PULLS_RATE_FLOOR - 1, resetAt: reset } } });
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    await pulls.list(repos);
+    const othersBefore = f.others().length;
+    now += INBOX_PULLS_FRESH_MS;
+    const held = await pulls.list(repos, { refresh: true, others: true });
+    expect(f.graphql()).toHaveLength(1);
+    expect(f.others()).toHaveLength(othersBefore);
+    expect(held.hosts[0]!.error).toBe("rate_limited");
+    expect(held.pulls).toHaveLength(3);
+    // Diffs are REST, not the GraphQL budget: still read.
+    const diff = await pulls.diff("github.com/northwind/billing-svc#412", "layer");
+    expect(diff.patch).toContain("diff of");
+    now = Date.parse(reset) + 1;
+    await pulls.list(repos, { refresh: true });
+    expect(f.graphql()).toHaveLength(2);
   });
 });
 

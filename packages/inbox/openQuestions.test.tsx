@@ -762,6 +762,7 @@ describe('the full-screen composer counts as the foot does', () => {
           to: 'Claude Code',
           value: '',
           onChange: () => {},
+          onLateVoice: () => {},
           onSend: () => {},
           sending: false,
           canSend: false,

@@ -12,7 +12,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapeSummary } from '../api';
+import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { MessageBody } from '../components/Thread';
@@ -139,6 +139,7 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
         <ShapeGrid
           items={items}
           query={query}
+          assetUrl={inboxApi.shapeFileUrl}
           onOpen={(id) => {
             const s = byId.get(id);
             if (s) onOpen(s);

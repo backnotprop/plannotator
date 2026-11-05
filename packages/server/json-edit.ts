@@ -285,6 +285,12 @@ function notValid(comments: boolean): string {
   return comments ? "it is not valid JSON" : "it is not plain JSON";
 }
 
+/** Why walking a text failed, in words for a person. */
+function scanFailure(error: unknown, comments: boolean): string {
+  if (error instanceof ScanError) return notValid(comments);
+  return error instanceof RangeError ? "it is nested too deeply" : String(error);
+}
+
 /** Where a member's cut starts: back over the spaces before it, and the line break before them when the key starts its line. */
 function cutStart(t: string, start: number): number {
   let i = start;
@@ -330,7 +336,7 @@ export function addJsonMember(text: string, path: readonly string[], key: string
       out = insertMember(lf, scanned.chain[scanned.missingAt]!, path[scanned.missingAt]!, nested, unit);
     }
   } catch (error) {
-    return { ok: false, reason: error instanceof ScanError ? notValid(comments) : String(error) };
+    return { ok: false, reason: scanFailure(error, comments) };
   }
   // The edit must be exactly the one member: anything else is refused.
   const before = parseText(prep.body, comments) as Record<string, unknown>;
@@ -347,6 +353,26 @@ export function addJsonMember(text: string, path: readonly string[], key: string
     return { ok: false, reason: comments ? "the edit would not stay valid JSON" : "the edit would not stay plain JSON" };
   }
   if (!sameJson(after, before)) return { ok: false, reason: "the edit would change more than one entry" };
+  return { ok: true, text: prep.bom + out, changed: true };
+}
+
+/** `text` with `key` at `path` set to `value`: a member there has only its value replaced, a missing one is added (`addJsonMember`). */
+export function setJsonMember(text: string, path: readonly string[], key: string, value: unknown, options: JsonEditOptions = {}): JsonEdit {
+  const added = addJsonMember(text, path, key, value, options);
+  if (!added.ok || added.changed) return added;
+  const comments = options.comments === true;
+  const prep = prepare(text, comments);
+  if ("error" in prep) return { ok: false, reason: prep.error };
+  const found = walk(prep.body, prep.start, path);
+  if ("error" in found) return { ok: false, reason: found.error };
+  const member = found.chain[found.chain.length - 1]!.members.find((m) => m.key === key)!;
+  const before = parseText(prep.body, comments) as Record<string, unknown>;
+  let parent = before;
+  for (const name of path) parent = parent[name] as Record<string, unknown>;
+  if (sameJson(parent[key], value)) return { ok: true, text, changed: false };
+  parent[key] = value;
+  const out = `${prep.body.slice(0, member.valueStart)}${JSON.stringify(value)}${prep.body.slice(member.valueEnd)}`;
+  if (!sameJson(parseText(out, comments), before)) return { ok: false, reason: "the edit would change more than one entry" };
   return { ok: true, text: prep.bom + out, changed: true };
 }
 
@@ -389,7 +415,7 @@ export function removeJsonMember(text: string, path: readonly string[], key: str
       }
     }
   } catch (error) {
-    return { ok: false, reason: error instanceof ScanError ? notValid(comments) : String(error) };
+    return { ok: false, reason: scanFailure(error, comments) };
   }
   const before = parseText(prep.body, comments) as Record<string, unknown>;
   let parent: Record<string, unknown> = before;

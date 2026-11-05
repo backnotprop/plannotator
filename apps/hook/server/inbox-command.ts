@@ -65,8 +65,10 @@ import { writeUrlQr } from "@plannotator/server/qr";
 import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -447,10 +449,11 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
     };
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
   }
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  let lines = "";
+  const out = (line: string) => void (lines += `${line}\n`);
   if (status.state === "missing") {
     out("Plannotator Inbox: not running (it has never run with this data dir)");
   } else if (status.state === "stopped") {
@@ -475,6 +478,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
         : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
     );
   }
+  await writeWholeToStdout(lines);
   return code;
 }
 
@@ -618,6 +622,11 @@ export interface InboxCommandAssets {
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // A launched Claude Code session's PermissionRequest hook (inbox-permission-hook.ts): never starts or connects anything.
+  if (args[0] === "permission-hook") {
+    if (args.length > 1) usageError(`Unknown inbox permission-hook option: ${args[1]}`);
+    return runPermissionHook(dataDir);
+  }
   // Only a person's `plannotator inbox` connects agents, never a detached start.
   // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
   // starts (its Restart into an updated binary, --background, a connection)

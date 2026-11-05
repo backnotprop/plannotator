@@ -4,6 +4,10 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
+ * - The head: "Reviews", and on its right the filter mark (approval
+ *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
+ *   To review, Others) and the project, kept in the address (`&view=`,
+ *   `&project=`) and named once in a quiet line over the list.
  * - The list, in the Inbox list's own rows and bands, grouped by whose move
  *   it is: On you (a teammate asked for the person's review, or the
  *   person's agent opened a PR that waits on them), Ready to land, and a
@@ -30,7 +34,6 @@ import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { HostMark, Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
-import { ProjectFilter } from '../board/ProjectFilter';
 import { RowAgentTiles } from '../components/RowAgents';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
@@ -48,6 +51,7 @@ import {
   ladderHeading,
   layerPill,
   linkAgentName,
+  pullFilterEmptyWords,
   pullGroups,
   pullHandoffAskLine,
   pullHandoffThreadName,
@@ -58,13 +62,15 @@ import {
   rowMeta,
   stackProjects,
   stackTitle,
+  type PullFilter,
 } from './model';
+import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter';
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
-import { filterPullGroups, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, type RiskFilterValue, type RiskJudgments } from './risk';
+import { filterPullGroups, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, stackRiskFailure, type RiskFailures, type RiskFilterValue, type RiskJudgments } from './risk';
 import { RiskFilter } from './RiskFilter';
-import { RiskMark } from './RiskMark';
+import { COULD_NOT_RANK, RiskMark } from './RiskMark';
 import { RiskRulesDialog } from './RiskRulesDialog';
 import { usePullRisk } from './usePullRisk';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
@@ -75,11 +81,14 @@ export interface PullsPageProps {
   /** The stack open beside the list (its id, or any layer's key), or null. */
   stackId: string | null;
   project: string | null;
+  /** The list's view (`&view=`): All, Mine, To review or Others. */
+  filter: PullFilter;
   projects: readonly ProjectFolder[];
   projectNames: ReadonlyMap<string, string>;
   phone: boolean;
   onOpenStack: (id: string | null) => void;
-  onProject: (id: string | null) => void;
+  /** A new view and project from the filter, in one step. */
+  onScope: (next: { filter: PullFilter; project: string | null }) => void;
   /** Phase 1's review mode on one layer (`scope` layer), or on the stack up to it (`stack`). */
   onReview: (stackId: string, layerKey: string, scope: 'layer' | 'stack') => void;
   onOpenThread: (threadId: string) => void;
@@ -95,48 +104,68 @@ export interface PullsPageProps {
 }
 
 const NO_JUDGMENTS: RiskJudgments = {};
+const NO_FAILURES: RiskFailures = {};
 
 /** A layer's state as the Board's mark draws it. */
 function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
   return pull.state;
 }
 
-export function PullsPage(props: PullsPageProps) {
+export function PullsPage(given: PullsPageProps) {
+  const model = given.state.model;
+  // The filter offers the projects that have a GitHub or GitLab remote here.
+  const offered = useMemo(() => {
+    const ids = new Set(Object.values(model?.projects ?? {}).flat());
+    return given.projects.filter((p) => ids.has(p.id));
+  }, [model, given.projects]);
+  // A project gone from the list (removed, its remote changed, a stale link) is no filter, as an unknown view is All:
+  // never a line naming no project over an empty list. Before the projects and the first answer, it stands.
+  const gone = !!given.project && !!model && given.projects.length > 0 && !offered.some((p) => p.id === given.project);
+  const props = gone ? { ...given, project: null } : given;
   const { state, phone } = props;
-  const model = state.model;
-  const groups = useMemo(() => (model ? pullGroups(model, props.project) : null), [model, props.project]);
-  const open = groups && props.stackId ? findStack(groups, props.stackId) : null;
+  const groups = useMemo(() => (model ? pullGroups(model, props.project, props.filter) : null), [model, props.project, props.filter]);
   // Risk ranking (inbox-pull-risk.ts). The filter acts only once rules exist, and never closes the stack open beside the list.
   const risk = usePullRisk(model);
   const rulesSet = !!risk.answer?.rules;
   const judgments: RiskJudgments = risk.answer?.judgments ?? NO_JUDGMENTS;
+  const riskFailed: RiskFailures = risk.answer?.failed ?? NO_FAILURES;
   const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
   const [rulesOpen, setRulesOpen] = useState(false);
-  const activeFilter = rulesSet ? riskFilter : 'all';
-  const filtered = useMemo(() => (groups ? filterPullGroups(groups, activeFilter, judgments) : null), [groups, activeFilter, judgments]);
-  // The filter offers the projects that have a GitHub or GitLab remote here.
-  const offered = useMemo(() => {
-    const ids = new Set(Object.values(model?.projects ?? {}).flat());
-    return props.projects.filter((p) => ids.has(p.id));
-  }, [model, props.projects]);
+  const activeRisk = rulesSet ? riskFilter : 'all';
+  const ranked = useMemo(() => (groups ? filterPullGroups(groups, activeRisk, judgments, riskFailed) : null), [groups, activeRisk, judgments, riskFailed]);
+  // A stack the address names opens even when the view leaves it out (a link like `view=mine&stack=…`): never a blank pane.
+  const open = useMemo(() => {
+    if (!groups || !model || !props.stackId) return null;
+    return findStack(groups, props.stackId) ?? (props.filter === 'all' ? null : findStack(pullGroups(model, props.project), props.stackId));
+  }, [groups, model, props.stackId, props.filter, props.project]);
+  const trigger = useFilterTrigger();
+  const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
-    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Pull requests" data-pulls-list="">
+    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
       <div className="ib-lhead">
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
-          Pull requests
+          Reviews
         </h1>
-        {filtered && filtered.groups.on_you.length > 0 && (
-          <span className="ib-pr-onyou" data-pulls-on-you={filtered.groups.on_you.length}>
-            {formatCount(filtered.groups.on_you.length)} on you
+        {/* Shown once a first answer came: before it, there is nothing to filter. */}
+        {model && (
+          <span className="ib-pf-slot">
+            <PullFilterControl
+              model={model}
+              filter={props.filter}
+              project={props.project}
+              projects={offered}
+              names={props.projectNames}
+              phone={phone}
+              triggerRef={trigger}
+              onChange={props.onScope}
+            />
           </span>
         )}
-        <span className="ib-sp" />
-        {offered.length > 1 && <ProjectFilter projects={offered} names={props.projectNames} value={props.project} phone={phone} onChange={props.onProject} />}
         {risk.answer && (
           <RiskFilter
-            value={activeFilter}
+            value={activeRisk}
             rulesSet={rulesSet}
             phone={phone}
             onChange={(next) => {
@@ -147,6 +176,7 @@ export function PullsPage(props: PullsPageProps) {
           />
         )}
       </div>
+      {model && <PullScopeLine filter={props.filter} projectName={projectName} triggerRef={trigger} onClear={() => props.onScope({ filter: 'all', project: null })} />}
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
         {!model && state.error && (
           <div className="ib-error" role="alert" style={{ margin: '8px 2px' }}>
@@ -154,7 +184,7 @@ export function PullsPage(props: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && filtered && <PullList model={model} groups={filtered.groups} filter={activeFilter} notJudged={filtered.notJudged} judgments={judgments} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && ranked && <PullList model={model} groups={ranked.groups} filter={props.filter} risk={activeRisk} notJudged={ranked.notJudged} judgments={judgments} riskFailed={riskFailed} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
@@ -174,14 +204,14 @@ export function PullsPage(props: PullsPageProps) {
   );
 
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} phone onClose={() => props.onOpenStack(null)} />;
+    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone onClose={() => props.onOpenStack(null)} />;
   }
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} phone={false} onClose={() => props.onOpenStack(null)} />
+          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} riskFailed={riskFailed} phone={false} onClose={() => props.onOpenStack(null)} />
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
             {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
@@ -191,46 +221,99 @@ export function PullsPage(props: PullsPageProps) {
   );
 }
 
+/** A `#reviews` or `#pulls` link while Settings → Capabilities → Code review is off: what is here, and the way to turn it on. Nothing is read. */
+export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: () => void }) {
+  return (
+    <>
+      <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-reviews-off="">
+        <div className="ib-lhead">
+          <SidebarTrigger />
+          <h1 dir="auto" tabIndex={-1}>
+            Reviews
+          </h1>
+        </div>
+        <div className="ib-lbody ib-pr-off">
+          <div className="ib-pr-empty">
+            <p className="ib-pr-empty-h">Code review is off</p>
+            <p>Reviews of your local changes and pull requests show here when it’s on.</p>
+            <button type="button" className="ib-btn" onClick={onSettings} data-reviews-off-settings="">
+              Open Settings
+            </button>
+          </div>
+        </div>
+        {!phone && <ListColumnEdge />}
+      </section>
+      {!phone && <div className="ib-pane ib-pempty" />}
+    </>
+  );
+}
+
 function PullList({
   model,
   groups,
   filter,
+  risk,
   notJudged,
   judgments,
+  riskFailed,
   selected,
   phone,
   onOpen,
 }: {
   model: InboxPullsAnswer;
   groups: ReturnType<typeof pullGroups>;
-  filter: RiskFilterValue;
+  filter: PullFilter;
+  risk: RiskFilterValue;
   notJudged: number;
   judgments: RiskJudgments;
+  riskFailed: RiskFailures;
   selected: string | null;
   phone: boolean;
   onOpen: (id: string) => void;
 }) {
   const [waitingFolded, setWaitingOpen] = useState(false);
   // With the risk filter on, nothing it kept stays folded away.
-  const waitingOpen = waitingFolded || filter !== 'all';
+  const waitingOpen = waitingFolded || risk !== 'all';
   const now = useRelativeClock(true);
   const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
   // A stack opened from the folded group keeps it open.
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
-  const notices = pullsNotices(model);
+  // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
+  const notices = pullsNotices(model, filter);
   const notJudgedLine =
     notJudged > 0 ? (
       <p className="ib-pr-risknote" data-pulls-risk-not-judged={notJudged}>
         {plural(notJudged, 'pull request')} not ranked yet.
       </p>
     ) : null;
-  if (total === 0 && filter !== 'all') {
+  if (total === 0 && risk !== 'all') {
     return (
       <div className="ib-pr-empty" data-pulls-empty="risk">
-        <p className="ib-pr-empty-h">{filter === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
+        <p className="ib-pr-empty-h">{risk === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
         {notJudgedLine}
+      </div>
+    );
+  }
+  // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
+  // A host whose own read failed says so at once instead: the wait never hides a failure.
+  if (total === 0 && (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error)) {
+    return (
+      <p className="ib-pr-empty" data-pulls-empty="reading">
+        Reading your pull requests…
+      </p>
+    );
+  }
+  // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
+  if (total === 0 && filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
+    const empty = pullFilterEmptyWords(filter);
+    return (
+      <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
+        <p className="ib-pr-empty-h">{empty.head}</p>
+        {[empty.line, ...notices.map((n) => n.line)].map((line) => (
+          <p key={line}>{line}</p>
+        ))}
       </div>
     );
   }
@@ -257,6 +340,7 @@ function PullList({
       phone={phone}
       now={now}
       judgments={judgments}
+      riskFailed={riskFailed}
       onOpen={() => onOpen(item.stack.id)}
     />
   );
@@ -410,6 +494,7 @@ function PullRow({
   phone,
   now,
   judgments,
+  riskFailed,
   onOpen,
 }: {
   item: InboxPullItem;
@@ -420,9 +505,11 @@ function PullRow({
   phone: boolean;
   now: number;
   judgments: RiskJudgments;
+  riskFailed: RiskFailures;
   onOpen: () => void;
 }) {
   const judged = stackRisk(item.stack, judgments);
+  const riskFailure = stackRiskFailure(item.stack, judgments, riskFailed);
   const title = stackTitle(item.stack, links);
   const meta = rowMeta(item, link);
   const layers = item.stack.layers.length;
@@ -444,6 +531,7 @@ function PullRow({
           </span>
         </span>
         {judged && <RiskMark judgment={judged} />}
+        {riskFailure && <RiskMark failed={riskFailure} />}
         <span className="ib-t">
           <span aria-hidden="true">{relativeTime(item.updated_at, now)}</span>
           <span className="ib-sr">{relativeWords(item.updated_at, now)}</span>
@@ -516,8 +604,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
 /** How long the primary waits for a just-started thread's link before it comes back anyway. */
 const AWAIT_LINK_MS = 15_000;
 
-function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; phone: boolean; onClose: () => void }) {
-  const { item, model, phone, judgments } = props;
+function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; riskFailed: RiskFailures; phone: boolean; onClose: () => void }) {
+  const { item, model, phone, judgments, riskFailed } = props;
   const stack = item.stack;
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
@@ -609,11 +697,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   const projects = stackProjects(model, stack);
   const threadName = pullHandoffThreadName(handed, model.links, stack);
   const judged = stackRisk(stack, judgments);
+  const riskFailure = stackRiskFailure(stack, judgments, riskFailed);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
         {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to pull requests">
+          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
             <Icon name="back" />
           </button>
         )}
@@ -652,6 +741,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </Tip>
           )}
         </div>
+        {riskFailure && (
+          <p className="ib-pr-riskline" data-pulls-risk-line="failed">
+            <span className="ib-risk" data-risk="failed">
+              {COULD_NOT_RANK}
+            </span>
+            <span dir="auto">{riskFailure}</span>
+          </p>
+        )}
         {judged && (
           <p className="ib-pr-riskline" data-pulls-risk-line={judged.level}>
             <span className="ib-risk" data-risk={judged.level}>
@@ -697,7 +794,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
-              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} layerRisk={stack.layers.length > 1 ? judgments[layer.key] : undefined} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
+              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} layerRisk={stack.layers.length > 1 ? judgments[layer.key] : undefined} layerFailed={stack.layers.length > 1 ? riskFailed[layer.key] : undefined} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
             ))}
             <li className="ib-pr-base" aria-label={`Base branch ${stack.base}`}>
               <span className="ib-pr-dot" aria-hidden="true" />
@@ -748,7 +845,7 @@ const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: bool
   );
 });
 
-function Layer({ layer, stack, next, now, layerRisk, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; layerRisk?: InboxPullRiskJudgment; onReview: () => void }) {
+function Layer({ layer, stack, next, now, layerRisk, layerFailed, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; layerRisk?: InboxPullRiskJudgment; layerFailed?: string; onReview: () => void }) {
   const pill = layerPill(layer);
   const checks = checksWords(layer);
   const base = layerBaseWords(layer, stack);
@@ -770,6 +867,7 @@ function Layer({ layer, stack, next, now, layerRisk, onReview }: { layer: InboxP
             </span>
           )}
           {layerRisk && <RiskMark judgment={layerRisk} />}
+          {!layerRisk && layerFailed && <RiskMark failed={layerFailed} />}
         </span>
         <span className="ib-pr-l2">
           {merged ? (

@@ -9,8 +9,9 @@
  * real `git diff`s of scratch repositories with invented names.
  *
  * What is proved, in order:
- *  1. Off (the default): no Pull requests row, a #pulls link lands on the
- *     Inbox, and no gh / glab query runs (the fakes' call log).
+ *  1. Off (the default): no Reviews row, a #pulls link (the permanent alias of
+ *     #reviews) says Code review is off, with Open Settings, and no gh / glab
+ *     query runs (the fakes' call log).
  *  2. On, with the Board off: the row; the list grouped by whose move it is
  *     (On you with a teammate's review request and the agent's stack, Ready
  *     to land, the folded "2 waiting on others"); the stack is one row with
@@ -158,6 +159,8 @@ function writeForge(dir: string) {
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    // Others (a read of its own): nothing open past the person's own lists.
+    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others" >> "$calls"; echo \'{"data":{"viewer":{"login":"dana"},"others0":{"issueCount":0,"nodes":[]}}}\'; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -189,6 +192,7 @@ function writeForge(dir: string) {
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -590,7 +594,7 @@ const LAYER_412 = 'github.com/northwind/billing-svc#412';
 const LAYER_413 = 'github.com/northwind/billing-svc#413';
 const LOCALE = 'github.com/northwind/web-app#869';
 
-test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or glab query runs', async () => {
+test('off (the default): no row, a #pulls link says Code review is off, and no gh or glab query runs', async () => {
   const { page } = world;
   const reads: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
@@ -601,8 +605,16 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await expect(page.locator('[data-pulls-nav]')).toHaveCount(0);
   await page.goto(`${world.url}#pulls`);
-  await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('pulls');
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(page.locator('[data-reviews-off]')).toContainText('Code review is off');
   await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+  await shot(page, '1-off-link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-reviews-off-settings]')).toBeVisible();
+  await shot(page, '1-off-link-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('[data-reviews-off-settings]').click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('capabilities');
   await page.goto(world.url);
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await page.waitForTimeout(800);
@@ -610,6 +622,80 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   page.off('request', watch);
   expect(reads).toEqual([]);
   expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff '))).toEqual([]);
+});
+
+test('an old #pulls link opened fresh, in a new window, becomes #reviews', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#pulls&view=review`);
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews&view=review');
+  } finally {
+    await context.close();
+  }
+});
+
+test("#reviews&new with Code review off: the off page, and no box", async () => {
+  const { page } = world;
+  await setCodeReview(false);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-reviews-off]')).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+});
+
+test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await setCodeReview(true);
+  try {
+    await page.route('**/api/inbox/settings*', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const answer = await route.fetch();
+      await route.fulfill({ response: answer, json: { ...(await answer.json()), via: 'tailnet', guest: true } });
+    });
+    const thread = `#thread=${encodeURIComponent(world.threads.stack)}`;
+    await page.goto(`${world.url}${thread}`);
+    await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+    await page.evaluate(() => {
+      location.hash = '#reviews';
+    });
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+    await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(thread);
+  } finally {
+    await context.close();
+    await setCodeReview(false);
+  }
+});
+
+test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
+  const { page } = world;
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.reload();
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  // The address was replaced, not pushed: Back from the box leaves the page, and does not open it again.
+  await page.goto(world.url);
+  await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+  await page.evaluate(() => {
+    location.hash = '#reviews&new';
+  });
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await page.goBack();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+  await page.waitForTimeout(400);
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await setCodeReview(false);
 });
 
 test('on, with the Board off: the row, and the list by whose move it is, the stack one row with its chain', async () => {
@@ -621,6 +707,8 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // Pull requests needs no Board.
   await expect(page.locator('[data-board-nav]')).toHaveCount(0);
   await nav.click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
@@ -651,12 +739,10 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
   expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
-  await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
-  // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
-  for (const selector of ['[data-pulls-heading]', '[data-pulls-on-you]']) {
-    expect(await list.locator(selector).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  }
-  await expect(list.locator('[data-board-project-chip]')).toHaveAccessibleName(/All projects/);
+  // The head is "Reviews" and the filter mark (inbox-pull-filters.spec.ts); the On you band carries the count.
+  expect(await list.locator('[data-pulls-heading]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
+  await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('Filter');
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
   await shot(page, '2-list');
   await fold.click();

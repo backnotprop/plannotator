@@ -121,6 +121,10 @@ interface SeenSession {
   holding: number;
   busy: boolean | null;
   idleSince: number | null;
+  /** When its current turn started (busy went true); null while idle or unknown. A launched thread's "working · N min". */
+  busySince?: number | null;
+  /** How many polls it started (launch: a stopped or respawned session counts as live again only once it polls anew). */
+  polls?: number;
   /** The last time it was seen idle (busy false); null when never. Decides whether an automatic mark went into a turn. */
   idleAt?: number | null;
   /**
@@ -321,6 +325,7 @@ export function createInboxLiveSessions(options: {
   const applyState = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
     if (typeof body.busy !== "boolean") return;
     if (body.busy) {
+      if (entry.busy !== true) entry.busySince = at;
       setDeliveryFlags(entry, true, entry.sendNow);
       entry.idleSince = null;
     } else {
@@ -447,6 +452,7 @@ export function createInboxLiveSessions(options: {
     entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
     entry.lastSeen = at;
     entry.holding += 1;
+    entry.polls = (entry.polls ?? 0) + 1;
     applyState(entry, body, at);
     sessions.set(session, entry);
     trackWaitsOf(session, entry, at);
@@ -921,6 +927,12 @@ export function createInboxLiveSessions(options: {
     return !!entry && isLive(entry);
   };
 
+  /** A live session's turn state (a launched thread's run line); null when it is not live. */
+  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number } | null => {
+    const entry = sessions.get(session);
+    return entry && isLive(entry) ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0 } : null;
+  };
+
   /**
    * Whether `session` of `host` holds or made a bridge poll within the live
    * window now: its connection (the Claude Code mod, Pi, OpenCode 2) will
@@ -953,8 +965,9 @@ export function createInboxLiveSessions(options: {
   /**
    * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
    * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
+   * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
    */
-  const route = async (req: Request, path: string, owner = false): Promise<Response | null> => {
+  const route = async (req: Request, path: string, owner = false, byGuest = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
@@ -1019,6 +1032,7 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
+      ...(byGuest ? { by_guest: true } : {}),
     });
     return answer({ message: result.message, replayed: result.replayed });
   };
@@ -1084,6 +1098,7 @@ export function createInboxLiveSessions(options: {
     route,
     allLive,
     isSessionLive,
+    runStateOf,
     pollsNow,
     composeTarget,
     connectionOf,
