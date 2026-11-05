@@ -259,6 +259,38 @@ describe("a launched agent that never starts", () => {
   });
 });
 
+describe("a teammate's PR assigned to the person, with no thread", () => {
+  const pullOf = (sha: string) => ghPull(891, { author: { login: "jun" }, headRefOid: sha });
+  const row891 = (answer: InboxReviewsAnswer) => answer.rows.find((row) => row.stacks.some((stack) => stack.layers.some((layer) => layer.number === 891)))!;
+
+  test("a posted review takes it off the person until a push moves past it, and comes through a reload of the store", async () => {
+    const assigned = { nodes: [pullOf("a".repeat(40))] };
+    const w = await world({ answer: { data: { ...GH_ANSWER.data, assigned } } });
+    await w.setCodeReview(true);
+    await w.call("send_message", { thread: "elsewhere", subject: "Something else", body: "So the Inbox knows this project." });
+    expect(row891(await w.reviews())).toMatchObject({ move: "on_you", reason: "assigned" });
+    expect((await w.post("/api/inbox/pulls/review", { key: key(891), head_sha: "a".repeat(40), action: "approve", body: "Good." })).status).toBe(200);
+    expect(row891(await w.reviews())).toMatchObject({ move: "waiting", reason: "others" });
+    expect(createInboxPullLinks(w.dataDir).posted().get(key(891))?.head).toBe("a".repeat(40));
+    assigned.nodes = [pullOf("b".repeat(40))];
+    try {
+      setSystemTime(new Date(Date.now() + 120_000));
+      const read = await fetch(`${w.base}/api/inbox/reviews?refresh=1`);
+      expect(row891((await read.json()) as InboxReviewsAnswer)).toMatchObject({ move: "on_you", reason: "assigned" });
+    } finally {
+      setSystemTime();
+    }
+  });
+
+  test("a record kept before heads were is read as it was, and still counts", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-posted-")));
+    roots.push(dir);
+    mkdirSync(inboxDir(dir), { recursive: true });
+    writeFileSync(join(inboxDir(dir), INBOX_PULL_LINKS_FILE), JSON.stringify({ v: 1, links: {}, posted: { old: "2026-11-04T11:00:00.000Z", bad: 7 } }));
+    expect([...createInboxPullLinks(dir).posted()]).toEqual([["old", { at: "2026-11-04T11:00:00.000Z", head: null }]]);
+  });
+});
+
 describe("a teammate's PR assigned to the person, reviewed by their agent", () => {
   const TEAMMATE = 891;
   const answer = { data: { ...GH_ANSWER.data, assigned: { nodes: [ghPull(TEAMMATE, { author: { login: "jun" } })] } } };

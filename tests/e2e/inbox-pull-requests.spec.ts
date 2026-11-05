@@ -1541,10 +1541,10 @@ test('New review: the picker says what it knows, and the summary never shows the
   await shot(page, 'n-picker-failed');
   await page.unroute('**/api/inbox/reviews*');
   await page.unroute('**/api/inbox/pulls?*');
-  await failed.locator('[data-compose-cancel]').click();
 
+  // Fresh, off the failed read: the box's summary, then the next choice with its read held back.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews`);
-  await page.reload();
   await page.locator('[data-reviews-new]').first().click();
   const box = page.locator('[data-review-box]');
   await expect(box.locator('[data-review-size]')).toBeVisible();

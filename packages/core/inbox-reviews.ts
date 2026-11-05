@@ -367,16 +367,26 @@ export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<Inb
   return repo === of || of.endsWith(`/${repo}`);
 }
 
+/** The person's last review posted on a PR from here. `head`: the commit it was on; null on one kept before heads were. */
+export interface InboxReviewPosted {
+  at: string;
+  head: string | null;
+}
+
 /**
  * A PR row (no review thread): On you when a teammate asked for the person's review, else not reviewed. One assigned
- * to them is On you until they've posted a review of it (`posted`: pull key → when), then Waiting on others.
+ * to them is On you until they've posted a review of it, then Waiting on others, until a push moves it past that review.
  */
-export function inboxReviewPullMove(stack: InboxPullStack, posted?: ReadonlyMap<string, string>): { move: InboxReviewMove; reason: InboxReviewReason } {
+export function inboxReviewPullMove(stack: InboxPullStack, posted?: ReadonlyMap<string, InboxReviewPosted>): { move: InboxReviewMove; reason: InboxReviewReason } {
   const theirs = stack.layers.filter((pull) => inboxPullIsOpen(pull) && !pull.mine);
   if (theirs.some((pull) => pull.requested)) return { move: "on_you", reason: "requested" };
   const assigned = theirs.filter((pull) => pull.assigned);
   if (assigned.length === 0) return { move: "not_reviewed", reason: "not_reviewed" };
-  return assigned.some((pull) => !posted?.has(pull.key)) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
+  const answered = (pull: InboxPull) => {
+    const review = posted?.get(pull.key);
+    return !!review && (!review.head || !pull.head_sha || review.head === pull.head_sha);
+  };
+  return assigned.every(answered) ? { move: "waiting", reason: "others" } : { move: "on_you", reason: "assigned" };
 }
 
 export interface InboxReviewGroups {
@@ -489,8 +499,8 @@ export function inboxReviewRows(input: {
   started?: ReadonlyMap<string, InboxReviewStart>;
   /** The thread's agent ended: a started review with no card is curated by no one, so it has no row. */
   ended?: (threadId: string) => boolean;
-  /** When the person last posted a review on a PR from here (pull key → time): their answer to any review before it. */
-  posted?: ReadonlyMap<string, string>;
+  /** The person's last review posted on a PR from here, by pull key: their answer to any review before it. */
+  posted?: ReadonlyMap<string, InboxReviewPosted>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
@@ -526,7 +536,7 @@ export function inboxReviewRows(input: {
     rows.push({
       id: threadId,
       reviewed: true,
-      ...inboxReviewMove(review, open, !!review && open.some((pull) => (input.posted?.get(pull.key) ?? "") >= review.reviewed_at)),
+      ...inboxReviewMove(review, open, !!review && open.every((pull) => (input.posted?.get(pull.key)?.at ?? "") >= review.reviewed_at)),
       thread_id: threadId,
       review,
       stacks,

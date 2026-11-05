@@ -2,7 +2,7 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: time } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: { at, head } } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
  * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
@@ -16,12 +16,12 @@
  * `landed`: a review thread's PR once it merged or closed (core's `InboxReviewLanding`), so Reviews still knows after
  * the forge's list stopped carrying it.
  *
- * `posted`: when the person last posted a review on a PR from here. The forge's list doesn't say, and an assignment
- * stays on the forge afterwards, so Reviews counts it as their answer.
+ * `posted`: the person's last review posted on a PR from here, when and on which commit. The forge's list doesn't say,
+ * and an assignment stays on the forge afterwards, so Reviews counts it as their answer. An older record is a bare time.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewStart } from "@plannotator/core/inbox-types";
+import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewPosted, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
@@ -56,10 +56,10 @@ export interface InboxPullLinks {
   /** New reviews on local changes, by thread. */
   started(): ReadonlyMap<string, InboxReviewStart>;
   start(threadId: string, start: InboxReviewStart): void;
-  /** Pull key → when the person last posted a review on it from here. */
-  posted(): ReadonlyMap<string, string>;
-  /** The review went: never fails the post that already happened (a read-only folder keeps it in memory). */
-  markPosted(key: string, at?: string): void;
+  /** Pull key → the person's last review posted on it from here. */
+  posted(): ReadonlyMap<string, InboxReviewPosted>;
+  /** The review went, on commit `head`: never fails the post that already happened (a read-only folder keeps it in memory). */
+  markPosted(key: string, head: string, at?: string): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -68,7 +68,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   let links: Map<string, InboxPullOwner> | null = null;
   const landed = new Map<string, InboxReviewLanding>();
   const started = new Map<string, InboxReviewStart>();
-  const posted = new Map<string, string>();
+  const posted = new Map<string, InboxReviewPosted>();
 
   const load = (): Map<string, InboxPullOwner> => {
     if (links) return links;
@@ -94,7 +94,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
         if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
       }
-      for (const [key, at] of Object.entries(parsed.posted ?? {})) if (typeof at === "string") posted.set(key, at);
+      for (const [key, value] of Object.entries(parsed.posted ?? {})) {
+        const review = value as Partial<InboxReviewPosted> | string | null;
+        if (typeof review === "string") posted.set(key, { at: review, head: null });
+        else if (typeof review?.at === "string") posted.set(key, { at: review.at, head: typeof review.head === "string" ? review.head : null });
+      }
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -164,10 +168,10 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       load();
       return posted;
     },
-    markPosted(key, at = new Date().toISOString()) {
+    markPosted(key, head, at = new Date().toISOString()) {
       const map = load();
       posted.delete(key);
-      posted.set(key, at);
+      posted.set(key, { at, head });
       while (posted.size > INBOX_PULL_LINKS_MAX) posted.delete(posted.keys().next().value!);
       try {
         save(map);
