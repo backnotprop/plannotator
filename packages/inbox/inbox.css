@@ -7712,7 +7712,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) :is(.ib-seg, .ib-gtab) { height: 29px; box-sizing: border-box; border: 0; background: var(--muted); align-items: stretch; }
 .pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) .ib-seg-o { height: auto; padding: 0 8px; font-size: var(--ib-fs-13, 13px); font-weight: 400; }
 .pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) .ib-seg-o[data-on] { background: var(--background); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
-.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-strip { container: prr-strip / inline-size; height: 33px; padding: 0 8px 0 6px; gap: 8px; background: var(--muted); border-bottom: 0; }
+.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-strip { container: ib-prr-strip / inline-size; height: 33px; padding: 0 8px 0 6px; gap: 8px; background: var(--muted); border-bottom: 0; }
 .ib-prr-wide .ib-prr-layers { flex: 0 1 auto; align-self: flex-end; margin-right: auto; }
 .pn-inbox .ib-prr-wide .ib-prr-layer { height: 28px; padding: 0 12px; border-radius: 8px 8px 0 0; font-weight: 400; }
 .pn-inbox .ib-prr-wide .ib-prr-layer:not(:disabled):hover { background: color-mix(in oklab, var(--background) 50%, transparent); }
@@ -7722,7 +7722,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-controls { display: flex; flex: none; align-items: center; gap: 8px; }
 .ib-prr-controls [data-guide-global-comment-add] { padding-block: 4px; }
 /* Where the row runs short the layers keep their room: Global comment keeps its globe and its tooltip. */
-@container prr-strip (max-width: 760px) {
+@container ib-prr-strip (max-width: 760px) {
   .ib-prr-controls [data-guide-global-comment-add] > span { display: none; }
 }
 .ib-viewer.ib-prreview.ib-prr-wide .ib-prr-foot { height: 37px; padding-block: 0; }

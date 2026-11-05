@@ -980,6 +980,12 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
       )
       .toBe(true);
   }
+  // A short strip leaves its room to the layers: Global comment gives up its words (its globe and tooltip stay).
+  const addWidth = () => review.locator('[data-guide-global-comment-add]').evaluate((el) => el.getBoundingClientRect().width);
+  await page.setViewportSize({ width: 800, height: 900 });
+  await expect.poll(addWidth).toBeLessThan(40);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect.poll(addWidth).toBeGreaterThan(100);
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
