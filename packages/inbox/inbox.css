@@ -7678,6 +7678,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* Each card's Edit and Delete: 44 px targets in a row no taller, the outer icon where it was. */
   .ib-review .ib-gpanel [data-annotation-panel] .ml-auto { margin-right: -10px; }
   .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button { display: grid; place-items: center; width: 44px; height: 44px; margin-block: -10px; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button::before { content: none; }
   .ib-rvcard { padding: 12px 14px 14px; }
   .pn-inbox .ib-rvc-foot .ib-btn { min-height: 44px; }
 }

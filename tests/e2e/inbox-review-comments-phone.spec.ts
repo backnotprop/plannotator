@@ -61,12 +61,12 @@ async function expectTarget(control: Locator): Promise<void> {
   const inside = await control.evaluate((el) => {
     const r = el.getBoundingClientRect();
     const [cx, cy] = [r.left + r.width / 2, r.top + r.height / 2];
-    return [[-21, -21], [21, -21], [-21, 21], [21, 21]].every(([dx, dy]) => {
+    return [[-21, 0], [21, 0], [0, -21], [0, 21]].map(([dx, dy]) => {
       const hit = document.elementFromPoint(cx + dx!, cy + dy!);
-      return !!hit && (hit === el || el.contains(hit));
+      return !!hit && (hit === el || el.contains(hit)) ? 'ok' : `${hit?.tagName}.${hit?.className}`;
     });
   });
-  expect(inside).toBe(true);
+  expect(inside).toEqual(['ok', 'ok', 'ok', 'ok']);
 }
 
 for (const [name, open] of Object.entries(opens)) {
@@ -136,9 +136,12 @@ test('a phone, a pull request: a comment chosen in the sheet closes it, to show 
 test('a phone, a guided review: a selection bar on the page goes when Comments opens, and nothing floats over the sheet', async ({ browser }) => {
   const { context, page } = await windowAt(browser, 390, 844, true);
   try {
+    // An agent that can answer, as Show me's spec has a live one: only then does a selection open on the bar.
+    await page.route(/\/threads\/[^/]+\/ask(\?.*)?$/, (route) => route.fulfill({ json: { conversation: null, running: null, can_ask: true } }));
     await openReview(world, page);
     const line = page.locator(`[data-guide-file-shell="${SHORT_FILE}"] [data-line-type="change-addition"][data-column-number="4"]`).first();
-    await line.scrollIntoViewIfNeeded();
+    await expect(line).toBeVisible({ timeout: 30_000 });
+    await page.waitForTimeout(300);
     await line.click();
     const bar = page.locator('[data-selection-chooser]');
     await expect(bar).toBeVisible();
