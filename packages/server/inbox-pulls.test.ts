@@ -885,7 +885,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       }
     });
 
-    test("a whole stack's diff carries this layer's, from one read beside its compare, and each layer has its own", async () => {
+    test("a whole stack's diff carries this layer's, from the head reads around its compare, and each layer has its own", async () => {
       const f = forge();
       f.bodies["412"] = "The schedule.";
       f.bodies["413"] = "The backoff.";
@@ -893,7 +893,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       await pulls.list(repos);
       const before = reads(f).length;
       expect((await pulls.diff(KEY, "stack")).description).toBe("The schedule.");
-      expect(reads(f).length).toBe(before + 1);
+      expect(reads(f).length).toBe(before + 2);
       expect((await pulls.diff("github.com/northwind/billing-svc#413", "stack")).description).toBe("The backoff.");
       expect((await pulls.diff("github.com/northwind/billing-svc#413", "layer")).description).toBe("The backoff.");
     });
