@@ -867,6 +867,16 @@ test.skipIf(!hasDom)('Start a new agent closes the picker: it does not come back
   expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
 });
 
+test.skipIf(!hasDom)('a repository with no project: Start a new agent is not offered, since compose would have nowhere to start it', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const launched: string[] = [];
+  mount(<Page answer={{ ...model, links: {}, projects: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
+  await settle();
+  await openPicker();
+  expect(document.querySelector('[data-pulls-picker-new]')).toBeNull();
+  expect(launched).toEqual([]);
+});
+
 test.skipIf(!hasDom)('Start a new agent shows once the Inbox can start one: it opens compose with the first message, the stack\'s PRs and their project, and the chosen ask', async () => {
   sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }, { agent: 'codex', name: 'Codex' }], projects: [] } };
   const launched: { keys: readonly string[]; projects: readonly string[]; body: string; askLine: string; threadName: string }[] = [];

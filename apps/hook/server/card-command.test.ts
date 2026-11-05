@@ -11,6 +11,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -35,6 +36,8 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 function sandbox() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-card-cli-")));
@@ -48,7 +51,7 @@ function sandbox() {
   writeFileSync(browser, `#!/bin/sh\necho "$1" >> '${browserMarker}'\n`);
   chmodSync(browser, 0o755);
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ...agents.env,
     HOME: home,
     TMPDIR: tmpdir(),
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -191,11 +194,26 @@ describe.if(INBOX_CARD_ACTION_ON)("plannotator card", () => {
     expect(help.stdout).toContain("--ref <issue or PR>");
     expect(HIDDEN_SUBCOMMANDS.has("card")).toBe(false);
     const top = await plannotator(box, ["--help"]);
-    expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list>");
+    expect(top.stdout).toContain("plannotator card <create|move|say|link|ship|drop|list|initiative_delete>");
   }, 30_000);
 
   // The agent tool's Board-off line (INBOX_TOOL_BOARD_OFF_NOTE) sends agents here while the Board is off:
   // the help must answer then, reach no Inbox, and say where the person turns the Board on.
+  test("the CLI prints the nudge when a call made an initiative, and not when it joined one", async () => {
+    const box = sandbox();
+    await seed(box);
+    const nudge = 'Made initiative "Billing". When its work is done, delete it (initiative_delete); its cards stay.';
+    const made = await card(box, ["create", "Schema step", "--initiative", "Billing"]);
+    expect(made.code).toBe(0);
+    expect(made.stdout).toContain(nudge);
+    const joined = await card(box, ["create", "Invoices", "--initiative", "billing"]);
+    expect(joined.code).toBe(0);
+    expect(joined.stdout).toContain('initiative "Billing"');
+    expect(joined.stdout).not.toContain("delete it");
+    const help = await card(box, ["--help"]);
+    expect(help.stdout).toContain("When an initiative's work is done, delete it (`initiative_delete`); its cards stay.");
+  }, 30_000);
+
   test("--help with the Board off exits 0, starts or reaches no Inbox, and says where to turn the Board on", async () => {
     const box = sandbox();
     writeFileSync(join(box.dataDir, "config.json"), JSON.stringify({ inboxBoard: false }));
@@ -238,5 +256,10 @@ describe("parseCardCommand", () => {
     expect(parseCardCommand(["say", "crd_x", "a", "--say", "b"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["create"])).toMatchObject({ ok: false });
     expect(parseCardCommand(["list", "--all"])).toMatchObject({ ok: true, args: { op: "list", include_resolved: true } });
+    // --initiative names one; "" (take the card out) reaches the tool as "", not as a missing value.
+    expect(parseCardCommand(["create", "Invoices", "--initiative", "Billing"])).toMatchObject({ ok: true, args: { op: "create", title: "Invoices", initiative: "Billing" } });
+    expect(parseCardCommand(["say", "crd_x", "--initiative", ""])).toMatchObject({ ok: true, args: { op: "say", card_id: "crd_x", initiative: "" } });
+    expect(parseCardCommand(["initiative_delete", "Billing"])).toMatchObject({ ok: true, args: { op: "initiative_delete", initiative: "Billing" } });
+    expect(parseCardCommand(["initiative_delete"])).toMatchObject({ ok: false });
   });
 });

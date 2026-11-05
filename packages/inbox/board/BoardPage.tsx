@@ -23,6 +23,7 @@ import { BoardIntro, useCopyBoardPrompt } from './BoardIntro';
 import { TidyMenu, type TidyController } from '../components/Tidy';
 import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
 import { InitiativesDialog } from './InitiativesDialog';
+import { restoreInitiatives } from './initiativeUndo';
 import { projectNames } from '../search/model';
 import {
   agentState,
@@ -34,6 +35,7 @@ import {
   cardsInInitiative,
   cardsInProject,
   initiativeCounts,
+  initiativeDeletedToast,
   liveInitiatives,
   newCardInitiative,
   inDoneLane,
@@ -187,8 +189,6 @@ export function BoardPage(props: BoardPageProps) {
   const liveCount = cards.filter(onLanes).length;
   // The filter's counts: the cards on the lanes of the picked project, per initiative (and in none).
   const filterCounts = initiativeCounts(projectCards.filter(onLanes), initiatives);
-  // The Initiatives dialog's: every card in each, any column (what a delete leaves in none).
-  const cardCounts = initiativeCounts(allCards, initiatives);
   /** Put a card in an initiative (or none): the card menu's Initiative and the opened card's. */
   const setInitiative = async (card: InboxCardWire, next: string | null) => {
     setFailed(null);
@@ -242,6 +242,19 @@ export function BoardPage(props: BoardPageProps) {
       setSaid(moveSaid(card, moved));
     }
     return moved;
+  };
+  /**
+   * The Initiatives dialog closed with its Undo still up: the window's toast takes it over, so Done never loses it.
+   * Every restore is tried (`restoreInitiatives`); a failed save offers Undo again, a name taken since only says so.
+   */
+  const undoableInitiatives = (deleted: readonly InboxInitiative[]) => {
+    props.onToast?.({ icon: 'check', ...initiativeDeletedToast(deleted), onUndo: () => void undoInitiatives(deleted) });
+  };
+  const undoInitiatives = async (deleted: readonly InboxInitiative[]) => {
+    props.onToast?.(null);
+    const { left, line } = await restoreInitiatives(deleted);
+    if (line) props.onToast?.({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoInitiatives(left) } : {}) });
+    props.onChanged();
   };
   /**
    * The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now.
@@ -687,11 +700,11 @@ export function BoardPage(props: BoardPageProps) {
       {managing && (
         <InitiativesDialog
           initiatives={initiatives}
-          cardCounts={cardCounts}
           start={managing}
           phone={phone}
           onClose={() => setManaging(null)}
           onChanged={() => props.onChanged()}
+          onCloseWithUndo={undoableInitiatives}
           fallbackFocus={() => pageRef.current?.querySelector<HTMLElement>('[data-board-filter-button]') ?? null}
         />
       )}

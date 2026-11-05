@@ -1,7 +1,7 @@
 // The Shape dev harness: ShapeSurface over the in-memory fixture host, for
 // screenshots and trying the board by hand. Nothing ships this page.
 //
-//   ?view=picture|how|reqs|code   the view to open on
+//   ?view=picture|how|know|code   the view to open on
 //   ?panel=ask|thread|refs        open the panel
 //   ?theme=light|dark
 //   ?stage=before                 the Code view before implementation
@@ -26,7 +26,7 @@ configurePlannotatorUI({ serverSync: () => {} });
 
 const q = new URLSearchParams(location.search);
 const theme = q.get('theme') === 'dark' ? 'dark' : 'light';
-const view = (['picture', 'how', 'reqs', 'code'].includes(q.get('view') ?? '') ? q.get('view') : 'picture') as ShapeViewId;
+const view = (['picture', 'how', 'know', 'code'].includes(q.get('view') ?? '') ? q.get('view') : 'picture') as ShapeViewId;
 const panel = (['ask', 'thread', 'refs'].includes(q.get('panel') ?? '') ? q.get('panel') : null) as ShapePanelTab | null;
 
 function HoverCard(props: ShapeCodeHoverCardProps) {
@@ -63,6 +63,7 @@ function Harness() {
   if (q.get('diagram') === '1') return <Diagram />;
   return (
     <ShapeSurface
+      readFirst
       host={{ ...host, codeHover: async (_id, req) => hoverFor(req.symbol) }}
       id={host.id}
       CodeGuide={ShapeCodeGuide}

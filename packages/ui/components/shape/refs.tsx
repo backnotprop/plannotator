@@ -1,8 +1,8 @@
 // A board's numbered references: small bubbles beside the words they source,
 // and the same numbers in the panel's References list. Hovering a bubble
 // lights its row; a row flashes its bubble; Open shows it in the real viewer.
-import React, { createContext, useContext } from 'react';
-import { shapeLinkUrl, type ShapeRef, type ShapeRefKind } from '@plannotator/core/shape';
+import React, { createContext, useContext, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { shapeLinkUrl, shapeUrlAllowed, type ShapeRef, type ShapeRefKind } from '@plannotator/core/shape';
 
 export interface RefsState {
   refs: readonly ShapeRef[];
@@ -10,11 +10,13 @@ export interface RefsState {
   flash: number | null;
   onHover: (n: number | null) => void;
   onOpen: (n: number) => void;
+  /** The bubble's preview: hover or keyboard focus shows it (null hides it), a tap pins it. */
+  onPeek?: (n: number | null, el: HTMLElement, how: 'hover' | 'focus' | 'tap') => void;
 }
 
 export const RefsCtx = createContext<RefsState>({ refs: [], hover: null, flash: null, onHover: () => {}, onOpen: () => {} });
 
-/** A bubble in the board's own markup (the header's claim, Requirements). Drawn views get theirs from ShapeDrawn. */
+/** A bubble in the board's own markup (the header's claim, What to know). Drawn views get theirs from ShapeDrawn. */
 export function Bubble({ n }: { n: number }) {
   const r = useContext(RefsCtx);
   const ref = r.refs.find((x) => x.n === n);
@@ -24,15 +26,35 @@ export function Bubble({ n }: { n: number }) {
     className: cls,
     'data-ref': n,
     'aria-label': `Reference ${n}: ${ref.title}`,
-    onPointerEnter: () => r.onHover(n),
-    onPointerLeave: () => r.onHover(null),
+    onPointerEnter: (e: React.PointerEvent<HTMLElement>) => {
+      r.onHover(n);
+      if (e.pointerType !== 'touch') r.onPeek?.(n, e.currentTarget, 'hover');
+    },
+    onPointerLeave: (e: React.PointerEvent<HTMLElement>) => {
+      r.onHover(null);
+      if (e.pointerType !== 'touch') r.onPeek?.(null, e.currentTarget, 'hover');
+    },
+    onFocus: (e: React.FocusEvent<HTMLElement>) => {
+      if (e.currentTarget.matches(':focus-visible')) r.onPeek?.(n, e.currentTarget, 'focus');
+    },
+    onBlur: (e: React.FocusEvent<HTMLElement>) => r.onPeek?.(null, e.currentTarget, 'focus'),
   };
   // A PR or link is a real link, so the host's GitHub hover card (RefHoverCards) opens on it.
   if (ref.kind === 'pr' || ref.kind === 'link') {
     return <a {...common} href={shapeLinkUrl(ref.target) ?? undefined} target="_blank" rel="noreferrer">{n}</a>;
   }
   return (
-    <button type="button" {...common} title={ref.title} onClick={(e) => { e.stopPropagation(); r.onOpen(n); }}>
+    <button
+      type="button"
+      {...common}
+      title={r.onPeek ? undefined : ref.title}
+      onClick={(e) => {
+        e.stopPropagation();
+        // A touch tap has no hover, so the first one shows the bubble.
+        if (r.onPeek && (e.nativeEvent as PointerEvent).pointerType === 'touch') r.onPeek(n, e.currentTarget, 'tap');
+        else r.onOpen(n);
+      }}
+    >
       {n}
     </button>
   );
@@ -77,5 +99,150 @@ export function RefList({ onShow, canOpen }: { onShow: (n: number) => void; canO
         </li>
       ))}
     </ol>
+  );
+}
+
+/** The picture a reference shows in its bubble: the first of `images`, or an image reference's own file. */
+export function shapeRefPicture(ref: ShapeRef): { src: string; alt: string; crop?: [number, number, number, number] } | null {
+  const first = ref.images?.find((im) => shapeUrlAllowed(im.src));
+  if (first) return first;
+  return ref.kind === 'image' && shapeUrlAllowed(ref.target) ? { src: ref.target, alt: ref.title } : null;
+}
+
+const OPEN_WORD: Record<ShapeRefKind, string> = { image: 'View', file: 'Open file', diff: 'Open diff', message: 'Go to message', pr: 'Open', link: 'Open' };
+
+/**
+ * A reference's bubble: it pops out beside its number with a small real picture (or, for a file, the
+ * lines it points at) and one line. The picture or the title opens the full view, in the same viewers
+ * the number and the References list use. Placed by the anchor's rect, inside the board.
+ */
+export function RefPeek({
+  reference,
+  anchor,
+  bounds,
+  obstacles,
+  canOpen,
+  resolveSrc,
+  readFile,
+  onOpen,
+  onOpenLink,
+  onEnter,
+  onLeave,
+}: {
+  reference: ShapeRef;
+  anchor: DOMRect;
+  bounds: DOMRect;
+  /** What the bubble should try not to hide. */
+  obstacles?: { rect: DOMRect; number: boolean }[];
+  canOpen: boolean;
+  resolveSrc: (src: string) => string;
+  readFile?: (path: string) => Promise<string | null>;
+  /** The full view: the lightbox for a picture, the file, the diff, or the message. */
+  onOpen: () => void;
+  /** A PR's or link's own page, in a new tab. */
+  onOpenLink?: () => void;
+  onEnter: () => void;
+  onLeave: () => void;
+}) {
+  const box = useRef<HTMLDivElement>(null);
+  const [place, setPlace] = useState<{ left: number; top: number; origin: string; side: string; dot: number } | null>(null);
+  const [lines, setLines] = useState<string[] | null>(null);
+  const picture = shapeRefPicture(reference);
+  const isLink = reference.kind === 'pr' || reference.kind === 'link';
+
+  useEffect(() => {
+    setLines(null);
+    if (picture || reference.kind !== 'file' || !readFile) return;
+    let live = true;
+    void readFile(reference.target).then((text) => {
+      if (!live || text == null) return;
+      const at = Math.max(0, (reference.line ?? 1) - 2);
+      setLines(text.split('\n').slice(at, at + 6));
+    });
+    return () => {
+      live = false;
+    };
+  }, [reference.n, reference.target, reference.line, reference.kind, picture?.src, readFile]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useLayoutEffect(() => {
+    const el = box.current;
+    if (!el) return;
+    const M = 10;
+    const w = el.offsetWidth;
+    const h = el.offsetHeight;
+    const minX = bounds.left + M;
+    const maxX = bounds.right - w - M;
+    const minY = bounds.top + M;
+    const maxY = bounds.bottom - h - M;
+    const clamp = (v: number, a: number, b: number) => Math.max(a, Math.min(v, Math.max(a, b)));
+    const GAPX = 24; // room for the two dots
+    const midY = clamp(anchor.top + anchor.height / 2 - h / 2, minY, maxY);
+    const midX = clamp(anchor.left + anchor.width / 2 - w / 2, minX, maxX);
+    const sides = [
+      { side: 'right', left: anchor.right + GAPX, top: midY, origin: 'left center' },
+      { side: 'left', left: anchor.left - GAPX - w, top: midY, origin: 'right center' },
+      { side: 'over', left: midX, top: anchor.top - GAPX - h, origin: 'center bottom' },
+      { side: 'under', left: midX, top: anchor.bottom + GAPX, origin: 'center top' },
+    ].filter((c) => c.left >= minX && c.left <= Math.max(minX, maxX) && c.top >= minY && c.top <= Math.max(minY, maxY));
+    // The side that hides no other number if it can, then the least of the drawing.
+    const cost = (c: { left: number; top: number }) =>
+      (obstacles ?? []).reduce((sum, o) => {
+        const x = Math.min(c.left + w, o.rect.right) - Math.max(c.left, o.rect.left);
+        const y = Math.min(c.top + h, o.rect.bottom) - Math.max(c.top, o.rect.top);
+        return x > 0 && y > 0 ? sum + (o.number ? 1_000_000 : x * y) : sum;
+      }, 0);
+    const best = sides.length ? sides.map((c) => ({ c, v: cost(c) })).sort((a, b) => a.v - b.v)[0]!.c : { side: 'under', left: midX, top: clamp(anchor.bottom + GAPX, minY, maxY), origin: 'center top' };
+    const sideways = best.side === 'right' || best.side === 'left';
+    setPlace({ ...best, dot: sideways ? clamp(anchor.top + anchor.height / 2 - best.top - 4, 14, h - 22) : clamp(anchor.left + anchor.width / 2 - best.left - 4, 14, w - 22) });
+  }, [anchor, bounds, lines, reference.n]);
+
+  const open = canOpen ? onOpen : undefined;
+  return (
+    <div
+      ref={box}
+      className="shp-peek"
+      role="group"
+      aria-label={`Reference ${reference.n}: ${reference.title}`}
+      style={place ? ({ left: place.left, top: place.top, transformOrigin: place.origin, '--dot': `${place.dot}px` } as React.CSSProperties) : { left: -9999, top: 0, visibility: 'hidden' }}
+      data-placed={place ? '' : undefined}
+      data-side={place?.side}
+      onPointerEnter={onEnter}
+      onPointerLeave={onLeave}
+    >
+      {picture ? (
+        <button type="button" className="shp-peek-pic" onClick={open} aria-label={`View ${picture.alt || reference.title} full size`} tabIndex={-1}>
+          {picture.crop ? (
+            <span
+              className="shp-peek-crop"
+              role="img"
+              aria-label={picture.alt || reference.title}
+              style={{
+                backgroundImage: `url("${encodeURI(resolveSrc(picture.src))}")`,
+                backgroundSize: `${100 / picture.crop[2]}% auto`,
+                backgroundPosition: `${picture.crop[2] < 1 ? (picture.crop[0] / (1 - picture.crop[2])) * 100 : 0}% ${picture.crop[3] < 1 ? (picture.crop[1] / (1 - picture.crop[3])) * 100 : 0}%`,
+              }}
+            />
+          ) : (
+            <img src={resolveSrc(picture.src)} alt={picture.alt || reference.title} />
+          )}
+        </button>
+      ) : lines ? (
+        <button type="button" className="shp-peek-code" onClick={open} tabIndex={-1} aria-label={`Open ${reference.target}`}>
+          <code>{lines.map((l, i) => <span key={i}>{l || ' '}</span>)}</code>
+        </button>
+      ) : null}
+      <div className="shp-peek-txt">
+        <div className="shp-peek-t">
+          <span className="shp-rb static">{reference.n}</span>
+          <b>{reference.title}</b>
+        </div>
+        {reference.sub && <p>{reference.sub}</p>}
+        <div className="shp-peek-acts">
+          {!isLink && canOpen && <button type="button" tabIndex={-1} onClick={onOpen}>{OPEN_WORD[reference.kind]}</button>}
+          {isLink && picture && <button type="button" tabIndex={-1} onClick={onOpen}>View</button>}
+          {isLink && <button type="button" tabIndex={-1} onClick={onOpenLink}>{reference.kind === 'pr' ? 'Open pull request' : 'Open link'} ↗</button>}
+        </div>
+      </div>
+    </div>
   );
 }

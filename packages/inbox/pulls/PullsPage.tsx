@@ -4,7 +4,7 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
- * - The head: "PRs", and on its right the filter mark (approval
+ * - The head: "Reviews", and on its right the filter mark (approval
  *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
  *   To review, Others) and the project, kept in the address (`&view=`,
  *   `&project=`) and named once in a quiet line over the list.
