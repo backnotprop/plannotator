@@ -207,7 +207,7 @@ test.skipIf(!hasDom)('an HTML file opens full screen with the toolbar showing, e
   expect(chromeCookie()).toBe(before);
 });
 
-test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes it to the one mode; the drawer left open comes back with the next file; a step keeps full screen', async () => {
+test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes it to the one mode; a step keeps full screen and closes the comments panel; it stays closed when the file comes back', async () => {
   const el = await renderThread();
   await openTile('plan.md');
   expect(inFullScreen()).toBe(false);
@@ -219,20 +219,22 @@ test.skipIf(!hasDom)('a markdown file opens beside the thread; Full screen takes
 
   await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-comments]')!.click());
   expect(view()!.classList.contains('ib-drawer')).toBe(true);
-  // A step to the HTML file keeps full screen and the drawer (the thread's order: page.html is before plan.md).
+  // A step to the HTML file keeps full screen; the panel was about the file left, so it closes (the thread's order: page.html is before plan.md).
   await act(async () => {
     view()!.dispatchEvent(new KeyboardEvent('keydown', { key: '[', bubbles: true, cancelable: true }));
   });
   await until(() => view()?.getAttribute('data-attachment-pane') === world.openIn.ids['page.html'], 'the step');
   expect(inFullScreen()).toBe(true);
-  expect(view()!.classList.contains('ib-drawer')).toBe(true);
+  expect(view()!.classList.contains('ib-drawer')).toBe(false);
 
-  // Closed, then another file taken full screen: the drawer is open as it was left.
+  // Open again, then the file closed and another taken full screen: the panel starts closed.
+  await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-comments]')!.click());
+  expect(view()!.classList.contains('ib-drawer')).toBe(true);
   await act(async () => el.querySelector<HTMLButtonElement>('[data-full-view-exit="exit"]')!.click());
   await close();
   await until(() => view() === null, 'the file closed');
   await openTile('plan.md');
   await act(async () => el.querySelector<HTMLButtonElement>('.ib-vhead [data-full-screen-toggle]')!.click());
   await until(inFullScreen, 'full screen');
-  expect(view()!.classList.contains('ib-drawer')).toBe(true);
+  expect(view()!.classList.contains('ib-drawer')).toBe(false);
 });

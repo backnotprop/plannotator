@@ -1922,7 +1922,6 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 /* Full screen: no header, so the band floats at the top left like the changed chip (the toolbar holds the top right). */
 .ib-view.ib-fullview .ib-linkband { position: absolute; top: 12px; left: 12px; z-index: 8; max-width: calc(100% - 360px); box-sizing: border-box; padding: 5px 12px 5px 6px; border-radius: 10px; border: 1px solid var(--border); background: var(--popover); color: var(--popover-foreground); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28); }
 :root.light .ib-view.ib-fullview .ib-linkband { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-linkband { max-width: calc(100% - 680px); min-width: min(320px, calc(100% - 24px)); }
 .ib-view.ib-fullview.ib-phone .ib-linkband { top: calc(10px + env(safe-area-inset-top)); left: 10px; right: 10px; max-width: none; }
 /* The page starts below the floating band, so nothing at its top is hidden under it. */
 .ib-view.ib-fullview .ib-linkedframe { margin-top: calc(var(--ib-linkband-h, 40px) + 20px); }
@@ -1991,15 +1990,36 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 /* the viewer's Global comment and Copy float right by the window's width; in a narrow pane they sit on their own line, as on a phone */
 .ib-fold [data-sticky-actions] { float: none; justify-content: flex-end; margin: 0 -4px 6px 0; }
 
-/* Full screen (approval "inbox-one-fullscreen", Drawer): one mode. The file fills the window; what floats over it is
-   one toolbar (it gathers into the corner control, "inbox-fullscreen-gather"), the changed chip (it stays), the step
-   chip and the question row. The comments are a drawer beside the page: the page narrows, it is not covered (no width
-   animation: the page reflows once). On a phone the drawer is the bottom sheet (its rules are in the phone query). */
+/* Full screen (approval "inbox-one-fullscreen"): one mode. The file fills the window; what floats over it is one
+   toolbar (it gathers into the corner control, "inbox-fullscreen-gather"), the changed chip (it stays), the step chip
+   and the question row. The comments float over the page at its right, under the toolbar, in the toolbar's material:
+   the page keeps its whole width, and the panel is as tall as what it lists, up to the window's foot. It gathers into
+   the corner control with the tools (below, with the others). On a phone the comments are the bottom sheet (its rules
+   are in the phone query). */
 .ib-view.ib-full.ib-fullview { grid-template-rows: minmax(0, 1fr); }
 .ib-view.ib-fullview .ib-vbody { grid-template-columns: minmax(0, 1fr); position: relative; }
 .ib-view.ib-fullview .ib-apanel { display: none; }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-vbody { grid-template-columns: minmax(0, 1fr) 320px; }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { display: flex; border-left-color: color-mix(in oklch, var(--border) 60%, transparent); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel {
+  display: flex; position: absolute; top: 58px; right: 12px; width: 320px; max-height: calc(100% - 70px); z-index: 6;
+  overscroll-behavior: contain; border-radius: 14px; background: var(--popover); color: var(--popover-foreground);
+  border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2);
+  animation: ib-float-in 180ms cubic-bezier(0.22, 1, 0.36, 1); transition: var(--ib-gather-back);
+}
+:root.light .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); }
+@keyframes ib-float-in { from { opacity: 0; transform: translateX(12px); } }
+/* As tall as its list: the timeline and its earlier comments scroll inside once the window's foot is reached. */
+.pn-inbox .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel > [data-annotation-panel] { flex: 0 1 auto; height: auto; background: transparent; }
+.pn-inbox .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel > [data-annotation-panel] > .flex-1 { flex: 0 1 auto; }
+.pn-inbox .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel :is(.bg-card, .ib-earlier-row) { background: var(--popover); }
+/* The page's right edge is under the panel: its Contents rail yields while the panel is open. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .pn-contents-rail { visibility: hidden; }
+/* What is centred at the page's foot (the reply card, the step chip, the question row) keeps clear of the open panel:
+   centred on the window while it fits beside the panel (from about 1420 px), else moved left as far as it must. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) {
+  --ib-foot-c: min(50%, calc(100% - 368px - min(340px, (100% - 392px) / 2)));
+  --ib-foot-w: calc(100% - 392px);
+}
 /* the file's own layers (the viewer draws at z-50) stay under the toolbar and the sheets */
 .ib-view.ib-fullview .ib-docarea { isolation: isolate; z-index: 0; }
 .ib-fullview .ib-sheet-h { flex: none; display: flex; align-items: center; gap: 8px; height: 46px; padding: 0 6px 0 14px; border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); font-size: var(--ib-fs-13-5, 13.5px); }
@@ -2015,10 +2035,9 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
   --ib-gather-go: transform 340ms cubic-bezier(0.65, 0, 0.35, 1), opacity 200ms ease-in 140ms, visibility 0s linear 340ms;
   --ib-gather-back: transform 360ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms ease-out, visibility 0s linear 0s;
 }
-/* The dock: the toolbar and the corner control the tools gather into. It covers the page (left of an open drawer) and
+/* The dock: the toolbar and the corner control the tools gather into. It covers the page and
    takes no presses itself; the toolbar is placed from its top right, the corner control from a bottom corner. */
 .ib-fvdock { position: absolute; inset: 0; z-index: 8; pointer-events: none; }
-.ib-fvdock.ib-shift { right: 320px; }
 .ib-fvbar { pointer-events: auto; }
 .ib-fvbar { position: absolute; top: 12px; right: 12px; display: flex; align-items: center; gap: 2px; padding: 3px; border-radius: 11px; white-space: nowrap; background: color-mix(in oklch, var(--popover) 94%, transparent); color: var(--popover-foreground); border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.32), 0 1px 3px rgba(0, 0, 0, 0.2); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); transition: var(--ib-gather-back); }
 :root.light .ib-fvbar { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.08); }
@@ -2064,8 +2083,8 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 
 .ib-fvchip { position: absolute; left: 50%; bottom: calc(22px + var(--ib-fvfoot, 0px)); transform: translateX(-50%); z-index: 8; display: flex; align-items: center; gap: 10px; height: 38px; max-width: calc(100% - 32px); padding: 0 8px 0 14px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid var(--border); box-shadow: 0 12px 34px rgba(0, 0, 0, 0.34); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity 150ms ease, visibility 0s linear 150ms; }
 .ib-fvchip.ib-on { opacity: 1; visibility: visible; transition: opacity 150ms ease; }
-/* With the drawer open the chip is centred on the page, not under the drawer. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fvchip { left: calc((100% - 320px) / 2); max-width: calc(100% - 352px); }
+/* With the comments panel open the chip keeps clear of it, centred over the reply card. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fvchip { left: var(--ib-foot-c); max-width: var(--ib-foot-w); }
 .ib-fvchip .ib-stepn { color: var(--muted-foreground); font-variant-numeric: tabular-nums; font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-fvchip-nm { font-weight: 600; min-width: 0; overflow: hidden; }
 .ib-fvchip-note { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); background: var(--muted); border-radius: 6px; padding: 3px 8px; }
@@ -2074,8 +2093,8 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 @media (prefers-reduced-motion: reduce) { .ib-fvchip, .ib-fvchip.ib-on { transition: none; } }
 /* The question row comes back as an overlay at the foot (there is no bar to sit on). */
 .ib-view.ib-fullview > .ib-stepguard { position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 9; width: min(760px, calc(100% - 24px)); box-sizing: border-box; border: 1px solid color-mix(in oklab, var(--primary) 30%, transparent); border-radius: 10px; box-shadow: 0 12px 34px rgba(0, 0, 0, 0.3); }
-/* With the drawer open the question is on the page, as the chip is; the drawer's foot stays free to press. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-stepguard { left: calc((100% - 320px) / 2); width: min(760px, calc(100% - 344px)); }
+/* With the comments panel open the question keeps clear of it, as the chip does; the panel's foot stays free to press. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-stepguard { left: var(--ib-foot-c); width: min(680px, var(--ib-foot-w)); }
 /* The drawer's foot: what rides the next Send, and the way to the reply. */
 .ib-fvfoot { flex: none; display: flex; flex-direction: column; gap: 10px; padding: 12px 14px 14px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); background: var(--card); }
 .ib-fvsend { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
@@ -2179,7 +2198,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-view.ib-fullview:not(.ib-phone):not(:has(.ib-imgcompose)) { --ib-clearfoot: var(--ib-fvfoot, 0px); }
 .ib-view.ib-fullview:not(.ib-phone):has(.ib-imgcompose) { --ib-clearfoot: 0px; }
 .ib-view.ib-fullview:not(.ib-phone)[data-tools="pinned"]:not(:has(.ib-fcomp-pillwrap)):has(.ib-optcap) .ib-imgclear { bottom: calc(22px + var(--ib-clearfoot) + var(--ib-optcap-h)); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: calc((100% - 320px) / 2); max-width: calc(100% - 352px); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-optcap { left: var(--ib-foot-c); max-width: min(640px, var(--ib-foot-w)); }
 .ib-optcap-step { flex: none; display: inline-grid; place-items: center; width: 30px; height: 30px; padding: 0; border: 0; border-radius: 8px; background: transparent; color: var(--muted-foreground); cursor: pointer; pointer-events: auto; }
 @media (pointer: coarse) { .ib-view.ib-fullview:not(.ib-phone) { --ib-optcap-h: max(52px, calc(52px * var(--ib-type, 14) / 14)); } .ib-optcap-step { width: 44px; height: 44px; } }
 .ib-optcap-step:hover:not([aria-disabled="true"]) { background: var(--muted); color: var(--foreground); }
@@ -2209,7 +2228,6 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 /* The changed chip: the changed line, compact, at the top left. It is a fact about the file, so it does not tuck. */
 .ib-fvver { position: absolute; top: 12px; left: 12px; z-index: 8; display: flex; align-items: center; gap: 8px; min-height: 34px; max-width: calc(100% - 360px); box-sizing: border-box; padding: 6px 12px; border-radius: 10px; background: var(--popover); color: var(--popover-foreground); border: 1px solid color-mix(in oklab, var(--warning) 40%, var(--border)); box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-13, 13px); line-height: 1.3; }
 :root.light .ib-fvver { box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fvver { max-width: calc(100% - 680px); }
 .ib-fvver > .ib-ic { color: var(--warning); flex: none; }
 .ib-fvver-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-fvver .ib-vlink { flex: none; white-space: nowrap; }
@@ -6912,9 +6930,11 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 
 /* Minimized: a quiet 30 px pill at the foot, centred, in the card's material. The words say a draft waits; no dot, no motion. */
 .ib-fcomp-pillwrap { position: absolute; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: 9; transition: var(--ib-gather-back, opacity 180ms ease, visibility 0s linear 0s); }
-/* An HTML page's card sits on the pane, not inside the file as an image's or a film's does, so it does not narrow with the drawer: it keeps to the page beside the drawer (320 px, as the chip above it), and a phone's sheet hides it, as the sheet covers an image's card and hides the toolbar. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: calc((100% - 320px) / 2); }
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-fcomp { width: min(680px, calc(100% - 352px)); }
+/* The card (an HTML page's on the pane, an image's or a film's inside the file) keeps clear of the floating comments
+   panel: centred while it fits beside it, else moved left (--ib-foot-c). A phone's sheet hides it, as the sheet covers an
+   image's card and hides the toolbar. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: var(--ib-foot-c); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-fcomp { width: min(680px, var(--ib-foot-w)); }
 /* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
 .ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
@@ -6966,14 +6986,18 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 
 /* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
    its pill, the image's size bar and "Your marked-up copy" chip, a text file's toolstrip, its Contents button and the
-   Contents rail (inert as well, or hidden: nothing invisible takes focus). Each comes back the same way. The changed
+   Contents rail, and the open comments panel (inert as well, or hidden: nothing invisible takes focus). Each comes back
+   the same way. The changed
    chip stays: it is a fact about the file. GATHERED in FullViewBar.tsx is the same list. The rail's box holds its
    panel to the left of its ticks: it flies by the ticks (the pane measures its dock), scaled about them. */
 .ib-view.ib-fullview .pn-contents-rail { transform-origin: calc(100% - var(--pn-contents-dock-width, 36px) / 2) 50%; }
 .ib-view.ib-fullview :is(.ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transition: var(--ib-gather-back); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translate(calc(-50% + var(--ib-gx, 0px)), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); }
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { opacity: 0; visibility: hidden; pointer-events: none; transform: translate(var(--ib-gx, 0px), var(--ib-gy, 0px)) scale(var(--ib-gs, 0.92)); transition: var(--ib-gather-go); }
 @media (prefers-reduced-motion: reduce) {
+  .ib-view.ib-fullview.ib-drawer:not(.ib-phone) .ib-apanel { animation-name: ib-sp-fade; }
+  .ib-view.ib-fullview.ib-drawer:not(.ib-phone)[data-tools="tucked"] .ib-apanel { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail) { transform: none; }
   .ib-view.ib-fullview[data-tools="tucked"] :is(.ib-fcomp:not(.ib-phone), .ib-fcomp-pillwrap:not(.ib-phone)) { transform: translateX(-50%); }
 }
@@ -7458,8 +7482,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-annat .ib-annpop { left: auto; right: 0; bottom: 0; width: min(540px, 100%); }
 .ib-annfoot { left: 0; right: 0; bottom: calc(100% + 8px); padding-inline: inherit; }
 .ib-anncard { left: 50%; bottom: calc(28px + var(--ib-fcomp-h, 0px) + env(safe-area-inset-bottom)); transform: translateX(-50%); width: min(540px, calc(100% - 32px)); }
-/* Over an HTML page's card (it sits on the pane too): on the page beside the drawer, centred over the card. */
-.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: calc((100% - 320px) / 2); width: min(540px, calc(100% - 352px)); }
+/* Over an HTML page's card (it sits on the pane too): clear of the floating comments panel, centred over the card. */
+.ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-anncard { left: var(--ib-foot-c); width: min(540px, var(--ib-foot-w)); }
 /* A tall card in a short window leaves the list what is above it, and keeps its Close on screen. */
 .ib-anncard .ib-annpop { max-height: min(60vh, calc(100dvh - 44px - var(--ib-fcomp-h, 0px) - env(safe-area-inset-bottom))); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
