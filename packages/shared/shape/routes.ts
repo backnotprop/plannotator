@@ -23,7 +23,7 @@
  */
 import { extname } from "node:path";
 import { isShapeId, type ShapeNote, type ShapeRecord, type ShapeSession, type ShapeVersion } from "./format";
-import type { ShapeStore, ShapeSummary } from "./store";
+import { shapeCodeRoot, type ShapeStore, type ShapeSummary } from "./store";
 
 export type ShapeRouteResult =
   | { status: number; body: unknown }
@@ -155,7 +155,7 @@ export async function handleShapeRoute(req: ShapeRouteRequest, deps: ShapeRouteD
   }
 
   if (sub === "code" && parts.length === 3 && deps.code) {
-    const root = shape.project.root;
+    const root = shapeCodeRoot(shape.project);
     if (parts[2] === "file" && method === "GET") return deps.code.file(root, req.params.get("path"));
     if (parts[2] === "hover" && method === "POST") {
       let body: unknown;

@@ -31,7 +31,7 @@ import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -43,6 +43,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
@@ -453,6 +454,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // global comments do.
   const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
+  // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
+  const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
+  const fileOpenIn = useCallback((path: string) => (repoKey ? <OpenInFile scope={{ repo: repoKey }} path={path} /> : null), [repoKey]);
   const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
   const byPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const snapshot = useMemo(
@@ -769,7 +773,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // same code keeps it, whatever the head reads said. The reader is a chunk loaded on first use: one that cannot
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
-              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
