@@ -197,6 +197,14 @@ describe("whose move", () => {
     expect(inboxPullMove(pr({ number: 10, head: "j", mine: false, author: "mara" }), false)).toEqual({ move: "waiting", reason: "others" });
   });
 
+  test("a teammate's PR assigned to the person is on them; the person's own assigned PR goes by its own rules", () => {
+    expect(inboxPullMove(pr({ number: 11, head: "k", mine: false, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "assigned" });
+    // Asked for a review too: the request says why.
+    expect(inboxPullMove(pr({ number: 12, head: "l", mine: false, requested: true, assigned: true, author: "jun" }), false)).toEqual({ move: "on_you", reason: "requested" });
+    expect(inboxPullMove(pr({ number: 13, head: "m", assigned: true, reviewers: ["jun"] }), false)).toEqual({ move: "waiting", reason: "review" });
+    expect(inboxPullMove(pr({ number: 14, head: "n", mine: false, assigned: true, state: "draft" }), false)).toEqual({ move: "waiting", reason: "draft" });
+  });
+
   test("an approved PR that conflicts with its base is not ready to land: it is on the person", () => {
     expect(inboxPullMove(pr({ number: 82, head: "kms", review: "approved", approved_by: "jo", conflicts: true }), false)).toEqual({ move: "on_you", reason: "conflicts" });
     expect(inboxPullMove(pr({ number: 83, head: "kms2", review: "approved", approved_by: "jo", conflicts: false }), false)).toEqual({ move: "ready", reason: "approved" });

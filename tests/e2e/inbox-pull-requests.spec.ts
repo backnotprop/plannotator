@@ -159,6 +159,8 @@ function writeForge(dir: string) {
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    // Others (a read of its own): nothing open past the person's own lists.
+    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others" >> "$calls"; echo \'{"data":{"viewer":{"login":"dana"},"others0":{"issueCount":0,"nodes":[]}}}\'; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -190,6 +192,7 @@ function writeForge(dir: string) {
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -675,12 +678,10 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
   expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
-  await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
-  // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
-  for (const selector of ['[data-pulls-heading]', '[data-pulls-on-you]']) {
-    expect(await list.locator(selector).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  }
-  await expect(list.locator('[data-board-project-chip]')).toHaveAccessibleName(/All projects/);
+  // The head is "PRs" and the filter mark (inbox-pull-filters.spec.ts); the On you band carries the count.
+  expect(await list.locator('[data-pulls-heading]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('Filter');
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
   await shot(page, '2-list');
   await fold.click();

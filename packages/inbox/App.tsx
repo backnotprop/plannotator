@@ -158,7 +158,7 @@ import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
-import { pullGroups } from './pulls/model';
+import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
@@ -306,6 +306,8 @@ interface Route {
   scope?: 'layer' | 'stack';
   /** `#reviews&new`: open the New review box (a link from outside, Workspaces among them). Taken off the address as it opens. */
   new?: boolean;
+  /** Pull requests' view (`&view=mine|review|others`; absent: All), beside `project`. */
+  view?: PullFilter;
   /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
@@ -384,7 +386,7 @@ function routeOf(fullHash: string): Route {
   if (params.has('reviews') || params.has('pulls')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'reviews', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
+    return { page: 'reviews', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
   }
   if (params.has('board'))
     return {
@@ -431,6 +433,7 @@ function hashOf(route: Route): string {
     hash =
       'reviews' +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
       (route.new ? '&new' : '');
@@ -4397,7 +4400,7 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown);
+  const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown, route.page === 'reviews' && route.view === 'others');
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'reviews' && guestPage) close({ page: 'inbox', project: null, thread: null });
@@ -5361,11 +5364,12 @@ function Inbox() {
         state={pulls}
         stackId={route.stack ?? null}
         project={route.project}
+        filter={route.view ?? 'all'}
         projects={projects}
         projectNames={projectNames}
         phone={phone}
         onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
-        onProject={(project) => go({ page: 'reviews', project, thread: null, stack: null })}
+        onScope={({ filter, project }) => go({ page: 'reviews', project, view: filter, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}

@@ -36,6 +36,8 @@ export interface InboxPull {
   mine: boolean;
   /** Review was requested from the person (or one of their teams). */
   requested: boolean;
+  /** The person is one of its assignees (GitHub `assignee:@me`, GitLab `assignedMergeRequests`); absent from an older Inbox. */
+  assigned?: boolean;
   state: InboxPullState;
   /** The branch it merges into. */
   base: string;
@@ -111,11 +113,20 @@ export interface InboxPullHost {
   /** With `error`: when the answer still shown for this host was read; absent when there is none (its PRs are not shown). */
   last_read?: string;
   /**
-   * The searches found more open PRs than one read takes (`INBOX_PULLS_SEARCH_MAX` a search): `shown`, the host's open
-   * PRs in this list; `total`, those plus the ones the searches left out. Null `total`: the searches were not limited
-   * to the projects' repositories, so how many of the ones left out are the projects' is not known.
+   * Why the Others read (every open PR of the projects' repositories, a read of its own) gave nothing this time; the
+   * person's own lists are unaffected. Absent when it answered.
    */
-  capped?: { shown: number; total: number | null };
+  others_error?: "rate_limited" | "unavailable";
+  /** With `others_error`: when the Others answer still shown was read; absent when there is none (Others is not shown). */
+  others_last_read?: string;
+  /** The Others read is running in the background (the list never waits for it): ask again shortly for its answer. */
+  others_pending?: true;
+  /**
+   * The reads found more open PRs than they take: `shown`, the host's open PRs in this list; `total`, how many there
+   * are. Null `total`: not known (the person's own searches were not limited to the projects' repositories, or Others
+   * searched only the most active ones). `of: "others"`: only Others left PRs out; the person's own lists are whole.
+   */
+  capped?: { shown: number; total: number | null; of?: "others" };
 }
 
 /** A CLI as the Inbox found it: not installed, installed and signed in to no host, or signed in to at least one. */
@@ -385,6 +396,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
 /**
  * Why a PR is where it is; the window turns it into words:
  * - `requested`: a teammate asked for the person's review;
+ * - `assigned`: a teammate's PR the person is assigned to;
  * - `agent_ready`: the person's agent opened it (not a draft, its checks done), so the person reviews it;
  * - `running`: the person's agent opened it and its checks still run;
  * - `changes`: a reviewer asked for changes on the person's PR;
@@ -399,6 +411,7 @@ export type InboxPullMove = "on_you" | "ready" | "waiting";
  */
 export type InboxPullReason =
   | "requested"
+  | "assigned"
   | "agent_ready"
   | "running"
   | "changes"
@@ -418,6 +431,7 @@ export function inboxPullMove(pull: InboxPull, linked: boolean): { move: InboxPu
   if (pull.state === "closed") return { move: "waiting", reason: "closed" };
   if (pull.state === "draft") return { move: "waiting", reason: "draft" };
   if (pull.requested && !pull.mine) return { move: "on_you", reason: "requested" };
+  if (pull.assigned && !pull.mine) return { move: "on_you", reason: "assigned" };
   if (!pull.mine) return { move: "waiting", reason: "others" };
   if (pull.review === "changes_requested") return { move: "on_you", reason: "changes" };
   if (pull.checks === "failure") return { move: "on_you", reason: "failing" };
