@@ -63,6 +63,8 @@ const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|comm
 const GROUPING = /smaller|additional|other|fixes|bug|ux improvements/i;
 /** A bullet that only credits someone or names a PR: no feature in it. */
 const ONLY_A_CREDIT = /^(authored|reported|requested|closes|closing|thanks|credit)\b/i;
+/** A line with an address in it stays out, even a public one: nobody needs it under a feedback box. */
+const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 /** A heading that only names the product: what is under it is the feature. */
 const ONLY_THE_PRODUCT = /^plannotator( inbox)?$/i;
 /** Bots and trackers: nobody files feedback about these. */
@@ -111,7 +113,7 @@ export function releaseTitles(body: string): string[] {
     if (GROUPING.test(heading) && bullets.length) titles.push(...bullets.map((line) => firstSentence(line.slice(2))));
     else titles.push(heading);
   }
-  return titles.filter((title) => title && !ONLY_A_CREDIT.test(title));
+  return titles.filter((title) => title && !ONLY_A_CREDIT.test(title) && !HAS_EMAIL.test(title));
 }
 
 /** The file's content from what GitHub answered. Pure; the tests call it with no `gh` in sight. */
@@ -132,12 +134,12 @@ export function buildRelatedData(input: { releases: ReleaseInput[]; issues: Titl
     }
   }
   const issues: RelatedIssue[] = input.issues
-    .filter((issue) => !NOT_A_REQUEST.test(issue.title))
+    .filter((issue) => !NOT_A_REQUEST.test(issue.title) && !HAS_EMAIL.test(issue.title))
     .sort((a, b) => b.number - a.number)
     .map((issue) => ({ title: plain(issue.title), number: issue.number }));
   const open = new Map(issues.map((issue) => [issue.number, issue]));
   for (const pull of [...input.pulls].sort((a, b) => a.number - b.number)) {
-    if (NOT_A_REQUEST.test(pull.title)) continue;
+    if (NOT_A_REQUEST.test(pull.title) || HAS_EMAIL.test(pull.title)) continue;
     const title = plain(pull.title).replace(/^(fix|feat|chore|docs|refactor|test|ci|perf|build|style)(\([^)]*\))?!?:\s*/i, '');
     const cited = [...title.matchAll(/#(\d{2,6})/g)].map((match) => open.get(Number(match[1]))).find(Boolean);
     if (cited) cited.prWords = cited.prWords ? `${cited.prWords} ${title}` : title;

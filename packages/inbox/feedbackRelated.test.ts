@@ -158,7 +158,7 @@ describe('the shipped file holds public titles and nothing else', () => {
 
   test('nothing in it reads like this computer or a credential', () => {
     const text = JSON.stringify(shipped);
-    expect(text).not.toMatch(/\/Users\/|\/home\/|C:\\\\Users|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_/);
+    expect(text).not.toMatch(/\/Users\/|\/home\/|C:\\\\Users|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|[\w.+-]+@[\w-]+\.[a-z]{2,}/i);
   });
 
   test('a hand-list phrase is more than one common word, or a word no message says by chance', () => {

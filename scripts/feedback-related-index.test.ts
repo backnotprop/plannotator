@@ -36,7 +36,7 @@ const fakeGh = (answers: { releases?: string; issues?: unknown[]; pulls?: unknow
 
 describe('release notes', () => {
   test('headings below What\'s New; not the people, the install block or the raw PR list', () => {
-    const body = notes('### Plannotator Inbox\n\n#### Snooze a thread\n\nText that stays out.\n\n### Contributors\n\n@someone did it\n\n### Thanks\n\n@another\n\n### Smaller changes\n\n- **Rows in the list** are tidier now. And more words.\n- Fix a thing [#12](https://x)\n- Authored by @someone in #12');
+    const body = notes('### Plannotator Inbox\n\n#### Snooze a thread\n\nText that stays out.\n\n### Contributors\n\n@someone did it\n\n### Thanks\n\n@another\n\n### Smaller changes\n\n- **Rows in the list** are tidier now. And more words.\n- Fix a thing [#12](https://x)\n- Authored by @someone in #12\n- Write to ada@example.com for early access to this.');
     expect(releaseTitles(body)).toEqual(['Snooze a thread', 'Rows in the list are tidier now.', 'Fix a thing #12']);
     expect(releaseTitles('no such section')).toEqual([]);
   });
@@ -85,6 +85,11 @@ describe('issues and PRs', () => {
     });
     expect(data.issues).toEqual([{ title: 'Inbox: the tab uses 1.6 GB', number: 2593, prWords: 'Inbox: memory soak over a large store (#2593)' }]);
     expect(JSON.stringify(data)).not.toContain('Gemini');
+  });
+
+  test('a title with an email address stays out, and so do a PR\'s words', () => {
+    const data = buildRelatedData({ releases: [], issues: [{ number: 9, title: 'Real request' }, { number: 8, title: 'Ask ada@example.com about it' }], pulls: [{ number: 10, title: 'Ask ada@example.com (#9)' }] });
+    expect(data.issues).toEqual([{ title: 'Real request', number: 9 }]);
   });
 
   test('bots and trackers stay out', () => {

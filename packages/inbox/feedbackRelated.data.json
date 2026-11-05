@@ -255,7 +255,6 @@
     {"title":"Plan review keeps a plan's versions when Claude Code changes folder between submits, so the Versions tab and the diff stay.","version":"v0.28.34"},
     {"title":"Code review: \"Edit Code to Suggest\" moves to a new Experimental tab in Settings.","version":"v0.28.34"},
     {"title":"Every published package is checked before release for settings that could hold an update back without a word, as happened to Pi on 0.28.31.","version":"v0.28.34"},
-    {"title":"The privacy page's contact email is now ramos@plannotator.ai.","version":"v0.28.34"},
     {"title":"Pi updates no longer get stuck on 0.28.31","version":"v0.28.33"},
     {"title":"The installer's npm check stops quickly on a broken network.","version":"v0.28.33"},
     {"title":"Security: update now (eMudhra certificates)","version":"v0.28.32"},
