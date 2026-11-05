@@ -455,6 +455,15 @@ function fitSurface(card: HTMLElement, phone: boolean) {
   card.style.setProperty('--ex-cut', `${cut}px`);
 }
 
+/** The card's width when open, read while it is folded too. */
+function openWidth(card: HTMLElement): number {
+  const folded = !card.classList.contains('expanded');
+  card.classList.add('expanded');
+  const w = card.offsetWidth;
+  if (folded) card.classList.remove('expanded');
+  return w;
+}
+
 /** Moves `box`'s scroll by as little as shows `el`. */
 function keepInView(box: HTMLElement, el: HTMLElement) {
   const a = box.getBoundingClientRect();
@@ -572,7 +581,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   reduceRef.current = reduce;
   const [phase, setPhaseRaw] = useState<FollowPhase>(options.initial ?? { open: false });
   const [expanded, setExpandedRaw] = useState(options.initialOpen ?? false);
-  const [cardW, setCardW] = useState(0);
+  const [openW, setOpenW] = useState(0);
   const [dockTight, setDockTight] = useState(false);
   const how = active && !!board;
   const cardRef = useRef<HTMLElement | null>(null);
@@ -586,7 +595,10 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
 
   // Every change of the card's layout goes through here, so its parts can FLIP from where they are.
   const prepare = useCallback(() => {
-    if (cardRef.current) flip.current = snapshot(cardRef.current);
+    const card = cardRef.current;
+    if (!card) return;
+    flip.current = snapshot(card);
+    setOpenW(openWidth(card));
   }, []);
   const dispatch = useCallback(
     (action: FollowAction) => {
@@ -620,13 +632,13 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     [prepare],
   );
 
-  // The card's width sets how long a signature's line can be, and when the panes stack.
+  // The open card's width sets how long a signature's line can be, and when the panes stack.
   const cardOn = phase.open && how;
   const expandedNow = expanded;
   useEffect(() => {
     const card = cardRef.current;
     if (!cardOn || !card || typeof ResizeObserver !== 'function') return;
-    const ro = new ResizeObserver(() => setCardW(card.offsetWidth));
+    const ro = new ResizeObserver(() => setOpenW(openWidth(card)));
     ro.observe(card);
     return () => ro.disconnect();
   }, [cardOn, expandedNow]);
@@ -694,7 +706,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
         const was = before.get(key);
         const now = el.getBoundingClientRect();
         if (!was) {
-          if (key === 'ios') {
+          if (key === 'ios' || key === 'stops') {
             const a = animate(el, [{ opacity: 0, transform: 'translateY(6px)' }, { opacity: 1, transform: 'none' }], { duration: 200, delay: 70, easing: FOLLOW_EASE, fill: 'backwards' });
             if (a) flipping.current.push(a);
           }
@@ -843,7 +855,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const on = card?.querySelector<HTMLElement>('.shp-ex-stop.on');
     if (on?.parentElement) keepInView(on.parentElement, on);
     if (phone) card?.querySelector('.shp-ex-in')?.scrollTo?.({ top: 0 });
-  }, [expanded, stepOn, phone, cardW]);
+  }, [expanded, stepOn, phone, openW]);
 
   // Closing the card: it fades where it was (React has already let it go).
   const lastCard = useRef<HTMLElement | null>(null);
@@ -879,12 +891,12 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const ex = phase.open ? examples[phase.ex] ?? null : null;
   const step = phase.open && phase.step !== null && ex ? ex.steps[phase.step] ?? null : null;
   const showIO = expanded && !!step;
-  const narrow = phone || (cardW > 0 && cardW < 860);
+  const narrow = phone || (openW > 0 && openW < 860);
   const withRail = showIO && !narrow;
   const withStrip = showIO && narrow;
   const withInputs = !!ex && ex.steps.some((s) => s.inputs.length > 0);
   // How many mono characters fit in each pane: the rail (232), the main area's padding (28) and the panes' gap (24) go first.
-  const width = cardW || 1100;
+  const width = openW || 1100;
   const panes = width - 284;
   const charsNow = narrow ? Math.max(28, Math.floor((width - 64) / CH)) : Math.floor((withInputs ? (panes * 8) / 14 : width - 260) / CH) - 1;
   const paneNow = narrow ? Math.floor((width - 40) / CH) : Math.floor((panes * 6) / 14 / CH);
@@ -1003,7 +1015,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
           {withRail && (
             <nav className="shp-ex-rail" aria-label="Steps">
               {tabs}
-              <div className="shp-ex-stops">{stops}</div>
+              <div className="shp-ex-stops" data-flip="stops">{stops}</div>
               {note}
             </nav>
           )}
@@ -1048,7 +1060,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
                 {close}
               </div>
             </div>
-            {withStrip && <div className="shp-ex-strip">{stops}</div>}
+            {withStrip && <div className="shp-ex-strip" data-flip="stops">{stops}</div>}
             {body}
           </div>
           {phone && (

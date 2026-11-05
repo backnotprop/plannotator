@@ -65,7 +65,7 @@ const LONG_STEP = {
   text: 'The Inbox checks who is asking, and turns a guest away before it stamps anything',
   inputs: [{ name: 'mayClaim', value: 'true', from: { step: 2 } }, ...names.map((name, i) => ({ name, value: i % 2 ? `'${name}-${i}'` : String(i), from: at(200 + i, LONG) }))],
   signature: 'resolveClaimEligibilityForTailnetIdentity(request: AuthenticatedInboxRequest<ClaimBody>, saved: SnoozeIntroSaved | undefined, options: { now: Date; release: string; policy: TailnetGuestPolicy }): Promise<ClaimDecision>',
-  checks: Array.from({ length: 12 }, (_, i) => (i === 9 ? check(`rule${i}(request, saved, options.policy)`, { decides: true }) : i < 9 ? check(`rule${i}(request, saved, options.policy)`) : { code: `rule${i}(request)`, result: 'not-reached' })).map((c, i) => (i === 9 ? { ...c, result: 'fail', saw: 'false', short: 'a guest, and guests may not claim' } : c)),
+  checks: Array.from({ length: 12 }, (_, i) => (i === 9 ? check(`request.auth.tailnetIdentity.userLoginName === ownerConfig.ownerLoginName || ownerConfig.tailnetGuestPolicy.allowSnoozeIntroClaims || rule${i}(request, saved, options.policy)`, { decides: true }) : i < 9 ? check(`rule${i}(request, saved, options.policy)`) : { code: `rule${i}(request)`, result: 'not-reached' })).map((c, i) => (i === 9 ? { ...c, result: 'fail', saw: 'false', short: 'a guest, and guests may not claim' } : c)),
   output: { name: 'decision', value: "{ show: false, reason: 'tailnet-guest' }", type: 'ClaimDecision' },
   code: at(148, 'src/claimEligibility.ts'),
 };
@@ -112,8 +112,16 @@ test.afterAll(async () => {
 
 test('the path: rows read on one line, stepping moves nothing, a short step ends the card under it', async ({ browser }) => {
   const { context, page } = await openBoard(browser);
+  // Opening goes straight to the rail: the one-column strip must not flash on the way.
+  await page.evaluate(() => {
+    const seen = window as unknown as { stripSeen?: boolean };
+    new MutationObserver(() => {
+      if (document.querySelector('.shp-ex-strip')) seen.stripSeen = true;
+    }).observe(document.body, { childList: true, subtree: true });
+  });
   await press(page, 'Inputs and outputs');
   await expect(page.locator('.shp-ex-rail .shp-ex-stop')).toHaveCount(steps.length);
+  expect(await page.evaluate(() => (window as unknown as { stripSeen?: boolean }).stripSeen ?? false)).toBe(false);
 
   const held = () => Promise.all([rect(page, '.shp-view.v-how .shp-drawn-fit'), rect(page, '.shp-ex-rail .shp-ex-stop'), rect(page, '[aria-label="Next step"]'), rect(page, '.shp-ex-card')]);
   const first = await held();
