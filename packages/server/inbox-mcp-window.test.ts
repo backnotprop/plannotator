@@ -580,9 +580,9 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     for (const words of ["Older reply one.", "Older reply two.", "x".repeat(13 * 1024), "Newer short reply.", big]) {
       const reply = await w.post(`/api/inbox/messages/${last}/reply`, { idempotency_key: `p-${replies.length}`, words });
       replies.push(reply.reply.id);
-      for (let i = 0; i < 6; i++) last = (await call(w.client, "send_message", { reply_to: reply.reply.id, body: `Noted ${replies.length}.${i}`, agent_session: "ses_long" })).structuredContent.message_id;
+      for (let i = 0; i < 4; i++) last = (await call(w.client, "send_message", { reply_to: reply.reply.id, body: `Noted ${replies.length}.${i}`, agent_session: "ses_long" })).structuredContent.message_id;
     }
-    const { thread, window } = (await call(w.client, "read_thread", { thread_id: seeded.threadId })).structuredContent;
+    const { thread, window } = (await call(w.client, "read_thread", { thread_id: seeded.threadId, limit: 2 })).structuredContent;
     const newest = thread.messages.find((m: any) => m.id === replies[4]);
     expect(newest.body).toBe(w.server.store.message(replies[4]!)!.body);
     expect(newest.body_bytes).toBeUndefined();
@@ -590,7 +590,7 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     // The 13 KB reply does not fit the 12 KB budget; the short ones before and after it still do.
     expect(inFull).toEqual(expect.arrayContaining([replies[0], replies[1], replies[3]]));
     expect(thread.earlier.map((l: any) => l.id)).toContain(replies[2]);
-    expect(window).toMatchObject({ newest: 6, expanded: 0 });
+    expect(window).toMatchObject({ newest: 2, expanded: 0 });
   });
 
   test("after with nothing new stays the same size whether the thread has 60 or 120 messages", async () => {
@@ -658,7 +658,7 @@ describe("the review's fixes: answers whole, the answers section cut exactly, th
     );
     const back = await call(w.client, "read_thread", { thread_id: sent.thread_id, before: sent.message_id, limit: 3 });
     expect(back.structuredContent.window).toMatchObject({ full: 0, newest: 0, lines: 0, left_out: 8 });
-    expect(back.content[0]!.text).toContain("Shown: 0 in full (the newest 0, up to 12.0 KB) and 0 earlier as one line each.");
+    expect(back.content[0]!.text).toContain("Shown: 0 in full (the newest 0) and 0 earlier as one line each.");
   });
 
   test("search writes nothing for a folder the Inbox has never seen: no project is made, and the answer says why there are no results", async () => {

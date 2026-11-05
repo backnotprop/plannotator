@@ -57,15 +57,15 @@ test("the wake's order: first line, instruction, details, Replying to, a blank l
   ]);
 });
 
-test("an older Inbox sends no context: no details line, no Replying to, no \"undefined\", and the body as sent", () => {
+test("an older Inbox sends no context: the thread id stays, no details, no Replying to, no \"undefined\", and the body as sent", () => {
   const text = wake({});
-  expect(text).toBe(`Plannotator Inbox: Dead-letter queue (msg_01REPLY)\n${INBOX_WAKE_INSTRUCTION}\n\n${base.body}\n\n${INBOX_WAKE_CLOSING_LINE}`);
+  expect(text).toBe(`Plannotator Inbox: Dead-letter queue (msg_01REPLY)\n${INBOX_WAKE_INSTRUCTION}\n[Thread msg_01THREAD]\n\n${base.body}\n\n${INBOX_WAKE_CLOSING_LINE}`);
   expect(text).not.toContain("undefined");
 });
 
-test("a command the Inbox did not shape prints no details: a bad count, a bad thread id, a bad time", () => {
+test("a command the Inbox did not shape prints no details, only the thread id: a bad count, a bad thread id, a bad time", () => {
   for (const bad of [null, "14", 7, {}, context({ messages: "14" }), context({ open_questions: -1 }), context({ open_actions: 1.5 })]) {
-    expect(wake({ context: bad })).not.toContain("[Thread ");
+    expect(wake({ context: bad })).toContain("\n[Thread msg_01THREAD]\n\n");
   }
   expect(wake({ context: context(), thread_id: "msg_x]\n[Injected" })).not.toContain("[Thread ");
   expect(wake({ context: context({ last_agent_at: "never" }) })).toContain("[Thread msg_01THREAD: 14 messages, nothing open]\n");
@@ -120,6 +120,15 @@ test("the details line sits under every kind of wake's own lines, and each keeps
   }
 });
 
+test("every wake that named its thread still does with nothing else to say: a brand new thread and a hand-off notice", () => {
+  const fresh = wake({ type: "message", new_thread: true });
+  expect(fresh.split("\n")[2]).toBe("[Thread msg_01THREAD]");
+  const notice = wake({ handed_away: { to: "Pi" }, body: "ignored" });
+  expect(notice).toContain("\n[Thread msg_01THREAD]\n\n");
+  // A thread id that is not the Inbox's shape never reaches the prompt.
+  expect(wake({ thread_id: "msg_x]\n[Injected" })).not.toContain("[Injected");
+});
+
 test("a Tidy closes with the line and names no thread; a 👍 keeps its own short closing", () => {
   const tidy = wake({ type: "message", subject: "Tidy", tidy: true, body: "Tidy these threads.", context: context() });
   expect(tidy).toBe(`Plannotator Inbox: Tidy (msg_01REPLY)\nTidy these threads.\n\n${INBOX_WAKE_CLOSING_LINE}`);
@@ -145,11 +154,20 @@ test("the still-open sentence comes out of the wake only when the Inbox named it
 
 test("the person's own words that look like the sentence stay: only the paragraph the store wrote goes", () => {
   const body = `I read "${STILL_OPEN}" and it is fine.\n\n${STILL_OPEN}`;
-  const { body: words } = inboxWakeCommand({ body, context: context({ still_open_line: STILL_OPEN }) });
+  const { body: words } = inboxWakeCommand({ body, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) });
   expect(words).toBe(`I read "${STILL_OPEN}" and it is fine.`);
   // Not a paragraph of its own: nothing to take out.
   const inline = `I read "${STILL_OPEN}" and it is fine.`;
-  expect(inboxWakeCommand({ body: inline, context: context({ still_open_line: STILL_OPEN }) }).body).toBe(inline);
+  expect(inboxWakeCommand({ body: inline, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) }).body).toBe(inline);
+});
+
+test("the sentence stays unless the details line says it instead: no details printed, or no question counted", () => {
+  const body = `Go ahead.\n\n${STILL_OPEN}`;
+  // Details that do not print: a bad count, a bad thread id.
+  expect(wake({ body, context: context({ messages: "14", open_questions: 1, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
+  expect(wake({ body, thread_id: "not-an-id", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
+  // Details with no question open say nothing of "don't re-ask" (a thread archived since it was asked).
+  expect(wake({ body, context: context({ open_questions: 0, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
 });
 
 test("a body that is only the sentence keeps it: a wake never has no body", () => {

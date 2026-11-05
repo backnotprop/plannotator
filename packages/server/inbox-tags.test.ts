@@ -535,7 +535,7 @@ describe("the Pi and OpenCode wake (agent-link) for a reply that tags", () => {
       const sent = ((await response.json()) as { reply: { id: string; body: string } }).reply;
       for (let i = 0; i < 200 && toOc.length === 0; i++) await Bun.sleep(50);
       expect(toOc).toHaveLength(1);
-      const withoutDetails = (text: string) => text.split("\n").filter((line) => !line.startsWith("[Thread ")).join("\n");
+      const withoutDetails = (text: string) => text.replace(/^\[Thread (msg_[0-9A-Za-z]+):.*\]$/m, "[Thread $1]");
       expect(withoutDetails(toOc[0]!.text)).toBe(inboxWakeText({ id: sent.id, thread_id: asked.thread_id, subject: "Should the queue own retries?", body: sent.body, tagged: { owner: "Pi" } }));
       // OpenCode reads the thread before Pi's turn ends: Pi is still woken.
       await client.callTool({ name: "read_thread", arguments: { thread_id: asked.thread_id, agent_session: "ses-oc" } });

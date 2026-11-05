@@ -2787,13 +2787,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     if (command.tidy || command.ack_of || command.handed_away) return command;
     const receiver = session ?? store.recipientOf(reply)?.session ?? null;
     // The details line (approval "inbox-wake-context"). A brand new thread has nothing to say yet: its only message is this one.
-    const context = command.new_thread ? {} : { context: store.wakeContext(reply, receiver) };
+    const context = command.new_thread ? {} : wakeContextOf(reply, receiver);
     // Thread steps (approval "inbox-thread-steps"): the session's own list in this thread, one wake line, only while
     // the person has steps on.
     const list = stepsOn() && receiver ? store.stepsOf(reply.thread_id, receiver) : null;
     if (!list) return { ...command, ...context };
     const { done, total, doing } = inboxStepsProgress(list.steps);
     return { ...command, ...context, ...(total > 0 ? { steps: { done, total, doing } } : {}) };
+  };
+  /** Words for the wake, never a condition of it: with no context, the reply goes as it would from an older Inbox. */
+  const wakeContextOf = (reply: InboxMessage, receiver: string | null): Pick<InboxReplyCommand, "context"> => {
+    try {
+      return { context: store.wakeContext(reply, receiver) };
+    } catch {
+      return {};
+    }
   };
   const replyCommandOf = (reply: InboxMessage, sendNow: boolean, session: string | null): InboxReplyCommand => {
     const tag = session && !store.isOwner(reply, session) ? (reply.tags?.find((t) => t.session === session) ?? null) : null;

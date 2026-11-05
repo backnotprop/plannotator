@@ -27,6 +27,7 @@ test("a tagged session's wake: its own instruction, whose thread it is, read fir
       "Plannotator Inbox: Dead-letter queue (msg_R)",
       INBOX_TAGGED_INSTRUCTION,
       "The thread belongs to another session (Claude Code); you have not seen it. Read it first with read_thread (message_id msg_R). Answer only what is addressed to you, in the same thread: plannotator_inbox send_message with reply_to msg_R.",
+      "[Thread msg_T]",
       "",
       "@Pi raise it to 30 s.",
       "",

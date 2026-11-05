@@ -963,7 +963,8 @@ export interface InboxReplyCommand {
    * What the wake's details line says about the thread (approval
    * "inbox-wake-context"). Absent on a Tidy, a 👍, a hand-off notice and a
    * brand new thread; an older connection ignores it and delivers `body` as
-   * it always did, and without it (an older Inbox) the lines are left out.
+   * it always did. Without it (an older Inbox too) the wake still names the
+   * thread, `[Thread <id>]`, and `body` stays whole.
    */
   context?: InboxWakeContext
 }
@@ -1342,13 +1343,15 @@ export function inboxWakeReplyingLine(target: unknown, now: number): string {
 
 /**
  * The command as a wake with a details line words it: the body without the
- * still-open sentence the details line replaces. Without `still_open_line`
- * (an older Inbox), or when that sentence is all the body holds, the body stays.
+ * still-open sentence, only when the details line says it instead (it prints,
+ * and counts a question open). Otherwise, and when that sentence is all the
+ * body holds, the body stays.
  */
-export function inboxWakeCommand<T extends { body: string; context?: unknown }>(command: T): T {
+export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; context?: unknown }>(command: T): T {
   if (!command.context || typeof command.context !== 'object') return command
   const { still_open_line: line, ...context } = command.context as Record<string, unknown>
   if (typeof line !== 'string' || line === '') return command
+  if (!inboxWakeDetailsLine(command.thread_id, context, { now: 0 }) || !wakeCount(context.open_questions)) return { ...command, context }
   const at = command.body.lastIndexOf(line)
   const end = at + line.length
   const alone = at >= 0 && (at === 0 || command.body.slice(at - 2, at) === '\n\n') && (end === command.body.length || command.body.slice(end, end + 2) === '\n\n')
@@ -1406,12 +1409,14 @@ export function inboxWakeText(
   const { body, context } = inboxWakeCommand(command)
   const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true })
   const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''
-  const facts = `${details ? `\n${details}` : ''}${target ? `\n${target}` : ''}`
+  // No details (a brand new thread, a hand-off notice, an older Inbox): the wake still names its thread.
+  const thread = wakeThreadId(command.thread_id)
+  const facts = details ? `\n${details}${target ? `\n${target}` : ''}` : thread ? `\n[Thread ${thread}]` : ''
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   // The thread was handed to another session: the notice alone.
   if (command.handed_away && typeof command.handed_away === 'object') {
     const to = wakeName(command.handed_away.to) || 'another agent'
-    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${facts}${closing}`
   }
   // Handed this thread: it is this session's now; read it first.
   if (command.handoff && typeof command.handoff === 'object') {

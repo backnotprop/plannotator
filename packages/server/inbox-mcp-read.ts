@@ -12,12 +12,6 @@
  *   size, and each of its questions with its state and answer.
  * - Bodies over INBOX_BODY_CUT_BYTES (16 KB) are cut with a marker that
  *   names the `expand` call for the rest.
- * - With `limit` set (approval "inbox-wake-context", a small read on purpose):
- *   the newest `limit` messages in full, INBOX_LIMIT_READ_BYTES at most
- *   together, and every other message one line. Nothing else joins them but
- *   what `expand` or `message_id` asks for, and what a message over the cap
- *   loses is one `expand` away. A person's message such a read shows only as
- *   a line is not settled by it (`windowedThread`).
  *
  * No question state is ever lost: a question is in the header (open or
  * picked), on a message shown in full, on a one-line message, or, for a
@@ -59,10 +53,6 @@ export const INBOX_BODY_CUT_BYTES = 16 * 1024;
  * away.
  */
 export const INBOX_EARLIER_PERSON_BYTES = 12 * 1024;
-/** What a read with `limit` set shows in full at most, the newest message first. */
-export const INBOX_LIMIT_READ_BYTES = 12 * 1024;
-/** Less room than this left under INBOX_LIMIT_READ_BYTES: the next message is one line, not a stub. */
-const INBOX_LIMIT_READ_MIN_CUT_BYTES = 1024;
 /** First words of a one-line message. */
 export const INBOX_LINE_WORDS = 120;
 /** At most this many ids in `expand`. */
@@ -216,8 +206,6 @@ export interface ThreadWindowResult {
     left_out: number;
     /** Of `full`: the newest in range, the person's earlier messages, and the ones expanded or asked for. */
     newest: number;
-    /** `limit` was asked for: `newest` is held to INBOX_LIMIT_READ_BYTES. */
-    capped?: true;
     person_earlier: number;
     expanded: number;
     before?: string | number;
@@ -413,12 +401,12 @@ function addressee(message: InboxMessageWire, caller: string | null): AgentAddre
   return message.to ? { host: message.to.host, session: message.to.session, you: !!caller && message.to.session === caller } : undefined;
 }
 
-export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null, cutAt: number = INBOX_BODY_CUT_BYTES): AgentMessage {
+export function agentMessage(message: InboxMessageWire, form: AgentMessageForm = "window", caller: string | null = null): AgentMessage {
   const source = form === "earlier" ? withoutAnswersSection(message) : message.body;
   const total = byteLength(message.body);
-  const over = form !== "whole" && byteLength(source) > cutAt;
+  const over = form !== "whole" && byteLength(source) > INBOX_BODY_CUT_BYTES;
   const body = over
-    ? `${cutToBytes(source, cutAt)}\n\n[… cut: ${sizeText(cutAt)} of ${sizeText(total)} shown; read_thread expand: ["${message.id}"] shows the rest]`
+    ? `${cutToBytes(source, INBOX_BODY_CUT_BYTES)}\n\n[… cut: ${sizeText(INBOX_BODY_CUT_BYTES)} of ${sizeText(total)} shown; read_thread expand: ["${message.id}"] shows the rest]`
     : source;
   const ack = message.ack && typeof message.ack === "object" ? message.ack : null;
   return {
@@ -481,16 +469,13 @@ function boundOf(store: InboxStore, ids: ReadonlySet<string>, value: string | nu
 /**
  * The windowed read of a thread (structured), from the thread as an agent
  * reads it, and the order its shown messages came in (oldest first).
- * `settles`: what the read may settle of what it shows; with `limit` set, only
- * what it showed in full, so a reply still owed to the reader keeps its wake
- * and its `unread` instead of ending as one line.
  */
 export function windowedThread(
   store: InboxStore,
   threadId: string,
   input: ThreadReadInput,
   url: string,
-): { result: ThreadWindowResult; order: string[]; shown: Set<string>; settles: Set<string>; readThrough: number } {
+): { result: ThreadWindowResult; order: string[]; shown: Set<string>; readThrough: number } {
   // With the reader, so a reply that tags it reads `tagged_you` (approval "inbox-tag-agents").
   const thread = store.agentThread(threadId, input.caller ?? null);
   if (!thread) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
@@ -511,7 +496,6 @@ export function windowedThread(
   const ids = new Set(all.map((m) => m.id));
   const seq = new Map(all.map((m) => [m.id, store.messageCursor(m.id) ?? 0]));
   const limit = input.limit ?? INBOX_THREAD_WINDOW;
-  const capped = input.limit !== undefined;
 
   if ((input.expand?.length ?? 0) > INBOX_EXPAND_MAX) throw new InboxError("validation_error", `expand: at most ${INBOX_EXPAND_MAX} message ids.`);
   const expand = new Set<string>();
@@ -526,23 +510,11 @@ export function windowedThread(
   const before = boundOf(store, ids, input.before, "before");
   const inRange = all.filter((m) => (after === null || seq.get(m.id)! > after) && (before === null || seq.get(m.id)! < before));
   const newest = new Set(inRange.slice(-limit).map((m) => m.id));
-  // With `limit`: the newest first, until INBOX_LIMIT_READ_BYTES is used up. The one that does not fit is cut to what is left, the rest are lines.
-  const cuts = new Map<string, number>();
-  if (capped) {
-    let room = INBOX_LIMIT_READ_BYTES;
-    for (const message of inRange.slice(-limit).reverse()) {
-      if (expand.has(message.id)) continue;
-      const size = byteLength(message.body);
-      if (room < INBOX_LIMIT_READ_MIN_CUT_BYTES) newest.delete(message.id);
-      else if (size > room) cuts.set(message.id, room);
-      room = size > room ? 0 : room - size;
-    }
-  }
   const full = new Set(newest);
   for (const id of expand) full.add(id);
   // The person's newest message is shown whole, whatever its size, and never folded into a line.
   const whole = new Set(expand);
-  const personNewest = capped ? undefined : [...inRange].reverse().find((m) => m.author.kind === "person" && !isInboxNote(m));
+  const personNewest = [...inRange].reverse().find((m) => m.author.kind === "person" && !isInboxNote(m));
   if (personNewest) {
     full.add(personNewest.id);
     whole.add(personNewest.id);
@@ -551,7 +523,7 @@ export function windowedThread(
   // The person's earlier messages, newest first, while they fit (each as `earlier` shows it).
   const personEarlier = new Set<string>();
   let used = 0;
-  for (const message of capped ? [] : [...inRange].reverse()) {
+  for (const message of [...inRange].reverse()) {
     if (full.has(message.id) || message.author.kind !== "person") continue;
     const size = Math.min(byteLength(withoutAnswersSection(message)), INBOX_BODY_CUT_BYTES);
     // One long reply does not fold every older one into a line: the next ones may still fit.
@@ -575,7 +547,7 @@ export function windowedThread(
       .map((card) => ({ id: card.id, title: card.title }));
   const messages = all
     .filter((m) => full.has(m.id))
-    .map((m) => agentMessage(m, formOf(m.id), caller, cuts.get(m.id)))
+    .map((m) => agentMessage(m, formOf(m.id), caller))
     .map((m) => (m.board_request ? { ...m, board_cards: linkedCards() } : m));
   const earlier = inRange.filter((m) => !full.has(m.id)).map((m) => agentMessageLine(m, caller));
   const leftOut = all.filter((m) => !shown.has(m.id));
@@ -640,7 +612,6 @@ export function windowedThread(
       lines: earlier.length,
       left_out: leftOut.length,
       newest: newest.size,
-      ...(capped ? { capped: true as const } : {}),
       person_earlier: [...personEarlier, ...(personNewest && !newest.has(personNewest.id) && !expand.has(personNewest.id) ? [personNewest.id] : [])].filter((id) => !newest.has(id)).length,
       expanded: [...expand].filter((id) => !newest.has(id) && !personEarlier.has(id)).length,
       ...(input.before !== undefined ? { before: input.before } : {}),
@@ -654,12 +625,7 @@ export function windowedThread(
   // What the read may mark read: everything up to `before` (a newer reply it
   // left out must still wake its session and stay unread), and the acks of
   // the messages it showed (an ack on a message `after` left out is not seen).
-  const end = before === null ? Number.POSITIVE_INFINITY : before - 1;
-  if (!capped) return { result, order, shown: new Set(order), settles: new Set(order), readThrough: end };
-  // A read with `limit` stops short of a person's message it showed only as a line and that no one has had yet.
-  const checked = store.message(threadId)?.agent_checked_seq ?? 0;
-  const owed = inRange.find((m) => m.author.kind === "person" && !full.has(m.id) && !isInboxNote(m) && !store.message(m.id)?.delivery && seq.get(m.id)! > checked);
-  return { result, order, shown: new Set(order), settles: new Set(messages.map((m) => m.id)), readThrough: owed ? Math.min(end, seq.get(owed.id)! - 1) : end };
+  return { result, order, shown: new Set(order), readThrough: before === null ? Number.POSITIVE_INFINITY : before - 1 };
 }
 
 /**
@@ -771,7 +737,7 @@ export function windowedThreadText(result: ThreadWindowResult, order: readonly s
     ? ` Range:${window.after !== undefined ? ` after ${window.after}` : ""}${window.before !== undefined ? ` before ${window.before}` : ""}; ${window.left_out} other message${window.left_out === 1 ? "" : "s"} left out.`
     : "";
   out.push(
-    `Shown: ${window.full} in full (the newest ${window.newest}${window.capped ? `, up to ${sizeText(INBOX_LIMIT_READ_BYTES)}` : ""}${window.person_earlier > 0 ? `, ${window.person_earlier} earlier from the person (up to ${sizeText(INBOX_EARLIER_PERSON_BYTES)})` : ""}${window.expanded > 0 ? `, ${window.expanded} expanded` : ""}) and ${window.lines} earlier as one line each.${range} A message replies to the one above it unless it says otherwise; times are UTC. read_thread expand: [ids] shows messages in full; before: <id> reads further back; after: <cursor> returns only what is new.`,
+    `Shown: ${window.full} in full (the newest ${window.newest}${window.person_earlier > 0 ? `, ${window.person_earlier} earlier from the person (up to ${sizeText(INBOX_EARLIER_PERSON_BYTES)})` : ""}${window.expanded > 0 ? `, ${window.expanded} expanded` : ""}) and ${window.lines} earlier as one line each.${range} A message replies to the one above it unless it says otherwise; times are UTC. read_thread expand: [ids] shows messages in full; before: <id> reads further back; after: <cursor> returns only what is new.`,
   );
   out.push("");
   // Oldest first, one line or in full.

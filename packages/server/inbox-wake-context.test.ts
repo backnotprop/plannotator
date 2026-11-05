@@ -37,13 +37,13 @@ const OWNER = "ses-owner";
 const QUESTION = [":::question", "Route through the second region?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 const ACTION = [":::action", "Approve the deploy on Vercel", ":::"].join("\n");
 
-async function setup() {
+async function setup(options: { setAsideDelayMs?: number } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-wake-context-")));
   roots.push(root);
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir });
+  const server = await startInboxServer({ dataDir, ...options });
   servers.push(server);
   const client = new Client({ name: "inbox-wake-context-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -246,7 +246,7 @@ describe("the Replying to line", () => {
 });
 
 describe("the other kinds of turn", () => {
-  test("a brand new thread the person started: its own instruction, no details line, and the closing line", async () => {
+  test("a brand new thread the person started: its own instruction, its thread id alone, and the closing line", async () => {
     const w = await setup();
     await w.send("I am here.");
     await w.poll();
@@ -256,7 +256,7 @@ describe("the other kinds of turn", () => {
     expect(command!.new_thread).toBe(true);
     expect(command!.context).toBeUndefined();
     const text = inboxWakeText(command!);
-    expect(text).not.toContain("[Thread ");
+    expect(text).toContain(`\n[Thread ${message.id}]\n\n`);
     expect(text.endsWith(`\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
     // Its second message has something to say: the agent answered, and the person wrote again.
     await w.delivered(command!.id);
@@ -290,6 +290,36 @@ describe("the other kinds of turn", () => {
     expect(inboxWakeText(command!)).not.toContain("[Replying to");
   });
 
+  test("a failure building the context never stops a reply: it goes as from an older Inbox, sentence and thread id kept", async () => {
+    const w = await setup();
+    const sent = await w.send(QUESTION);
+    const reply = await w.reply(sent.message_id, "Not yet.");
+    w.server.store.wakeContext = () => {
+      throw new Error("a record it could not read");
+    };
+    const [command] = await w.poll();
+    expect(command!.id).toBe(reply.id);
+    expect(command!.context).toBeUndefined();
+    const text = inboxWakeText(command!);
+    expect(text.split("\n")[2]).toBe(`[Thread ${sent.thread_id}]`);
+    expect(text).toContain("still open");
+  });
+
+  test("a person's result on an action item: the report stays whole, and the details count the question still open", async () => {
+    const w = await setup({ setAsideDelayMs: 50 });
+    const sent = (await w.send(`${ACTION}\n\n${QUESTION}`)) as unknown as { message_id: string; thread_id: string; actions: { key: string }[] };
+    await w.post(`/api/inbox/messages/${sent.message_id}/actions/${sent.actions[0]!.key}`, { outcome: "cant", note: "I am not on that team." });
+    await Bun.sleep(300);
+    const [command] = await w.poll();
+    expect(command!.context).toMatchObject({ open_questions: 1, open_actions: 0 });
+    const text = inboxWakeText(command!);
+    expect(text).toContain("## Action items you asked for");
+    expect(text).toContain("I am not on that team.");
+    expect(text).toContain(`[Thread ${sent.thread_id}: 2 messages, 1 question open, don't re-ask it.`);
+    // Every paragraph the older wake had is here, but the sentence the details line says instead.
+    for (const paragraph of command!.body.split("\n\n")) if (paragraph !== command!.context!.still_open_line) expect(text).toContain(paragraph);
+  });
+
   test("a 👍 carries no context: its wake is its one line", async () => {
     const w = await setup();
     const sent = await w.send("Shipped.");
@@ -313,10 +343,10 @@ describe("every host", () => {
     expect(modWakeText(command!, now)).toContain(`[Thread ${sent.thread_id}: `);
   });
 
-  test("an older Inbox's command through the mod's copy: no lines, the words as sent", () => {
+  test("an older Inbox's command through the mod's copy: the thread id, no details, the words as sent", () => {
     const old = { type: "reply" as const, id: "msg_R", thread_id: "msg_T", subject: null, body: "Yes.\n\nNo question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox." };
     const text = modWakeText(old);
-    expect(text).not.toContain("[Thread ");
+    expect(text.split("\n")[2]).toBe("[Thread msg_T]");
     expect(text).toContain(old.body);
   });
 

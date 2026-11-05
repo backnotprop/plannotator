@@ -167,11 +167,12 @@ async function personSends(w: World, messageId: string, words: string): Promise<
   return reply.id
 }
 
-/** A wake without what the Inbox's context adds to an older Inbox's wake: its lines under the first ones. */
+/** A wake without what the Inbox's context adds to an older Inbox's wake: the thread line back to its id, no Replying to. */
 const withoutContext = (text: string) =>
   text
     .split('\n')
-    .filter((line) => !line.startsWith('[Thread ') && !line.startsWith('[Replying to '))
+    .filter((line) => !line.startsWith('[Replying to '))
+    .map((line) => line.replace(/^\[Thread (msg_[0-9A-Za-z]+):.*\]$/, '[Thread $1]'))
     .join('\n')
 /** A reply's stored body as the wake carries it: without the still-open sentence the details line replaces. */
 const bodyInWake = (body: string) =>
