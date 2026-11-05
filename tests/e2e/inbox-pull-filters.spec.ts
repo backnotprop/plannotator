@@ -396,7 +396,12 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-  const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  const read = () => readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  // The first row shows when one forge has answered; the other calls may still be on their way.
+  await expect
+    .poll(() => ['gh pulls', 'glab pulls', 'gh others', 'glab others'].filter((name) => read().some((c) => c.startsWith(name))))
+    .toEqual(['gh pulls', 'glab pulls', 'gh others', 'glab others']);
+  const calls = read();
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
   const glab = calls.filter((c) => c.startsWith('glab pulls'));
   const ghOthers = calls.filter((c) => c.startsWith('gh others'));
