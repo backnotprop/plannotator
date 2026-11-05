@@ -208,10 +208,25 @@ async function servePageWithGoneEntry(page: Page, times: number): Promise<{ docu
 test('an older page whose entry script is gone reloads by itself onto the Inbox\'s own page, never blank', async ({ browser }) => {
   const page = await open(browser, false);
   const seen = await servePageWithGoneEntry(page, 1);
-  await page.goto(url);
+  await page.goto(`${url}#thread=${thread}`);
   await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
   expect(seen.documents).toBe(2);
   await expect(page.locator('[data-stale-page]')).toHaveCount(0);
+  // Where the person was: the reload keeps the address's thread.
+  expect(new URL(page.url()).hash).toBe(`#thread=${thread}`);
+});
+
+test('the same old page coming back after a page that loaded reloads again (a rollback, then forward)', async ({ browser }) => {
+  const page = await open(browser, false);
+  await servePageWithGoneEntry(page, 1);
+  await page.goto(url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  await page.unrouteAll({ behavior: 'wait' });
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('plannotator-entry-gone'))).toBeNull();
+  const again = await servePageWithGoneEntry(page, 1);
+  await page.goto(url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  expect(again.documents).toBe(2);
 });
 
 test('a page that keeps coming back with its entry script gone reloads once, not in a loop', async ({ browser }) => {

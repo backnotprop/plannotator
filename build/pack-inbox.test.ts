@@ -69,37 +69,81 @@ describe("asciiRegExps", () => {
 describe("a page whose entry script cannot load", () => {
   const entry = { src: "http://localhost:1/assets/index-old.js", getAttribute: () => "/assets/index-old.js" };
 
-  async function run(options: { head?: () => Promise<{ status: number }>; target?: unknown; stored?: Record<string, string>; storage?: "throws" }) {
+  type Listener = (event: { target: unknown }) => void;
+
+  function page(options: { head?: () => Promise<{ status: number }>; refresh?: () => Promise<{ status: number }>; stored?: Record<string, string>; storage?: "throws" | "keeps nothing" }) {
     const stored = options.stored ?? {};
     const calls: string[] = [];
-    const listeners: ((event: { target: unknown }) => void)[] = [];
+    const errors: Listener[] = [];
+    const loads: Listener[] = [];
     const fake = {
-      addEventListener: (type: string, listener: (event: { target: unknown }) => void, capture: boolean) => {
+      addEventListener: (type: string, listener: Listener, capture: boolean) => {
         expect([type, capture]).toEqual(["error", true]); // An element's load error does not bubble.
-        listeners.push(listener);
+        errors.push(listener);
       },
-      document: { querySelector: () => entry },
+      document: {
+        querySelector: () => entry,
+        addEventListener: (type: string, listener: Listener, capture: boolean) => {
+          expect([type, capture]).toEqual(["load", true]); // An element's `load` never reaches the window.
+          loads.push(listener);
+        },
+      },
       location: { href: "http://localhost:1/#thread=t", reload: () => calls.push("reload") },
       sessionStorage:
         options.storage === "throws"
-          ? { getItem: () => { throw new Error("denied"); }, setItem: () => {} }
-          : { getItem: (key: string) => stored[key] ?? null, setItem: (key: string, value: string) => void (stored[key] = value) },
+          ? { getItem: () => { throw new Error("denied"); }, setItem: () => {}, removeItem: () => { throw new Error("denied"); } }
+          : {
+              getItem: (key: string) => stored[key] ?? null,
+              setItem: (key: string, value: string) => { if (options.storage !== "keeps nothing") stored[key] = value; },
+              removeItem: (key: string) => void delete stored[key],
+            },
       fetch: async (url: string, init: { method?: string; cache: string }) => {
         calls.push(`${init.method ?? "GET"} ${url} ${init.cache}`);
-        return init.method === "HEAD" ? (options.head ?? (async () => ({ status: 404 })))() : { status: 200 };
+        return init.method === "HEAD" ? (options.head ?? (async () => ({ status: 404 })))() : (options.refresh ?? (async () => ({ status: 200 })))();
       },
     };
     const code = INBOX_ENTRY_GONE_SCRIPT.replace(/^<script>|<\/script>$/g, "");
     new Function(...Object.keys(fake), code)(...Object.values(fake));
-    listeners[0]!({ target: options.target ?? entry });
+    return { calls, stored, load: (target: unknown = entry) => loads[0]!({ target }), error: errors[0]! };
+  }
+
+  async function run(options: Parameters<typeof page>[0] & { target?: unknown }) {
+    const opened = page(options);
+    opened.error({ target: options.target ?? entry });
     await new Promise((done) => setTimeout(done, 0));
-    return { calls, stored };
+    return opened;
   }
 
   const head = "HEAD http://localhost:1/assets/index-old.js no-store";
 
   test("a 404: the page is read afresh past the cache and reloaded", async () => {
     expect((await run({})).calls).toEqual([head, "GET http://localhost:1/#thread=t reload", "reload"]);
+  });
+
+  test("a refresh that fails still reloads", async () => {
+    expect((await run({ refresh: () => Promise.reject(new Error("offline")) })).calls).toEqual([head, "GET http://localhost:1/#thread=t reload", "reload"]);
+  });
+
+  test("the entry script loading clears the mark, so the same old page coming back later reloads again", async () => {
+    const { stored } = await run({});
+    expect(stored).toEqual({ "plannotator-entry-gone": "/assets/index-old.js" });
+    // The page the reload brought: another element's load keeps the mark, the entry script's clears it.
+    const next = page({ stored });
+    next.load({ src: "a picture" });
+    expect(stored).toEqual({ "plannotator-entry-gone": "/assets/index-old.js" });
+    next.load();
+    expect(stored).toEqual({});
+    expect((await run({ stored })).calls).toContain("reload");
+    // No store to clear: nothing breaks.
+    expect(() => page({ storage: "throws" }).load()).not.toThrow();
+  });
+
+  test("a store that keeps nothing never reloads: it could not stop a second reload", async () => {
+    expect((await run({ storage: "keeps nothing" })).calls).toEqual([head]);
+  });
+
+  test("it stays under 1 KB: it sits in every page", () => {
+    expect(INBOX_ENTRY_GONE_SCRIPT.length).toBeLessThan(1024);
   });
 
   test("the same old page again does not reload again; another old page does", async () => {
