@@ -3,11 +3,12 @@
  * a reader who left, and that a delete through the window's own route keeps the numbers.
  */
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { DecisionDataSummary } from "@plannotator/core/inbox-types";
+import { DECISION_LINES_FILE } from "@plannotator/shared/inbox/decision-data";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -145,7 +146,11 @@ for (const [what, query] of [
 ] as const) {
 test(`a reader who leaves stops the ${what}, and the server keeps answering`, async () => {
   const world = scratch();
-  seed(world.data, world.project, 1500);
+  seed(world.data, world.project, 1);
+  // Kept lines are quick to write, and give either answer far more slices than a request takes to notice a reader left.
+  const at = Date.now() - 86_400_000;
+  const line = (id: number) => JSON.stringify({ v: 1, id: `q${id}`, thread_id: "t", project_id: "p", agent: "Claude Code", kind: "single", asked_at: at, answered_at: at, sent_at: at, fate: "answered", took: null, offered: false, stopped: false, holds_up: false, files: false, revisions: 1 });
+  writeFileSync(join(world.data, "inbox", DECISION_LINES_FILE), `${Array.from({ length: 100_000 }, (_, id) => line(id)).join("\n")}\n`);
   const server = await start(world.data);
   const savedImmediate = globalThis.setImmediate;
   let slices = 0;
@@ -157,11 +162,12 @@ test(`a reader who leaves stops the ${what}, and the server keeps answering`, as
     await withFastClock(async () => {
       await (await fetch(`${base(server)}/api/inbox/decision-data?${query}`)).text();
       const whole = slices;
-      expect(whole).toBeGreaterThan(10);
+      expect(whole).toBeGreaterThan(100);
       slices = 0;
       const controller = new AbortController();
       const left = fetch(`${base(server)}/api/inbox/decision-data?${query}`, { signal: controller.signal }).catch(() => null);
-      await new Promise((resolve) => savedImmediate(resolve));
+      // Only once the server is counting does leaving say anything.
+      while (slices === 0) await new Promise((resolve) => setTimeout(resolve, 1));
       controller.abort();
       await left;
       // Give it time to run to the end, were it still running.
