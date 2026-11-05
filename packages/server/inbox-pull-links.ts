@@ -89,7 +89,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
         }
       }
       for (const [threadId, start] of Object.entries(parsed.started ?? {})) {
-        if (start?.kind === "local" && typeof start.at === "string") started.set(threadId, start);
+        if ((start?.kind === "local" || start?.kind === "link") && typeof start.at === "string") started.set(threadId, start);
       }
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
         if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);

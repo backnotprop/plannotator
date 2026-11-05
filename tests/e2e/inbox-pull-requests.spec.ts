@@ -1609,12 +1609,27 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await expect(box).toBeVisible();
   // One Pull request row: its picker's search takes the link.
   await expect(box.locator('[data-review-choice="link"]')).toHaveCount(0);
+  // No visible labels on what is reviewed: each control says what it asks, and keeps its name.
+  await expect(box.locator('.ib-cp-rvrow .ib-cp-tol')).toHaveCount(0);
+  await expect(box.getByRole('radiogroup', { name: 'Review' })).toBeVisible();
+  await expect(box.getByRole('radiogroup', { name: 'Changes' })).toBeVisible();
+  for (const [width, height] of [[390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-local-${width}`);
+  }
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await expect(box.locator('.ib-cp-rvrow .ib-cp-tol')).toHaveCount(0);
+  await expect(box.getByRole('button', { name: 'Pull request: none chosen' })).toBeVisible();
+  for (const [width, height] of [[320, 700], [390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-pr-empty-${width}`);
+  }
   const openPicker = async () => {
     await box.locator('[data-review-choice="pr"]').check({ force: true });
     await box.locator('[data-review-pick]').click();
   };
   await openPicker();
-  await expect(box.locator('[data-review-pick]')).toContainText('Choose one, or paste a link');
+  await expect(box.locator('[data-review-pick]')).toContainText('Choose or paste a pull request');
   const field = box.locator('[data-review-link]');
   await expect(field).toBeFocused();
   await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
@@ -1662,7 +1677,8 @@ test('New review, a pull request link: what was found and how it was read, a rep
   // Enter chooses it: the row then says what it is and how it was read.
   await field.press('Enter');
   await expect(field).toHaveCount(0);
-  await expect(box.locator('[data-review-pick]')).toContainText('northwind/payments #231');
+  await expect(box.locator('[data-review-pick]')).toContainText('northwind/payments');
+  await expect(box.locator('[data-review-pick]')).toContainText('#231');
   await expect(box.locator('[data-review-pick]')).toContainText('Idempotent refunds');
   await expect(read).toContainText('Read with gh, signed in to github.com');
   await expect(box.locator('.ib-cp-to').last()).toContainText('New scratch folder');
@@ -1670,7 +1686,7 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await shot(page, 'l-box-link');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'l-box-link-phone');
-  // The phone's toggle: slim, on the label's line, as tall as the row below, with room for a third choice at 320 too.
+  // No labels: the toggle takes its row, slim, as tall as the row below, with room for a third choice at 320 too.
   await box.locator('[data-review-choices="kind"]').evaluate((group) => {
     const third = group.lastElementChild!.cloneNode(true) as HTMLElement;
     third.lastChild!.textContent = 'Walkthrough';
@@ -1683,16 +1699,19 @@ test('New review, a pull request link: what was found and how it was read, a rep
     await shot(page, `l-box-three-choices-${width}`, ['light']);
     const fit = await box.locator('[data-review-choices="kind"]').evaluate((group) => {
       const row = group.parentElement!;
-      const label = row.querySelector('.ib-cp-tol')!.getBoundingClientRect();
       const toggle = group.getBoundingClientRect();
-      const box = row.getBoundingClientRect();
-      return { sameLine: Math.abs(label.top + label.height / 2 - (toggle.top + toggle.height / 2)) < 3, height: box.height, inside: toggle.right <= box.right, toRow: row.parentElement!.querySelector('[data-compose-to], .ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
+      const rect = row.getBoundingClientRect();
+      return { height: rect.height, inside: toggle.right <= rect.right, toRow: row.parentElement!.querySelector('.ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
     });
-    expect(fit.sameLine).toBe(true);
     expect(fit.inside).toBe(true);
     expect(fit.height).toBeLessThanOrEqual(fit.toRow + 1);
   }
   await box.locator('[data-try-third]').evaluate((third) => third.remove());
+  // One chosen, at each size.
+  for (const [width, height] of [[320, 700], [390, 844], [1440, 900]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `l-nolabel-pr-picked-${width}`);
+  }
   await page.setViewportSize({ width: 390, height: 844 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.unroute('**/api/inbox/sessions*');
