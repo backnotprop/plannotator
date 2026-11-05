@@ -5,6 +5,7 @@
  * the person's data, environment or Inbox.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
@@ -51,6 +52,99 @@ function world(env: Record<string, string | undefined> = {}) {
 }
 
 describe("shape update", () => {
+  test("real git: a shell `cd` moves a board to the checkout it runs in, the session's folder does not hold it back", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cd-")));
+    roots.push(root);
+    const repo = (dir: string, ...args: string[]) => {
+      const done = spawnSync("git", ["-C", dir, "-c", "init.defaultBranch=main", "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" },
+      });
+      if (done.status !== 0) throw new Error(done.stderr);
+    };
+    const main = join(root, "kettle");
+    mkdirSync(main);
+    writeFileSync(join(main, "a.ts"), "main\n");
+    repo(main, "init", "-q");
+    repo(main, "add", "a.ts");
+    repo(main, "commit", "-qm", "one");
+    const tree = join(root, "kettle-wt");
+    repo(main, "worktree", "add", "-q", "-b", "wt", tree);
+    const other = join(root, "elsewhere");
+    mkdirSync(other);
+    writeFileSync(join(root, "b.json"), JSON.stringify({ title: "Kettle", claim: "Built.", views: { picture: { html: '<p data-mark="p">One</p>' } } }));
+
+    const dataDir = join(root, "data");
+    const write = async (session: string, cwd: string, ...argv: string[]) => {
+      const out: string[] = [];
+      const err: string[] = [];
+      const code = await runShapeCommand(["update", "--file", join(root, "b.json"), ...argv], {
+        dataDir,
+        cwd,
+        env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_abc", PLANNOTATOR_SESSION_PROJECT: `claude-code:ses_abc:${session}` },
+        stdout: (t) => out.push(t),
+        stderr: (t) => err.push(t),
+      });
+      expect(err.join("\n")).toBe("");
+      expect(code).toBe(0);
+      return (JSON.parse(out.join("\n")) as { id: string }).id;
+    };
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const projectOf = (id: string) => createShapeStore({ dataDir }).get(id)!.project;
+
+    // Started in main, `cd` to a worktree: a new board, and a later write to one.
+    const made = await write(main, tree);
+    expect(projectOf(made)).toMatchObject({ root: main, worktree: tree });
+    const started = await write(main, main);
+    expect(projectOf(started).worktree).toBeUndefined();
+    await write(main, tree, "--id", started, "--base", "1");
+    expect(projectOf(started)).toMatchObject({ root: main, worktree: tree });
+    // Started in a worktree, `cd` to main: a new board, and a later write to one.
+    const back = await write(tree, main);
+    expect(projectOf(back).worktree).toBeUndefined();
+    await write(tree, main, "--id", made, "--base", "1");
+    expect(projectOf(made).worktree).toBeUndefined();
+    // A `cd` out of the project: the session's project, in its own checkout.
+    const away = await write(tree, other);
+    expect(projectOf(away)).toMatchObject({ root: main, worktree: tree });
+    // `--project` says which, wherever the shell is.
+    await write(main, tree, "--id", started, "--base", "2", "--project", main);
+    expect(projectOf(started).worktree).toBeUndefined();
+  });
+
+  test("a board's checkout follows its latest write within its project, and only there", async () => {
+    const w = world();
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    let here: { root: string; name: string; worktree?: string } = { root: w.project, name: "kettle", worktree: "/wt/one" };
+    const write = async (...argv: string[]) => {
+      const out: string[] = [];
+      const code = await runShapeCommand(["update", "--file", w.board("b.json", `words ${Math.random()}`), ...argv], {
+        dataDir,
+        cwd: w.project,
+        env: {},
+        stdout: (t) => out.push(t),
+        stderr: () => {},
+        projectRootOf: async () => here,
+      });
+      expect(code).toBe(0);
+      return JSON.parse(out.join("\n")) as { id: string; v: number };
+    };
+    const projectOf = (id: string) => createShapeStore({ dataDir }).get(id)!.project;
+    const { id } = await write();
+    expect(projectOf(id).worktree).toBe("/wt/one");
+    here = { root: w.project, name: "kettle", worktree: "/wt/two" };
+    await write("--id", id, "--base", "1");
+    expect(projectOf(id).worktree).toBe("/wt/two");
+    here = { root: w.project, name: "kettle" };
+    await write("--id", id, "--base", "2");
+    expect(projectOf(id).worktree).toBeUndefined();
+    // Written from another project: the board stays where it is.
+    here = { root: "/elsewhere", name: "elsewhere", worktree: "/wt/three" };
+    await write("--id", id, "--base", "3");
+    expect(projectOf(id)).toEqual({ root: w.project, name: "kettle" });
+  });
+
   test("creates a shape, then adds versions only from the latest base", async () => {
     const w = world();
     const first = await w.run("update", "--file", w.board("b1.json", "whistles once"));
@@ -193,6 +287,23 @@ describe("shape --help", () => {
 });
 
 describe("the Shape switch, through the entrypoint", () => {
+  test("update tells the agent how the board will behave, and stores it either way", async () => {
+    const { run, board } = world();
+    const r = await run("update", "--file", board("kettle.json", "whistles"));
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.out);
+    expect(out.v).toBe(1);
+    expect(out.notes.join()).toContain("no width and height");
+  });
+
+  test("a board that writes Requirements is refused, and the refusal says where the words go", async () => {
+    const { run, project } = world();
+    writeFileSync(join(project, "old.json"), JSON.stringify({ title: "T", claim: "C", views: { reqs: { groups: [] } } }));
+    const r = await run("update", "--file", "old.json");
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("views.know");
+  });
+
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
   // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
   // says it is off and exits 1, and nothing is written. On, the same calls work.
@@ -235,6 +346,11 @@ describe("the Shape switch, through the entrypoint", () => {
           expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
         }
         expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+        // Off, the kit is one more command that does not exist: nothing teaches the feature.
+        const kit = await run("kit");
+        expect(kit.code).toBe(1);
+        expect(kit.stdout).toBe("");
+        expect(kit.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
       }
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");
@@ -343,7 +459,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const inbox = await startInboxServer({ dataDir: c.dataDir, phones: false });
     try {
       const base = `http://127.0.0.1:${inbox.port}`;
-      // Off, the settings read leaves Shape out (held for 0.28.50, inbox.ts heldSwitch): absent reads as off.
+      // Off, the settings read leaves Shape out (held until the next big release, inbox.ts heldSwitch): absent reads as off.
       const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape?: { on: boolean } }).shape?.on === true;
       expect(await settingsShape()).toBe(false);
       expect((await c.run("on")).code).toBe(0);

@@ -24,11 +24,12 @@ import { resolve } from "node:path";
 import { mcpAnswerOf } from "@plannotator/shared/inbox/connection";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { CARD_COMMAND_USAGE } from "./cli";
+import { writeWholeToStdout } from "./write-whole-stdout";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 
 export { CARD_COMMAND_USAGE };
 
-type Op = "create" | "move" | "say" | "link" | "ship" | "drop" | "list";
+type Op = "create" | "move" | "say" | "link" | "ship" | "drop" | "list" | "initiative_delete";
 
 /** A parsed command: the tool's arguments (without the filled ones), or why it is not one. */
 export type ParsedCardCommand =
@@ -45,6 +46,7 @@ const VALUE_FLAGS: Record<string, string> = {
   "--key": "idempotency_key",
   "--reason": "reason",
   "--title": "title",
+  "--initiative": "initiative",
   "--project": "project",
 };
 
@@ -57,12 +59,13 @@ const POSITIONAL: Record<Op, { names: readonly string[]; required: number }> = {
   ship: { names: ["card_id"], required: 1 },
   drop: { names: ["card_id", "reason"], required: 2 },
   list: { names: [], required: 0 },
+  initiative_delete: { names: ["initiative"], required: 1 },
 };
 
 export function parseCardCommand(argv: readonly string[]): ParsedCardCommand {
   // `card done <crd_id>` is `card ship` (its column is Done).
   const op = (argv[0] === "done" ? "ship" : argv[0]) as Op | undefined;
-  if (!op || !Object.hasOwn(POSITIONAL, op)) return { ok: false, error: op ? `Unknown card command: ${op}` : "A card command: create, move, say, link, ship, drop or list." };
+  if (!op || !Object.hasOwn(POSITIONAL, op)) return { ok: false, error: op ? `Unknown card command: ${op}` : "A card command: create, move, say, link, ship, drop, list or initiative_delete." };
   const args: Record<string, unknown> = { op };
   const positional: string[] = [];
   let project: string | null = null;
@@ -102,16 +105,16 @@ export interface CardCommandDeps {
   cwd: string;
   env: Record<string, string | undefined>;
   ensureRunning: () => Promise<InboxRegistryEntry>;
-  out?: (text: string) => void;
+  out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
 }
 
 /** Run `plannotator card …`; resolves to the exit code. */
 export async function runCardCommand(argv: readonly string[], deps: CardCommandDeps): Promise<number> {
-  const out = deps.out ?? ((text: string) => void process.stdout.write(text));
+  const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
   if (argv.length === 0 || argv[0] === "--help" || argv[0] === "-h") {
-    (argv.length === 0 ? err : out)(`${CARD_COMMAND_USAGE}\n`);
+    await (argv.length === 0 ? err : out)(`${CARD_COMMAND_USAGE}\n`);
     return argv.length === 0 ? 2 : 0;
   }
   const parsed = parseCardCommand(argv);
@@ -163,6 +166,6 @@ export async function runCardCommand(argv: readonly string[], deps: CardCommandD
     if (noCards(body)) err("This Plannotator Inbox does not offer cards yet.\n");
     return 1;
   }
-  out(parsed.json ? `${JSON.stringify(result?.structuredContent ?? null, null, 2)}\n` : `${body}\n`);
+  await out(parsed.json ? `${JSON.stringify(result?.structuredContent ?? null, null, 2)}\n` : `${body}\n`);
   return 0;
 }

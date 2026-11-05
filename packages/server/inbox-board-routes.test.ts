@@ -371,11 +371,36 @@ describe("the Board's initiatives over the routes (approval \"board-initiatives\
     expect(model.initiatives.map((i) => i.name)).toEqual(["Shape v2"]);
     expect(model.cards.filter((c) => c.initiative === id).length).toBe(2);
     expect((await post(`/api/inbox/initiatives/${id}`, { op: "delete" })).status).toBe(200);
+    // The toast's Undo: the initiative and its cards back; deleted again for what follows.
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "restore" })).status).toBe(200);
+    expect(((await (await fetch(`${base}/api/inbox/cards`)).json()) as Read).cards.filter((c) => c.initiative === id).length).toBe(2);
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "delete" })).status).toBe(200);
     model = await read();
     expect(model.initiatives[0]!.deleted_at).not.toBeNull();
     expect(model.cards.map((c) => c.initiative)).toEqual([null, null]);
     // A stale window's write is refused like every other.
     expect((await post("/api/inbox/initiatives", { name: "Memory", serverSession: "another" })).status).toBe(409);
     expect((await fetch(`${base}/api/inbox/initiatives`)).status).toBe(405);
+  });
+});
+
+describe("# tags in the cards read (approval \"board-hashtags\")", () => {
+  test("`initiative_threads`: the few latest tagged threads no card of it links, with their rows, and the total", async () => {
+    const { server, base, project } = await world();
+    const store = server.store;
+    const shape = store.createInitiative({ name: "Shape", by: { kind: "person" } });
+    const agent = { kind: "agent", host: "codex", session: "s", name: "Codex" } as const;
+    const linked = store.sendMessage({ project_id: project.id, author: agent, body: "Card work #Shape", thread: "linked" }).message;
+    const { card } = store.createCard({ project_id: project.id, by: agent, title: "Linked", threads: [linked.thread_id] });
+    store.setCardInitiative(card.id, shape.id, { kind: "person" });
+    const tagged = Array.from({ length: 7 }, (_, i) => store.sendMessage({ project_id: project.id, author: agent, body: `Note ${i} for #shape`, thread: `t${i}` }).message.thread_id);
+    store.sendMessage({ project_id: project.id, author: agent, body: "Only `#Shape` in code", thread: "code" });
+    type Read = { initiative_threads?: Record<string, { threads: string[]; total: number }>; threads: Record<string, unknown> };
+    const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as Read;
+    // Bounded: the 4 latest unlinked tagged threads (3 shown + the one being read), and how many in all.
+    const latest = [...tagged].reverse();
+    expect(model.initiative_threads).toEqual({ [shape.id]: { threads: latest.slice(0, 4), total: 7 } });
+    // Rows: the linked card's own thread, and those 4.
+    expect(Object.keys(model.threads).sort()).toEqual([linked.thread_id, ...latest.slice(0, 4)].sort());
   });
 });

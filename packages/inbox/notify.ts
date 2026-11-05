@@ -29,6 +29,7 @@ import { inboxApi, type InboxEvent, type ListModel, type NotificationSettings } 
 import { agentName, plural } from './format';
 import { pageInFront } from './sound';
 import { inboxEventsServedBy } from './sharedEvents';
+import { signalNotificationClick } from './history';
 
 /** The one tag every Inbox notification carries: a new one replaces the last. */
 export const NOTIFICATION_TAG = 'plannotator-inbox';
@@ -538,6 +539,7 @@ export function useInboxNotifications(options: {
         burst.current.clear();
         lastNotice.current = null;
         open();
+        signalNotificationClick();
       };
     } catch {
       // A browser that only notifies through a service worker: nothing to show.
@@ -650,6 +652,7 @@ export function useInboxNotifications(options: {
       notification.onclick = () => {
         window.focus();
         notification.close();
+        signalNotificationClick();
       };
       return 'sent';
     } catch {

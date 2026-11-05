@@ -8,7 +8,7 @@ import { afterEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAttachment, InboxMessageWire } from '@plannotator/core/inbox-types';
-import { attachmentDeepLink, attachmentDisplayPath, attachmentForLink, normalizeLinkPath } from './links';
+import { attachmentDeepLink, attachmentDisplayPath, attachmentForLink, normalizeLinkPath, projectFileOfLink } from './links';
 import { setComponentTooltips, resetComponentTooltips } from '@plannotator/ui/components/HostTitle';
 import { tooltipOf, unhover } from './testing/tooltip';
 
@@ -252,4 +252,18 @@ test.skipIf(!hasDom)('a Viewer without resolveLocalLink draws a local link as it
   expect(host!.querySelector('[data-local-link]')).toBeNull();
   expect(host!.querySelector('a[href="mock.html"]')).not.toBeNull();
   expect(host!.querySelector('a[href="notes.md"]')).not.toBeNull();
+});
+
+test('the project file a link that names no attachment may mean: relative to the root, with its line; nothing outside the project', () => {
+  expect(projectFileOfLink('src/a.ts')).toEqual({ path: 'src/a.ts' });
+  expect(projectFileOfLink('src/a.ts#L12')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12-20')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('my%20file.ts')).toEqual({ path: 'my file.ts' });
+  // The path stays as written: the server knows the folder the agent wrote from.
+  expect(projectFileOfLink('/work/wt/src/a.ts')).toEqual({ path: '/work/wt/src/a.ts' });
+  expect(projectFileOfLink('../a.ts')).toEqual({ path: '../a.ts' });
+  expect(projectFileOfLink('#top')).toBeNull();
+  expect(projectFileOfLink('src/')).toBeNull();
 });

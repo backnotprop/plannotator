@@ -25,10 +25,11 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { plural } from '@plannotator/core/inbox-format';
-import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -41,6 +42,7 @@ import { isTextCut, Tip } from '../components/Tip';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
@@ -57,7 +59,7 @@ import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } 
 const RAIL_FOLD_BELOW = 760;
 /** The review's width (px) under which the controls' row has no room for the read-only note: it moves to the foot. */
 const NOTE_ON_STRIP_FROM = 900;
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 /** The layer on screen brought to the middle of the strip, when the layers do not all fit. */
 function centerCurrentLayer(strip: HTMLElement): void {
@@ -312,6 +314,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
   const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+
+  // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
+  const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
+  const fileOpenIn = useCallback((path: string) => (repoKey ? <OpenInFile scope={{ repo: repoKey }} path={path} /> : null), [repoKey]);
 
   // The files in the rail's order, as the review app has them: the diffs below follow it.
   const { files, tree, loose, patch } = useMemo(() => reviewFiles(diff?.patch ?? ''), [diff]);
@@ -654,9 +660,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
             </p>
           ) : snapshot ? (
-            <Suspense fallback={null}>
-              <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
-            </Suspense>
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+                <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              </OpenInCodeSpans>
+            </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
               Reading the diff…

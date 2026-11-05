@@ -3,7 +3,7 @@
 // the approved prototype's Picture and How it works rewritten as agent HTML;
 // the code files and patch are #2547's own (files/). Thread messages are
 // invented for the harness.
-import type { ShapeBoard, ShapeCodeView, ShapeRef, ShapeRequirements } from '@plannotator/core/shape';
+import type { ShapeBoard, ShapeCodeView, ShapeRef } from '@plannotator/core/shape';
 import patch from './files/snooze.patch.txt?raw';
 import intro from './files/snoozeIntro.ts.txt?raw';
 import server from './files/inbox-snooze-intro.ts.txt?raw';
@@ -268,38 +268,10 @@ function howTall(m: SnoozeModel): string {
 </div>`;
 }
 
-// ───────────────────────── Requirements ─────────────────────────
+// ───────────────────────── What to know ─────────────────────────
 
-function reqs(m: SnoozeModel): ShapeRequirements {
-  const when = [
-    { id: 'r-when', text: 'At a quiet moment, after you leave a thread that still waits on you.', code: { path: P.when, line: 80 } },
-    { id: 'r-typing', text: 'Never over a half-typed reply.', code: { path: P.when, line: 89 } },
-    ...(m.calmReq ? [{ id: 'r-calm', text: 'Only when the page is calm: open 60 s, 3+ rows, no other one-time dialog, nothing over it.', code: { path: P.when, line: 3 } }] : []),
-  ];
-  return {
-    heading: 'What I understand you want',
-    groups: [
-      { id: 'who', label: 'Who gets it', items: [
-        { id: 'r-2days', text: 'At least 2 days since you started. No active-days rule.[^4][^9]', code: { path: P.who, line: 14 } },
-        { id: 'r-never', text: 'Never if you’ve snoozed. A snooze counts once it succeeds.', code: { path: P.who, line: 30 } },
-        { id: 'r-who', text: 'You, never a guest on your tailnet.', code: { path: P.who, line: 10 } },
-      ] },
-      { id: 'when', label: 'When it shows', items: when },
-      { id: 'what', label: 'What it shows', items: [
-        { id: 'r-new', text: '“New”, then “Snooze a thread until later”.', code: { path: P.dialog, line: 151 } },
-        { id: 'r-b', text: 'Version B: the real “Snooze until” menu, pointer on Tomorrow, Undo toast.[^2]', code: { path: P.dialog, line: 1 } },
-      ] },
-      { id: 'after', label: 'What happens after', items: [
-        { id: 'r-try', text: 'Try it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick.', code: { path: P.tryIt, line: 3 } },
-        { id: 'r-once', text: `${m.onceLabel}.[^5]`, code: { path: P.when, line: 16 } },
-      ] },
-      { id: 'where', label: 'Where', items: [{ id: 'r-same', text: 'The same dialog on your computer and your own phone.' }] },
-    ],
-    foot: [
-      { label: 'Open', text: 'Nothing. No question waits on you.' },
-      { label: 'Next', text: `Merged in [#2547](${PR_URL}). It goes out with 0.28.48; you don’t need to publish core for it.` },
-    ],
-  };
+function know(m: SnoozeModel): string {
+  return `It shows at a quiet moment, after you leave a thread that still waits on you, and never over a half-typed reply${m.calmReq ? ', and only when the page is calm' : ''}. You get it **2 days** after you started, unless you already snoozed.[^4][^9]\n\nTry it opens the real Snooze menu on the thread you just left. Nothing is snoozed until you pick. ${m.onceLabel}.[^5] It goes out with 0.28.48 ([#2547](${PR_URL})); no question waits on you.`;
 }
 
 // ───────────────────────── Code ─────────────────────────
@@ -402,7 +374,7 @@ export function snoozeBoard(m: SnoozeModel, stage: 'before' | 'after' = 'after')
     views: {
       picture: { html: picture(m), css: PICTURE_CSS },
       how: { html: howWide(m), css: HOW_CSS, width: 1180, height: 520, tall: { html: howTall(m) } },
-      reqs: reqs(m),
+      know: know(m),
       code: code(stage),
     },
     refs: REFS,

@@ -12,6 +12,8 @@ import { join, relative, resolve } from "node:path";
 import { AGENT_SPECS, type AgentEnvironment } from "../packages/server/inbox-agents";
 import { MARKER_ENGINES } from "../packages/server/marker-review";
 import { AGENT_CLIS, agentCliCalls, writeAgentCliStubs } from "./e2e/agent-cli-stubs";
+import { stubbedAgentClis } from "./helpers/agent-cli-guard";
+import { GH_TRIPWIRE_BIN } from "./setup/gh-tripwire";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const stubbed = new Set<string>(AGENT_CLIS);
@@ -22,7 +24,7 @@ afterEach(() => {
 });
 
 /** Tools the servers look up that are not agents: never stubbed (git, openssl and the rest must keep working). */
-const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash"]);
+const NOT_AGENTS = new Set(["node", "npm", "glimpseui", "dns-sd", "avahi-publish", "openssl", "git", "curl", "lsof", "rg", "pwsh", "pwsh.exe", "powershell.exe", "tailscale", "sh", "bash", "osascript"]);
 
 function sourceFiles(dir: string, found: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -108,11 +110,43 @@ describe("a stub", () => {
   });
 });
 
+describe("a bun test's child PATH (tests/helpers/agent-cli-guard.ts)", () => {
+  const agents = stubbedAgentClis();
+
+  test.skipIf(process.platform === "win32")("finds every agent CLI in the stubs, and bun, with no other folder that could hold an agent", () => {
+    const { PATH } = agents.env;
+    expect(AGENT_CLIS.filter((name) => Bun.which(name, { PATH }) !== join(agents.bin, name))).toEqual([]);
+    expect(PATH.split(":")).toEqual([agents.bin, GH_TRIPWIRE_BIN, "/usr/bin", "/bin"]);
+    expect(spawnSync("bun", ["--version"], { env: { PATH }, encoding: "utf8" }).status).toBe(0);
+  });
+
+  /** Test files that start the CLI's Inbox: each gives it this PATH, or a copy of an old env brings the real CLIs back. */
+  test("is the one a CLI test that starts an Inbox gives its child", () => {
+    const dir = join(repoRoot, "apps/hook/server");
+    const exposed = readdirSync(dir)
+      .filter((name) => name.endsWith(".test.ts") && /inboxEntryOf|stopProvenInboxes|"inbox"/.test(readFileSync(join(dir, name), "utf8")))
+      .filter((name) => /^\s*PATH: process\.env\.PATH\b/m.test(readFileSync(join(dir, name), "utf8")));
+    expect(exposed).toEqual([]);
+  });
+});
+
 /**
  * Specs that need the agents they set up under HOME found (the sandbox would hide them), so their PATH holds only
  * their own folder and the system's /usr/bin:/bin, never a folder that holds agents.
  */
-const OWN_FAKES = new Set(["inbox-first-run.spec.ts", "inbox-tailnet-owner.spec.ts", "inbox.spec.ts", "voice-inbox.ts", "inbox-accounts.spec.ts", "inbox-accounts-peek.spec.ts"]);
+const OWN_FAKES = new Set([
+  "inbox-first-run.spec.ts",
+  "inbox-tailnet-owner.spec.ts",
+  "inbox.spec.ts",
+  "voice-inbox.ts",
+  "inbox-accounts.spec.ts",
+  "inbox-accounts-peek.spec.ts",
+  "inbox-launch-claude.spec.ts",
+  "inbox-launch-permission.spec.ts",
+  "inbox-launch-scratch.spec.ts",
+  "inbox-launch-trust.spec.ts",
+  "inbox-launch-trust-compose.spec.ts",
+]);
 
 describe("an e2e spec that builds its own PATH", () => {
   test("gives that Inbox the test sandbox (or keeps the runner's PATH, where the stubs come first)", () => {

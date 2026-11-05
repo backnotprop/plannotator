@@ -53,6 +53,7 @@ import {
 import { isContentlessBinaryPatch, isImagePreviewCandidate, isOversizedReviewStubPatch } from '@plannotator/shared/diff-paths';
 import { OversizedFileNotice } from './OversizedFileNotice';
 import { ToolbarHost, type ToolbarHostHandle } from './ToolbarHost';
+import type { DiffSelectionActions } from './SelectionChooser';
 import { FileHeader } from './FileHeader';
 import { DiffHScrollbar } from './DiffHScrollbar';
 import { BinaryFileNotice } from './BinaryFileNotice';
@@ -422,12 +423,20 @@ export interface AllFilesCodeViewProps {
    * `readOnly` is set.
    */
   commentOnly?: boolean;
+  /** A host's own "Open in" for a file's header (the Inbox's). Absent: none beyond the app's own. */
+  fileOpenIn?: (filePath: string) => React.ReactNode;
   /**
    * Selected lines can only be asked about (the VS Code Guide tab, where
    * there are no comments): with `commentOnly` and `aiAvailable`, the
    * selection toolbar opens on its Ask box. Ignored without `aiAvailable`.
    */
   askOnly?: boolean;
+  /**
+   * A host's choices for selected lines before the comment box (the Inbox's
+   * code review: Comment · Ask · Show me). Absent: a selection opens the
+   * comment box at once, as always.
+   */
+  selectionActions?: DiffSelectionActions;
   /** EXPERIMENTAL flag-gated edit-to-suggestion mode. Only the plain all-files
    * dock panel passes this — Guided Review surfaces deliberately do NOT (the
    * GuideViewportManager evicts CodeViews beyond ~8 mounted, which would
@@ -730,6 +739,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   isActive = true,
   readOnly = false,
   commentOnly = false,
+  fileOpenIn,
+  selectionActions,
   askOnly = false,
   aiAvailable = false,
   onAskAIForFile,
@@ -2369,8 +2380,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // Selection originated inside CodeView — already on the right item.
       return;
     }
-    if (activeFilePath) {
-      const itemId = filePathToItemId.get(activeFilePath);
+    // A host that paints lines before anyone touched this view (the Inbox's guide card, one file: a picture's
+    // part opened these lines) has no active file yet: its only file is the one.
+    const owner = activeFilePath ?? (filePathToItemId.size === 1 ? [...filePathToItemId.keys()][0]! : null);
+    if (owner) {
+      const itemId = filePathToItemId.get(owner);
       if (itemId != null) {
         setSelectedLines({ id: itemId, range: pendingSelection });
       }
@@ -3018,6 +3032,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         <FileHeader
         compactTouchLayout={compactTouchLayout}
         readOnly={readOnly || commentOnly}
+        openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
         status={file.status}
@@ -3374,6 +3389,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         onViewAIResponse={onViewAIResponse}
         aiHistoryMessages={aiHistoryForActiveFile}
         askOnly={askOnly && !!aiAvailable}
+        selectionActions={selectionActions}
       />
       )}
 
