@@ -15,6 +15,7 @@ import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
 import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { projectSortControl, setProjectSort, sortProjects, useProjectSort, type ProjectSort } from '../projectSort';
 import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
@@ -71,6 +72,8 @@ export interface SidebarProps {
   projectNames?: ReadonlyMap<string, string>;
   /** Rows waiting on the person, per project id. */
   projectCounts: ReadonlyMap<string, number>;
+  /** Each project's latest activity (`projectActivity`): what "most recent" sorts Projects by. */
+  projectActivity?: ReadonlyMap<string, string>;
   /**
    * The project menu (design record "inbox-project-menu"): the projects where
    * Mark all as read has something to do, and the action. Absent: no menu.
@@ -206,9 +209,10 @@ export function Sidebar(props: SidebarProps) {
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
+  const projectSort = useProjectSort();
   const shown = useMemo(
-    () => shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })),
-    [props.projects, props.projectNames, held],
+    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, props.projectActivity),
+    [props.projects, props.projectNames, held, projectSort, props.projectActivity],
   );
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
@@ -523,16 +527,20 @@ export function Sidebar(props: SidebarProps) {
             </div>
           </>
         )}
-        <SectionHeader
-          section="projects"
-          id={projectsLabelId}
-          controls={projectsBodyId}
-          label="Projects"
-          icon={projectsClosed ? 'folder' : 'folderOpen'}
-          open={!projectsClosed}
-          count={0}
-          onToggle={() => sections.toggle('projects')}
-        />
+        {/* Two controls side by side, never one inside the other: the header opens and closes, the icon changes the order. */}
+        <div className="ib-secrow">
+          <SectionHeader
+            section="projects"
+            id={projectsLabelId}
+            controls={projectsBodyId}
+            label="Projects"
+            icon={projectsClosed ? 'folder' : 'folderOpen'}
+            open={!projectsClosed}
+            count={0}
+            onToggle={() => sections.toggle('projects')}
+          />
+          {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
+        </div>
         <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined}>
           {/* Closed: only the project the list shows, if any; never the empty notes. */}
           {firstRun ? (
@@ -691,6 +699,33 @@ function SectionHeader(props: {
         <Icon name="chevR" className="ib-side-sec-chev" />
       </span>
     </button>
+  );
+}
+
+/**
+ * The order of Projects, one quiet icon beside the header's chevron: the icon
+ * is the order on screen, a press goes to the next. It shows on the header's
+ * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
+ * shows. Only with two projects or more, and only while the section is open.
+ * Not navigation: the phone sheet stays open.
+ */
+function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
+  const { icon, label, next, said } = projectSortControl(sort);
+  return (
+    <Tip content={label}>
+      <button
+        type="button"
+        className="ib-proj-sort"
+        aria-label={label}
+        data-projects-sort={sort}
+        onClick={() => {
+          setProjectSort(next);
+          announce?.(said);
+        }}
+      >
+        <Icon name={icon} />
+      </button>
+    </Tip>
   );
 }
 
