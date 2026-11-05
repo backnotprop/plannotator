@@ -123,6 +123,12 @@ export interface CardsModel {
   steps?: Record<string, InboxStepsWire[]>;
   /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
   initiatives?: InboxInitiative[];
+  /**
+   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
+   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
+   * Absent from an older Inbox: the preview lists no threads.
+   */
+  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -1656,6 +1662,8 @@ export interface AttachmentsModel {
   /** The images the messages show, captured as files (additive; absent from an older Inbox). */
   inline_images?: InboxAttachmentState[];
   annotations: InboxAnnotationRecord[];
+  /** The person's comments on files that a Send already carried (additive; absent from an older Inbox or peer). */
+  earlier_annotations?: InboxAnnotationRecord[];
 }
 
 /** One version of a file: its text, and for HTML the page as annotate serves it. */
