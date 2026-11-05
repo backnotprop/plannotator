@@ -1209,8 +1209,6 @@ test("a stranger's description: paths open on the forge, only the web's links ar
     '',
     '<div data-pn-image-annotator-stage>stage</div>',
     '',
-    '<table width="5000"><tr><td>wide</td></tr></table>',
-    '',
     '![pixel](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==)',
   ].join('\n');
   const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: body });
@@ -1242,9 +1240,7 @@ test("a stranger's description: paths open on the forge, only the web's links ar
       await link(name).click();
       expect(page.url()).toBe(route);
     }
-    // A data: image draws; a wide table scrolls in its own box, never the review.
     await expect(section.locator('img[alt="pixel"]')).toHaveCount(1);
-    expect(await review.locator('.ib-gbody').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     // Its `data-pn-image-annotator-stage` is no modal: Escape still closes the sheet.
     await page.locator('.ib-vhead .ib-vcomments').click();
     await expect(page.locator('.ib-panel-open')).toHaveCount(1);
@@ -1252,6 +1248,15 @@ test("a stranger's description: paths open on the forge, only the web's links ar
     await expect(page.locator('.ib-panel-open')).toHaveCount(0);
   } finally {
     await context.close();
+  }
+  // A short one with a wide table, drawn whole: the table scrolls in its own box, never the review.
+  const wide = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: '<table width="5000"><tr><td>wide</td></tr></table>' });
+  try {
+    await expect(wide.page.locator('[data-pull-review] [data-pull-description]')).toHaveAttribute('data-pull-description', 'whole');
+    await expect(wide.page.locator('[data-pull-description] table')).toBeAttached();
+    expect(await wide.page.locator('[data-pull-review] .ib-gbody').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  } finally {
+    await wide.context.close();
   }
   // A long one is parsed only to its start while folded, and all of it on Show more.
   const tail = 'THE-LAST-WORDS';
