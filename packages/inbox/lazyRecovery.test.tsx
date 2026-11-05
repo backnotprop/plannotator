@@ -8,7 +8,9 @@
  *    word, because the dialog's open state was never cleared;
  *  - ⌘K: the palette's boundary stays failed and React.lazy keeps its
  *    rejection, so ⌘K never opens search again; and the window's search state
- *    stays open, which keeps the list intro off.
+ *    stays open, which keeps the list intro off;
+ *  - Shape: React.lazy keeps the board's rejection, so every later open shows
+ *    the notice until Reload.
  *
  * The chunk fails as a missing one does; it is then served again by mocking
  * the module once more.
@@ -18,6 +20,7 @@ import { afterEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull } from '@plannotator/core/inbox-types';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
 
 const hasDom = typeof document !== 'undefined';
 const gone = () => {
@@ -26,9 +29,12 @@ const gone = () => {
 if (hasDom) {
   mock.module('#platform-post', gone);
   mock.module('#search-palette', gone);
+  mock.module('#shape-board', gone);
 }
 const { PostEnding } = (hasDom ? await import('./pulls/PostEnding') : {}) as typeof import('./pulls/PostEnding');
 const { SearchHost } = (hasDom ? await import('./components/SearchHost') : {}) as typeof import('./components/SearchHost');
+const { ShapeLayer } = (hasDom ? await import('./shape/ShapeParts') : {}) as typeof import('./shape/ShapeParts');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -147,4 +153,29 @@ test.skipIf(!hasDom)('a palette whose chunk cannot arrive closes the search stat
   expect(host!.querySelector('[data-palette]') !== null).toBe(true);
   expect(host!.querySelector('[data-search-open]')!.getAttribute('data-search-open')).toBe('yes');
   expect(closes).toEqual(['dismissed']);
+});
+
+test.skipIf(!hasDom)('a Shape board whose chunk cannot arrive says so, and the next open loads it', async () => {
+  let setOpen: (id: string | null) => void = () => {};
+  /** The window's Shape layer, as App mounts it: only while a board is open. */
+  function Window() {
+    const [id, set] = useState<string | null>(null);
+    setOpen = set;
+    return id ? (
+      <SidebarProvider open onOpenChange={() => {}}>
+        <ShapeLayer host={{} as ShapeHost} id={id} thread={null} onClose={() => set(null)} />
+      </SidebarProvider>
+    ) : null;
+  }
+  mount(<Window />);
+  await act(async () => setOpen('shp_1'));
+  await settle();
+  expect(host!.querySelector('[data-shape-layer] [data-lazy-load-failed]') !== null).toBe(true);
+  // The Inbox is back: closing and opening the board loads it.
+  mock.module('#shape-board', () => ({ default: ({ id }: { id: string }) => <div data-board={id} /> }));
+  await act(async () => setOpen(null));
+  await act(async () => setOpen('shp_1'));
+  await settle();
+  expect(host!.querySelector('[data-board="shp_1"]') !== null).toBe(true);
+  expect(host!.querySelector('[data-lazy-load-failed]') !== null).toBe(false);
 });

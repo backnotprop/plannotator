@@ -23,7 +23,7 @@
 
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow } from '@plannotator/core/inbox-search';
-import { saveRecentSearch, searchInbox, type SearchModel } from '../api';
+import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
 import { HostMark, Icon } from '../icons';
 import { ShapeThumb } from '@plannotator/ui/components/shape/ShapeGrid';
@@ -942,7 +942,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
               return (
                 <div key={`shape-${shape.id}`} className="ib-sp-row" {...common} data-result="shape" data-result-id={shape.id}>
                   <span className="ib-sp-shape-prev" aria-hidden="true">
-                    <ShapeThumb picture={shape.picture} refs={shape.refs} />
+                    <ShapeThumb picture={shape.picture} refs={shape.refs} resolveSrc={(src) => inboxApi.shapeFileUrl(shape.id, src)} />
                   </span>
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{shape.title}</span>
