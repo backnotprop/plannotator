@@ -1,4 +1,5 @@
 import React from 'react';
+import { isCodeFilePath } from '@plannotator/core/code-file';
 import { GUIDE_LINK_TARGET_SOURCE } from '@plannotator/core/guide-links';
 
 /**
@@ -7,6 +8,18 @@ import { GUIDE_LINK_TARGET_SOURCE } from '@plannotator/core/guide-links';
  * plain text, which is also what happens when no renderer is given.
  */
 export type GuideLinkRenderer = (href: string, label: React.ReactNode, key: number) => React.ReactNode | null;
+
+/**
+ * A host's own wrap for an inline code span that names a code file (`src/a.ts:12`): `text` is the span's words, `code`
+ * the span as it is drawn without a host. With no provider, nothing changes.
+ */
+export type GuideCodeSpanRenderer = (text: string, code: React.ReactNode) => React.ReactNode;
+export const GuideCodeSpanContext = React.createContext<GuideCodeSpanRenderer | null>(null);
+
+function GuideCodeSpan({ text, children }: { text: string; children: React.ReactNode }) {
+  const wrap = React.useContext(GuideCodeSpanContext);
+  return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
+}
 
 export interface InlineMarkdownOptions {
   renderLink?: GuideLinkRenderer;
@@ -46,7 +59,7 @@ export function renderInlineMarkdown(text: string, opts?: InlineMarkdownOptions)
   return nodes;
 }
 
-function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptions): React.ReactNode[] {
+function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptions, inLink = false): React.ReactNode[] {
   const nodes: React.ReactNode[] = [];
   let key = startKey;
 
@@ -73,7 +86,7 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
 
     const token = match[0];
     if (match[5] !== undefined && match[6] !== undefined) {
-      const label = renderInline(match[5], 0);
+      const label = renderInline(match[5], 0, undefined, true);
       const rendered = opts?.renderLink?.(match[6], label, key);
       nodes.push(rendered ?? <span key={key} data-guide-link={match[6]}>{label}</span>);
       key++;
@@ -99,7 +112,9 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
         );
       }
     } else if (token.startsWith('`')) {
-      nodes.push(<code key={key++} className="inline-code">{token.slice(1, -1)}</code>);
+      // A span inside a guide link's label is that link's words: the link decides what a click does.
+      const code = <code className="inline-code">{token.slice(1, -1)}</code>;
+      nodes.push(inLink ? <React.Fragment key={key++}>{code}</React.Fragment> : <GuideCodeSpan key={key++} text={token.slice(1, -1)}>{code}</GuideCodeSpan>);
     } else if (token.startsWith('**')) {
       nodes.push(<strong key={key++}>{token.slice(2, -2)}</strong>);
     } else if (token.startsWith('_')) {

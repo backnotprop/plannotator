@@ -30,11 +30,13 @@ export interface ShapeCodeGuideProps {
   onOpenFile?: (path: string, line: number) => void;
   /** Controls at the guide header's right (the board's "Global comment"). */
   headerActions?: React.ReactNode;
+  /** The host's control beside a file (its "open in"). */
+  fileAction?: (path: string) => React.ReactNode;
 }
 
 const noProps = () => ({});
 
-export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerActions }: ShapeCodeGuideProps) {
+export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerActions, fileAction }: ShapeCodeGuideProps) {
   const before = code.stage === 'before';
   const files = useMemo(() => (code.patch ? parseDiffToFiles(code.patch) : []), [code.patch]);
   const guide = useMemo<CodeGuideData>(() => {
@@ -56,16 +58,20 @@ export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerA
 
   const renderFileActions = useCallback(
     (file: { path: string }) => {
-      if (before) return <span className="shp-proposed" title="A proposed change. Nothing is applied yet.">Proposed · not applied</span>;
+      const action = fileAction?.(file.path);
+      if (before) return <>{action}<span className="shp-proposed" title="A proposed change. Nothing is applied yet.">Proposed · not applied</span></>;
       const line = openLine?.(file.path);
-      if (!line || !onOpenFile) return null;
+      if (!line || !onOpenFile) return action ?? null;
       return (
-        <button type="button" className="shp-g-open" onClick={() => onOpenFile(file.path, line)} title={`Open ${file.path} at line ${line}`}>
-          Open at line {line}
-        </button>
+        <>
+          {action}
+          <button type="button" className="shp-g-open" onClick={() => onOpenFile(file.path, line)} title={`Open ${file.path} at line ${line}`}>
+            Open at line {line}
+          </button>
+        </>
       );
     },
-    [before, openLine, onOpenFile],
+    [before, openLine, onOpenFile, fileAction],
   );
 
   // `code:path#L12` opens the whole file there (after implementation); an http link is a link.
@@ -98,6 +104,7 @@ export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerA
                 <li key={f.path}>
                   <span className={`shp-g-kind ${f.kind}`}>{f.kind === 'new' ? 'new' : 'changes'}</span>
                   <code>{f.path}</code>
+                  {f.kind !== 'new' && fileAction?.(f.path)}
                 </li>
               ))}
             </ul>
@@ -105,7 +112,7 @@ export function ShapeCodeGuide({ code, renderDiff, openLine, onOpenFile, headerA
         </div>
       );
     },
-    [before, code.planned],
+    [before, code.planned, fileAction],
   );
 
   const host = useMemo(
