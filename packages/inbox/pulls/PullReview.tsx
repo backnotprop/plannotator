@@ -575,8 +575,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
             </p>
           ) : snapshot ? (
-            <Suspense fallback={null}>
-              <GuideReader key={diff?.head_sha ?? diff?.patch} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+            // Keyed on the head: a new commit brings a new reader, so a composer left open cannot save onto a moved line.
+            <Suspense key={diff?.head_sha ?? diff?.patch} fallback={null}>
+              <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
             </Suspense>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
