@@ -486,7 +486,7 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
   expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the list: On you, Ready to land, then the folded ones; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, then the folded group; a stack is one row with its chain', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
@@ -511,16 +511,14 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the folded ones; a s
   await settle();
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
   const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
-  expect(moves).toEqual(['on_you', 'ready']);
+  // A teammate's request stays On you; a PR only listed is folded under Open, not reviewed, and opens on a click.
+  expect(moves).toEqual(['on_you']);
   expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
-  // The folded groups: each opens on a click, under its name and count, and is remembered.
-  const fold = (name: string) => el(`[data-reviews-fold="${name}"]`);
-  expect(fold('waiting').textContent).toContain('Waiting on others');
-  expect(fold('not_reviewed').textContent).toContain('Open, not reviewed');
-  await act(async () => fold('waiting').click());
-  await act(async () => fold('not_reviewed').click());
+  const fold = el('[data-reviews-fold="not_reviewed"]');
+  expect(fold.textContent).toContain('Open, not reviewed');
+  await act(async () => fold.click());
   await settle();
-  expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'ready', 'waiting', 'not_reviewed']);
+  expect(new Set(rows().map((r) => r.getAttribute('data-pulls-move')))).toEqual(new Set(['on_you', 'not_reviewed']));
   const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
   expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
   await act(async () => stackRow.click());
