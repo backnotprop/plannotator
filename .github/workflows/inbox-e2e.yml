@@ -243,7 +243,15 @@ jobs:
 
       - name: Install the browsers' system libraries
         if: steps.browser-cache.outputs.cache-hit == 'true'
-        run: bunx playwright install-deps chromium webkit
+        # A slow apt mirror can use up the job's whole limit here; a good run takes
+        # under a minute. Each try keeps the packages the last one finished.
+        timeout-minutes: 16
+        run: |
+          for try in 1 2 3; do
+            timeout -k 15 300 bunx playwright install-deps chromium webkit && exit 0
+            echo "::warning::playwright install-deps failed or timed out (exit $?, try $try of 3)"
+          done
+          exit 1
 
       # Code review's Go to Definition (review-explorer.spec.ts) searches with ripgrep.
       - name: Install ripgrep
