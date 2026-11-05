@@ -6,8 +6,8 @@
  * in a radiogroup: Tab reaches the one chosen, the arrows choose.
  *
  * `icons`: the full-window review (the owner's note on r7, "limit the amount of text so the user can focus on the
- * diff"): Pierre's own two marks, the tooltip and each radio's name saying which is which. `name`: a second switch on
- * the page (the one held under the top bar) keeps its own radio group.
+ * diff"): two marks, the tooltip and each radio's name saying which is which. `name`: another switch on the page (one
+ * per chapter, and the one docked in the top bar) keeps its own radio group.
  */
 
 import type React from 'react';
@@ -21,28 +21,48 @@ const CHOICES: { id: InboxDiffStyle; label: string; tip: string }[] = [
   { id: 'unified', label: 'Unified', tip: 'Unified: old and new in one column. Also code review.' },
 ];
 
-/** `diffs-icon-diff-split` and `diffs-icon-diff-unified` of @pierre/diffs' sprite (dist/sprite.js), which its page does not always load. */
+/**
+ * Pierre's `diffs-icon-diff-split` and `diffs-icon-diff-unified` (@pierre/diffs dist/sprite.js) in one line: its
+ * square cut into two panes, its minus and plus. Every stroke lands on a pixel. Pierre's panes are two solid tones,
+ * which read as a dark block at this size; here only the chosen mark's panes fill, faintly, in those same two tones
+ * (`.ib-mark-old`, `.ib-mark-new`: inbox.css).
+ */
 const MARKS: Record<InboxDiffStyle, React.ReactElement> = {
   split: (
-    <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">
-      <path d="M14 0H8.5v16H14a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2m-1.5 6.5v1h1a.5.5 0 0 1 0 1h-1v1a.5.5 0 0 1-1 0v-1h-1a.5.5 0 0 1 0-1h1v-1a.5.5 0 0 1 1 0" />
-      <path d="M2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h5.5V0zm.5 7.5h3a.5.5 0 0 1 0 1h-3a.5.5 0 0 1 0-1" opacity=".3" />
+    <svg className="ib-mark" viewBox="0 0 15 15" width="15" height="15" fill="none" stroke="currentColor" aria-hidden="true">
+      <path className="ib-mark-old" stroke="none" d="M2 .5h5.5v14H2A1.5 1.5 0 0 1 .5 13V2A1.5 1.5 0 0 1 2 .5" />
+      <path className="ib-mark-new" stroke="none" d="M7.5 .5H13A1.5 1.5 0 0 1 14.5 2v11a1.5 1.5 0 0 1-1.5 1.5H7.5z" />
+      <rect x=".5" y=".5" width="14" height="14" rx="1.5" />
+      <path d="M7.5 .5v14M3 7.5h3M9 7.5h3M10.5 6v3" />
     </svg>
   ),
   unified: (
-    <svg viewBox="0 0 16 16" width="15" height="15" fill="currentColor" aria-hidden="true">
-      <path fillRule="evenodd" clipRule="evenodd" d="M16 14a2 2 0 0 1-2 2H2a2 2 0 0 1-2-2V8.5h16zm-8-4a.5.5 0 0 0-.5.5v1h-1a.5.5 0 0 0 0 1h1v1a.5.5 0 0 0 1 0v-1h1a.5.5 0 0 0 0-1h-1v-1A.5.5 0 0 0 8 10" />
-      <path fillRule="evenodd" clipRule="evenodd" opacity=".4" d="M14 0a2 2 0 0 1 2 2v5.5H0V2a2 2 0 0 1 2-2zM6.5 3.5a.5.5 0 0 0 0 1h3a.5.5 0 0 0 0-1z" />
+    <svg className="ib-mark" viewBox="0 0 15 15" width="15" height="15" fill="none" stroke="currentColor" aria-hidden="true">
+      <path className="ib-mark-old" stroke="none" d="M2 .5h11A1.5 1.5 0 0 1 14.5 2v5.5H.5V2A1.5 1.5 0 0 1 2 .5" />
+      <path className="ib-mark-new" stroke="none" d="M.5 7.5h14V13a1.5 1.5 0 0 1-1.5 1.5H2A1.5 1.5 0 0 1 .5 13z" />
+      <rect x=".5" y=".5" width="14" height="14" rx="1.5" />
+      <path d="M.5 7.5h14M6 3.5h3M6 11.5h3M7.5 10v3" />
     </svg>
   ),
 };
 
-export function DiffStyleSwitch({ icons = false, name = 'ib-diff-style' }: { icons?: boolean; name?: string }) {
+export function DiffStyleSwitch({
+  icons = false,
+  name = 'ib-diff-style',
+  label = 'Diff layout',
+  tipSide,
+}: {
+  icons?: boolean;
+  name?: string;
+  /** The group's name, told apart when the page has several. */
+  label?: string;
+  tipSide?: 'top' | 'bottom';
+}) {
   const style = useConfigValue('diffStyle');
   return (
-    <span className={`ib-seg ib-gtab${icons ? ' ib-gtab-marks' : ''}`} role="radiogroup" aria-label="Diff layout" data-diff-style-switch={style}>
+    <span className={`ib-seg ib-gtab${icons ? ' ib-gtab-marks' : ''}`} role="radiogroup" aria-label={label} data-diff-style-switch={style}>
       {CHOICES.map((choice) => (
-        <Tip key={choice.id} content={choice.tip}>
+        <Tip key={choice.id} content={choice.tip} side={tipSide}>
           <label className="ib-seg-o" data-on={style === choice.id ? '' : undefined} data-diff-style={choice.id}>
             <input
               type="radio"

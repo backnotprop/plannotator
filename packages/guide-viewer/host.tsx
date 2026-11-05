@@ -129,7 +129,7 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * the control; the host draws only the control. The tab assumes the guide
    * sits on `--background`, as it does in every host.
    */
-  renderSectionTab?: (index: number) => React.ReactNode | null;
+  renderSectionTab?: (index: number, card: { folded: boolean; diffs: number; title: string }) => React.ReactNode | null;
   /**
    * Controls a host draws on a file card's summary row, at its right (the VS
    * Code extension: Open in editor, Diff). Answering null (or absent) leaves

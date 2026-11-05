@@ -6,9 +6,10 @@
  *
  * - The agent's walkthrough is the spine. There is no left rail (approval
  *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
- *   switch, the menu of chapters or changed files (ReviewJump), the review's
- *   title in quiet grey and Split | Unified. A phone keeps the switch and a
- *   native list held at the top of the scroll.
+ *   switch, the menu of chapters or changed files (ReviewJump) and the review's
+ *   title in quiet grey. Split | Unified is a tab on each chapter, and sits in
+ *   the bar while no tab is in view. A phone's bar is one row: the same menu
+ *   holds its title and switch.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -76,7 +77,8 @@ import {
   type RouteState,
 } from './ReplyRoute';
 import { DiffStyleSwitch } from './DiffStyleSwitch';
-import { chapterInView, fileInView, jumpPlace, jumpProgress, ReviewJump } from './ReviewJump';
+import { DropdownMenuRadioGroup, DropdownMenuRadioItem } from '@plannotator/ui/components/ui/dropdown-menu';
+import { chapterInView, fileInView, ReviewJump } from './ReviewJump';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -104,7 +106,6 @@ const NO_ANNOTATIONS: never[] = [];
 type RailMode = 'walkthrough' | 'files';
 
 /** Where Split | Unified is held under the top bar (inbox.css `.ib-rv-held`). */
-const HELD_TOP = 8;
 
 export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
@@ -177,7 +178,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
 
   const files = useMemo(() => (snapshot ? parseDiffToFiles(snapshot.review.rawPatch) : []), [snapshot]);
   const chapters = snapshot?.guide.sections ?? [];
-  const reviewedCount = chapters.filter((_, i) => reviewed[i] ?? snapshot?.guide.reviewed[i] ?? false).length;
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
   // Where the person is: the top bar's chapter (or file) follows the scroll. A jump holds the one picked until the
@@ -185,9 +185,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   // last chapter too short to reach the top of the scroll keeps its name.
   const [fileSpot, setFileSpot] = useState<string | null>(null);
   const jumped = useRef(false);
-  // The tab's control has scrolled up to where it is held: how far from the scroll's right edge to hold it (a tab
-  // above the first card only; a phone draws neither).
-  const [heldAt, setHeldAt] = useState<number | null>(null);
+  // No chapter's tab is in view: Split | Unified docks in the top bar, where it covers nothing (a phone has neither).
+  const [docked, setDocked] = useState(false);
+  const dockRef = useRef<HTMLSpanElement>(null);
   useEffect(() => {
     const body = bodyRef.current;
     if (!body) return;
@@ -196,8 +196,14 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
       cancelAnimationFrame(frame);
       frame = requestAnimationFrame(() => {
         const box = body.getBoundingClientRect();
-        const tab = body.querySelector('[data-guide-section-tab] [data-diff-style-switch]')?.getBoundingClientRect();
-        setHeldAt(tab && tab.top <= box.top + HELD_TOP ? Math.round(body.clientWidth - (tab.right - box.left)) : null);
+        const tabs = [...body.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')];
+        const inView = tabs.find((tab) => {
+          const at = tab.getBoundingClientRect();
+          return at.bottom > box.top && at.top < box.bottom;
+        });
+        // One at a time. Focus in the docked one goes with it, to the tab that takes over.
+        if (inView && dockRef.current?.contains(document.activeElement)) inView.querySelector<HTMLElement>('input:checked')?.focus({ preventScroll: true });
+        setDocked(tabs.length > 0 && !inView);
         if (jumped.current) return;
         if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
         else setFileSpot(fileInView(body));
@@ -210,7 +216,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     read();
     body.addEventListener('scroll', read, { passive: true });
     for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
+    // A taller or shorter window changes which tabs are in view with no scroll.
+    const resized = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(read);
+    resized?.observe(body);
     return () => {
+      resized?.disconnect();
       cancelAnimationFrame(frame);
       body.removeEventListener('scroll', read);
       for (const kind of HAND) body.removeEventListener(kind, release);
@@ -241,7 +251,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     jumped.current = true;
     setMode(next);
     if (next === 'files') setFileSpot(path);
-    else setCurrent(path ? chapterOf(chapters, path) : null);
+    // A file no chapter placed sits after the last chapter: the name a scroll by hand gives it there.
+    else setCurrent(path ? (chapterOf(chapters, path) ?? Math.max(chapters.length - 1, 0)) : null);
     if (path) move(path);
     else body?.scrollTo({ top: 0 });
   };
@@ -401,7 +412,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     .flatMap((group) => group.items)
     .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedSet.has(file.path) }));
   const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
-  const place = jumpPlace({ mode, chapters: jumpChapters, files: jumpFiles, current: jumpAt });
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
   // and a reload keep them), the way the reply box keeps its draft.
@@ -546,32 +556,71 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
             <Icon name="back" size={15} />
           </button>
         </Tip>
-        <span className="ib-vsep" />
+        {!phone && <span className="ib-vsep" />}
         {!phone && (
           <span className="ib-rv-nav" data-review-nav="">
             {railModes}
             {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} />}
           </span>
         )}
+        {/* A phone's bar is one row: the place, and in its menu the title and the switch that had rows of their own. */}
+        {phone && snapshot && (
+          <ReviewJump
+            mode={mode}
+            chapters={jumpChapters}
+            files={jumpFiles}
+            current={jumpAt}
+            onChapter={toChapter}
+            onFile={toFile}
+            head={
+              <>
+                <div className="ib-rj-head">
+                  <bdi className="ib-rj-title" data-review-title="">
+                    {title}
+                  </bdi>
+                  {source && (
+                    <span className="ib-rj-source" dir="ltr" data-review-source="">
+                      {source}
+                    </span>
+                  )}
+                </div>
+                <DropdownMenuRadioGroup className="ib-rj-modes" aria-label="Review by" value={mode} onValueChange={(value) => flip(value as typeof mode)}>
+                  {(['walkthrough', 'files'] as const).map((value) => (
+                    <DropdownMenuRadioItem key={value} value={value} className="ib-rj-mode" data-review-mode-choice={value}>
+                      {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
+                    </DropdownMenuRadioItem>
+                  ))}
+                </DropdownMenuRadioGroup>
+              </>
+            }
+          />
+        )}
         {!phone && <span className="ib-vsep ib-rv-titlesep" aria-hidden="true" />}
         {/* The review's title, quiet; where it gives way (a short bar) the heading holds the same facts. */}
-        <Tip
-          content={
-            <span className="ib-tip-proj">
-              <bdi className="ib-tip-name">{title}</bdi>
-              {source && (
-                <span className="ib-tip-path" dir="ltr" data-review-source="">
-                  {source}
-                </span>
-              )}
+        {!phone && (
+          <Tip
+            content={
+              <span className="ib-tip-proj">
+                <bdi className="ib-tip-name">{title}</bdi>
+                {source && (
+                  <span className="ib-tip-path" dir="ltr" data-review-source="">
+                    {source}
+                  </span>
+                )}
+              </span>
+            }
+          >
+            <span className="ib-fn ib-rv-title" data-review-title="">
+              <bdi>{title}</bdi>
             </span>
-          }
-        >
-          <span className="ib-fn ib-rv-title" data-review-title="">
-            <bdi>{title}</bdi>
-          </span>
-        </Tip>
+          </Tip>
+        )}
         <span className="ib-sp" />
+        {docked && !phone && (
+          <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
+            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" tipSide="bottom" />
+          </span>
+        )}
         {folded && (
           <button
             type="button"
@@ -635,52 +684,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
       </div>
       <div className="ib-rsplit">
         <div className="ib-gbody" ref={bodyRef}>
-          {/* Split | Unified, once its tab has reached the top of the scroll: the same control held in the same spot. */}
-          {heldAt !== null && (
-            <div className="ib-rv-held" style={{ paddingRight: heldAt }} data-review-diff-style-held="">
-              <DiffStyleSwitch icons name="ib-diff-style-held" />
-            </div>
-          )}
-          {phone && (
-            // A phone: its switch, and the chapters or files as a native list to jump to, held at the top.
-            <div className="ib-rv-phonebar" data-review-phonebar="">
-              {railModes}
-              <select
-                className="ib-rv-jump"
-                aria-label={mode === 'walkthrough' ? 'Go to a chapter' : 'Go to a file'}
-                value=""
-                onChange={(event) => {
-                  const value = event.target.value;
-                  if (mode === 'walkthrough') toChapter(value === 'overview' ? null : Number(value));
-                  else if (value) toFile(value);
-                }}
-              >
-                <option value="" disabled>
-                  {mode === 'walkthrough' && !place.lead ? `Overview · ${reviewedCount} of ${chapters.length} reviewed` : place.lead ? `${place.lead} · ${place.name}` : `Files · ${plural(files.length, 'file')}`}
-                </option>
-                {mode === 'walkthrough' ? (
-                  <>
-                    <option value="overview">Overview</option>
-                    {chapters.map((chapter, index) => (
-                      <option key={`${chapter.title}:${index}`} value={String(index)}>
-                        {`${index + 1}. ${chapter.title}${(reviewed[index] ?? snapshot?.guide.reviewed[index]) ? ' ✓' : ''}`}
-                      </option>
-                    ))}
-                  </>
-                ) : (
-                  jumpFiles.map((file) => (
-                    <option key={file.path} value={file.path}>
-                      {`${file.path}${file.viewed ? ' ✓' : ''}`}
-                    </option>
-                  ))
-                )}
-                {/* The count, wherever the person is: a chapter's name takes the list's own line. */}
-                <option value="progress" disabled>
-                  {jumpProgress({ mode, chapters: jumpChapters, files: jumpFiles })}
-                </option>
-              </select>
-            </div>
-          )}
           {moved && (
             <p className="ib-prr-note" role="status" data-review-pull-moved={moved}>
               {moved === 'reading'

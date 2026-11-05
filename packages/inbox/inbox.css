@@ -7637,7 +7637,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The full-window review without its left rail (approval "review-deslop", r7; `.ib-rv-walk` is ReviewPane, never the
    PR page). The top bar holds Walkthrough | All files, the chapter menu (ReviewJump) and the review's title in quiet
    grey; each chapter keeps its card, notes and file clickers beside the diffs, the notes narrower. Split | Unified is
-   the tab above the first card, as Pierre's two marks, held under the bar once it reaches the top of the scroll. */
+   the tab above each chapter's card, as two marks, and docks in the bar while no tab is in view. */
 .ib-review.ib-rv-walk .ib-rsplit { grid-template-columns: minmax(0, 1fr) 300px; }
 .ib-review.ib-rv-walk.ib-fold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
 .ib-rv-walk .ib-vhead { gap: 10px; }
@@ -7666,10 +7666,22 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
 .ib-rv-walk .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
-/* Split | Unified as marks, and held at the top of the scroll: a pill in the spot the tab's control reached. */
-.pn-inbox .ib-gtab-marks .ib-seg-o { padding: 0 6px; }
-.ib-rv-walk .ib-rv-held { position: sticky; top: 8px; z-index: 6; display: flex; justify-content: flex-end; height: 0; pointer-events: none; }
-.pn-inbox .ib-rv-held .ib-gtab { pointer-events: auto; box-shadow: 0 0 0 1px var(--border), 0 2px 6px rgb(0 0 0 / 0.12); }
+/* Split | Unified as marks: a line drawing, the chosen one's panes filled faintly on the raised seat. */
+.pn-inbox .ib-gtab-marks .ib-seg-o { padding: 0 5px; }
+/* Dark: the card is darker than the switch's track, so a chosen mark would sit in a hole; its seat rises instead. */
+.pn-inbox .ib-gtab-marks .ib-seg-o[data-on] { background: color-mix(in oklch, var(--foreground) 20%, var(--card)); }
+:root.light .pn-inbox .ib-gtab-marks .ib-seg-o[data-on], .ib-lightscope.light .ib-gtab-marks .ib-seg-o[data-on] { background: var(--card); }
+.ib-gtab-marks .ib-seg-o:not([data-on]) .ib-mark { opacity: 0.75; }
+.ib-gtab-marks .ib-seg-o:hover .ib-mark { opacity: 1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-old { fill: currentColor; fill-opacity: 0.1; }
+.ib-gtab-marks .ib-seg-o[data-on] .ib-mark-new { fill: currentColor; fill-opacity: 0.24; }
+/* While no chapter's tab shows it sits in the bar: nothing it could cover, and the row's right side stays put. */
+.ib-rv-docked { display: inline-flex; animation: ib-rv-dock-in 120ms ease-out; }
+.pn-inbox .ib-rv-docked .ib-gtab { height: 28px; }
+@keyframes ib-rv-dock-in { from { opacity: 0; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-rv-docked { animation: none; }
+}
 /* The menu portals to the body, outside .pn-inbox. Long titles wrap and many chapters scroll; the count stays. */
 .ib-rj-menu[data-review-jump-menu] { display: flex; flex-direction: column; width: 380px; max-width: calc(100vw - 16px); padding: 6px; border-radius: 12px; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.28); }
 .ib-rj-list { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; max-height: min(480px, 70vh); overflow-y: auto; overscroll-behavior: contain; }
@@ -7680,7 +7692,19 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rj-mark { width: 20px; height: 20px; flex: none; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; font-size: var(--ib-fs-11, 11px); font-weight: 400; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-rj-mark[data-done] { background: var(--success); color: var(--background); }
 .ib-rj-mark svg.ib-ic { width: 12px; height: 12px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+/* The menu's item recolours any svg in it: the tick keeps the disc's own colour. */
+[data-review-jump-menu] .ib-rj-mark[data-done] svg.ib-ic { color: var(--background); }
 .ib-rj-t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+/* A phone's menu opens with what its one-row bar has no room for: the title, its source and the mode switch. */
+.ib-rj-head { display: grid; gap: 2px; padding: 6px 8px 10px; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-rj-title { overflow-wrap: anywhere; }
+.ib-rj-source { font-size: var(--ib-fs-12, 12px); overflow-wrap: anywhere; }
+.ib-rj-modes { flex: none; display: grid; grid-template-columns: 1fr 1fr; gap: 2px; margin-bottom: 6px; padding: 2px; border-radius: 8px; background: var(--muted); }
+[data-review-jump-menu] .ib-rj-mode { justify-content: center; min-height: 36px; padding: 0 8px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+[data-review-jump-menu] .ib-rj-mode > span:first-child { display: none; }
+[data-review-jump-menu] .ib-rj-mode[data-highlighted] { background: transparent; color: var(--foreground); }
+[data-review-jump-menu] .ib-rj-mode[data-checked] { background: var(--card); color: var(--foreground); font-weight: 550; box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12); }
+.ib-rj-head ~ .ib-rj-list { max-height: min(420px, 50vh); }
 .ib-rj-path { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-12, 12px); direction: rtl; text-align: left; }
 .ib-rj-dir { color: var(--muted-foreground); }
 .ib-rj-n { flex: none; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; white-space: nowrap; }
@@ -7718,6 +7742,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-walk [data-guide-section-narrative] h3 { min-width: 0; overflow-wrap: anywhere; }
 .ib-rv-walk [data-guide-file-shell] { scroll-margin-top: 30px; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 16px; }
+/* A jump to a chapter lands on its first file, with the chapter's tab above it in view. */
+.ib-rv-walk [data-guide-section-tabbed] [data-guide-file-shell]:first-child { scroll-margin-top: 62px; }
 /* All files: every changed file in one full-width column, no chapter card (the menu lists them). */
 .ib-rv-walk[data-review-mode='files'] [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .ib-rv-walk[data-review-mode='files'] [data-guide-section-grid] { display: block; }
@@ -7731,12 +7757,28 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .gv-head-row { display: contents; }
   .gv-head .gv-meta { order: 1; margin-top: 8px; }
   .gv-head .gv-tools { order: 2; margin-top: 12px; }
-  /* The phone's switch and list stay at the top of the review while it scrolls. */
-  .ib-rv-walk .ib-rv-phonebar { position: sticky; top: 0; z-index: 5; grid-template-columns: auto minmax(0, 1fr); align-items: center; padding: 8px 12px; background: var(--background); border-bottom: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
-  .pn-inbox .ib-rv-walk .ib-rv-jump { height: 40px; min-width: 0; text-overflow: ellipsis; }
-  /* A jump lands below the held bar, not under it. */
-  .ib-rv-walk :is([data-guide-section], [data-guide-file-shell]), .ib-rv-walk[data-review-mode='files'] [data-guide-file-shell] { scroll-margin-top: 68px; }
-  .ib-review.ib-rv-walk .ib-vhead .ib-rv-title { flex: 1 1 0; }
+  /* A phone's bar: one row, every control one height. Each keeps a 44 px target over the row's own height. */
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead { gap: 6px; padding-inline: 4px 6px; }
+  .pn-inbox .ib-rv-walk .ib-vhead :is(.ib-back, .ib-iconbtn, .ib-btn.ib-sm, .ib-rj-btn, .ib-rv-decide button) { position: relative; height: 36px; min-height: 0; }
+  .pn-inbox .ib-rv-walk .ib-vhead :is(.ib-back, .ib-iconbtn, .ib-btn.ib-sm, .ib-rj-btn, .ib-rv-decide button)::after { content: ''; position: absolute; inset: -4px 0; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-iconbtn { width: 36px; }
+  .pn-inbox .ib-rv-walk .ib-vhead .ib-vcomments { min-width: 0; padding-inline: 10px; }
+  .pn-inbox .ib-rv-walk .ib-vhead > .ib-rj-btn { flex: 1 1 0; max-width: none; background: var(--ib-hover-s, var(--muted)); }
+  /* The name over the count: the menu's rows and foot say where the chapter sits. */
+  .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-lead { display: none; }
+  .ib-rv-walk .ib-vhead > .ib-rj-btn .ib-rj-chev { margin-left: auto; }
+  /* Approve says so: the word stays, and takes the check's room. */
+  .ib-rv-decide .md\:inline { display: inline; }
+  .ib-rv-decide [data-slot='button-icon'] { display: none; }
+}
+/* No room for the word: a window this narrow, or a pull request's destination beside it. The check and the green say it. */
+@media (max-width: 349px) {
+  .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
+}
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
+  .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
 }
 
 /* Pull requests (approval "inbox-code-review-direction", items 4 and 5; concept B take 1; PullsPage.tsx,
@@ -8122,7 +8164,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-pip-f span { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-ov-fig { margin: 18px 0 4px; border-radius: 12px; background: var(--shp-paper); box-shadow: 0 0 0 1px var(--ib-line); overflow: hidden; }
 .ib-ov-fig-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px 0 14px; font-size: var(--ib-fs-13, 13px); }
-.ib-ov-fig.ib-ov-ask .ib-ov-fig-h { padding-bottom: 10px; }
 .ib-ov-fig-h b { font-weight: 600; white-space: nowrap; }
 .ib-ov-fig-m { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); }
 .ib-ov-fig-b { padding: 10px 18px 6px; }

@@ -451,7 +451,7 @@ test('a phone at 390 px: the switch, the "/" list, the card, the review with a c
     await composer.fill('Log the Stripe code here.');
     await page.getByRole('button', { name: 'Add Comment' }).click();
     await expect(pane.locator('[data-guide-comments]')).toHaveAttribute('data-guide-comments', '1');
-    await expect(pane.locator('[data-review-phonebar] select')).toBeVisible();
+    await expect(pane.locator('[data-review-jump]')).toBeVisible();
     await retry.getByText('Log the Stripe code here.').scrollIntoViewIfNeeded();
     await shot(page, 'phone-4-review-comment', ['light']);
     // The review fits the phone: nothing wider than the window.
@@ -530,14 +530,15 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await pane.locator('[data-review-title]').hover();
   await expect(page.locator('[data-review-source]')).toBeVisible();
   await page.mouse.move(700, 500);
-  // Split | Unified is the tab above the first card, as marks; not in the bar.
+  // Split | Unified is a tab above each chapter's card, as marks; not in the bar while one is in view.
   await expect(bar.locator('[data-diff-style-switch]')).toHaveCount(0);
-  const tab = pane.locator('[data-guide-section-tab] [data-diff-style-switch]');
+  const tabs = pane.locator('[data-guide-section-tab] [data-diff-style-switch]');
+  // Three chapters and the card of files no chapter placed.
+  await expect(tabs).toHaveCount(4);
+  const tab = tabs.first();
   await expect(tab).toBeVisible();
   await expect(tab).toHaveText('');
   await expect(tab.getByRole('radio', { name: 'Unified' })).toBeAttached();
-  const held = pane.locator('[data-review-diff-style-held] [data-diff-style-switch]');
-  await expect(held).toHaveCount(0);
   // Words cut from the screen stay in a tooltip: the arrow says Thread, a mark says what it does.
   await pane.locator('.ib-back').hover();
   await expect(page.getByText('Thread', { exact: true })).toBeVisible();
@@ -559,29 +560,79 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await expect(pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]')).toBeInViewport();
   const body = pane.locator('.ib-gbody');
   await settled(body);
+  // It lands with that chapter's tab attached above it, whole; so nothing docks.
+  await expect(pane.locator('[data-guide-section-tabbed]:has([data-guide-section="1"]) [data-guide-section-tab] [data-diff-style-switch]')).toBeInViewport({ ratio: 1 });
+  const docked = bar.locator('[data-review-diff-style-docked] [data-diff-style-switch]');
+  await expect(docked).toHaveCount(0);
   await body.hover();
   await page.mouse.wheel(0, -100000);
   await expect(jump).toContainText('Overview');
   await page.mouse.wheel(0, 100000);
   await expect(jump).toContainText('of 3');
-
-  // Scrolled past the first card: Split | Unified is held under the bar, in the spot the tab reached, and it works.
-  await expect(held).toBeInViewport();
-  const unified = held.locator('[data-diff-style="unified"]');
-  await unified.click();
-  await expect(held).toHaveAttribute('data-diff-style-switch', 'unified');
-  await expect.poll(() => pane.locator('pre[data-diff]').evaluateAll((pres) => [...new Set(pres.map((p) => p.getAttribute('data-diff-type')))])).toEqual(['single']);
   await page.mouse.wheel(0, -100000);
-  // Back at the top the tab is the one, holding the same choice, in the same column as the held one was.
-  await expect(held).toHaveCount(0);
+  await expect(jump).toContainText('Overview');
+  await settled(body);
+
+  // No tab in view: the switch sits in the top bar, left of the other controls, which stay where they were; it covers
+  // nothing of the page (the bar ends where the scroll starts), and it works.
+  const approve = pane.locator('[data-review-decision] [data-decision-primary]');
+  const approveAt = (await approve.boundingBox())!.x;
+  await page.setViewportSize({ width: 1440, height: 300 });
+  // The first place down the page where no tab shows.
+  const clearOfTabs = await body.evaluate((scroll) => {
+    for (let top = 0; top < scroll.scrollHeight; top += 10) {
+      scroll.scrollTop = top;
+      const view = scroll.getBoundingClientRect();
+      const tabRects = [...scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')].map((t) => t.getBoundingClientRect());
+      if (!tabRects.some((t) => t.bottom > view.top && t.top < view.bottom)) return top;
+    }
+    return null;
+  });
+  expect(clearOfTabs).not.toBeNull();
+  await expect(docked).toBeVisible();
+  const dockBox = (await docked.boundingBox())!;
+  expect(dockBox.x + dockBox.width).toBeLessThanOrEqual(approveAt);
+  expect((await approve.boundingBox())!.x).toBe(approveAt);
+  expect(dockBox.y + dockBox.height).toBeLessThanOrEqual((await body.boundingBox())!.y);
+  // Its tooltip opens under the bar, off Approve. Each group on the page has its own name.
+  await docked.locator('[data-diff-style="unified"]').hover();
+  const dockTip = page.getByText('Unified: old and new in one column. Also code review.');
+  await expect(dockTip).toBeVisible();
+  expect((await dockTip.boundingBox())!.y).toBeGreaterThanOrEqual(dockBox.y + dockBox.height);
+  await page.mouse.move(700, 150);
+  const groupNames = await pane.locator('[data-diff-style-switch]').evaluateAll((groups) => groups.map((group) => group.getAttribute('aria-label')));
+  expect(new Set(groupNames).size).toBe(groupNames.length);
+  await docked.locator('[data-diff-style="unified"]').click();
+  await expect(docked).toHaveAttribute('data-diff-style-switch', 'unified');
+  await expect.poll(() => pane.locator('pre[data-diff]').evaluateAll((pres) => [...new Set(pres.map((p) => p.getAttribute('data-diff-type')))])).toEqual(['single']);
+  // Back at the top the tab is the one, holding the same choice.
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await body.evaluate((scroll) => {
+    scroll.scrollTop = 0;
+  });
+  await expect(docked).toHaveCount(0);
   await expect(tab).toHaveAttribute('data-diff-style-switch', 'unified');
-  const tabBox = (await tab.boundingBox())!;
+  // Focus in the docked switch moved to the tab that took over, not to the page.
+  await expect(tabs.locator('input:focus')).toHaveCount(1);
   await tab.locator('[data-diff-style="split"]').click();
-  await page.mouse.wheel(0, 100000);
-  await expect(held).toBeInViewport();
-  const heldBox = (await held.boundingBox())!;
-  expect(Math.abs(heldBox.x - tabBox.x)).toBeLessThanOrEqual(1);
-  expect(heldBox.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)).toBeLessThanOrEqual(12);
+  // The window alone can change which tab shows: at the same scroll a short window docks it, a tall one has a tab.
+  await body.evaluate((scroll, top) => {
+    scroll.scrollTop = top ?? 0;
+  }, clearOfTabs);
+  await expect(docked).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 300 });
+  await expect(docked).toBeVisible();
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await expect(docked).toHaveCount(0);
+  await body.evaluate((scroll) => {
+    scroll.scrollTop = 0;
+  });
+
+  // A folded chapter has no diffs to lay out, so no tab; opened, it has it back.
+  await pane.locator('[data-guide-section="1"]').getByRole('button', { name: 'Reviewed' }).click();
+  await expect(tabs).toHaveCount(3);
+  await pane.locator('[data-guide-section="1"]').getByRole('button', { name: 'Un-mark as reviewed' }).click();
+  await expect(tabs).toHaveCount(4);
 
   // Reviewed: the tick shows in the menu, the count moves, and the rows are still there.
   await page.mouse.wheel(0, -100000);
@@ -589,6 +640,9 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await jump.click();
   await expect(menu.locator('[data-review-progress]')).toHaveText('1 of 3 chapters reviewed');
   await expect(menu.locator('[data-review-jump-row="0"] [data-done]')).toBeVisible();
+  // The tick reads on its disc: the menu recolours any svg, and this one keeps the disc's own colour.
+  const tick = await menu.locator('[data-review-jump-row="0"] [data-done]').evaluate((disc) => ({ on: getComputedStyle(disc).color, stroke: getComputedStyle(disc.querySelector('svg')!).stroke }));
+  expect(tick.stroke).toBe(tick.on);
   // Keyboard, as the rail's rows were: Enter opens (on the trigger), an arrow and Enter pick, focus comes back to the button.
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -625,6 +679,15 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   await menu.locator('[data-review-jump-row="src/payouts/retry.ts"]').click();
   await expect(pane.locator('[data-guide-section-narrative]').first()).toBeHidden();
   await pane.locator('[data-review-mode-choice="walkthrough"]').click();
+  // A file no chapter placed: back from All files, the name is the last chapter's, what a scroll by hand gives, not Overview.
+  const placed = new Set(REVIEW_GUIDE.sections.flatMap((section) => section.diffs.map((ref) => ref.file)));
+  const unplaced = (drawn as string[]).find((path) => !placed.has(path))!;
+  await pane.locator('[data-review-mode-choice="files"]').click();
+  await jump.click();
+  await menu.locator(`[data-review-jump-row="${unplaced}"]`).click();
+  await settled(body);
+  await pane.locator('[data-review-mode-choice="walkthrough"]').click();
+  await expect(jump).toContainText('3 of 3');
 
   // Keys the review did not have stay that way: nothing here moves the thread or the chapter.
   const before = page.url();
@@ -641,7 +704,7 @@ test('the top bar holds what the rail held: chapters, the count, files, Overview
   expect(world.errors).toEqual([]);
 });
 
-test('narrow windows, long titles and many chapters: nothing overlaps or leaves the window, and Split | Unified is held', async () => {
+test('narrow windows, long titles and many chapters: nothing overlaps or leaves the window, and Split | Unified docks in the bar', async () => {
   const { page, claude } = world;
   const long = 'Retry every failed payout with a jittered backoff, then remove the row and send exactly one email, whatever the worker crashed on halfway through its run';
   const unbroken = 'reconcile_failed_payouts_against_the_ledger_before_the_morning_report_runs_and_never_twice_for_the_same_invoice';
@@ -674,10 +737,14 @@ test('narrow windows, long titles and many chapters: nothing overlaps or leaves 
     await menu.locator('[data-review-jump-row="5"]').click();
     await expect(jump).toContainText('6 of 30');
     await expectBarFits(page);
-    // The chapter's own name in the bar is cut, never the count.
+    // The chapter's own name in the bar is cut, never the count, and its tooltip says it whole.
     await expect(pane.locator('.ib-rj-lead')).toHaveText('6 of 30');
+    await jump.hover();
+    await expect(page.locator('[data-pn-tooltip]')).toContainText(long);
+    await page.mouse.move(width / 2, 500);
     await settled(pane.locator('.ib-gbody'));
-    await expect(pane.locator('[data-review-diff-style-held] [data-diff-style-switch]')).toBeInViewport();
+    await expect(pane.locator('.ib-vhead [data-review-diff-style-docked] [data-diff-style-switch]')).toBeVisible();
+    await expectBarFits(page);
     await pane.locator('.ib-gbody').hover();
     await page.mouse.wheel(0, -1000000);
     await expect(jump).toContainText('Overview');
@@ -700,7 +767,7 @@ test('narrow windows, long titles and many chapters: nothing overlaps or leaves 
   );
   await page.reload();
   await expect(pane.locator('[data-review-destination]')).toBeVisible();
-  for (const width of [1440, 1280, 1100, 1099, 960, 959, 800, 768]) {
+  for (const width of [1440, 1280, 1100, 1099, 960, 959, 800, 768, 390]) {
     await page.setViewportSize({ width, height: 800 });
     await expectBarFits(page);
     await expectOverviewWhole(page);
@@ -721,7 +788,7 @@ test('narrow windows, long titles and many chapters: nothing overlaps or leaves 
   expect(world.errors).toEqual([]);
 });
 
-test('a phone at 390 px: the switch and the list stay at the top of the scroll, with the count, and a file lands clear of them', async ({ browser }) => {
+test('a phone at 390 px: one row of one height, and the same menu as a desktop holds the place, the mode and the title', async ({ browser }) => {
   const { claude } = world;
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'phone-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light' });
@@ -730,16 +797,35 @@ test('a phone at 390 px: the switch and the list stay at the top of the scroll, 
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
     const pane = page.locator('[data-review-message]');
     await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
-    // A phone reads Unified only: no layout to choose, in the bar or on a card. No chapter menu either: the native list.
+    // A phone reads Unified only: no layout to choose, in the bar or on a card.
     await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
-    await expect(pane.locator('[data-review-nav]')).toHaveCount(0);
-    const bar = pane.locator('[data-review-phonebar]');
-    const list = bar.locator('select');
-    await expect(list.locator('option').first()).toHaveText('Overview · 0 of 3 reviewed');
-    await expect(list.locator('option').last()).toHaveText('0 of 3 chapters reviewed');
+    await expect(pane.locator('select')).toHaveCount(0);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
 
-    // Under the bar means hidden: the top of the file header has to clear the bar's foot.
+    // One row, every control one height; Approve says so in a word.
+    const bar = pane.locator('.ib-vhead');
+    const parts = [bar.locator('.ib-back'), bar.locator('[data-review-jump]'), bar.locator('.ib-vcomments'), bar.locator('[data-decision-primary]'), bar.getByRole('button', { name: 'Close the review' })];
+    const boxes = await Promise.all(parts.map(async (part) => (await part.boundingBox())!));
+    expect(new Set(boxes.map((box) => box.height))).toEqual(new Set([36]));
+    expect(new Set(boxes.map((box) => box.y))).toEqual(new Set([boxes[0]!.y]));
+    await expect(bar.getByText('Approve', { exact: true })).toBeVisible();
+    await expectBarFits(page);
+
+    // The menu names the review and where it comes from, switches the mode, and goes to a chapter.
+    const jump = bar.locator('[data-review-jump]');
+    const menu = page.locator('[data-review-jump-menu]');
+    await expect(jump).toContainText('Overview');
+    await jump.click();
+    await expect(menu.locator('[data-review-title]')).toHaveText('Retry failed payouts');
+    await expect(menu.locator('[data-review-source]')).toBeVisible();
+    await expect(menu.locator('[data-review-progress]')).toHaveText('0 of 3 chapters reviewed');
+    const box = (await menu.boundingBox())!;
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.x + box.width).toBeLessThanOrEqual(390);
+    await menu.locator('[data-review-jump-row="1"]').click();
+    await expect(jump).toContainText('Write each attempt to the ledger once');
+
+    // A jump lands on the file, under the bar, not behind it.
     const clear = async (path: string) => {
       const shell = pane.locator(`[data-guide-file-shell="${path}"]`);
       await expect(shell).toBeInViewport();
@@ -748,20 +834,101 @@ test('a phone at 390 px: the switch and the list stay at the top of the scroll, 
       const shellBox = (await shell.boundingBox())!;
       expect(shellBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
     };
-    await list.selectOption('1');
-    await expect(list.locator('option').first()).toHaveText('2 of 3 · Write each attempt to the ledger once');
     await clear('src/payouts/ledger.ts');
-    // All files keeps the place, and the file is not left under the bar.
-    await bar.locator('[data-review-mode-choice="files"]').click();
+
+    // All files keeps the place, and the menu stays open to pick in the new list.
+    await jump.click();
+    await menu.locator('[data-review-mode-choice="files"]').click();
     await expect(pane).toHaveAttribute('data-review-mode', 'files');
-    await expect(list.locator('option').first()).toContainText('ledger.ts');
-    await clear('src/payouts/ledger.ts');
-    await list.selectOption('src/payouts/retry.ts');
+    await expect(menu.locator('[data-review-progress]')).toHaveText('0 of 4 files viewed');
+    await expect(jump).toContainText('ledger.ts');
+    await menu.locator('[data-review-jump-row="src/payouts/retry.ts"]').click();
+    await expect(jump).toContainText('retry.ts');
     await clear('src/payouts/retry.ts');
-    await expect(list.locator('option').last()).toHaveText('0 of 4 files viewed');
+
+    // Escape closes the menu and stays in the review; the next one leaves it.
+    await jump.click();
+    await expect(menu).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    await expect(pane).toBeVisible();
   } finally {
     await context.close();
   }
+});
+
+test('Viewed takes its click at every scroll: one Split | Unified shows at a time, and neither sits on a file header', async () => {
+  const { page, claude } = world;
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'viewed-click', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+  const pane = page.locator('[data-review-message]');
+  await expect(pane.locator('[data-guide-file-shell] [data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+  const body = pane.locator('.ib-gbody');
+  const jump = pane.locator('[data-review-jump]');
+  const menu = page.locator('[data-review-jump-menu]');
+  const frames = () => page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+  /** What shows with the page at this scroll: the switches, and any Viewed whose centre is under something else. */
+  const look = (top: number) =>
+    body.evaluate((scroll, at) => {
+      scroll.scrollTop = at;
+      const view = scroll.getBoundingClientRect();
+      const showing = (el: Element) => {
+        const box = el.getBoundingClientRect();
+        return box.bottom > view.top && box.top < view.bottom;
+      };
+      const viewed = [...scroll.querySelectorAll<HTMLElement>('[data-guide-file-shell] button')].filter((button) => button.textContent?.includes('Viewed'));
+      const spots = viewed.map((button) => {
+        const box = button.getBoundingClientRect();
+        return { x: box.x + box.width / 2, y: box.y + box.height / 2, button };
+      }).filter((spot) => spot.y > view.top + 1 && spot.y < view.bottom - 1);
+      return {
+        tabs: [...scroll.querySelectorAll('[data-guide-section-tab] [data-diff-style-switch]')].filter(showing).length,
+        covered: spots.filter((spot) => !spot.button.contains(document.elementFromPoint(spot.x, spot.y))).length,
+        spots: spots.map((spot) => ({ x: spot.x, y: spot.y })),
+        height: scroll.scrollHeight - scroll.clientHeight,
+      };
+    }, top);
+  const sweep = async () => {
+    const { height } = await look(0);
+    let nearTop: { x: number; y: number; top: number } | null = null;
+    for (let top = 0; top <= height; top += 12) {
+      await look(top);
+      await frames();
+      const seen = await look(top);
+      const docked = await pane.locator('.ib-vhead [data-review-diff-style-docked]').count();
+      expect(`${top}: ${seen.tabs > 0 ? 'tab' : 'dock'} ${docked}`).toBe(`${top}: ${seen.tabs > 0 ? 'tab 0' : 'dock 1'}`);
+      expect(`${top}: ${seen.covered}`).toBe(`${top}: 0`);
+      const box = (await body.boundingBox())!;
+      const spot = seen.spots.find((at) => at.y - box.y < 40);
+      if (spot && !nearTop) nearTop = { ...spot, top };
+    }
+    return nearTop as { x: number; y: number; top: number } | null;
+  };
+  const viewedCount = async () => {
+    await jump.click();
+    const words = await menu.locator('[data-review-progress]').textContent();
+    await page.keyboard.press('Escape');
+    await expect(menu).toHaveCount(0);
+    return words;
+  };
+
+  // The walkthrough: nothing covers a Viewed.
+  await sweep();
+
+  // All files, a Viewed just under the bar, a real click: the count moves.
+  await pane.locator('[data-review-mode-choice="files"]').click();
+  await expect(pane).toHaveAttribute('data-review-mode', 'files');
+  await settled(body);
+  const spot = await sweep();
+  expect(spot).not.toBeNull();
+  await look(spot!.top);
+  await frames();
+  await page.mouse.click(spot!.x, spot!.y);
+  await expect.poll(viewedCount).toBe('1 of 4 files viewed');
+  expect(await pane.locator('.ib-vhead [data-diff-style-switch]').count()).toBeLessThanOrEqual(1);
+  await page.mouse.move(0, 400);
+  expect(world.errors).toEqual([]);
 });
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {

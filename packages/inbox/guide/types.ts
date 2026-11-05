@@ -58,8 +58,9 @@ export interface GuideReaderProps {
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
   /**
-   * Under a top bar that names the review and lists its chapters, and holds Split | Unified (the full-window review):
-   * the heading reads like a thread's (GuideView `threadHeading`) and no card carries the layout switch. Absent: as before.
+   * Under a top bar that names the review and lists its chapters (the full-window review): the heading reads like a
+   * thread's (GuideView `threadHeading`), and every open chapter with diffs carries the layout switch as marks, not
+   * only the first card. Absent: as before.
    */
   threadHeading?: boolean;
   /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */

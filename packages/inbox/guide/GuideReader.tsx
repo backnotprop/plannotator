@@ -13,7 +13,8 @@
  * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
  * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
- * through the chain's `renderSectionTab`); a phone draws every diff Unified
+ * through the chain's `renderSectionTab`; under `threadHeading`, every open
+ * chapter with diffs does); a phone draws every diff Unified
  * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
  * and suggestion blocks are styled by packages/review-editor/comments.css,
  * which apps/inbox/index.css imports (guides.show gets it through
@@ -309,12 +310,20 @@ export default function GuideReader({
   }, [commentFile, reveal]);
 
   // A phone draws one column, always, and offers no switch (two ~130 px columns read as nothing);
-  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab.
+  // the saved layout is left as it is. Elsewhere the first card carries the Split | Unified tab (the review: every open chapter).
   const phone = usePhone();
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={threadHeading} /> : null), [threadHeading]);
+  // The review: every open chapter with diffs carries it too, so a jump to a chapter lands with the control attached.
+  const renderSectionTab = useCallback(
+    (index: number, card: { folded: boolean; diffs: number; title: string }) => {
+      if (index === 0) return <DiffStyleSwitch icons={threadHeading} name={threadHeading ? 'ib-diff-style-0' : undefined} />;
+      if (!threadHeading || card.folded || card.diffs === 0) return null;
+      return <DiffStyleSwitch icons name={`ib-diff-style-${index}`} label={`Diff layout, ${card.title}`} />;
+    },
+    [threadHeading],
+  );
 
   const getDiffRendererProps = useCallback(
     ({ file, focused }: GuideDiffRendererContext): {
@@ -378,7 +387,6 @@ export default function GuideReader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      // The thread's heading sits under a top bar that holds Split | Unified: no card carries it.
       ...(phone ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),

@@ -10,11 +10,12 @@
  * every menu here), and Escape closes it without leaving the review.
  */
 
+import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { Icon } from '../icons';
-import { Tip } from './Tip';
+import { isTextCut, Tip } from './Tip';
 
 export interface ReviewJumpChapter {
   title: string;
@@ -29,6 +30,8 @@ export interface ReviewJumpFile {
 }
 
 export interface ReviewJumpProps {
+  /** Above the rows (a phone: the title and the mode switch, which have no room in its bar). */
+  head?: React.ReactNode;
   mode: 'walkthrough' | 'files';
   chapters: readonly ReviewJumpChapter[];
   /** In the order the review draws them. */
@@ -85,7 +88,7 @@ export function jumpProgress({ mode, chapters, files }: Pick<ReviewJumpProps, 'm
     : `${files.filter((file) => file.viewed).length} of ${plural(files.length, 'file')} viewed`;
 }
 
-export function ReviewJump({ mode, chapters, files, current, onChapter, onFile }: ReviewJumpProps) {
+export function ReviewJump({ mode, chapters, files, current, onChapter, onFile, head }: ReviewJumpProps) {
   const [open, setOpen] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
   const walk = mode === 'walkthrough';
@@ -104,7 +107,7 @@ export function ReviewJump({ mode, chapters, files, current, onChapter, onFile }
       open={open}
       onOpenChange={setOpen}
     >
-      <Tip content={name} cut>
+      <Tip content={name} when={(trigger) => isTextCut(trigger.querySelector('.ib-rj-name'))}>
         <DropdownMenuTrigger
           render={
             <button
@@ -122,6 +125,7 @@ export function ReviewJump({ mode, chapters, files, current, onChapter, onFile }
         </DropdownMenuTrigger>
       </Tip>
       <DropdownMenuContent align="start" sideOffset={6} className="ib-rj-menu" aria-label={walk ? 'Chapters' : 'Files'} data-review-jump-menu={mode}>
+        {head}
         <div ref={listRef} className="ib-rj-list" {...(walk ? { 'data-review-chapters': '' } : { 'data-review-files': '' })}>
           {walk ? (
             <>

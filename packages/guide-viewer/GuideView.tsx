@@ -214,7 +214,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   ) : null;
   // The first card drawn: the first section, or "Everything else" when the guide has none.
   const firstCardIndex = guide.sections.length > 0 ? 0 : unplacedSection ? guide.sections.length : -1;
-  const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex) : null;
+  const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex, { folded: false, diffs: 1, title: '' }) : null;
   const actionsOnTab = !!actions && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
 
   return (
