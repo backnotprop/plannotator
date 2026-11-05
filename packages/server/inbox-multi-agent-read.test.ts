@@ -20,7 +20,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxListRow, InboxThread } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, type InboxListRow, type InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_WAKES_META_KEY, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -370,6 +370,12 @@ describe("who settled a reply no connection wakes", () => {
     await personReplies(server, unknown.message_id, "r1", "k3");
     await reads(client, unknown.thread_id, "ses_claude");
     expect(await lineOf(server, unknown.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("each agent has its own name, apart from the `claude` alias: a shared name would hide who read a reply", () => {
+    const names = Object.entries(INBOX_HOST_NAMES).filter(([host]) => host !== "claude").map(([, name]) => name);
+    expect(names).toEqual([...new Set(names)]);
+    expect(INBOX_HOST_NAMES.claude).toBe(INBOX_HOST_NAMES["claude-code"]);
   });
 
   test("two ids of one agent are one agent: `claude` and `claude-code` never read as someone else", async () => {
