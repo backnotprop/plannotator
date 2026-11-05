@@ -394,6 +394,15 @@ test('more selected lines than the screen holds: it stays on screen', async () =
       const box = (await geometry(page)).bar!;
       return box.top >= 0 && box.bottom <= 420;
     }).toBe(true);
+    // All of them scrolled off the top: the bar waits on screen instead of going with them.
+    await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'start' }));
+    await page.mouse.move(1000, 300);
+    await page.mouse.wheel(0, 200);
+    await expect.poll(async () => (await line(page, LONG, 25).boundingBox())?.y ?? 0).toBeLessThan(-30);
+    await page.waitForTimeout(100);
+    const scrolledOff = (await geometry(page)).bar!;
+    expect(scrolledOff.top).toBeGreaterThanOrEqual(0);
+    expect(scrolledOff.bottom).toBeLessThanOrEqual(420);
     await closeBar(page);
   } finally {
     await page.setViewportSize({ width: 1440, height: 900 });
