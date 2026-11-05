@@ -49,7 +49,7 @@ export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeM
       inputSchema: z
         .object({
           thread_id: z.string().describe("Thread or message id."),
-          until: z.union([z.string(), z.null()]).describe("Only if the person asks: ISO 8601 return time with zone; null ends it."),
+          until: z.union([z.string(), z.null()]).describe("Only if the person asks. How: plannotator inbox --help"),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

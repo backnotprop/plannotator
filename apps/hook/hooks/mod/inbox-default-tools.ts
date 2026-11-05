@@ -227,7 +227,7 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
           "description": "Thread or message id."
         },
         "until": {
-          "description": "Only if the person asks: ISO 8601 return time with zone; null ends it.",
+          "description": "Only if the person asks. How: plannotator inbox --help",
           "type": [
             "string",
             "null"

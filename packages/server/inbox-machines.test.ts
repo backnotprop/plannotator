@@ -1374,6 +1374,14 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
     }
   });
 
+  test("the link is removed as the snooze arrives: the agent hears it was not delivered, not that it is waiting", async () => {
+    await withDoor("plannotator-snooze-agent-revoked-", "msg_01K00000000000000000000007", true, { snooze: () => Response.json({ code: "device_revoked", error: "Link removed." }, { status: 401 }) }, async (_inbox, client) => {
+      const refused = await call(client, "msg_01K00000000000000000000007", inSoon());
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toStartWith("not_delivered: ");
+    });
+  });
+
   test("a held write says what the window's does, by the machine's state", () => {
     for (const state of ["online", "connecting", "offline", "needs_update", "revoked"] as const) {
       expect([state, machineHeldWords("Mini", state)]).toEqual([state, heldWords({ name: "Mini", state })]);
