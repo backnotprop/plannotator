@@ -60,6 +60,54 @@ const sectionOf = (model: ListModel, threadId: string) => model.sections.find((s
 const later = (ms: number) => new Date(Date.now() + ms).toISOString();
 const ASK = "Which index?\n\n:::question\nWhich index?\n\n- [ ] Pagefind\n- [ ] Orama\n:::";
 
+describe("snooze_thread, the agent's call", () => {
+  const call = async (client: Client, args: Record<string, unknown>) =>
+    (await client.callTool({ name: "snooze_thread", arguments: args })) as { isError?: boolean; content: { text: string }[]; structuredContent?: { snoozed: { until: string } | null } };
+
+  test("an agent the person asked snoozes a thread: it leaves the list, writes no message, comes back at its time; until: null ends it", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const cursor = server.store.cursor();
+    const until = later(1_200);
+    const snoozed = await call(client, { thread_id: a.thread_id, until });
+    expect(snoozed.structuredContent!.snoozed!.until).toBe(new Date(until).toISOString());
+    expect(snoozed.content[0]!.text).toContain("is snoozed until");
+    expect(server.store.cursor()).toBe(cursor);
+    const away = await list(server);
+    expect(sectionOf(away, a.thread_id)).toBeNull();
+    expect(away.snoozed!.map((r) => r.thread_id)).toEqual([a.thread_id]);
+    expect(server.store.listRow(a.thread_id)!.questions.open).toBe(1);
+    // By a message in the thread too, and the read says nothing of it.
+    await call(client, { thread_id: a.message_id, until: later(3_600_000) });
+    expect(server.store.snoozes().map((s) => s.thread_id)).toEqual([a.thread_id]);
+    expect(JSON.stringify(await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } }))).not.toMatch(/snooz/i);
+    // Ended: back in its section at once.
+    const ended = await call(client, { thread_id: a.thread_id, until: null });
+    expect(ended.structuredContent!.snoozed).toBeNull();
+    expect((await list(server)).snoozed).toEqual([]);
+    expect(sectionOf(await list(server), a.thread_id)).toBe("waiting");
+    // Its time: back by itself, with the return's mark.
+    await call(client, { thread_id: a.thread_id, until: later(600) });
+    await Bun.sleep(700);
+    const back = await list(server);
+    expect(back.snoozed).toEqual([]);
+    expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.snooze_back).toEqual(expect.any(String));
+  });
+
+  test("the store's rules hold: a past time and an unknown thread are refused, and nothing is snoozed", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const past = await call(client, { thread_id: a.thread_id, until: later(-60_000) });
+    expect(past.isError).toBe(true);
+    expect(past.content[0]!.text).toStartWith("snooze_past: ");
+    const unknown = await call(client, { thread_id: "msg_nope", until: later(60_000) });
+    expect(unknown.isError).toBe(true);
+    expect(unknown.content[0]!.text).toStartWith("thread_not_found: ");
+    expect(server.store.snoozes()).toEqual([]);
+  });
+
+});
+
 describe("snooze", () => {
   test("the window's list takes a snoozed thread out of every section into `snoozed`; the phone's keeps it, marked", async () => {
     const { server, send } = await setup();

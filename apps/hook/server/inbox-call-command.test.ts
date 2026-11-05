@@ -157,6 +157,19 @@ describe("what a script gets", () => {
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
   });
 
+  test("snooze_thread from a script: it snoozes, says until when as JSON, and until: null ends it", async () => {
+    const box = await world();
+    const sent = JSON.parse((await cli(box, ["send_message", '{"body":"News.","subject":"Ledger"}'], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_call" } })).stdout);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const snoozed = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until })]);
+    expect(snoozed.code).toBe(0);
+    expect(JSON.parse(snoozed.stdout).snoozed.until).toBe(until);
+    expect(box.server.store.snoozes().map((s) => s.thread_id)).toEqual([sent.thread_id]);
+    const ended = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until: null })]);
+    expect(JSON.parse(ended.stdout).snoozed).toBeNull();
+    expect(box.server.store.snoozes()).toEqual([]);
+  });
+
   // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
   // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
   test("an unknown action's list never names steps; steps itself is an action", () => {

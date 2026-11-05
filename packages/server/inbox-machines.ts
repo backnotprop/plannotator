@@ -145,6 +145,14 @@ export interface MachineView {
   snoozes: boolean;
 }
 
+/** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
+export interface MachineSnoozeAnswer {
+  machine: string;
+  name: string;
+  snoozed: { until: string; at: string } | null;
+  held: string | null;
+}
+
 export interface OutboxView {
   key: string;
   machine: string;
@@ -662,6 +670,35 @@ export function createInboxMachines(context: InboxMachinesContext) {
     return new Response(JSON.stringify({ outbox: outboxView(entry), machine }), { status: 202, headers });
   };
 
+  // ── An agent's snooze of a linked machine's thread ──
+
+  /**
+   * The window's own write: the forward and the outbox, so a machine that is away gets it when it is back. Null: no
+   * linked machine lists the thread. A machine too old to keep snoozes is refused here, with nothing held or noticed.
+   */
+  const snoozeThread = async (threadId: string, until: string | null): Promise<MachineSnoozeAnswer | null> => {
+    const owners = [...peers.values()].filter((peer) => peer.list?.rows.some((row) => row.thread_id === threadId));
+    if (owners.length === 0) return null;
+    if (owners.length > 1) throw new InboxError("machine_conflict", "Two linked machines both claim this thread, so it opens on neither.");
+    const machine = owners[0]!.id;
+    const name = links.get(machine)?.name ?? "that machine";
+    if (!owners[0]!.list!.snoozes) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: it cannot snooze threads yet. Nothing changed.`);
+    const route = `threads/${encodeURIComponent(threadId)}/snooze`;
+    const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
+    const asked = new Request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Plannotator-Thread": threadId },
+      body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, until }),
+    });
+    const response = await forward(asked, url, machine, route, "local");
+    const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: unknown } | null };
+    if (response.status === 202) {
+      return { machine, name, snoozed: null, held: body.machine?.state === "offline" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}…` };
+    }
+    if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
+    return { machine, name, snoozed: body.snoozed ?? null, held: null };
+  };
+
   // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
 
   /**
@@ -802,6 +839,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     rows,
     projects,
     projectOwner,
+    snoozeThread,
     subscribe: (listener: (frame: MachineFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);

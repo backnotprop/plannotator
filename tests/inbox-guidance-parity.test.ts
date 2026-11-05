@@ -221,6 +221,15 @@ describe("Inbox guidance parity across harnesses", () => {
     }
   });
 
+  test("snooze_thread adds no word to the tool's description: its name in `action` and its field carry it", () => {
+    const tool = inboxAgentTool(INBOX_DEFAULT_TOOLS)!;
+    expect(tool.description).not.toMatch(/snooz/i);
+    const properties = tool.inputSchema.properties as Record<string, { enum?: string[]; description?: string }>;
+    expect(properties.action!.enum).toContain("snooze_thread");
+    expect(properties.until!.description).toStartWith("(snooze_thread) Only when the person asks you to");
+    expect(properties.thread_id!.description).toContain("snooze_thread");
+  });
+
   test("no surface bans progress: the follow-through rule asks for updates the person would want", () => {
     for (const [surface, text] of Object.entries(SURFACES)) expect([surface, /routine progress/i.test(text)]).toEqual([surface, false]);
   });
