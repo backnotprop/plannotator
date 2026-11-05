@@ -3,13 +3,14 @@
  * - annotation is on from the start, so a click on a part opens a comment box;
  * - the Annotate button no longer turns pointing on, or an SVG part throws when picked;
  * - `views.know` stops reading as paragraphs under the drawing, comes back as a tab, or an old link stops landing on it;
+ * - a note on those words reaches the agent as one on the drawing;
  * - an old board's Requirements vanish or crash;
  * - Show more cannot go back, or a bubble does not pop out, close on Esc, or avoid another number.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { shapeParts, type ShapeBoard, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
+import { shapeParts, type ShapeBoard, type ShapeNote, type ShapeNoteInput, type ShapeRef, type ShapeVersion, type ShapeViewId } from '@plannotator/core/shape';
 import { bridgeSanitizerDom } from '../../../../tests/helpers/chat-sanitizer-dom';
 import type { ShapeHost, ShapeLoaded } from './types';
 
@@ -199,11 +200,12 @@ describe.if(hasDom)('the words under the drawing (views.know)', () => {
     await mount({ picture: PICTURE, know: words });
     const know = document.querySelector('.shp-know')!;
     const groups = [...know.querySelectorAll('.shp-rb-with')];
-    // Each number with its neighbours, joined by a no-break space where the words had a space.
-    expect(groups.map((g) => g.textContent)).toEqual(['base\u00a01.', 'pour\u00a01,', 'src/a.ts:11;', 'done\u00a011!', 'done\u00a01']);
-    // The punctuation sits in the part that cannot break, right after its number.
-    expect([...know.querySelectorAll('.shp-rb-end')].map((e) => e.textContent)).toEqual(['1.', '1,', '1;', '1', '1!']);
-    expect(know.textContent?.replace(/\u00a0/g, ' ')).toBe('Lift it off the base 1. Then pour 1, see src/a.ts:11; done 11! And the rest.');
+    // Each number with its neighbours.
+    expect(groups.map((g) => g.textContent)).toEqual(['base 1.', 'pour 1,', 'src/a.ts:11;', 'done 11!', 'done 1']);
+    // The space before a number and the punctuation after it sit in the part that cannot break.
+    expect([...know.querySelectorAll('.shp-rb-end')].map((e) => e.textContent)).toEqual([' 1.', ' 1,', '1;', ' 1', '1!']);
+    // What a copy takes: the words as written, with plain spaces.
+    expect(know.textContent).toBe('Lift it off the base 1. Then pour 1, see src/a.ts:11; done 11! And the rest.');
     expect(know.querySelectorAll('.shp-rb').length).toBe(5);
   });
 
@@ -335,6 +337,33 @@ describe.if(hasDom)('the words under the drawing (views.know)', () => {
     await click(dock('Annotate')!);
     await click(document.querySelector('[data-mark="know-1"]')!);
     expect(popover()?.textContent).toContain('Only this.');
+  });
+
+  test('a note on the words under the drawing is sent as one on the words, and one on the drawing as one on the drawing', async () => {
+    const sent: ShapeNoteInput[] = [];
+    const base = host({ picture: PICTURE, know: 'Only this.' });
+    const at = '2026-11-04T10:00:00.000Z';
+    base.note = async (_id, input) => {
+      sent.push(input);
+      return { id: `n${sent.length}`, at, v: 1, view: input.view, part: input.part, quote: input.quote, kind: 'change', text: input.text, from: 'you', re: null, delivered: null } as ShapeNote;
+    };
+    await mount({}, { host: base });
+    await click(dock('Annotate')!);
+    const send = async (words: string) => {
+      const box = popover()!.querySelector<HTMLTextAreaElement>('textarea')!;
+      const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+      await act(async () => {
+        setter.call(box, words);
+        box.dispatchEvent(new Event('input', { bubbles: true }));
+      });
+      await act(async () => { box.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', metaKey: true, bubbles: true, cancelable: true })); });
+      await wait();
+    };
+    await click(document.querySelector('[data-mark="know-1"]')!);
+    await send('shorter');
+    await click(inDrawing('[data-mark="whistle"]')!);
+    await send('louder');
+    expect(sent.map((n) => [n.view, n.part, n.quote])).toEqual([['know', 'know-1', 'Only this.'], ['picture', 'whistle', 'One whistle']]);
   });
 
   test('an old board opens: heading, group names, every line, the foot, with no crash', async () => {

@@ -11,6 +11,7 @@
  *  - `views.know` reads as paragraphs under the drawing, with no tab of its own; a board saved with Requirements still opens, its words all there;
  *  - a phone pans a canvas with no tall drawing;
  *  - a number never lets its punctuation start a line, and never pushes the words past a 320 phone.
+ *  - a long path or link with no number beside it never makes the Shape scroll sideways on a phone.
  *
  * Build first: see inbox.spec.ts.
  */
@@ -253,6 +254,23 @@ test('a number stays with its word and punctuation at every width, and a long pa
       return { over: view.scrollWidth - view.clientWidth, past: rects.filter((r) => r.right > room.right + 0.5 || r.left < room.left - 0.5).length, stray };
     });
     expect(seen, `at ${width}`).toEqual({ over: 0, past: 0, stray: 0 });
+  }
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('a long path or link with no number beside it never pushes the Shape sideways on a phone', async ({ browser }) => {
+  const id = store('long-path', {
+    ...board,
+    title: 'A long path alone',
+    views: { picture: board.views.picture, know: 'It lives in `packages/ui/components/shape/a/very/long/path/that/fills/the/phone/ShapeSurface.tsx` today.\n\nSee https://example.com/a/very/long/link/with/no/place/to/break/it/on/a/small/phone/screen for more.' },
+  });
+  const { context, page, problems } = await openBoard(browser, id, { ...phone, viewport: { width: 320, height: 700 }, screen: { width: 320, height: 700 } });
+  for (const width of [320, 390]) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.waitForTimeout(120);
+    const sideways = await page.locator('.shp-view:not(.leaving)').evaluate((v) => [v.scrollWidth - v.clientWidth, document.documentElement.scrollWidth - document.documentElement.clientWidth]);
+    expect(sideways, `at ${width}`).toEqual([0, 0]);
   }
   expect(problems).toEqual([]);
   await context.close();

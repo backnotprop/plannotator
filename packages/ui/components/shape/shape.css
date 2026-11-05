@@ -126,7 +126,7 @@
 .shp-tstrip button { flex-shrink: 0; }
 
 /* ── views.know: prose, set for reading, under the drawing or (with none) as the view ── */
-.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
+.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; overflow-wrap: anywhere; }
 .shp-drawn.followed { min-height: 0; }
 .shp-drawn.canvas.followed:not(.tall) { height: auto; }
 .shp-drawn.followed + .shp-know { margin-top: 18px; scroll-margin-top: 14px; font-size: 16px; }

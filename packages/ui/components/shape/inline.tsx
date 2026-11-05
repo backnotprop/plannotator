@@ -9,15 +9,18 @@ const TOKEN = /\[\^(\d{1,3})\]|\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)|`([^`]+)`|\*
 /** What may follow a number on its own line's end, never start the next one. */
 const AFTER_NUMBER = /^[.,;:!?…)\]}'"’”»]+/;
 
-/** Takes the word (or the bold, link or code) right before a number off the end of `out`. */
-function takeWordBefore(out: React.ReactNode[]): React.ReactNode[] {
+/**
+ * Takes the word (or the bold, link or code) right before a number off the end of `out`, and the space between them.
+ * The space goes with the number, where nothing can break, so a copy still reads a plain space.
+ */
+function takeWordBefore(out: React.ReactNode[]): { word: React.ReactNode[]; space: string } {
   const prev = out.pop();
-  if (typeof prev !== 'string') return prev === undefined ? [] : [prev];
+  if (typeof prev !== 'string') return { word: prev === undefined ? [] : [prev], space: '' };
   const word = prev.match(/\S*\s*$/)![0];
   if (prev.length > word.length) out.push(prev.slice(0, prev.length - word.length));
-  // A space there is a place to break: a no-break space looks the same.
-  const kept = word.replace(/\s+$/, '\u00a0');
-  return word.trim() || !out.length ? [kept] : [out.pop(), kept];
+  const space = /\s$/.test(word) ? ' ' : '';
+  const kept = word.trimEnd();
+  return { word: kept || !out.length ? [kept] : [out.pop()], space };
 }
 
 export function ShapeInline({ text }: { text: string }) {
@@ -31,7 +34,7 @@ export function ShapeInline({ text }: { text: string }) {
       // A number stays with the word before it and the punctuation after it: neither starts a line.
       const before = takeWordBefore(out);
       const after = text.slice(at + m[0].length).match(AFTER_NUMBER)?.[0] ?? '';
-      out.push(<span key={key++} className="shp-rb-with">{before}<span className="shp-rb-end"><Bubble n={Number(m[1])} />{after}</span></span>);
+      out.push(<span key={key++} className="shp-rb-with">{before.word}<span className="shp-rb-end">{before.space}<Bubble n={Number(m[1])} />{after}</span></span>);
       last = at + m[0].length + after.length;
       continue;
     }
