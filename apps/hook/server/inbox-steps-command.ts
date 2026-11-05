@@ -12,6 +12,7 @@
 import { INBOX_STEPS_LEAD } from "@plannotator/shared/inbox/connection";
 import { hasHelpFlag } from "./cli";
 import { runInboxCallCommand, type CallCommandDeps } from "./inbox-call-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_STEPS_USAGE = [
   "Usage:",
@@ -56,7 +57,7 @@ export function parseStepsCommand(argv: readonly string[]): ParsedStepsCommand {
 
 /** Run `plannotator inbox steps …`; resolves to the exit code. */
 export async function runInboxStepsCommand(argv: readonly string[], deps: CallCommandDeps): Promise<number> {
-  const out = deps.out ?? ((text: string) => new Promise<void>((done) => void process.stdout.write(text, () => done())));
+  const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
   if (hasHelpFlag([...argv])) {
     await out(`${INBOX_STEPS_USAGE}\n`);
