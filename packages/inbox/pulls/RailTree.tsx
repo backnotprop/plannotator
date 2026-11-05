@@ -37,12 +37,13 @@ function reindent(rows: Row[], by: number): Row[] {
 const pad = (depth: number) => 6 + depth * 10;
 
 /**
- * Where a name gives way when the row is short: a path keeps its last folder (`crates/next-api/` + `src/`), a file name
+ * Where a name gives way when the row is short: a path keeps its last folder and the slash before it, so a cut reads
+ * `crates/n…/src/` (`crates/next-api` + `/src/`); a file name
  * its end, as the Inbox's `FileName` cuts one (`turbopack-worker-self-reference` + `.test.ts`), so the end, which tells
  * rows apart, stays. A short name has no tail: it is whole or, past all room, cut at its end.
  */
 export function middleCut(text: string): [head: string, tail: string] {
-  const path = /^(.+\/)([^/]+\/?)$/.exec(text);
+  const path = /^(.+?)(\/[^/]+\/?)$/.exec(text);
   if (path) return [path[1]!, path[2]!];
   return splitFileName(text);
 }

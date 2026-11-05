@@ -56,15 +56,16 @@ test.if(hasDom)('a row holds the whole path, cut only where it may give way: the
   draw([file(path, 1, 0), file('src/one.ts', 1, 0)].join(''));
   const row = host.querySelector(`[data-review-file="${path}"]`)!;
   expect(row.querySelector('.ib-prp-fname')!.textContent).toBe(path);
-  expect(row.querySelector('.ib-prp-dir .ib-prp-keep')!.textContent).toBe('turbopack-worker-self-reference/');
+  expect(row.querySelector('.ib-prp-dir .ib-prp-keep')!.textContent).toBe('/turbopack-worker-self-reference/');
   expect(row.querySelector('.ib-prp-base .ib-prp-keep')!.textContent).toBe('.test.ts');
   // Nothing on the row fades or reads right to left.
   expect(row.querySelector('[class*="ib-rv-name"]')).toBeNull();
 });
 
 test.if(hasDom)('middleCut keeps the end that tells rows apart', () => {
-  expect(middleCut('crates/next-api/src/')).toEqual(['crates/next-api/', 'src/']);
-  expect(middleCut('turbopack/crates')).toEqual(['turbopack/', 'crates']);
+  // The slash stays with the end, so a cut folder still reads as a path ("turbopack-b…/src").
+  expect(middleCut('crates/next-api/src/')).toEqual(['crates/next-api', '/src/']);
+  expect(middleCut('turbopack/crates')).toEqual(['turbopack', '/crates']);
   expect(middleCut('global_module_ids.rs')).toEqual(['global_module', '_ids.rs']);
   expect(middleCut('mod.rs')).toEqual(['mod.rs', '']);
 });
