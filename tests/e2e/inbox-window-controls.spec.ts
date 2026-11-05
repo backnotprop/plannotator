@@ -475,7 +475,40 @@ test('a phone-width window: the header holds the edge and the layer clears the h
   expect(await top(phone, '.ib-view.ib-full .ib-vbody')).toBeGreaterThanOrEqual(H);
 });
 
-test('the selection toolbar over the band: its buttons click, though it renders outside the page', async () => {
+/**
+ * A float the shared parts render into body, outside the page, moved over the band: its buttons' middle at y 4, above
+ * the panes' gutter, where nothing of the page lies over the band. Its entrance (a rise) settles first.
+ */
+async function floatOverBand(float: ReturnType<Page['locator']>): Promise<void> {
+  await float.waitFor();
+  expect(await float.evaluate((el) => el.closest('.pn-inbox'))).toBeNull();
+  await page.waitForTimeout(600);
+  await float.evaluate((el) => {
+    const bar = el as HTMLElement;
+    bar.style.animation = 'none';
+    const button = bar.querySelector('button')!.getBoundingClientRect();
+    const middle = button.top + button.height / 2 - bar.getBoundingClientRect().top;
+    bar.style.top = `${4 - middle}px`;
+  });
+  await page.waitForTimeout(200);
+  await installDragAt(page);
+  const read = await float.evaluate((el) => {
+    const { dragAt } = window as unknown as { dragAt: (x: number, y: number) => boolean };
+    const middles = [...el.querySelectorAll('button')]
+      .map((button) => button.getBoundingClientRect())
+      .filter((r) => r.width > 0)
+      .map((r) => [r.left + r.width / 2, r.top + r.height / 2] as const);
+    // Just left of it, at the same height, the band drags: the float is what stops it.
+    const beside = dragAt(el.getBoundingClientRect().left - 6, middles[0]![1]);
+    return { buttons: middles.length, middle: middles[0]![1], beside, dragging: middles.filter(([x, y]) => dragAt(x, y)).length };
+  });
+  expect(read.buttons).toBeGreaterThan(0);
+  expect(read.middle).toBe(4);
+  expect(read.beside).toBe(true);
+  expect(read.dragging).toBe(0);
+}
+
+test('the selection and table toolbars over the band: their buttons click, though they render outside the page', async () => {
   await openRoute(page, world, `#thread=${world.picture}`, 'collapsed');
   await setControls(page);
   const words = page.locator('section.ib-pane [data-message-id] p', { hasText: 'The ledger export is ready.' }).first();
@@ -485,36 +518,14 @@ test('the selection toolbar over the band: its buttons click, though it renders 
   await page.mouse.down();
   await page.mouse.move(box.x + box.width - 4, y, { steps: 10 });
   await page.mouse.up();
-  const toolbar = page.locator('.annotation-toolbar');
-  await toolbar.waitFor();
-  expect(await toolbar.evaluate((el) => el.closest('.pn-inbox'))).toBeNull();
-  // Where a selection in a layer's first line puts it: over the band. Its buttons' middle goes to y 4, above the
-  // panes' gutter, where nothing of the page lies over the band. Its entrance (a rise) settles first.
-  await page.waitForTimeout(600);
-  await toolbar.evaluate((el) => {
-    const bar = el as HTMLElement;
-    bar.style.animation = 'none';
-    const button = bar.querySelector('button')!.getBoundingClientRect();
-    const middle = button.top + button.height / 2 - bar.getBoundingClientRect().top;
-    bar.style.top = `${4 - middle}px`;
-  });
-  await page.waitForTimeout(200);
-  await installDragAt(page);
-  const read = await toolbar.evaluate((el) => {
-    const { dragAt } = window as unknown as { dragAt: (x: number, y: number) => boolean };
-    const middles = [...el.querySelectorAll('button')]
-      .map((button) => button.getBoundingClientRect())
-      .filter((r) => r.width > 0)
-      .map((r) => [r.left + r.width / 2, r.top + r.height / 2] as const);
-    // Just left of the toolbar, at the same height, the band drags: the toolbar is what stops it.
-    const beside = dragAt(el.getBoundingClientRect().left - 6, middles[0]![1]);
-    return { buttons: middles.length, middle: middles[0]![1], beside, dragging: middles.filter(([x, y]) => dragAt(x, y)).length };
-  });
-  expect(read.buttons).toBeGreaterThan(0);
-  expect(read.middle).toBe(4);
-  expect(read.beside).toBe(true);
-  expect(read.dragging).toBe(0);
+  await floatOverBand(page.locator('.annotation-toolbar'));
   await page.keyboard.press('Escape');
+
+  // A table's toolbar shows while the pointer is on the table.
+  await openRoute(page, world, `#thread=${world.table}`, 'collapsed');
+  await setControls(page);
+  await page.locator('section.ib-pane [data-message-id] table').first().hover();
+  await floatOverBand(page.locator('[data-table-toolbar]'));
 });
 
 test('a control added later clicks: a button over the band, and anything inside a header', async () => {

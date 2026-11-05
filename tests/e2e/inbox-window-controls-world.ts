@@ -25,6 +25,8 @@ export interface ControlsWorld {
   board: string;
   /** The thread with two open questions: Decision mode's way in. */
   questions: string;
+  /** A message with a table: the table's toolbar. */
+  table: string;
   /** An agent's code review: the full-window review. */
   review: { thread: string; message: string };
   agents: SimAgent[];
@@ -66,6 +68,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   const sent = await claude.send({ project_path: project, subject: 'The ledger export is ready', thread: 'export', body: 'The ledger export is ready. The picture shows the new page.', attachments: ['shot.png'] });
   const question = (prompt: string) => `:::question\n${prompt}\n\n- [ ] Yes\n- [ ] No\n:::`;
   const asked = await claude.send({ project_path: project, subject: 'Two calls before the export ships', thread: 'calls', body: `Two calls.\n\n${question('Keep the CSV?')}\n\n${question('Keep the JSON?')}` });
+  const tabled = await claude.send({ project_path: project, subject: 'Export sizes', thread: 'sizes', body: 'The sizes.\n\n| Format | Size |\n| --- | --- |\n| CSV | 2 MB |\n| JSON | 5 MB |\n' });
   const { example } = await pi.guideBrief();
   const guided = await pi.submitGuide({ project_path: project, ...example });
   const askedForReview = await pi.send({ project_path: project, subject: 'A review of the token refresh', thread: 'review', body: 'Asking for the review.' });
@@ -80,6 +83,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
     url: started.stdout.trim(),
     picture: sent.thread_id as string,
     questions: asked.thread_id as string,
+    table: tabled.thread_id as string,
     review: { thread: reviewed.thread_id as string, message: reviewed.message_id as string },
     thread: guided.thread_id as string,
     guide: guided.message_id as string,
