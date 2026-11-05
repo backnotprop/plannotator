@@ -1132,6 +1132,26 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   return { context, page };
 }
 
+test('the rail: a folder that does not fit gives way before the file name loses a letter', async ({ browser }) => {
+  const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
+  const fits = 'guides-and-shared-ui.md';
+  const patch = [file(`docs/agent-guides/with-a-long-folder-name/${fits}`), file('src/one.ts')].join('');
+  const { context, page } = await stubbedReview(browser, 1440, patch);
+  try {
+    const row = page.locator('[data-pull-review] .ib-prp-file').filter({ hasText: fits });
+    await expect(row.locator('.ib-prp-dir')).toBeVisible({ timeout: 30_000 });
+    const sizes = await row.locator('.ib-prp-base').evaluate((box) => {
+      const range = document.createRange();
+      range.selectNodeContents(box);
+      return { box: box.getBoundingClientRect().width, text: range.getBoundingClientRect().width };
+    });
+    expect(sizes.box).toBeGreaterThanOrEqual(sizes.text);
+    await expect(row.locator('.ib-prp-dir')).toHaveCSS('text-overflow', 'clip');
+  } finally {
+    await context.close();
+  }
+});
+
 test('the same small gap between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
   const hunk = (at: number) => `@@ -${at},3 +${at},3 @@\n ctx\n-old\n+new\n ctx\n`;
   const file = (path: string, ...ats: number[]) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${ats.map(hunk).join('')}`;

@@ -8322,7 +8322,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-folder svg { flex: none; transition: transform 100ms ease; }
 .ib-prp-folder svg.ib-prp-open { transform: rotate(90deg); }
 .ib-prp-fname { flex: 1 1 auto; display: flex; min-width: 0; }
-.ib-prp-dir { flex: 0 1000 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; direction: rtl; color: var(--muted-foreground); }
+/* The folder gives way entirely before the file's name loses a pixel: at 1000:1 the name lost a fraction, and its
+   ellipsis took two letters from a name that fit. Cut, the folder fades, so a sliver of it never reads as a stray mark. */
+.ib-prp-dir { flex: 0 1000000 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; direction: rtl; color: var(--muted-foreground); -webkit-mask-image: linear-gradient(to right, transparent, #000 14px); mask-image: linear-gradient(to right, transparent, #000 14px); }
 .ib-prp-base { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
 .ib-prp-c { flex: none; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
