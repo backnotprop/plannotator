@@ -70,8 +70,8 @@ let pierreLoad: Promise<PierreModule | undefined> | undefined;
 
 /** `${lang} ${theme}` pairs attached to the shared highlighter. */
 const ready = new Set<string>();
-/** Pairs the highlighter refused (unknown grammar or theme). Never retried. */
-const rejected = new Set<string>();
+/** Pairs the highlighter refused (unknown grammar or theme), with the error it gave. Never retried. */
+const rejected = new Map<string, unknown>();
 const inflight = new Map<string, Promise<boolean>>();
 
 const pairKey = (lang: string, theme: string) => `${lang} ${theme}`;
@@ -234,8 +234,8 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
       ready.add(key);
       return true;
     })
-    .catch(() => {
-      rejected.add(key);
+    .catch((cause: unknown) => {
+      rejected.set(key, cause);
       return false;
     })
     .then((ok) => {
@@ -257,6 +257,17 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
  */
 export function forgetHighlightRejection(lang: string, theme: string): void {
   rejected.delete(pairKey(lang, theme));
+}
+
+/**
+ * Why a pair failed to attach: `{ cause }`, the error its load gave, or null
+ * when it has not failed. A host whose grammars are fetched on first use can
+ * tell a chunk its server no longer has (asking again cannot help) from one a
+ * dropped link lost. Nothing in ui calls it.
+ */
+export function highlightRejection(lang: string, theme: string): { cause: unknown } | null {
+  const key = pairKey(lang, theme);
+  return rejected.has(key) ? { cause: rejected.get(key) } : null;
 }
 
 /** Monotonic stamp per element so a slow async highlight from a previous
