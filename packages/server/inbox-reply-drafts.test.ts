@@ -8,7 +8,7 @@
  * holding unsent work never sits in Quiet unless archived.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -414,6 +414,19 @@ describe("reply drafts keep long pastes", () => {
     expect(sent.status).toBe(200);
     expect(server.store.replyDraft(thread_id)).toBeNull();
     expect((await textOf(server, file.upload_id)).status).toBe(404);
+  });
+
+  test("the same Send twice at once, while its files are still copying: one reply, one set of files", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_s");
+    const file = await upload(server, "shot.txt", LOG);
+    const body = { idempotency_key: "twice", words: "Here:", uploads: [file.upload_id] };
+    const answers = await Promise.all([post(server, `/api/inbox/messages/${message_id}/reply`, body), post(server, `/api/inbox/messages/${message_id}/reply`, body)]);
+    expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+    const replies = server.store.thread(thread_id)!.messages.filter((message) => message.author.kind === "person");
+    expect(replies).toHaveLength(1);
+    const kept = readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending");
+    expect(kept).toEqual([replies[0]!.attachments![0]!.id]);
   });
 
   test("the text route reads only long pastes: a .txt the person dropped is 404", async () => {

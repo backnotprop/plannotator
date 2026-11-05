@@ -9,7 +9,6 @@ describe('a pasted picture that is this Inbox\'s own file', () => {
   test.each([
     ['Chrome', `<meta charset="utf-8"><img src="${ORIGIN}/api/inbox/attachments/${ID}/image" alt="ref02.jpg"/>`],
     ['Windows fragment comments', `<html><body><!--StartFragment--><img src="${ORIGIN}/api/inbox/attachments/${ID}/image"><!--EndFragment--></body></html>`],
-    ['a relative src', `<img src="/api/inbox/attachments/${ID}/image">`],
     ['single quotes', `<img alt='x' src='${ORIGIN}/api/inbox/attachments/${ID}/image'>`],
   ])('%s', (_, html) => {
     expect(ownAttachmentInPaste(clip(html), ORIGIN)).toEqual({ id: ID, version: 'current', src: `/api/inbox/attachments/${ID}/image` });
@@ -27,6 +26,8 @@ describe('anything else is a plain paste', () => {
     ['words around the picture', `<p>See this <img src="${ORIGIN}/api/inbox/attachments/${ID}/image"> here</p>`],
     ['two pictures', `<img src="${ORIGIN}/api/inbox/attachments/${ID}/image"><img src="${ORIGIN}/api/inbox/attachments/${ID}/image">`],
     ['another Inbox', `<img src="http://localhost:5000/api/inbox/attachments/${ID}/image">`],
+    ['a relative src, which no browser writes', `<img src="/api/inbox/attachments/${ID}/image">`],
+    ['a protocol-relative src', `<img src="//${ORIGIN.replace(/^https?:\/\//, '')}/api/inbox/attachments/${ID}/image">`],
     ['another site', `<img src="https://example.com/api/inbox/attachments/${ID}/image">`],
     ['a linked machine\'s file', `<img src="${ORIGIN}/api/inbox/m/ibx_other/attachments/${ID}/image">`],
     ['another route', `<img src="${ORIGIN}/api/inbox/attachments/${ID}/download">`],

@@ -32,9 +32,10 @@ export function ownAttachmentInPaste(data: Pick<DataTransfer, 'getData'> | null,
   const src = /\bsrc\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(tags[0]!);
   const value = (src?.[1] ?? src?.[2] ?? src?.[3] ?? '').replace(/&amp;/g, '&').trim();
   if (!value) return null;
+  // Browsers write the absolute address when they copy a picture; anything else did not come from this page.
   let url: URL;
   try {
-    url = new URL(value, origin);
+    url = new URL(value);
   } catch {
     return null;
   }

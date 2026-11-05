@@ -1417,7 +1417,7 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const project = store.ensureProject({ name: "ledger", root: ledger });
     const uploaded = await door("uploads?name=shot.png&idempotency_key=reuse-up-1", { raw: ONE_PIXEL_PNG, headers: { "Content-Type": "image/png" } });
     const upload = ((await uploaded.json()) as Json).upload;
-    const asked = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-a", name: null }, body: "A picture.", thread: "Shots", attachments: inboxUploadAttachments(store.dir, [upload.upload_id], new Date().toISOString()) }).message;
+    const asked = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-a", name: null }, body: "A picture.", thread: "Shots", attachments: await inboxUploadAttachments(store.dir, [upload.upload_id], new Date().toISOString()) }).message;
     const source = asked.attachments![0]!;
     const answer = await door("uploads/reuse", { body: { attachment_id: source.id, version: "sent", idempotency_key: "reuse-1" } });
     expect(answer.status).toBe(200);

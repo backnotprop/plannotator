@@ -123,6 +123,12 @@ export interface CardsModel {
   steps?: Record<string, InboxStepsWire[]>;
   /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
   initiatives?: InboxInitiative[];
+  /**
+   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
+   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
+   * Absent from an older Inbox: the preview lists no threads.
+   */
+  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -992,11 +998,11 @@ export interface StartThreadInput {
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
-export async function reuseAttachment(attachmentId: string, version: 'current' | 'sent', options: { signal?: AbortSignal } = {}): Promise<InboxUpload> {
+export async function reuseAttachment(attachmentId: string, version: 'current' | 'sent', options: { signal?: AbortSignal; sha256?: string } = {}): Promise<InboxUpload> {
   const response = await fetch(inboxUrl('/uploads/reuse'), {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ attachment_id: attachmentId, version, serverSession: pageServerSession() }),
+    body: JSON.stringify({ attachment_id: attachmentId, version, ...(options.sha256 ? { sha256: options.sha256 } : {}), serverSession: pageServerSession() }),
     signal: options.signal,
   });
   const body = (await response.json().catch(() => ({}))) as { upload?: InboxUpload; error?: string; code?: string };

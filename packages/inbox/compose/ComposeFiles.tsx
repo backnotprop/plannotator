@@ -222,7 +222,7 @@ export function useComposeFiles(
   }, []);
 
   /** The tile holding these bytes, whichever way they came. */
-  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256), []);
+  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.state !== 'refused' && (file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256)), []);
 
   const flash = (key: string) => {
     patch(key, { flash: true });
@@ -242,13 +242,20 @@ export function useComposeFiles(
     }
     const reuse = uploader.current.reuse;
     if (!reuse) return;
+    // Tried again after a refusal: this try takes the refused tile's place.
+    const tried = filesRef.current.filter((file) => file.state === 'refused' && file.reuse?.sha256 === source.sha256).map((file) => file.key);
+    if (tried.length > 0) {
+      filesRef.current = filesRef.current.filter((file) => !tried.includes(file.key));
+      setFiles((current) => current.filter((file) => !tried.includes(file.key)));
+      tried.forEach(release);
+    }
     const key = `local-${newUuid()}`;
     const fresh: ComposeFile = { key, name: source.name, size: source.size, state: 'uploading', progress: 0, upload: null, error: null, preview: source.preview, reuse: { sha256: source.sha256 } };
     filesRef.current = [...filesRef.current, fresh];
     setFiles((current) => [...current, fresh]);
     const controller = new AbortController();
     aborts.current.set(key, controller);
-    const settled = reuse(source.id, source.version, { signal: controller.signal })
+    const settled = reuse(source.id, source.version, { signal: controller.signal, sha256: source.sha256 })
       .then((upload) => {
         patch(key, { state: 'done', progress: 1, upload });
         return upload;
