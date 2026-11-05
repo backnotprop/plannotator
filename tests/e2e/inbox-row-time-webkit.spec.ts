@@ -6,9 +6,8 @@
  *
  * Threads come back from a real snooze. The return's time is whatever the
  * snooze said, so the list's `last_at` is rewritten on its way to the page to
- * show the hard words ("12:00 PM", a date). Pictures land in
- * PLANNOTATOR_ROW_TIME_SHOTS (default .local/proof/row-time), named with
- * PLANNOTATOR_ROW_TIME_TAG. Build the binary first (see inbox.spec.ts), then
+ * show the hard words ("12:00 PM", a date). Set PLANNOTATOR_ROW_TIME_SHOTS to a
+ * folder for pictures, named with PLANNOTATOR_ROW_TIME_TAG. Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-row-time-webkit`.
  */
 
@@ -22,11 +21,12 @@ import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scrat
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
-const shots = resolve(process.env.PLANNOTATOR_ROW_TIME_SHOTS ?? join(repo, '.local/proof/row-time'));
+const shots = process.env.PLANNOTATOR_ROW_TIME_SHOTS ? resolve(process.env.PLANNOTATOR_ROW_TIME_SHOTS) : null;
 const tag = process.env.PLANNOTATOR_ROW_TIME_TAG ?? 'row-time';
 
 const LONG_PROJECT = 'a-very-long-project-name-that-never-seems-to-end-at-all';
-const LINE = 17; // `.ib-m1 .ib-t`'s line height at every text size.
+const LINE = 17; // `.ib-m1 .ib-t`'s line height at every text size; a delivery tick's cell is a pixel taller, a wrap twice it.
+const ROW_PADDING = 16; // `.ib-mrow`'s padding on the right.
 
 const today = (hours: number) => {
   const date = new Date();
@@ -50,7 +50,6 @@ test.describe.configure({ mode: 'serial' });
 
 test.beforeAll(async () => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
-  mkdirSync(shots, { recursive: true });
   root = inboxScratch('plannotator-inbox-row-time-');
   const dataDir = join(root, 'data');
   const env = {
@@ -175,7 +174,7 @@ test('at 320 the clock and the time keep one line, and the long project is what 
     for (const [name, words] of Object.entries(expected)) {
       const line = await lineOf(page, rows[name]!);
       expect(line.words, name).toMatch(words);
-      expect(line.time.height, `${name}: "${line.words}" is one line`).toBe(LINE);
+      expect(line.time.height, `${name}: "${line.words}" is one line`).toBeLessThan(LINE * 1.5);
       if (name !== 'shortTwo') expect(line.projectCut, `${name}: the project is cut`).toBe(true);
     }
   } finally {
@@ -197,9 +196,8 @@ test('every row, every look, 320 and 390, at the largest text size: the time is 
           for (const [name, id] of Object.entries(rows)) {
             const where = `${width}px, text ${text_size}, [${look.join(' ')}], ${name}`;
             const line = await lineOf(page, id);
-            // A delivery tick's cell is a pixel taller than the text's line; a wrap is twice it.
             expect(line.time.height, `${where}: "${line.words}" is one line`).toBeLessThan(LINE * 1.5);
-            expect(line.time.right, `${where}: the time stays in the row`).toBeLessThanOrEqual(line.row.right);
+            expect(line.time.right, `${where}: the time stays inside the row's padding`).toBeLessThanOrEqual(line.row.right - ROW_PADDING);
             if (line.lead) expect(line.lead.right, `${where}: the project stops before the time`).toBeLessThanOrEqual(line.time.left);
           }
         }
@@ -211,6 +209,8 @@ test('every row, every look, 320 and 390, at the largest text size: the time is 
 });
 
 test('pictures: a phone, dark and light, 390 and 320', async ({ browser }) => {
+  test.skip(!shots, 'set PLANNOTATOR_ROW_TIME_SHOTS to a folder');
+  mkdirSync(shots!, { recursive: true });
   await post('/api/inbox/settings', { rows: [], text_size: 14 });
   for (const scheme of ['dark', 'light'] as const) {
     for (const width of [390, 320]) {
@@ -218,7 +218,7 @@ test('pictures: a phone, dark and light, 390 and 320', async ({ browser }) => {
       try {
         await openList(page);
         await page.waitForTimeout(300);
-        await page.screenshot({ path: join(shots, `${tag}-${scheme}-${width}.png`) });
+        await page.screenshot({ path: join(shots!, `${tag}-${scheme}-${width}.png`) });
       } finally {
         await context.close();
       }
