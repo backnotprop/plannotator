@@ -27,10 +27,11 @@ export const GuideGlobalCommentButton: React.FC<{ onAdd: (anchor: HTMLElement) =
       data-guide-global-comment-add=""
       onClick={() => ref.current && onAdd(ref.current)}
       title="Add global comment"
-      className="flex items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+      className="flex min-w-0 max-w-full items-center gap-1.5 rounded-md bg-muted/50 px-2.5 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
     >
       <GlobeIcon />
-      <span>Global comment</span>
+      {/* Cut with "…" only where the row is narrower than the button (the tab's row in a narrow bare guide). */}
+      <span className="truncate">Global comment</span>
     </button>
   );
 };
