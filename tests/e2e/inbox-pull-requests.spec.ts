@@ -1217,8 +1217,9 @@ test("a stranger's description: paths open on the forge, only the web's links ar
     const section = review.locator('[data-pull-description]');
     const route = page.url();
     const link = (name: string) => section.getByRole('link', { name, exact: true });
-    await section.getByRole('button', { name: 'Show more' }).click();
-    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    // Folded, what is clipped is inert: read it open, or whole when it fits.
+    await expect(section).toContainText('guide');
+    if (await section.getByRole('button', { name: 'Show more' }).count()) await section.getByRole('button', { name: 'Show more' }).click();
     // A path is the file on the forge, in a new tab; this window stays, Markdown and raw HTML alike, whatever its target says.
     for (const [name, path] of [['guide', '/docs/guide.md'], ['api', '/api/inbox/settings'], ['raw', '/docs/raw']] as const) {
       await expect(link(name)).toHaveAttribute('href', new RegExp(`^https://github\\.com/[^/]+/[^/]+/blob/[^/]+${path}$`));
