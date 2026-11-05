@@ -106,11 +106,11 @@ export function PullsPage(props: PullsPageProps) {
   }, [model, props.projects]);
 
   const list = (
-    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Pull requests" data-pulls-list="">
+    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
       <div className="ib-lhead">
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
-          Pull requests
+          Reviews
         </h1>
         {groups && groups.on_you.length > 0 && (
           <span className="ib-pr-onyou" data-pulls-on-you={groups.on_you.length}>
@@ -148,6 +148,33 @@ export function PullsPage(props: PullsPageProps) {
             {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
           </div>
         ))}
+    </>
+  );
+}
+
+/** A `#reviews` or `#pulls` link while Settings → Capabilities → Code review is off: what is here, and the way to turn it on. Nothing is read. */
+export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: () => void }) {
+  return (
+    <>
+      <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-reviews-off="">
+        <div className="ib-lhead">
+          <SidebarTrigger />
+          <h1 dir="auto" tabIndex={-1}>
+            Reviews
+          </h1>
+        </div>
+        <div className="ib-lbody ib-pr-off">
+          <div className="ib-pr-empty">
+            <p className="ib-pr-empty-h">Code review is off</p>
+            <p>Reviews of your local changes and pull requests show here when it’s on.</p>
+            <button type="button" className="ib-btn" onClick={onSettings} data-reviews-off-settings="">
+              Open Settings
+            </button>
+          </div>
+        </div>
+        {!phone && <ListColumnEdge />}
+      </section>
+      {!phone && <div className="ib-pane ib-pempty" />}
     </>
   );
 }

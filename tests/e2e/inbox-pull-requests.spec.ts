@@ -9,8 +9,9 @@
  * real `git diff`s of scratch repositories with invented names.
  *
  * What is proved, in order:
- *  1. Off (the default): no Pull requests row, a #pulls link lands on the
- *     Inbox, and no gh / glab query runs (the fakes' call log).
+ *  1. Off (the default): no Reviews row, a #pulls link (the permanent alias of
+ *     #reviews) says Code review is off, with Open Settings, and no gh / glab
+ *     query runs (the fakes' call log).
  *  2. On, with the Board off: the row; the list grouped by whose move it is
  *     (On you with a teammate's review request and the agent's stack, Ready
  *     to land, the folded "2 waiting on others"); the stack is one row with
@@ -590,7 +591,7 @@ const LAYER_412 = 'github.com/northwind/billing-svc#412';
 const LAYER_413 = 'github.com/northwind/billing-svc#413';
 const LOCALE = 'github.com/northwind/web-app#869';
 
-test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or glab query runs', async () => {
+test('off (the default): no row, a #pulls link says Code review is off, and no gh or glab query runs', async () => {
   const { page } = world;
   const reads: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
@@ -601,8 +602,16 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await expect(page.locator('[data-pulls-nav]')).toHaveCount(0);
   await page.goto(`${world.url}#pulls`);
-  await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('pulls');
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(page.locator('[data-reviews-off]')).toContainText('Code review is off');
   await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+  await shot(page, '1-off-link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-reviews-off-settings]')).toBeVisible();
+  await shot(page, '1-off-link-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('[data-reviews-off-settings]').click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('capabilities');
   await page.goto(world.url);
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await page.waitForTimeout(800);
@@ -610,6 +619,19 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   page.off('request', watch);
   expect(reads).toEqual([]);
   expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff '))).toEqual([]);
+});
+
+test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
+  const { page } = world;
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.reload();
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await setCodeReview(false);
 });
 
 test('on, with the Board off: the row, and the list by whose move it is, the stack one row with its chain', async () => {
@@ -621,6 +643,8 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // Pull requests needs no Board.
   await expect(page.locator('[data-board-nav]')).toHaveCount(0);
   await nav.click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);

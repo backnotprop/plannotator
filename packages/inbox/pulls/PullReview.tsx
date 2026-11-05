@@ -335,7 +335,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <div className="ib-vhead">
           <button type="button" className="ib-back" onClick={onBack}>
             <Icon name="back" size={15} />
-            Pull requests
+            Reviews
           </button>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
@@ -369,7 +369,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-vhead">
         <button type="button" className="ib-back" onClick={onBack}>
           <Icon name="back" size={15} />
-          {phone ? <span className="ib-sr">Pull requests</span> : 'Pull requests'}
+          {phone ? <span className="ib-sr">Reviews</span> : 'Reviews'}
         </button>
         <span className="ib-vsep" />
         {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
