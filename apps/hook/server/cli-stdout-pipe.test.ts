@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_TITLE_MAX } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { FIXTURE_V1_PR } from "@plannotator/shared/guide-format-fixtures";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 
@@ -46,6 +47,8 @@ with open(sys.argv[1], "wb") as out:
 sys.exit(proc.wait())
 `;
 const PYTHON = Bun.which("python3");
+
+const agents = stubbedAgentClis();
 
 // Sh runs the pipeline: Windows has no such pipe to test here.
 describe.skipIf(process.platform === "win32")("CLI output through a pipe", () => {
@@ -97,6 +100,7 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
     writeFileSync(inRoot("big.json"), JSON.stringify({ ...FIXTURE_V1_PR, review: { ...FIXTURE_V1_PR.review, rawPatch: patch } }));
     env = {
       ...process.env,
+      ...agents.env,
       PLANNOTATOR_DATA_DIR: root,
       PLANNOTATOR_BROWSER: NO_BROWSER,
       PLANNOTATOR_UPDATE_CHECK: "0",
