@@ -793,8 +793,13 @@ export async function startAnnotateServer(
     bundlePaths,
   });
 
-  // Detect repo info (cached for this session)
-  const repoInfo = await getRepoInfo();
+  // Repo identity follows the annotated source when it is on disk. Rootless
+  // sessions (URLs, agent messages, live apps) keep the launch directory.
+  const repoInfoCwd =
+    mode === "annotate-folder" && folderPath
+      ? folderPath
+      : bundleRoot ?? (draftFilePath ? dirname(draftFilePath) : undefined);
+  const repoInfo = await getRepoInfo(repoInfoCwd);
 
   // Decision promise
   let resolveDecision: (result: {

@@ -693,8 +693,13 @@ export async function startAnnotateServer(options: {
 		return legacyDurable && (archived || !hasContent);
 	};
 
-	// Detect repo info (cached for this session)
-	const repoInfo = getRepoInfo();
+	// Repo identity follows the annotated source when it is on disk. Rootless
+	// sessions (URLs, agent messages, live apps) keep the launch directory.
+	const repoInfoCwd =
+		options.mode === "annotate-folder" && options.folderPath
+			? options.folderPath
+			: bundleRoot ?? (draftFilePath ? dirname(draftFilePath) : undefined);
+	const repoInfo = getRepoInfo(repoInfoCwd);
 
 	const externalAnnotations = createExternalAnnotationHandler("plan");
 	// Set once bound: "Ask this session" answers only a loopback Host with this port.
