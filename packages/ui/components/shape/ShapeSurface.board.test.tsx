@@ -15,6 +15,7 @@ import type { ShapeHost, ShapeLoaded } from './types';
 const hasDom = typeof document !== 'undefined';
 const { ShapeSurface } = (hasDom ? await import('./ShapeSurface') : {}) as typeof import('./ShapeSurface');
 const { RefPeek, shapeRefPicture } = (hasDom ? await import('./refs') : {}) as typeof import('./refs');
+const { CodeSpanContext } = (hasDom ? await import('../LocalLinkContext') : {}) as typeof import('../LocalLinkContext');
 
 const ID = 'shp_board_test';
 const PICTURE = { html: '<p data-mark="whistle">One whistle</p><svg><g data-mark="svg-part"><text>Kettle</text><text>boils</text></g></svg><span data-ref="1"></span>' };
@@ -327,5 +328,73 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     await wait();
     expect(!!document.querySelector('.shp-peek')).toBe(false);
     expect(!!document.querySelector('.shp-surface')).toBe(true);
+  });
+});
+
+describe.if(hasDom)('a host\'s control beside a file (fileAction)', () => {
+  test('an open menu keeps its Esc: the number stays open, and the board does not take the key', async () => {
+    await mount({ picture: PICTURE });
+    const num = inDrawing('[data-ref="1"]')!;
+    await act(async () => { num.dispatchEvent(Object.assign(new MouseEvent('pointerover', { bubbles: true, composed: true }), { pointerType: 'mouse' })); });
+    for (let i = 0; i < 40 && !document.querySelector('.shp-peek'); i++) await wait();
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    document.body.appendChild(menu);
+    try {
+      const esc = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      await act(async () => { window.dispatchEvent(esc); });
+      expect(esc.defaultPrevented).toBe(false);
+      await wait();
+      expect(!!document.querySelector('.shp-peek')).toBe(true);
+    } finally {
+      menu.remove();
+    }
+  });
+
+  test('a code span is the host\'s control while reading, and only words while annotating', async () => {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const wrap = (text: string, code: React.ReactNode) => <span data-host-span={text}>{code}</span>;
+    act(() => root!.render(<CodeSpanContext.Provider value={wrap}><ShapeSurface host={host({ know: 'The rows go through `src/a.ts`.' })} id={ID} readFirst /></CodeSpanContext.Provider>));
+    for (let i = 0; i < 50 && !document.querySelector('.shp-dock'); i++) await wait();
+    await wait();
+    const spans = () => document.querySelectorAll('.shp-know [data-host-span="src/a.ts"]').length;
+    expect(spans()).toBe(1);
+    await click(dock('Annotate')!);
+    expect(spans()).toBe(0);
+    expect(document.querySelector('.shp-know code')?.textContent).toBe('src/a.ts');
+    await click(dock('Annotate')!);
+    expect(spans()).toBe(1);
+  });
+
+  const MIXED: ShapeRef[] = [
+    { n: 1, kind: 'file', title: 'The loop', target: 'src/a.ts', line: 7 },
+    { n: 2, kind: 'diff', title: 'The change', target: 'src/b.ts' },
+    { n: 3, kind: 'image', title: 'A picture', target: 'files/a.png' },
+    { n: 4, kind: 'link', title: 'A link', target: 'https://example.com/' },
+  ];
+
+  async function mountRefs(withAction: ((id: string, file: { path: string; line?: number }) => React.ReactNode) | undefined) {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const h = { ...host({ picture: PICTURE }, MIXED), ...(withAction ? { fileAction: withAction } : {}) };
+    act(() => root!.render(<ShapeSurface host={h} id={ID} initialPanel="refs" />));
+    for (let i = 0; i < 50 && !document.querySelector('.shp-ref-list'); i++) await wait();
+    return [...document.querySelectorAll('.shp-ref-list li')];
+  }
+
+  test('the References list draws it for a file and a diff, with the board, the path and the line; never for anything else', async () => {
+    const seen: unknown[] = [];
+    const rows = await mountRefs((id, file) => (seen.push([id, file]), <i data-host-action={file.path} />));
+    expect(rows.map((row) => row.querySelector('[data-host-action]')?.getAttribute('data-host-action') ?? null)).toEqual(['src/a.ts', 'src/b.ts', null, null]);
+    expect(seen).toContainEqual([ID, { path: 'src/a.ts', line: 7 }]);
+  });
+
+  test('a host without one gets the list as it was', async () => {
+    const rows = await mountRefs(undefined);
+    expect(rows).toHaveLength(4);
+    expect(document.querySelector('[data-host-action]')).toBeNull();
   });
 });

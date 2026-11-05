@@ -48,6 +48,7 @@ import {
   shapeViewNow,
   type ShapeBoard,
   type ShapeNote,
+  type ShapeProject,
   type ShapeRecord,
   type ShapeSession,
   type ShapeState,
@@ -65,7 +66,7 @@ const MESSAGE_ID_RE = /^msg_[0-9A-HJKMNP-TV-Z]{26}$/;
 export interface ShapeSummary {
   id: string;
   title: string;
-  project: { name: string; root: string };
+  project: ShapeProject;
   thread: string | null;
   state: ShapeState;
   updated: string;
@@ -92,7 +93,7 @@ export interface ShapeUpdateInput {
   thread?: string | null;
   /** The last thread message this version took in. */
   through?: string | null;
-  project: { name: string; root: string };
+  project: ShapeProject;
   session?: ShapeSession | null;
   /** The folder the board file is in: image references by relative path are read from here. */
   sourceDir?: string | null;
@@ -261,6 +262,25 @@ function withLock<T>(dir: string, fn: () => T): T {
 
 export function shapesDirOf(dataDir: string): string {
   return join(dataDir, "shapes");
+}
+
+export type { ShapeProject };
+
+/** A linked worktree's `.git` is a file saying `gitdir: <path>`, and that path exists; a main checkout's is a folder. */
+export function isLinkedWorktree(folder: string): boolean {
+  try {
+    const dotGit = join(folder, ".git");
+    if (!statSync(dotGit).isFile()) return false;
+    const gitdir = /^gitdir: (.+)$/.exec(readFileSync(dotGit, "utf8").trim())?.[1];
+    return !!gitdir && existsSync(resolve(folder, gitdir));
+  } catch {
+    return false;
+  }
+}
+
+/** The checkout a board's code lives in: the linked worktree of its latest write while that is still one, else the project's root. */
+export function shapeCodeRoot(project: ShapeProject): string {
+  return project.worktree && isLinkedWorktree(project.worktree) ? project.worktree : project.root;
 }
 
 export function createShapeStore(options: { dataDir: string; now?: () => number }): ShapeStore {
@@ -504,7 +524,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         parts: shapeParts(kept.board),
       };
       appendLine(join(folder, "versions.jsonl"), version);
-      const next: ShapeRecord = { ...record, title: kept.board.title, updated: at, latest: n, drawing: null };
+      // The board's checkout follows its latest write, within its project.
+      const project = input.project.root === record.project.root ? { ...input.project, name: record.project.name } : record.project;
+      const next: ShapeRecord = { ...record, project, title: kept.board.title, updated: at, latest: n, drawing: null };
       writeJsonAtomic(join(folder, "shape.json"), next);
       return { ok: true, id: record.id, v: n, created: false, record: next };
     });
