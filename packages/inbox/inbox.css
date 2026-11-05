@@ -8403,6 +8403,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview .ib-vhead .ib-prr-note { flex: none; max-width: 160px; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ib-prreview .ib-rrail { padding: 0; display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
 .ib-prp-title { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 600; }
+.ib-prp-of { flex: none; white-space: nowrap; }
 .ib-prp-num { flex: none; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-prp-row { display: flex; align-items: center; gap: 7px; width: 100%; min-width: 0; min-height: 28px; padding: 0 8px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); color: var(--foreground); text-align: left; }
 .pn-inbox .ib-prp-row:not(:disabled):hover { background: color-mix(in oklab, var(--foreground) 6%, transparent); }
@@ -8495,7 +8496,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prreview .ib-prp-all { margin-bottom: 2px; }
 .ib-prp-all .ib-prp-rowtitle { font-weight: 450; }
 /* The tree: one column. */
-.ib-prp-files { flex: 1 1 auto; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
+/* From nothing, not from the tree's height: a big tree otherwise squeezes the layers above it to a row, hiding the one you are on. */
+.ib-prp-files { flex: 1 1 0; min-height: 0; overflow-y: auto; padding: 12px 8px 12px; scrollbar-width: thin; }
 .ib-prp-fileshead { display: flex; align-items: center; padding: 0 6px 4px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-prp-list { list-style: none; margin: 0; padding: 0; }
 .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { display: flex; align-items: center; gap: 5px; width: 100%; min-height: 25px; padding-right: 6px; border-radius: 6px; font-size: var(--ib-fs-12-5, 12.5px); text-align: left; color: var(--foreground); }

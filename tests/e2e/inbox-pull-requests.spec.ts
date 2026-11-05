@@ -1737,6 +1737,31 @@ test('each layer shows its own description, through the forge read: Next layer c
   }
 });
 
+test("the rail: a stack's layers stay in view over a tree of many files; on a phone the layer's place stays on one line", async ({ browser }) => {
+  const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
+  const patch = Array.from({ length: 80 }, (_, i) => file(`src/area-${i % 9}/file-${i}.ts`)).join('');
+  await setCodeReview(true);
+  for (const width of [1440, 390]) {
+    const { context, page } = await stubbedReview(browser, width, patch, {}, 'layer', STACK_ID);
+    try {
+      const review = page.locator('[data-pull-review]');
+      if (width === 390) {
+        const of = review.locator('.ib-prp-of');
+        await expect(of).toBeVisible();
+        // A real stack's title fills the row.
+        await review.locator('.ib-prp-this .ib-prp-title').evaluate((title) => { title.textContent = "Flat PR view: the review app's layering of background colours"; });
+        expect(await of.evaluate((el) => el.getClientRects().length === 1 && el.getBoundingClientRect().height < 24)).toBe(true);
+        continue;
+      }
+      const layers = review.locator('.ib-prp-layers');
+      await expect(layers.locator('[data-pull-layer-row][aria-current="step"]')).toBeVisible();
+      expect(await layers.evaluate((el) => el.scrollHeight <= el.clientHeight + 1)).toBe(true);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
 test('the rail: a folder that does not fit gives way before the file name loses a letter', async ({ browser }) => {
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
   const fits = 'guides-and-shared-ui.md';
