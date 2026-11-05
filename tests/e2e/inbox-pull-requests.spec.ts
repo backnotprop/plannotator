@@ -1416,12 +1416,21 @@ test("A guided review of a PR's own diff posts its comment inline, and what post
   await page.getByPlaceholder('Leave feedback...').fill(words);
   await page.getByRole('button', { name: 'Add Comment' }).click();
 
+  await page.waitForTimeout(800);
+  await shot(page, 'post-inline-commented');
   await page.locator('[data-review-destination-choice="forge"]').click();
+  await shot(page, 'post-inline-ending');
   const before = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).length;
   await page.locator('[data-review-posts] [data-decision-primary]').click();
   const dialog = page.getByRole('dialog');
+  await shot(page, 'post-inline-dialog');
   await dialog.getByRole('button', { name: 'Post Comments', exact: true }).click();
   await expect(page.locator('[data-review-posted], [data-pull-review-posted]').first()).toContainText('on GitHub');
+  await shot(page, 'post-inline-posted');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'post-inline-posted-390');
+  await page.setViewportSize({ width: 1440, height: 900 });
   const sent = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as { body: string; comments?: unknown[] });
   expect(sent.length).toBe(before + 1);
   expect(sent.at(-1)!.comments).toEqual([expect.objectContaining({ path: 'src/i18n/fallback.ts', line: 1, side: 'RIGHT', body: words })]);
