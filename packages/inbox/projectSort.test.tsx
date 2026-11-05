@@ -91,20 +91,20 @@ const names = () => [...host!.querySelectorAll('.ib-projs .ib-name')].map((el) =
 const toggle = () => host!.querySelector<HTMLButtonElement>('[data-projects-sort]');
 const press = () => act(() => toggle()!.click());
 
-test("with no choice the list keeps the server's order, and nothing is written", () => {
+test.skipIf(!hasDom)("with no choice the list keeps the server's order, and nothing is written", () => {
   draw();
   expect(names()).toEqual(['zephyr', 'Atlas', 'billing-svc']);
   expect(toggle()?.dataset.projectsSort).toBe('added');
   expect(stored.has(PROJECTS_SORT_COOKIE)).toBe(false);
 });
 
-test("a cookie it does not know is the server's order", () => {
+test.skipIf(!hasDom)("a cookie it does not know is the server's order", () => {
   storage.setItem(PROJECTS_SORT_COOKIE, 'sideways');
   draw();
   expect(names()).toEqual(['zephyr', 'Atlas', 'billing-svc']);
 });
 
-test('the first press goes A to Z, then one button goes between most recent and A to Z, never back to the first order', () => {
+test.skipIf(!hasDom)('the first press goes A to Z, then one button goes between most recent and A to Z, never back to the first order', () => {
   draw();
   const first = toggle()!.getAttribute('aria-label');
   expect(first).toBeTruthy();
@@ -128,14 +128,14 @@ test('the first press goes A to Z, then one button goes between most recent and 
   expect(toggle()!.getAttribute('aria-label')).toBe(az);
 });
 
-test('most recent also survives a remount', () => {
+test.skipIf(!hasDom)('most recent also survives a remount', () => {
   storage.setItem(PROJECTS_SORT_COOKIE, 'recent');
   draw();
   expect(names()).toEqual(['billing-svc', 'Atlas', 'zephyr']);
   expect(toggle()?.dataset.projectsSort).toBe('recent');
 });
 
-test('the toggle names and draws the order on screen, then what a press does', () => {
+test.skipIf(!hasDom)('the toggle names and draws the order on screen, then what a press does', () => {
   const sees = () => [toggle()!.getAttribute('aria-label'), toggle()!.querySelector('svg')!.getAttribute('data-icon')];
   draw();
   expect(sees()).toEqual(['Sorted by when added. Sort A to Z', 'sortList']);
@@ -145,7 +145,7 @@ test('the toggle names and draws the order on screen, then what a press does', (
   expect(sees()).toEqual(['Sorted by most recent. Sort A to Z', 'sortRecent']);
 });
 
-test('the toggle going while it holds focus hands focus to the Projects header, not the page', () => {
+test.skipIf(!hasDom)('the toggle going while it holds focus hands focus to the Projects header, not the page', () => {
   draw();
   act(() => toggle()!.focus());
   draw({ projects: [PROJECTS[0]!] as never });
@@ -153,7 +153,7 @@ test('the toggle going while it holds focus hands focus to the Projects header, 
   expect(document.activeElement).toBe(host!.querySelector('[data-sidebar-section="projects"]'));
 });
 
-test('the toggle going without focus leaves focus where it is', () => {
+test.skipIf(!hasDom)('the toggle going without focus leaves focus where it is', () => {
   draw();
   const inbox = host!.querySelector<HTMLElement>('.ib-nav-inbox')!;
   act(() => inbox.focus());
@@ -161,7 +161,7 @@ test('the toggle going without focus leaves focus where it is', () => {
   expect(document.activeElement).toBe(inbox);
 });
 
-test('the choice survives a remount, and a press says the new order and never closes the section', () => {
+test.skipIf(!hasDom)('the choice survives a remount, and a press says the new order and never closes the section', () => {
   const said: string[] = [];
   draw({ announce: (text) => said.push(text) });
   press();
@@ -173,26 +173,26 @@ test('the choice survives a remount, and a press says the new order and never cl
   expect(toggle()?.dataset.projectsSort).toBe('name');
 });
 
-test('A to Z goes by the name on screen', () => {
+test.skipIf(!hasDom)('A to Z goes by the name on screen', () => {
   storage.setItem(PROJECTS_SORT_COOKIE, 'name');
   // The window's name wins over the server's: "zephyr" reads "aardvark" here.
   draw({ projectNames: new Map([['prj_z', 'aardvark']]) });
   expect(names()).toEqual(['aardvark', 'Atlas', 'billing-svc']);
 });
 
-test('A to Z ignores case and accents and counts numbers', () => {
+test.skipIf(!hasDom)('A to Z ignores case and accents and counts numbers', () => {
   const sorted = (list: string[]) => sortProjects(list.map((name) => ({ id: name, name })), 'name').map((p) => p.name);
   expect(sorted(['zebra', 'Apple', 'banana'])).toEqual(['Apple', 'banana', 'zebra']);
   expect(sorted(['Zeta', 'Émile', 'eagle', 'Fox'])).toEqual(['eagle', 'Émile', 'Fox', 'Zeta']);
   expect(sorted(['app10', 'app2', 'App1'])).toEqual(['App1', 'app2', 'app10']);
 });
 
-test('names that differ only by case or accent keep the order they came in', () => {
+test.skipIf(!hasDom)('names that differ only by case or accent keep the order they came in', () => {
   const list = [{ id: 'one', name: 'résumé' }, { id: 'two', name: 'Resume' }];
   expect(sortProjects(list, 'name').map((p) => p.id)).toEqual(['one', 'two']);
 });
 
-test('most recent puts a project with no activity last, and a tie keeps the order they came in', () => {
+test.skipIf(!hasDom)('most recent puts a project with no activity last, and a tie keeps the order they came in', () => {
   const list = [{ id: 'quiet', name: 'quiet' }, { id: 'tieA', name: 'tieA' }, { id: 'tieB', name: 'tieB' }, { id: 'new', name: 'new' }];
   const activity = new Map([
     ['tieA', '2026-11-01T00:00:00.000Z'],
@@ -202,7 +202,7 @@ test('most recent puts a project with no activity last, and a tie keeps the orde
   expect(sortProjects(list, 'recent', activity).map((p) => p.id)).toEqual(['new', 'tieA', 'tieB', 'quiet']);
 });
 
-test("a project's activity is the newest row in any section of the list", () => {
+test.skipIf(!hasDom)("a project's activity is the newest row in any section of the list", () => {
   const row = (project: string, last_at: string) => ({ project: { id: project, name: project }, last_at });
   const sections = [
     { id: 'new', label: 'New', threads: [row('a', '2026-11-01T00:00:00.000Z'), row('b', '2026-10-01T00:00:00.000Z')] },
@@ -211,7 +211,7 @@ test("a project's activity is the newest row in any section of the list", () => 
   expect(Object.fromEntries(projectActivity(sections))).toEqual({ a: '2026-11-05T00:00:00.000Z', b: '2026-10-01T00:00:00.000Z' });
 });
 
-test('no toggle with one project or none', () => {
+test.skipIf(!hasDom)('no toggle with one project or none', () => {
   draw({ projects: [PROJECTS[0]!] as never });
   expect(names()).toEqual(['zephyr']);
   expect(toggle()).toBeNull();
@@ -219,14 +219,14 @@ test('no toggle with one project or none', () => {
   expect(toggle()).toBeNull();
 });
 
-test('no toggle when only one project is on screen, though more exist', () => {
+test.skipIf(!hasDom)('no toggle when only one project is on screen, though more exist', () => {
   // The rest have nothing in the list, so they left the sidebar.
   draw({ projects: [PROJECTS[0]!, folder('prj_g', 'gone', 0), folder('prj_h', 'hidden', 0)] as never });
   expect(names()).toEqual(['zephyr']);
   expect(toggle()).toBeNull();
 });
 
-test('a closed Projects has no toggle', () => {
+test.skipIf(!hasDom)('a closed Projects has no toggle', () => {
   draw();
   act(() => host!.querySelector<HTMLButtonElement>('[data-sidebar-section="projects"]')!.click());
   expect(toggle()).toBeNull();

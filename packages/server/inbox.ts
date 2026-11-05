@@ -3878,18 +3878,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (text.length > PULL_REVIEW_BODY_MAX) throw new InboxError("validation_error", `body: at most ${PULL_REVIEW_BODY_MAX} characters.`, { field: "body" });
         const fileComments = pullReviewComments(body.fileComments);
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
-        const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
+        // All of them go or none: the page forgets what it sent once the forge has it.
+        const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
+        const fileLevelSent = Array.isArray(body.fileLevelComments) ? body.fileLevelComments.length : 0;
+        if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
-        // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
-        // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
-        // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
+        // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
+        // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
+        // what moved outdated; one no longer on the PR (a force-push) is refused for the page to put its words in the
+        // review's body. GitLab's docs do not say it takes one, so there a commit the Inbox no longer names is refused.
         const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
-        if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
-        const headSha = typeof body.head_sha === "string" && heads.includes(body.head_sha) ? body.head_sha : null;
-        if (!headSha) return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        const named = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
+        const known = !!named && heads.includes(named);
+        if (!known && (!named || pull.platform !== "github")) {
+          if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+          return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        }
+        const commitGone = () => json({ error: "The commit you read is no longer on this pull request.", code: "pull_commit_gone" }, 409);
+        if (!known && (await pulls.hasCommit(key, named!)) === false) return commitGone();
+        const headSha = named!;
         const ref: PRRef | null =
           pull.platform === "github"
             ? (() => {
@@ -3912,6 +3922,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ serverSession, ok: true, prUrl: pull.url, submission });
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : "The review was not posted.";
+          // A refusal of the commit or its lines, or GitHub's 422 giving no reason: nothing went, and the words have a way.
+          // Any other reason (your own PR, a pending review, too quickly) is the person's to read.
+          if (/no commit found|commit_id|not part of the pull request|part of the (?:diff|same hunk)|\bpath could not be resolved|\(HTTP 422\)\s*$|HTTP 422: (?:Unprocessable Entity|Validation Failed)\s*$/i.test(message)) {
+            // At a head the list still names, only if a force-push really took it.
+            if (!known || (await pulls.hasCommit(key, headSha)) === false) return commitGone();
+          }
           return json({ error: message, code: "pull_review_failed" }, 502);
         }
       }
