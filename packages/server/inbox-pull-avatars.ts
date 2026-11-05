@@ -70,6 +70,18 @@ export interface PullAvatars {
 }
 
 const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
+/** The largest a face is drawn, at twice the pixels. */
+const PICTURE_PX = 96;
+
+/**
+ * GitHub's avatar URLs answer the whole upload unless they name a size, and uploads run past the size cap (mischnic's
+ * is 527 KB), which left a real face as its initial. github.com's picture host and an Enterprise server's `/avatars/`
+ * take `s=`; anything else, or a URL that already names a size, is left as the forge gave it.
+ */
+function sizeForAFace(url: URL): void {
+  const github = url.hostname === "avatars.githubusercontent.com" || url.hostname.startsWith("avatars.") || url.pathname.startsWith("/avatars/");
+  if (github && !url.searchParams.has("s") && !url.searchParams.has("size")) url.searchParams.set("s", String(PICTURE_PX));
+}
 
 const keyOf = (host: string, login: string) => `${host.toLowerCase()}\n${login.toLowerCase()}`;
 
@@ -202,6 +214,7 @@ export function createPullAvatars(options: PullAvatarOptions): PullAvatars {
       return { ok: false, miss: "not_https" };
     }
     if (!fetchable(url)) return { ok: false, miss: "not_https" };
+    sizeForAFace(url);
     // The forge's own origin: its name (the list's host, which carries no port) on the port of the avatar URL the forge
     // itself returned when that URL is on its name (a self-managed forge on :8443 serves its avatars there), else 443.
     const named = forgeOrigin(host);

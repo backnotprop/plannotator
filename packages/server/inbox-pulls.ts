@@ -1067,10 +1067,17 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
     async details(key) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
-      const hit = detailReads.get(key);
-      if (hit && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) return (await hit.read).answer;
       const forge = pull.platform === "github" ? "GitHub" : "GitLab";
       const failed = () => new InboxPullsError("pull_details_failed", `${forge} did not answer. Try again in a minute.`);
+      const hit = detailReads.get(key);
+      if (hit && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) {
+        try {
+          return (await hit.read).answer;
+        } catch {
+          // Another asker's read, still in flight when it failed: the same answer, not an internal error.
+          throw failed();
+        }
+      }
       if (now() < (holdUntil.get(pull.host) ?? 0)) throw failed();
       const parts = splitPath(pull.repo);
       if (!parts) throw failed();

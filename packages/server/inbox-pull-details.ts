@@ -62,7 +62,8 @@ const QUIET_NOTE: Readonly<Record<string, string>> = { SKIPPED: "Skipped", NEUTR
 
 function checkOf(check: PRCheck): InboxPullCheck | null {
   if (!check.name) return null;
-  const done = check.status === "COMPLETED" || check.conclusion !== null;
+  // A queued or running check answers an empty conclusion, not null.
+  const done = check.status === "COMPLETED" || !!check.conclusion;
   const conclusion = check.conclusion?.toUpperCase() ?? "";
   const state: InboxPullCheckState = !done ? "pending" : FAILED.has(conclusion) ? "fail" : "pass";
   const note = QUIET_NOTE[conclusion];

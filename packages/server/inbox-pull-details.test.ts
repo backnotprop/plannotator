@@ -59,6 +59,8 @@ describe("checks", () => {
 
   test("running until done; a failure in any of its words; skipped says so", () => {
     expect(states([check("a", "IN_PROGRESS", null), check("b", "COMPLETED", "SUCCESS")]).map((c) => c.state)).toEqual(["pending", "pass"]);
+    // As gh answers them: a check not done has an empty conclusion, not null.
+    expect(states([check("a", "QUEUED", ""), check("b", "IN_PROGRESS", "")]).map((c) => c.state)).toEqual(["pending", "pending"]);
     for (const word of ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]) {
       expect([word, states([check("a", "COMPLETED", word)])[0]!.state]).toEqual([word, "fail"]);
     }
@@ -189,6 +191,15 @@ describe("reading them through the list", () => {
     const refused = await pulls.details("github.com/elsewhere/thing#9").catch((cause) => cause);
     expect(refused).toBeInstanceOf(InboxPullsError);
     expect(refused.code).toBe("pull_unknown");
+  });
+
+  test("two asking at once when the forge fails: both are told it did not answer, neither an internal error", async () => {
+    const f = forge();
+    f.state.view.exitCode = 1;
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list(repos);
+    const answers = await Promise.allSettled([pulls.details(KEY), pulls.details(KEY)]);
+    expect(answers.map((a) => (a.status === "rejected" ? (a.reason as { code?: string }).code : "ok"))).toEqual(["pull_details_failed", "pull_details_failed"]);
   });
 
   test("the people it named stay allowed across a new list, and go with the PR", async () => {
