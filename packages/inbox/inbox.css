@@ -4058,10 +4058,11 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-cp-file .ib-att-text { flex: 1; min-width: 0; }
 .ib-cp-file .ib-nm { font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
 .ib-cp-file .ib-kd { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* The size never gets cut (the owner: "the numbers still seem cut off"): a long kind gives way before it. */
-.ib-cp-file .ib-cp-kd { display: flex; min-width: 0; }
-.ib-cp-kd-w { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
-.ib-cp-kd-n { flex: none; }
+/* The size never gets cut (the owner: "the numbers still seem cut off"), on a compose tile or a thread's: the words give way, then the count, and the separator stays with the size. */
+.ib-kd-split { display: flex; min-width: 0; }
+.ib-kd-w { flex: 0 1000 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.ib-kd-n { flex: none; white-space: pre; }
+.ib-kd-c { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
 .ib-cp-file.ib-refused { border-color: color-mix(in oklch, var(--destructive) 55%, var(--border)); background: color-mix(in oklch, var(--destructive) 5%, var(--card)); }
 .ib-cp-ferr { font-size: var(--ib-fs-12, 12px); color: var(--destructive); line-height: 1.4; }
 .ib-cp-prog { display: block; height: 3px; margin-top: 5px; border-radius: 2px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); overflow: hidden; }
@@ -8056,8 +8057,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-reuse-gallery:not(.ib-reuse-on), .ib-reuse-spot:not(:has(.ib-reuse-on)), .pn-inbox .ib-att-w:not(:has(> a.ib-dl)) > .ib-reuse-tile:not(.ib-reuse-on), .pn-inbox .ib-reuse-card:not(.ib-reuse-on) { display: none; }
   .pn-inbox .ib-att-w:has(> a.ib-dl) > .ib-reuse-tile { opacity: 1; width: 44px; height: 44px; right: 2px; }
   .pn-inbox .ib-att-w-more:has(> a.ib-dl) > .ib-reuse-tile { right: 36px; }
-  .ib-att-w-reuse:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 36px; }
-  .ib-att-w-reuse.ib-att-w-more:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 70px; }
+  .ib-att-w-reuse:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 34px; padding-left: 0; }
+  .ib-att-w-reuse.ib-att-w-more:has(> a.ib-dl) > .ib-att-t .ib-open { margin-right: 68px; }
 }
 /* A tile pointed at again. */
 .ib-cp-file.ib-cp-flash { animation: ib-cp-flash 900ms ease-out; }

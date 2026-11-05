@@ -495,9 +495,6 @@ test("a phone, a thread with only a PDF: its tile holds a 44 px button clear of 
     expect(box.x + box.width).toBeLessThanOrEqual(tileBox.x + tileBox.width);
     const word = (await tile(phone, SHEET).locator('.ib-open').boundingBox())!;
     expect(word.x + word.width).toBeLessThanOrEqual(box.x);
-    const detail = tile(phone, SHEET).locator('.ib-kd');
-    expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-
     await add.tap();
     await expect(phone.locator(`[data-reply-files] [data-compose-file="done"][data-compose-file-name="${SHEET}"]`)).toBeVisible();
     const added = phone.locator(`section.ib-pane .ib-attachments:not(.ib-hatts-tiles) [data-reuse-surface="tile"][aria-label^="${SHEET} is in your reply"]`);
@@ -520,6 +517,50 @@ test("a phone, a thread with only a PDF: its tile holds a 44 px button clear of 
     await context.close();
   }
 });
+
+for (const [width, height, more] of [[320, 700, false], [1366, 900, true]] as const) {
+  test(`a touch screen at ${width}: a download tile's size is whole beside the 44 px button, a long one, a very long kind, a name that was tight`, async ({ browser, browserName }) => {
+    test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
+    const big = Buffer.concat([Buffer.from('PK\x03\x04'), Buffer.alloc(Math.round(12.4 * 1024 * 1024) - 4, 0)]);
+    const sheet = 'budget-2026-planning.xlsx';
+    const long = 'report.averyveryverylongextensionforafile';
+    const { thread_id } = await threadWithFiles({ body: 'The numbers.', attachments: [art(sheet, big), art(long, big), join(harbor, 'art', SHEET)] });
+    const context = await browser.newContext({ viewport: { width, height }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+    const touch = await context.newPage();
+    try {
+      await open(touch, thread_id);
+      for (const name of [sheet, long]) {
+        const item = tile(touch, name);
+        await item.scrollIntoViewIfNeeded();
+        const size = item.locator('.ib-kd-n');
+        await expect(size).toHaveText(', 12.4 MB');
+        // The number is drawn whole: nothing clips it, and it ends before the word Download.
+        const [line, number, word] = [(await item.locator('.ib-kd').boundingBox())!, (await size.boundingBox())!, (await item.locator('.ib-open').boundingBox())!];
+        expect(number.x + number.width).toBeLessThanOrEqual(line.x + line.width + 0.5);
+        expect(number.x + number.width).toBeLessThanOrEqual(word.x);
+        expect(await size.evaluate((el) => el.scrollWidth <= el.getBoundingClientRect().width + 0.5)).toBe(true);
+        const add = touch.locator(`section.ib-pane .ib-attachments:not(.ib-hatts-tiles) [data-reuse-surface="tile"][aria-label="Add ${name} to your reply"]`);
+        const box = (await add.boundingBox())!;
+        expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+        expect(word.x + word.width).toBeLessThanOrEqual(box.x);
+        expect(await add.locator('xpath=..').evaluate((el) => el.classList.contains('ib-att-w-more'))).toBe(more);
+      }
+      // A kind no tile holds: its words give way and show that they did, and the comma stays with the number.
+      const words = tile(touch, long).locator('.ib-kd-w');
+      expect(await words.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      expect((await tile(touch, long).locator('.ib-kd').textContent())).toBe(`${long.split('.')[1]!.toUpperCase()} file, 12.4 MB`);
+      // The tight names: the long one keeps a start before its end, and at 320 the short one is whole, extension and all.
+      const start = tile(touch, sheet).locator('.ib-fname-h');
+      expect(await start.evaluate((el) => el.getBoundingClientRect().width)).toBeGreaterThanOrEqual(width === 320 ? 20 : 14);
+      if (width === 320) {
+        const short = tile(touch, SHEET).locator('.ib-fname-h');
+        expect(await short.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      }
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 test("a phone reaches a file that downloads through the viewer's steps: the button is on its card's toolbar", async ({ browser, browserName }) => {
   test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
@@ -563,21 +604,21 @@ for (const width of [1440, 390]) {
       ]);
       const done = dialog.locator('[data-compose-file="done"]');
       await expect(done).toHaveCount(3, { timeout: 30_000 });
-      const line = (name: string) => dialog.locator(`[data-compose-file-name="${name}"] .ib-cp-kd`);
+      const line = (name: string) => dialog.locator(`[data-compose-file-name="${name}"] .ib-kd-split`);
       await expect(line('hero-direction-long-name.jpg')).toHaveText('JPEG image, 329.0 KB');
       await expect(line('hero-direction-large.jpg')).toHaveText('JPEG image, 12.4 MB');
       // Neither the kind nor the size is cut, and each tile holds a line of this length with room to spare.
       for (const name of ['hero-direction-long-name.jpg', 'hero-direction-large.jpg']) {
-        const words = line(name).locator('.ib-cp-kd-w');
+        const words = line(name).locator('.ib-kd-w');
         expect(await words.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
         expect(await line(name).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
       }
       // A kind no tile can hold: the words give way, and the number stays whole and clear of the ×.
       const long = 'report.averyveryverylongextensionforafile';
-      const words = line(long).locator('.ib-cp-kd-w');
+      const words = line(long).locator('.ib-kd-w');
       expect(await words.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-      const size = line(long).locator('.ib-cp-kd-n');
-      await expect(size).toHaveText('12.4 MB');
+      const size = line(long).locator('.ib-kd-n');
+      await expect(size).toHaveText(', 12.4 MB');
       const sizeBox = (await size.boundingBox())!;
       const x = (await dialog.locator(`[data-compose-file-name="${long}"] .ib-cp-fx`).boundingBox())!;
       expect(sizeBox.x + sizeBox.width).toBeLessThanOrEqual(x.x);
