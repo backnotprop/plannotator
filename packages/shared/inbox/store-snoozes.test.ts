@@ -9,6 +9,7 @@
  * checks every row an agent or the list reads never differs.
  */
 import { afterEach, describe, expect, test } from "bun:test";
+import { inboxRowAsOf } from "@plannotator/core/inbox-snooze";
 import fc from "fast-check";
 import { mkdtempSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -132,7 +133,7 @@ describe("snoozes in the store", () => {
     expect(store.snoozedThreads().has(root.thread_id)).toBe(true);
   });
 
-  test("an agent's archive and then its time: reopened or written in, the thread comes back with no return; while it runs, the snooze stays", () => {
+  test("an agent's archive and then its time: reopened, the thread comes back with no return; while it runs, the snooze stays", () => {
     const t = clock();
     const { store, project } = open(t.now);
     const make = (name: string) => {
@@ -142,7 +143,6 @@ describe("snoozes in the store", () => {
       return root;
     };
     const reopened = make("reopened");
-    const written = make("written");
     const running = make("running");
     store.resolveThread(running.id, false, "person");
     expect(store.snoozedThreads().has(running.thread_id)).toBe(true);
@@ -152,14 +152,49 @@ describe("snoozes in the store", () => {
     expect(entries()).toContain(reopened.thread_id);
     store.resolveThread(reopened.id, false, "person");
     expect(entries()).not.toContain(reopened.thread_id);
-    store.sendMessage({ project_id: project.id, author: agent("ses_written"), body: "One more thing", reply_to: written.id });
-    expect(entries()).not.toContain(written.thread_id);
-    // Not archived, past its time: the real return, and nothing an agent writes takes it away.
-    const plain = store.sendMessage({ project_id: project.id, author: agent("ses_plain"), body: "News", thread: "plain" }).message;
-    store.setSnooze(plain.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
+  });
+
+  test("a return survives an agent's write, on a thread that was archived and came back too", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const write = (name: string, reply_to?: string) => store.sendMessage({ project_id: project.id, author: agent(`ses_${name}`), body: "News", ...(reply_to ? { reply_to } : { thread: name }) }).message;
+    const inAnHour = () => new Date(t.now().getTime() + HOUR).toISOString();
+    /** The row by the list's rule: what the window reads. */
+    const back = (threadId: string) => {
+      const entry = store.snoozes().find((s) => s.thread_id === threadId);
+      return inboxRowAsOf({ ...store.listRow(threadId)!, snoozed: entry ? { until: entry.until, at: entry.at } : null }, t.now()).snooze_back ?? null;
+    };
+
+    // Never archived.
+    const plain = write("plain");
+    const plainUntil = inAnHour();
+    store.setSnooze(plain.thread_id, plainUntil);
+
+    // The person archives; an agent writes, so the thread is back; the person snoozes it.
+    const personArchived = write("person");
+    store.resolveThread(personArchived.id, true, "person");
+    write("person", personArchived.id);
+    const personUntil = inAnHour();
+    store.setSnooze(personArchived.thread_id, personUntil);
+
+    // An agent archives a snoozed thread and writes in it while the snooze runs.
+    const agentArchived = write("agent");
+    const agentUntil = inAnHour();
+    store.setSnooze(agentArchived.thread_id, agentUntil);
+    store.resolveThread(agentArchived.id, true);
+    write("agent", agentArchived.id);
+
     t.go(2 * HOUR);
-    store.sendMessage({ project_id: project.id, author: agent("ses_plain"), body: "More", reply_to: plain.id });
-    expect(entries()).toContain(plain.thread_id);
+    const cases = [
+      ["plain", plain, plainUntil],
+      ["person", personArchived, personUntil],
+      ["agent", agentArchived, agentUntil],
+    ] as const;
+    for (const [name, root, until] of cases) {
+      expect(back(root.thread_id)).toBe(until);
+      write(name, root.id);
+      expect(back(root.thread_id)).toBe(until);
+    }
   });
 
   test("`at` (Undo's earlier snooze) is a real time, not after now, and stored normalized", () => {

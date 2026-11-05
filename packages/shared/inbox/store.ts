@@ -1311,7 +1311,7 @@ export class InboxStore {
 
   /**
    * Past its time, the entry goes: a look took the return, or an archived thread
-   * came back (reopened or written in) for that reason and not as a return, so
+   * was reopened, which brings it back for that reason and not as a return, so
    * no clock and no "Back from snooze". A snooze still running stays.
    */
   private endLapsedSnooze(threadId: string): void {
@@ -3752,7 +3752,6 @@ export class InboxStore {
       );
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
-    if (this.messages.get(message.thread_id)?.resolved_at) this.endLapsedSnooze(message.thread_id);
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
   }
 
