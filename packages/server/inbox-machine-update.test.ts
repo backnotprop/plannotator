@@ -34,7 +34,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function farMachine(over: { managed?: boolean; version?: string; sessions?: number; answer?: string | null } = {}) {
+function farMachine(over: { managed?: boolean; version?: string; sessions?: number; answer?: string | null; duringCheck?: () => void } = {}) {
   const home = join(root, "Users", "ramos");
   const dataDir = join(home, ".plannotator");
   mkdirSync(dataDir, { recursive: true });
@@ -46,6 +46,7 @@ function farMachine(over: { managed?: boolean; version?: string; sessions?: numb
   const answer = over.answer === undefined ? NEWEST : over.answer;
   const fetchRelease = async (): Promise<FetchReleaseResult> => {
     facts.asked++;
+    over.duringCheck?.();
     return answer ? { ok: true, release: { tag: `v${answer}`, body: "" } } : { ok: false, error: "offline" };
   };
   const updates = createInboxUpdates({
@@ -137,6 +138,18 @@ describe("the far machine, when a linked machine presses Update", () => {
     const outcomes = (await Promise.all([far.updates.machineStart(), far.updates.machineStart()])).map((answer) => answer.outcome).sort();
     expect(outcomes).toEqual(["joined", "launched"]);
     expect(far.facts.launches).toHaveLength(1);
+    far.swap(NEWEST);
+    far.finish(0);
+    await far.settled();
+    expect(far.facts.restarts).toBe(1);
+  });
+
+  test("a terminal's update that takes the lock while this press asks GitHub is joined, and its ending counts as this press's", async () => {
+    let lock = () => {};
+    const far = farMachine({ duringCheck: () => lock() });
+    lock = () => far.takeLock();
+    expect(await far.updates.machineStart()).toEqual({ outcome: "joined" });
+    expect(far.facts.launches).toEqual([]);
     far.swap(NEWEST);
     far.finish(0);
     await far.settled();
