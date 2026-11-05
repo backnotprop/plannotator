@@ -58,15 +58,22 @@ function reviewersOf(context: PRContext, author: string | null, avatars: Record<
 }
 
 const FAILED = new Set(["FAILURE", "TIMED_OUT", "CANCELLED", "CANCELED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]);
-const QUIET_NOTE: Readonly<Record<string, string>> = { SKIPPED: "Skipped", NEUTRAL: "Neutral" };
+/** A check that passed by not running, or was overtaken by a newer run: quiet, counted on the line. */
+const QUIET_NOTE: Readonly<Record<string, string>> = { SKIPPED: "Skipped", NEUTRAL: "Neutral", STALE: "Stale" };
+/** How a check failed, in the forge's own words. */
+const FAILED_NOTE: Readonly<Record<string, string>> = {
+  FAILURE: "Failed", FAILED: "Failed", TIMED_OUT: "Timed out", CANCELLED: "Cancelled", CANCELED: "Cancelled",
+  ACTION_REQUIRED: "Action required", STARTUP_FAILURE: "Startup failure", ERROR: "Error",
+};
 
 function checkOf(check: PRCheck): InboxPullCheck | null {
   if (!check.name) return null;
   // gh answers a queued or running check with an empty conclusion, not null.
   const conclusion = check.conclusion?.toUpperCase() ?? "";
-  const done = check.status === "COMPLETED" && !!conclusion && conclusion !== "STALE";
+  // A stale check was overtaken and will never finish: it counts as done, quietly, never as running forever.
+  const done = (check.status === "COMPLETED" && !!conclusion) || conclusion === "STALE";
   const state: InboxPullCheckState = !done ? "pending" : FAILED.has(conclusion) ? "fail" : "pass";
-  const note = QUIET_NOTE[conclusion];
+  const note = state === "fail" ? FAILED_NOTE[conclusion] : QUIET_NOTE[conclusion];
   let url: string | undefined;
   try {
     if (check.detailsUrl && new URL(check.detailsUrl).protocol === "https:") url = check.detailsUrl;

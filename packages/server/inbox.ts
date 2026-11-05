@@ -3779,7 +3779,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
             return json({ serverSession, ...answer });
           } catch (cause) {
-            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : 502);
+            if (cause instanceof InboxPullsError) {
+              const held = cause.code === "pull_details_held" && cause.retryAt ? { retry_at: cause.retryAt } : {};
+              return json({ error: cause.message, code: cause.code, ...held }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_details_held" ? 429 : 502);
+            }
             throw cause;
           }
         }

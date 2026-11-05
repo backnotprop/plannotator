@@ -664,6 +664,8 @@ export class InboxApiError extends Error {
     message: string,
     /** The request's field the refusal names (`files[1]`), when it names one. */
     readonly field: string | null = null,
+    /** When a held read may be asked again (ms since the epoch), when the answer says. */
+    readonly retryAt: number | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -678,6 +680,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.code === 'string' ? body.code : 'error',
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
+      typeof body.retry_at === 'number' ? body.retry_at : null,
     );
   }
   return body as T;

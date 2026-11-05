@@ -630,8 +630,10 @@ interface HostState {
 
 export class InboxPullsError extends Error {
   constructor(
-    readonly code: "pull_unknown" | "pull_details_failed" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
+    readonly code: "pull_unknown" | "pull_details_failed" | "pull_details_held" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
     message: string,
+    /** For `pull_details_held`: when the forge may be asked again (ms since the epoch). */
+    readonly retryAt?: number,
   ) {
     super(message);
   }
@@ -749,7 +751,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
   /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
-  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string> }>();
+  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean }>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -839,7 +841,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   };
 
   /** A list read (own or Others) is held: the forge asked to slow down, or GitHub's GraphQL budget is nearly spent. */
-  const listHeld = (host: string): boolean => now() < Math.max(holdUntil.get(host) ?? 0, budgetHold.get(host) ?? 0);
+  const heldUntil = (host: string): number => Math.max(holdUntil.get(host) ?? 0, budgetHold.get(host) ?? 0);
+  const listHeld = (host: string): boolean => now() < heldUntil(host);
 
   /** A failed list read: a rate-limit answer holds the host (diffs too); anything else is "unavailable". */
   const fail = (host: string, state: { error: InboxPullHost["error"] | null; failedAt: number }, cli: RefCli, result: RefCommandResult) => {
@@ -1077,7 +1080,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const forge = pull.platform === "github" ? "GitHub" : "GitLab";
       const failed = () => new InboxPullsError("pull_details_failed", `${forge} did not answer. Try again in a minute.`);
       const hit = detailReads.get(key);
-      if (hit && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) {
+      if (hit && !hit.partial && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) {
         try {
           return (await hit.read).answer;
         } catch {
@@ -1085,7 +1088,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           throw failed();
         }
       }
-      if (listHeld(pull.host)) throw new InboxPullsError("pull_details_failed", `${pull.host} asked to slow down. Try again in a minute.`);
+      // Held (a rate limit: a minute; GitHub's budget spent: until it fills, up to an hour): the window says until when.
+      if (listHeld(pull.host)) throw new InboxPullsError("pull_details_held", `${pull.host} asked to slow down.`, heldUntil(pull.host));
       const parts = splitPath(pull.repo);
       if (!parts) throw failed();
       const ref: PRRef = pull.platform === "github"
@@ -1098,17 +1102,19 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return result;
         },
       };
-      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string> } = {
+      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string>; partial?: boolean } = {
         at: now(),
         updated: pull.updated_at,
         read: fetchPRContextWithReviewers(runtime, ref).then((context) => pullDetailsOf(key, context, pull.author)),
+        // The faces already shown stay allowed while the next read is out.
+        ...(hit?.avatars ? { avatars: hit.avatars } : {}),
       };
       detailReads.set(key, entry);
       try {
         const read = await entry.read;
-        entry.avatars = read.avatars;
-        // Part of an answer is shown, not kept: the next opening asks again.
-        if (read.answer.threads_incomplete && detailReads.get(key) === entry) detailReads.delete(key);
+        entry.avatars = { ...entry.avatars, ...read.avatars };
+        // Part of an answer is shown, and asked again on the next opening; its faces stay allowed meanwhile.
+        if (read.answer.threads_incomplete) entry.partial = true;
         return read.answer;
       } catch {
         // A failure is not kept: the next opening asks again.

@@ -4,19 +4,23 @@
  * line each that opens in place. Everything comes from the forge through `GET /api/inbox/pulls/details` (the diff's
  * description first, as it is already read); pictures through the Inbox's own avatar route.
  */
-import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { InboxPull, InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
+import { InboxApiError, inboxApi } from '../api';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
 import { forgeBody } from './descriptionLinks';
 import { ForgeMarkdown, PullDescription } from './PullDescription';
 
-/** The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says so and can ask again. */
-export function usePullDetails(key: string | null, stamp: string = ''): { data: InboxPullDetailsAnswer | null; failed: boolean; retry: () => void } {
+/**
+ * The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says
+ * so and can ask again. `heldUntil`: the forge asked to slow down, and is not asked again before then.
+ */
+export function usePullDetails(key: string | null, stamp: string = ''): { data: InboxPullDetailsAnswer | null; failed: boolean; heldUntil: number | null; retry: () => void } {
   const [data, setData] = useState<InboxPullDetailsAnswer | null>(null);
   const [failed, setFailed] = useState(false);
+  const [heldUntil, setHeldUntil] = useState<number | null>(null);
   const [asked, setAsked] = useState(0);
   const shownKey = useRef(key);
   useEffect(() => {
@@ -26,14 +30,29 @@ export function usePullDetails(key: string | null, stamp: string = ''): { data: 
       setData(null);
     }
     setFailed(false);
+    setHeldUntil(null);
     if (!key) return;
     const ask = new AbortController();
-    inboxApi.pullDetails(key, ask.signal).then(setData, () => {
-      if (!ask.signal.aborted) setFailed(true);
+    inboxApi.pullDetails(key, ask.signal).then(setData, (cause) => {
+      if (ask.signal.aborted) return;
+      setFailed(true);
+      if (cause instanceof InboxApiError && cause.code === 'pull_details_held' && cause.retryAt) setHeldUntil(cause.retryAt);
     });
     return () => ask.abort();
   }, [key, stamp, asked]);
-  return { data, failed: failed && !data, retry: () => setAsked((n) => n + 1) };
+  return { data, failed: failed && !data, heldUntil: failed && !data ? heldUntil : null, retry: () => setAsked((n) => n + 1) };
+}
+
+/** Whether the time has come, re-drawn when it does. */
+function useReached(at: number | null): boolean {
+  const [, tick] = useState(0);
+  const reached = at === null || Date.now() >= at;
+  useEffect(() => {
+    if (reached || at === null) return;
+    const timer = setTimeout(() => tick((n) => n + 1), Math.min(at - Date.now() + 50, 2 ** 31 - 1));
+    return () => clearTimeout(timer);
+  }, [at, reached]);
+  return reached;
 }
 
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
@@ -147,22 +166,35 @@ function ReviewerRows({ reviewers, host, words }: { reviewers: readonly InboxPul
   );
 }
 
-/** A check's whole name: in its tip where it is cut; a row with a page is a link, which a keyboard reaches the tip on too. */
-function CheckRow({ check }: { check: InboxPullCheck }) {
-  const name = checkName(check);
+/**
+ * A check's own name, as the forge's checks page leads with it: a reusable workflow's run is "<job> / <its job>", so the
+ * caller's job ("Test new and changed tests when deployed (adapter, 1/5)") names it, without the workflow before it or
+ * the called job after it. Two checks that would read the same keep their whole names.
+ */
+export function checkLabels(checks: readonly InboxPullCheck[]): Map<InboxPullCheck, string> {
+  const short = (check: InboxPullCheck) => check.name.split(' / ')[0]!.trim() || check.name;
+  const seen = new Map<string, number>();
+  for (const check of checks) seen.set(short(check), (seen.get(short(check)) ?? 0) + 1);
+  return new Map(checks.map((check) => [check, seen.get(short(check))! > 1 ? check.name : short(check)]));
+}
+
+/** One line: its mark, its own name cut at the end (the whole one in its tip), and a failure's word; a link to its run. */
+function CheckRow({ check, label }: { check: InboxPullCheck; label: string }) {
+  const whole = checkName(check);
+  const quiet = check.state === 'pass' && !!check.note;
   const inner = (
     <>
-      <CheckMark state={check.state} quiet={!!check.note} />
-      <Tip cut content={name}>
-        <span className="ib-prd-rname">{name}</span>
+      <CheckMark state={check.state} quiet={quiet} />
+      <Tip content={whole}>
+        <span className="ib-prd-rname">{label}</span>
       </Tip>
-      {check.note && <span className="ib-prd-rstate">{check.note}</span>}
+      {check.state === 'fail' && check.note && <span className="ib-prd-rstate" data-state="fail">{check.note}</span>}
     </>
   );
   return (
     <li data-pull-details-check={check.state}>
       {check.url ? (
-        <a className="ib-prd-rlink" href={check.url} target="_blank" rel="noreferrer noopener" aria-label={`${name}, ${check.state === 'pass' ? 'passed' : check.state === 'fail' ? 'failed' : 'running'}`}>
+        <a className="ib-prd-rlink" href={check.url} target="_blank" rel="noreferrer noopener" aria-label={`${whole}, ${check.state === 'pass' ? (check.note ?? 'passed') : check.state === 'fail' ? (check.note ?? 'failed') : 'running'}`}>
           {inner}
         </a>
       ) : (
@@ -172,28 +204,39 @@ function CheckRow({ check }: { check: InboxPullCheck }) {
   );
 }
 
-/** What needs eyes first; the passed ones behind a line that opens. */
+/** Running checks past this many fold into the line with the passed ones; failures always show. */
+const RUNNING_SHOWN = 3;
 /** This many passed checks read as a list; a project's hundred read as a line that opens. */
 const PASSED_SHOWN = 5;
 
+/**
+ * Failures first, each on a line with its status; then what runs; then the passed and the quiet ones. A short list is
+ * whole. A long one keeps the failures (and a few running) and folds the rest into one line that says what it holds
+ * ("14 running, 113 passed, 7 skipped") and opens.
+ */
 export function CheckRows({ checks }: { checks: readonly InboxPullCheck[] }) {
   const [all, setAll] = useState(false);
-  const needEyes = checks.filter((c) => c.state !== 'pass');
+  const labels = useMemo(() => checkLabels(checks), [checks]);
+  const failed = checks.filter((c) => c.state === 'fail');
+  const running = checks.filter((c) => c.state === 'pending');
   const passed = checks.filter((c) => c.state === 'pass' && !c.note);
   const quiet = checks.filter((c) => c.state === 'pass' && c.note);
   const done = passed.length + quiet.length;
-  const folds = done > 0 && (needEyes.length > 0 || done > PASSED_SHOWN);
+  const runningFolds = running.length > RUNNING_SHOWN;
+  const folds = runningFolds || (done > 0 && (failed.length + running.length > 0 || done > PASSED_SHOWN));
   const words = [
+    ...(runningFolds ? [`${running.length} running`] : []),
     ...(passed.length ? [`${passed.length} passed`] : []),
     ...[...new Set(quiet.map((c) => c.note!))].map((note) => `${quiet.filter((c) => c.note === note).length} ${note.toLowerCase()}`),
   ].join(', ');
-  const rows = all || !folds ? [...needEyes, ...passed, ...quiet] : needEyes;
+  const order = [...failed, ...running, ...passed, ...quiet];
+  const rows = all || !folds ? order : [...failed, ...(runningFolds ? [] : running)];
   return (
     <>
       {rows.length > 0 && (
-        <ul className="ib-prd-rows" data-pull-details-checks-list="">
+        <ul className="ib-prd-rows ib-prd-checks" data-pull-details-checks-list="">
           {rows.map((check, index) => (
-            <CheckRow key={`${index}:${check.name}`} check={check} />
+            <CheckRow key={`${index}:${check.name}`} check={check} label={labels.get(check)!} />
           ))}
         </ul>
       )}
@@ -236,12 +279,14 @@ function CommentCard({ comment, layer, onFile }: { comment: InboxPullDetailComme
   );
 }
 
-export function PullDetails({ layer, description, headSha, data, failed, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys }: {
+export function PullDetails({ layer, description, headSha, data, failed, heldUntil = null, onRetry, forge, panel, phone, inDiff, onClose, onFile, top, keys }: {
   layer: InboxPull;
   description: string | null | undefined;
   headSha?: string | null;
   data: InboxPullDetailsAnswer | null;
   failed: boolean;
+  /** The forge asked to slow down: not asked again before this time. */
+  heldUntil?: number | null;
   onRetry: () => void;
   forge: string;
   panel: RefObject<HTMLElement | null>;
@@ -292,10 +337,14 @@ export function PullDetails({ layer, description, headSha, data, failed, onRetry
     </p>
   );
   const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || failed ? <p className="ib-prd-none">No description.</p> : null;
+  // Held, Try again waits for the time it names: before it, a click could only be refused again.
+  const canRetry = useReached(heldUntil);
   const failedNote = failed && (
-    <p className="ib-prd-none" role="status" data-pull-details-failed="">
-      {forge} did not answer about the reviewers and checks.{' '}
-      <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>
+    <p className="ib-prd-none" role="status" data-pull-details-failed={heldUntil ? 'held' : ''}>
+      {heldUntil
+        ? `${layer.host} asked to slow down.${canRetry ? '' : ` Try again after ${new Date(heldUntil).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}.`}`
+        : `${forge} did not answer about the reviewers and checks.`}{' '}
+      {canRetry && <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>}
     </p>
   );
   const labelRow = labels.length > 0 && (

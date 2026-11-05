@@ -61,10 +61,19 @@ describe("checks", () => {
     expect(states([check("a", "IN_PROGRESS", null), check("b", "COMPLETED", "SUCCESS")]).map((c) => c.state)).toEqual(["pending", "pass"]);
     // As gh answers them: a check not done has an empty conclusion, not null.
     expect(states([check("a", "QUEUED", ""), check("b", "IN_PROGRESS", "")]).map((c) => c.state)).toEqual(["pending", "pending"]);
-    for (const word of ["FAILURE", "TIMED_OUT", "CANCELLED", "ACTION_REQUIRED", "STARTUP_FAILURE", "ERROR"]) {
-      expect([word, states([check("a", "COMPLETED", word)])[0]!.state]).toEqual([word, "fail"]);
+    // Each failure says how, in the forge's own word.
+    const how = { FAILURE: "Failed", TIMED_OUT: "Timed out", CANCELLED: "Cancelled", ACTION_REQUIRED: "Action required", STARTUP_FAILURE: "Startup failure", ERROR: "Error" };
+    for (const [word, note] of Object.entries(how)) {
+      const [one] = states([check("a", "COMPLETED", word)]);
+      expect([word, one!.state, one!.note]).toEqual([word, "fail", note]);
     }
     expect(states([check("a", "COMPLETED", "SKIPPED")])[0]).toEqual({ name: "a", state: "pass", note: "Skipped" });
+  });
+
+  test("a stale check, overtaken by a newer run, is done and quiet: never running forever", () => {
+    expect(states([check("a", "COMPLETED", "STALE")])[0]).toEqual({ name: "a", state: "pass", note: "Stale" });
+    // Some answers leave a stale check's status where it was.
+    expect(states([check("a", "IN_PROGRESS", "STALE")])[0]).toEqual({ name: "a", state: "pass", note: "Stale" });
   });
 
   test("a page is a link only over https", () => {
@@ -205,7 +214,7 @@ describe("reading them through the list", () => {
   const noted = (id: string) => ({ id, author: { __typename: "User", login: "kim", avatarUrl: "https://a/kim" }, body: id, createdAt: "2026-11-01T00:00:00Z", url: "u" });
   const threadPage = (threads: unknown[], next?: string) => ({ data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: !!next, endCursor: next ?? null }, nodes: threads } } } } });
 
-  test("a queued check and a skipped one, as gh answered them on a real PR: running, and skipped, not passed", async () => {
+  test("a queued check and a skipped one, as gh answered them on a real PR: running, skipped not passed, and stale done", async () => {
     const f = forge();
     // Two rows of #2671's statusCheckRollup, as captured.
     const rollup = [
@@ -216,7 +225,7 @@ describe("reading them through the list", () => {
     const pulls = createInboxPulls({ run: changed(f, (args, stdout) => (isView(args) ? { ...JSON.parse(stdout), statusCheckRollup: rollup } : undefined)) });
     await pulls.list(repos);
     const answer = await pulls.details(KEY);
-    expect(answer.checks.map((c) => [c.state, c.note])).toEqual([["pending", undefined], ["pass", "Skipped"], ["pending", undefined]]);
+    expect(answer.checks.map((c) => [c.state, c.note])).toEqual([["pending", undefined], ["pass", "Skipped"], ["pass", "Stale"]]);
   });
 
   test("a description of only a PR template's comments is no description", async () => {
@@ -250,7 +259,7 @@ describe("reading them through the list", () => {
     expect(answer.threads_incomplete).toBeUndefined();
   });
 
-  test("a page of threads that fails: what was read shows, says it is not all, and is not kept", async () => {
+  test("a page of threads that fails: what was read shows, says it is not all, keeps its faces, and is read again", async () => {
     const f = forge();
     let failing = true;
     const pulls = createInboxPulls({
@@ -264,6 +273,8 @@ describe("reading them through the list", () => {
     const partial = await pulls.details(KEY);
     expect(partial.threads_incomplete).toBe(true);
     expect(partial.comments.some((c) => c.body === "t1-1")).toBe(true);
+    // The faces it named stay allowed: the commenter's picture is not refused for the part that failed.
+    expect(pulls.avatarUrls("github.com").kim).toBe("https://a/kim");
     failing = false;
     const whole = await pulls.details(KEY);
     expect(whole.threads_incomplete).toBeUndefined();
@@ -285,7 +296,8 @@ describe("reading them through the list", () => {
     await pulls.list(repos);
     await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed" });
     const views = f.state.views;
-    await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed", message: expect.stringContaining("slow down") });
+    // Held: its own code, and when it lifts, so the window can say until when.
+    await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_held", message: "github.com asked to slow down.", retryAt: 1_000_000 + 60_000 });
     expect(f.state.views).toBe(views);
 
     const g = forge();
@@ -294,7 +306,8 @@ describe("reading them through the list", () => {
       run: changed(g, (args, stdout) => (args.includes("graphql") && stdout.includes('"authored"') ? { data: { ...JSON.parse(stdout).data, rateLimit: { cost: 1, remaining: 3, resetAt: reset } } } : undefined)),
     });
     await spent.list(repos);
-    await expect(spent.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed", message: expect.stringContaining("slow down") });
+    // GitHub's budget spent: held until it fills, close to an hour here, not a minute.
+    await expect(spent.details(KEY)).rejects.toMatchObject({ code: "pull_details_held", retryAt: Date.parse(reset) });
     expect(g.state.views).toBe(0);
   });
 

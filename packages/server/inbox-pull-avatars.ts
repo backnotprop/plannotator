@@ -74,13 +74,16 @@ const LOOPBACK = new Set(["127.0.0.1", "localhost"]);
 const PICTURE_PX = 96;
 
 /**
- * GitHub's avatar URLs answer the whole upload unless they name a size, and uploads run past the size cap (mischnic's
- * is 527 KB), which left a real face as its initial. github.com's picture host and an Enterprise server's `/avatars/`
- * take `s=`; anything else, or a URL that already names a size, is left as the forge gave it.
+ * GitHub's avatar URLs answer the whole upload unless they name a size, and an upload can run past the size cap (a real
+ * one was 527 KB), which left a face as its initial; GraphQL's `avatarUrl(size: 48)` is soft on a 2x screen. So
+ * github.com's picture host and an Enterprise server's `/avatars/` are always asked at `s=96`, whatever size the URL
+ * named; anything else is left as the forge gave it.
  */
 function sizeForAFace(url: URL): void {
   const github = url.hostname === "avatars.githubusercontent.com" || url.hostname.startsWith("avatars.") || url.pathname.startsWith("/avatars/");
-  if (github && !url.searchParams.has("s") && !url.searchParams.has("size")) url.searchParams.set("s", String(PICTURE_PX));
+  if (!github) return;
+  url.searchParams.delete("size");
+  url.searchParams.set("s", String(PICTURE_PX));
 }
 
 const keyOf = (host: string, login: string) => `${host.toLowerCase()}\n${login.toLowerCase()}`;

@@ -838,6 +838,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             headSha={diff?.head_sha}
             data={details.data}
             failed={details.failed}
+            heldUntil={details.heldUntil}
             onRetry={details.retry}
             forge={forgeName(stack)}
             panel={detailsPanel}

@@ -8574,7 +8574,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The panel: floats on the page, no rule, generous air. */
 .ib-prd { position: absolute; top: 8px; right: 8px; bottom: 8px; z-index: 7; width: min(480px, calc(100% - 16px)); display: flex; flex-direction: column; min-height: 0; background: var(--card); border-radius: 14px; box-shadow: 0 1px 2px rgb(0 0 0 / 0.05), 0 12px 40px -8px rgb(0 0 0 / 0.18); overflow: hidden; }
 .dark .ib-prd { box-shadow: 0 0 0 1px rgb(255 255 255 / 0.06), 0 16px 48px -8px rgb(0 0 0 / 0.6); }
-.ib-prd[data-layout="columns"]:has(.ib-prd-side) { width: min(760px, calc(100% - 16px)); }
+.ib-prd[data-layout="columns"]:has(.ib-prd-side) { width: min(880px, calc(100% - 16px)); }
 .ib-prd .ib-prr-desc-body { --ib-desc-fold: 220px; }
 .ib-prd-head { flex: none; display: flex; align-items: center; gap: 12px; padding: 18px 12px 14px 24px; min-width: 0; }
 .ib-prd-who { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 1px; font-size: 13.5px; line-height: 1.35; }
@@ -8612,8 +8612,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ib-prd-rows li { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
 .ib-prd-rname { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* A real project's failed checks share their first words: cut, four rows read the same, so what needs eyes reads whole. */
-[data-pull-details-check="fail"] .ib-prd-rname, [data-pull-details-check="pending"] .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; }
+/* A check is one line: its own name, cut at its end (its tip has the whole one), and a failure's word. */
 .ib-prd-cmark[data-state="quiet"] { color: var(--muted-foreground); }
 .ib-prd-rstate { flex: none; margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); }
 .ib-prd-rstate[data-state="approved"] { color: var(--success, #0a7f33); }
@@ -8653,7 +8652,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-drop { margin: -14px -10px 22px; padding: 8px 10px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3%, transparent); }
 /* C: reading on the left, the facts in a tinted column, as on the forge. */
 .ib-prd[data-layout="columns"] .ib-prd-body { padding: 0; display: flex; flex-direction: column; overflow: hidden; }
-.ib-prd-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 232px; }
+.ib-prd-cols { flex: 1 1 auto; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 312px; }
 .ib-prd-cols:not(:has(.ib-prd-side)) { grid-template-columns: minmax(0, 1fr); }
 .ib-prd-main { min-width: 0; overflow-y: auto; padding: 4px 24px 32px; scrollbar-width: thin; }
 .ib-prd-side { min-width: 0; overflow-y: auto; margin: 0 8px 8px 0; padding: 14px 14px 18px; border-radius: 10px; background: color-mix(in oklab, var(--foreground) 3.5%, transparent); display: grid; align-content: start; gap: 22px; font-size: 13px; scrollbar-width: thin; }

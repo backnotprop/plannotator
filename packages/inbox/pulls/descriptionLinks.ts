@@ -5,6 +5,7 @@
  */
 
 import type { InboxPull } from '@plannotator/core/inbox-types';
+import { GITHUB_SHORTCODES } from './githubShortcodes';
 
 type Layer = Pick<InboxPull, 'url' | 'platform' | 'repo' | 'head' | 'head_repo' | 'head_sha'>;
 
@@ -16,9 +17,27 @@ function fileRef(layer: Layer, headSha: string | null | undefined): string | nul
 }
 
 /** The forge's address for a path in this layer's description, or null when it has none (it climbs out of the repo). */
+let shortcodes: Map<string, string> | null = null;
+
 /**
- * A forge's body as the Inbox's Markdown should read it: HTML comments gone (a PR template's, which the forge hides too)
- * and a line holding nothing but `<br>` (dependabot's), which would draw as those words. In code, each stays.
+ * `:robot:` as the forge draws it, 🤖, wherever its alias is GitHub's; any other `:word:` stays. ui's Markdown knows a
+ * few dozen (`inlineTransforms`), the same pattern; a forge's words use the whole set, bots' most of all.
+ */
+export function withEmoji(text: string): string {
+  if (!text.includes(':')) return text;
+  if (!shortcodes) {
+    const parts = GITHUB_SHORTCODES.split(' ');
+    shortcodes = new Map();
+    for (let i = 0; i + 1 < parts.length; i += 2) shortcodes.set(parts[i]!, parts[i + 1]!);
+  }
+  const known = shortcodes;
+  return text.replace(/:([a-z0-9_+-]+):/g, (whole, code: string) => known.get(code) ?? whole);
+}
+
+/**
+ * A forge's body as the Inbox's Markdown should read it: HTML comments gone (a PR template's, which the forge hides too),
+ * a line holding nothing but `<br>` (dependabot's), which would draw as those words, and `:shortcodes:` as their emoji.
+ * In code, each stays.
  */
 export function forgeBody(markdown: string): string {
   const out: string[] = [];
@@ -50,10 +69,10 @@ export function forgeBody(markdown: string): string {
       }
       const next = /(`+).*?\1|<!--/.exec(rest);
       if (!next) {
-        kept += rest;
+        kept += withEmoji(rest);
         break;
       }
-      kept += rest.slice(0, next.index);
+      kept += withEmoji(rest.slice(0, next.index));
       rest = rest.slice(next.index + next[0].length);
       if (next[0] === '<!--') {
         inComment = true;

@@ -51,4 +51,10 @@ describe('forgeBody', () => {
     expect(forgeBody('```\n<!-- x -->\n```')).toBe('```\n<!-- x -->\n```');
     expect(forgeBody('<!-- only a template -->').trim()).toBe('');
   });
+  test(":robot: is the emoji the forge draws, outside code; a word GitHub has no emoji for stays", () => {
+    expect(forgeBody('## :robot: Stats from current PR\n\n:white_check_mark: :+1: :-1: :100:')).toBe('## 🤖 Stats from current PR\n\n✅ 👍 👎 💯');
+    expect(forgeBody('Run `:robot:` as is')).toBe('Run `:robot:` as is');
+    expect(forgeBody('```\n:robot:\n```')).toBe('```\n:robot:\n```');
+    expect(forgeBody(':octocat: at 10:30:00 and :not_an_emoji:')).toBe(':octocat: at 10:30:00 and :not_an_emoji:');
+  });
 });

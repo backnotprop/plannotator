@@ -85,22 +85,26 @@ describe("PR authors' pictures", () => {
     expect(s.fetched).toEqual([]);
   });
 
-  test("a GitHub picture is asked for at a face's size, as its full upload can pass the size cap; others stay as given", async () => {
+  test("a GitHub picture is asked for at a face's size, its full upload or a smaller size it named; others stay as given", async () => {
     const s = scripted();
     const avatars = createPullAvatars({ ...s.options, dir: tempDir() });
     avatars.allow("github.com", {
-      full: "https://avatars.githubusercontent.com/u/4586894?u=4f69eb&v=4",
-      small: "https://avatars.githubusercontent.com/u/1365881?s=48&v=4",
+      full: "https://avatars.githubusercontent.com/u/1000002?u=4f69eb&v=4",
+      small: "https://avatars.githubusercontent.com/u/1000001?s=48&v=4",
+      sized: "https://avatars.githubusercontent.com/u/1000003?size=48",
     });
     avatars.allow("ghe.example", { server: "https://ghe.example/avatars/u/7?v=4" });
     avatars.allow("gitlab.com", { lab: "https://gitlab.com/uploads/-/system/user/avatar/9/me.png?width=64" });
     await avatars.get("github.com", "full");
     await avatars.get("github.com", "small");
+    await avatars.get("github.com", "sized");
     await avatars.get("ghe.example", "server");
     await avatars.get("gitlab.com", "lab");
     expect(s.fetched).toEqual([
-      "https://avatars.githubusercontent.com/u/4586894?u=4f69eb&v=4&s=96",
-      "https://avatars.githubusercontent.com/u/1365881?s=48&v=4",
+      "https://avatars.githubusercontent.com/u/1000002?u=4f69eb&v=4&s=96",
+      // GraphQL's avatarUrl(size: 48) is soft at 28 px on a 2x screen: a face is drawn at up to 48, so 96.
+      "https://avatars.githubusercontent.com/u/1000001?s=96&v=4",
+      "https://avatars.githubusercontent.com/u/1000003?s=96",
       "https://ghe.example/avatars/u/7?v=4&s=96",
       "https://gitlab.com/uploads/-/system/user/avatar/9/me.png?width=64",
     ]);
