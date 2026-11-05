@@ -464,43 +464,114 @@ describe("what `GET /api/inbox/sessions` offers", () => {
   });
 });
 
-describe("a launched session that stopped, and a reply aimed at another session", () => {
-  test("it keeps its thread, since a reply to it starts it again; once its launch is gone, the reply takes the thread", async () => {
-    let now = Date.now();
-    const world = await setup({ inboxLaunch: { enabled: true } }, () => now);
+describe("a launched session and a reply going elsewhere", () => {
+  /** A launch through the server, the sessions' clock in hand; `C` polls. */
+  async function launched(start?: { ok: false; code: string; text: string }) {
+    const clock = { now: Date.now() };
+    const world = await setup({ inboxLaunch: { enabled: true } }, () => clock.now);
     world.fake.faults.trusted = () => true;
+    if (start) world.fake.host.start = (async () => start) as typeof world.fake.host.start;
     expect((await world.press({ to: { launch: { agent: FAKE, project_id: world.project.id } } })).status).toBe(200);
     const rootId = world.store.listRows()[0]!.thread_id;
     const until = async (check: () => boolean) => {
       for (let tries = 0; tries < 200 && !check(); tries++) await Bun.sleep(10);
       expect(check()).toBe(true);
     };
-    await until(() => !!world.store.message(rootId)!.launch!.session_ref);
-    const session = world.store.message(rootId)!.to!.session;
-    const asked = world.store.sendMessage({ project_id: world.project.id, author: { kind: "agent", host: FAKE, session, name: "Fake Agent" }, body: "Done.", reply_to: rootId, wakes: true, idempotency_key: "done" }).message;
-    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
-    const other = "ses_other";
-    const base = `http://127.0.0.1:${world.server.port}`;
-    await fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Authorization: `Bearer ${world.server.token}` },
-      body: JSON.stringify({ session: other, host: "claude-code", waitMs: 0, project_path: world.folder, started_at: now }),
-    });
-    const aim = async (key: string) => {
-      const response = await fetch(`${base}/api/inbox/messages/${asked.id}/reply`, {
+    await until(() => (start ? !!world.store.message(rootId)!.launch!.error : !!world.store.message(rootId)!.launch!.session_ref));
+    const base = world.base;
+    const poll = (session: string) =>
+      fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
         method: "POST",
-        headers: { Origin: base, "Content-Type": "application/json" },
-        body: JSON.stringify({ serverSession: world.server.serverSession, idempotency_key: key, words: "For you.", to: { host: "claude-code", session: other } }),
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${world.server.token}` },
+        body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: world.folder, started_at: clock.now }),
       });
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: world.server.serverSession, ...body }) });
+    const to = (session: string) => ({ to: { host: "claude-code", session } });
+    const reply = async (id: string, key: string, extra: Record<string, unknown> = {}) => {
+      const response = await post(`/api/inbox/messages/${id}/reply`, { idempotency_key: key, words: "Words.", ...extra });
       expect(response.status).toBe(200);
-      return ((await response.json()) as { reply: { took_over?: boolean } }).reply;
+      return ((await response.json()) as { reply: { id: string; took_over?: boolean } }).reply;
     };
-    expect((await aim("k1")).took_over).toBeUndefined();
-    expect(world.store.threadOwner(rootId)?.session).toBe(session);
+    const move = async (id: string, session: string) => {
+      const response = await post(`/api/inbox/messages/${id}/to`, to(session));
+      const body = (await response.json()) as { message?: { took_over?: boolean }; code?: string };
+      return { status: response.status, tookOver: body.message?.took_over, code: body.code };
+    };
+    const L = world.store.message(rootId)!.to!.session;
+    const says = (body: string, session: string, replyTo: string, key: string) =>
+      world.store.sendMessage({ project_id: world.project.id, author: { kind: "agent", host: session === L ? FAKE : "claude-code", session, name: "Agent" }, body, reply_to: replyTo, wakes: true, idempotency_key: key }).message;
+    const pastGrace = () => (clock.now += INBOX_ASKER_RESTART_GRACE_MS + 1);
+    const gone = () => world.store.settleLaunch(rootId, { error: { code: "missing", text: "Not installed.", at: new Date(clock.now).toISOString() } });
+    return { ...world, rootId, L, poll, to, reply, move, says, pastGrace, gone, owner: () => world.store.threadOwner(rootId)?.session };
+  }
 
-    await fetch(`${base}/api/inbox/launch/${world.store.message(rootId)!.launch!.id}/delete`, { method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: "{}" });
-    await until(() => !!world.store.message(rootId)!.launch!.deleted_at);
-    expect((await aim("k2")).took_over).toBe(true);
-    expect(world.store.threadOwner(rootId)?.session).toBe(other);
+  test("stopped: a reply aimed elsewhere leaves it the thread, a reply waiting on it stays; once its launch is deleted, the reply takes the thread", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    w.pastGrace();
+    await w.poll("ses_c");
+    expect((await w.reply(asked.id, "k1", w.to("ses_c"))).took_over).toBeUndefined();
+    expect(w.owner()).toBe(w.L);
+    const waiting = await w.reply(asked.id, "k2", w.to(w.L)).catch(() => null);
+    // The stopped launched session is there: a reply addressed to it is not moved off it.
+    if (waiting) expect(await w.move(waiting.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
+
+    const saved = await w.reply(asked.id, "k3");
+    expect(await w.move(saved.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
+
+    const launchId = w.store.message(w.rootId)!.launch!.id;
+    await fetch(`${w.base}/api/inbox/launch/${launchId}/delete`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json" }, body: "{}" });
+    for (let tries = 0; tries < 200 && !w.store.message(w.rootId)!.launch!.deleted_at; tries++) await Bun.sleep(10);
+    expect((await w.reply(asked.id, "k4", w.to("ses_c"))).took_over).toBe(true);
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("gone: a plain reply moves at once, before the 60 s, and the thread goes with it", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    await w.poll("ses_c");
+    const saved = await w.reply(asked.id, "k1");
+    w.gone();
+    expect(await w.move(saved.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("gone: a reply addressed to it moves at once too", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    await w.poll("ses_c");
+    const stamped = await w.reply(asked.id, "k1", w.to(w.L)).catch(() => null);
+    w.gone();
+    if (stamped) expect(await w.move(stamped.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
+    else expect((await w.move(w.rootId, "ses_c")).status).toBe(200);
+  });
+
+  test("a start that failed, the root moved to a live session: that session keeps the thread, and a reply to it stays on it", async () => {
+    const w = await launched({ ok: false, code: "missing", text: "Not installed." });
+    await w.poll("ses_c");
+    await w.poll("ses_d");
+    expect(await w.move(w.rootId, "ses_c")).toMatchObject({ status: 200 });
+    const answer = w.says("On it.", "ses_c", w.rootId, "a1");
+    await w.poll("ses_c");
+    await w.poll("ses_d");
+    expect((await w.reply(answer.id, "k1", w.to("ses_d"))).took_over).toBeUndefined();
+    expect(w.owner()).toBe("ses_c");
+    const stamped = await w.reply(answer.id, "k2", w.to("ses_c"));
+    expect(await w.move(stamped.id, "ses_d")).toMatchObject({ status: 422, code: "session_still_live" });
+  });
+
+  test("a root moved to a session that then ended: that session reads as ended, whatever the launch's line says", async () => {
+    const w = await launched();
+    w.store.settleLaunch(w.rootId, { error: { code: "failed", text: "It failed.", at: new Date().toISOString() } });
+    w.pastGrace();
+    await w.poll("ses_c");
+    expect(await w.move(w.rootId, "ses_c")).toMatchObject({ status: 200 });
+    w.store.settleLaunch(w.rootId, { error: null });
+    const answer = w.says("On it.", "ses_c", w.rootId, "a1");
+    w.pastGrace();
+    await w.poll("ses_d");
+    expect((await w.reply(answer.id, "k1", w.to("ses_d"))).took_over).toBe(true);
+    expect(w.owner()).toBe("ses_d");
   });
 });

@@ -889,22 +889,60 @@ test.skipIf(!hasDom)('a launched thread, its stopped agent the only one: never "
   expect(replies().map((r) => [r.path, r.body.to ?? null])).toEqual([[`/api/inbox/messages/${M1}/reply`, null]]);
 });
 
-test.skipIf(!hasDom)('a launched thread, a plain reply saved: no move when it is for its own agent, stopped or gone; a move when it is for a tagged agent that ended', async () => {
+const SAVED_REPLY = 'msg_01M4H6G73M9H3Z32T859E72L09';
+const savedIn = (asked: InboxMessageWire, replyTo: string, to?: { host: string; session: string }) =>
+  ({ ...asked, id: SAVED_REPLY, reply_to: replyTo, author: { kind: 'person' }, questions: undefined, wakes: undefined, ...(to ? { to } : {}), body: 'Carry on.', created_at: '2026-10-11T10:50:00.000Z', idempotency_key: 'k-saved' }) as InboxMessageWire;
+const SAVED_AT = { at: '2026-10-11T10:52:00.000Z', checked_at: null };
+
+test.skipIf(!hasDom)('a launched thread, a plain reply for its own agent: stopped, the reply starts it, so no move; gone, the line offers the move', async () => {
+  liveness = { ses_launched: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const withSaved = { ...thread, messages: [rootMessage, asked, savedIn(asked, M1)] };
+  const stopped = await render(withSaved, SAVED_AT, stoppedRun);
+  expect(stopped.querySelector('[data-run]')?.getAttribute('data-run')).toBe('stopped');
+  expect(!!stopped.querySelector('[data-readdress-open]')).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+  const gone = await render(withSaved, SAVED_AT, { ...stoppedRun, state: 'missing' });
+  expect(gone.querySelector('[data-run]')?.textContent).toContain('or send the reply to another session');
+  act(() => (gone.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (gone.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${SAVED_REPLY}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('a launched thread, a plain reply for a tagged agent that ended: a move, and no line saying the reply starts the launched agent', async () => {
   liveness = { ses_launched: false, ses_tagged: false };
   sessions = { sessions: [live('ses_other', 'pi')] };
   const thread = launchedThread(false);
   const [rootMessage, asked, tagged] = thread.messages as [InboxMessageWire, InboxMessageWire, InboxMessageWire];
-  const saved = (replyTo: string) =>
-    ({ ...asked, id: 'msg_01M4H6G73M9H3Z32T859E72L09', reply_to: replyTo, author: { kind: 'person' }, questions: undefined, wakes: undefined, body: 'Carry on.', created_at: '2026-10-11T10:50:00.000Z', idempotency_key: 'k-saved' }) as InboxMessageWire;
-  const sent = { at: '2026-10-11T10:52:00.000Z', checked_at: null };
-  for (const run of [stoppedRun, { ...stoppedRun, state: 'missing' } as typeof stoppedRun]) {
-    const own = await render({ ...thread, messages: [rootMessage, asked, saved(M1)] }, sent, run);
-    expect(!!own.querySelector('[data-readdress-open]')).toBe(false);
-    act(() => root?.unmount());
-    host?.remove();
-  }
-  const toTagged = await render({ ...thread, messages: [rootMessage, asked, tagged, saved(R1)] }, sent, stoppedRun);
-  expect(!!toTagged.querySelector('[data-readdress-open]')).toBe(true);
+  const el = await render({ ...thread, messages: [rootMessage, asked, tagged, savedIn(asked, R1)] }, SAVED_AT, stoppedRun);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(true);
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a launched thread, its agent stopped, a reply aimed at a session that ended: a move, and no line saying the reply starts the launched agent', async () => {
+  liveness = { ses_launched: false, ses_c: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const el = await render({ ...thread, messages: [rootMessage, asked, savedIn(asked, M1, { host: 'pi', session: 'ses_c' })] }, SAVED_AT, stoppedRun);
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(true);
+});
+
+test.skipIf(!hasDom)('a launched root moved before it started, a reply on the session it moved to: no "isn\'t on this computer" line and no move', async () => {
+  liveness = { ses_c: true };
+  sessions = { sessions: [live('ses_c', 'pi'), live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const moved = { ...rootMessage, to: { host: 'pi', session: 'ses_c' }, launch: { ...rootMessage.launch!, session_ref: null } } as InboxMessageWire;
+  const el = await render({ ...thread, messages: [moved, savedIn(asked, LAUNCHED_ROOT, { host: 'pi', session: 'ses_c' })] }, SAVED_AT, { ...stoppedRun, state: 'missing' });
+  expect(!!el.querySelector('[data-run]')).toBe(false);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(false);
 });
 
 test.skipIf(!hasDom)('a launched thread, the words going to a tagged agent that ended: the ended note shows, so the reply does not wait on it unsaid', async () => {

@@ -254,7 +254,7 @@ export function createInboxCompose(options: {
     const there = thereInThread(live, options.launch, message.thread_id);
     const next = store.readdressMessage(messageId, target, {
       targetLive: !!waitsOn && there.askerLive(waitsOn),
-      askerEnded: replacesEndedAsker(asked, live),
+      askerEnded: replacesEndedAsker(asked, there),
       tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
     });
     return json({ message: next, row: store.listRow(next.thread_id) });

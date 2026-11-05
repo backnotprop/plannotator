@@ -596,6 +596,8 @@ export interface InboxDeliveryPresence {
   hostOf?(session: string): string | null;
   /** Whether the session that asked is still there, with the sessions route's grace (`askerLive`). */
   askerLive(session: string): boolean;
+  /** Whether a reply to this session starts it again (a launched thread's own session): it has not ended. Absent: never. */
+  launchResumes?(threadId: string, session: string): boolean;
   /**
    * Whether an item may not have reached its session though it was handed on
    * (a Codex `codex queue` call that ran out of time): the row says it is
@@ -1972,8 +1974,11 @@ export class InboxStore {
     const reached = asking ?? (lastReal.author.kind === "agent" ? lastReal : null);
     const reachedSession = reached?.author.kind === "agent" ? reached.author.session : null;
     const movedAway = lastReal.author.kind === "person" && !!lastReal.to;
-    const askerGone = !!presence && root.resolved_at === null && !movedAway && reached?.wakes === true && !!reachedSession && !presence.askerLive(reachedSession);
-    const sessionEnded = askerGone || delivery?.reason === "undelivered";
+    const resumes = (session: string | null | undefined) => !!session && presence?.launchResumes?.(root.id, session) === true;
+    const askerGone = !!presence && root.resolved_at === null && !movedAway && reached?.wakes === true && !!reachedSession && !presence.askerLive(reachedSession) && !resumes(reachedSession);
+    // Each reading is about its own session: a launched one that a reply starts again has not ended, another still has.
+    const undelivered = delivery?.reason === "undelivered" && !resumes(this.replyAddressee(root, lastReal)?.session);
+    const sessionEnded = askerGone || undelivered;
     const facts = {
       ...summary,
       unsent,
@@ -2018,6 +2023,16 @@ export class InboxStore {
    * decided by the one rule (`inboxDeliveryState`), so a row and its thread
    * agree. Memory only: a few map lookups per row.
    */
+  /**
+   * Where a person's message is addressed: its own `to`, or in a thread the person started, that thread's. Not when it
+   * answers another session that wrote in it: the reply goes to that one (the thread's rule too).
+   */
+  private replyAddressee(root: InboxMessage, last: InboxMessage): InboxAddressee | null {
+    const startedTo = root.started_by_person && root.to ? root.to : null;
+    const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
+    return last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
+  }
+
   private rowDelivery(
     root: InboxMessage,
     lastReal: InboxMessage,
@@ -2059,11 +2074,9 @@ export class InboxStore {
     if (lastReal.author.kind === "person") {
       if (isInboxNote(lastReal)) return null;
       const last = lastReal;
-      // A thread the person started is addressed to a session; a reply in it goes there too.
       const startedTo = root.started_by_person && root.to ? root.to : null;
       const askedBy = last.reply_to ? this.messages.get(last.reply_to) : undefined;
-      // Not when it answers another session that wrote in it: the reply goes to that one (the thread's rule too).
-      const lastTo = last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
+      const lastTo = this.replyAddressee(root, last);
       const repliedTo = lastTo ? undefined : askedBy;
       const askedSession = repliedTo?.author.kind === "agent" && repliedTo.author.session ? repliedTo.author.session : null;
       const wakingSession = askedSession && repliedTo?.wakes === true ? askedSession : null;
@@ -6349,7 +6362,7 @@ export class InboxStore {
     if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
     const next: InboxMessage =
       "to" in outcome
-        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session_ref: outcome.session_ref, error: null } }
+        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session: outcome.to.session, session_ref: outcome.session_ref, error: null } }
         : "error" in outcome
           ? { ...message, launch: { ...message.launch, error: outcome.error } }
           : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };

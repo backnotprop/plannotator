@@ -63,7 +63,7 @@
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
 import { inboxId, type InboxComposeLaunch, type InboxLaunchAgent, type InboxLaunchRecord, type InboxLaunchTrust, type InboxLaunchUntrusted, type InboxListRow, type InboxMessage, type InboxProject, type InboxRun } from "@plannotator/core/inbox-types";
-import { inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
+import { inboxLaunchedSession, inboxRunOf, INBOX_RUN_START_GRACE_MS, type InboxRunHostState } from "@plannotator/core/inbox-run-line";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { derivePersonThreadSubject } from "@plannotator/core/inbox-questions";
 import { INBOX_SCRATCH_PICK, inboxScratchCandidate, inboxScratchSlug } from "@plannotator/core/inbox-scratch";
@@ -487,6 +487,14 @@ export function createInboxLaunch(options: {
     const last = lastId ? store.message(lastId) : null;
     // The person's latest, unless it went to another session (re-addressed).
     return last?.author.kind === "person" && (!last.to || last.to.session === root.to?.session);
+  };
+
+  /** The root of a launched thread whose launch started this session, with launch on and the launch not deleted. */
+  const launchedRootOf = (threadId: string, session: string | null | undefined): InboxMessage | null => {
+    if (!enabled() || !session) return null;
+    const root = store.message(threadId);
+    if (!root?.launch || root.launch.deleted_at || inboxLaunchedSession(root) !== session) return null;
+    return root;
   };
 
   /** The run line of a launched root; null for an agent with no host here. */
@@ -1141,33 +1149,27 @@ export function createInboxLaunch(options: {
     },
 
     /**
-     * Whether a reply to this session starts it again: a launched thread's own session whose agent is not gone. It
-     * has not ended, whatever its liveness says (the window's `launchResumes`).
+     * Whether a reply to this session starts it again: the session this thread's launch started, and an agent that is
+     * neither gone nor without a host here. It has not ended, whatever its liveness says (the window's `launchResumes`).
      */
     resumes(threadId: string, session: string | null | undefined): boolean {
-      if (!enabled() || !session) return false;
-      const root = store.message(threadId);
-      if (!root?.launch || root.launch.deleted_at || root.to?.session !== session) return false;
+      const root = launchedRootOf(threadId, session);
+      if (!root || !hostOf(root.launch!)) return false;
       const state = runOfRoot(root)?.state;
       return state !== "missing" && state !== "failed";
     },
 
-    /** Whether this launched session is gone (the line's "missing"), however recently it was heard from. */
+    /** Whether the session this thread's launch started is gone (the line's "missing"), however recently it was heard from. */
     gone(threadId: string, session: string | null | undefined): boolean {
-      if (!enabled() || !session) return false;
-      const root = store.message(threadId);
-      if (!root?.launch || root.launch.deleted_at || root.to?.session !== session) return false;
-      return runOfRoot(root)?.state === "missing";
+      const root = launchedRootOf(threadId, session);
+      return !!root && runOfRoot(root)?.state === "missing";
     },
 
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */
-    decorateLaunched<T extends InboxListRow>(listed: T): T {
-      const root = store.message(listed.thread_id);
-      if (!root?.launch) return listed;
+    decorateLaunched<T extends InboxListRow>(row: T): T {
+      const root = store.message(row.thread_id);
+      if (!root?.launch) return row;
       const runLine = runOfRoot(root);
-      // A launched agent that stopped is not "ended": a reply starts it again.
-      const { session_ended: _ended, ...notEnded } = listed;
-      const row = listed.session_ended && this.resumes(root.thread_id, store.threadOwner(root.thread_id)?.session) ? (notEnded as unknown as T) : listed;
       if (runLine?.state === "waiting_terminal" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
       // A permission question waits on the person: the session is blocked on them (screen 09).
       if (runLine?.state === "waiting_answer" && row.resolved_at === null) return { ...row, section: "stopped", unread: true, run: null };
