@@ -223,3 +223,13 @@ test('the groups start folded, are remembered, and a bad stored value is the def
     Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: saved });
   }
 });
+
+test("a review's lead is the PR the person handed it, whatever the agent's guide names; a Post goes there too", () => {
+  const handed = { key: 'github.com/o/app#231', url: 'https://github.com/o/app/pull/231', number: 231, title: 'T', platform: 'github' as const, mine: false };
+  const line = reviewRowLine(row({
+    started: { kind: 'link', changes: null, pull: handed, branch: null, base: null, ask: 'guide', host: 'claude-code', project_id: 'p', at: '' },
+    review: review({ source: { kind: 'pr', pr: { url: 'https://github.com/o/other/pull/999', number: 999, platform: 'github' } } }),
+  } as Partial<InboxReviewRow>));
+  expect(line.lead).toBe('#231');
+});
+

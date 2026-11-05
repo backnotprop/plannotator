@@ -1120,6 +1120,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
    * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
    */
+  /** The PR New review's link last read: what Start review takes for whose it is. */
+  let lastLinkRead: InboxPull | null = null;
   /** One PR no list holds, from a host this computer's CLI is signed in to; nothing is asked of any other host. */
   const readUnlistedPull = async (ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>>): Promise<InboxPull | null> => {
     if (!(await pulls.signedInTo(ref.platform === "gitlab" ? "glab" : "gh", ref.host))) return null;
@@ -3276,9 +3278,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onReviewStart: (threadId, review, where) => {
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
       if (!start) return;
-      pullOwners.start(threadId, start);
+      // Whose PR it is comes from what the Inbox read itself (the list, or the link's read just before Start), never the window's word.
+      const read = start.pull && (pulls.find(start.pull.key) ?? (lastLinkRead?.key === start.pull.key ? lastLinkRead : null));
+      const started = start.pull ? { ...start, pull: { ...start.pull, mine: read?.mine === true } } : start;
+      pullOwners.start(threadId, started);
       // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
-      if (start.pull) pullOwners.set([start.pull.key], threadId, { ask: start.ask, theirs: !start.pull.mine });
+      if (started.pull) pullOwners.set([started.pull.key], threadId, { ask: started.ask, theirs: !started.pull.mine });
     },
     launch,
     isGuest,
@@ -3865,6 +3870,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { ref } = link;
         const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
         const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
+        lastLinkRead = pull;
         if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
         const { projectsByRepo } = await pullProjects();
         const owner = pullOwners.get(ref.key);
@@ -3959,9 +3965,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
         const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        // A PR reached by its link is on no list: its own read says what the list would.
-        const unlisted = pulls.find(key) ? null : inboxPullRefOfKey(key);
+        // A PR a thread owns but no list has (reached by its link): its own read says what the list would. Any other stays unknown.
+        const unlisted = !pulls.find(key) && pullOwners.get(key) ? inboxPullRefOfKey(key) : null;
         const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
+        if (!pull && unlisted) return json({ error: "Couldn't check that link. Try again.", code: "pull_unknown" }, 404);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.

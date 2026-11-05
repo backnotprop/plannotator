@@ -228,7 +228,7 @@ export function createInboxCompose(options: {
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else {
-      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
+      if (body.review && !guest) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.

@@ -448,6 +448,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   // Pull request links: a teammate's PR in a repository that is no project, read only as one link.
   forge.gh('repos/northwind/payments/pulls/231', JSON.stringify({ state: 'open', title: 'Idempotent refunds', html_url: 'https://github.com/northwind/payments/pull/231', head: { ref: 'refunds', sha: 'a'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
   forge.gh('user', JSON.stringify({ login: 'dana' }));
+  forge.gh('repos/northwind/never-opened/pulls/77', JSON.stringify({ state: 'open', title: 'Never opened', html_url: 'https://github.com/northwind/never-opened/pull/77', head: { ref: 'x', sha: 'b'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.gh('repos/northwind/payments/pulls/233', JSON.stringify({ state: 'open', title: 'Not yours', html_url: 'https://github.com/northwind/payments/pull/233', head: { ref: 'x', sha: 'c'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
   forge.glab(`projects/${encodeURIComponent('northwind/mobile')}/merge_requests/44`, JSON.stringify({ state: 'merged', merged_at: ago(90), title: 'Offline queue', web_url: 'https://gitlab.com/northwind/mobile/-/merge_requests/44', source_branch: 'offline', target_branch: 'main', author: { username: 'priya' } }));
 
   const billingRepo = 'northwind/billing-svc';
@@ -1426,6 +1428,7 @@ test('New review, local changes: the + opens the box, the summary follows the ch
     await page.setViewportSize({ width: 390, height: 844 });
     await shot(page, 'n-box-local-phone');
     await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(page.locator('dialog.ib-cp[data-phone]')).toHaveCount(0);
     // Another choice, another size: the working copy's new file is not in the last commit.
     await box.locator('[data-review-choice="last"]').check({ force: true });
     await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: last commit on /);
@@ -1858,8 +1861,19 @@ test("A link's review posts to its forge, though no list has it; the picker's li
   await expect(page.locator('[data-review-posts="github"]')).toBeVisible();
   await shot(page, 'l-link-post');
   await page.locator('[data-review-posts] [data-decision-primary]').click();
+  // The dialog says which PR, and the page's header agrees, whatever PR the agent's guide named.
+  await expect(page.locator('[data-review-posting-to]')).toHaveText('Posting to northwind/payments#231');
+  await shot(page, 'l-link-approve-dialog');
   await page.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click();
   await expect.poll(() => forgeCalls().filter((call) => call.startsWith('gh post'))).toContain('gh post repos/northwind/payments/pulls/231/reviews');
+
+  // A PR nothing started a thread on isn't read or posted to, even by a plain local request.
+  const refused = await page.evaluate(async () => {
+    const res = await fetch('/api/inbox/pulls/review', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ key: 'github.com/northwind/never-opened#77', action: 'approve', body: '', head_sha: 'b'.repeat(40), fileComments: [] }) });
+    return res.status;
+  });
+  expect(refused).toBe(404);
+  expect(forgeCalls().filter((call) => call.includes('never-opened'))).toEqual([]);
 
   // Capitals are the same PR: it opens the thread it's in, no second one.
   await openBox();
@@ -1939,6 +1953,16 @@ test("A link's review posts to its forge, though no list has it; the picker's li
   await expect(box).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`thread=${mrThread}`));
   expect((await threads()).length).toBe(before);
+  // Whose PR it is comes from the Inbox's read, not from what the window says.
+  const claimed = await page.evaluate(async () => {
+    const url = 'https://github.com/northwind/payments/pull/233';
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent(url)}`);
+    const res = await fetch('/api/inbox/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: { host: 'claude-code', session: 'ses-ledger-claude' }, body: 'Please review.', idempotency_key: '00000000-0000-4000-8000-000000000233', review: { kind: 'link', url, title: 'Not yours', mine: true, ask: 'guide' } }) });
+    const { thread_id } = (await res.json()) as { thread_id: string };
+    const rows = ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; started?: { pull?: { mine: boolean } } }[] }).rows;
+    return rows.find((row) => row.thread_id === thread_id)?.started?.pull?.mine;
+  });
+  expect(claimed).toBe(false);
   world.polls.splice(world.polls.indexOf(ledgerAgent), 1);
   await ledgerAgent.stop();
 });
