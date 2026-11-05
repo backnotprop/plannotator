@@ -6076,6 +6076,10 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bstack .ib-bc-bot:has(.ib-bc-youlink) { align-items: center; margin: -4px 0 -10px; }
 .ib-bstack .ib-bc-youlink { display: flex; align-items: center; width: 100%; min-height: 44px; }
 .ib-bc-top { display: flex; align-items: center; gap: 8px; min-width: 0; }
+/* While the Board spans projects (owner, 2026-11-05): the project's name on a row of its own, the marks and the age
+   at its right, so the title under it keeps the card's whole width. */
+.ib-bc-head { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.4; color: var(--muted-foreground); }
+.ib-bc-proj { flex: 0 1 auto; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-bc-t { min-width: 0; flex: 0 1000000 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: var(--ib-fs-14, 14px); font-weight: 500; color: color-mix(in oklab, var(--foreground) 72%, var(--card)); }
 .ib-bcard[data-unread] .ib-bc-t { font-weight: 650; color: var(--foreground); }
 .ib-bc-bot { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
@@ -6099,6 +6103,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .ib-bpage .ib-bcard .ib-bc-main { display: block; max-height: calc(1.4em * 3); }
 }
 .ib-bpage .ib-bcard .ib-bc-meta { float: right; display: inline-flex; height: calc(var(--ib-fs-14, 14px) * 1.4); margin: 0 0 0 8px; gap: 5px; }
+.ib-bpage .ib-bcard .ib-bc-head .ib-bc-meta { float: none; height: auto; margin: 0 0 0 auto; }
 .ib-bpage .ib-bcard .ib-bc-age { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 @media (hover: hover) and (pointer: fine) {
   .ib-bpage .ib-bcard .ib-bc-youlink > svg { display: none; }
