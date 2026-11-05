@@ -129,6 +129,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { foldCheckoutFolderProjects } from "./inbox-checkout-folders";
 import { combineSuggestions, type InboxAgentWork } from "./inbox-combine-suggestions";
 import { createInboxTidy } from "./inbox-tidy";
+import { createInboxListVersions } from "./inbox-list-delta";
 import { debugRoute, INBOX_DEBUG_PATH, resolveInboxDebug } from "@plannotator/shared/inbox/debug-log";
 import { perfPhase, retainPerfPhases, watchLoopStalls, withServerTiming } from "./inbox-perf";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
@@ -947,8 +948,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   let baseUrl = "";
   let portChanged = false;
   const statusListeners = new Set<() => void>();
-  /** A reply draft was saved or deleted (inbox-reply-drafts.ts): the windows' streams say `event: drafts`. */
-  const draftListeners = new Set<(threadId: string) => void>();
+  /**
+   * A reply draft was saved or deleted (inbox-reply-drafts.ts), or a compose draft saved, deleted or sent
+   * (inbox-compose.ts, no thread: null): the windows' streams say `event: drafts`.
+   */
+  const draftListeners = new Set<(threadId: string | null) => void>();
   /** An Ask AI conversation changed (inbox-ask.ts): the owner's windows' streams say `event: ask`. */
   const askListeners = new Set<(threadId: string) => void>();
   /** The sidebar's pins changed (inbox-pins.ts): the windows' streams say `event: pins`. */
@@ -1179,6 +1183,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     inbox_id: machines.selfId,
     machine_links: 1,
   });
+
+  /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
+  const listVersions = createInboxListVersions();
 
   const snoozesById = () => new Map(store.snoozes().map((snooze) => [snooze.thread_id, snooze]));
   /**
@@ -2521,7 +2528,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const sendReach = () => send(`event: reach\ndata: ${JSON.stringify(windows.reach(notificationsState().enabled))}\n\n`);
         const stopReach = windowId ? windows.subscribe(sendReach) : () => {};
         // A reply draft changed (any window's, or this one's): the list reads the rows' `unsent` again. Windows only.
-        const onDraft = (threadId: string) => send(`event: drafts\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
+        // A compose draft has no thread: `{ compose: true }` (additive; a window that predates it skips the frame).
+        const onDraft = (threadId: string | null) => send(`event: drafts\ndata: ${JSON.stringify(threadId === null ? { compose: true } : { thread_id: threadId })}\n\n`);
         if (windowId) draftListeners.add(onDraft);
         // An Ask AI conversation changed: the window reads it again. Only the owner's own window hears of it.
         const onAsk = (threadId: string) => send(`event: ask\ndata: ${JSON.stringify({ thread_id: threadId })}\n\n`);
@@ -3131,6 +3139,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     boardOn,
     machine: () => machines.selfId,
+    onDraftsChange: () => {
+      for (const listener of draftListeners) listener(null);
+    },
   });
   compose.sweep();
   // Reply drafts: the words typed in a thread's reply box, kept per thread (packages/server/inbox-reply-drafts.ts).
@@ -3482,10 +3493,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
       if (path === "/api/inbox/threads" && req.method === "GET") {
-        const rows = perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
+        const projectFilter = projectFilterOf(url);
+        const archivedMode = archivedModeOf(url);
+        const merged = url.searchParams.get("machines") === "1";
+        const snoozedMode = snoozedModeOf(url);
+        const rows = perfPhase("rows", () => listModel(projectFilter, archivedMode, merged, snoozedMode));
         // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
         // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
-        return json(ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows);
+        const model = ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows;
+        // `since` (the window, #2593): only the rows changed since the list it holds (inbox-list-delta.ts); the rest of
+        // the model, the labels too, goes as it is now. Without it, as before.
+        const since = url.searchParams.get("since");
+        if (since === null) return json(model);
+        return json(listVersions.answer(`${projectFilter ?? ""}|${archivedMode}|${merged ? 1 : 0}|${snoozedMode}`, model, since || null));
       }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {

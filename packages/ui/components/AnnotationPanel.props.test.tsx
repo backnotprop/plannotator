@@ -145,3 +145,32 @@ describe('AnnotationPanel consumer props', () => {
     expect(document.querySelector('.fixed.inset-0')).toBeNull();
   });
 });
+
+describe('AnnotationPanel host section at the timeline foot', () => {
+  const base = { isOpen: true, blocks: [], onSelect: () => {}, onDelete: () => {}, selectedId: null };
+
+  test.skipIf(!hasDom)('timelineFooter sits inside the scroll area, after the cards, so they scroll as one', async () => {
+    await mount(<AnnotationPanel {...base} annotations={[annotation]} timelineFooter={<div data-host-foot="" />} />);
+    const foot = host!.querySelector('[data-host-foot]')!;
+    const card = host!.querySelector('[data-annotation-id="a1"]')!;
+    expect(foot.parentElement === card.closest('.flex-col.gap-1\\.5')).toBe(true);
+    expect(Boolean(card.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('hideEmptyMessage drops the empty message and keeps the way to other files; absent, the message stays', async () => {
+    await mount(<AnnotationPanel {...base} annotations={[]} />);
+    expect(host!.textContent).toContain('No annotations yet');
+    act(() => root?.unmount());
+    host?.remove();
+
+    await mount(<AnnotationPanel {...base} annotations={[]} hideEmptyMessage />);
+    expect(host!.textContent).not.toContain('No annotations yet');
+    act(() => root?.unmount());
+    host?.remove();
+
+    const other = { path: '/other.md', label: 'other.md', isCurrent: false, annotations: [annotation] };
+    await mount(<AnnotationPanel {...base} annotations={[]} hideEmptyMessage annotationScope="current" onAnnotationScopeChange={() => {}} documentGroups={[other] as never} />);
+    expect(host!.textContent).not.toContain('No annotations yet');
+    expect(host!.querySelector('[data-annotation-view-all]') === null).toBe(false);
+  });
+});

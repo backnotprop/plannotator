@@ -897,6 +897,17 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   await expect(review.locator('.ib-gbody h1')).toHaveCount(0);
   await expect(review.locator('.ib-vhead .ib-from')).toHaveCount(0);
   await expect(review.locator('[data-pull-layer-step][aria-current="step"]')).toContainText('#412');
+  // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
+  // last row ends within one row of its box's bottom.
+  const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
+  const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
+  const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
+  expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
+  // The Global comment button sits on the Split | Unified tab's row (owner, q-bfcf3a4a B), left of it, not over it.
+  const addGlobal = (await review.locator('[data-guide-section-tab] [data-guide-global-comment-add]').boundingBox())!;
+  const layoutSwitch = (await review.locator('[data-guide-section-tab] [data-diff-style-switch]').boundingBox())!;
+  expect(Math.abs(addGlobal.y + addGlobal.height / 2 - (layoutSwitch.y + layoutSwitch.height / 2))).toBeLessThan(3);
+  expect(addGlobal.x + addGlobal.width).toBeLessThan(layoutSwitch.x);
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');

@@ -662,7 +662,8 @@ test("one project's list: three overlapping tiles, logos whole, with or without 
   // on rows the server sent: each needs a live session or the reply box to arise for real (as inbox-row-badges.spec.ts does).
   const listRoute = '**/api/inbox/threads?archived=exclude*';
   await page.route(listRoute, async (route) => {
-    const response = await route.fetch();
+    // Asked without `since`, the whole list: an answer of changed rows has no sections to put these on.
+    const response = await route.fetch({ url: route.request().url().replace(/&since=[^&]*/, '') });
     const model = (await response.json()) as { sections: { threads: Record<string, unknown>[] }[] };
     for (const row of model.sections.flatMap((s) => s.threads)) {
       if (row.thread_id === trio.thread_id) row.answered_not_sent = true;
