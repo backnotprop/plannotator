@@ -135,6 +135,32 @@ test('most recent also survives a remount', () => {
   expect(toggle()?.dataset.projectsSort).toBe('recent');
 });
 
+test('the toggle names and draws the order on screen, then what a press does', () => {
+  const sees = () => [toggle()!.getAttribute('aria-label'), toggle()!.querySelector('svg')!.getAttribute('data-icon')];
+  draw();
+  expect(sees()).toEqual(['Sorted by when added. Sort A to Z', 'sortList']);
+  press();
+  expect(sees()).toEqual(['Sorted A to Z. Sort by most recent', 'sortAZ']);
+  press();
+  expect(sees()).toEqual(['Sorted by most recent. Sort A to Z', 'sortRecent']);
+});
+
+test('the toggle going while it holds focus hands focus to the Projects header, not the page', () => {
+  draw();
+  act(() => toggle()!.focus());
+  draw({ projects: [PROJECTS[0]!] as never });
+  expect(toggle()).toBeNull();
+  expect(document.activeElement).toBe(host!.querySelector('[data-sidebar-section="projects"]'));
+});
+
+test('the toggle going without focus leaves focus where it is', () => {
+  draw();
+  const inbox = host!.querySelector<HTMLElement>('.ib-nav-inbox')!;
+  act(() => inbox.focus());
+  draw({ projects: [PROJECTS[0]!] as never });
+  expect(document.activeElement).toBe(inbox);
+});
+
 test('the choice survives a remount, and a press says the new order and never closes the section', () => {
   const said: string[] = [];
   draw({ announce: (text) => said.push(text) });

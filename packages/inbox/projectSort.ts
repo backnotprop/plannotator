@@ -55,6 +55,8 @@ export function projectActivity(sections: readonly InboxListSection[]): Readonly
   return latest;
 }
 
+const BY_NAME = new Intl.Collator(undefined, { sensitivity: 'base', numeric: true });
+
 /**
  * The projects in the chosen order. `added` is the order they came in. A to Z
  * goes by the name on screen, ignoring case and accents and counting numbers as
@@ -63,7 +65,7 @@ export function projectActivity(sections: readonly InboxListSection[]): Readonly
  * tie keeps the order they came in.
  */
 export function sortProjects<P extends { id: string; name: string }>(projects: readonly P[], sort: ProjectSort, activity: ReadonlyMap<string, string> = new Map()): readonly P[] {
-  if (sort === 'name') return [...projects].sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base', numeric: true }));
+  if (sort === 'name') return [...projects].sort((a, b) => BY_NAME.compare(a.name, b.name));
   if (sort === 'recent') {
     const at = (project: P) => activity.get(project.id) ?? '';
     return [...projects].sort((a, b) => (at(a) === at(b) ? 0 : at(a) > at(b) ? -1 : 1));

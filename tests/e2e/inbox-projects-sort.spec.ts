@@ -34,6 +34,8 @@ interface World {
   url: string;
   agent: SimAgent;
   paths: Map<string, string>;
+  /** Each project's first thread. */
+  threads: Map<string, string>;
   context: BrowserContext;
   page: Page;
 }
@@ -43,7 +45,8 @@ const side = (page: Page) => page.getByRole('complementary', { name: 'Inbox navi
 const header = (scope: Locator) => scope.locator('[data-sidebar-section="projects"]');
 const toggle = (scope: Locator) => scope.locator('[data-projects-sort]');
 const names = (scope: Locator) => scope.locator('.ib-projs .ib-name');
-const cookie = async (page: Page) => (await page.context().cookies()).find((c) => c.name === 'plannotator-inbox-projects-sort')?.value;
+const SORT_COOKIE = 'plannotator-inbox-projects-sort';
+const cookie = async (page: Page) => (await page.context().cookies()).find((c) => c.name === SORT_COOKIE)?.value;
 
 async function shot(page: Page, name: string, clip?: { x: number; y: number; width: number; height: number }): Promise<void> {
   for (const scheme of ['light', 'dark'] as const) {
@@ -83,8 +86,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const url = started.stdout.trim();
   const agent = await SimAgent.connect({ binary: builtBinary, env, name: 'Claude Code', host: 'claude-code' });
   const paths = new Map(ADDED.map((name) => [name, scratchProject(join(root, 'src'), name)]));
+  const threads = new Map<string, string>();
   for (const name of ADDED) {
-    await agent.send({ project_path: paths.get(name)!, subject: `Status of ${name}`, body: 'The build passed and the change is ready to read.' });
+    const sent = await agent.send({ project_path: paths.get(name)!, subject: `Status of ${name}`, body: 'The build passed and the change is ready to read.' });
+    threads.set(name, sent.thread_id as string);
     await new Promise((done) => setTimeout(done, 5));
   }
   for (const name of ['acme-web', 'infra']) {
@@ -93,7 +98,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   }
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, deviceScaleFactor: 2, colorScheme: 'light' });
   const page = await context.newPage();
-  world = { url, agent, paths, context, page };
+  world = { url, agent, paths, threads, context, page };
 });
 
 test.afterAll(async () => {
@@ -121,6 +126,14 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await header(nav).hover();
   await expect(toggle(nav)).toHaveCSS('opacity', '1');
   await shot(page, 'desktop-1-default-hover', clip);
+
+  // The row is exactly the header: the gap above it is not hover, and the header keeps its 12 px above.
+  const headerBox = (await header(nav).boundingBox())!;
+  const rowBox = (await nav.locator('.ib-secrow').boundingBox())!;
+  expect([rowBox.y, rowBox.height]).toEqual([headerBox.y, headerBox.height]);
+  await expect(nav.locator('.ib-secrow')).toHaveCSS('margin-top', '12px');
+  await page.mouse.move(headerBox.x + headerBox.width / 2, headerBox.y - 6);
+  await expect(toggle(nav)).toHaveCSS('opacity', '0');
 
   await toggle(nav).click();
   await expect(names(nav)).toHaveText(AZ);
@@ -170,7 +183,7 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
 test('a phone: the sheet always shows it, a 44 px target beside the chevron, and a tap keeps the sheet open', async () => {
   const { page, url } = world;
   // A browser that has not chosen, as a phone decides on its own.
-  await page.context().clearCookies({ name: 'plannotator-inbox-projects-sort' });
+  await page.context().clearCookies({ name: SORT_COOKIE });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(url);
   await page.locator('.ib-lhead').getByRole('button', { name: 'Toggle Sidebar' }).click();
@@ -202,4 +215,49 @@ test('a phone: the sheet always shows it, a 44 px target beside the chevron, and
   await toggle(sheet).click();
   await expect(sheet).toBeVisible();
   await expect(names(sheet)).toHaveText(AZ);
+});
+
+test('most recent: a row in view moving up leaves the sidebar scrolled where it was', async () => {
+  const { context, page, url } = world;
+  await context.addCookies([{ name: SORT_COOKIE, value: 'recent', url }]);
+  await page.setViewportSize({ width: 1280, height: 480 });
+  await page.goto(url);
+  const nav = side(page);
+  const scroller = nav.locator('.ib-sidescroll');
+  await expect(names(nav)).toHaveCount(ADDED.length);
+  // Scrolled to the end: the first row fully in view is the one scroll anchoring would pick and follow.
+  const { top, name } = await scroller.evaluate((el) => {
+    el.scrollTop = el.scrollHeight;
+    const box = el.getBoundingClientRect();
+    const row = [...el.querySelectorAll('.ib-projs .ib-name')].find((node) => node.getBoundingClientRect().top >= box.top)!;
+    return { top: el.scrollTop, name: row.textContent! };
+  });
+  expect(top).toBeGreaterThan(0);
+  expect(await names(nav).first().textContent()).not.toBe(name);
+  await world.agent.send({ project_path: world.paths.get(name)!, subject: `Newer on ${name}`, body: 'A later change.' });
+  await expect(names(nav).first()).toHaveText(name);
+  expect(await scroller.evaluate((el) => el.scrollTop)).toBe(top);
+});
+
+test('most recent counts a snoozed thread, which is in the list but in no section', async () => {
+  const { context, page, url } = world;
+  await context.addCookies([{ name: SORT_COOKIE, value: 'recent', url }]);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await page.goto(url);
+  const nav = side(page);
+  await expect(names(nav)).toHaveCount(ADDED.length);
+  // Its project has this thread only, and newer ones than the last row: with no activity read from it, it would fall to the bottom.
+  const before = await names(nav).allTextContents();
+  expect(before.indexOf('app10')).toBeLessThan(before.length - 1);
+  await page.evaluate(
+    async ([threadId, until]) => {
+      const list = (await (await fetch('/api/inbox/threads?archived=exclude')).json()) as { serverSession: string };
+      const res = await fetch(`/api/inbox/threads/${threadId}/snooze`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession: list.serverSession, until }) });
+      if (!res.ok) throw new Error(`snooze ${res.status}`);
+    },
+    [world.threads.get('app10')!, new Date(Date.now() + 3_600_000).toISOString()] as const,
+  );
+  await page.reload();
+  await expect(page.locator('[data-section-id="snoozed"]')).toBeVisible();
+  await expect(names(nav)).toHaveText(before);
 });

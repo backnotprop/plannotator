@@ -210,9 +210,11 @@ export function Sidebar(props: SidebarProps) {
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
   const projectSort = useProjectSort();
+  // Only most recent reads the activity, so another order does not sort again when a row's time changes.
+  const activity = projectSort === 'recent' ? props.projectActivity : undefined;
   const shown = useMemo(
-    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, props.projectActivity),
-    [props.projects, props.projectNames, held, projectSort, props.projectActivity],
+    () => sortProjects(shownProjects(props.projects, held).map((project) => ({ ...project, name: props.projectNames?.get(project.id) ?? project.name })), projectSort, activity),
+    [props.projects, props.projectNames, held, projectSort, activity],
   );
   const pins = props.pins ?? [];
   // Pinned and Projects close like folders; closed, a section still shows where the person is (the open pinned thread, the project the list shows).
@@ -541,7 +543,7 @@ export function Sidebar(props: SidebarProps) {
           />
           {!projectsClosed && shown.length > 1 && <ProjectSortToggle sort={projectSort} announce={props.announce} />}
         </div>
-        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined}>
+        <div className="ib-projs" id={projectsBodyId} role="group" aria-labelledby={projectsLabelId} data-closed={projectsClosed ? '' : undefined} data-recent={projectSort === 'recent' ? '' : undefined}>
           {/* Closed: only the project the list shows, if any; never the empty notes. */}
           {firstRun ? (
             !projectsClosed && <div className="ib-side-empty">Projects appear here when an agent writes from one.</div>
@@ -707,13 +709,22 @@ function SectionHeader(props: {
  * is the order on screen, a press goes to the next. It shows on the header's
  * hover and keyboard focus; where nothing hovers (a phone, a tablet) it always
  * shows. Only with two projects or more, and only while the section is open.
- * Not navigation: the phone sheet stays open.
+ * Not navigation: the phone sheet stays open. Going while it holds focus (the
+ * list fell to one project), it hands focus to the header, never the page.
  */
 function ProjectSortToggle({ sort, announce }: { sort: ProjectSort; announce?: (text: string) => void }) {
   const { icon, label, next, said } = projectSortControl(sort);
+  const button = useRef<HTMLButtonElement>(null);
+  useLayoutEffect(() => {
+    const node = button.current;
+    return () => {
+      if (node && node === document.activeElement) node.closest('.ib-secrow')?.querySelector<HTMLElement>('[data-sidebar-section]')?.focus({ preventScroll: true });
+    };
+  }, []);
   return (
     <Tip content={label}>
       <button
+        ref={button}
         type="button"
         className="ib-proj-sort"
         aria-label={label}
