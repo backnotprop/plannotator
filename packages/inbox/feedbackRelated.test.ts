@@ -257,6 +257,29 @@ describe('the opening decides', () => {
     expect(shown.slice(shown.indexOf(true)).every(Boolean)).toBe(true);
   });
 
+  test('an opening ended by "/ /": what it found holds through a long tail, word by word', () => {
+    const message =
+      "Support Jira ticket URLs as Board card references / / The Board presently rejects those URLs in the reference field, and the docs only mention GitHub and GitLab. We plan every piece of work in Jira, so most of what a card should point to lives there and not in a repository. When I paste a ticket address the field turns red and says it does not recognize the host, and nothing is saved. I have tried the short ticket key and the long address with the project in it, and neither one gets through. It would help a lot if the card showed the ticket and its status beside the title, the way it does for a pull request, and if an agent could read the ticket when it picks up the card.";
+    const typed = message.split(' ');
+    const lines = typed.map((_, n) => said(typed.slice(0, n + 1).join(' ')).join(' | '));
+    const from = lines.indexOf('Jira links on Board cards');
+    expect(from).toBeGreaterThan(-1);
+    expect(from).toBeLessThan(10);
+    expect(lines.slice(from).every((line) => line === 'Jira links on Board cards')).toBe(true);
+  });
+
+  test('a first line with no full stop is the opening too', () => {
+    expect(said('big Question cards\nand a dozen other words about the reply box and the send button')).toEqual(['Question cards']);
+  });
+
+  test('a greeting is not the opening: the words after it are', () => {
+    expect(said('Hi there,\nbig Question cards please')).toEqual(['Question cards']);
+  });
+
+  test('one slash is not a break: "bug / idea" stays in its sentence', () => {
+    expect(said('big Question cards / and a dozen other words about the reply box and the send button')).toEqual([]);
+  });
+
   test('nothing draws on the product name and a word that says nothing yet', () => {
     // As in the shipped file, where titles say "show" and "start" often.
     const common = Array.from({ length: 11 }, (_, n) => [release(`The thread list shows number ${n}`), release(`Start an agent number ${n} from the Inbox`)]).flat();

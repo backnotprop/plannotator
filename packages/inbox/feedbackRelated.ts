@@ -163,9 +163,9 @@ const LATER_MIN_SCORE = MIN_SCORE * 2;
 /** Later parts add at most this many lines, and never replace one. */
 const LATER_LINKS = 1;
 
-/** The message by line and sentence, with a run-on first sentence cut after OPENING_WORDS words so it cannot gather loose ones. */
+/** The message by line, sentence and "/ /" break, with a run-on first sentence cut after OPENING_WORDS words so it cannot gather loose ones. */
 function partsOf(typed: string): string[] {
-  const [first = '', ...rest] = typed.split(/\n+|(?<=[.?!])\s+/);
+  const [first = '', ...rest] = typed.split(/\n+|(?<=[.?!])\s+|\s\/\s*\/\s/);
   const all = first.split(/\s+/);
   const cut = all.length > OPENING_WORDS ? [all.slice(0, OPENING_WORDS).join(' '), all.slice(OPENING_WORDS).join(' ')] : [first];
   return [...cut, ...rest].filter(Boolean);
@@ -245,7 +245,7 @@ function matches(index: RelatedIndex, text: string, later: boolean): { entry: En
  * Up to three lines for what is typed, best first; none is the usual answer.
  * Never throws on any text. The same text always gives the same lines.
  *
- * The opening (the first line or sentence) decides, so what it found holds
+ * The opening (the first line, sentence or part before a "/ /") decides, so what it found holds
  * however much is written after it. A later part may only add a line, and only
  * by naming a title outright or asking for a feature in a few words: scored
  * across a whole message, loose words kept replacing the good answer.

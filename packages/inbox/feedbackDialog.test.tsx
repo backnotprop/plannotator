@@ -496,6 +496,19 @@ describe.skipIf(!hasDom)('These might help under the box', () => {
       expect(dialog.cat('bug').getAttribute('aria-pressed')).toBe('true');
     });
 
+    test('a line that goes away is a change too: a press in the 400 ms after does nothing', async () => {
+      const calls = stubFetch(() => Response.json({ ok: true }));
+      const dialog = await typeAndPause('need a done button');
+      clockAt(401);
+      type(dialog.box(), 'works great, thank you');
+      await pause();
+      expect(list().querySelector('a') === null).toBe(true);
+      clockAt(250);
+      expect(pressOn(dialog.send())).toBe(true);
+      await act(async () => new Promise((done) => setTimeout(done, 0)));
+      expect(calls).toEqual([]);
+    });
+
     test('opening the form is not a change: a press works from the start', async () => {
       const dialog = render();
       await act(async () => {
