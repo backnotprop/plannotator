@@ -446,3 +446,28 @@ describe('cross-repo owner/repo#N refs', () => {
     expect(html).toContain('<code');
   });
 });
+
+describe('code spans: a run of N backticks closes at the next run of exactly N', () => {
+  test('a double-backtick span holds a single backtick', () => {
+    expect(renderInline('``use `x` here``')).toContain('<code class="px-1.5 py-0.5 rounded bg-muted text-sm font-mono">use `x` here</code>');
+  });
+
+  test('one space comes off each side, so a span can start and end with a backtick', () => {
+    expect(renderInline('`` `x` ``')).toContain('>`x`</code>');
+    // All spaces: nothing is stripped.
+    expect(renderInline('`` ``')).toContain('> </code>');
+  });
+
+  test('a run with no closing run of its length stays literal, all of it', () => {
+    const html = renderInline('``a` b');
+    expect(html).not.toContain('<code');
+    expect(html).toContain('``a` b');
+  });
+
+  test('single-backtick spans read as before, several on a line', () => {
+    const html = renderInline('`a` and ``b``');
+    expect(html.match(/<code /g)?.length).toBe(2);
+    expect(html).toContain('>a</code>');
+    expect(html).toContain('>b</code>');
+  });
+});

@@ -159,6 +159,30 @@ const CodeFileLink: React.FC<{
 };
 
 const DANGEROUS_PROTOCOL = /^\s*(javascript|data|vbscript|file)\s*:/i;
+/**
+ * A code span at the start of `text`, as CommonMark reads one: a run of N
+ * backticks closed by the next run of exactly N, so a span can hold shorter
+ * runs (``use `x` here``). One space comes off each side when both sides have
+ * one and the content is not all spaces, so `` `x` `` shows `x` in backticks.
+ * Null when no run of the same length closes it.
+ */
+export function matchCodeSpan(text: string): { content: string; length: number } | null {
+  const open = /^`+/.exec(text);
+  if (!open) return null;
+  const width = open[0].length;
+  const runs = /`+/g;
+  runs.lastIndex = width;
+  for (let run = runs.exec(text); run; run = runs.exec(text)) {
+    if (run[0].length !== width) continue;
+    let content = text.slice(width, run.index);
+    if (content.length > 1 && content[0] === ' ' && content[content.length - 1] === ' ' && content.trim() !== '') {
+      content = content.slice(1, -1);
+    }
+    return content ? { content, length: run.index + width } : null;
+  }
+  return null;
+}
+
 function sanitizeLinkUrl(url: string): string | null {
   if (DANGEROUS_PROTOCOL.test(url)) return null;
   return url;
@@ -788,9 +812,18 @@ export const InlineMarkdown: React.FC<{
     }
 
     // Inline code: `code` — when the content is a code file path, render as clickable
-    match = remaining.match(/^`([^`]+)`/);
-    if (match) {
-      const codeContent = match[1];
+    const codeSpan = remaining[0] === '`' ? matchCodeSpan(remaining) : null;
+    if (remaining[0] === '`' && !codeSpan) {
+      // A run with no closing run of the same length is literal, all of it: its
+      // tail must not open a shorter span with a later backtick.
+      const run = remaining.match(/^`+/)![0];
+      parts.push(run);
+      remaining = remaining.slice(run.length);
+      previousChar = '`';
+      continue;
+    }
+    if (codeSpan) {
+      const codeContent = codeSpan.content;
       if (isCodeFilePath(codeContent) && onOpenCodeFile) {
         const cleanPath = codeContent.replace(/#.*$/, '');
         parts.push(
@@ -811,8 +844,8 @@ export const InlineMarkdown: React.FC<{
           </CodeSpan>,
         );
       }
-      remaining = remaining.slice(match[0].length);
-      previousChar = match[0][match[0].length - 1] || previousChar;
+      remaining = remaining.slice(codeSpan.length);
+      previousChar = '`';
       continue;
     }
 
