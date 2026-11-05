@@ -124,10 +124,10 @@ describe('What to know', () => {
   const errors = (r: ReturnType<typeof checkShapeBoard>) => (r.ok ? '' : r.errors.join('\n'));
 
   test('up to the limit it stores; past it the agent is told to cut, and how far', () => {
-    expect(knowing('x'.repeat(SHAPE_LIMITS.know)).ok).toBe(true);
-    const long = knowing('x'.repeat(SHAPE_LIMITS.know + 1));
+    expect(knowing('x'.repeat(1200)).ok).toBe(true);
+    const long = knowing('x'.repeat(1201));
     expect(long.ok).toBe(false);
-    expect(errors(long)).toContain(`views.know: is ${SHAPE_LIMITS.know + 1} characters; at most ${SHAPE_LIMITS.know}`);
+    expect(errors(long)).toContain('views.know: is 1201 characters; at most 1200');
     expect(errors(long)).toContain('Cut it');
   });
 
