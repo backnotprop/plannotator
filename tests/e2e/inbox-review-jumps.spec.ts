@@ -191,7 +191,11 @@ async function settledPlace(page: Page, body: Locator, path: string): Promise<nu
 /** Files on screen with no line drawn, leaving out the renames and binaries, which have none to draw. */
 const blankCode = async (body: Locator) => (await blankOnScreen(body)).filter((path) => !path.includes('/moved/') && !path.startsWith('assets/'));
 
-const railButton = (page: Page, index: number) => page.locator('[data-review-message] [data-review-files] li button').nth(index);
+/** Goes to a file from the menu of changed files in the review's top bar. */
+async function jumpToFile(page: Page, path: string) {
+  await page.locator('[data-review-message] [data-review-jump]').click();
+  await page.locator(`[data-review-files] [data-review-jump-row="${path}"]`).click();
+}
 
 test('a jump far down a review of 300 files lands exactly, and mounts nothing it passes', async () => {
   const { page } = world;
@@ -200,7 +204,7 @@ test('a jump far down a review of 300 files lands exactly, and mounts nothing it
   // Down, far up, and down again: each lands where the heights above it have never been measured.
   for (const [index, passedFrom, passedTo] of [[150, 20, 140], [40, 50, 140], [280, 50, 270]] as const) {
     await forget(page);
-    await railButton(page, index).click();
+    await jumpToFile(page, fixture.paths[index]);
     expect(await settledPlace(page, body, fixture.paths[index]), `file ${index}`).toBe(PLACE);
     await expect.poll(() => blankCode(body)).toEqual([]);
     const ever = await mountedEver(page);
@@ -218,7 +222,7 @@ test('a jump to a file nearby scrolls smoothly and lands exactly', async () => {
   const { page } = world;
   const fixture = manyFiles();
   const body = await openFiles(fixture);
-  await railButton(page, 100).click();
+  await jumpToFile(page, fixture.paths[100]);
   expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE);
 
   const stops = body.evaluate((el) => new Promise<number>((done) => {
@@ -231,7 +235,7 @@ test('a jump to a file nearby scrolls smoothly and lands exactly', async () => {
     };
     requestAnimationFrame(look);
   }));
-  await railButton(page, 103).click();
+  await jumpToFile(page, fixture.paths[103]);
   expect(await stops, 'the places the scroll went through on its way').toBeGreaterThan(3);
   expect(await settledPlace(page, body, fixture.paths[103])).toBe(PLACE);
 });
@@ -287,7 +291,7 @@ test('a 30,000-line diff: jumping to it draws it with no freeze, and End and Hom
   expect(await mountedEver(page)).not.toContain(huge);
 
   await forget(page);
-  await railButton(page, 20).click();
+  await jumpToFile(page, fixture.paths[20]);
   expect(await settledPlace(page, body, huge)).toBe(PLACE);
   await expect.poll(() => blankOnScreen(body), { timeout: 10_000 }).toEqual([]);
   // Highlighting it on the main thread takes 1,500 ms and up, here and on any slower machine.
