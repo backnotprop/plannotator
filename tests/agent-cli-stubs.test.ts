@@ -12,6 +12,8 @@ import { join, relative, resolve } from "node:path";
 import { AGENT_SPECS, type AgentEnvironment } from "../packages/server/inbox-agents";
 import { MARKER_ENGINES } from "../packages/server/marker-review";
 import { AGENT_CLIS, agentCliCalls, writeAgentCliStubs } from "./e2e/agent-cli-stubs";
+import { stubbedAgentClis } from "./helpers/agent-cli-guard";
+import { GH_TRIPWIRE_BIN } from "./setup/gh-tripwire";
 
 const repoRoot = resolve(import.meta.dir, "..");
 const stubbed = new Set<string>(AGENT_CLIS);
@@ -105,6 +107,26 @@ describe("a stub", () => {
     expect(run.status).toBe(127);
     expect(run.stdout).toBe("");
     expect(agentCliCalls(dir)).toEqual(["codex --version"]);
+  });
+});
+
+describe("a bun test's child PATH (tests/helpers/agent-cli-guard.ts)", () => {
+  const agents = stubbedAgentClis();
+
+  test.skipIf(process.platform === "win32")("finds every agent CLI in the stubs, and bun, with no other folder that could hold an agent", () => {
+    const { PATH } = agents.env;
+    expect(AGENT_CLIS.filter((name) => Bun.which(name, { PATH }) !== join(agents.bin, name))).toEqual([]);
+    expect(PATH.split(":")).toEqual([agents.bin, GH_TRIPWIRE_BIN, "/usr/bin", "/bin"]);
+    expect(spawnSync("bun", ["--version"], { env: { PATH }, encoding: "utf8" }).status).toBe(0);
+  });
+
+  /** Test files that start the CLI's Inbox: each gives it this PATH, or a copy of an old env brings the real CLIs back. */
+  test("is the one a CLI test that starts an Inbox gives its child", () => {
+    const dir = join(repoRoot, "apps/hook/server");
+    const exposed = readdirSync(dir)
+      .filter((name) => name.endsWith(".test.ts") && /inboxEntryOf|stopProvenInboxes|"inbox"/.test(readFileSync(join(dir, name), "utf8")))
+      .filter((name) => /^\s*PATH: process\.env\.PATH\b/m.test(readFileSync(join(dir, name), "utf8")));
+    expect(exposed).toEqual([]);
   });
 });
 
