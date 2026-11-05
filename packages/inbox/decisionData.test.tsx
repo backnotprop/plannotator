@@ -104,6 +104,18 @@ test.skipIf(!hasDom)('Ask never waits on the count: while it runs, Ask is there 
   expect(input.disabled).toBe(false);
 });
 
+test.skipIf(!hasDom)('the quiet place waits a moment before it shows, so a count that lands soon never flashes it', async () => {
+  answer = never;
+  const begun = performance.now();
+  const el = await open();
+  await act(async () => {
+    await new Promise((r) => setTimeout(r, 20));
+  });
+  // A stalled machine may have run past the patience: only a look inside it can say anything.
+  if (performance.now() - begun < 100) expect(el.querySelector('[data-decision-counting]')).toBeNull();
+  await until(() => el.querySelector('[data-decision-counting]') !== null, 'the quiet place');
+});
+
 test.skipIf(!hasDom)('on a small store the numbers land first: no quiet place flashes before them', async () => {
   const el = await open();
   await until(() => el.querySelector('[data-decision-insights]') !== null, 'Insights');
@@ -229,6 +241,13 @@ test.skipIf(!hasDom)('a narrow section lists who asks; a wider one has the table
   const narrow = await open(340);
   await until(() => narrow.querySelector('ul.ib-dd-gl') !== null, 'the list');
   expect(narrow.querySelector('[data-group="agent"]')!.textContent).toContain('40 decisions');
+  act(() => root?.unmount());
+  host?.remove();
+
+  // Where the table's number columns would leave too little of an ordinary name ("Claud…"), it is the list.
+  const tight = await open(568);
+  await until(() => tight.querySelector('ul.ib-dd-gl') !== null, 'the list at 568');
+  expect(tight.querySelector('[data-group] table')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
 

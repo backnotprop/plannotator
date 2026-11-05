@@ -418,7 +418,6 @@ function Trends({ trends }: { trends: DecisionTrend[] }) {
 
 function Insights({ model, days, onDays, narrow }: { model: DecisionDataSummary; days: number; onDays: (days: number) => void; narrow: boolean }) {
   const started = model.range.earliest ?? model.range.until;
-  const since = model.range.since && model.range.since > started ? model.range.since : started;
   const { counts } = model;
   const insights = insightsOf(model);
   return (
@@ -428,7 +427,7 @@ function Insights({ model, days, onDays, narrow }: { model: DecisionDataSummary;
         <Trends trends={model.trends} />
         <Range days={days} onDays={onDays} />
         <p data-decision-lede="">
-          {since === started ? `Since ${dayLabel(started)}` : 'In this range'}: <b>{plural(counts.answered, 'decision')}</b>, {counts.skipped} skipped, {counts.set_aside} closed with Mark read, {model.waiting} waiting on you.
+          Since {dayLabel(started)}: <b>{plural(counts.answered, 'decision')}</b>, {counts.skipped} skipped, {counts.set_aside} closed with Mark read, {model.waiting} waiting on you.
         </p>
         {counts.answered + counts.skipped === 0 ? (
           <div className="ib-card ib-sempty" data-decision-filtered="">
@@ -450,7 +449,7 @@ function Insights({ model, days, onDays, narrow }: { model: DecisionDataSummary;
               </ul>
             )}
             <h3 className="ib-dd-sub">Decisions by day</h3>
-            <DayColumns days={model.days} since={since} until={model.range.until} height={130} />
+            <DayColumns days={model.days} since={started} until={model.range.until} height={130} />
             <ByDay days={model.days} />
             <h3 className="ib-dd-sub">Who asks</h3>
             <GroupRows groups={model.agents} min={model.rate_min} kind="agent" narrow={narrow} />
@@ -471,6 +470,9 @@ function Insights({ model, days, onDays, narrow }: { model: DecisionDataSummary;
   );
 }
 
+/** Under this the table's number columns leave too little of an ordinary name ("Claud…"), so Who asks is a list. */
+const TABLE_MIN_WIDTH = 640;
+
 /** How long the section may stay empty for a count on its way: on a small store the numbers are back first, so the first paint is already right. */
 const COUNT_PATIENCE_MS = 150;
 
@@ -483,7 +485,7 @@ export function DecisionData() {
     return () => window.clearTimeout(timer);
   }, []);
   const [ref, width] = useWidth<HTMLDivElement>();
-  const narrow = width > 0 && width < 520;
+  const narrow = width > 0 && width < TABLE_MIN_WIDTH;
 
   let content: ReactNode = null;
   if (failed) content = <DecisionAsk />;

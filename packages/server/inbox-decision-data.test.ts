@@ -48,8 +48,8 @@ function seed(data: string, projectRoot: string, count: number) {
   return { thread };
 }
 
-async function start(data: string) {
-  const server = await startInboxServer({ dataDir: data });
+async function start(data: string, options: { phones?: boolean } = {}) {
+  const server = await startInboxServer({ dataDir: data, ...options });
   servers.push(server);
   return server;
 }
@@ -139,7 +139,11 @@ test("counting hands the server back: another request is answered before a big c
   });
 });
 
-test("a reader who leaves stops the count, and the server keeps answering", async () => {
+for (const [what, query] of [
+  ["count", "days=0&tz=0"],
+  ["CSV", "days=0&format=csv"],
+] as const) {
+test(`a reader who leaves stops the ${what}, and the server keeps answering`, async () => {
   const world = scratch();
   seed(world.data, world.project, 1500);
   const server = await start(world.data);
@@ -151,12 +155,12 @@ test("a reader who leaves stops the count, and the server keeps answering", asyn
   }) as typeof setImmediate;
   try {
     await withFastClock(async () => {
-      await (await fetch(`${base(server)}/api/inbox/decision-data?days=0&tz=0`)).text();
+      await (await fetch(`${base(server)}/api/inbox/decision-data?${query}`)).text();
       const whole = slices;
       expect(whole).toBeGreaterThan(10);
       slices = 0;
       const controller = new AbortController();
-      const left = fetch(`${base(server)}/api/inbox/decision-data?days=0&tz=0`, { signal: controller.signal }).catch(() => null);
+      const left = fetch(`${base(server)}/api/inbox/decision-data?${query}`, { signal: controller.signal }).catch(() => null);
       await new Promise((resolve) => savedImmediate(resolve));
       controller.abort();
       await left;
@@ -168,6 +172,22 @@ test("a reader who leaves stops the count, and the server keeps answering", asyn
     globalThis.setImmediate = savedImmediate;
   }
   expect((await fetch(`${base(server)}/api/inbox/health`)).status).toBe(200);
+});
+}
+
+test("the phone door does not carry the numbers or the CSV", async () => {
+  const world = scratch();
+  seed(world.data, world.project, 1);
+  const server = await start(world.data, { phones: true });
+  expect((await read(server)).counts.answered).toBe(1);
+  const made = (await (await fetch(`${base(server)}/api/inbox/pairing`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession }) })).json()) as { offer: { code: string } };
+  const paired = await fetch(`${base(server)}/api/inbox/device/pair`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code: made.offer.code, name: "iPhone", platform: "ios" }) });
+  const { token } = (await paired.json()) as { token: string };
+  for (const query of ["days=90&tz=0", "format=csv&days=90"]) {
+    const refused = await fetch(`${base(server)}/api/inbox/device/decision-data?${query}`, { headers: { Authorization: `Bearer ${token}` } });
+    expect(refused.status).toBe(404);
+    expect(((await refused.json()) as { code: string }).code).toBe("device_route_not_found");
+  }
 });
 
 test("a delete through the window's own route keeps the numbers", async () => {

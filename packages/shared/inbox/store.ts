@@ -17,10 +17,14 @@
 import {
   appendFileSync,
   chmodSync,
+  closeSync,
   existsSync,
+  fstatSync,
   mkdirSync,
+  openSync,
   readdirSync,
   readFileSync,
+  readSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -424,6 +428,28 @@ export interface InboxDiskUsage {
   dir: string;
   bytes: number;
   projects: InboxProjectUsage[];
+}
+
+/**
+ * Whether a file's last line was torn by a crash, so the next append starts on a fresh line and can't be glued to it.
+ * For a file the store never reads into memory, so it has no `tornFiles` entry; the last byte says, without reading the rest.
+ */
+function endsMidLine(path: string): boolean {
+  let fd: number;
+  try {
+    fd = openSync(path, "r");
+  } catch {
+    return false;
+  }
+  try {
+    const { size } = fstatSync(fd);
+    if (size === 0) return false;
+    const last = Buffer.alloc(1);
+    readSync(fd, last, 0, 1, size - 1);
+    return last[0] !== 0x0a;
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /** An annotation as stored: without the exporter's `exportLocation`, which only the window sets, on its export copies. */
@@ -5510,14 +5536,21 @@ export class InboxStore {
   /**
    * Settings -> Decision data keeps its numbers when a thread goes (the owner, round 2): one line per question, no
    * words, written before the delete. A crash in between leaves a line beside a question still stored, which the count
-   * reads once. A line that cannot be written costs a number, never the person's delete.
+   * reads once. A line that cannot be written, or a record that cannot be read, costs a number, never the person's
+   * delete: Delete is the way out of a bad thread.
    */
   private keepDecisionLines(which: (question: InboxQuestionRecord) => boolean): void {
-    const questions = [...this.questions.values()].filter(which);
-    const lines = decisionLinesOf(questions, this.messages, (id) => this.decisionProjectLabel(id));
-    if (!lines) return;
     try {
-      appendFileSync(join(this.dir, DECISION_LINES_FILE), lines, { mode: 0o600 });
+      const questions = [...this.questions.values()].filter(which);
+      const lines = decisionLinesOf(
+        questions,
+        this.messages,
+        (id) => this.decisionProjectLabel(id),
+        (message) => this.closedByArchive(message),
+      );
+      if (!lines) return;
+      const file = join(this.dir, DECISION_LINES_FILE);
+      appendFileSync(file, `${endsMidLine(file) ? "\n" : ""}${lines}`, { mode: 0o600 });
     } catch {
       // See above.
     }
@@ -5535,6 +5568,7 @@ export class InboxStore {
       labelOf: (id) => this.decisionProjectLabel(id),
       messages: [...this.messages.values()],
       byId: this.messages,
+      closedByArchive: (message) => this.closedByArchive(message),
       questions: [...this.questions.values()],
     };
   }

@@ -42,6 +42,8 @@ export interface DecisionDataInput {
   messages: readonly InboxMessage[];
   /** The store's own map, read only, so a calculation adds no copy of it. */
   byId: ReadonlyMap<string, InboxMessage>;
+  /** The Inbox's own rule: the archive closed this message's questions. One an agent sent after the archive line stays live. */
+  closedByArchive: (message: InboxMessage) => boolean;
   questions: readonly InboxQuestionRecord[];
   /** `DECISION_LINES_FILE`'s text, read before the calculation. */
   deleted?: string;
@@ -78,19 +80,18 @@ function tookRecommendation(question: InboxQuestionRecord): { offered: boolean; 
 }
 
 /** The row of one stored question, or null when it is not a question an agent asked. */
-export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string): DecisionRow | null {
+export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
   if (question.kind === "action") return null;
   const message = byId.get(question.message_id);
   if (!message || message.author.kind !== "agent") return null;
   const asked = ms(message.created_at);
   if (asked === null) return null;
-  const root = byId.get(message.thread_id);
   const sent = question.sent_reply_id ? ms(byId.get(question.sent_reply_id)?.created_at) : null;
   let fate: DecisionFate;
   if (question.superseded_by) fate = "replaced";
   else if (question.set_aside) fate = "set_aside";
   else if (question.answer && question.revision > 0 && question.sent_revision === question.revision) fate = question.answer.skipped ? "skipped" : "answered";
-  else if (root?.resolved_at) fate = "archived";
+  else if (closedByArchive(message)) fate = "archived";
   else fate = question.answer ? "picked_unsent" : "open";
   const decided = fate === "answered" || fate === "skipped";
   const { offered, took } = tookRecommendation(question);
@@ -113,6 +114,46 @@ export function decisionRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<s
   };
 }
 
+const DAY_MS = 86_400_000;
+/** A time every later step can use, even moved into the reader's zone: `new Date(...).toISOString()` throws past this. */
+const readableTime = (at: unknown): at is number => typeof at === "number" && Number.isFinite(at) && Math.abs(at) <= 8.64e15 - 2 * DAY_MS;
+const readableTimeOrNull = (at: unknown): at is number | null => at === null || readableTime(at);
+const FATES: ReadonlySet<unknown> = new Set<DecisionFate>(["answered", "skipped", "set_aside", "replaced", "archived", "open", "picked_unsent"]);
+
+/** Every field the count and the CSV use, of the type they use it as. */
+function isReadableRow(row: Partial<Record<keyof DecisionRow, unknown>> | null | undefined): row is DecisionRow {
+  return (
+    typeof row === "object" &&
+    row !== null &&
+    typeof row.id === "string" &&
+    typeof row.thread_id === "string" &&
+    typeof row.project_id === "string" &&
+    typeof row.agent === "string" &&
+    typeof row.kind === "string" &&
+    readableTime(row.asked_at) &&
+    readableTimeOrNull(row.answered_at) &&
+    readableTimeOrNull(row.sent_at) &&
+    FATES.has(row.fate) &&
+    (row.took === null || typeof row.took === "boolean") &&
+    typeof row.offered === "boolean" &&
+    typeof row.stopped === "boolean" &&
+    typeof row.holds_up === "boolean" &&
+    typeof row.files === "boolean" &&
+    typeof row.revisions === "number" &&
+    Number.isFinite(row.revisions)
+  );
+}
+
+/** A stored record's row, or null for one that can't be read: it costs its own number, never the count, the CSV or a delete. */
+function readableRowOf(question: InboxQuestionRecord, byId: ReadonlyMap<string, InboxMessage>, headOf: (projectId: string) => string, closedByArchive: (message: InboxMessage) => boolean): DecisionRow | null {
+  try {
+    const row = decisionRowOf(question, byId, headOf, closedByArchive);
+    return isReadableRow(row) ? row : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Numbers kept when a thread is deleted (round 2) ──
 
 /** One line per question of a deleted thread or project, in the store's folder, so `uninstall --purge` removes it with the store. */
@@ -122,10 +163,10 @@ export const DECISION_LINES_FILE = "decision-lines.jsonl";
  * The lines a deletion keeps: no prompt, choice, answer or note. A question nobody answered no longer waits on anyone
  * once its thread is gone, so it stays in the totals as closed, not as waiting forever.
  */
-export function decisionLinesOf(questions: Iterable<InboxQuestionRecord>, byId: ReadonlyMap<string, InboxMessage>, labelOf: (projectId: string) => string | null): string {
+export function decisionLinesOf(questions: Iterable<InboxQuestionRecord>, byId: ReadonlyMap<string, InboxMessage>, labelOf: (projectId: string) => string | null, closedByArchive: (message: InboxMessage) => boolean): string {
   let out = "";
   for (const question of questions) {
-    const row = decisionRowOf(question, byId, (id) => id);
+    const row = readableRowOf(question, byId, (id) => id, closedByArchive);
     if (!row) continue;
     const fate = row.fate === "open" || row.fate === "picked_unsent" ? "archived" : row.fate;
     out += `${JSON.stringify({ v: 1, ...row, fate, project_name: labelOf(question.project_id) })}\n`;
@@ -150,8 +191,9 @@ function rowOfLine(raw: string): (DecisionRow & { project_name: string | null })
   } catch {
     return null; // A line torn by a crash mid-write.
   }
-  const row = line as DecisionRow & { project_name?: unknown };
-  if (typeof row?.id !== "string" || typeof row.asked_at !== "number" || typeof row.project_id !== "string") return null;
+  const row = line as (DecisionRow & { project_name?: unknown }) | null;
+  // A hand edit or a later format: what can't be read is skipped, as a torn line is.
+  if (!isReadableRow(row)) return null;
   return { ...row, project_name: typeof row.project_name === "string" ? row.project_name : null };
 }
 
@@ -166,7 +208,7 @@ function* rowsSteps(input: DecisionDataInput): Generator<void, { rows: DecisionR
   for (const question of input.questions) {
     if (++tick % EVERY === 0) yield;
     stored.add(question.id);
-    const row = decisionRowOf(question, input.byId, input.headOf);
+    const row = readableRowOf(question, input.byId, input.headOf, input.closedByArchive);
     if (row) rows.push(row);
   }
   const names = new Map<string, string>();
@@ -207,7 +249,6 @@ export async function runInSlices<T>(steps: Generator<void, T>, signal?: AbortSi
 
 // ── Trends: the last 30 days against the 30 before. Two periods, no series, nothing stored. ──
 
-const DAY_MS = 86_400_000;
 export const TREND_DAYS = 30;
 /** A rate is not shown under this many answers; each trend period needs this many behind it. */
 export const RATE_MIN = 20;
@@ -235,12 +276,16 @@ function clearOfChance(a: number, n: number, b: number, m: number): boolean {
 /**
  * At most three lines, and none unless the history covers both full periods, each has enough behind it, and the change
  * is big enough to notice and too big for chance. Anything else shows nothing.
+ *
+ * The periods are whole UTC days and today counts in the recent one, so on unchanged data a line can change only when
+ * the UTC date turns over. UTC because the reader's offset moves on a daylight-saving day, and two windows should agree.
  */
 export function trendsOf(rows: readonly DecisionRow[], now: number, earliest: number | null): DecisionTrend[] {
-  const cut = now - TREND_DAYS * DAY_MS;
-  const start = now - 2 * TREND_DAYS * DAY_MS;
+  const end = (Math.floor(now / DAY_MS) + 1) * DAY_MS;
+  const cut = end - TREND_DAYS * DAY_MS;
+  const start = end - 2 * TREND_DAYS * DAY_MS;
   if (earliest === null || earliest > start) return [];
-  const period = (at: number | null): 0 | 1 | null => (at === null || at <= start || at > now ? null : at > cut ? 0 : 1);
+  const period = (at: number | null): 0 | 1 | null => (at === null || at < start || at >= end ? null : at >= cut ? 0 : 1);
   const offered = [0, 0];
   const taken = [0, 0];
   const decided = [0, 0];
@@ -344,13 +389,18 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   const ownWordsAt = new Map<string, number[]>();
   for (const message of input.messages) {
     if (++tick % EVERY === 0) yield;
-    if (message.author.kind !== "person" || isInboxNote(message)) continue;
-    const at = ms(message.created_at);
-    if (at === null || carried.has(message.id)) continue;
-    const times = ownWordsAt.get(message.thread_id);
-    if (times) times.push(at);
-    else ownWordsAt.set(message.thread_id, [at]);
-    if (inRange(at) && !isInboxActionReport(message) && !message.started_by_person && message.reply_to && !message.review_verdict && message.body.trim() !== "") dayEntry(dayOf(at)).own_words++;
+    try {
+      // A Re-ask note is a press: the Inbox writes its words, the person typed none.
+      if (message.author.kind !== "person" || isInboxNote(message) || (message.reask?.length ?? 0) > 0) continue;
+      const at = ms(message.created_at);
+      if (!readableTime(at) || carried.has(message.id)) continue;
+      const times = ownWordsAt.get(message.thread_id);
+      if (times) times.push(at);
+      else ownWordsAt.set(message.thread_id, [at]);
+      if (inRange(at) && !isInboxActionReport(message) && !message.started_by_person && message.reply_to && !message.review_verdict && message.body.trim() !== "") dayEntry(dayOf(at)).own_words++;
+    } catch {
+      // A record that can't be read costs its own number.
+    }
   }
   // Replaced, left open or archived after the person's own words: the nearest honest stand-in for "a plain reply settled it".
   let settledInWords = 0;
@@ -467,12 +517,18 @@ export const decisionDataSummary = (input: DecisionDataInput, query: DecisionQue
 
 const iso = (at: number | null) => (at === null ? "" : new Date(at).toISOString());
 
-/** A CSV cell. An agent or project name can start like a spreadsheet formula: the apostrophe keeps it text. */
+/**
+ * A CSV cell. An agent or project name can start like a spreadsheet formula: the apostrophe keeps it text. Spaces
+ * before the sign and the full-width signs count too, since a spreadsheet may read past or fold them.
+ */
 function cell(value: string | number | boolean | null): string {
   const text = value === null ? "" : String(value);
-  const safe = typeof value === "string" && /^[=+\-@\t\r]/.test(text) ? `'${text}` : text;
+  const safe = typeof value === "string" && /^\s*[=+\-@\uFF1D\uFF0B\uFF0D\uFF20]|^[\t\r]/.test(text) ? `'${text}` : text;
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
+
+/** The moment the range goes by, as the page cuts it: a decision by when it was made, anything else by when it was asked. */
+const rangeMoment = (row: DecisionRow): number => (row.fate === "answered" || row.fate === "skipped" ? (row.answered_at ?? row.asked_at) : row.asked_at);
 
 function* csvSteps(input: DecisionDataInput, since: number | null): Generator<void, string> {
   const { rows, labelOf } = yield* rowsSteps(input);
@@ -480,7 +536,7 @@ function* csvSteps(input: DecisionDataInput, since: number | null): Generator<vo
   let tick = 0;
   for (const row of rows) {
     if (++tick % EVERY === 0) yield;
-    if (since !== null && row.asked_at < since) continue;
+    if (since !== null && rangeMoment(row) < since) continue;
     lines.push(
       [row.id, row.thread_id, labelOf(row.project_id), row.agent, row.kind, row.fate, iso(row.asked_at), iso(row.answered_at), iso(row.sent_at), row.offered, row.took, row.stopped, row.holds_up, row.files, row.revisions]
         .map(cell)

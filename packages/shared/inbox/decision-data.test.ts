@@ -3,7 +3,7 @@
  * give the server back, and the lines kept when a thread or project is deleted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DECISION_LINES_FILE, DecisionDataAborted, decisionDataCsv, decisionDataSummary, readDecisionLines, runInSlices, trendsOf, type DecisionRow } from "./decision-data";
@@ -142,6 +142,70 @@ describe("what counts as what", () => {
     expect((await w.summary()).projects.map((p) => p.label)).toEqual(["bay", "harbor"]);
   });
 
+  test("pressing Re-ask is not the person's words: not a plain reply on the chart, and not an end in their own words", async () => {
+    const w = world();
+    const reasked = w.ask();
+    w.store.sendReask(reasked.id, { idempotency_key: w.key() });
+    const pressed = await w.summary();
+    expect(pressed.days.map((d) => d.own_words)).toEqual([]);
+    expect(pressed.settled_in_words).toBe(0);
+
+    // The agent replaces the question, as the note asks: still no words of the person's.
+    w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: "No longer needed.", reply_to: reasked.id, supersedes: [reasked.id], idempotency_key: w.key() });
+    const replaced = await w.summary();
+    expect(replaced.counts.replaced).toBe(1);
+    expect(replaced.settled_in_words).toBe(0);
+    expect(replaced.days.map((d) => d.own_words)).toEqual([]);
+
+    // A reply the person typed still is both.
+    const typed = w.ask();
+    w.store.sendReply(typed.id, { words: "Go with the simpler one.", idempotency_key: w.key() });
+    const after = await w.summary();
+    expect(after.settled_in_words).toBe(1);
+    expect(after.days.map((d) => d.own_words)).toEqual([1]);
+  });
+
+  test("a thread that came back: what the agent asked after the archive waits on the person as the Inbox says, and what the archive closed does not", async () => {
+    const w = world();
+    const closed = w.ask({ prompt: "Before the archive?" });
+    w.store.resolveThread(closed.thread_id, true, "person");
+    expect((await w.summary()).waiting).toBe(0);
+
+    const again = w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: ":::question\nAfter the archive?\n\n- [ ] A\n- [ ] B\n:::", reply_to: closed.id, idempotency_key: w.key() }).message;
+    expect(w.store.message(closed.thread_id)!.resolved_at).not.toBeNull();
+    expect(w.store.questionsOf(again.id)[0]!.state).toBe("open");
+    expect(w.store.questionsOf(closed.id)[0]!.state).not.toBe("open");
+    expect((await w.summary()).waiting).toBe(1);
+    const fates = (await w.csv()).trim().split("\n").slice(1).map((line) => line.split(",")[5]);
+    expect(fates.sort()).toEqual(["archived", "open"]);
+
+    // Its pick waits too, until it is sent.
+    w.pick(again.id, "A");
+    expect((await w.summary()).waiting).toBe(1);
+    w.send(again.id);
+    const answered = await w.summary();
+    expect(answered.waiting).toBe(0);
+    expect(answered.counts.answered).toBe(1);
+  });
+
+  test("archiving does not undo an answer: an answered question in an archived thread stays a decision", async () => {
+    const w = world();
+    const answered = w.ask();
+    w.answer(answered.id, "A");
+    const picked = w.ask();
+    w.pick(picked.id, "A");
+    w.store.resolveThread(answered.thread_id, true, "person");
+    w.store.resolveThread(picked.thread_id, true, "person");
+    const summary = await w.summary();
+    expect(summary.counts.answered).toBe(1);
+    expect(summary.history.answered).toBe(1);
+    expect(summary.recommendation).toEqual({ offered: 1, taken: 1 });
+    // The pick nobody sent is closed by the archive, so it waits on no one.
+    expect(summary.waiting).toBe(0);
+    const fates = (await w.csv()).trim().split("\n").slice(1).map((line) => line.split(",")[5]);
+    expect(fates.sort()).toEqual(["answered", "archived"]);
+  });
+
   test("a project's numbers wait for enough behind them: the usual wait needs five answers", async () => {
     const w = world();
     for (let i = 0; i < 4; i++) w.answer(w.ask().id, "A");
@@ -246,6 +310,44 @@ describe("trends", () => {
     const before = period("before", 100, (index, at) => ({ ...takes(60)(index), ...(index >= 95 ? { fate: "skipped" as const, took: null } : {}), ...(index < 40 ? waited(600)(index, at) : {}) }));
     const recent = period("recent", 100, (index, at) => ({ ...takes(90)(index), ...(index >= 70 ? { fate: "skipped" as const, took: null } : {}), ...(index < 40 ? waited(60)(index, at) : {}) }));
     expect(trendsOf([...before, ...recent], NOW, HISTORY).map((t) => t.key)).toEqual(["recommendations", "waits", "skips"]);
+  });
+
+  describe("whole days", () => {
+    /** A UTC midnight, and a line that sits near the threshold: five taken answers on the day the periods meet decide it. */
+    const MIDNIGHT = Date.parse("2026-11-05T00:00:00Z");
+    const onEdge = () => {
+      const spread = (from: number, n: number, hits: number) => Array.from({ length: n }, (_, index) => row(from + (index + 1) * 3 * 3_600_000, { id: `r${from}-${index}`, offered: true, took: index < hits }));
+      // Five answers at 12:30 UTC on the day that is the recent period's first when the clock reads "now minus 30 days".
+      const edge = Array.from({ length: 5 }, (_, index) => row(MIDNIGHT - 30 * DAY + 12.5 * 3_600_000 + index, { id: `edge-${index}`, offered: true, took: true }));
+      return [...spread(MIDNIGHT - 58 * DAY, 60, 30), ...spread(MIDNIGHT - 20 * DAY, 55, 40), ...edge];
+    };
+
+    test("on unchanged data every hour of a day reads the same, across the moment a sliding window would flip it", () => {
+      const rows = onEdge();
+      const first = trendsOf(rows, MIDNIGHT, MIDNIGHT - 90 * DAY);
+      for (let hour = 0; hour < 24; hour++) {
+        for (const minute of [0, 29, 31, 59]) expect(trendsOf(rows, MIDNIGHT + hour * 3_600_000 + minute * 60_000, MIDNIGHT - 90 * DAY)).toEqual(first);
+      }
+    });
+
+    test("the periods meet at a UTC midnight, today counts in the recent one, and the next day may read differently", () => {
+      const rows = [...period("before", 100, takes(60)), ...period("recent", 100, takes(90))];
+      const end = Date.parse("2026-11-06T00:00:00Z");
+      const cut = end - 30 * DAY;
+      const start = end - 60 * DAY;
+      const shares = (extra: DecisionRow[]) => trendsOf([...rows, ...extra], NOW, HISTORY)[0] as { now: number; was: number };
+      const base = shares([]);
+      const miss = (at: number) => [row(at, { id: `m${at}`, offered: true, took: false })];
+      // Today so far is in the recent period; the first moment of tomorrow is in neither.
+      expect(shares(miss(NOW)).now).toBeLessThan(base.now);
+      expect(shares(miss(end))).toEqual(base);
+      // The cut's own moment is recent; just before it is the period before.
+      expect(shares(miss(cut)).now).toBeLessThan(base.now);
+      expect(shares(miss(cut - 1)).was).toBeLessThan(base.was);
+      // The start's own moment is in; just before it is in neither.
+      expect(shares(miss(start)).was).toBeLessThan(base.was);
+      expect(shares(miss(start - 1))).toEqual(base);
+    });
   });
 
   test("the summary's trends read the whole history, whatever range is showing", async () => {
@@ -425,6 +527,191 @@ describe("numbers kept when a thread is deleted", () => {
     expect(summary.history.asked).toBe(2);
   });
 
+  test("a torn last line costs only itself: the next delete's line starts fresh and counts", async () => {
+    const w = world();
+    const first = w.ask();
+    w.answer(first.id, "A");
+    const second = w.ask();
+    w.answer(second.id, "A");
+    const file = join(w.store.dir, DECISION_LINES_FILE);
+    w.store.deleteThread(first.thread_id);
+    writeFileSync(file, `${readFileSync(file, "utf8")}{"v":1,"id":"torn`);
+    w.store.deleteThread(second.thread_id);
+    const raw = readFileSync(file, "utf8").split("\n");
+    expect(raw.length).toBe(4);
+    expect(raw[1]).toBe('{"v":1,"id":"torn');
+    expect(raw[3]).toBe("");
+    expect((await w.summary()).counts.answered).toBe(2);
+  });
+
+  test("a file that ends cleanly gets no blank lines between deletes", () => {
+    const w = world();
+    for (const asked of [w.ask(), w.ask()]) {
+      w.answer(asked.id, "A");
+      w.store.deleteThread(asked.thread_id);
+    }
+    expect(readFileSync(join(w.store.dir, DECISION_LINES_FILE), "utf8").split("\n").filter((line) => line === "").length).toBe(1);
+  });
+
+  test("two lines for one question count once, on the page and in the CSV", async () => {
+    const w = world();
+    const gone = w.ask();
+    w.answer(gone.id, "A");
+    w.store.deleteThread(gone.thread_id);
+    const file = join(w.store.dir, DECISION_LINES_FILE);
+    const line = readFileSync(file, "utf8");
+    writeFileSync(file, `${line}${line}`);
+    const summary = await w.summary();
+    expect(summary.counts.answered).toBe(1);
+    expect(summary.history.asked).toBe(1);
+    expect((await w.csv()).trim().split("\n").length).toBe(2);
+  });
+
+  test("a line of the wrong shape is skipped, and neither the count nor the CSV stops for it", async () => {
+    const w = world();
+    const gone = w.ask();
+    w.answer(gone.id, "A");
+    w.store.deleteThread(gone.thread_id);
+    const file = join(w.store.dir, DECISION_LINES_FILE);
+    const good = readFileSync(file, "utf8");
+    const base = JSON.parse(good) as Record<string, unknown>;
+    const breaks: Record<string, unknown>[] = [
+      { answered_at: undefined },
+      { answered_at: 1e300 },
+      { answered_at: "yesterday" },
+      { sent_at: 9e15 },
+      { asked_at: Infinity },
+      { asked_at: "2026" },
+      { agent: 5 },
+      { agent: undefined },
+      { kind: null },
+      { fate: "gone" },
+      { took: "yes" },
+      { offered: 1 },
+      { revisions: "2" },
+      { project_id: 3 },
+      { thread_id: null },
+    ];
+    const bad = breaks.map((change, index) => JSON.stringify({ ...base, ...change, id: `bad-${index}` }));
+    writeFileSync(file, `${["null", "7", "[]", '"text"', ...bad].join("\n")}\n${good}`);
+
+    const summary = await w.summary();
+    expect(summary.counts.answered).toBe(1);
+    expect(summary.history.asked).toBe(1);
+    expect(summary.agents.map((agent) => agent.label)).toEqual(["Claude Code"]);
+    const rows = (await w.csv()).trim().split("\n").slice(1);
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toContain(String(base.id));
+  });
+
+  test("a line whose time would fall off the calendar in the reader's zone is skipped, not thrown on", async () => {
+    const w = world();
+    const gone = w.ask();
+    w.answer(gone.id, "A");
+    w.store.deleteThread(gone.thread_id);
+    const file = join(w.store.dir, DECISION_LINES_FILE);
+    const base = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    writeFileSync(file, `${JSON.stringify({ ...base, id: "edge", answered_at: 8.64e15, sent_at: 8.64e15 })}\n`);
+    const summary = await w.summary({ tz: 840 });
+    expect(summary.counts.answered).toBe(0);
+  });
+
+  test("a line that cannot be written never stops the delete", () => {
+    const w = world();
+    const thread = w.ask();
+    w.answer(thread.id, "A");
+    const other = w.store.ensureProject({ name: "fieldnotes", root: join(w.dir, "fieldnotes") });
+    w.answer(w.ask({ project: other.id }).id, "A");
+    // A folder where the file goes: the append fails whatever the permissions.
+    mkdirSync(join(w.store.dir, DECISION_LINES_FILE));
+
+    w.store.deleteThread(thread.thread_id);
+    expect(w.store.message(thread.id)).toBeNull();
+    w.store.deleteProject(other.id);
+    expect(w.store.decisionDataInput().questions.length).toBe(0);
+    const reopened = InboxStore.open(w.dir);
+    expect(reopened.message(thread.id)).toBeNull();
+  });
+
+  describe("a record that can't be read", () => {
+    /** Change one question's stored line by hand, as a bug or a hand edit would, and read the store again. */
+    function damage(w: ReturnType<typeof world>, projectId: string, messageId: string, change: (record: Record<string, unknown>) => void): InboxStore {
+      const folder = readdirSync(join(w.store.dir, "projects"))
+        .map((name) => join(w.store.dir, "projects", name))
+        .find((path) => readFileSync(join(path, "project.json"), "utf8").includes(projectId))!;
+      const file = join(folder, "questions.jsonl");
+      const lines = readFileSync(file, "utf8").split("\n").map((raw) => {
+        if (!raw) return raw;
+        const line = JSON.parse(raw) as { record: Record<string, unknown> };
+        if (line.record.message_id !== messageId) return raw;
+        change(line.record);
+        return JSON.stringify(line);
+      });
+      writeFileSync(file, lines.join("\n"));
+      return InboxStore.open(w.dir);
+    }
+    const counted = async (store: InboxStore) => {
+      const input = { ...store.decisionDataInput(), deleted: await readDecisionLines(store.dir) };
+      return { summary: await decisionDataSummary(input, { since: null, until: NOW, tz_offset_min: 0, now: NOW }), csv: await decisionDataCsv(input, null) };
+    };
+    const dropped = ["parsed", "holds_up", "revision"];
+
+    for (const field of dropped) {
+      test(`without its ${field}: the count and the CSV skip it, and deleteThread still deletes, keeping the other lines`, async () => {
+        const w = world();
+        const bad = w.ask({ prompt: "Bad one?" });
+        const goodInThread = w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: ":::question\nGood one?\n\n- [ ] A\n- [ ] B\n:::", reply_to: bad.id, idempotency_key: w.key() }).message;
+        w.answer(goodInThread.id, "A");
+        const elsewhere = w.ask();
+        w.answer(elsewhere.id, "A");
+        const store = damage(w, w.project.id, bad.id, (record) => delete record[field]);
+
+        const { summary, csv } = await counted(store);
+        expect(summary.history.asked).toBe(2);
+        expect(summary.counts.answered).toBe(2);
+        expect(csv.trim().split("\n").length).toBe(3);
+
+        store.deleteThread(bad.thread_id);
+        expect(store.message(bad.id)).toBeNull();
+        const lines = readFileSync(join(store.dir, DECISION_LINES_FILE), "utf8").trim().split("\n");
+        expect(lines.length).toBe(1);
+        const after = await counted(store);
+        expect(after.summary.counts.answered).toBe(2);
+      });
+
+      test(`without its ${field}: deleteProject still deletes, keeping the other lines`, async () => {
+        const w = world();
+        const other = w.store.ensureProject({ name: "fieldnotes", root: join(w.dir, "fieldnotes") });
+        const bad = w.ask({ project: other.id });
+        w.answer(w.ask({ project: other.id }).id, "A");
+        const store = damage(w, other.id, bad.id, (record) => delete record[field]);
+
+        store.deleteProject(other.id);
+        expect(store.message(bad.id)).toBeNull();
+        expect(readFileSync(join(store.dir, DECISION_LINES_FILE), "utf8").trim().split("\n").length).toBe(1);
+        expect((await counted(store)).summary.counts.answered).toBe(1);
+      });
+    }
+
+    test("a person's message of the wrong shape costs its own mark, not the count", async () => {
+      const w = world();
+      const asked = w.ask();
+      w.store.sendReply(asked.id, { words: "My own words.", idempotency_key: w.key() });
+      const reply = w.store.decisionDataInput().messages.find((message) => message.author.kind === "person")!;
+      const folder = readdirSync(join(w.store.dir, "projects")).map((name) => join(w.store.dir, "projects", name))[0]!;
+      const file = join(folder, "messages.jsonl");
+      const lines = readFileSync(file, "utf8").split("\n").map((raw) => {
+        if (!raw) return raw;
+        const line = JSON.parse(raw) as { record: Record<string, unknown> };
+        return line.record.id === reply.id ? JSON.stringify({ ...line, record: { ...line.record, body: 5 } }) : raw;
+      });
+      writeFileSync(file, lines.join("\n"));
+      const { summary } = await counted(InboxStore.open(w.dir));
+      expect(summary.history.asked).toBe(1);
+      expect(summary.days).toEqual([]);
+    });
+  });
+
   test("the lines count in Settings -> Storage's total", () => {
     const w = world();
     const gone = w.ask();
@@ -454,14 +741,34 @@ describe("the CSV", () => {
     expect(line).toContain(",harbor,Claude Code,");
   });
 
-  test("the range cuts by when it was asked", async () => {
+  test("the range cuts as the page does: a decision by when it was made, anything else by when it was asked", async () => {
     const w = world();
-    const old = w.ask();
+    const decidedLately = w.ask();
+    const oldOpen = w.ask();
+    const decidedLongAgo = w.ask();
+    w.answer(decidedLongAgo.id, "A");
     w.tick(9 * DAY);
-    const recent = w.ask();
-    const text = await w.csv(NOW - 3 * DAY);
-    expect(text).toContain(recent.thread_id);
-    expect(text).not.toContain(old.thread_id);
+    w.answer(decidedLately.id, "A");
+    const recentOpen = w.ask();
+    const since = NOW - 3 * DAY;
+    const text = await w.csv(since);
+    expect(text).toContain(decidedLately.thread_id);
+    expect(text).toContain(recentOpen.thread_id);
+    expect(text).not.toContain(oldOpen.thread_id);
+    expect(text).not.toContain(decidedLongAgo.thread_id);
+    // The page's count and the CSV's decided lines are the same.
+    const decided = text.trim().split("\n").slice(1).filter((line) => line.split(",")[5] === "answered");
+    expect(decided.length).toBe((await w.summary({ since })).counts.answered);
+  });
+
+  test("a formula behind spaces or in full-width signs is kept as text like any other; an ordinary name is left alone", async () => {
+    const w = world();
+    const names = [" =SUM(A1)", "\u3000=SUM(A1)", "\uFF1DSUM(A1)", "\uFF0BSUM(A1)", "\uFF0DSUM(A1)", "\uFF20SUM(A1)", " \uFF1DSUM(A1)", "=SUM(A1)", "+SUM(A1)"];
+    for (const name of names) w.ask({ project: w.store.ensureProject({ name, root: join(w.dir, name) }).id });
+    w.ask({ project: w.store.ensureProject({ name: "a=b", root: join(w.dir, "a=b") }).id });
+    const projects = (await w.csv()).trim().split("\n").slice(1).map((line) => line.split(",")[2]);
+    for (const name of names) expect(projects).toContain(`'${name}`);
+    expect(projects).toContain("a=b");
   });
 
   test("an agent's or project's name can't run as a spreadsheet formula or break the columns", async () => {
