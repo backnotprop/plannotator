@@ -740,6 +740,23 @@ test('the Settings switch off raises nothing', async () => {
   expect((await calls()).at(-1)).toMatchObject({ title: 'billing-svc: Codex stopped on you', tag: TAG });
 });
 
+test('a fresh load of an address that kept its click= opens that screen and drops it', async () => {
+  // Its own tab, so this is a real load: a goto that only changes the hash of the page on screen stays in that document.
+  const fresh = await world.context.newPage();
+  fresh.on('pageerror', (error) => world.errors.push(error.message));
+  const loaded = async (hash: string, section: string) => {
+    await fresh.goto('about:blank');
+    await fresh.goto(`${world.url}${hash}&click=7`);
+    await expect(fresh.locator(`[data-settings-link="${section}"]`)).toHaveAttribute('aria-current', 'page');
+    await expect.poll(() => fresh.evaluate(() => location.hash)).toBe(hash);
+  };
+  await loaded('#settings/general', 'general');
+  await expect(fresh.getByRole('heading', { name: 'General', level: 1 })).toBeVisible();
+  // `#settings` alone is General on a desktop, so only another section shows the value was read past.
+  await loaded('#settings/about', 'about');
+  await fresh.close();
+});
+
 test('no page errors along the way', () => {
   expect(world.errors).toEqual([]);
 });
