@@ -24,7 +24,8 @@ export function topLevel(selector: string): string[] {
   let flat = selector.replaceAll(SCOPE, ".pn-inbox").replace(/\\.|"[^"]*"|'[^']*'/g, "_");
   for (let was = ""; was !== flat; ) {
     was = flat;
-    flat = flat.replace(/\([^()]*\)|\[[^[\]]*\]/g, "");
+    // `[]` stays: `[a] [b] > svg` is three compounds, and an attribute can be all a compound is.
+    flat = flat.replace(/\([^()]*\)|\[[^[\]]*\]/g, (group) => (group[0] === "[" ? "[]" : ""));
   }
   return flat.replace(/\s*([>+~])\s*/g, " $1 ").trim().split(/\s+/);
 }

@@ -111,6 +111,8 @@ packages/inbox/cardPanelLinks.test.tsx
 packages/inbox/boardProjectFilter.test.tsx
 packages/inbox/boardSend.test.tsx
 packages/inbox/boardOff.test.tsx
+packages/inbox/hashtagPicker.test.tsx
+packages/inbox/initiativePeekTap.test.tsx
 packages/inbox/soundIntro.test.tsx
 packages/inbox/soundSettings.test.tsx
 packages/inbox/notifyHook.test.tsx
@@ -118,6 +120,7 @@ packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
 packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
+packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx
@@ -494,6 +497,7 @@ packages/ui/components/StartCutPath.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
+packages/inbox/listDeltaWindow.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
@@ -514,6 +518,8 @@ packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/inbox/lazyChunkFailure.test.tsx
+packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
@@ -523,4 +529,6 @@ packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
 packages/ui/components/ImageLightbox.regionDraft.test.tsx
 packages/review-editor/components/MarkdownBody.prImages.test.tsx
+packages/inbox/attachmentDrawReady.test.tsx
+packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx
