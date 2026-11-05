@@ -1,10 +1,19 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { FEEDBACK_CONTACT_MAX, FEEDBACK_MESSAGE_MAX, FEEDBACK_UNAVAILABLE, feedbackInputError, type FeedbackCategory } from '@plannotator/core/product-feedback';
 import { Icon } from '../icons';
+import { searchShipped, type SearchHit } from '../feedbackSearch';
 import { Modal } from './Updates';
 
 /** Shown under the box once the message is this close to the cap. */
 const COUNT_FROM = FEEDBACK_MESSAGE_MAX - 400;
+const SEARCH_PAUSE_MS = 250;
+
+const NOTHING_TYPED = { message: '', category: null as FeedbackCategory | null, contact: '' };
+/** What was typed and not sent, for the window's life: any close, even a stray press on the backdrop, loses nothing. */
+let unsent = NOTHING_TYPED;
+export function forgetUnsentFeedback() {
+  unsent = NOTHING_TYPED;
+}
 
 const CATEGORIES: { value: FeedbackCategory; label: string }[] = [
   { value: 'bug', label: 'Bug' },
@@ -31,8 +40,9 @@ function lengthOf(value: string): number {
 
 /**
  * Sidebar → Feedback: a short form that sends the person's words about
- * Plannotator to its maintainers. A message, an optional category and an
- * optional email; a line saying exactly what is sent; Send and Cancel; a
+ * Plannotator to its maintainers. A message; "These might help" links when a
+ * search finds something similar; an optional category and an optional email;
+ * a line saying what is sent; Send and Cancel; a
  * short "Sent" state. "Prompt your agent to send feedback" copies a prompt that has
  * the person's agent collect the feedback and send it with
  * `plannotator feedback` after the person says yes. Nothing is sent without
@@ -41,19 +51,34 @@ function lengthOf(value: string): number {
  */
 export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }: FeedbackDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
-  const [message, setMessage] = useState('');
-  const [category, setCategory] = useState<FeedbackCategory | null>(null);
-  const [contact, setContact] = useState('');
+  const [message, setMessage] = useState(unsent.message);
+  const [category, setCategory] = useState(unsent.category);
+  const [contact, setContact] = useState(unsent.contact);
   const [phase, setPhase] = useState<'edit' | 'sending' | 'sent'>('edit');
   const [error, setError] = useState<string | null>(null);
+  const [hits, setHits] = useState<SearchHit[]>([]);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
   const closed = useRef(false);
+  useEffect(() => {
+    let latest = true;
+    const pause = setTimeout(() => void searchShipped(message).then((found) => latest && setHits(found)), SEARCH_PAUSE_MS);
+    return () => {
+      latest = false;
+      clearTimeout(pause);
+    };
+  }, [message]);
+  useEffect(() => {
+    unsent = { message, category, contact };
+  }, [message, category, contact]);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
 
   useEffect(() => {
-    boxRef.current?.focus();
+    const box = boxRef.current;
+    box?.focus();
+    // Kept words go on from their end.
+    box?.setSelectionRange(box.value.length, box.value.length);
   }, []);
   useEffect(() => {
     if (phase === 'sent') doneRef.current?.focus();
@@ -78,6 +103,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
     setPhase('sending');
     try {
       await onSend({ ...input, message: message.trim() });
+      forgetUnsentFeedback();
       setPhase('sent');
     } catch (cause) {
       setPhase('edit');
@@ -150,6 +176,21 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
                 : `${(FEEDBACK_MESSAGE_MAX - count).toLocaleString('en-US')} characters left`}
             </p>
           )}
+          <div className="ib-fbk-rel" role="status" data-feedback-related="">
+            {hits.length > 0 && <p className="ib-fbk-rel-h">These might help</p>}
+            {hits.length > 0 && (
+              <ul>
+                {hits.map((hit) => (
+                  <li key={hit.href + hit.title}>
+                    <a href={hit.href} target="_blank" rel="noopener noreferrer">
+                      {hit.title}
+                    </a>
+                    {hit.definition && `. ${hit.definition}`}
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
           {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
           <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
             Category and email are optional
@@ -192,8 +233,8 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
           <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
             <Icon name="info" />
             <span>
-              Sends only your message (and the category and email, if you add them), Plannotator {version}, the name of your OS and that it came
-              from the Inbox. Nothing from your threads or files.
+              Sends your message (and the category and email, if you add them), Plannotator {version} and the name of your OS. Nothing from your
+              threads or files.
             </span>
           </p>
           {error && (
