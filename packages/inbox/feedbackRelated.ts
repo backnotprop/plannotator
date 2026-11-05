@@ -1,0 +1,214 @@
+/**
+ * "Might be related" under the Feedback box (components/FeedbackRelated.tsx):
+ * plain word matching against feedbackRelated.data.json, in the window. The
+ * person's words go nowhere: no request, not even to this Inbox's server.
+ *
+ * Strict on purpose. The owner's rule is that a wrong suggestion is worse than
+ * none, and silence leaves the form exactly as it was. A line shows only when
+ * its title is close to what was typed; see the gate in `relatedLinks`.
+ * Measured on 100 sentences before this shipped (PR notes): about one in four
+ * real requests gets a line, and most of those are right.
+ */
+
+/** A feature people ask for by another name. Fires on whole phrases only: single words misfired on 9 of 20 off-topic sentences. */
+export interface RelatedFeature {
+  title: string;
+  phrases: string[];
+  reason: string;
+  url: string;
+}
+export interface RelatedRelease {
+  title: string;
+  version: string;
+}
+export interface RelatedIssue {
+  title: string;
+  number: number;
+  /** Titles of open PRs that cite this issue. They count for matching and are never shown. */
+  prWords?: string;
+}
+/** The whole of feedbackRelated.data.json (scripts/feedback-related-index.ts writes it, newest first). */
+export interface RelatedData {
+  features: RelatedFeature[];
+  releases: RelatedRelease[];
+  issues: RelatedIssue[];
+}
+
+export interface RelatedLink {
+  title: string;
+  reason: string;
+  href: string;
+}
+
+const REPO_URL = 'https://github.com/backnotprop/plannotator';
+
+/** Under this many characters there is nothing to match yet. */
+const MIN_CHARS = 8;
+/** At most this much of the message is read; a line needs a short ask anyway. */
+const MAX_CHARS = 4000;
+const MAX_LINKS = 3;
+const MAX_TITLE = 90;
+const MIN_SCORE = 6;
+/** A second line must score this close to the best one. */
+const NEAR_BEST = 0.85;
+/** The hand-written list stays out of a message with more real words than this. */
+const FEATURE_MAX_WORDS = 4;
+
+const STOP = new Set(
+  `a about above after again all also am an and any are as at be because been before being below between both but by can cannot could did do does doing don down during each few for from further had has have having he her here hers him his how i if in into is it its itself just let like lets make made me more most my myself need needs no nor not now of off on once only or other our out over own please same she should so some such than that the their them then there these they this those through to too under until up us use using very instead want wanted wants was we were what when where which while who whom why will wish with would you your yours get gets got thing things way really still lot much many keep see able add adding allow allows support feature option maybe new`.split(
+    /\s+/,
+  ),
+);
+/** Words every other title has: they lift a match and never make one alone. */
+const WEAK = new Set(
+  `plannotator inbox app window page file files thread threads message messages agent agents session sessions fix fixes fixed error issue bug work works working update updates updated button review reviews reply replies`.split(
+    /\s+/,
+  ),
+);
+
+function stem(word: string): string {
+  if (word.length > 4 && word.endsWith('ies')) return `${word.slice(0, -3)}y`;
+  const undouble = (x: string) => (/(bb|dd|gg|mm|nn|pp|rr|tt)$/.test(x) ? x.slice(0, -1) : x);
+  if (word.length > 5 && word.endsWith('ing')) return undouble(word.slice(0, -3));
+  if (word.length > 4 && word.endsWith('ed')) return undouble(word.slice(0, -2));
+  if (word.length > 3 && word.endsWith('s') && !word.endsWith('ss')) return word.slice(0, -1);
+  return word;
+}
+
+const words = (text: string): string[] => text.toLowerCase().normalize('NFKD').match(/[\p{L}\p{N}]+/gu) ?? [];
+
+function tokens(text: string): string[] {
+  return words(text)
+    .filter((word) => word.length > 1 && !STOP.has(word))
+    .map(stem)
+    .filter((word) => !STOP.has(word));
+}
+
+/** Only these addresses are ever drawn as a link: the file is data, and a link must not be able to go anywhere else. */
+export function isPublicRelatedUrl(url: string): boolean {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.port) return false;
+    if (parsed.hostname === 'plannotator.ai') return parsed.pathname.startsWith('/docs/');
+    return parsed.hostname === 'github.com' && parsed.pathname.startsWith('/backnotprop/plannotator/');
+  } catch {
+    return false;
+  }
+}
+
+/** A long title stops at its first clause or a word, so the reason after it always shows. */
+function shortTitle(title: string): string {
+  let text = title.replace(/\.$/, '');
+  const clause = text.indexOf('; ');
+  if (clause > 20) text = text.slice(0, clause);
+  if (text.length <= MAX_TITLE) return text;
+  return `${text.slice(0, MAX_TITLE).replace(/[\s,;:]+\S*$/, '')}…`;
+}
+
+type Kind = 'feature' | 'release' | 'issue';
+
+interface Entry {
+  kind: Kind;
+  link: RelatedLink;
+  terms: string[];
+  key: string;
+  phrases: string[][];
+}
+
+export interface RelatedIndex {
+  entries: Entry[];
+  documents: Map<string, number>;
+  averageLength: number;
+}
+
+export function relatedIndex(data: RelatedData): RelatedIndex {
+  const entries: Entry[] = [];
+  const add = (kind: Kind, title: string, reason: string, href: string, extra = '', phrases: string[][] = []) => {
+    if (!isPublicRelatedUrl(href)) return;
+    entries.push({ kind, link: { title: shortTitle(title), reason, href }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
+  };
+  for (const feature of data.features) add('feature', feature.title, feature.reason, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
+  for (const release of data.releases) {
+    if (/^v\d+\.\d+\.\d+$/.test(release.version)) add('release', release.title, `Release note, ${release.version}`, `${REPO_URL}/releases/tag/${release.version}`);
+  }
+  for (const issue of data.issues) {
+    if (Number.isSafeInteger(issue.number) && issue.number > 0) add('issue', issue.title, `Open issue #${issue.number}`, `${REPO_URL}/issues/${issue.number}`, issue.prWords);
+  }
+  const documents = new Map<string, number>();
+  let length = 0;
+  for (const entry of entries) {
+    for (const term of new Set(entry.terms)) documents.set(term, (documents.get(term) ?? 0) + 1);
+    length += entry.terms.length * 2.5;
+  }
+  return { entries, documents, averageLength: entries.length ? length / entries.length : 1 };
+}
+
+/** The phrase's first word, then its last within reach (one word of slack): "mark as done", not "done … mark". */
+function saysPhrase(said: string[], phrase: string[]): boolean {
+  const last = phrase[phrase.length - 1]!;
+  return said.some((word, at) => word === phrase[0] && (phrase.length === 1 || said.slice(at + 1, at + phrase.length + 1).includes(last)));
+}
+
+/** Up to three lines for what is typed, best first; none is the usual answer. Never throws on any text. */
+export function relatedLinks(index: RelatedIndex, text: string): RelatedLink[] {
+  const typed = text.trim().slice(0, MAX_CHARS);
+  if (typed.length < MIN_CHARS) return [];
+  const query = [...new Set(tokens(typed))];
+  if (!query.length) return [];
+  const real = query.filter((term) => !WEAK.has(term));
+  const said = words(typed).map(stem);
+  const weight = (term: string) => {
+    const seen = index.documents.get(term) ?? 0;
+    return Math.log(1 + (index.entries.length - seen + 0.5) / (seen + 0.5)) * (WEAK.has(term) ? 0.25 : 1);
+  };
+
+  const found: { entry: Entry; score: number }[] = [];
+  for (const entry of index.entries) {
+    if (entry.kind === 'feature') {
+      if (real.length <= FEATURE_MAX_WORDS && entry.phrases.some((phrase) => saysPhrase(said, phrase))) found.push({ entry, score: Infinity });
+      continue;
+    }
+    const length = entry.terms.length * 2.5;
+    let score = 0;
+    for (const term of query) {
+      const count = entry.terms.filter((other) => other === term).length;
+      if (!count) continue;
+      const weighted = count * 2.5;
+      score += weight(term) * ((weighted * 2.2) / (weighted + 1.2 * (0.25 + 0.75 * (length / index.averageLength))));
+    }
+    if (!score) continue;
+    // Words in a row in the title count for more: in order, at most one word between ("blanks the entire page").
+    const places = (term: string) => entry.terms.flatMap((other, at) => (other === term ? [at] : []));
+    let inARow = 0;
+    for (let at = 0; at + 1 < query.length; at++) {
+      const next = places(query[at + 1]!);
+      if (places(query[at]!).some((a) => next.some((b) => b > a && b - a <= 2))) inARow += 1;
+    }
+    score *= 1 + 0.4 * inARow;
+    // The gate: a word in common is not enough.
+    const realInTitle = real.filter((term) => entry.terms.includes(term)).length;
+    const titleAsked = entry.terms.length ? entry.terms.filter((term) => query.includes(term)).length / entry.terms.length : 0;
+    const snug = entry.terms.length >= 2 && titleAsked >= 0.6 && realInTitle >= 1; // "Mark unread": the title is what they asked for.
+    const covered = real.length >= 2 && realInTitle >= Math.max(2, Math.ceil(real.length * 0.67));
+    const oneWord = real.length === 1 && inARow >= 1; // One real word needs its neighbour beside it: "blank page", not "blank lines".
+    if ((snug || covered || oneWord) && score >= MIN_SCORE) found.push({ entry, score });
+  }
+
+  // Stable: at the same score the file's order, newest first, decides.
+  found.sort((a, b) => (a.score === b.score ? 0 : b.score - a.score));
+  // The hand-written list answered it: release notes on the same word only repeat it.
+  const answered = found.some(({ entry }) => entry.kind === 'feature');
+  const best = found.find(({ entry }) => entry.kind !== 'feature')?.score ?? 0;
+  const room: Record<Kind, number> = { feature: 1, release: answered ? 0 : 2, issue: 1 };
+  const shown = new Set<string>();
+  const links: RelatedLink[] = [];
+  for (const { entry, score } of found) {
+    if (entry.kind !== 'feature' && score < best * NEAR_BEST) continue;
+    if (shown.has(entry.key) || room[entry.kind] <= 0) continue;
+    room[entry.kind] -= 1;
+    shown.add(entry.key);
+    links.push(entry.link);
+    if (links.length === MAX_LINKS) break;
+  }
+  return links;
+}

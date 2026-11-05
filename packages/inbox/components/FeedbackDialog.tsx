@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { FEEDBACK_CONTACT_MAX, FEEDBACK_MESSAGE_MAX, FEEDBACK_UNAVAILABLE, feedbackInputError, type FeedbackCategory } from '@plannotator/core/product-feedback';
 import { Icon } from '../icons';
+import { FeedbackRelated, useFeedbackRelated } from './FeedbackRelated';
 import { Modal } from './Updates';
 
 /** Shown under the box once the message is this close to the cap. */
@@ -33,7 +34,9 @@ function lengthOf(value: string): number {
  * Sidebar → Feedback: a short form that sends the person's words about
  * Plannotator to its maintainers. A message, an optional category and an
  * optional email; a line saying exactly what is sent; Send and Cancel; a
- * short "Sent" state. "Prompt your agent to send feedback" copies a prompt that has
+ * short "Sent" state. Under the box, sometimes, "Might be related"
+ * (FeedbackRelated.tsx), matched in this window; with no match the form is
+ * unchanged. "Prompt your agent to send feedback" copies a prompt that has
  * the person's agent collect the feedback and send it with
  * `plannotator feedback` after the person says yes. Nothing is sent without
  * Send. No shortcut (owner rule); Escape and the backdrop close it, as every
@@ -48,9 +51,11 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
   const [error, setError] = useState<string | null>(null);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
+  const actionsRef = useRef<HTMLDivElement>(null);
   const closed = useRef(false);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
+  const related = useFeedbackRelated({ message, frozen: phase !== 'edit', phone, boxRef, actionsRef });
 
   useEffect(() => {
     boxRef.current?.focus();
@@ -150,6 +155,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
                 : `${(FEEDBACK_MESSAGE_MAX - count).toLocaleString('en-US')} characters left`}
             </p>
           )}
+          <FeedbackRelated links={related} />
           {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
           <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
             Category and email are optional
@@ -202,7 +208,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
               <span>{error}</span>
             </p>
           )}
-          <div className="ib-acts-row ib-fbk-acts">
+          <div className="ib-acts-row ib-fbk-acts" ref={actionsRef}>
             <button type="button" className="ib-btn ib-ghost ib-left" data-feedback-copy-prompt="" disabled={sending} onClick={() => onCopyPrompt(message)}>
               <Icon name="copy" />
               Prompt your agent to send feedback

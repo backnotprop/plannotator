@@ -360,3 +360,60 @@ describe.skipIf(!hasDom)('the sidebar row', () => {
     expect(host.querySelector('[data-feedback-nav]')).toBeNull();
   });
 });
+
+describe.skipIf(!hasDom)('Might be related under the box', () => {
+  /** The real file, through the dialog's real pause; the matcher's own rules are in feedbackRelated.test.ts. */
+  const pause = () => act(async () => new Promise((done) => setTimeout(done, 650)));
+  async function typeAndPause(text: string) {
+    const dialog = render();
+    // The file loads at the first open.
+    await act(async () => new Promise((done) => setTimeout(done, 30)));
+    type(dialog.box(), text);
+    await pause();
+    return dialog;
+  }
+  const list = () => document.querySelector('[data-feedback-related]')!;
+
+  test('nothing typed goes anywhere while the person types and pauses', async () => {
+    const calls = stubFetch(() => Response.json({ ok: true }));
+    await typeAndPause('I wish I could mark a thread as unread');
+    expect(list().querySelectorAll('a').length).toBeGreaterThan(0);
+    expect(calls).toEqual([]);
+  });
+
+  test('a line waits for the pause; it opens safely in a new tab, on a public address', async () => {
+    const dialog = render();
+    await act(async () => new Promise((done) => setTimeout(done, 30)));
+    type(dialog.box(), 'need a done button');
+    expect(list().childNodes.length).toBe(0);
+    await pause();
+    const link = list().querySelector('a')!;
+    expect(link.textContent).toBe('Archive');
+    expect(link.getAttribute('target')).toBe('_blank');
+    expect(link.getAttribute('rel')).toBe('noopener noreferrer');
+    expect(link.getAttribute('href')!.startsWith('https://plannotator.ai/docs/')).toBe(true);
+  });
+
+  test('no match draws nothing: the slot stays empty', async () => {
+    await typeAndPause('translate the interface into Spanish');
+    expect(list().childNodes.length).toBe(0);
+  });
+
+  test('the line stays while they type, and goes after the pause when the words stop matching', async () => {
+    const dialog = await typeAndPause('need a done button');
+    expect(list().querySelectorAll('a').length).toBe(1);
+    type(dialog.box(), 'works great, thank you');
+    expect(list().querySelectorAll('a').length).toBe(1);
+    await pause();
+    expect(list().childNodes.length).toBe(0);
+  });
+
+  test('Send sends only the words: the suggestion stays out of it', async () => {
+    const calls = stubFetch(() => Response.json({ ok: true }));
+    const dialog = await typeAndPause('need a done button');
+    await press(dialog.send());
+    expect(calls.length).toBe(1);
+    expect(calls[0]!.body.message).toBe('need a done button');
+    expect(JSON.stringify(calls[0]!.body)).not.toContain('Archive');
+  });
+});
