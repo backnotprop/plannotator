@@ -242,6 +242,8 @@ import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
 import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+// @ts-expect-error a text import of the optional helper file
+import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { isReviewDrawCommand } from "./review-draw-command";
 import { INBOX_REVIEW_DRAW_GONE } from "@plannotator/core/inbox-review";
@@ -361,7 +363,12 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
   const args = rawArgs;
   // Off unless the person turned Shape on, or Code review, whose Show me makes a board (Settings → Capabilities):
   // no command and no help, so an agent learns nothing of it (the same switches hide the Pebble and the routes).
-  // `shape on|off` is the switch itself, so it runs while Shape is off (only it; `on --help` still gets the off line).
+  // Two run while Shape is off: `shape kit` only prints a helper file and stores nothing, and `shape on|off` is
+  // the switch itself (`on --help` still gets the off line).
+  if (args[0] === "shape" && args[1] === "kit") {
+    process.stdout.write(SHAPE_KIT);
+    process.exit(0);
+  }
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
   }

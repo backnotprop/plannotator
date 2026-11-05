@@ -66,12 +66,7 @@ function dialogBoard(title: string, claim: string, heading: string, lines: [stri
         width: 900,
         height: 300,
       },
-      reqs: {
-        groups: [
-          { id: 'who', label: 'Who gets it', items: [{ id: 'r-who', text: 'Everyone who used the app **2 days** or more [^1]' }] },
-          { id: 'when', label: 'When it shows', items: [{ id: 'r-once', text: 'Once, ever. Any way out counts.' }] },
-        ],
-      },
+      know: 'Everyone who used the app **2 days** or more sees it [^1]. It shows once, ever, and any way out counts.',
     },
     refs: [
       { n: 1, kind: 'file', title: 'Who gets it', target: 'src/reveal.ts', line: 3 },
