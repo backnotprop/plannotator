@@ -63,9 +63,11 @@ export interface PullReviewProps {
 const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
 const STORE = 'plannotator-inbox-pull-review:';
-/** The diffs read in this window, by layer, scope and the PR's last update (a new push reads again). */
+/** The diffs read in this window, by what makes a diff: layer, scope, head commit and base (a new commit reads again). */
 const SEEN = new Map<string, InboxPullDiffAnswer>();
 const SEEN_MAX = 12;
+/** A stored review's last part when it names a head commit (as `shaOf` in the server's inbox-pulls.ts takes one). */
+const HEAD_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 
 function readKept(id: string): { comments: CodeAnnotation[]; viewed: string[] } {
   try {
@@ -97,20 +99,27 @@ export function PullReview(props: PullReviewProps) {
 }
 
 /**
- * Stored comments of a layer from before its last push: their lines may have moved, so line comments go. Global
- * comments are on no line: they move to this push's comments.
+ * A layer's other stored reviews move to this head's. One kept for another head commit (only once `sure` this head is
+ * the newest): its lines may have moved, so line comments and Viewed go; global comments are on no line and move. One
+ * that names no commit (written before the head was known, or by an older Inbox, which named the PR's last update):
+ * nothing says a commit came since, so all of it moves.
  */
-function dropStale(layerKey: string, scope: string, keptId: string): void {
+function dropStale(layerKey: string, scope: string, keptId: string, sure: boolean): void {
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
     const carried: CodeAnnotation[] = [];
+    const ticks: string[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
       if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
-      carried.push(...readKept(name.slice(STORE.length)).comments.filter((c) => c.scope === 'general'));
+      const ofAHead = HEAD_SHA.test(name.slice(prefix.length));
+      if (ofAHead && !sure) continue;
+      const was = readKept(name.slice(STORE.length));
+      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments));
+      if (!ofAHead) ticks.push(...was.viewed);
       window.localStorage.removeItem(name);
     }
-    if (carried.length === 0) return;
+    if (carried.length === 0 && ticks.length === 0) return;
     const now = readKept(keptId);
     const ids = new Set(now.comments.map((c) => c.id));
     const comments = [...now.comments];
@@ -119,7 +128,7 @@ function dropStale(layerKey: string, scope: string, keptId: string): void {
       ids.add(c.id);
       comments.push(c);
     }
-    keep(keptId, { comments, viewed: now.viewed });
+    keep(keptId, { comments, viewed: [...new Set([...now.viewed, ...ticks])] });
   } catch {
     // Storage off.
   }
@@ -147,7 +156,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const position = stack && layer ? layerPosition(stack, layer.key) : null;
   const next = stack && layer ? nextLayer(stack, layer.key) : null;
 
-  const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.updated_at}` : '';
+  // What makes this diff: its head commit and its base. `updated_at` also moves with a label, a comment or a review,
+  // which change nothing here (no read, no scroll lost); it only stands in while the list names no head.
+  const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${scope === 'stack' ? stack?.open_base : layer.base}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => SEEN.get(seenId) ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   useEffect(() => {
@@ -159,8 +170,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       setDiff(seen);
       return;
     }
+    // The list caught up with the patch on screen: nothing new to read.
+    if (diff?.head_sha && diff.head_sha === layer.head_sha && diff.base === layer.base) {
+      SEEN.set(seenId, diff);
+      return;
+    }
     const controller = new AbortController();
-    setDiff(null);
+    // A new commit draws afresh; otherwise the reader stays (its scroll, a comment being typed) while this reads.
+    if (layer.head_sha && diff?.head_sha !== layer.head_sha) setDiff(null);
     inboxApi
       .pullDiff(layer.key, scope, controller.signal)
       .then((answer) => {
@@ -175,23 +192,33 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     return () => controller.abort();
     // A new layer or scope reads again; the same one keeps its diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layer?.key, scope, layer?.updated_at]);
+  }, [seenId]);
 
-  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean, but for the global comments.
-  const keptId = `${layerKey}:${scope}:${layer?.updated_at ?? ''}`;
-  useEffect(() => {
-    if (layer) dropStale(layerKey, scope, keptId);
-  }, [layer, layerKey, scope, keptId]);
+  // Comments and Viewed are kept per head commit: a new commit starts clean, but for the global comments. The head is
+  // the patch's when it says (the list can be minutes behind it, and the comments are on the patch), else the list's
+  // (a whole stack's compare ends at this layer's head; another layer's commit changes nothing here). Neither says: the
+  // last one known stays, and only a head that is named can clear anything.
+  const lastHead = useRef<string | null>(null);
+  const head = diff?.head_sha ?? layer?.head_sha ?? lastHead.current;
+  lastHead.current = head;
+  const keptId = `${layerKey}:${scope}:${head ?? ''}`;
+  // A layer's newest comments can be on a patch newer than the list: its older heads go once a patch has named its head.
+  const pinned = useRef(scope === 'stack');
+  if (diff?.head_sha) pinned.current = true;
+  const sure = pinned.current;
   const [comments, setComments] = useState<CodeAnnotation[]>(() => readKept(keptId).comments);
   const [viewed, setViewed] = useState<string[]>(() => readKept(keptId).viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   useEffect(() => {
+    if (head) dropStale(layerKey, scope, keptId, sure);
     const kept = readKept(keptId);
     setComments(kept.comments);
     setViewed(kept.viewed);
     setSelectedId(null);
-  }, [keptId]);
+    // `head` and the layer are in `keptId`.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keptId, sure]);
   const write = (next: { comments?: CodeAnnotation[]; viewed?: string[] }) => {
     const value = { comments: next.comments ?? comments, viewed: next.viewed ?? viewed };
     if (next.comments) setComments(next.comments);
