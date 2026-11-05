@@ -83,6 +83,10 @@ interface Scripted {
   pull: Record<string, unknown>;
   /** The commit a compare says the head left its base at. */
   mergeBase: string;
+  /** The PR's diff, as the forge answers it. */
+  patch: string;
+  /** The commit the PR's head is at, as the forge answers it. */
+  headNow: string;
 }
 
 function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
@@ -92,6 +96,8 @@ function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
     failWith: null,
     pull,
     mergeBase: BASE,
+    patch: "the patch\n",
+    headNow: HEAD,
     run: async (cli, args) => {
       if (args[0] === "auth") {
         return cli === "gh"
@@ -105,8 +111,8 @@ function scripted(pull: Record<string, unknown> = ghPull()): Scripted {
       f.reads.push(endpoint);
       if (f.failWith) return { stdout: "", stderr: f.failWith.stderr, exitCode: 1 };
       if (args.includes(".merge_base_commit.sha")) return { stdout: `${f.mergeBase}\n`, stderr: "", exitCode: 0 };
-      if (args.includes(".head.sha")) return { stdout: `${HEAD}\n`, stderr: "", exitCode: 0 };
-      if (endpoint.endsWith("/pulls/412")) return { stdout: "the patch\n", stderr: "", exitCode: 0 };
+      if (args.includes(".head.sha")) return { stdout: `${f.headNow}\n`, stderr: "", exitCode: 0 };
+      if (endpoint.endsWith("/pulls/412")) return { stdout: f.patch, stderr: "", exitCode: 0 };
       const file = f.files.get(endpoint);
       return file !== undefined ? { stdout: file, stderr: "", exitCode: 0 } : { stdout: "", stderr: "gh: Not Found (HTTP 404)", exitCode: 1 };
     },
@@ -335,7 +341,7 @@ describe("a PR's file", () => {
 
 const GIT_ENV = { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@t", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@t" };
 
-async function world(options: { codeReview: boolean }) {
+async function world(options: { codeReview?: boolean; configCodeReview?: boolean; repoOf?: (root: string) => { host: string; display: string } }) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-file-contents-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -349,13 +355,14 @@ async function world(options: { codeReview: boolean }) {
   const dataDir = join(root, "data");
   mkdirSync(dataDir, { recursive: true });
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
+  if (options.configCodeReview !== undefined) writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxCodeReview: options.configCodeReview }));
   const forge = scripted();
   const server = await startInboxServer({
     dataDir,
     phones: false,
-    codeReview: options.codeReview,
+    ...(options.codeReview !== undefined ? { codeReview: options.codeReview } : {}),
     refRunner: forge.run,
-    readProjectRepo: async () => ({ host: "github.com", display: "northwind/billing-svc" }),
+    readProjectRepo: async (root: string) => options.repoOf?.(root) ?? { host: "github.com", display: "northwind/billing-svc" },
   } as Parameters<typeof startInboxServer>[0]);
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
@@ -424,12 +431,29 @@ describe("the PR route", () => {
     await w.sendGuide(w.git("diff", `${baseSha}..${headSha}`), ["a.ts"]);
     w.forge.pull = ghPull({ headRefOid: headSha });
     w.forge.mergeBase = baseSha;
+    w.forge.patch = w.git("diff", `${baseSha}..${headSha}`);
+    w.forge.headNow = headSha;
     expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
     w.forge.reads.length = 0;
     const response = await ask(w.base, "a.ts");
     expect(response.status).toBe(200);
     expect(await contentsOf(response)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
+  });
+
+  test("a file the diff does not change is not read, whatever blob id comes with it", async () => {
+    const w = await world({ codeReview: true });
+    w.forge.patch = `diff --git a/a.ts b/a.ts\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n`;
+    w.forge.files.set(fileAt(".env", HEAD), "new\n");
+    w.forge.files.set(fileAt(".env", BASE), "old\n");
+    w.forge.files.set(fileAt("a.ts", HEAD), "new\n");
+    w.forge.files.set(fileAt("a.ts", BASE), "old\n");
+    // The Inbox learns of the project from an agent's message, and of the PR from the list.
+    await w.sendGuide(w.forge.patch, ["a.ts"]);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    expect(await contentsOf(await ask(w.base, ".env"))).toEqual(NO_CONTENTS);
+    expect(w.forge.reads.filter((r) => r.includes(".env"))).toEqual([]);
+    expect(await contentsOf(await ask(w.base, "a.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
   });
 });
 
@@ -454,8 +478,9 @@ describe("a guide's file", () => {
   const PR_SOURCE = { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } as const;
   const patchOf = (path: string) => `diff --git a/${path} b/${path}\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`;
   /** A guide of a PR whose blobs this clone does not have. */
-  const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string) =>
+  const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string, project?: string) =>
     w.sendGuide("", [], {
+      ...(project ? { project_path: project } : {}),
       patch: undefined,
       guide: undefined,
       snapshot: buildGuideSnapshot({
@@ -484,6 +509,38 @@ describe("a guide's file", () => {
     expect(response.status).toBe(200);
     expect(await contentsOf(response)).toEqual(NO_CONTENTS);
     expect(off.forge.reads).toEqual([]);
+  });
+
+  test("Code review turned off with the PR still listed: no forge read, and nothing served", async () => {
+    const w = await world({ configCodeReview: true });
+    w.forge.files.set(fileAt("a.ts", HEAD), "new\n");
+    w.forge.files.set(fileAt("a.ts", BASE), "old\n");
+    const id = await prGuide(w, "a.ts");
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    const turned = await fetch(`${w.base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ code_review: { on: false } }) });
+    expect(turned.status).toBe(200);
+    w.forge.reads.length = 0;
+    const response = await w.askGuide(id, "a.ts");
+    expect(response.status).toBe(200);
+    expect(await contentsOf(response)).toEqual(NO_CONTENTS);
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide in another project naming this PR reads nothing of it", async () => {
+    const w = await world({ codeReview: true, repoOf: (root) => ({ host: "github.com", display: root.endsWith("billing-svc") ? "northwind/billing-svc" : "someone/third" }) });
+    w.forge.files.set(fileAt("a.ts", HEAD), "new\n");
+    w.forge.files.set(fileAt("a.ts", BASE), "old\n");
+    // The PR's own project is known to the Inbox, from a guide there.
+    const own = await prGuide(w, "a.ts");
+    const third = join(w.project, "..", "third");
+    mkdirSync(third, { recursive: true });
+    Bun.spawnSync(["git", "init", "-q"], { cwd: third, env: GIT_ENV });
+    const cross = await prGuide(w, "a.ts", third);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    expect(await contentsOf(await w.askGuide(own, "a.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    w.forge.reads.length = 0;
+    expect(await contentsOf(await w.askGuide(cross, "a.ts"))).toEqual(NO_CONTENTS);
+    expect(w.forge.reads).toEqual([]);
   });
 
   test("another site, a bad path, no such message: refused", async () => {
@@ -540,6 +597,22 @@ describe("a guide's file", () => {
     const saved = await fetch(`${w.base}/api/inbox/messages/${id}/guide/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotation }) });
     expect(saved.status).toBe(200);
     expect(((await saved.json()) as { annotation: { annotation: Record<string, unknown> } }).annotation.annotation).toMatchObject({ outsideDiff: true, anchorText: "2" });
+  });
+
+  test("a comment on a line in no hunk: refused without the mark, kept with it, and the file must still be in the patch", async () => {
+    const w = await world({ codeReview: true });
+    const before = Array.from({ length: 40 }, (_, i) => `line ${i + 1}`);
+    const after = before.map((line, i) => (i === 30 ? "changed" : line));
+    const id = await w.sendGuide(await changed(w, `${before.join("\n")}\n`, `${after.join("\n")}\n`), ["a.ts"]);
+    const save = (annotation: Record<string, unknown>) =>
+      fetch(`${w.base}/api/inbox/messages/${id}/guide/annotations`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ annotation }) });
+    // Line 5 is far above the hunk: only an arrow shows it.
+    const opened = { type: "comment", scope: "line", filePath: "a.ts", lineStart: 5, lineEnd: 5, side: "new", text: "Why?" };
+    expect((await save({ ...opened, id: "ann-closed" })).status).toBe(422);
+    const kept = await save({ ...opened, id: "ann-opened", outsideDiff: true, anchorText: "line 5" });
+    expect(kept.status).toBe(200);
+    expect(((await kept.json()) as { annotation: { annotation: Record<string, unknown> } }).annotation.annotation).toMatchObject({ lineStart: 5, outsideDiff: true });
+    expect((await save({ ...opened, id: "ann-elsewhere", filePath: "b.ts", outsideDiff: true })).status).toBe(422);
   });
 
   test("a binary file past the patch's own check has no arrows", async () => {

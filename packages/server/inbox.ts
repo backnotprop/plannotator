@@ -200,6 +200,7 @@ import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
@@ -3572,6 +3573,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           try {
             const [oldId, newId] = [url.searchParams.get("old"), url.searchParams.get("new")];
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
+            // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
+            if (ids && !parseDiffToFiles((await pulls.diff(key, scope)).patch).some((file) => file.path === filePath)) {
+              return json({ serverSession, oldContent: null, newContent: null });
+            }
             return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
@@ -4461,10 +4466,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
         if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
         const { sha256 } = message.guide;
-        const contents = await inboxGuideFileContents(store, sha256, filePath, store.project(message.project_id)?.root ?? null, (ids) => {
+        const projectRoot = store.project(message.project_id)?.root ?? null;
+        const contents = await inboxGuideFileContents(store, sha256, filePath, projectRoot, (ids) => {
           if (!codeReviewOn()) return null;
           const pullKey = guidePullKey(store, sha256);
-          return pullKey && pulls.find(pullKey) ? pullRoots(pullKey).then((roots) => pulls.fileContents(pullKey, "layer", filePath, roots, ids)) : null;
+          // Only a PR of this message's own project: a guide cannot name any PR on this machine to read its files.
+          return pullKey && pulls.find(pullKey)
+            ? pullRoots(pullKey).then((roots) => (projectRoot && roots.includes(projectRoot) ? pulls.fileContents(pullKey, "layer", filePath, roots, ids) : { oldContent: null, newContent: null }))
+            : null;
         });
         return json({ serverSession, ...contents });
       }

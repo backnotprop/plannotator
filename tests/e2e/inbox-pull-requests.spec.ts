@@ -147,7 +147,8 @@ const MERGE_BASE = 'b'.repeat(40);
 /** A file with lines far from its one change, in the teammate's PR: the expand arrows have somewhere to open. */
 const TOKENS_PATH = 'src/settings/tokens.ts';
 const TOKENS = Array.from({ length: 60 }, (_, i) => `export const SPACE_${i + 1} = ${i + 1};`);
-const TOKENS_CHANGED = TOKENS.map((line, i) => (i === 29 ? 'export const SPACE_30 = 32;' : line));
+// Past the change the two sides number apart: new line 46 is old line 45.
+const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SPACE_30 = 32;', 'export const SPACE_30_5 = 34;'] : [line]));
 
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
@@ -1171,15 +1172,21 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
   const arrow = shell.locator('[data-expand-button]').first();
   await expect(arrow).toBeVisible({ timeout: 30_000 });
-  expect(forgeCalls()).toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
-  // Layout.tsx is whole in its patch: nothing to open.
-  await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]')).toHaveCount(0);
+  // Highlighting happens off the page's thread: a long file must not freeze it.
+  await expect.poll(() => page.workers().length).toBeGreaterThan(0);
+  // Arrows, and no read: a whole file is read and highlighted only when someone opens one.
+  expect(forgeCalls()).not.toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
+  // The forge has no whole text of Layout.tsx: its first click takes its arrows away, and nothing is logged.
+  const noText = review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]');
+  await noText.first().click();
+  await expect(noText).toHaveCount(0);
   const box = shell.locator('[data-guide-code-view-mounted]');
   const height = async () => (await box.boundingBox())!.height;
   const before = await height();
   // The gap above the hunk: its arrow opens down from the file's first line.
   await shell.locator('[data-expand-button][data-expand-down]').first().click();
   await expect.poll(height).toBeGreaterThan(before);
+  expect(forgeCalls()).toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
   // Line 20 was in no hunk: GitHub takes no inline comment on it, so it goes in the review's main comment, quoted.
   const opened = shell.locator('[data-column-number="20"]').last();
   await expect(opened).toBeVisible({ timeout: 10_000 });
@@ -1188,6 +1195,20 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await page.getByPlaceholder('Leave feedback...').fill('Why 20 and not a named step?');
   await page.getByRole('button', { name: 'Add Comment' }).click();
   await expect(review.locator('[data-review-posts] [data-decision-primary]')).toContainText('Post Comments');
+  // The old side's line 45 quotes the old text, not the new file's line 45.
+  await shell.locator('[data-expand-up]:visible').last().click();
+  const oldSide = shell.locator('[data-column-number="45"]').first();
+  await expect(oldSide).toBeVisible({ timeout: 10_000 });
+  await oldSide.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why is this one kept?');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  // After a reload the gap is closed again: going to the comment opens it first.
+  await page.reload();
+  await expect(shell.locator('[data-expand-button]').first()).toBeVisible({ timeout: 30_000 });
+  await expect(shell.locator('[data-column-number="20"]')).toHaveCount(0);
+  await review.getByRole('button', { name: 'Comments, 2' }).click();
+  await review.locator('.ib-gpanel').getByText('Why 20 and not a named step?').first().click();
+  await expect(shell.locator('[data-column-number="20"]').last()).toBeInViewport({ timeout: 10_000 });
   await review.locator('[data-review-posts] [data-decision-primary]').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.locator('[data-outside-diff-note]')).toContainText('outside the diff');
@@ -1197,6 +1218,8 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   expect(sent.comments ?? []).toEqual([]);
   expect(sent.body).toContain('Why 20 and not a named step?');
   expect(sent.body).toContain(TOKENS[19]!);
+  expect(sent.body).toContain(TOKENS[44]!);
+  expect(sent.body).not.toContain(TOKENS[43]!);
   expect(world.errors).toEqual([]);
 });
 

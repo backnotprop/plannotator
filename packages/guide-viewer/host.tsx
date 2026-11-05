@@ -159,6 +159,8 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * which the renderer's measured height then corrects).
    */
   diffStyle?: 'split' | 'unified';
+  /** The renderer can read a changed file's whole text: it draws an arrow row after the last hunk. For the same estimate. */
+  opensWholeFiles?: boolean;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

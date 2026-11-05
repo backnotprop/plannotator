@@ -560,6 +560,20 @@ describe('GuideView bare (the Inbox PR page)', () => {
     expect(latestCodeViewProps.at(-1)!.onContentHeightChange).toBeFunction();
   });
 
+  // Guards the row being read moving when a box above mounts: with a reader the viewer draws an arrow row after the last hunk.
+  test.skipIf(!hasDom)('with a reader of whole files, a changed file\'s first estimate holds the arrow row after its last hunk', async () => {
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
+    const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,1 +1,1 @@\n-a\n+b\n';
+    const file: DiffFile = { path: 'a.ts', patch, additions: 1, deletions: 1, status: 'modified' };
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
+    const without = Number.parseFloat(boxHeight('a.ts'));
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split', opensWholeFiles: true } });
+    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
+    // Nothing more to open in a file that is not changed in place.
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'added' }] }), diffStyle: 'split', opensWholeFiles: true } });
+    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without);
+  });
+
   // Guards the Split over-count: a replaced line is one row in Split, two in Unified; before a measure the box follows the host's layout.
   test.skipIf(!hasDom)('the first estimate follows the layout the host draws: Split pairs removed and added lines', async () => {
     const patch = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1,4 +1,5 @@\n ctx\n-a\n-b\n+A\n+B\n+C\n ctx2\n-d\n';
@@ -762,6 +776,90 @@ describe('GuideView bare (the Inbox PR page)', () => {
       expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBe(9);
     });
   }, 15_000);
+
+  describe('the reader\'s place', () => {
+    const box = () => host!.querySelector<HTMLElement>('[data-guide-code-view-mounted]')!;
+    /** The page, a box `top` px from its top, and what a ResizeObserver would say when the box's height changes. */
+    async function placed(top: number, height: number) {
+      const heard: (() => void)[] = [];
+      const savedObserver = globalThis.ResizeObserver;
+      globalThis.ResizeObserver = class {
+        constructor(private readonly callback: ResizeObserverCallback) {}
+        observe() {
+          heard.push(() => this.callback([], this as unknown as ResizeObserver));
+        }
+        unobserve() {}
+        disconnect() {}
+      } as unknown as typeof ResizeObserver;
+      const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'a.ts' }] }] });
+      const page = document.createElement('div');
+      page.style.overflowY = 'auto';
+      document.body.appendChild(page);
+      let scrolled = 5_000;
+      Object.defineProperty(page, 'scrollTop', { configurable: true, get: () => scrolled, set: (next: number) => void (scrolled = next) });
+      page.getBoundingClientRect = () => ({ top: 0 }) as DOMRect;
+      let boxHeightNow = height;
+      await renderView(guide, { fitFileHeights: true, state: makeState({ files: [makeFile('a.ts')] }) });
+      page.appendChild(host!);
+      Object.defineProperty(box(), 'offsetHeight', { configurable: true, get: () => boxHeightNow });
+      box().getBoundingClientRect = () => ({ top }) as DOMRect;
+      const again = () => heard.forEach((say) => say());
+      // The card's first look at its height, in that page.
+      again();
+      scrolled = 5_000;
+      return {
+        page,
+        top: () => scrolled,
+        grow: (next: number) => {
+          boxHeightNow = next;
+          again();
+        },
+        restore: () => {
+          globalThis.ResizeObserver = savedObserver;
+          page.remove();
+        },
+      };
+    }
+
+    // Guards the row being read moving: browsers do not hold it on this scroller (Safari never does).
+    test.skipIf(!hasDom)('a box wholly above the viewport that changes height moves the page by as much; one in view does not', async () => {
+      const above = await placed(-900, 500);
+      try {
+        above.grow(620);
+        expect(above.top()).toBe(5_120);
+        above.grow(600);
+        expect(above.top()).toBe(5_100);
+      } finally {
+        above.restore();
+      }
+      const inView = await placed(-100, 500);
+      try {
+        inView.grow(620);
+        expect(inView.top()).toBe(5_000);
+      } finally {
+        inView.restore();
+      }
+    }, 15_000);
+
+    // Guards folding from the sticky header landing the reader in an unrelated file.
+    test.skipIf(!hasDom)('folded with its top above the viewport, the file comes to the top of the page; a file already in view stays', async () => {
+      const fold = () => act(async () => (latestCodeViewProps.at(-1) as { onFileCollapsedChange: (path: string, collapsed: boolean) => void }).onFileCollapsedChange('a.ts', true));
+      const above = await placed(-2_527, 3_163);
+      try {
+        await fold();
+        expect(above.top()).toBe(5_000 - 2_527);
+      } finally {
+        above.restore();
+      }
+      const inView = await placed(40, 3_163);
+      try {
+        await fold();
+        expect(inView.top()).toBe(5_000);
+      } finally {
+        inView.restore();
+      }
+    }, 15_000);
+  });
 
   // Guards the shared chain's default (the review app, guides.show, VS Code): unchanged.
   test.skipIf(!hasDom)('with neither bare nor the opt-in the box keeps its estimate and the renderer is asked for no height', async () => {

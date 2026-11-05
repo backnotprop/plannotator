@@ -32,6 +32,7 @@ import type {
   ConventionalLabel,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
+import { openedLinesQuote } from '../attachments';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -169,7 +170,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       fileContents
         ? async (file, signal) => {
             if (file.status !== 'modified' || file.oldPath) return null;
-            // A viewer coming back into the outer window asks again: what this patch already has is not read twice.
+            // A viewer mounted again asks again: what this patch already has is not read twice.
             const kept = wholeFiles.current.get(file.path);
             if (kept?.patch === file.patch) return kept.contents;
             const contents = await fileContents(file.path, signal, file.patch);
@@ -245,8 +246,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
       const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
       const whole = wholeFiles.current.get(filePath);
-      const wholeText = side === 'new' ? whole?.contents.newContent : whole?.contents.oldContent;
-      const openedCode = outsideDiff && wholeText ? wholeText.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+      const openedCode = outsideDiff && whole ? openedLinesQuote(whole.contents, side, lineStart, lineEnd) : '';
       const selectedText = !outsideDiff && file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
@@ -387,8 +387,9 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      opensWholeFiles: !!fetchFileContent,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments, savedDiffStyle, fetchFileContent],
   );
 
   return (

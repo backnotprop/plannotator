@@ -6,6 +6,7 @@ import type {
   CodeViewLineSelection,
   CodeViewOptions,
   DiffLineAnnotation,
+  FileDiffLoadedFiles,
   FileDiffMetadata,
   LineAnnotation,
   PostRenderPhase,
@@ -35,6 +36,7 @@ import { getFileKindOrder } from '../utils/fileKindTree';
 import { buildCodeNavRequest } from '../utils/buildCodeNavRequest';
 import { getDiffSelection, getLineNumberFromNode, getSideFromNode, snapshotDiffSelection, rangeForGutterClick, type DiffSelectionSnapshot } from '../utils/diffSelection';
 import { isContentConsistentWithPatch } from '../utils/patchConsistency';
+import { isLineRangeInPatch } from '../utils/patchParser';
 import { hashString } from '../utils/hashString';
 import {
   resolveLineSelectionBehavior,
@@ -211,10 +213,12 @@ export interface AllFilesCodeViewProps {
    *  firing a /api/file-content request the server answers 400. */
   contextExpansionAvailable?: boolean;
   /**
-   * Where a host with no review server reads a file's whole text from. Given,
-   * it replaces the `/api/file-content` request, and a read-only diff or
-   * `contextExpansionAvailable={false}` no longer stops expansion. Null, or a
-   * side left null, leaves the file as the patch shows it. Absent: as before.
+   * Where a host with no review server reads a file's whole text from, for a
+   * view of one file. It replaces the `/api/file-content` request, and it is
+   * asked only when a person opens an arrow (or a comment on a closed line is
+   * revealed): a diff nobody opens costs no read and no tokenizing of a whole
+   * file. Null, a side left null, or text that no longer fits the patch takes
+   * the arrows away and leaves the file as the patch shows it. Absent: as before.
    */
   fetchFileContent?: (file: DiffFile, signal: AbortSignal) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
   /**
@@ -678,6 +682,19 @@ const SCROLLS_WITH_PAGE_CSS = `
 // (item growth + re-render) are allowed to land. Slightly above Pierre's own
 // post-interaction restore delay (120ms).
 const AUGMENT_APPLY_IDLE_MS = 150;
+// How long revealing a comment on a closed line waits for its file's whole text.
+const REVEAL_WAIT_MS = 30_000;
+
+/** `line`'s number on the new side, for a line outside every hunk (where both sides read the same). */
+function newLineOf(fileDiff: FileDiffMetadata, line: number, side: 'old' | 'new'): number {
+  if (side === 'new') return line;
+  let offset = 0;
+  for (const hunk of fileDiff.hunks) {
+    if (line < hunk.deletionStart) break;
+    offset = hunk.additionStart + hunk.additionCount - (hunk.deletionStart + hunk.deletionCount);
+  }
+  return line + offset;
+}
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const noopAIMarkerClick = () => {};
 
@@ -1702,6 +1719,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // second (rAF `fitPerfectly`) render wave for augmentation — a library
     // implementation detail we'd rather not lean on. The handle is only needed
     // at fetch RESOLUTION, where it is re-read fresh from the ref.
+    // A host's reader is asked when an arrow opens (loadWholeFile).
+    if (fetchFileContentRef.current) return;
     const augmentState = augmentRef.current;
     const generation = fileSetKeyRef.current;
     // One fetch per item PER DIFF: a same-generation entry ('pending' or
@@ -1725,8 +1744,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Read-only hosts have no review server: leave the raw-patch context in
     // place and mark the item done so it never re-fires (no dead requests,
     // no console noise from a CSP that blocks connect-src).
-    const hostFetch = fetchFileContentRef.current;
-    if (!hostFetch && (readOnlyRef.current || !contextExpansionAvailableRef.current)) {
+    if (readOnlyRef.current || !contextExpansionAvailableRef.current) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }
@@ -1752,9 +1770,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const snapshot = reviewSnapshotIdRef.current;
     if (snapshot) params.set('snapshot', snapshot);
 
-    (hostFetch
-      ? hostFetch(file, controller.signal)
-      : fetch(`/api/file-content?${params}`, { signal: controller.signal }).then((res) => (res.ok ? res.json() : null)))
+    fetch(`/api/file-content?${params}`, { signal: controller.signal })
+      .then((res) => (res.ok ? res.json() : null))
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
         if (isStale()) return;
         if (!data || (data.oldContent == null && data.newContent == null)) {
@@ -1860,6 +1877,74 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         void err;
       });
   }, [queueAugmentApply]);
+
+  // A host's reader, for the arrows: Pierre shows them on a partial diff once it has a loader, and calls it on the first
+  // click. It parks the click's opening, swaps in the whole file and highlights that off the main thread.
+  const [wholeFileGone, setWholeFileGone] = useState(false);
+  const wholeFileGoneRef = useRef(wholeFileGone);
+  wholeFileGoneRef.current = wholeFileGone;
+  useEffect(() => setWholeFileGone(false), [fileSetKey]);
+  const loadWholeFile = useStableCallback((fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
+    const generation = fileSetKeyRef.current;
+    const entry = [...itemIdToFileRef.current].find(([, candidate]) => candidate.path === fileDiff.name);
+    const read = fetchFileContentRef.current;
+    // No text to open: no arrows, and a promise that stays open, since Pierre logs a rejection and throws on an empty answer.
+    const none = () => {
+      if (fileSetKeyRef.current === generation) setWholeFileGone(true);
+      return new Promise<never>(() => {});
+    };
+    if (!entry || !read) return none();
+    const [itemId, file] = entry;
+    const controller = new AbortController();
+    augmentRef.current.get(itemId)?.controller.abort();
+    augmentRef.current.set(itemId, { status: 'pending', controller, generation });
+    return read(file, controller.signal).then(
+      (data) => {
+        augmentRef.current.set(itemId, { status: 'done', controller, generation });
+        if (data?.oldContent == null || data.newContent == null) return none();
+        // The file may have moved on since this diff was captured: whole text that no longer fits would break the layout.
+        if (!isContentConsistentWithPatch(file.patch, data.oldContent, data.newContent)) return none();
+        return {
+          oldFile: { name: file.oldPath || file.path, contents: data.oldContent },
+          newFile: { name: file.path, contents: data.newContent },
+        };
+      },
+      () => none(),
+    );
+  });
+  // Only a file changed in place has both sides to open.
+  const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' && !file.oldPath);
+
+  // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
+  // need be), then scroll, once the rows are there. Answers whether it took the jump on.
+  const revealClosedLines = useStableCallback((itemId: string, ann: CodeAnnotation, range: SelectedLineRange, onDone: () => void): (() => void) | null => {
+    const file = itemIdToFileRef.current.get(itemId);
+    const side = range.side === 'deletions' ? 'old' : 'new';
+    if (!file || !fetchFileContentRef.current || isFileScopedAnnotation(ann)) return null;
+    if (isLineRangeInPatch(file.patch, Math.min(range.start, range.end), Math.max(range.start, range.end), side)) return null;
+    let frame = 0;
+    let asked = false;
+    const deadline = performance.now() + REVEAL_WAIT_MS;
+    const step = () => {
+      const viewer = viewerRef.current?.getInstance();
+      const rendered = viewer?.getRenderedItems().find((candidate) => candidate.id === itemId);
+      const instance = rendered?.type === 'diff' ? rendered.instance : null;
+      const fileDiff = rendered?.type === 'diff' ? rendered.item.fileDiff : null;
+      if (wholeFileGoneRef.current || performance.now() > deadline) return onDone();
+      if (instance && fileDiff && !fileDiff.isPartial) {
+        for (const line of [range.start, range.end]) instance.revealLine(newLineOf(fileDiff, line, side));
+        return onDone();
+      }
+      // The arrows' own path, opening nothing yet: it starts the read.
+      if (instance && fileDiff && !asked) {
+        asked = true;
+        instance.expandHunk(0, 'up', 0);
+      }
+      frame = requestAnimationFrame(step);
+    };
+    frame = requestAnimationFrame(step);
+    return () => cancelAnimationFrame(frame);
+  });
 
   // (Re)apply search marks for ONE item's node. Called on every render of that
   // item (onPostRender mount/update) so marks survive CodeView's element
@@ -2750,13 +2835,21 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
 
     const isFile = isFileScopedAnnotation(ann);
     const range = lineRangeForAnnotation(ann);
-    const raf = requestAnimationFrame(() => {
-      const viewer = viewerRef.current;
-      if (viewer == null) return;
-      if (isFile) viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
-      else viewer.scrollTo({ type: 'range', id: itemId, range });
-    });
-    return () => cancelAnimationFrame(raf);
+    let raf = 0;
+    const jump = () => {
+      raf = requestAnimationFrame(() => {
+        const viewer = viewerRef.current;
+        if (viewer == null) return;
+        if (isFile) viewer.scrollTo({ type: 'item', id: itemId, align: 'start' });
+        else viewer.scrollTo({ type: 'range', id: itemId, range });
+      });
+    };
+    const stopOpening = revealClosedLines(itemId, ann, range, jump);
+    if (!stopOpening) jump();
+    return () => {
+      stopOpening?.();
+      cancelAnimationFrame(raf);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scrollTargetAnnotation, filePathToItemId, previewItemIds]);
 
@@ -3237,6 +3330,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      ...(opensWholeFiles && { loadDiffFiles: loadWholeFile }),
       enableLineSelection: !readOnly,
       enableGutterUtility: !readOnly,
       hunkSeparators: 'line-info',
@@ -3303,6 +3397,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      opensWholeFiles,
+      loadWholeFile,
       readOnly,
       itemMetrics,
       leadingHeight,

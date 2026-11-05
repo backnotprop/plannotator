@@ -682,16 +682,16 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   const height = async () => (await box.boundingBox())!.height;
   const closed = await height();
   const place = await scrollTop();
-  // A box is its content: no band of empty space under the last row or above the header (the box's 8 px and its border,
-  // and 8 px more until the file header draws at the --panel-header-h its layout counts).
+  // A box is its content: no band of empty space above the header (the box's 8 px and its border) or under the last
+  // row (those, and the 4 px under a last arrow row).
   const slack = await box.evaluate((el) => {
     const outer = el.getBoundingClientRect();
     const code = el.querySelector('diffs-container')!.getBoundingClientRect();
     const header = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-diffs-header]')!;
     return { above: code.top - outer.top, below: outer.bottom - code.bottom, line: getComputedStyle(header, '::after').content };
   });
-  expect(slack.above).toBeLessThanOrEqual(17);
-  expect(slack.below).toBeLessThanOrEqual(17);
+  expect(slack.above).toBeLessThanOrEqual(9);
+  expect(slack.below).toBeLessThanOrEqual(13);
   // The line under a file header shows only while the header is stuck.
   expect(slack.line).toBe('none');
   await arrow.click();
@@ -747,7 +747,7 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   await page.keyboard.press('Escape');
 });
 
-test('a guided review whose blobs are nowhere: no arrows, and nothing logged', async () => {
+test('a guided review whose blobs are nowhere: the first click takes the arrows away, and nothing logged', async () => {
   const { page, claude } = world;
   const patch = [
     'diff --git a/src/gone.ts b/src/gone.ts',
@@ -769,11 +769,13 @@ test('a guided review whose blobs are nowhere: no arrows, and nothing logged', a
     body: 'A file whose blobs this clone does not have.',
     guide: { title: 'Gone', intent: 'Gone.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/gone.ts', summary: 'One edit.' }] }] },
   } as never);
-  const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));
   await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
-  expect((await answered).status()).toBe(200);
   const shell = page.locator('[data-guide-file-shell="src/gone.ts"]');
   await expect(shell.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
+  // Whether a blob is there is known only by asking, and nobody asks before an arrow is opened.
+  const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));
+  await shell.locator('[data-expand-button]').first().click();
+  expect((await answered).status()).toBe(200);
   await expect(shell.locator('[data-expand-button]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 });

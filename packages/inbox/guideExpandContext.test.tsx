@@ -4,17 +4,18 @@
  * GuidePane, against `GET /api/inbox/messages/:id/guide/file`), and the real
  * reader, AllFilesCodeView and Pierre's diff do the rest.
  *
- * The failures this catches: no arrows in a read-only diff or a comment-only
- * one (the review app's gate stopped both); a click that opens nothing, or a box
- * that does not grow with what it opened; a file with no text to open showing
- * arrows or an error; a renamed, added or deleted file costing a read; a request
- * from a host that passed no reader. (A real browser's boxes:
- * tests/e2e/inbox-pull-requests.spec.ts.)
+ * The failures this catches: a read before anyone opens an arrow (a whole file
+ * read and tokenized per mounted file froze the page on real code); no arrows
+ * in a read-only diff or a comment-only one (the review app's gate stopped
+ * both); a click that opens nothing, or a box that does not grow with what it
+ * opened; a file with no text to open keeping its arrows or logging an error; a
+ * renamed, added or deleted file showing arrows; a request from a host that
+ * passed no reader. (A real browser's boxes: tests/e2e/inbox-pull-requests.spec.ts.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { plugin } from 'bun';
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, expect, mock, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { resolve } from 'node:path';
@@ -40,6 +41,7 @@ mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => (
 
 const hasDom = typeof document !== 'undefined';
 const { GuidePane } = (hasDom ? await import('./components/GuidePane') : {}) as typeof import('./components/GuidePane');
+const { ReviewPane } = (hasDom ? await import('./components/ReviewPane') : {}) as typeof import('./components/ReviewPane');
 const GuideReader = (hasDom ? (await import('#guide-reader')).default : null)!;
 
 const OLD = Array.from({ length: 60 }, (_, i) => `line ${i + 1}`);
@@ -170,14 +172,16 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
     return Response.json({});
   }) as typeof fetch;
   await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} />);
-  expect(asked).toEqual([`/api/inbox/messages/${MESSAGE}/guide/file?path=a.ts`]);
+  // Nobody opened anything: the arrows are there, and the file is not read.
+  expect(asked).toEqual([]);
   expect(arrows().length).toBeGreaterThan(0);
   const before = rows();
   await act(async () => observers.forEach((heard) => heard()));
   const boxBefore = boxHeight('a.ts');
 
   await act(async () => arrows()[0]!.click());
-  await settle(4);
+  await settle();
+  expect(asked).toEqual([`/api/inbox/messages/${MESSAGE}/guide/file?path=a.ts`]);
   expect(rows()).toBeGreaterThan(before);
   await act(async () => observers.forEach((heard) => heard()));
   expect(boxHeight('a.ts')).toBeGreaterThan(boxBefore);
@@ -198,7 +202,20 @@ test.skipIf(!hasDom)("a tailnet guest's page asks nothing (each file would be a 
   await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} guest />);
   expect(rows()).toBeGreaterThan(0);
   expect(asked).toEqual([]);
-  expect(arrows()).toEqual([]);
+  expect(arrows().length).toBe(0);
+});
+
+test.skipIf(!hasDom)("a tailnet guest's review (the full window): no arrows either", async () => {
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const path = String(input);
+    if (path.includes('/guide/file')) return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
+    if (path.includes('/guide')) return Response.json({ message_id: MESSAGE, guide: message.guide, snapshot: snapshotOf(MODIFIED, ['a.ts']) });
+    if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
+    return Response.json({});
+  }) as typeof fetch;
+  await draw(<ReviewPane thread={thread} message={message} guest onBack={() => {}} onClose={() => {}} onSent={() => {}} />);
+  expect(rows()).toBeGreaterThan(0);
+  expect(arrows().length).toBe(0);
 });
 
 test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments) still has its arrows', async () => {
@@ -206,21 +223,29 @@ test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments
   expect(arrows().length).toBeGreaterThan(0);
 });
 
-test.skipIf(!hasDom)('nothing to open (no contents, a refused read, a failed read): the diff as it came, no arrows', async () => {
+test.skipIf(!hasDom)('nothing to open (no contents, a refused read, a failed read): the first click takes the arrows away, the diff as it came, nothing logged', async () => {
   const answers: (() => Promise<{ oldContent: string | null; newContent: string | null }>)[] = [
     async () => ({ oldContent: null, newContent: null }),
     () => Promise.reject(Object.assign(new Error('Code review is off.'), { status: 409 })),
     // Contents that do not reconcile with the patch's hunks: the file moved on.
     async () => ({ oldContent: whole(OLD), newContent: whole([...NEW, 'one more']) }),
   ];
+  const logged = spyOn(console, 'error');
   for (const answer of answers) {
     await draw(reader(MODIFIED, ['a.ts'], answer));
-    expect(rows()).toBeGreaterThan(0);
-    expect(arrows()).toEqual([]);
+    const before = rows();
+    expect(before).toBeGreaterThan(0);
+    expect(arrows().length).toBeGreaterThan(0);
+    await act(async () => arrows()[0]!.click());
+    await settle();
+    expect(rows()).toBe(before);
+    expect(arrows().length).toBe(0);
+    expect(logged).not.toHaveBeenCalled();
     act(() => root?.unmount());
     host?.remove();
     root = null;
   }
+  logged.mockRestore();
 });
 
 test.skipIf(!hasDom)('an added, deleted or renamed file costs no read and has no arrows; a changed one beside them does', async () => {
@@ -231,8 +256,10 @@ test.skipIf(!hasDom)('an added, deleted or renamed file costs no read and has no
       return { oldContent: whole(OLD), newContent: whole(NEW) };
     }),
   );
-  expect(asked).toEqual(['a.ts']);
-  expect(host!.querySelector('[data-guide-file-shell="new.ts"] diffs-container')!.shadowRoot!.querySelectorAll('[data-expand-button]').length).toBe(0);
+  expect(asked).toEqual([]);
+  for (const path of ['new.ts', 'gone.ts', 'to.ts']) {
+    expect(host!.querySelector(`[data-guide-file-shell="${path}"] diffs-container`)!.shadowRoot!.querySelectorAll('[data-expand-button]').length).toBe(0);
+  }
   expect(arrows().length).toBeGreaterThan(0);
 });
 
@@ -244,6 +271,6 @@ test.skipIf(!hasDom)('a host that passes no reader: no request of any kind, no a
   }) as typeof fetch;
   await draw(reader(MODIFIED, ['a.ts']));
   expect(rows()).toBeGreaterThan(0);
-  expect(arrows()).toEqual([]);
+  expect(arrows().length).toBe(0);
   expect(asked.filter((path) => path.includes('file'))).toEqual([]);
 });

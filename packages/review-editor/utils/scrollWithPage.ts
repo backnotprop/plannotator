@@ -41,8 +41,9 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
     const at = viewTop - rect.top;
     let from = at;
     if (performance.now() >= jumpUntil) {
-      // CodeView keeping its anchor. Wholly above the viewport, the browser's own scroll anchoring already keeps the
-      // reader's place; past the last whole window CodeView sees `last`, not `at`, so what it asks for is a move from there.
+      // CodeView keeping its anchor. Wholly above the viewport, what holds the reader's place is the host keeping it for
+      // a box that changes height there (GuideFileCard); past the last whole window CodeView sees `last`, not `at`, so
+      // what it asks for is a move from there.
       if (rect.bottom <= viewTop) return;
       const last = Math.max(0, rect.height - windowHeight());
       if (at > last) from = last;
@@ -74,8 +75,16 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
   };
   page.addEventListener('scroll', follow, { passive: true });
   for (const type of FORWARDED_INTENT) page.addEventListener(type, intent, { passive: true });
-  // Something above grew or shrank without a scroll: the root moved all the same.
-  const moved = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(follow);
+  // Something above grew or shrank without a scroll: the root moved all the same. A frame later, since what `follow`
+  // sets off can change sizes, and doing that inside this callback is a ResizeObserver loop.
+  let frame = 0;
+  const moved =
+    typeof ResizeObserver === 'undefined'
+      ? null
+      : new ResizeObserver(() => {
+          cancelAnimationFrame(frame);
+          frame = requestAnimationFrame(follow);
+        });
   for (const child of Array.from(page.children)) moved?.observe(child);
 
   return {
@@ -86,6 +95,7 @@ export function scrollWithPage(root: HTMLElement): PageScroll {
       page.removeEventListener('scroll', follow);
       for (const type of FORWARDED_INTENT) page.removeEventListener(type, intent);
       moved?.disconnect();
+      cancelAnimationFrame(frame);
       delete (root as { scrollTop?: number }).scrollTop;
       delete (root as { scrollTo?: unknown }).scrollTo;
       delete (root as { getBoundingClientRect?: unknown }).getBoundingClientRect;

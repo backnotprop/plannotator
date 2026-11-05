@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FileKind } from '@plannotator/core/file-kind';
 import type { DiffFile } from './types';
 import { FileKindIcon } from './FileKindIcon';
@@ -10,8 +10,21 @@ import { useGuideFileWindow } from './GuideViewportManager';
 const MAX_DIFF_HEIGHT = 620;
 /** A fitted box's border and padding around the viewer's own height. */
 const FIT_BOX_CHROME = 2 + 16;
+/** The arrow row after a file's last hunk. */
+const TRAILING_ROW_HEIGHT = 32;
 /** A folded file's box: its header alone. */
 const COLLAPSED_HEIGHT = 49;
+
+/** The element the page scrolls in. */
+function pageOf(element: HTMLElement): HTMLElement {
+  for (let parent = element.parentElement; parent; parent = parent.parentElement) {
+    const overflow = getComputedStyle(parent).overflowY;
+    if (overflow === 'auto' || overflow === 'scroll') return parent;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? document.documentElement;
+}
+
+const pageTopOf = (page: HTMLElement) => (page === document.scrollingElement ? 0 : page.getBoundingClientRect().top);
 
 function estimateDiffHeight(patch: string): number {
   const lineCount = patch.split('\n').length;
@@ -24,9 +37,11 @@ function estimateDiffHeight(patch: string): number {
  * lines and the added lines after it share rows), a separator before each hunk that does not start the file, the
  * file's header and the list's padding (AllFilesCodeView's metrics: 20 px rows, one more for a "\ No newline", a
  * 33 px header, a 40 px separator above the first hunk and 48 px between hunks, 8 px above and below the list, 8 px
- * in the code block, a 1 px border). A patch with no hunk (a binary file, a rename) keeps the old estimate.
+ * in the code block, a 1 px border). With a reader of whole files the viewer also draws an arrow row after the last
+ * hunk (`trailingRow`), whose 24 px its margins leave out. A patch with no hunk (a binary file, a rename) keeps the old
+ * estimate.
  */
-function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified'): number {
+function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = 'unified', trailingRow = false): number {
   let rows = 0;
   let hunks = 0;
   let separatorHeight = 0;
@@ -68,7 +83,7 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return FIT_BOX_CHROME + 33 + rows * 20 + separatorHeight;
+  return FIT_BOX_CHROME + 33 + rows * 20 + separatorHeight + (trailingRow ? TRAILING_ROW_HEIGHT : 0);
 }
 
 interface GuideFileCardProps {
@@ -101,7 +116,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   onActivate,
   fitContent = false,
 }) => {
-  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle } = useGuideHost();
+  const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle, opensWholeFiles } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
   const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
@@ -112,8 +127,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const [opened, setOpened] = useState(false);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
-    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle) : estimateDiffHeight(file.patch)),
-    [fitContent, file.patch, diffStyle],
+    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && file.status === 'modified' && !file.oldPath) : estimateDiffHeight(file.patch)),
+    [fitContent, file.patch, file.status, file.oldPath, diffStyle, opensWholeFiles],
   );
   // The content's height as the renderer last reported it (plus the box's border), kept while the CodeView is
   // unmounted so the box does not jump when it leaves the outer window.
@@ -179,7 +194,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     requestMount();
     onActivate(file.path);
     const raf = requestAnimationFrame(() => {
-      shellRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      // Fitting, at once: a page-long ride would mount boxes on the way, and holding the reader's place stops a smooth scroll.
+      shellRef.current?.scrollIntoView(fitContent ? { block: 'start' } : { behavior: 'smooth', block: 'start' });
     });
     return () => cancelAnimationFrame(raf);
     // Token identifies the navigation event; callback identity must not replay it.
@@ -196,6 +212,37 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     shellRef.current = element;
     register(element);
   }, [register]);
+
+  // The page holds the reader's place: a box wholly above the viewport that changes height moves the page by as much.
+  // Browsers do not do this for us here (and Safari never does): `.ib-gbody` opts out so that nothing corrects twice.
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const box = boxRef.current;
+    if (!fitContent || !box || typeof ResizeObserver === 'undefined') return;
+    let height = box.offsetHeight;
+    const observer = new ResizeObserver(() => {
+      const before = height;
+      height = box.offsetHeight;
+      if (height === before) return;
+      const page = pageOf(box);
+      if (box.getBoundingClientRect().top + before <= pageTopOf(page)) page.scrollTop += height - before;
+    });
+    observer.observe(box);
+    return () => observer.disconnect();
+  }, [fitContent]);
+
+  // Folded from its sticky header, the box is gone from under the reader: bring the file to the top of the page, not
+  // whatever now sits where they were reading. Before paint, and before the box's new height reaches the observer above.
+  const wasCollapsed = useRef(collapsed);
+  useLayoutEffect(() => {
+    const folded = collapsed && !wasCollapsed.current;
+    wasCollapsed.current = collapsed;
+    const box = boxRef.current;
+    if (!folded || !fitContent || !box) return;
+    const page = pageOf(box);
+    const above = pageTopOf(page) - box.getBoundingClientRect().top;
+    if (above > 0) page.scrollTop -= above;
+  }, [collapsed, fitContent]);
 
   return (
     <div
@@ -225,6 +272,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       )}
 
       <div
+        ref={boxRef}
         style={followsContent ? { minHeight: renderedHeight } : { height: renderedHeight }}
         className={`${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
         data-guide-code-view-mounted={mounted ? 'true' : 'false'}

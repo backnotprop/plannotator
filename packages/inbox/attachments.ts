@@ -406,6 +406,12 @@ function conventionalPrefix(comment: CodeAnnotation): string {
 }
 
 /** Heading suffix of a comment on lines outside the diff, as the review app's export writes it. */
+/** The lines an expand arrow opened, as a comment on them quotes: its own side's text, since the two sides number apart. */
+export function openedLinesQuote(contents: { oldContent: string | null; newContent: string | null }, side: 'old' | 'new', lineStart: number, lineEnd: number): string {
+  const text = side === 'new' ? contents.newContent : contents.oldContent;
+  return text ? text.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+}
+
 const OUTSIDE_DIFF_LABEL = '(not in the diff)';
 
 /**

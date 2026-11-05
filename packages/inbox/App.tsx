@@ -6090,6 +6090,7 @@ function Inbox() {
             key={guideMessage.id}
             thread={thread}
             message={guideMessage}
+            guest={tailnetGuest(settings)}
             // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
             onBack={() => {
               const now = routeRef.current;

@@ -58,6 +58,8 @@ const GuideReader = lazy(() => import('#guide-reader'));
 
 export interface ReviewPaneProps {
   thread: InboxThread;
+  /** A tailnet guest's page: the routes behind the arrows refuse it, so no reader. */
+  guest?: boolean;
   message: InboxMessageWire;
   /** Back to the thread. */
   onBack: () => void;
@@ -75,7 +77,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -557,7 +559,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
-                fileContents={fileContents}
+                {...(guest ? {} : { fileContents })}
               />
             </Suspense>
           ) : null}

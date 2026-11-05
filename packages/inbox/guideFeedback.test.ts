@@ -9,7 +9,7 @@ import { describe, expect, test } from 'bun:test';
 import type { InboxAnnotationRecord } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { exportReviewFeedback } from '@plannotator/review-editor/utils/exportFeedback';
-import { attachmentFeedback, guideCommentSections, guideFeedback, recordQuote, recordTag } from './attachments';
+import { attachmentFeedback, guideCommentSections, guideFeedback, openedLinesQuote, recordQuote, recordTag } from './attachments';
 
 const comments: CodeAnnotation[] = [
   { id: 'a', type: 'comment', scope: 'line', filePath: 'src/auth.ts', lineStart: 12, lineEnd: 12, side: 'new', text: 'Refresh earlier.', selectedText: '  if (expired) refresh();', createdAt: 1 },
@@ -156,6 +156,14 @@ describe('guided-review comments as feedback', () => {
 
 // A record written before the store checked its fields can hold a label's decorations as a string (or a label that is
 // not one). The export reads them defensively: one bad comment must never make every Send on the thread fail.
+// Guards the wrong code going to GitHub unnoticed: past a hunk that added lines, the sides number apart.
+test('a comment on an opened line quotes the text of its own side', () => {
+  const contents = { oldContent: 'one\ntwo\nthree\n', newContent: 'added\none\ntwo\nthree\n' };
+  expect(openedLinesQuote(contents, 'old', 2, 3)).toBe('two\nthree');
+  expect(openedLinesQuote(contents, 'new', 2, 3)).toBe('one\ntwo');
+  expect(openedLinesQuote({ oldContent: null, newContent: 'x\n' }, 'old', 1, 1)).toBe('');
+});
+
 test('a stored comment with a string decorations or a non-string label still exports', () => {
   const bad = [
     { ...globals[0]!, id: 'g-bad', conventionalLabel: 'issue', decorations: 'blocking' },
