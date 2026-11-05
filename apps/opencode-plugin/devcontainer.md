@@ -2,9 +2,9 @@
 
 Plannotator works in devcontainers and Docker environments with minimal configuration.
 
-## Required Environment Variables
+## Environment Variables
 
-Add these to your `devcontainer.json`:
+A VS Code development container usually opens the browser by itself. If it does not, or in any other development container, add the fixed port and remote mode to `devcontainer.json`:
 
 ```json
 {
@@ -18,10 +18,10 @@ Add these to your `devcontainer.json`:
 
 | Variable | Purpose |
 |----------|---------|
-| `PLANNOTATOR_REMOTE=1` | Forces remote mode for container-friendly port/browser handling (required in containers) |
-| `PLANNOTATOR_PORT=9999` | Fixed port for the UI (required for port forwarding) |
+| `PLANNOTATOR_REMOTE=1` | Forces remote mode, which binds to `0.0.0.0` and uses port `19432` unless `PLANNOTATOR_PORT` is set |
+| `PLANNOTATOR_PORT=9999` | Optional. Uses another port instead of `19432` |
 
-Both are required. Just setting the port isn't enough.
+Setting `PLANNOTATOR_PORT` without `PLANNOTATOR_REMOTE=1` is not enough for a published Docker port, because local mode binds to `127.0.0.1` inside the container. A VS Code forwarded port can still reach that address.
 
 ## Port Forwarding
 
