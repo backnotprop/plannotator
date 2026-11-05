@@ -3526,7 +3526,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
   const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
-    setFull(false);
+    // A phone has no view beside the thread, so leaving full screen would change nothing on screen: the file closes.
+    if (phone) onOpenFile(null);
+    else setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
     // back to it where the caret was (as R did with the box open before the composer).
     // openBox's other resets still apply (a New message, the route choice and an error go).
@@ -3534,7 +3536,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       setNewMessage(null);
       setRoute((current) => ({ ...current, open: false, error: null }));
       setError(null);
-      requestAnimationFrame(() => textRef.current?.focus());
+      // A phone's words came from the card, so this box has no caret of its own yet: focus lands at their end.
+      if (phone) focusReplyEnd();
+      else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
   const focusReplyEnd = () =>

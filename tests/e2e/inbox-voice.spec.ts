@@ -454,8 +454,83 @@ test('full screen’s composer on a phone at 320: dictating, the status has the 
   expect(cancel!.x + cancel!.width).toBeLessThanOrEqual(clock!.x);
   expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
   expect(button!.x + button!.width).toBeLessThanOrEqual(box!.x + box!.width);
+  // Cancel reaches 44 px to press, and its overlay stays clear of its neighbours.
+  const cancelMiddle = { x: cancel!.x + cancel!.width / 2, y: cancel!.y + cancel!.height / 2 };
+  for (const dy of [-21.5, 21.5]) {
+    expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-voice-cancel]') !== null, [cancelMiddle.x, cancelMiddle.y + dy])).toBe(true);
+  }
   await mic(card).click();
   await expect(card.locator('[data-fcomp-field] textarea')).toHaveValue('Looks right.');
+  await context.close();
+});
+
+test('full screen’s composer on a phone at 320: the mic within “Sent to …”, the status has the row and stays in the box', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { phone: true, viewport: { width: 320, height: 568 } });
+  await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
+  const card = page.locator('[data-fcomp]');
+  await expect(card).toBeVisible();
+  await card.getByRole('radio', { name: 'Reply' }).tap();
+  await card.locator('[data-fcomp-field] textarea').fill('Going left.');
+  await card.locator('[data-fcomp-send]').tap();
+  await expect(card.locator('[data-fcomp-sent]')).toBeVisible();
+  w.send({ upstream: [{ text: 'Looks right.' }] });
+  await mic(card).click();
+  await expect(line(card, 'tap')).toBeVisible();
+  await expect(card.locator('[data-fcomp-sent]')).toBeHidden();
+  const [box, cancel, clock, button] = await Promise.all(['', '[data-voice-cancel]', '.ib-dttime', '[data-voice-mic]'].map(async (part) => (await (part ? card.locator(part) : card).boundingBox())!));
+  expect(cancel!.x + cancel!.width).toBeLessThanOrEqual(clock!.x);
+  expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
+  expect(button!.x + button!.width).toBeLessThanOrEqual(box!.x + box!.width);
+  await page.waitForTimeout(800);
+  await mic(card).click();
+  await expect(card.locator('[data-fcomp-field] textarea')).toHaveValue('Looks right.');
+  await context.close();
+});
+
+test('full screen’s composer on a phone: the comments sheet ends a dictation, no mic stays open under it, and the words land', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { phone: true, viewport: { width: 390, height: 844 } });
+  const open_ = await watchMic(page);
+  await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
+  const card = page.locator('[data-fcomp]');
+  await expect(card).toBeVisible();
+  await card.getByRole('radio', { name: 'Reply' }).tap();
+  const field = card.locator('[data-fcomp-field] textarea');
+  await field.fill('');
+  w.send({ upstream: [{ text: 'Under the sheet.' }] });
+  await mic(card).click();
+  await expect(line(card, 'tap')).toBeVisible();
+  await expect.poll(open_).toBe(1);
+  await page.waitForTimeout(1200);
+  await page.locator('[data-full-view-bar] .ib-fvcount').tap();
+  await expect.poll(open_).toBe(0);
+  await page.locator('.ib-sheet-h button').last().tap();
+  await expect(card).toBeVisible();
+  await expect(field).toHaveValue('Under the sheet.');
+  await context.close();
+});
+
+test('a narrow desktop window: Esc closes the comments sheet while a take is on its way, and the words still land', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { viewport: { width: 500, height: 800 } });
+  await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
+  const card = page.locator('[data-fcomp]');
+  await expect(card).toBeVisible();
+  await card.getByRole('radio', { name: 'Reply' }).click();
+  const field = card.locator('[data-fcomp-field] textarea');
+  await field.fill('');
+  w.send({ upstream: [{ text: 'Esc kept it.', hold: true }] });
+  await mic(card).click();
+  await expect(line(card, 'tap')).toBeVisible();
+  await page.waitForTimeout(1200);
+  const foot = page.locator('[data-full-view-foot]');
+  await page.locator('[data-full-view-bar] .ib-fvcount').click();
+  await expect(foot).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(foot).toBeHidden();
+  w.send({ release: true });
+  await expect(field).toHaveValue('Esc kept it.');
   await context.close();
 });
 

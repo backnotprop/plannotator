@@ -6877,10 +6877,10 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
    and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
 .ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 0; }
 .ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
-/* Dictating, the status has the row: the link would squeeze Cancel and the clock out of it at 320. */
-.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > .ib-fcomp-link { display: none; }
+/* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
 .ib-fcomp.ib-phone .ib-fcomp-chips { flex-wrap: nowrap; min-width: 44px; }
-.ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; white-space: nowrap; height: auto; min-height: 22px; }
+.ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; height: auto; min-height: 22px; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-q { height: auto; min-height: 22px; }
 .pn-inbox .ib-fcomp.ib-phone :is(button.ib-fcomp-chip, .ib-fcomp-q) { justify-content: center; min-width: 44px; box-sizing: border-box; }
 .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="chips"] .ib-fcomp-w,
@@ -6901,11 +6901,11 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-fcomp.ib-phone .ib-fcomp-solo { min-width: 0; white-space: nowrap; }
 .ib-fcomp.ib-phone .ib-fcomp-solo b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .ib-fcomp.ib-phone :is(.ib-rtext, .ib-ta)::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* 44 px to press, drawn on an overlay: every control in the card stays the size it is, and nothing moves. The top row's
+/* 44 px to press, drawn on an overlay: the card's controls stay the size they are, and nothing moves. The top row's
    reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
 .ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q) { position: relative; }
-.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
 .ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }

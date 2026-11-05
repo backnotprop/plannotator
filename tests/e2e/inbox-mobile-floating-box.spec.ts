@@ -2,7 +2,7 @@
  * The floating box over a file in full screen, on a phone (the owner's iPhone: "the floating box has mobile responsive
  * issues"), proved against the compiled binary on WebKit and Chromium, with a 1920 × 1080 image and an HTML page:
  *
- *  - The foot is one row at 320 and 390, the mic on: the "N comments" pill is one line inside its pill, the open
+ *  - The foot is one row at 320, 360 and 390, the mic on: the "N comments" pill is one line inside its pill, the open
  *    questions chip beside it, nothing past the box. The mic used to take half the row's free room at every width,
  *    so this broke up to 430.
  *  - What yields is decided: the questions' words, then the comment count's word (its name stays whole), then "Open in
@@ -10,7 +10,8 @@
  *  - Every control in the box is 44 px to press, measured by hit test: the controls keep their size, an overlay
  *    takes the press.
  *  - A long agent's name is cut on one line, in the header and in "Sent to …".
- *  - The comments sheet covers the file: the box and its pill step aside from Write the reply.
+ *  - The comments sheet covers the file: the box and its pill step aside from Write the reply. Write the reply closes
+ *    the file and gives the thread's box focus; Keep writing and a refused Save it close the sheet to reach the words.
  *  - A folded pill never lies under the toolbar: it shares the row when both fit, else it sits above (360 px overlapped by 24).
  *  - A desktop window's foot takes none of this.
  *
@@ -184,7 +185,7 @@ for (const phone of PHONES) {
       await browser?.close().catch(() => {});
     });
 
-    for (const [width, height] of [[320, 568], [390, 844]] as const) {
+    for (const [width, height] of [[320, 568], [360, 640], [390, 844]] as const) {
       test(`${width} px, an image and a page: the foot is one row with the questions chip, every press 44 px`, async () => {
         await page.setViewportSize({ width, height });
         for (const t of [seeded.two, seeded.twelve]) {
@@ -201,7 +202,7 @@ for (const phone of PHONES) {
             await expect(card(page).locator('[data-fcomp-questions]'), where).toBeVisible();
             await expect(card(page).locator('[data-voice-mic]'), where).toBeVisible();
             await expect.poll(() => footProblems(page), { message: where }).toEqual([]);
-            expect(await shortTargets(page, FOOT_TARGETS), where).toEqual([]);
+            expect(await shortTargets(page, [...FOOT_TARGETS, '.ib-vnote .ib-dtlink']), where).toEqual([]);
             expect(await shortTargets(page, file === 'shot.png' ? TOP_TARGETS : ['[data-fcomp-minimize]', '[data-fcomp-send]']), where).toEqual([]);
             // The pill's name is whole, however little of it shows; and the row chooses that over the link's words.
             await expect(card(page).locator('[data-fcomp-comments]'), where).toHaveAccessibleName(`${t === seeded.two ? 2 : 12} comments`);
@@ -240,6 +241,19 @@ for (const phone of PHONES) {
       expect(chip!.y + chip!.height).toBeLessThanOrEqual(link!.y + 1);
     });
 
+    test('a long agent: the empty field stays one line, as tall as a short name’s', async () => {
+      await page.setViewportSize({ width: 320, height: 568 });
+      const height = async (t: Thread) => {
+        await page.goto('about:blank');
+        await page.goto(fileUrl(t, 'shot.png'));
+        await card(page).waitFor();
+        await page.locator('[data-fcomp-mode="reply"]').tap();
+        await page.waitForTimeout(250);
+        return (await card(page).boundingBox())!.height;
+      };
+      expect(await height(seeded.longName)).toBe(await height(seeded.twelve));
+    });
+
     test('a long agent: its name is cut on one line, in the header and in “Sent to …”', async () => {
       await page.setViewportSize({ width: 320, height: 568 });
       await page.goto('about:blank');
@@ -247,15 +261,21 @@ for (const phone of PHONES) {
       await page.locator('.ib-htmlframe iframe').waitFor();
       await page.locator('[data-fcomp-pill]').tap();
       await card(page).waitFor();
+      /** The text's lines: the middles of its words' boxes, apart by more than a line's slack, count as another line. */
       const lines = (selector: string) =>
         card(page).locator(selector).evaluate((el) => {
-          const range = document.createRange();
-          range.selectNodeContents(el);
-          return new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.bottom))).size;
+          const middles: number[] = [];
+          const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+          for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+            const range = document.createRange();
+            range.selectNodeContents(node);
+            for (const r of range.getClientRects()) if (r.width > 0) middles.push((r.top + r.bottom) / 2);
+          }
+          return 1 + Math.round((Math.max(...middles) - Math.min(...middles)) / 16);
         });
+      expect(await lines('.ib-fcomp-solo')).toBe(1);
       const solo = (await card(page).locator('.ib-fcomp-solo').boundingBox())!;
       const box = (await card(page).boundingBox())!;
-      expect(solo.height).toBeLessThanOrEqual(26);
       expect(solo.x + solo.width).toBeLessThanOrEqual(box.x + box.width);
       await card(page).locator('[data-fcomp-field] textarea').fill('Going left.');
       await card(page).locator('[data-fcomp-send]').tap();
@@ -276,11 +296,10 @@ for (const phone of PHONES) {
           .poll(async () => {
             const [pill, bar] = await Promise.all([page.locator('[data-fcomp-pill]').boundingBox(), page.locator('[data-full-view-bar]').boundingBox()]);
             const apart = pill!.x + pill!.width <= bar!.x || pill!.y + pill!.height <= bar!.y;
-            return apart && pill!.x >= 0 && pill!.y + pill!.height <= 700;
+            const onRow = Math.abs(pill!.y + pill!.height - (bar!.y + bar!.height)) <= 2;
+            return apart && pill!.x >= 0 && pill!.y + pill!.height <= 700 && (sharesRowAt === null || width < sharesRowAt || onRow);
           }, { message: where })
           .toBe(true);
-        const [pill, bar] = await Promise.all([page.locator('[data-fcomp-pill]').boundingBox(), page.locator('[data-full-view-bar]').boundingBox()]);
-        if (sharesRowAt !== null && width >= sharesRowAt) expect(Math.abs(pill!.y + pill!.height - (bar!.y + bar!.height)), `${where}: on the toolbar's row`).toBeLessThanOrEqual(2);
       };
       await page.goto('about:blank');
       await page.goto(fileUrl(t, 'page.html'));
@@ -319,6 +338,103 @@ for (const phone of PHONES) {
         await expect(page.locator(standing)).toBeVisible();
       }
     });
+
+    /** Writes in the card's Reply tab, when there are words to carry. */
+    const openSheet = async (t: Thread, file: 'shot.png' | 'page.html', words: string | null) => {
+      await page.goto('about:blank');
+      await page.goto(fileUrl(t, file));
+      if (file === 'page.html') {
+        await page.locator('.ib-htmlframe iframe').waitFor();
+        if (words !== null) await page.locator('[data-fcomp-pill]').tap();
+      } else {
+        await card(page).waitFor();
+        if (words !== null) await page.locator('[data-fcomp-mode="reply"]').tap();
+      }
+      if (words !== null) await card(page).locator('[data-fcomp-field] textarea').fill(words);
+      await page.locator('[data-full-view-bar] .ib-fvcount').tap();
+      await page.locator('[data-full-view-foot]').waitFor();
+    };
+
+    for (const file of ['shot.png', 'page.html'] as const) {
+      for (const words of [null, 'Going left.'] as const) {
+        test(`Write the reply, ${file}, ${words ? 'with words' : 'with none'}: the file closes and the thread's box has focus, and takes typing`, async () => {
+          await page.setViewportSize({ width: 390, height: 844 });
+          const t = await seed(short, 2);
+          await openSheet(t, file, words);
+          await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
+          await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+          const box = page.locator('section.ib-pane textarea.ib-rtext');
+          await expect(box).toBeVisible();
+          await expect(box).toBeFocused();
+          await expect(box).toHaveValue(words ?? '');
+          await page.keyboard.type(' More.');
+          await expect(box).toHaveValue(`${words ?? ''} More.`);
+        });
+      }
+    }
+
+    test('Keep writing, and a refused Save it, from under the sheet: the sheet closes and the words have focus', async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const t = await seed(short, 2);
+      const words = 'Not saved yet.';
+      const field = card(page).locator('[data-image-composer] textarea');
+      const ask = async () => {
+        await page.locator('[data-full-view-bar] .ib-fvcount').tap();
+        await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
+        await page.locator('[data-step-guard]').waitFor();
+      };
+      const reached = async () => {
+        await expect(page.locator('[data-full-view-foot]')).toBeHidden();
+        await expect(field).toBeVisible();
+        await expect(field).toBeFocused();
+        await expect(field).toHaveValue(words);
+      };
+      await page.goto('about:blank');
+      await page.goto(fileUrl(t, 'shot.png'));
+      await card(page).waitFor();
+      await page.locator('[data-fcomp-mode="comment"]').tap();
+      await field.fill(words);
+      await ask();
+      await page.locator('[data-guard-keep]').tap();
+      await reached();
+      await page.route('**/api/inbox/annotations**', (route) => route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"refused"}' }));
+      try {
+        await ask();
+        await page.locator('[data-guard-save]').tap();
+        await reached();
+      } finally {
+        await page.unroute('**/api/inbox/annotations**');
+      }
+    });
+
+    for (const width of [390, 430]) {
+      test(`${width} px with motion on: Hide tools and back, the pill lands on the toolbar's row`, async () => {
+        const t = await seed(short, 2);
+        await page.setViewportSize({ width, height: 700 });
+        await page.emulateMedia({ reducedMotion: 'no-preference' });
+        try {
+          await page.goto('about:blank');
+          await page.goto(fileUrl(t, 'page.html'));
+          await page.locator('.ib-htmlframe iframe').waitFor();
+          await page.locator('[data-fcomp-pill]').waitFor();
+          await page.locator('[data-full-view-hide]').tap();
+          await page.locator('[data-full-view-handle]').waitFor();
+          await page.waitForTimeout(600);
+          await page.locator('[data-full-view-handle]').tap();
+          await expect
+            .poll(
+              async () => {
+                const [pill, bar] = await Promise.all([page.locator('[data-fcomp-pill]').boundingBox(), page.locator('[data-full-view-bar]').boundingBox()]);
+                return Math.abs(pill!.y + pill!.height - (bar!.y + bar!.height));
+              },
+              { timeout: 2_000 },
+            )
+            .toBeLessThanOrEqual(2);
+        } finally {
+          await page.emulateMedia({ reducedMotion: 'reduce' });
+        }
+      });
+    }
   });
 }
 

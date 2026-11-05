@@ -108,6 +108,8 @@ export interface FullScreenComposerValue {
   reply: FullScreenReply;
   /** The tools are gathered into the corner control: the card and the pill went with them (inert). Set by the pane. */
   tucked?: boolean;
+  /** A phone's comments sheet is over the file: the card and the pill are hidden under it. Set by the pane. */
+  covered?: boolean;
   /** The card's ⌄: gather every floating tool into the corner control, as » does. Set by the pane. */
   onGather?: () => void;
 }
@@ -267,7 +269,14 @@ export function FullScreenComposer({
   const commentsRef = useRef<HTMLButtonElement | null>(null);
   /** The card's height when the list opened: the list sits just above the card. */
   const [cardHeight, setCardHeight] = useState(0);
-  const voice = useVoiceSession();
+  const voice = useVoiceSession(!value.covered);
+  // The sheet hides the status and Stop, so no microphone stays open behind it. What was said still lands in the reply.
+  const covered = value.covered === true;
+  useEffect(() => {
+    if (!covered) return;
+    voice.session.stop();
+    if (voice.session.view().phase !== 'sending') voice.session.covered();
+  }, [covered, voice.session]);
   const tabsRef = useRef<HTMLDivElement | null>(null);
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
   const focusNext = useRef<'field' | 'pill' | null>(null);
@@ -287,7 +296,12 @@ export function FullScreenComposer({
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(check);
     for (const el of [pill, bar, view]) observer.observe(el);
-    return () => observer.disconnect();
+    // The toolbar flies back from the corner on a transform, which no ResizeObserver sees: measured where it lands.
+    view.addEventListener('transitionend', check);
+    return () => {
+      observer.disconnect();
+      view.removeEventListener('transitionend', check);
+    };
   });
   // Files dropped on the card attach to the reply, as on the reply box (a comment takes no files: Reply only).
   const drop = useFileDrop((list) => reply.onDropFiles(list), !state.minimized && mode === 'reply' && !value.tucked);
