@@ -637,7 +637,7 @@ test('a Send from the floating box tells the agent which file was on screen, and
   // An image: the words stay the person's, and the agent reads the name beside them.
   const onImage = await reply(page, 'checkout.png', 'This one reads best.');
   expect(onImage.viewing).toContain(`while viewing \`checkout.png\`, from the `);
-  expect(onImage.viewing).toEndWith(` message ${messageId}.)`);
+  expect(onImage.viewing!.endsWith(` message ${messageId}.)`), onImage.viewing).toBe(true);
   // An HTML page: the same line, naming the page.
   expect((await reply(page, 'checkout.html', 'Or this page.')).viewing).toContain('`checkout.html`');
 
