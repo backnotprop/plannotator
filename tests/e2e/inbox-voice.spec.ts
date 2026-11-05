@@ -13,6 +13,7 @@
  *  - A hold ends where the pointer comes up, on the button or off it, with one transcription. Cancel stays on screen,
  *    and a touch the system takes away ends the take with nothing sent.
  *  - Reply box, compose, and full screen's composer.
+ *  - Typing while dictation shows keeps every key, and undo under the highlight takes the words back.
  *  - New message dictates as the reply box does, in Chromium and in WebKit (WebKit has no fake capture device, so a tone
  *    through a real MediaStream stands in for the microphone), at 320 to 430 px, the keyboard a stand-in: the mic at the
  *    row's right end and still when it starts, the level drawn and moving, nothing over the clock, "Listening" whole or
@@ -448,6 +449,75 @@ test('compose: the words land, and Send waits', async () => {
   // The real `disabled` is voice's. This world has no agent to send to, so the button stays aria-disabled for that.
   await expect(dialog.locator('[data-compose-send]')).toHaveJSProperty('disabled', false);
   await context.close();
+});
+
+test.describe('typing while dictation shows', () => {
+  /** The reply box, its take held at the answer, and focus in the box. */
+  const landing = async (page: Page, w: World, thread: string, words: string) => {
+    const box = await openReply(page, w, thread);
+    await box.fill('Cards.');
+    w.send({ upstream: [{ text: words, hold: true }] });
+    await hold(page);
+    await page.mouse.up();
+    await expect(line(pane(page), 'sending')).toBeVisible();
+    await box.focus();
+    return box;
+  };
+  const highlight = (page: Page) => pane(page).locator('mark.ib-vmark');
+
+  test('under the highlight: the first key is kept', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[2]!, 'Under the wash.');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards. Under the wash.');
+    await expect(highlight(page)).toBeVisible();
+    await page.keyboard.type('abc');
+    await expect(box).toHaveValue('Cards. Under the wash.abc');
+    await expect(highlight(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('under the highlight: undo takes the words back', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[3]!, 'Taken back.');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards. Taken back.');
+    await expect(highlight(page)).toBeVisible();
+    await box.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+    await expect(box).toHaveValue('Cards.');
+    await expect(highlight(page)).toHaveCount(0);
+    await context.close();
+  });
+
+  test('while the words are on their way: every key is kept, and they land at the caret', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await landing(page, w, w.threads[4]!, 'Then these.');
+    await page.keyboard.type('xyz');
+    await expect(box).toHaveValue('Cards.xyz');
+    w.send({ release: true });
+    await expect(box).toHaveValue('Cards.xyz Then these.');
+    await context.close();
+  });
+
+  test('a line with nothing to retry: the key that clears it is kept', async () => {
+    const w = await mainWorld();
+    const { context, page } = await open(speech, w);
+    const box = await openReply(page, w, w.threads[5]!);
+    await box.fill('Cards.');
+    await box.focus();
+    w.send({ upstream: [{ text: '   ', hold: false }] });
+    await hold(page);
+    await page.mouse.up();
+    await expect(pane(page).locator('[data-voice-note]')).toBeVisible();
+    await box.focus();
+    await page.keyboard.type('abc');
+    await expect(box).toHaveValue('Cards.abc');
+    await expect(pane(page).locator('[data-voice-note]')).toHaveCount(0);
+    await context.close();
+  });
 });
 
 test('full screen’s composer: the words land in the reply', async () => {
@@ -1426,6 +1496,36 @@ test.describe('New message dictates as the reply box does', () => {
   ] as const;
 
   for (const engine of ENGINES) {
+    test(`${engine.name} as a phone: keys typed while the words are on their way are kept, and the one that clears the highlight`, async () => {
+      const w = await mainWorld();
+      const browser = engine.ios ? await webkit.launch({ args: [] }) : speech;
+      try {
+        const context = await browser.newContext({ userAgent: engine.device.userAgent, isMobile: true, hasTouch: true, deviceScaleFactor: 2, viewport: { width: 390, height: 660 } });
+        if (!engine.ios) await context.grantPermissions(['microphone'], { origin: new URL(w.url).origin });
+        const page = await context.newPage();
+        if (engine.ios) await page.addInitScript(toneForAMicrophone);
+        await openCompose(page, w, { pick: false });
+        await field(page).fill('Cards.');
+        w.send({ upstream: [{ text: 'Then these.', hold: true }] });
+        await mic(sheet(page)).tap();
+        await expect(line(sheet(page), 'tap')).toBeVisible();
+        await page.waitForTimeout(1200);
+        await mic(sheet(page)).tap();
+        await expect(line(sheet(page), 'sending')).toBeVisible();
+        await field(page).focus();
+        await page.keyboard.type('xyz');
+        await expect(field(page)).toHaveValue('Cards.xyz');
+        w.send({ release: true });
+        await expect(field(page)).toHaveValue('Cards.xyz Then these.');
+        await expect(sheet(page).locator('mark.ib-vmark')).toBeVisible();
+        await page.keyboard.type('abc');
+        await expect(field(page)).toHaveValue('Cards.xyz Then these.abc');
+        await context.close();
+      } finally {
+        if (engine.ios) await browser.close();
+      }
+    });
+
     test(`${engine.name} as a phone: the mic on the same side, the level drawn and moving, keyboard down and up`, async () => {
       const w = await mainWorld();
       const browser = engine.ios ? await webkit.launch({ args: [] }) : speech;
