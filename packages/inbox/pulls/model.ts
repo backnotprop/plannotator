@@ -63,7 +63,7 @@ export function pullViewOf(pull: Pick<InboxPull, 'mine' | 'requested' | 'assigne
 export function pullGroups(answer: InboxPullsAnswer, project: string | null, filter: PullFilter = 'all'): InboxPullGroups {
   const projectsOf = (pull: InboxPull) => answer.projects[`${pull.host}/${pull.repo}`.toLowerCase()] ?? [];
   const pulls = project ? answer.pulls.filter((p) => projectsOf(p).includes(project)) : answer.pulls;
-  const stacks = inboxPullStacks(pulls).filter((stack) => filter === 'all' || stack.layers.some((l) => isOpen(l) && pullViewOf(l) === filter));
+  const stacks = inboxPullStacks(pulls).filter((stack) => filter === 'all' || stack.layers.some((l) => isOpenPull(l) && pullViewOf(l) === filter));
   return inboxPullGroups(inboxPullItems(stacks, (pull) => !!answer.links[pull.key]));
 }
 

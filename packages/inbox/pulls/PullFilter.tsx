@@ -15,12 +15,11 @@
  */
 import { useEffect, useRef, useState, type RefObject } from 'react';
 import { Menu } from '@base-ui/react/menu';
-import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { formatCount } from '@plannotator/core/inbox-format';
 import type { ProjectFolder } from '../api';
 import { Icon, type IconName } from '../icons';
 import { Tip } from '../components/Tip';
-import { PULL_FILTERS, pullCount, pullFilterWords, type PullFilter } from './model';
+import { PULL_FILTERS, pullFilterWords, type PullFilter } from './model';
 
 /** Marks the Inbox's icon set has no match for, drawn as its icons are (24-unit view, stroked). */
 const GLYPHS = {
@@ -52,7 +51,8 @@ function Glyph({ name }: { name: GlyphName }) {
 const VIEW_GLYPH: Record<PullFilter, GlyphName> = { all: 'pullRequest', mine: 'pen', review: 'eye', others: 'users' };
 
 export interface PullFilterProps {
-  model: InboxPullsAnswer;
+  /** How many rows a view shows in a project (null: every project): the menu's counts. */
+  count: (project: string | null, filter: PullFilter) => number;
   filter: PullFilter;
   /** The chosen project; one the list no longer offers is dropped by the page before it gets here. */
   project: string | null;
@@ -71,7 +71,7 @@ export function pullScopeWords(filter: PullFilter, projectName: string | null): 
   return [filter === 'all' ? null : pullFilterWords(filter), projectName].filter(Boolean).join(', ');
 }
 
-export function PullFilterControl({ model, filter, project, projects, names, phone, triggerRef, onChange }: PullFilterProps) {
+export function PullFilterControl({ count, filter, project, projects, names, phone, triggerRef, onChange }: PullFilterProps) {
   const [open, setOpen] = useState(false);
   // The menu is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
@@ -120,7 +120,7 @@ export function PullFilterControl({ model, filter, project, projects, names, pho
                 <Menu.RadioItem key={value} value={value} closeOnClick className="ib-pmi" label={words} data-pulls-filter={value}>
                   <Glyph name={VIEW_GLYPH[value]} />
                   <span className="ib-pmi-l">{words}</span>
-                  <span className="ib-pmi-n">{formatCount(pullCount(model, project, value))}</span>
+                  <span className="ib-pmi-n">{formatCount(count(project, value))}</span>
                   {tick(filter === value)}
                 </Menu.RadioItem>
               ))}
@@ -132,7 +132,7 @@ export function PullFilterControl({ model, filter, project, projects, names, pho
                   <Menu.RadioItem value="" closeOnClick className="ib-pmi" label="All projects" data-pulls-filter-project-option="">
                     <Glyph name="grid" />
                     <span className="ib-pmi-l">All projects</span>
-                    <span className="ib-pmi-n">{formatCount(pullCount(model, null, filter))}</span>
+                    <span className="ib-pmi-n">{formatCount(count(null, filter))}</span>
                     {tick(project === null)}
                   </Menu.RadioItem>
                   {projects.map((p) => {
@@ -143,7 +143,7 @@ export function PullFilterControl({ model, filter, project, projects, names, pho
                         <span className="ib-pmi-l" dir="auto">
                           {shown}
                         </span>
-                        <span className="ib-pmi-n">{formatCount(pullCount(model, p.id, filter))}</span>
+                        <span className="ib-pmi-n">{formatCount(count(p.id, filter))}</span>
                         {tick(project === p.id)}
                       </Menu.RadioItem>
                     );

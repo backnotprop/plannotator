@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { InboxPullsAnswer, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 
 /** The window got its focus back: the list is read again, at most this often. */
@@ -11,12 +11,16 @@ export const PULLS_PENDING_MS = 2_000;
 
 export interface PullsState {
   model: InboxPullsAnswer | null;
+  /** The Reviews rows (`GET /api/inbox/reviews`): review threads and listed PRs. */
+  reviews: InboxReviewsAnswer | null;
   error: string | null;
   loading: boolean;
   /** Read the forges again now (the footer's refresh). */
   refresh: () => void;
   /** Read the list again from the server's cache (a PR was just handed to an agent: its thread is new). */
   reload: () => void;
+  /** The store changed (a review arrived, a verdict went): the rows again, from what the forges last answered. */
+  reloadRows: () => void;
 }
 
 /**
@@ -33,6 +37,7 @@ export interface PullsState {
  */
 export function usePulls(enabled: boolean, counted = false, othersView = false): PullsState {
   const [model, setModel] = useState<InboxPullsAnswer | null>(null);
+  const [reviews, setReviews] = useState<InboxReviewsAnswer | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const inFlight = useRef<AbortController | null>(null);
@@ -53,9 +58,11 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
       setLoading(true);
       inboxApi
         .pulls(refresh, controller.signal, enabled && others.current)
-        .then((answer) => {
+        .then(async (answer) => [answer, await inboxApi.reviews({ others: enabled && others.current }, controller.signal)] as const)
+        .then(([answer, rows]) => {
           if (controller.signal.aborted) return;
           setModel(answer);
+          setReviews(rows);
           setError(null);
           // Others still on its way: its answer lands on the server's next answer (a cache read, no forge call).
           if (answer.hosts.some((h) => h.others_pending)) pendingTimer.current = setTimeout(() => readRef.current(false), PULLS_PENDING_MS);
@@ -127,5 +134,12 @@ export function usePulls(enabled: boolean, counted = false, othersView = false):
 
   const refresh = useCallback(() => read(true), [read]);
   const reload = useCallback(() => read(false), [read]);
-  return { model, error, loading, refresh, reload };
+  const reloadRows = useCallback(() => {
+    // A read of the whole list in flight brings the rows too.
+    if (inFlight.current || (!enabled && !counted)) return;
+    inboxApi.reviews({ cached: true }).then(setReviews, () => {
+      // The next read of the list says what is wrong.
+    });
+  }, [enabled, counted]);
+  return { model, reviews, error, loading, refresh, reload, reloadRows };
 }

@@ -46,6 +46,7 @@ import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
+import type { ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost } from './CopyMenus';
 import { threadLink } from '../rowMenu';
@@ -969,6 +970,10 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
+  /** Opened from Reviews: the line and title over the messages, and what came before the review folded. */
+  reviewView?: ReviewView | null;
+  /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
+  onInReviews?: () => void;
   /**
    * The thread in full screen: the sidebar and the list hidden, the thread at a reading measure. The header leads with
    * "‹ Inbox" (back to them) in place of the button that hid them, and has no ×.
@@ -1391,7 +1396,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1734,7 +1739,12 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   }
   const foldRef = useRef(fold);
   foldRef.current = fold;
-  const hiddenNow = new Set(fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)));
+  // Opened from Reviews: what came before the first review stays behind one chip until it is unfolded in place.
+  const [earlierShownIn, setEarlierShownIn] = useState<string | null>(null);
+  const reviewFirstAt = reviewView?.firstReviewId && earlierShownIn !== thread.thread_id ? thread.messages.findIndex((m) => m.id === reviewView.firstReviewId) : -1;
+  const beforeReview = reviewFirstAt > 0 ? thread.messages.slice(0, reviewFirstAt) : [];
+  const beforeReviewIds = new Set(beforeReview.map((m) => m.id));
+  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...beforeReviewIds]);
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
@@ -1815,6 +1825,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       announce('Earlier messages folded');
     } else {
       setFoldState((current) => (current ? { ...current, folded: new Set(), revealed: new Set(current.hidden.map((_, index) => index)) } : current));
+      setEarlierShownIn(thread.thread_id);
       announce(`All ${thread.messages.length} messages open`);
     }
   };
@@ -5262,7 +5273,37 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
         data-session-labels={thread.messages.some((m) => m.author.kind === 'agent' && labelOf(sessionLabels, m.author.session)) ? '' : undefined}
       >
         {/* A focus target (the way back's fallback, a stacked thread), never a tab stop. */}
-        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{thread.subject ?? '(no subject)'}</h2>
+        {reviewView && (
+          <div className="ib-rvctx" data-review-context="">
+            <Icon name={reviewView.kind === 'local' ? 'laptop' : 'pullRequest'} size={15} />
+            <span dir="auto">{reviewView.context}</span>
+            {reviewView.onOpenPull && (
+              <button type="button" className="ib-rvctx-link" onClick={reviewView.onOpenPull} data-review-open-pull="">
+                See the pull request
+              </button>
+            )}
+            {reviewView.pullUrl && (
+              <a className="ib-rvctx-link" href={reviewView.pullUrl} target="_blank" rel="noreferrer noopener" data-review-pull-link="">
+                See the pull request
+              </a>
+            )}
+          </div>
+        )}
+        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? thread.subject ?? '(no subject)'}</h2>
+        {reviewView?.fromThread && (
+          <p className="ib-rvfrom" data-review-from="">
+            <Icon name="questionBubble" size={14} />
+            Review from the thread{' '}
+            <button type="button" className="ib-rvctx-link" dir="auto" onClick={reviewView.onWholeThread} data-review-from-link="">
+              {reviewView.fromThread}
+            </button>
+          </p>
+        )}
+        {beforeReview.length > 0 && (
+          <button type="button" className="ib-rvearlier" onClick={() => setEarlierShownIn(thread.thread_id)} data-review-earlier={beforeReview.length}>
+            {plural(beforeReview.length, 'earlier message')} in the thread
+          </button>
+        )}
         {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
         {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
         {machine && (
@@ -5723,7 +5764,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 )}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
-                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onOpen={() => onOpenGuide(message.id)} />
+                    <ReviewCard guide={message.guide} round={thread.messages.filter((m, at) => at <= index && m.author.kind === 'agent' && m.guide?.review).length} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}

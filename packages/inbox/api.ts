@@ -49,7 +49,7 @@ import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
-import type { InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxReviewsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -1445,6 +1445,14 @@ export const inboxApi = {
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
+  /**
+   * The Reviews rows (Code review on only). `others`: the Others view is open, as `pulls` asks. `cached`: from what the
+   * forges last answered, with no forge read (the store changed, not the forge).
+   */
+  reviews: (options: { others?: boolean; cached?: boolean } = {}, signal?: AbortSignal) => {
+    const query = [options.others ? 'others=1' : null, options.cached ? 'cached=1' : null].filter(Boolean).join('&');
+    return get<InboxReviewsAnswer>(inboxUrl(`/reviews${query ? `?${query}` : ''}`), signal);
+  },
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>

@@ -31,14 +31,14 @@ export function reviewOutcomeWords(outcome: ReviewOutcome | null): string {
 }
 
 /** `verdict: false`: a review of a teammate's pull request (`InboxThread.pull_theirs`), which waits on no verdict. */
-export function ReviewCard({ guide, outcome, verdict = true, onOpen }: { guide: InboxGuideRef; outcome: ReviewOutcome | null; verdict?: boolean; onOpen: () => void }) {
+export function ReviewCard({ guide, round, outcome, verdict = true, onOpen, onInReviews }: { guide: InboxGuideRef; round?: number; outcome: ReviewOutcome | null; verdict?: boolean; onOpen: () => void; onInReviews?: () => void }) {
   const chapters = guide.chapters ?? [];
   return (
     <div className="ib-rvcard" data-review-card="" data-review-outcome={outcome?.verdict.verdict ?? 'waiting'}>
       <div className="ib-rvc-top">
         <span className="ib-rvc-kind">
           <Icon name="code" size={14} />
-          Review
+          {round ? `Review · round ${round}` : 'Review'}
         </span>
         {(verdict || outcome) && (
           <span className="ib-rvc-state" data-verdict={outcome?.verdict.verdict ?? undefined}>
@@ -67,6 +67,12 @@ export function ReviewCard({ guide, outcome, verdict = true, onOpen }: { guide: 
         <button type="button" className={`ib-btn${outcome ? '' : ' ib-pri'}`} onClick={onOpen} data-review-start="">
           {outcome ? 'Open review' : 'Start review'}
         </button>
+        {onInReviews && (
+          <button type="button" className="ib-rvc-link" onClick={onInReviews} data-review-in-reviews="">
+            <Icon name="reviews" size={14} />
+            In Reviews
+          </button>
+        )}
         {outcome && <span className="ib-rvc-note">Your verdict is in your reply below.</span>}
       </div>
     </div>
