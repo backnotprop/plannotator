@@ -161,6 +161,8 @@ export interface InboxPullStateAnswer {
   title: string;
   url: string;
   head: string | null;
+  base: string | null;
+  author: string | null;
 }
 
 /** A PR gone from the forge's list: what one read answered, or null when it could not say. */
@@ -169,16 +171,52 @@ export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli
   const read = await run(cli, ["api", "--hostname", ref.host, endpoint]).catch(() => null);
   if (!read || read.exitCode !== 0) return null;
   try {
-    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown }; source_branch?: unknown };
+    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown }; source_branch?: unknown; base?: { ref?: unknown }; target_branch?: unknown; user?: { login?: unknown }; author?: { username?: unknown } };
     const text = (value: unknown) => (typeof value === "string" && value ? value : null);
     const merged = text(pr.merged_at);
     const state = merged || pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : pr.state === "open" || pr.state === "opened" ? "open" : null;
     const url = text(pr.html_url) ?? text(pr.web_url);
     if (!state || !url) return null;
-    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch) };
+    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch), base: text(pr.base?.ref) ?? text(pr.target_branch), author: text(pr.user?.login) ?? text(pr.author?.username) };
   } catch {
     return null;
   }
+}
+
+/** A pull request link's one read, as a PR of the list. Nothing else of its repository is read. */
+export async function readInboxReviewLink(
+  run: RefRunner | undefined,
+  link: { ref: { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } },
+  login: string | null,
+): Promise<InboxPull | null> {
+  const { ref } = link;
+  const state = await readInboxPullState(run ?? refCliRunner, ref.platform === "gitlab" ? "glab" : "gh", ref);
+  if (!state) return null;
+  return {
+    key: ref.key,
+    platform: ref.platform,
+    host: ref.host,
+    repo: ref.repo,
+    number: ref.number,
+    url: state.url,
+    title: state.title,
+    author: state.author,
+    mine: !!login && state.author === login,
+    requested: false,
+    state: state.state,
+    base: state.base ?? "",
+    head: state.head ?? "",
+    head_repo: null,
+    additions: 0,
+    deletions: 0,
+    files: 0,
+    review: null,
+    approved_by: null,
+    reviewers: [],
+    checks: null,
+    updated_at: state.at ?? "",
+    merged_at: state.state === "merged" ? state.at : null,
+  };
 }
 
 /**

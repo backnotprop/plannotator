@@ -445,6 +445,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const rounding = ledger.diff('main', 'priya/rounding');
   forge.glab(`projects/${encodeURIComponent('northwind/ledger')}/merge_requests/61/raw_diffs`, csvPatch);
   forge.glab(`projects/${encodeURIComponent('northwind/ledger')}/merge_requests/58/raw_diffs`, rounding);
+  // Pull request links: a teammate's PR in a repository that is no project, read only as one link.
+  forge.gh('repos/northwind/payments/pulls/231', JSON.stringify({ state: 'open', title: 'Idempotent refunds', html_url: 'https://github.com/northwind/payments/pull/231', head: { ref: 'refunds' }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.glab(`projects/${encodeURIComponent('northwind/mobile')}/merge_requests/44`, JSON.stringify({ state: 'merged', merged_at: ago(90), title: 'Offline queue', web_url: 'https://gitlab.com/northwind/mobile/-/merge_requests/44', source_branch: 'offline', target_branch: 'main', author: { username: 'priya' } }));
 
   const billingRepo = 'northwind/billing-svc';
   const webRepo = 'northwind/web-app';
@@ -1517,6 +1520,138 @@ test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR a
   await expect(page).toHaveURL(new RegExp(`#reviews.*thread=${threadId}`));
   const threadCount = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
   expect(threadCount).toBe(threads.length);
+});
+
+test('New review, a pull request link: what was found and how it was read, a repository that is no project, one read only, and a second link opens the same thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews&new`);
+  await page.reload();
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="link"]').check({ force: true });
+  const field = box.locator('[data-review-link]');
+  await expect(field).toBeFocused();
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  const read = box.locator('[data-review-link-read]');
+
+  // Bitbucket and things that aren't links say so, and nothing can start.
+  const before = forgeCalls().length;
+  await field.fill('https://bitbucket.org/acme/mobile/pull-requests/88');
+  await expect(read).toHaveText("Bitbucket links aren't supported yet.");
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await shot(page, 'l-box-bitbucket');
+  await field.fill('retries');
+  await expect(read).toHaveText("That isn't a pull request link.");
+  expect(forgeCalls().length).toBe(before);
+
+  // GitLab, through glab; a merged one says so.
+  await field.fill('https://gitlab.com/northwind/mobile/-/merge_requests/44');
+  await expect(read).toContainText('northwind/mobile !44 Offline queue · merged');
+  await expect(read).toContainText('Read with glab, signed in to gitlab.com');
+  await shot(page, 'l-box-gitlab');
+
+  // A PR of no project where launching can: a new session in a new scratch folder is the default.
+  await page.route('**/api/inbox/sessions*', async (route) => {
+    const response = await route.fetch();
+    const body = (await response.json()) as Record<string, unknown>;
+    await route.fulfill({ response, json: { ...body, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [], scratch: { root: '/tmp/scratch' } } } });
+  });
+  await page.reload();
+  await expect(box).toHaveCount(0);
+  await page.goto(`${world.url}#reviews&new`);
+  await page.reload();
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await field.fill('northwind/payments#231');
+  await expect(read).toContainText('northwind/payments #231 Idempotent refunds');
+  await expect(read).toContainText('Read with gh, signed in to github.com');
+  await expect(box.locator('.ib-cp-to').last()).toContainText('New scratch folder');
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Review #231: Idempotent refunds');
+  await shot(page, 'l-box-link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'l-box-link-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.unroute('**/api/inbox/sessions*');
+
+  // No launching: any live agent can take it, and the link typed is still there.
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await field.fill('https://github.com/northwind/payments/pull/231/files');
+  await expect(read).toContainText('Idempotent refunds');
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+  const reads = forgeCalls().filter((call) => call.includes('northwind/payments')).length;
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+
+  // The thread: the approved hand-off's words, and its row from the moment it starts, by number.
+  const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Review #231: Idempotent refunds' });
+  await expect(row).toContainText('#231');
+  await expect(row).toContainText('Curating');
+  await expect(page.getByText('https://github.com/northwind/payments/pull/231').first()).toBeVisible();
+  await shot(page, 'l-curating');
+  const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+
+  // Its one read: nothing else of that repository, whatever else happens on the page.
+  await page.reload();
+  await expect(row).toBeVisible();
+  expect(forgeCalls().filter((call) => call.includes('northwind/payments')).every((call) => call.endsWith('repos/northwind/payments/pulls/231'))).toBe(true);
+  expect(forgeCalls().filter((call) => call.includes('northwind/payments')).length).toBeGreaterThanOrEqual(reads);
+
+  // Its review arrives: the row is on the person, still by its number.
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: world.patches.locale,
+    body: 'Ready for you.',
+    guide: {
+      title: 'Idempotent refunds, reviewed',
+      intent: 'Make refunds safe to retry.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      source: { kind: 'pr', pr: { url: 'https://github.com/northwind/payments/pull/231', number: 231, platform: 'github' } },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
+  await expect(reviewed).toContainText('Review ready', { timeout: 15_000 });
+  await expect(reviewed).toContainText('#231');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await shot(page, 'l-review-ready');
+
+  // The same link again: nothing starts, and Start review opens that thread.
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await field.fill('northwind/payments#231');
+  await expect(read).toContainText('Already in review');
+  const rows = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`thread=${threadId}`));
+  expect(await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length)).toBe(rows);
+
+  // A PR the list has goes the picker's way: from its own project.
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await field.fill('https://github.com/northwind/web-app/pull/880');
+  await expect(read).toContainText('RTL layout');
+  await expect(box.locator('.ib-cp-rvfrompull')).toBeVisible();
+
+  // Left and opened again: the link typed comes back with the words.
+  await box.locator('[data-compose-text] textarea').fill('Only the sidebar');
+  await box.locator('[data-compose-cancel]').click();
+  await expect(box).toHaveCount(0);
+  await page.locator('[data-reviews-new]').first().click();
+  await expect(field).toHaveValue('https://github.com/northwind/web-app/pull/880');
+  await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Only the sidebar');
+  await box.locator('[data-compose-text] textarea').fill('');
+  await field.fill('');
+  await box.locator('[data-compose-cancel]').click();
 });
 
 test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {

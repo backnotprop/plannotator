@@ -7699,6 +7699,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-choice[data-on] { color: var(--foreground); font-weight: 600; background: var(--background); box-shadow: 0 1px 2px rgba(0, 0, 0, 0.08); }
 .ib-cp-rvsize { margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; }
 .ib-cp-rvsize b { font-weight: 500; }
+.ib-cp-rvlink { display: flex; flex: 1; align-items: center; gap: 8px; min-width: 0; height: 32px; padding: 0 10px; border: 1px solid var(--border); border-radius: 8px; color: var(--muted-foreground); }
+.ib-cp-rvlink input { flex: 1; min-width: 0; border: 0; outline: 0; background: transparent; color: var(--foreground); font-size: inherit; }
+.ib-cp-rvlink:focus-within { border-color: var(--ring); }
+.ib-cp-rvread { padding: 8px 14px 10px 110px; border-bottom: 1px solid var(--ib-line); font-size: var(--ib-fs-13-5, 13.5px); }
+.ib-cp-rvread p { margin: 0; color: var(--muted-foreground); }
+.ib-cp-rvread p + p { margin-top: 4px; }
+.ib-cp-rvread svg { display: inline; margin-right: 6px; vertical-align: -2px; }
+.ib-cp-rvread b { color: var(--foreground); font-weight: 600; }
+.ib-cp-rvreadok svg { color: var(--success); }
+.ib-cp[data-phone] .ib-cp-rvread { padding-left: 16px; }
 .ib-cp-rvfrompull { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-picker.ib-cp-rvpulls { top: calc(100% + 4px); left: 110px; width: min(600px, calc(100% - 124px)); }
 .ib-cp-rvpulls .ib-cp-list { display: block; }
@@ -7709,7 +7719,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
 .ib-cp[data-phone] .ib-cp-choices { flex: 0 1 auto; }
-.ib-cp[data-phone] .ib-cp-choice { justify-content: center; min-height: 44px; padding: 0 11px; }
+.ib-cp[data-phone] .ib-cp-choice { justify-content: center; min-height: 44px; padding: 0 6px; }
 .ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; text-align: right; }
 .ib-cp[data-phone] .ib-cp-rvrow .ib-cp-tol { flex: 0 0 100%; }
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }

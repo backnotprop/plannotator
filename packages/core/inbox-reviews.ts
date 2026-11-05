@@ -222,10 +222,24 @@ export function inboxReviewLandingOf(
 /** Which local changes a New review is of. */
 export type InboxReviewChanges = "uncommitted" | "last" | "branch";
 
-/** New review on local changes: what the box asked for, so its row shows "Curating…" before any review arrives. */
+/** A pull request link's PR, which may be in no project and on no list: enough for its row. */
+export interface InboxReviewLinkPull {
+  key: string;
+  url: string;
+  number: number;
+  title: string;
+  platform: InboxPull["platform"];
+  /** The person's own (else a teammate's, whose reviews take no verdict). */
+  mine: boolean;
+}
+
+/** New review on local changes or a link: what the box asked for, so its row shows "Curating…" before any review arrives. */
 export interface InboxReviewStart {
-  kind: "local";
-  changes: InboxReviewChanges;
+  kind: "local" | "link";
+  /** Local changes only. */
+  changes: InboxReviewChanges | null;
+  /** A link only. */
+  pull?: InboxReviewLinkPull;
   branch: string | null;
   base: string | null;
   /** The words decide: none is a guided review, the person's own make it a custom curation. */
@@ -242,10 +256,51 @@ export interface InboxReviewStart {
 export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart, "host" | "project_id" | "at">): InboxReviewStart | null {
   if (!value || typeof value !== "object") return null;
   const review = value as Record<string, unknown>;
+  if (review.kind === "link") {
+    const ref = typeof review.url === "string" ? inboxPullRefOfUrl(review.url) : null;
+    if (!ref) return null;
+    const pull = { key: ref.key, url: review.url as string, number: ref.number, title: typeof review.title === "string" ? review.title.slice(0, 300) : "", platform: ref.platform, mine: review.mine === true };
+    return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" ? "custom" : "guide", ...where };
+  }
   if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
   const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
   return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
 }
+
+/**
+ * What the person pasted as a pull request link: a web address, or `owner/repo#123` on github.com. `unsupported`: a
+ * forge's link the Inbox can't read yet; null: not a link to a pull request at all.
+ */
+export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable<ReturnType<typeof inboxPullRefOfUrl>> } | { unsupported: "bitbucket" | "host" } | null {
+  const typed = text.trim();
+  const short = /^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)#(\d+)$/.exec(typed);
+  const url = short ? `https://github.com/${short[1]}/pull/${short[2]}` : typed;
+  const ref = inboxPullRefOfUrl(url);
+  if (ref) return { url: `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`, ref };
+  let address: URL;
+  try {
+    address = new URL(typed);
+  } catch {
+    return null;
+  }
+  if (address.protocol !== "https:" && address.protocol !== "http:") return null;
+  if (/(^|\.)bitbucket\./.test(address.hostname)) return { unsupported: "bitbucket" };
+  return /pull|merge/i.test(address.pathname) ? { unsupported: "host" } : null;
+}
+
+/** `GET /api/inbox/reviews/link`: what a pull request link is, read once. */
+export type InboxReviewLinkAnswer =
+  | {
+      ok: true;
+      cli: "gh" | "glab";
+      pull: InboxPull;
+      /** The Inbox projects its repository is. None: it is reviewed from a new scratch folder, or wherever To says. */
+      projects: string[];
+      /** It already has a review thread (one not on the list too): Start opens that. */
+      thread_id: string | null;
+    }
+  | { ok: false; reason: "not_a_link" | "bitbucket" | "host" }
+  | { ok: false; reason: "unreadable"; cli: "gh" | "glab"; host: string };
 
 /** `GET /api/inbox/reviews/changes`: the size of those changes. `git: false`: the project is not a repository. */
 export interface InboxReviewChangesAnswer {

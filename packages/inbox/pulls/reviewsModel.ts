@@ -139,6 +139,8 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, tone };
   const source = row.review?.source;
   if (source?.pr?.number) return { kind: 'pr', lead: `${source.pr.platform === 'gitlab' ? '!' : '#'}${source.pr.number}`, agent, status, tone };
+  const linked = row.started?.pull;
+  if (linked) return { kind: 'pr', lead: `${linked.platform === 'gitlab' ? '!' : '#'}${linked.number}`, agent, status, tone };
   return { kind: 'local', lead: source?.branch ?? row.started?.branch ?? '', agent, status, tone };
 }
 

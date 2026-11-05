@@ -1,4 +1,4 @@
-import type { InboxPull, InboxPullStack, InboxReviewChanges, InboxReviewChangesAnswer, InboxReviewRow, InboxReviewsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullStacks, type InboxPull, type InboxPullStack, type InboxReviewChanges, type InboxReviewChangesAnswer, type InboxReviewLinkAnswer, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle } from '../pulls/model';
 
 /**
@@ -16,7 +16,7 @@ export interface ReviewBoxRequest {
  * The words in the box and a thread name typed there, kept in memory when it closes without starting, as the Feedback
  * dialog keeps its own. Opened again, they are there. Cleared once a review starts.
  */
-const NOTHING_TYPED = { body: '', threadName: null as string | null };
+const NOTHING_TYPED = { body: '', threadName: null as string | null, link: '' };
 let unsent = NOTHING_TYPED;
 export const unsentReview = () => unsent;
 export const keepUnsentReview = (typed: typeof NOTHING_TYPED) => {
@@ -83,6 +83,25 @@ export function reviewBoxPull(stack: InboxPullStack, row: Pick<InboxReviewRow, '
   };
 }
 
+/** A link's PR when the picker lists it too: it then goes the picker's way. */
+export function reviewLinkListed(link: Extract<InboxReviewLinkAnswer, { ok: true }>, pulls: readonly ReviewBoxPull[]): ReviewBoxPull | null {
+  const key = link.pull.key.toLowerCase();
+  return pulls.find((pull) => pull.stack.layers.some((layer) => layer.key.toLowerCase() === key)) ?? null;
+}
+
+/** A link's PR as the hand-off takes it. A merged or closed one can still be read, so it asks the same. */
+export function reviewLinkStack(pull: InboxPull): InboxPullStack {
+  return inboxPullStacks([{ ...pull, state: 'open' }])[0]!;
+}
+
+/** The line under the Link field: how it was read, or why it wasn't. */
+export function reviewLinkWords(link: InboxReviewLinkAnswer): string {
+  if (link.ok) return `Read with ${link.cli}, signed in to ${link.pull.host}`;
+  if (link.reason === 'unreadable') return `${link.cli} couldn't read it. Check the link, and that ${link.cli} is signed in to ${link.host}.`;
+  if (link.reason === 'bitbucket') return "Bitbucket links aren't supported yet.";
+  return link.reason === 'host' ? "Plannotator can't read that host yet." : "That isn't a pull request link.";
+}
+
 const CHANGES_WORDS: Record<InboxReviewChanges, string> = {
   uncommitted: 'the uncommitted changes',
   last: 'the last commit',
@@ -113,7 +132,10 @@ export function reviewDefaultTo(
   launch: { agents: readonly { agent: string }[]; projects: readonly { id: string; exists?: boolean }[] } | null | undefined,
   current: string | null,
   lastSent: string | null,
+  /** A PR in none of the person's projects: a new session in this scratch pick, where launching can. */
+  scratch?: string,
 ): { session: string } | { agent: string; projectId: string } | null {
+  if (scratch && launch?.agents[0]) return { agent: launch.agents[0].agent, projectId: scratch };
   const live = targets.find((t) => current && t.project.id === current) ?? targets.find((t) => t.session === lastSent) ?? targets[0];
   if (live) return { session: live.session };
   const agent = launch?.agents[0];

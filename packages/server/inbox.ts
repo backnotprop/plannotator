@@ -223,8 +223,8 @@ import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges,
-  inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart } from "@plannotator/core/inbox-types";
-import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
+  inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart } from "@plannotator/core/inbox-types";
+import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -3252,7 +3252,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     boardOn,
     onReviewStart: (threadId, review, where) => {
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
-      if (start) pullOwners.start(threadId, start);
+      if (!start) return;
+      pullOwners.start(threadId, start);
+      // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
+      if (start.pull) pullOwners.set([start.pull.key], threadId, { ask: start.ask, theirs: !start.pull.mine });
     },
     launch,
     isGuest,
@@ -3813,6 +3816,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), closed, started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
+      }
+      // New review's Pull request link: what a pasted link is. One read of that one PR, unless the list already has it.
+      if (path === "/api/inbox/reviews/link") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const link = inboxReviewLinkOf(url.searchParams.get("ref") ?? "");
+        if (!link) return json({ serverSession, ok: false, reason: "not_a_link" });
+        if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
+        const { ref } = link;
+        const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
+        const login = lastReviewsRead?.listed.hosts.find((host) => host.host === ref.host)?.login ?? null;
+        const pull = pulls.find(ref.key) ?? (await readInboxReviewLink(options.refRunner, link, login));
+        if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
+        const { projectsByRepo } = await pullProjects();
+        const owner = pullOwners.get(ref.key);
+        const row = owner ? store.listRow(owner.thread_id) : null;
+        const inReview = owner && row && !inboxRowArchived(row) && threadAgent(pullLinkStore, owner.thread_id)?.ended !== true;
+        return json({ serverSession, ok: true, cli, pull, projects: projectsByRepo.get(`${ref.host}/${ref.repo}`.toLowerCase()) ?? [], thread_id: inReview ? owner.thread_id : null });
       }
       // New review's change summary: what `plannotator review` would show for a project's local changes. Same guards.
       if (path === "/api/inbox/reviews/changes") {

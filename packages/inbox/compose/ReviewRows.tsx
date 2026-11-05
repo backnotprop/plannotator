@@ -1,11 +1,11 @@
 import { useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
-import type { InboxReviewChanges } from '@plannotator/core/inbox-types';
+import { inboxPullLabel, type InboxReviewChanges, type InboxReviewLinkAnswer } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { plural } from '@plannotator/core/inbox-format';
-import type { ReviewBoxPull, ReviewSummary } from './reviewBox';
+import { reviewLinkWords, type ReviewBoxPull, type ReviewSummary } from './reviewBox';
 
-export type ReviewKind = 'local' | 'pr';
+export type ReviewKind = 'local' | 'pr' | 'link';
 
 function Choices<T extends string>({ label, value, options, onChange, name }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (next: T) => void; name: string }) {
   const group = useId();
@@ -144,19 +144,61 @@ export function ReviewRows(props: {
   phone: boolean;
   menu: boolean;
   onMenu: (open: boolean) => void;
+  link: string;
+  onLink: (text: string) => void;
+  linkRead: InboxReviewLinkAnswer | null;
+  /** The link's PR already has a review thread. */
+  linkInReview: boolean;
 }) {
-  const { kind, pick, menu, onMenu } = props;
+  const { kind, pick, menu, onMenu, linkRead: read } = props;
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
       <Row label="Review">
-        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local changes'], ['pr', 'Open pull request']]} />
+        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local changes'], ['pr', 'Open pull request'], ['link', 'Pull request link']]} />
       </Row>
       {kind === 'local' ? (
         <Row label="Changes">
           <Choices label="Changes" name="changes" value={props.changes} onChange={props.onChanges} options={[['uncommitted', 'Uncommitted'], ['last', 'Last commit'], ['branch', 'Whole branch']]} />
           <SummaryLine summary={props.summary} />
         </Row>
+      ) : kind === 'link' ? (
+        <>
+          <Row label="Link">
+            <span className="ib-cp-rvlink">
+              <Icon name="link" size={14} />
+              <input
+                // A paste is the usual way in: a link is what this choice is for.
+                autoFocus
+                type="text"
+                inputMode="url"
+                autoComplete="off"
+                spellCheck={false}
+                aria-label="Pull request link"
+                data-review-link=""
+                value={props.link}
+                placeholder="A pull request's link, or owner/repo#123"
+                onChange={(event) => props.onLink(event.target.value)}
+              />
+            </span>
+          </Row>
+          {read && (
+            <div className="ib-cp-rvread" data-review-link-read={read.ok ? 'ok' : read.reason} role="status">
+              {read.ok && (
+                <p dir="auto">
+                  <RefMarkIcon kind="pr" state={read.pull.state === 'merged' || read.pull.state === 'closed' ? read.pull.state : 'open'} size={14} />
+                  <span className="ib-cp-tod">{read.pull.repo} {inboxPullLabel(read.pull)}</span> <b>{read.pull.title}</b>
+                  {read.pull.state === 'merged' || read.pull.state === 'closed' ? <span className="ib-cp-tod"> · {read.pull.state}</span> : null}
+                </p>
+              )}
+              <p className={read.ok ? 'ib-cp-rvreadok' : undefined}>
+                {read.ok && <Icon name="check" size={13} />}
+                {reviewLinkWords(read)}
+                {props.linkInReview ? ' · Already in review: Start review opens its thread' : ''}
+              </p>
+            </div>
+          )}
+        </>
       ) : (
         <Row label="Pull request">
           <button ref={button} type="button" className="ib-cp-tobtn" aria-haspopup="listbox" aria-expanded={menu} data-review-pick={pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
