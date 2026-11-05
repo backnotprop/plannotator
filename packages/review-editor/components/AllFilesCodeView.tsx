@@ -399,6 +399,13 @@ export interface AllFilesCodeViewProps {
    * viewer reaches either vertical boundary. Guided Review file cards opt in. */
   allowScrollChaining?: boolean;
   /**
+   * The height (px) the scroller's content needs: Pierre's virtual list (every
+   * file at its laid-out height) plus its edge padding. Reported when it
+   * changes, so a host that sizes the viewer can fit it to its content (the
+   * Inbox's PR page: a file box as tall as its lines). Absent: nothing measured.
+   */
+  onContentHeightChange?: (height: number) => void;
+  /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
    * keyboard shortcuts, no /api/file-content augmentation, no open-in
@@ -732,6 +739,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   onClickAIMarker,
   getAIHistoryForFile,
   allowScrollChaining = false,
+  onContentHeightChange,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
   onAddEditorCommentForFile,
@@ -784,6 +792,44 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     observer.observe(el);
     return () => observer.disconnect();
   }, [scrollEl, leadingContent]);
+
+  // The content's height, for a host that fits the viewer to it. Pierre keeps its list element's height at the
+  // virtual total (every item's laid-out height), so observing that element follows line wraps, inline comments,
+  // Split/Unified and a fold without reading the rows. The list is re-found if Pierre replaces it.
+  const contentHeightRef = useRef(onContentHeightChange);
+  contentHeightRef.current = onContentHeightChange;
+  const reportsContentHeight = !!onContentHeightChange;
+  useEffect(() => {
+    if (!scrollEl || !reportsContentHeight || typeof ResizeObserver === 'undefined') return;
+    let last = -1;
+    let list: Element | null = null;
+    const report = () => {
+      if (!list) return;
+      const style = getComputedStyle(list);
+      const height = Math.ceil((list as HTMLElement).offsetHeight + parseFloat(style.marginTop || '0') + parseFloat(style.marginBottom || '0'));
+      if (height <= 0 || height === last) return;
+      last = height;
+      contentHeightRef.current?.(height);
+    };
+    const sizes = new ResizeObserver(report);
+    const bind = () => {
+      const next = scrollEl.firstElementChild;
+      if (next === list) return;
+      if (list) sizes.unobserve(list);
+      list = next;
+      if (list) {
+        sizes.observe(list);
+        report();
+      }
+    };
+    bind();
+    const children = new MutationObserver(bind);
+    children.observe(scrollEl, { childList: true });
+    return () => {
+      children.disconnect();
+      sizes.disconnect();
+    };
+  }, [scrollEl, reportsContentHeight]);
 
   const toolbarHostRef = useRef<ToolbarHostHandle>(null);
 

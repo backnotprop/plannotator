@@ -137,3 +137,48 @@ test('the drawn controls are the same for a touch screen and for iOS and iPadOS 
   expect(coarse).toContain('appearance: none');
   expect(ios).toBe(coarse);
 });
+
+/**
+ * With the page pinned for a keyboard (phone.ts trackKeyboard), a focused field in the thread hides the reply foot.
+ * A radio or a checkbox opens no keyboard: picking a question's option must never hide Reply. The rule's field list
+ * is read from inbox.css and checked against the controls ui draws (happy-dom misreads a descendant combinator inside
+ * :has(), so the list is matched against the focused element itself).
+ */
+test.skipIf(!hasDom)("picking a question's option never hides the reply foot; a field that takes the keyboard does", async () => {
+  const css = readFileSync(resolve(import.meta.dir, 'inbox.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '');
+  const rule = /:root\[data-ib-keyboard-pin\] \.ib-pane:has\(\.ib-pbody (:is\((?:[^()]|\([^()]*\))*\)):focus\) \.ib-pfoot\s*\{\s*display:\s*none;/.exec(css);
+  expect(rule).toBeTruthy();
+  const fields = rule![1]!;
+  const blocks = parseMarkdownToBlocks(DOC);
+  const index = indexQuestionBlocks(blocks);
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  root = createRoot(host);
+  await act(async () =>
+    root!.render(
+      <div>
+        {blocks.map((block) => {
+          const question = index.find((q) => q.blockId === block.id);
+          return (
+            <BlockRenderer
+              key={block.id}
+              block={block}
+              question={question}
+              questionTotal={index.length}
+              questionAnswer={question ? emptyQuestionAnswer(question) : undefined}
+              onAnswerQuestion={() => {}}
+            />
+          );
+        })}
+        <input type="text" aria-label="Note" />
+        <textarea aria-label="Note" />
+      </div>,
+    ),
+  );
+  const radio = host.querySelector<HTMLInputElement>('input[type="radio"][data-question-control]')!;
+  const box = host.querySelector<HTMLInputElement>('input[type="checkbox"][data-question-control]')!;
+  expect(radio.matches(fields)).toBe(false);
+  expect(box.matches(fields)).toBe(false);
+  expect(host.querySelector('input[type="text"]')!.matches(fields)).toBe(true);
+  expect(host.querySelector('textarea')!.matches(fields)).toBe(true);
+});
