@@ -2,8 +2,10 @@
  * A guided review open in the Inbox (the record's 4.2): it takes the window
  * the way an attachment does, under a header naming who sent it, with
  * Plannotator's guide viewer below. The viewer mounts through a dynamic import
- * (React.lazy): in the single-file build its code is inline and its modules
- * run at page load, but nothing of the guide renders until Open. Reviewed
+ * (React.lazy): its code is a chunk the Inbox serves (build/pack-inbox.ts),
+ * loaded on the first Open; when it cannot arrive (the Inbox stopped, or
+ * restarted onto a new release under this page) the pane says so with Reload
+ * (ReaderPart) and the window stays as it is. Reviewed
  * ticks are kept with the thread, on the message in the store, so they
  * survive a reload, another browser and the Inbox moving to another port.
  *
@@ -15,7 +17,8 @@
  * shows the guide read-only.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -28,7 +31,7 @@ import { useNarrowerThan } from '../narrower';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface GuidePaneProps {
   thread: InboxThread;
@@ -261,9 +264,9 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
               {error}
             </div>
           ) : snapshot ? (
-            <Suspense fallback={null}>
+            <ReaderPart diff={snapshot.review.rawPatch}>
               <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
-            </Suspense>
+            </ReaderPart>
           ) : null}
         </div>
         <div
