@@ -197,6 +197,17 @@ describe.skipIf(!hasDom)('the Bro mode offer', () => {
     expect(claims()).toHaveLength(0);
   });
 
+  test("the credit's links open the person and the repo in a new tab, never in place of the Inbox", async () => {
+    const render = await readThread();
+    render({ ...BASE, thread: null });
+    await until(() => card() !== null);
+    const links = [...card()!.querySelectorAll<HTMLAnchorElement>('a')];
+    expect(links.map((a) => [a.textContent, a.getAttribute('href'), a.target, a.rel.includes('noopener')])).toEqual([
+      ['@dillon_mullroy', 'https://x.com/dillon_mullroy', '_blank', true],
+      ['backnotprop', 'https://github.com/backnotprop/bro', '_blank', true],
+    ]);
+  });
+
   test('refused: no card', async () => {
     grants = false;
     const render = await readThread();
