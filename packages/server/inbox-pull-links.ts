@@ -2,7 +2,7 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [pull key]: InboxReviewLanding } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
  * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { InboxReviewLanding } from "@plannotator/core/inbox-types";
+import { inboxReviewLandingId, type InboxReviewLanding } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
@@ -45,7 +45,10 @@ export interface InboxPullLinks {
   keys(threadId: string): string[];
   /** Review threads' PRs that merged or closed. */
   landings(): InboxReviewLanding[];
-  /** Records `record`, forgets the keys in `forget`; a call that changes nothing writes nothing. */
+  /**
+   * Records `record`, and forgets every thread's record of the PRs in `forget`. A call that changes nothing writes
+   * nothing, and one that cannot write (a read-only folder) keeps it in memory: a read of the list never fails for this.
+   */
   land(record: readonly InboxReviewLanding[], forget?: readonly string[]): void;
 }
 
@@ -74,7 +77,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
         }
       }
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
-        if (typeof landing?.thread_id === "string" && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
+        if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
       }
     } catch {
       try {
@@ -113,14 +116,22 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
     land(record, forget = []) {
       const map = load();
       let changed = false;
-      for (const key of forget) changed = landed.delete(key) || changed;
+      for (const [id, landing] of landed) {
+        if (forget.includes(landing.key)) changed = landed.delete(id) || changed;
+      }
       for (const landing of record) {
-        landed.delete(landing.key);
-        landed.set(landing.key, landing);
+        const id = inboxReviewLandingId(landing);
+        landed.delete(id);
+        landed.set(id, landing);
         changed = true;
       }
       while (landed.size > INBOX_PULL_LINKS_MAX) landed.delete(landed.keys().next().value!);
-      if (changed) save(map);
+      if (!changed) return;
+      try {
+        save(map);
+      } catch (cause) {
+        console.error(`inbox: could not save the landed pull requests: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
     },
     keys(threadId) {
       const out: string[] = [];

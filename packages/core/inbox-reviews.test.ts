@@ -297,6 +297,7 @@ describe("landed PRs", () => {
     number: 10,
     title: "PR 10",
     platform: "github",
+    head: "feature",
     through_review: "t_r1",
     ...fields,
   });
@@ -315,12 +316,12 @@ describe("landed PRs", () => {
   });
 
   test("a later review the person approved has nothing left to land: it never reads Ready to land", () => {
-    const round2 = review({ thread_id: "t", round: 2, latest_review_id: "t_r2", ...approved("t") });
+    const round2 = review({ thread_id: "t", round: 2, latest_review_id: "t_r2", source: { kind: "pr", pr: { url: landing().url } }, ...approved("t") });
     expect(inboxReviewRows({ threads: [round2], stacks: [], links: {}, pulls: [], landed: [landing()] })).toEqual([]);
   });
 
   test("a clock a few minutes fast does not make a review sent before the merge look newer; a later one by an hour is", () => {
-    const of = (reviewedAt: string) => inboxReviewLandingOf({ ...landing(), state: "merged" }, "t", { latest_review_id: "t_r1", reviewed_at: reviewedAt });
+    const of = (reviewedAt: string) => inboxReviewLandingOf(landing(), "t", { latest_review_id: "t_r1", reviewed_at: reviewedAt });
     expect(of("2026-11-04T12:03:00.000Z").through_review).toBe("t_r1");
     expect(of("2026-11-04T13:00:00.000Z").through_review).toBeNull();
   });
@@ -340,6 +341,27 @@ describe("landed PRs", () => {
     expect(inboxReviewLandingChanges({ threads: [review({ thread_id: "t", latest_review_id: "t_r2" })], pulls: [pull], links, landed: first.record }).record).toEqual([]);
     const reopened = pr({ number: 10, head: "feature" });
     expect(inboxReviewLandingChanges({ threads, pulls: [reopened], links, landed: first.record }).forget).toEqual([pull.key]);
+  });
+
+  test("a thread with a PR off the list and no record stays: it may be open (a teammate's stack, its bottom merged)", () => {
+    const owners = new Map([[landing().key, { thread_id: "t" }], ["github.com/northwind/billing-svc#999", { thread_id: "t" }]]);
+    const rows = inboxReviewRows({ threads: [review({ thread_id: "t" })], stacks: [], links: {}, pulls: [], landed: [landing()], owners });
+    expect(rows.map((r) => r.id)).toEqual(["t"]);
+    expect(inboxReviewRows({ threads: [review({ thread_id: "t" })], stacks: [], links: {}, pulls: [], landed: [landing(), landing({ key: "github.com/northwind/billing-svc#999", number: 999 })], owners })).toEqual([]);
+  });
+
+  test("two threads on one PR each get a record, against their own review", () => {
+    const pull = merged();
+    const first = inboxReviewLandingChanges({ threads: [review({ thread_id: "a", source: { kind: "pr", pr: { url: pull.url } } })], pulls: [pull], links: { [pull.key]: link("a") }, landed: [] }).record;
+    const second = inboxReviewLandingChanges({ threads: [review({ thread_id: "b", source: { kind: "pr", pr: { url: pull.url } } })], pulls: [pull], links: { [pull.key]: link("b") }, landed: first }).record;
+    expect(second.map((l) => l.thread_id)).toEqual(["b"]);
+  });
+
+  test("an approved local review on another branch, in a thread with an old landing, reads Ready to land", () => {
+    const local = review({ thread_id: "t", latest_review_id: "t_r2", source: { kind: "local", branch: "other" }, ...approved("t") });
+    expect(inboxReviewRows({ threads: [local], stacks: [], links: {}, pulls: [], landed: [landing()] }).map((r) => [r.id, r.move])).toEqual([["t", "ready"]]);
+    const ofIt = review({ thread_id: "t", latest_review_id: "t_r2", source: { kind: "local", branch: "feature" }, ...approved("t") });
+    expect(inboxReviewRows({ threads: [ofIt], stacks: [], links: {}, pulls: [], landed: [landing()] })).toEqual([]);
   });
 
   test("a reopened PR's record no longer hides its thread", () => {

@@ -19,6 +19,8 @@ import {
   inboxPullStacks,
   inboxPullUrlsIn,
   type InboxPull,
+  inboxPullRefOfKey,
+  inboxPullRefOfUrl,
 } from "./inbox-pulls";
 
 let n = 0;
@@ -246,3 +248,18 @@ test("inboxPullUrlsIn finds pull and merge request links, each once", () => {
   const text = "Ready: https://github.com/northwind/billing-svc/pull/412 and https://gitlab.com/northwind/ledger/-/merge_requests/57. Again https://github.com/northwind/billing-svc/pull/412 — not https://github.com/northwind/billing-svc/issues/3";
   expect(inboxPullUrlsIn(text)).toEqual(["https://github.com/northwind/billing-svc/pull/412", "https://gitlab.com/northwind/ledger/-/merge_requests/57"]);
 });
+
+describe("a PR's address", () => {
+  test("a forge's own addresses read back to the list's key", () => {
+    expect(inboxPullRefOfUrl("https://github.com/northwind/web-app/pull/869")?.key).toBe("github.com/northwind/web-app#869");
+    expect(inboxPullRefOfUrl("https://gitlab.com/infra/terraform/modules/-/merge_requests/61/diffs")).toMatchObject({ key: "gitlab.com/infra/terraform/modules#61", platform: "gitlab" });
+  });
+
+  test("an agent-written address cannot walk out of repos/… or smuggle a query into the API call", () => {
+    for (const url of ["https://github.com/../../user/emails?x=/pull/1", "https://github.com/a/../../pull/1", "https://github.com/a/b?x=/pull/1", "https://github.com/a/./pull/1", "https://github.com/a%2f..%2f/b/pull/1"]) {
+      expect(inboxPullRefOfUrl(url)).toBeNull();
+    }
+    expect(inboxPullRefOfKey("github.com/../../user/emails#1")).toBeNull();
+  });
+});
+
