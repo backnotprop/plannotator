@@ -168,7 +168,8 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
-import { inboxGuideRoute } from "./inbox-guides";
+import { inboxGuideRoute, readInboxReviewSnapshot } from "./inbox-guides";
+import { parseDiffToFiles } from "@plannotator/core/diff-files";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
@@ -198,6 +199,8 @@ import {
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
+import { createInboxReviewDrawings, INBOX_REVIEW_DRAWINGS_PATH } from "./inbox-review-drawings";
+import { pruneInboxReviewDrawings } from "@plannotator/shared/inbox/review-drawings";
 import type { InboxAskTimes } from "./inbox-ask-live";
 import { createInboxPins } from "./inbox-pins";
 import { createInboxSnoozes } from "./inbox-snooze";
@@ -1156,6 +1159,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stepsOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
+        // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
+        snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
+        snoozeMade: () => markSnoozeUsed(),
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
@@ -2173,6 +2179,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * shows nothing new. Read on every request.
    */
   const codeReviewOn = () => options.codeReview ?? loadConfig().inboxCodeReview === true;
+  /**
+   * Ask AI is on with PLANNOTATOR_INBOX_ASK_AI, or whenever Code review is on
+   * (approval "shape-in-code-review", q-668227a8: Code review brings Ask, and
+   * so Show me). Read on every request, as the switch is.
+   */
+  const askOnNow = () => askOn || codeReviewOn();
   const saveCodeReview = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "code_review: { on: boolean }.", { field: "code_review" });
@@ -2410,8 +2422,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     store_dir: store.dir,
     /** Whether this Inbox serves phones; the window shows the Phones block only then. */
     phones: phonesOn,
-    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI): absent while it is off, and for a tailnet guest, who may not use it. */
-    ...(askOn && !guest ? { ask_ai: true } : {}),
+    /** Ask AI (PLANNOTATOR_INBOX_ASK_AI, or Code review on): absent while it is off, and for a tailnet guest, who may not use it. */
+    ...(askOnNow() && !guest ? { ask_ai: true } : {}),
     /** Whether `cswap` is on this computer, so the sidebar's Usage row is there before the first read. Looks on PATH, runs nothing. Never for a tailnet guest. */
     cswap: !guest && accounts.installed(),
   });
@@ -3165,7 +3177,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOn,
+    on: askOnNow,
+    codeReviewOn,
+    // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
+    reviewOf: (messageId) => {
+      const message = store.message(messageId);
+      if (!message) return null;
+      if (!message.guide?.review || message.author.kind !== "agent") return "not_a_review";
+      const snapshot = readInboxReviewSnapshot(store, messageId);
+      if (!snapshot) return null;
+      return { threadId: message.thread_id, title: message.guide.title, files: parseDiffToFiles(snapshot.review.rawPatch).map((file) => file.path) };
+    },
     store,
     serverSession,
     readBody: (req) => readBody(req),
@@ -3178,6 +3200,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hostOf: (session) => live.askHostOf(session),
     ...(options.askTimes ? { times: options.askTimes } : {}),
   });
+  // Show me's drawings (packages/server/inbox-review-drawings.ts): the agent's pictures for a review, beside it.
+  const reviewDrawings = createInboxReviewDrawings({
+    store,
+    serverSession,
+    json,
+    readBody: (req) => readBody(req),
+    codeReviewOn,
+    isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+    onAskChange: (threadId) => {
+      for (const listener of askListeners) listener(threadId);
+    },
+  });
+  // A deleted review takes its drawings along.
+  store.onDeletion(() => pruneInboxReviewDrawings(store.dir, (messageId) => store.message(messageId) !== null));
   // Pins: threads pinned to the window's sidebar (packages/server/inbox-pins.ts). A deletion's prune tells the windows too.
   const pins = createInboxPins({ store, serverSession, readBody: (req) => readBody(req), json });
   // Snoozes: threads out of the list until a time (packages/server/inbox-snooze.ts).
@@ -3404,8 +3440,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
 
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOn && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
-    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient) {
+    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    // `plannotator review draw` / `drawings` (inbox-review-drawings.ts): a POST, or a read that carries the token. The window reads below.
+    // Code review off: not a route at all, as before Show me.
+    const drawingsClient = INBOX_REVIEW_DRAWINGS_PATH.test(path) && (req.method !== "GET" || req.headers.has("authorization")) && codeReviewOn();
+    if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || askClient || drawingsClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.
       if (via === "tailnet") return localOnly();
@@ -3420,6 +3459,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (askClient) {
         try {
           return await ask.hostRoute(req, url);
+        } catch (error) {
+          return errorResponse(error);
+        }
+      }
+      if (drawingsClient) {
+        try {
+          return (await reviewDrawings.cliRoute(req, path)) ?? json({ error: "Not found", code: "not_found" }, 404);
         } catch (error) {
           return errorResponse(error);
         }
@@ -4102,6 +4148,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // Ask AI: off, this answers nothing and the path is an unknown route.
       const asked = await ask.route(req, url, via);
       if (asked) return asked;
+      // Show me's drawings, for the owner's window (inbox-review-drawings.ts; the CLI's door is above).
+      const drawn = await reviewDrawings.windowRoute(req, path, via);
+      if (drawn) return drawn;
       // Pins (approval "inbox-pinned-threads"): pin, unpin and the order of the sidebar's pinned threads.
       const pinned = await pins.route(req, url);
       if (pinned) return pinned;

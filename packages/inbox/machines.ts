@@ -195,10 +195,8 @@ export function outboxPending(entry: Pick<OutboxView, 'state'>): boolean {
 export function outboxLine(entry: OutboxView, machine: Pick<MachineView, 'name' | 'state'> | null): { tone: 'waiting' | 'failed'; text: string } | null {
   const name = machine?.name ?? 'the other machine';
   if (outboxPending(entry)) {
-    // Online or still connecting: on its way. Asleep or out of date: it waits for the machine. Removed there: it
-    // cannot go until the link is made again, said so rather than promised.
+    // Online or still connecting: on its way. Asleep or out of date: it waits for the machine.
     if (!machine || machine.state === 'online' || machine.state === 'connecting') return { tone: 'waiting', text: `Sending to ${name}…` };
-    if (machine.state === 'revoked') return { tone: 'waiting', text: `Not sent: ${name} removed the link. Link it again to send.` };
     if (machine.state === 'needs_update') return { tone: 'waiting', text: `Will send when ${name} is updated` };
     return { tone: 'waiting', text: `Will send when ${name} is back` };
   }
