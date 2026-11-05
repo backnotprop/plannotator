@@ -2,7 +2,7 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [pull key]: InboxReviewLanding } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
  * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
@@ -12,9 +12,13 @@
  * cannot be read is moved aside (`pull-links.json.unreadable-<time>`), never
  * written over. Nothing is written until the first choice. A link whose thread
  * is gone is ignored on read (the linker checks the thread), never pruned here.
+ *
+ * `landed`: a review thread's PR once it merged or closed (core's `InboxReviewLanding`), so Reviews still knows after
+ * the forge's list stopped carrying it.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import type { InboxReviewLanding } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
@@ -39,19 +43,24 @@ export interface InboxPullLinks {
   theirs(threadId: string): boolean;
   /** The pull requests the thread owns, oldest hand-over first. */
   keys(threadId: string): string[];
+  /** Review threads' PRs that merged or closed. */
+  landings(): InboxReviewLanding[];
+  /** Records `record`, forgets the keys in `forget`; a call that changes nothing writes nothing. */
+  land(record: readonly InboxReviewLanding[], forget?: readonly string[]): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const dir = inboxDir(dataDir);
   const file = join(dir, INBOX_PULL_LINKS_FILE);
   let links: Map<string, InboxPullOwner> | null = null;
+  const landed = new Map<string, InboxReviewLanding>();
 
   const load = (): Map<string, InboxPullOwner> => {
     if (links) return links;
     links = new Map();
     if (!existsSync(file)) return links;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; links?: Record<string, unknown> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding> };
       if (parsed.v !== 1 || !parsed.links || typeof parsed.links !== "object") throw new Error("not a pull links file");
       for (const [key, value] of Object.entries(parsed.links)) {
         const owner = value as Partial<InboxPullOwner>;
@@ -63,6 +72,9 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
             ...(owner.theirs === true ? { theirs: true as const } : {}),
           });
         }
+      }
+      for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
+        if (typeof landing?.thread_id === "string" && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
       }
     } catch {
       try {
@@ -78,7 +90,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const save = (map: Map<string, InboxPullOwner>) => {
     mkdirSync(dir, { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map) })}\n`, { mode: 0o600 });
+    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}) })}\n`, { mode: 0o600 });
     renameSync(temp, file);
   };
 
@@ -93,6 +105,22 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       }
       while (map.size > INBOX_PULL_LINKS_MAX) map.delete(map.keys().next().value!);
       save(map);
+    },
+    landings() {
+      load();
+      return [...landed.values()];
+    },
+    land(record, forget = []) {
+      const map = load();
+      let changed = false;
+      for (const key of forget) changed = landed.delete(key) || changed;
+      for (const landing of record) {
+        landed.delete(landing.key);
+        landed.set(landing.key, landing);
+        changed = true;
+      }
+      while (landed.size > INBOX_PULL_LINKS_MAX) landed.delete(landed.keys().next().value!);
+      if (changed) save(map);
     },
     keys(threadId) {
       const out: string[] = [];

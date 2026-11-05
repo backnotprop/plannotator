@@ -474,6 +474,16 @@ export function inboxPullGroups(items: readonly InboxPullItem[]): InboxPullGroup
   };
 }
 
+/** A pull or merge request's parts from its web address (`/pull/N`, `/pulls/N`, `/-/merge_requests/N`), its key included; null for anything else. */
+export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
+  const match = /^https:\/\/([A-Za-z0-9.-]+)\/(.+?)\/(pulls?|-\/merge_requests)\/(\d+)(?:[/?#].*)?$/.exec(url);
+  if (!match) return null;
+  const host = match[1]!.toLowerCase();
+  const repo = match[2]!;
+  const number = Number(match[4]);
+  return { key: `${host}/${repo}#${number}`, platform: match[3] === "-/merge_requests" ? "gitlab" : "github", host, repo, number };
+}
+
 /**
  * Pull and merge request URLs in a message's text, in order, each once, as
  * `host/owner/repo#n` keys' parts. Only https links that name a pull or merge
