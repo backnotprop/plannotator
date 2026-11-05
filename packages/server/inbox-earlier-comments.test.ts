@@ -66,7 +66,7 @@ test("the read returns the sent comments of this thread, and the same path keeps
   const state = await inboxAttachmentState(newer, second.id);
   const onNewer = earlierCommentsOn(model.earlier_annotations, state);
   expect(onNewer.flatMap((reply) => reply.comments.map((c) => c.id))).toEqual(["ann-page"]);
-  expect(onNewer[0]!.comments[0]!.spot).toBe("on “One”");
+  expect(onNewer[0]!.comments[0]!.spot).toBe("\"One\"");
 });
 
 test("a sent comment keeps its reply's time, comes back after a restart, and goes with its thread", async () => {

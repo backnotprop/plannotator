@@ -12,6 +12,7 @@ const TOOLS_KEYS: ShortcutRef = { scope: inboxFileViewerShortcuts, action: 'togg
 const exitKeys = shortcutAria(EXIT_KEYS);
 import { modKey } from '@plannotator/ui/utils/platform';
 import { Icon } from '../icons';
+import { CommentCount, commentsLabel } from './EarlierSection';
 import { Tip as HoverTip } from './Tip';
 
 /**
@@ -51,6 +52,8 @@ export interface FullViewBarProps {
   /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and no other file has any. */
   comments: {
     count: number;
+    /** Comments a Send already carried on this file (earlierComments.ts). Absent or 0: the count is today's. */
+    earlier?: number;
     open: boolean;
     controls: string;
     onToggle: () => void;
@@ -149,11 +152,10 @@ const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
  * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
  * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip, its Contents button
  * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide). The changed chip is not
- * here: it is a fact about the file. The earlier comments panel is here for focus only: it closes on a gather
- * (AttachmentPane) instead of flying, so inbox.css does not list it.
+ * here: it is a fact about the file.
  */
 export const GATHERED =
-  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail, .ib-earlier-panel';
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
 /** Focus sits in something that is about to gather (and go inert or hidden). */
 const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
@@ -328,13 +330,11 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
               }}
               aria-expanded={comments.open}
               aria-controls={comments.controls}
-              aria-label={`Comments, ${comments.count}`}
+              aria-label={commentsLabel(comments.count, comments.earlier ?? 0)}
               data-full-view-comments=""
             >
               <Icon name="comment" size={iconSize} />
-              <span key={bump} className={bump ? 'ib-bump' : undefined}>
-                {comments.count}
-              </span>
+              <CommentCount count={comments.count} earlier={comments.earlier ?? 0} phone={phone} bump={bump} />
             </button>
           </Tip>
         )}

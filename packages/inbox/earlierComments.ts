@@ -21,7 +21,7 @@ export function isSameFile(record: InboxAnnotationRecord, attachment: Pick<Inbox
 export interface EarlierComment {
   id: string;
   words: string;
-  /** The quoted words or the spot, when stored: `on “…”`, `At 1:42`, `Lines 12–14`. */
+  /** The quoted words or the spot, when stored: `"…"`, `At 1:42`, `Lines 12–14`. */
   spot: string | null;
 }
 
@@ -48,9 +48,8 @@ function spotOf(annotation: Annotation): string | null {
   if (lines) return lines.lineStart === lines.lineEnd ? `Line ${lines.lineStart}` : `Lines ${lines.lineStart}–${lines.lineEnd}`;
   if (annotation.type === AnnotationType.GLOBAL_COMMENT || annotation.blockId === 'image') return null;
   const quote = annotationQuote(annotation).replace(/\s+/g, ' ').trim();
-  if (quote) return `on “${quote}”`;
-  const tag = annotationTag(annotation);
-  return tag ? `on ${tag}` : null;
+  if (quote) return `"${quote}"`;
+  return annotationTag(annotation);
 }
 
 /** "Today, 6:30 PM", "Yesterday, 6:30 PM", else "Oct 3, 6:30 PM". */

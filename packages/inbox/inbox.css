@@ -6844,42 +6844,26 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
 .ib-view.ib-fullview[data-tools="tucked"] .ib-vidview .ib-vidstage { padding-bottom: 60px; box-sizing: border-box; }
 
-/* Earlier comments (EarlierComments.tsx): a slim panel inside the file's own box, so it is the same in every mode. The
-   stage takes no pointer: the file keeps its clicks right beside the panel. Vertically centred, clear of what sits at
-   the top and foot of a full-screen file. The slide is the sidebar peek's (.ib-peek), mirrored. */
-.ib-earlier-stage { position: absolute; inset: 24px 0; z-index: 60; display: flex; align-items: center; justify-content: flex-end; overflow: hidden; pointer-events: none; }
-.ib-view.ib-fullview .ib-earlier-stage { inset: 150px 0; }
-.ib-earlier-panel { display: flex; flex-direction: column; box-sizing: border-box; width: 300px; max-width: calc(100% - 24px); max-height: min(100%, 560px); background: var(--popover); color: var(--popover-foreground); border-radius: var(--ib-sheet-corner, 12px) 0 0 var(--ib-sheet-corner, 12px); box-shadow: var(--ib-shadow-sheet); pointer-events: auto; transform: translateX(100%); visibility: hidden; will-change: transform; transition: transform 300ms var(--ib-ease-enter), visibility 0s linear 300ms; }
-.ib-earlier-panel[data-visible] { transform: translateX(0); visibility: visible; transition: transform 300ms var(--ib-ease-enter); }
-@media (prefers-reduced-motion: reduce) {
-  .ib-earlier-panel, .ib-earlier-panel[data-visible] { transition: none; }
-}
-.ib-earlier-h { flex: none; display: flex; align-items: center; gap: 8px; height: 44px; padding: 0 8px 0 16px; }
-.ib-earlier-h b { font-size: var(--ib-fs-13, 13px); font-weight: 600; }
-.ib-earlier-n { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.pn-inbox .ib-earlier-h .ib-iconbtn { margin-left: auto; }
-.ib-earlier-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; outline: none; }
-.ib-earlier-list:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
-/* The list itself (EarlierCommentsList.tsx) fits any host: a host's scroller holds it, and a host on another surface sets --ib-earlier-bg for its sticky headings. */
-.ib-earlier-comments { padding: 0 var(--ib-earlier-pad, 16px) 12px; }
-.ib-earlier-sub { position: sticky; top: 0; z-index: 1; margin: 0 calc(-1 * var(--ib-earlier-pad, 16px)); padding: 2px var(--ib-earlier-pad, 16px) 6px; background: var(--ib-earlier-bg, var(--popover)); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
-.ib-earlier-reply + .ib-earlier-reply { margin-top: 6px; }
-.ib-earlier-reply + .ib-earlier-reply .ib-earlier-sub { padding-top: 8px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
-.ib-earlier-item { padding: 7px 0 8px; }
-.ib-earlier-t { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: color-mix(in oklch, var(--foreground) 78%, transparent); }
-.ib-earlier-m { display: block; margin-top: 2px; font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-/* A phone: the comments sheet's shape over the window, with the phone menu's rise. */
-.ib-earlier-scrim { position: fixed; inset: 0; z-index: 60; border: 0; padding: 0; background-color: rgb(0 0 0 / 0.45); backdrop-filter: blur(2px); }
-.ib-earlier-sheet { position: fixed; left: 0; right: 0; bottom: 0; z-index: 61; display: flex; flex-direction: column; height: min(65%, 520px); background: var(--popover); color: var(--popover-foreground); border-top: 1px solid var(--border); border-radius: var(--ib-sheet-corner, 12px) var(--ib-sheet-corner, 12px) 0 0; box-shadow: 0 -16px 48px rgba(0, 0, 0, 0.25); padding-bottom: env(safe-area-inset-bottom); animation: ib-earlier-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
-.ib-earlier-sheet:focus { outline: none; }
-.ib-earlier-sheet .ib-earlier-h { height: 52px; padding-right: 4px; }
-.ib-earlier-sheet .ib-earlier-h b { font-size: var(--ib-fs-15, 15px); }
-.ib-earlier-sheet .ib-earlier-t { font-size: var(--ib-fs-15, 15px); }
-.ib-earlier-sheet :is(.ib-earlier-m, .ib-earlier-sub) { font-size: var(--ib-fs-12, 12px); }
-.pn-inbox .ib-earlier-sheet .ib-iconbtn { width: 44px; height: 44px; }
-@keyframes ib-earlier-up { from { transform: translateY(16px); opacity: 0; } to { transform: none; opacity: 1; } }
-@media (prefers-reduced-motion: reduce) { .ib-earlier-sheet { animation: none; } }
-@media (prefers-reduced-transparency: reduce) { .ib-earlier-scrim { backdrop-filter: none; background-color: rgb(0 0 0 / 0.65); } }
+/* Earlier comments (EarlierSection.tsx): at the foot of the comments column's timeline, in its one scroll area. The row
+   stays in view while its list scrolls. A comment reads as a resolved one: a card's quote and words, dimmed, no actions. */
+.ib-earlier { margin: 2px -8px -8px; padding: 0 8px 8px; }
+.ib-earlier[data-after] { padding-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.pn-inbox .ib-earlier-row { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% + 16px); margin: 0 -8px; padding: 7px 14px; border: 0; background: var(--card); font-size: var(--ib-fs-11, 11px); font-weight: 500; color: var(--muted-foreground); text-align: left; cursor: pointer; }
+.pn-inbox .ib-earlier-row:hover { color: var(--foreground); }
+.pn-inbox .ib-earlier-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-earlier-row .ib-ic { width: 10px; height: 10px; flex: none; opacity: .6; transition: transform 120ms ease; }
+.ib-earlier-row[aria-expanded="false"] .ib-ic { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .ib-earlier-row .ib-ic { transition: none; } }
+.ib-earlier-n { font-weight: 400; font-variant-numeric: tabular-nums; color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-earlier-sub { padding: 6px 12px 2px; font-size: var(--ib-fs-11, 11px); color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-earlier-item { padding: 8px 12px 9px; }
+.ib-earlier-q { margin: 0 0 4px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11, 11px); line-height: 1.5; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-earlier-t { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: color-mix(in oklch, var(--foreground) 62%, transparent); }
+.pn-inbox .ib-phone .ib-earlier-row { min-height: 44px; font-size: var(--ib-fs-13, 13px); }
+.ib-phone .ib-earlier-t { font-size: var(--ib-fs-15, 15px); }
+.ib-phone :is(.ib-earlier-q, .ib-earlier-sub) { font-size: var(--ib-fs-12, 12px); }
+/* The count on the comments button: earlier comments are muted beside today's number. */
+.ib-earlier-cnt { font-weight: 500; color: var(--muted-foreground); }
 
 /* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
    its pill, the image's size bar and "Your marked-up copy" chip, a text file's toolstrip, its Contents button and the

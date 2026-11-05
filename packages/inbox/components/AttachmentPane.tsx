@@ -66,7 +66,7 @@ import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '..
 import { useHtmlPageComment } from './HtmlPageComment';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
-import { EarlierCommentsPanel, EarlierCommentsSheet, type EarlierEntry } from './EarlierComments';
+import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
 import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
@@ -174,8 +174,6 @@ export interface AttachmentPaneProps {
   records: readonly InboxAnnotationRecord[];
   /** The person's comments on the thread's files that a Send already carried (earlierComments.ts). */
   earlierRecords?: readonly InboxAnnotationRecord[];
-  /** What opens the earlier comments panel (EarlierComments.tsx). Absent: nothing opens it. */
-  earlierEntry?: EarlierEntry;
   /**
    * Tag agents with `@` in a comment (approval "inbox-tag-agents"): markdown, text and HTML files. The
    * image, video, code and diagram comment boxes take none yet.
@@ -470,10 +468,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
    * of full screen starts showing.
    */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
-  // Earlier comments (earlierComments.ts): what the person said about this file before. Each file starts closed.
-  const [earlierOpen, setEarlierOpen] = useState(false);
-  const earlierPanelId = `ib-earlier-${useId().replace(/:/g, '')}`;
-  const EarlierEntryPoint = props.earlierEntry;
+  // Earlier comments: what the person said about this file before, under the current ones in the comments column.
   const earlierReplies = useMemo(() => earlierCommentsOn(props.earlierRecords ?? [], attachment), [props.earlierRecords, attachment]);
   const earlierCount = useMemo(() => earlierReplies.reduce((sum, reply) => sum + reply.comments.length, 0), [earlierReplies]);
   const barRef = useRef<FullViewBarHandle>(null);
@@ -796,7 +791,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setEndNote(null);
     setGuard(null);
     setSheet(false);
-    setEarlierOpen(false);
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
@@ -1147,11 +1141,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   function ladderRung(target: Element | null): EscapeRung | null {
     if (modalOpen()) return null;
     if (!full) {
-      if (document.querySelector(SELF_CLOSING_DRAFTS)) return null;
-      // Beside the thread the earlier comments panel closes before the file does, wherever focus is but a field or an overlay.
-      if (earlierShown) return target && (isEditableTarget(target) || inOverlay(target)) ? null : 'earlier';
-      // The other rung is a linked page, for a key from inside the pane (or the page).
-      if (!linkedTop) return null;
+      // Beside the thread the one rung is a linked page, for a key from inside the pane (or the page).
+      if (!linkedTop || document.querySelector(SELF_CLOSING_DRAFTS)) return null;
       if (target && (!sectionRef.current?.contains(target) || isEditableTarget(target) || inOverlay(target))) return null;
       return 'linked';
     }
@@ -1163,7 +1154,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
       popoverOpen: menuOpen || moreOpen || !!props.composer?.reply.comments.list,
       composerOpen: !props.readOnly && openComposer() !== null,
       inField,
-      earlierOpen: earlierShown,
       panelOpen: panelOpen,
       linkedOpen: linkedTop !== null,
       annotating: isHtml && armed && !props.readOnly,
@@ -1206,9 +1196,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         announce(fromReply ? 'Left the reply box. Your words are kept.' : 'Left the comment box.');
         return;
       }
-      case 'earlier':
-        closeEarlier();
-        return;
       case 'drawer':
         if (fromPage) {
           if (drawerMode) setDrawer(false);
@@ -1257,16 +1244,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   linkedStackRef.current = linkedStack;
   const linkedLast = linkedStack.at(-1);
   const linkedTop = linkedLast && linkedLast.attachmentId === attachment.id ? linkedLast : null;
-  /** A linked page over the file is not the file: its earlier comments wait under it. */
-  const earlierHere = earlierCount > 0 && !linkedTop;
-  const earlierShown = earlierOpen && earlierHere;
-  /** Closes the panel; focus inside it goes back to what opened it, else stays where the person is (the file). */
-  const closeEarlier = useCallback(() => {
-    const inside = document.activeElement?.closest('[data-earlier-panel]');
-    setEarlierOpen(false);
-    announce('Earlier comments closed.');
-    if (inside) (sectionRef.current?.querySelector<HTMLElement>('[data-earlier-entry]') ?? sectionRef.current)?.focus({ preventScroll: true });
-  }, [announce]);
   /** Why a link opened nothing, for a moment. */
   const [linkNote, setLinkNote] = useState<string | null>(null);
   const linkNoteTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -1653,10 +1630,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const pinchTucks = pinched && !pinchShown && !htmlComment.open;
   const shownToolbar: ToolbarState = pinchTucks ? 'tucked' : toolbar;
   shownToolbarRef.current = shownToolbar;
-  // Hide tools takes the earlier comments with the rest of what floats.
-  useEffect(() => {
-    if (shownToolbar === 'tucked') setEarlierOpen(false);
-  }, [shownToolbar]);
   // Every way back to showing (the corner control, Keep writing, ⌘⇧X, leaving full screen, a pinch let go) forgets
   // what gathered the tools, once the corner control's press has put focus back: the next » brings focus back to ».
   useEffect(() => {
@@ -1728,7 +1701,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const currentKey = recordKey(attachment.path, annotationVersion);
   const otherFiles = documents.some((d) => d.path !== currentKey);
   // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list.
-  const hasPanel = !isDownload || otherFiles;
+  const hasPanel = !isDownload || otherFiles || earlierCount > 0;
   const groups = useMemo(() => groupAnnotationsByDocument(documents, currentKey), [documents, currentKey]);
   const openInDocument = (_path: string, id: string) => {
     const record = props.records.find((r) => r.id === id);
@@ -1841,6 +1814,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     .join(', ');
   /** The thread's annotations on files other than this one (the foot of the drawer says so). */
   const elsewhere = props.records.filter((r) => recordKey(r.path, r.version) !== currentKey).length;
+  /** All this file has is earlier comments: nothing may read as if they are gone ("Comments 0", "No annotations yet"). */
+  const onlyEarlier = earlierCount > 0 && annotations.length === 0 && elsewhere === 0;
   /** Full screen's ⋯ offers the other version, as the changed chip does. */
   const versionAction = versionChip?.action ? { label: versionChip.action.label, onSelect: () => chooseVersion(versionChip!.action!.to) } : null;
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
@@ -1911,6 +1886,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             hasPanel
               ? {
                   count: annotations.length,
+                  earlier: earlierCount,
                   open: panelOpen,
                   controls: sheetId,
                   onToggle: togglePanel,
@@ -2018,11 +1994,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               }}
               aria-expanded={sheet}
               aria-controls={sheetId}
-              aria-label={`Comments, ${annotations.length}`}
+              aria-label={commentsLabel(annotations.length, earlierCount)}
               data-annotations-sheet=""
             >
               <Icon name="comment" size={15} />
-              {annotations.length}
+              <CommentCount count={annotations.length} earlier={earlierCount} />
             </button>
           )}
           {!props.fullLocked && (
@@ -2109,8 +2085,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onAnnotateModeExit={() => {
                 if (!escapeFromPage()) setArmed(false);
               }}
-              // In Interact, an Escape the page did not use climbs the ladder (full screen, or to close the earlier comments).
-              onPageEscape={full || earlierShown ? () => void escapeFromPage() : undefined}
+              // In Interact, an Escape the page did not use climbs the ladder (full screen only).
+              onPageEscape={full ? () => void escapeFromPage() : undefined}
               onAnnotateModeToggle={() => setArmed((v) => !v)}
               // ⌘⇧X pressed inside the page: the bridge forwards it (Hide / Show the full-screen toolbar).
               onToolsToggle={full ? () => barRef.current?.toggle() : undefined}
@@ -2373,17 +2349,6 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               panelAction={<ContentsHide onHide={hideContents} />}
             />
           )}
-          {earlierHere && (
-            <>
-              {/* How the panel gets opened: the one piece a change of entry point replaces (EarlierComments.tsx). */}
-              {EarlierEntryPoint && <EarlierEntryPoint count={earlierCount} open={earlierShown} panelId={earlierPanelId} onToggle={() => (earlierShown ? closeEarlier() : setEarlierOpen(true))} />}
-              {phone ? (
-                earlierShown && <EarlierCommentsSheet id={earlierPanelId} near={sectionRef.current} replies={earlierReplies} count={earlierCount} onClose={closeEarlier} />
-              ) : (
-                <EarlierCommentsPanel id={earlierPanelId} open={earlierShown} replies={earlierReplies} count={earlierCount} onClose={closeEarlier} />
-              )}
-            </>
-          )}
         </div>
         <div
           className="ib-apanel"
@@ -2403,7 +2368,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           {(folded || full) && (
             <div className="ib-sheet-h">
               <b>Comments</b>
-              <span className="ib-mut">{annotations.length}</span>
+              {!onlyEarlier && <span className="ib-mut">{annotations.length}</span>}
               <span className="ib-sp" />
               {isVideo && <span className="ib-mut ib-sheet-note">By time</span>}
               <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
@@ -2417,6 +2382,19 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // A linked page takes no comments: the hint says where they can be written instead.
             emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
             isOpen
+            hideEmptyMessage={earlierCount > 0}
+            timelineFooter={
+              earlierCount > 0 ? (
+                <EarlierSection
+                  // Each file and version starts by the fold rule.
+                  key={`${attachment.id}:${annotationVersion}`}
+                  replies={earlierReplies}
+                  count={earlierCount}
+                  current={annotations.length}
+                  inAllFiles={otherFiles && scope === 'all'}
+                />
+              ) : undefined
+            }
             annotations={annotations}
             blocks={blocks}
             // A film's comments read by the moment they are at, each with its time (a click seeks there).
@@ -2520,10 +2498,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name="chevD" size={13} />
                 </button>
               )}
+              {!(onlyEarlier && props.strip.picks === 0 && props.strip.annotations === 0) && (
               <p className="ib-fvsend" data-strip-chip="">
                 <b>{chipText}</b> {props.strip.picks === 0 && props.strip.annotations === 1 ? 'rides' : 'ride'} your next Send to {props.agent}.
                 {elsewhere > 0 && ` ${elsewhere} ${elsewhere === 1 ? 'is' : 'are'} on other files.`}
               </p>
+              )}
               <div className="ib-fvacts">
                 <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => leave(null, props.strip.onWriteReply)}>
                   <Icon name="reply" size={14} />
