@@ -336,7 +336,9 @@ describe("Inbox Open in: a file a reference names", () => {
   /** A linked worktree of the project, as git leaves it: a folder whose `.git` is a file. */
   function worktree(r: { root: string }, name: string, files: Record<string, string>) {
     const dir = realpathSync(mkdtempSync(join(r.root, `${name}-`)));
-    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+    const gitdir = join(dir, "..", `${name}-gitdir-${dir.slice(-6)}`);
+    mkdirSync(gitdir);
+    writeFileSync(join(dir, ".git"), `gitdir: ${gitdir}\n`);
     for (const [path, text] of Object.entries(files)) {
       mkdirSync(join(dir, path, ".."), { recursive: true });
       writeFileSync(join(dir, path), text);
@@ -465,6 +467,41 @@ describe("Inbox Open in: a file a reference names", () => {
       const scope = { thread: sent.message.thread_id, message: sent.message.id };
       for (const path of [".ssh/id_rsa", "notes/a.md", "hosts", "../.ssh/id_rsa"]) expect((await r.check({ ...scope, path })).found).toBe(false);
       expect((await r.check({ ...scope, path: join(home, ".ssh/id_rsa") })).found).toBe(false);
+    }
+  });
+
+  test("the home folder by another spelling is still the home folder", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "open-in-home-")));
+    roots.push(dir);
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".git"), { recursive: true });
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/id_rsa"), "secret\n");
+    const spelled = join(dir, "linkhome");
+    symlinkSync(home, spelled);
+    // The home folder named through a link, a base under the real folder; the home folder real, a base through the link.
+    for (const [openInHome, base_path] of [[spelled, home], [home, spelled]] as const) {
+      const r = await referenced({ openInHome });
+      const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+      const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path });
+      expect((await r.check({ thread: sent.message.thread_id, message: sent.message.id, path: ".ssh/id_rsa" })).found).toBe(false);
+    }
+  });
+
+  test("a `.git` file that names nothing is no worktree", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    for (const dotGit of ["", "not a gitdir line\n", `gitdir: ${join(r.root, "nowhere")}\n`]) {
+      const loose = realpathSync(mkdtempSync(join(r.root, "loose-")));
+      writeFileSync(join(loose, ".git"), dotGit);
+      writeFileSync(join(loose, "hosts"), "secret\n");
+      const made = createShapeStore({ dataDir: r.dataDir }).update({
+        board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+        project: { root: r.project, name: "billing", worktree: loose },
+        session: { id: "ses_a", host: "claude-code" },
+      });
+      if (!made.ok) throw new Error(JSON.stringify(made));
+      expect(await r.check({ shape: made.id, path: "hosts" })).toEqual({ found: false });
     }
   });
 

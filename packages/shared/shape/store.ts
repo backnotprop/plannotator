@@ -266,10 +266,13 @@ export function shapesDirOf(dataDir: string): string {
 
 export type { ShapeProject };
 
-/** A linked worktree's `.git` is a file; a main checkout's is a folder. */
+/** A linked worktree's `.git` is a file saying `gitdir: <path>`, and that path exists; a main checkout's is a folder. */
 export function isLinkedWorktree(folder: string): boolean {
   try {
-    return statSync(join(folder, ".git")).isFile();
+    const dotGit = join(folder, ".git");
+    if (!statSync(dotGit).isFile()) return false;
+    const gitdir = /^gitdir: (.+)$/.exec(readFileSync(dotGit, "utf8").trim())?.[1];
+    return !!gitdir && existsSync(resolve(folder, gitdir));
   } catch {
     return false;
   }

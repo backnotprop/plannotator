@@ -192,7 +192,12 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch {
       return null;
     }
-    return (deps.projectRootOf ?? defaultProjectRoot)(folder);
+    const rootOf = deps.projectRootOf ?? defaultProjectRoot;
+    const project = await rootOf(folder);
+    if (c.project || folder === deps.cwd) return project;
+    // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
+    const here = await rootOf(deps.cwd).catch(() => null);
+    return here?.root === project.root ? here : project;
   };
 
   /** Output where a closed pipe changes nothing: the reader is gone either way. */

@@ -104,7 +104,7 @@ export interface InboxOpenInRouteContext {
  */
 function checkoutOf(folder: string, home: string): string | null {
   for (let dir = folder; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) return dir === home ? null : dir;
+    if (existsSync(join(dir, ".git"))) return realpathOrNull(dir) === home ? null : dir;
     if (dirname(dir) === dir) return null;
   }
 }
@@ -134,7 +134,9 @@ interface FileScope {
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, home = homedir() } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots } = context;
+  const givenHome = context.home ?? homedir();
+  const home = realpathOrNull(givenHome) ?? givenHome;
 
   /**
    * Where a scope's path may be, in the order to try. A shape's or a repository's path starts at its root, and so does
