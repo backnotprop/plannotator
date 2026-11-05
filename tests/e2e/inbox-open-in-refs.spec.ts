@@ -304,6 +304,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.locator('.shp-tbtn', { hasText: 'Code' }).first().click();
       const card = page.locator('.shp-guide [data-guide-file-shell="src/retry.ts"]');
       await expect(card.locator('[data-open-in-caret]').first()).toBeVisible();
+      await page.waitForTimeout(700); // the board's fade between views, for the picture
       await shot(page, `03-shape-code-guide-${colorScheme}`);
       await card.locator('.shp-g-open').click();
       await expect(page.locator('.shp-code-head [data-open-in-caret]')).toBeVisible();
