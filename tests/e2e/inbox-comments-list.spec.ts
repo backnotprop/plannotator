@@ -10,7 +10,7 @@
  *  - the full-screen card's count does the same, and Escape takes the list
  *    first, from the window and from inside the page;
  *  - a highlight leaves the open file when its comment goes (Send, the list),
- *    in Markdown and on an HTML page;
+ *    in Markdown and on an HTML page; a sent one stays as an earlier comment;
  *  - words half written in the list come back however it closed;
  *  - the stale guard takes the foot: no list behind it, then or later;
  *  - the list stays on screen at 1000, 390 and 320 wide, with the keyboard up
@@ -466,7 +466,9 @@ test('an HTML page\'s pin leaves with its comment: after Send, after Remove in t
   const pin = await pinOnPage(page, sent);
   await footSend(page).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  await expect(panel).toContainText('No annotations yet');
+  // What was sent stays as an earlier comment, read only; its pin does not.
+  await expect(panel.locator('[data-earlier-row]')).toBeVisible();
+  await expect(panel.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(pin).toHaveCount(0);
 
   const listed = await seededThread(world);
@@ -492,7 +494,9 @@ test('a highlight leaves the open file with its comment after Send', async ({ br
   await expect(fileHighlight(page)).toBeVisible();
   await pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' }).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  await expect(page.locator('[data-attachment-pane]')).toContainText('No annotations yet');
+  const filePane = page.locator('[data-attachment-pane]');
+  await expect(filePane.locator('[data-earlier-row]')).toBeVisible();
+  await expect(filePane.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(fileHighlight(page)).toHaveCount(0);
   await page.context().close();
 });

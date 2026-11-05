@@ -168,6 +168,23 @@ describe("the routes carry each session's own label", () => {
     expect(list.session_labels).toEqual({ "ses-login": "Fix login redirect", "ses-docs": "Docs pass", "ses-billing": "Billing cleanup" });
   });
 
+  test("the window's read of only what changed still brings the labels: a rename alone changes no row and still arrives", async () => {
+    const { server, project } = await threeNamed();
+    const path = "/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1&since=";
+    const first = await read(server, "local", path);
+    expect(first.session_labels).toMatchObject({ "ses-login": "Fix login redirect" });
+    await poll(server, "ses-login", project, "Login, take two");
+    const next = await read(server, "local", `${path}${encodeURIComponent(first.list_version as string)}`);
+    expect(next.delta.rows).toEqual([]);
+    expect(next.session_labels).toMatchObject({ "ses-login": "Login, take two" });
+    // And over the wire a tailnet guest's list never has them, a change of rows or not.
+    const guestFirst = await read(server, "guest", path);
+    expect("session_labels" in guestFirst).toBe(false);
+    const guestNext = await read(server, "guest", `${path}${encodeURIComponent(guestFirst.list_version as string)}`);
+    expect(guestNext.delta).toBeDefined();
+    expect("session_labels" in guestNext).toBe(false);
+  });
+
   test("a rename follows on the next poll, an empty label or an older connection clears it, and the label is the cleaned one", async () => {
     const { server, project, threadId } = await threeNamed();
     await poll(server, "ses-login", project, "Login, take two");
