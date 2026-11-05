@@ -36,7 +36,7 @@ const fakeGh = (answers: { releases?: string; issues?: unknown[]; pulls?: unknow
 
 describe('release notes', () => {
   test('headings below What\'s New; not the people, the install block or the raw PR list', () => {
-    const body = notes('### Plannotator Inbox\n\n#### Snooze a thread\n\nText that stays out.\n\n### Contributors\n\n@someone did it\n\n### Thanks\n\n@another\n\n### Smaller changes\n\n- **Rows in the list** are tidier now. And more words.\n- Fix a thing [#12](https://x)');
+    const body = notes('### Plannotator Inbox\n\n#### Snooze a thread\n\nText that stays out.\n\n### Contributors\n\n@someone did it\n\n### Thanks\n\n@another\n\n### Smaller changes\n\n- **Rows in the list** are tidier now. And more words.\n- Fix a thing [#12](https://x)\n- Authored by @someone in #12');
     expect(releaseTitles(body)).toEqual(['Snooze a thread', 'Rows in the list are tidier now.', 'Fix a thing #12']);
     expect(releaseTitles('no such section')).toEqual([]);
   });

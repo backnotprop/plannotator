@@ -61,6 +61,8 @@ export interface TitleInput {
 const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|community|contributors|thanks|full changelog)/i;
 /** A section whose heading only groups its bullets: each bullet is the line. */
 const GROUPING = /smaller|additional|other|fixes|bug|ux improvements/i;
+/** A bullet that only credits someone or names a PR: no feature in it. */
+const ONLY_A_CREDIT = /^(authored|reported|requested|closes|closing|thanks|credit)\b/i;
 /** A heading that only names the product: what is under it is the feature. */
 const ONLY_THE_PRODUCT = /^plannotator( inbox)?$/i;
 /** Bots and trackers: nobody files feedback about these. */
@@ -109,7 +111,7 @@ export function releaseTitles(body: string): string[] {
     if (GROUPING.test(heading) && bullets.length) titles.push(...bullets.map((line) => firstSentence(line.slice(2))));
     else titles.push(heading);
   }
-  return titles.filter(Boolean);
+  return titles.filter((title) => title && !ONLY_A_CREDIT.test(title));
 }
 
 /** The file's content from what GitHub answered. Pure; the tests call it with no `gh` in sight. */
