@@ -42,10 +42,12 @@ import {
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
   parseInboxSupersedeRef,
+  splitInboxReplyBody,
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
 } from "@plannotator/core/inbox-questions";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import {
   checkInboxActionResult,
   composeInboxActionsReply,
@@ -53,6 +55,7 @@ import {
   withInboxActionsSection,
   parseInboxActionBlocks,
   parseInboxDoneRef,
+  INBOX_ACTIONS_HEADING,
 } from "@plannotator/core/inbox-actions";
 import {
   inboxId,
@@ -171,7 +174,10 @@ import {
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
 import {
+  inboxHashtags,
   inboxInitiativeNameKey,
+  inboxInitiativeTagKey,
+  inboxTaggedInitiative,
   INBOX_INITIATIVE_NAME_MAX,
   INBOX_INITIATIVES_MAX,
   isInboxInitiativeId,
@@ -179,6 +185,8 @@ import {
   type InboxInitiative,
 } from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
@@ -632,6 +640,34 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   return kept;
 }
 
+/** The headings a Send appends after the person's words (the action items, the annotations' feedback). */
+const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
+  `## ${INBOX_ACTIONS_HEADING}`,
+  `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
+  `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
+]);
+
+/**
+ * The person's own words in a reply as stored (approval "board-hashtags"), for a card made later for its
+ * thread (`threadTaggedInitiative`): without the reply's first line, the still-open line and the answers
+ * section (`splitInboxReplyBody`) and the skills block, cut where a Send appends its own sections (the
+ * action items, the annotations' feedback, which quote plans and files): only at those headings, each after
+ * a blank line, never inside a code fence. The person's own headings and fenced `# comments` stay words.
+ * At send time the reply's words are read directly (`sendReply`), and a New message's body is its words.
+ */
+function personWords(body: string): string {
+  const lines = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i]!)) {
+      i = codeFenceCloseIndex(lines, i);
+      continue;
+    }
+    if (SEND_APPENDED_HEADINGS.has(lines[i]!.trimEnd()) && (i === 0 || lines[i - 1]!.trim() === "")) return lines.slice(0, i).join("\n");
+  }
+  return lines.join("\n");
+}
+
 export class InboxStore {
   readonly dir: string;
   /** The live sessions, for the rows' delivery; null (tests, tools): not known, every session counts as there. */
@@ -726,6 +762,15 @@ export class InboxStore {
   private readonly stepsIdsByThread = new Map<string, Set<string>>();
   /** The Board's initiatives, by id, deleted ones too (approval "board-initiatives"). Read by the Board only. */
   private readonly initiativesById = new Map<string, InboxInitiative>();
+  /**
+   * Hashtags (approval "board-hashtags"): every thread a message (an agent's or the person's) tags, by the
+   * tag's key (`inboxInitiativeTagKey`, so a rename needs no rebuild): each thread's latest tagging seq, and
+   * the threads in the order of those seqs (`order`, oldest first; a thread tagged again is appended again,
+   * its earlier entry stale, compacted when stale entries outnumber live ones). Filled as each message is
+   * first applied (load and write alike, both in seq order, `indexTags`), never rescanned and never written
+   * to disk; a delete's reload builds it again. Read by `initiativeThreads` only, from the newest end.
+   */
+  private readonly tagThreads = new Map<string, { latest: Map<string, number>; order: string[] }>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -870,6 +915,7 @@ export class InboxStore {
           if (members) members.push(line.record.id);
           else this.threadMembers.set(line.record.thread_id, [line.record.id]);
           this.indexRoot(line.record);
+          this.indexTags(line.record, line.seq);
         }
         break;
       }
@@ -4277,6 +4323,8 @@ export class InboxStore {
       throw error;
     }
     this.endSnooze(message.thread_id);
+    // The person's words as typed: never the picks, the action items or the feedback the Send adds.
+    this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
   }
 
@@ -5342,6 +5390,7 @@ export class InboxStore {
     this.stepsIdOf.clear();
     this.stepsIdsByThread.clear();
     this.initiativesById.clear();
+    this.tagThreads.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -5849,6 +5898,7 @@ export class InboxStore {
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
+    this.tagThreadCards(threadId, message.body);
     return { message, replayed: false };
   }
   // ──────────── Tidy ────────────
@@ -6522,6 +6572,9 @@ export class InboxStore {
       initiative,
     };
     this.appendCard(card, at);
+    // Made for a thread the person tagged (`#Shape`, approval "board-hashtags"): it starts in that initiative.
+    const tagged = initiative === null ? this.threadTaggedInitiative(threads) : null;
+    if (tagged) return { card: this.setCardInitiative(card.id, tagged, { kind: "person" }), replayed: false };
     return { card, replayed: false };
   }
 
@@ -6650,7 +6703,96 @@ export class InboxStore {
       ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
+    // A thread the person tagged, linked now to a card in none: the card goes in that initiative.
+    const added = threads.filter((thread) => !card.threads.includes(thread));
+    const tagged = added.length > 0 && this.cardWire(next).initiative === null ? this.threadTaggedInitiative(added) : null;
+    if (tagged) return this.setCardInitiative(id, tagged, { kind: "person" });
     return next;
+  }
+
+  /** Hashtags: the tags in a message's body, indexed to its thread (`tagThreads`). Code holds no tag. */
+  private indexTags(message: InboxMessage, seq: number): void {
+    if (typeof message.body !== "string" || !message.body.includes("#")) return;
+    for (const key of new Set(inboxHashtags(message.body).map((tag) => tag.key))) {
+      if (!key) continue;
+      let entry = this.tagThreads.get(key);
+      if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
+      if ((entry.latest.get(message.thread_id) ?? -1) >= seq) continue;
+      entry.latest.set(message.thread_id, seq);
+      entry.order.push(message.thread_id);
+      if (entry.order.length > 2 * entry.latest.size + 16) {
+        // Keep each thread's last entry only, in order.
+        const seen = new Set<string>();
+        entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
+      }
+    }
+  }
+
+  /**
+   * Hashtags: for each live initiative that a message tags, the latest-tagged threads (at most `limit`,
+   * thread ids, newest tag first) that `linked` (its cards' threads) leaves out, and `total`, how many such
+   * threads there are. Walks the index from its newest end and stops at `limit`: no sort, no message parsed,
+   * so a tag used in thousands of threads costs the same as one used in a few.
+   */
+  initiativeThreads(options: { limit?: number; linked?: (initiativeId: string) => ReadonlySet<string> | undefined } = {}): Record<string, { threads: string[]; total: number }> {
+    const limit = options.limit ?? Infinity;
+    const out: Record<string, { threads: string[]; total: number }> = {};
+    for (const initiative of this.initiativesById.values()) {
+      if (initiative.deleted_at !== null) continue;
+      const entry = this.tagThreads.get(inboxInitiativeTagKey(initiative.name));
+      if (!entry || entry.latest.size === 0) continue;
+      const linked = options.linked?.(initiative.id);
+      let total = entry.latest.size;
+      if (linked) for (const id of linked) if (entry.latest.has(id)) total--;
+      const threads: string[] = [];
+      const seen = new Set<string>();
+      for (let i = entry.order.length - 1; i >= 0 && threads.length < limit; i--) {
+        const id = entry.order[i]!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (linked?.has(id)) continue;
+        // A delete reloads the store, so every indexed thread exists; checked anyway, cheaply.
+        if (this.isThreadRoot(id)) threads.push(id);
+      }
+      if (total > 0) out[initiative.id] = { threads, total };
+    }
+    return out;
+  }
+
+  /**
+   * Hashtags (approval "board-hashtags"): the person's message in a thread
+   * that tags a live initiative (`#Shape`; the last one wins) puts the
+   * thread's cards in it, as if the person set it on each (a history line
+   * each). A cancelled card stays as it is.
+   */
+  private tagThreadCards(threadId: string, words: string): void {
+    const tagged = inboxTaggedInitiative(words, [...this.initiativesById.values()]);
+    if (!tagged) return;
+    for (const card of [...this.cards.values()]) {
+      if (card.column === "dropped" || !card.threads.includes(threadId)) continue;
+      if (this.cardWire(card).initiative === tagged.id) continue;
+      this.setCardInitiative(card.id, tagged.id, { kind: "person" });
+    }
+  }
+
+  /** The initiative the person's latest tag in any of `threads` names (newest message first), or null. */
+  private threadTaggedInitiative(threads: readonly string[]): string | null {
+    const live = [...this.initiativesById.values()];
+    if (!live.some((i) => i.deleted_at === null)) return null;
+    let best: { seq: number; id: string } | null = null;
+    for (const thread of threads) {
+      const messages = this.threadMessages(thread);
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i]!;
+        if (message.author.kind !== "person") continue;
+        const found = inboxTaggedInitiative(personWords(message.body), live);
+        if (!found) continue;
+        const seq = this.messageSeq.get(message.id) ?? 0;
+        if (!best || seq > best.seq) best = { seq, id: found.id };
+        break;
+      }
+    }
+    return best?.id ?? null;
   }
 
   private cardNotes(value: unknown): string | null {

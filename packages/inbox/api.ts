@@ -123,6 +123,12 @@ export interface CardsModel {
   steps?: Record<string, InboxStepsWire[]>;
   /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
   initiatives?: InboxInitiative[];
+  /**
+   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
+   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
+   * Absent from an older Inbox: the preview lists no threads.
+   */
+  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
