@@ -6,6 +6,7 @@ import {
   isShapeProjectPath,
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeHtmlDataCodes,
   shapeHtmlProblems,
   shapeHtmlMarks,
   shapeParts,
@@ -138,11 +139,17 @@ describe('What to know', () => {
     expect(errors(knowing('One.\n  \nTwo.\r\n\r\nThree.'))).toContain('is 3 paragraphs');
   });
 
-  test('prose only: a list or a heading is refused, wherever it starts', () => {
-    for (const text of ['- one\n- two', '* one', '1. one', 'Words.\n\n- one', '# Heading', '> quote', '| a | b |']) {
-      expect(errors(knowing(text))).toContain('views.know: is prose');
+  test('only its length and its paragraphs are limited: a line may start any way', () => {
+    for (const text of ['> 5 MB files are skipped.', '# of retries drops to 3.', '2026. That is when it ends.', '- and that is the point.', 'Wrapped, so the next line\n5. That one starts with a number.']) {
+      expect(knowing(text).ok).toBe(true);
     }
-    expect(knowing('Costs 3 - 4 seconds. 1.5 times more, **bold**, `code` and [a link](https://example.com).').ok).toBe(true);
+  });
+
+  test('a note from a tab older than What to know is taken, as What to know', () => {
+    const r = checkShapeNoteInput({ kind: 'change', v: 1, view: 'reqs', part: 'r-1', text: 'Change this' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.view).toBe('know');
+    expect(checkShapeNoteInput({ kind: 'change', v: 1, view: 'nope', text: 'x' }).ok).toBe(false);
   });
 
   test('it must be words, and its references must exist', () => {
@@ -215,7 +222,7 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   });
 
   test('a number with nothing behind it is named; one with a line or a picture is not', () => {
-    expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', target: 'a.ts' }]).join()).toContain('Bubbles 1 show only a title');
+    expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', target: 'a.ts' }]).join()).toContain('Bubble 1 shows only a title');
     expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', sub: 'One line', target: 'a.ts' }])).toEqual([]);
   });
 
@@ -303,6 +310,20 @@ describe('data-code', () => {
     if (!r.ok) expect(r.errors.join('\n')).toContain('views.picture');
     b.views.picture = { html: '<div data-mark="p" data-code="src/kettle.ts#L3">Kettle</div>' };
     expect(checkShapeBoard(b).ok).toBe(true);
+  });
+});
+
+describe('character references in a data-code', () => {
+  test('decoded once, as a browser reads the attribute: nbsp, NULL, and 128–159 as windows-1252', () => {
+    const codes = (value: string) => shapeHtmlDataCodes(`<div data-code="${value}">x</div>`);
+    expect(codes('a&#38;#x2F;b')).toEqual(['a&#x2F;b']);
+    expect(codes('a&amp;lt;b')).toEqual(['a&lt;b']);
+    expect(codes('a&#x2F;b&#47c&lt;')).toEqual(['a/b/c<']);
+    expect(codes('a.ts&nbsp;#L1')).toEqual(['a.ts\u00a0#L1']);
+    expect(codes('a&#0;b\u0000c&#xD800;')).toEqual(['a\ufffdb\ufffdc\ufffd']);
+    expect(codes('a&#150;b&#x80;&#159;&#129;&#160;')).toEqual(['a\u2013b\u20ac\u0178\u0081\u00a0']);
+    // What the check reads is what is drawn: an en dash, not a C1 control in the path.
+    expect(parseShapeCodeTarget(codes('a&#150;b.ts#L1')[0]!)).toEqual({ path: 'a\u2013b.ts', line: 1 });
   });
 });
 

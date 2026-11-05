@@ -563,9 +563,81 @@ export function shapeHtmlProblems(html: string): string[] {
       } else if (!shapePaintAllowed(value)) add(`<${tag} ${name}="${shown}">: only url(#id) is allowed here`);
     }
   }
-  for (const m of html.matchAll(/\sdata-code\s*=\s*(?:"([^"]*)"|'([^']*)')/gi)) {
-    const value = m[1] ?? m[2] ?? '';
+  for (const value of shapeHtmlDataCodes(html)) {
     if (!parseShapeCodeTarget(value)) add(`data-code="${value.slice(0, 80)}" is not a file and line in the project (write path#L42)`);
+  }
+  return out;
+}
+
+const isHtmlSpace = (c: string | undefined) => c === ' ' || c === '\t' || c === '\n' || c === '\f' || c === '\r';
+const isAsciiAlpha = (c: string | undefined) => !!c && ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'));
+/** A value longer than this is no file and line; it is kept cut, with a mark, so it still fails as one. */
+const DATA_CODE_READ_MAX = 512;
+
+/**
+ * For each place in `html`, the next place at or after it whose character
+ * `stop` takes (`html.length` when none): one pass from the end, so every jump
+ * in the scan below costs one step.
+ */
+function nextWhere(html: string, stop: (c: string) => boolean): Int32Array {
+  const n = html.length;
+  const next = new Int32Array(n + 2).fill(n);
+  for (let i = n - 1; i >= 0; i--) next[i] = stop(html[i]!) ? i : next[i + 1]!;
+  return next;
+}
+
+/**
+ * Every `data-code` value a browser could read in drawn HTML, and maybe more:
+ * the check that uses it must never miss a code the board draws, and a code
+ * it reads that the board does not draw only makes the check stricter. So it
+ * reads a start tag at every `<` followed by a letter, wherever it stands:
+ * in text, in a comment, in the content of script, style, textarea, title,
+ * noscript and the like, in a CDATA section, inside another tag's attribute.
+ * Where a browser starts a tag, it reads it from there by the tokenizer's own
+ * rules (a value quoted or not, a stray quote inside an unquoted one kept, an
+ * attribute after `/` or straight after another's closing quote), and those
+ * rules do not depend on what is around the tag, so whatever the parser and
+ * the sanitizer make of the rest (scripting on or off, svg and math, a
+ * misnested end tag), a code the board draws was written here as such a tag.
+ * Named references decoded; in order. Linear: a scan that comes to an
+ * attribute another scan already read stops, as the rest is the same.
+ */
+export function shapeHtmlDataCodes(html: string): string[] {
+  const out: string[] = [];
+  const n = html.length;
+  if (!html.includes('<')) return out;
+  const tagNameEnd = nextWhere(html, (c) => isHtmlSpace(c) || c === '/' || c === '>');
+  const attrNameEnd = nextWhere(html, (c) => isHtmlSpace(c) || c === '/' || c === '>' || c === '=');
+  const unquotedEnd = nextWhere(html, (c) => isHtmlSpace(c) || c === '>');
+  const nextDouble = nextWhere(html, (c) => c === '"');
+  const nextSingle = nextWhere(html, (c) => c === "'");
+  const nextSolid = nextWhere(html, (c) => !isHtmlSpace(c));
+  const nextAttr = nextWhere(html, (c) => !isHtmlSpace(c) && c !== '/');
+  const read = new Uint8Array(n + 1);
+  for (let lt = html.indexOf('<'); lt >= 0; lt = html.indexOf('<', lt + 1)) {
+    if (!isAsciiAlpha(html[lt + 1])) continue;
+    let i = tagNameEnd[lt + 1]!;
+    for (;;) {
+      i = nextAttr[i]!;
+      if (i >= n || html[i] === '>' || read[i]) break;
+      read[i] = 1;
+      const nameEnd = attrNameEnd[i + 1]!; // A name may start with `=`.
+      const isCode = nameEnd - i === 9 && html.slice(i, nameEnd).toLowerCase() === 'data-code';
+      i = nextSolid[nameEnd]!;
+      if (html[i] !== '=') continue;
+      i = nextSolid[i + 1]!;
+      let from = i;
+      let to: number;
+      if (html[i] === '"' || html[i] === "'") {
+        from = i + 1;
+        to = (html[i] === '"' ? nextDouble : nextSingle)[from]!;
+        i = Math.min(to + 1, n);
+      } else {
+        to = unquotedEnd[i]!;
+        i = to;
+      }
+      if (isCode) out.push(to - from > DATA_CODE_READ_MAX ? `${decodeEntities(html.slice(from, from + DATA_CODE_READ_MAX))}…` : decodeEntities(html.slice(from, to)));
+    }
   }
   return out;
 }
@@ -721,7 +793,6 @@ function checkKnow(c: Checker, value: unknown, field: string): string | undefine
   if (text.length > SHAPE_LIMITS.know) c.fail(field, `is ${text.length} characters; at most ${SHAPE_LIMITS.know}. ${cut}`);
   const paragraphs = shapeKnowParagraphs(text).length;
   if (paragraphs > SHAPE_LIMITS.knowParagraphs) c.fail(field, `is ${paragraphs} paragraphs; at most ${SHAPE_LIMITS.knowParagraphs}. ${cut}`);
-  if (/^\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|>\s|\|)/m.test(text)) c.fail(field, 'is prose: write sentences, with no lists or headings');
   return text;
 }
 
@@ -848,6 +919,19 @@ function checkRefs(c: Checker, value: unknown): ShapeRef[] | undefined {
 }
 
 /** Validate what an agent writes. Every problem is named by its field. */
+/**
+ * One drawn view on its own, as another surface takes it (code review's
+ * pictures): `{ html, css?, width?, height?, tall? }`, with the same checks a
+ * board's Picture gets. Each problem names its field under `field`.
+ */
+export function checkShapeDrawnView(input: unknown, field = 'view'): ShapeCheck<ShapeDrawnView> {
+  const c = new Checker();
+  if (!isRecord(input)) return { ok: false, errors: [`${field}: must be an object with html`] };
+  const view = checkDrawn(c, input, field);
+  if (c.errors.length || !view) return { ok: false, errors: c.errors.length ? c.errors : [`${field}.html: is required`] };
+  return { ok: true, value: view };
+}
+
 export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
   const c = new Checker();
   if (!isRecord(input)) return { ok: false, errors: ['the board must be a JSON object: { title, claim, views, refs }'] };
@@ -891,18 +975,30 @@ export function checkShapeBoard(input: unknown): ShapeCheck<ShapeBoard> {
 
 const VOID = new Set(['area', 'br', 'col', 'hr', 'img', 'input', 'source', 'track', 'wbr', 'path', 'circle', 'rect', 'line', 'polyline', 'polygon', 'ellipse', 'use', 'stop']);
 
+/** The named references read here; any other stays as written (and a check that cares refuses it). */
+const NAMED_REFS: Readonly<Record<string, string>> = { nbsp: '\u00a0', lt: '<', LT: '<', gt: '>', GT: '>', quot: '"', QUOT: '"', apos: "'", amp: '&', AMP: '&', rarr: '→' };
+
+/**
+ * Character references decoded once, as a browser does (`&#38;#x2F;` is
+ * `&#x2F;`, not `/`): numeric ones with or without their `;`, the named ones
+ * above; and a NULL is U+FFFD, as a browser reads it in an attribute. A
+ * numeric one in 128–159 is the windows-1252 character, as a browser reads it
+ * (`&#150;` is an en dash, not a C1 control).
+ */
 function decodeEntities(text: string): string {
   return text
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;|&apos;/g, "'")
-    .replace(/&rarr;/g, '→')
-    // A browser reads a numeric reference with or without its `;`.
-    .replace(/&#(\d+);?/g, (_, d: string) => codePoint(Number(d).toString(16)))
-    .replace(/&#x([0-9a-f]+);?/gi, (_, h: string) => codePoint(h))
-    .replace(/&amp;/g, '&');
+    .replace(/\0/g, '\ufffd')
+    .replace(/&(?:#(\d+);?|#[xX]([0-9a-fA-F]+);?|([A-Za-z][A-Za-z0-9]*);)/g, (whole, d: string | undefined, h: string | undefined, name: string | undefined) =>
+      d !== undefined ? numericRef(Number(d).toString(16)) : h !== undefined ? numericRef(h) : (NAMED_REFS[name!] ?? whole),
+    );
+}
+
+/** 128–159 as windows-1252 (the HTML standard's table; the five it leaves out stay as they are). */
+const WINDOWS_1252_C1 = '\u20ac\u0081\u201a\u0192\u201e\u2026\u2020\u2021\u02c6\u2030\u0160\u2039\u0152\u008d\u017d\u008f\u0090\u2018\u2019\u201c\u201d\u2022\u2013\u2014\u02dc\u2122\u0161\u203a\u0153\u009d\u017e\u0178';
+
+function numericRef(hex: string): string {
+  const n = parseInt(hex, 16);
+  return n >= 0x80 && n <= 0x9f ? WINDOWS_1252_C1[n - 0x80]! : codePoint(hex);
 }
 
 const fold = (text: string) => text.replace(/\s+/g, ' ').trim();
@@ -1042,6 +1138,11 @@ export interface ShapeDiff {
 }
 
 /** What a view holds on this version. What to know is the words, or an old board's Requirements. */
+/** A view, part or note saved when What to know was Requirements says "reqs": it is `know` now. */
+export function shapeViewNow<T>(view: T): T | 'know' {
+  return (view as unknown) === 'reqs' ? 'know' : view;
+}
+
 export function shapeViewContent(views: ShapeBoard['views'], view: ShapeViewId): unknown {
   return view === 'know' ? views.know ?? views.reqs : views[view];
 }
@@ -1051,8 +1152,9 @@ type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<P
 /** What changed from `a` to `b`, by part ids. Snapshots, so any two versions compare. */
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
-  const before = new Map(a.parts.map((p) => [key(p), p]));
-  const after = new Map(b.parts.map((p) => [key(p), p]));
+  const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
+  const before = new Map(a.parts.map(now).map((p) => [key(p), p]));
+  const after = new Map(b.parts.map(now).map((p) => [key(p), p]));
   const changes: ShapeChange[] = [];
   for (const p of b.parts) {
     const old = before.get(key(p));
@@ -1118,8 +1220,9 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   const v = c.int(input.v, 'v', 1, 1_000_000);
   let view: ShapeViewId | null = null;
   if (input.view !== undefined && input.view !== null) {
-    if (!SHAPE_VIEWS.some((x) => x.id === input.view)) c.fail('view', 'must be picture, how, know or code');
-    else view = input.view as ShapeViewId;
+    const now = shapeViewNow(input.view);
+    if (!SHAPE_VIEWS.some((x) => x.id === now)) c.fail('view', 'must be picture, how, know or code');
+    else view = now as ShapeViewId;
   }
   let part: string | null = null;
   if (input.part !== undefined && input.part !== null) {
@@ -1172,7 +1275,8 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const onPicture = (board.refs ?? []).filter((r) => cited.includes(r.n));
   if (!onPicture.length) notes.push('The Picture has no numbers. Put data-ref="n" on the things that have more behind them: the person hovers a number to see its picture and line.');
   const bare = onPicture.filter((r) => !r.sub && !r.images?.length && r.kind !== 'image').map((r) => r.n);
-  if (bare.length) notes.push(`Bubbles ${bare.join(', ')} show only a title. Give those refs a sub (one line) or images (a small real picture).`);
+  if (bare.length === 1) notes.push(`Bubble ${bare[0]} shows only a title. Give that ref a sub (one line) or images (a small real picture).`);
+  else if (bare.length) notes.push(`Bubbles ${bare.join(', ')} show only a title. Give those refs a sub (one line) or images (a small real picture).`);
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);

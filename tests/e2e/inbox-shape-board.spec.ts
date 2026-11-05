@@ -33,6 +33,7 @@ const follow =
   on(['b'], part('p-b', 2, box(20, 200, 240, 90), text(40, 250, 'Path B box')));
 const shapes =
   '<rect id="lone-dash" class="dash" x="300" y="80" width="120" height="60" stroke-width="2"></rect>' +
+  '<rect id="own-dash" class="dash" fill="var(--mark-soft)" stroke="var(--mark)" x="300" y="300" width="120" height="60"></rect>' +
   '<svg id="nested" x="300" y="160" width="40" height="40" viewBox="0 0 40 40"><rect id="past-edge" x="0" y="0" width="400" height="400" class="line"></rect></svg>' +
   '<image id="kept" href="shot.png" x="460" y="80" width="200" height="120"></image>' +
   '<g data-ref="1"><circle cx="700" cy="60" r="14" style="fill:var(--mark)"></circle></g>';
@@ -134,12 +135,18 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
     nested: getComputedStyle(r.querySelector('#nested')!).overflow,
     fill: getComputedStyle(r.querySelector('#lone-dash')!).fill,
     dasharray: getComputedStyle(r.querySelector('#lone-dash')!).strokeDasharray,
+    ownFill: getComputedStyle(r.querySelector('#own-dash')!).fill,
+    ownStroke: getComputedStyle(r.querySelector('#own-dash')!).stroke,
+    loneStroke: getComputedStyle(r.querySelector('#lone-dash')!).stroke,
     href: r.querySelector('#kept')!.getAttribute('href'),
   }));
   expect(styles.outer).toBe('visible');
   expect(styles.nested).toBe('hidden');
   expect(styles.fill).toBe('none');
   expect(styles.dasharray).not.toBe('none');
+  // A dashed shape with its own colours keeps them.
+  expect(styles.ownFill).not.toBe('none');
+  expect(styles.ownStroke).not.toBe(styles.loneStroke);
   expect(styles.href).toContain('/files/');
   expect((await page.request.get(new URL(styles.href!, w.url).href)).status()).toBe(200);
 

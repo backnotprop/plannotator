@@ -133,6 +133,29 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     expect(bad!.hasAttribute('tabindex')).toBe(false);
   });
 
+  // Code review's redrawn Overview tags the parts that changed; a Show me of an earlier round tags the parts whose code moved on.
+  test("a host's tags land on the fresh and the stale parts only, and leave with them", async () => {
+    const { NO_MARKS, ShapeDrawn } = drawnModule!;
+    // c carries the drawing's own `stale` class and a padding note it wrote: a host's tags leave both alone.
+    const html = '<div data-mark="a">A</div><div data-mark="b" style="padding-top: 6px">B</div><div data-mark="c" class="stale" data-shp-pad="99px">C</div>';
+    const tags = { fresh: 'changed', stale: 'changed since asked' };
+    const { board } = await draw({ html, marks: { ...NO_MARKS, fresh: new Set(['a']) }, stale: new Set(['b']), tags });
+    const tagOf = (id: string) => board.querySelector(`[data-mark="${id}"]`)!.getAttribute('data-shp-tag');
+    expect([tagOf('a'), tagOf('b'), tagOf('c')]).toEqual(['changed', 'changed since asked', null]);
+    expect(board.querySelector('[data-mark="b"]')!.classList.contains('shp-stale')).toBe(true);
+    expect(board.querySelector('[data-mark="c"]')!.classList.contains('stale')).toBe(true);
+    // The tag sits inside its part, with room made above the part's words; an untagged part keeps its layout.
+    const padOf = (id: string) => board.querySelector<HTMLElement>(`[data-mark="${id}"]`)!.style.paddingTop;
+    expect([padOf('a'), padOf('b'), padOf('c')]).toEqual(['28px', '28px', '']);
+    await act(async () => {
+      root!.render(<ShapeDrawn drawn={{ html, css: '.x { color: red; }' }} reduce />);
+    });
+    expect([tagOf('a'), tagOf('b')]).toEqual([null, null]);
+    expect(board.querySelector('[data-mark="b"]')!.classList.contains('shp-stale')).toBe(false);
+    expect(board.querySelector('[data-mark="c"]')!.classList.contains('stale')).toBe(true);
+    expect([padOf('a'), padOf('b'), padOf('c')]).toEqual(['', '6px', '']);
+  });
+
   test('while pointing, a marked part is picked and its code waits', async () => {
     const opened: ShapeCodeTarget[] = [];
     const picked: string[] = [];
@@ -210,6 +233,38 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     { n: 3, kind: 'pr', title: 'The PR', target: 'https://example.com/pr/1', images: [{ src: 'files/pr.png', alt: 'Its page' }] },
   ];
   const hit = (el: Element, type: string, init: Record<string, unknown> = {}) => act(async () => { el.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, composed: true }), init)); });
+
+  test('a number with only blank space inside still shows its number', async () => {
+    const { shadow } = await draw({ html: '<span data-ref="1"> </span><span data-ref="2">\n</span><span data-ref="3"><b>mine</b></span>', refs: [1, 2, 3].map((n) => ({ n, kind: 'file' as const, title: 'T', target: 'a.ts' })) });
+    expect(shadow.querySelector('[data-ref="1"]')!.textContent).toBe('1');
+    expect(shadow.querySelector('[data-ref="2"]')!.textContent).toBe('2');
+    expect(shadow.querySelector('[data-ref="3"]')!.classList.contains('own')).toBe(true);
+  });
+
+  test('a host URL cannot break out of the picture attribute', async () => {
+    const { shadow } = await draw({ html: '<img src="files/a.png">', resolveSrc: () => '/x"><b id="out">y&z' });
+    expect(shadow.querySelector('#out')).toBeNull();
+    expect(shadow.querySelector('img')!.getAttribute('src')).toBe('/x"><b id="out">y&z');
+  });
+
+  test('only a caller that asks for it pans a narrow canvas; anything else shrinks to fit', async () => {
+    // This DOM measures 0 wide, which is narrow; its padding has to read as a number.
+    const real = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
+    try {
+      const canvas = { html: '<p>x</p>', width: 1000, height: 500 };
+      await draw({ html: '<p>x</p>', drawn: canvas, pan: true });
+      expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(true);
+      act(() => root!.unmount());
+      root = null;
+      container!.remove();
+      const { board } = await draw({ html: '<p>x</p>', drawn: canvas });
+      expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(false);
+      expect(board.style.transform).toBe('scale(0.2)');
+    } finally {
+      window.getComputedStyle = real;
+    }
+  });
 
   test('a radio the kit draws survives the sanitizer, with the name, class and checked its css reads', async () => {
     const { shadow } = await draw({ html: '<label class="pick on-a"><input type="radio" name="follow" class="f-a" checked=""><span>Path A</span></label><label class="pick"><input type="radio" name="follow" class="f-b"></label>' });

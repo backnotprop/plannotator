@@ -245,6 +245,7 @@ import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
@@ -346,6 +347,26 @@ const rawArgs = process.argv.slice(2);
     );
   }
 }
+// `plannotator review draw …` / `plannotator review drawings <msg_id>`: an agent's side of
+// Show me (review-draw-command.ts; approval "shape-in-code-review"). Before the
+// review parse, which would take `draw` for a ref. Only while the person has Code
+// review on, and only arguments of the command's own shape: otherwise (off
+// included) the review parse takes them, exactly as before Show me.
+{
+  const args = rawArgs;
+  // Read quietly: a broken config.json is Code review off, and the review parse that then takes the words
+  // warns about it once, as it always did.
+  if (isReviewDrawCommand(args, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
+    const drawDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runReviewDrawCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        ensureRunning: () => ensureInboxRunning(drawDataDir),
+      }),
+    );
+  }
+}
 // `plannotator shape …`: an agent's side of Shape (shape-command.ts; unreleased,
 // HIDDEN_SUBCOMMANDS). It reads and writes the Shape store directly. Before the
 // strict-annotate parse, which takes `--file`-style flags for itself.
@@ -353,18 +374,17 @@ const rawArgs = process.argv.slice(2);
   const args = rawArgs;
   // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
   // learns nothing of it (the same switch hides the Pebble, the row and the routes).
-  // Two run while Shape is off: `shape kit` only prints a helper file and stores nothing, and `shape on|off` is
-  // the switch itself (`on --help` still gets the off line).
-  if (args[0] === "shape" && args[1] === "kit") {
-    process.stdout.write(SHAPE_KIT);
-    process.exit(0);
-  }
+  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
   }
   if (args[0] === "shape" && !shapeSwitchOn()) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
+  }
+  if (args[0] === "shape" && args[1] === "kit") {
+    process.stdout.write(SHAPE_KIT);
+    process.exit(0);
   }
   // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
   // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.

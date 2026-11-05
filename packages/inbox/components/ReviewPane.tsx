@@ -18,10 +18,17 @@
  *   app's export format. It wakes the agent like any reply, and the card in
  *   the thread then shows the outcome.
  *
+ * - Show me (approval "shape-in-code-review", mock ac2): selecting lines offers
+ *   Comment · Ask · Show me. Show me asks the agent for a picture of the
+ *   lines, which opens over the diff; a click on a part opens its code and the
+ *   picture shrinks to a corner card. The Overview draws the agent's own
+ *   picture sent with the guide, or offers one Show me for the whole review.
+ *   Plain Ask opens the Inbox's Ask window with the lines named.
+ *
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
@@ -29,6 +36,17 @@ import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
+import type { GuideOverviewDiagram } from '@plannotator/core/guide';
+import { parseGuideSnapshot } from '@plannotator/core/guide-format';
+import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
+import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
+import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
+import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
+import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
+import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
+import type { GuideSelectionActions } from '../guide/types';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
 import { Icon } from '../icons';
@@ -67,6 +85,8 @@ export interface ReviewPaneProps {
   onClose: () => void;
   /** The verdict went: the thread reads again (the card shows the outcome). */
   onSent: () => void | Promise<void>;
+  /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
+  onAsk?: (words: string) => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -77,7 +97,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -168,6 +188,139 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
     if (mode !== 'files') setMode('files');
     move(path);
   };
+
+  // Show me: a picture of selected lines (or the whole review), over the diff.
+  const author = agentName(message.author);
+  const host = message.author.kind === 'agent' ? (message.author.host ?? null) : null;
+  const round = inboxReviewRound(thread.messages, message.id);
+  const earlierReviews = useMemo(() => {
+    const at = thread.messages.findIndex((m) => m.id === message.id);
+    return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
+  }, [thread.messages, message.id]);
+  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly });
+  // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
+  const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
+  const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);
+  useEffect(() => {
+    if (!askedReview || askedPatch?.review === askedReview) return;
+    let live = true;
+    inboxApi.guide(askedReview).then(
+      (answer) => {
+        const parsed = parseGuideSnapshot(answer.snapshot);
+        if (live && parsed.ok) setAskedPatch({ review: askedReview, patch: parsed.value.review.rawPatch });
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [askedReview]); // eslint-disable-line react-hooks/exhaustive-deps
+  const anchors = useMemo(() => {
+    const shown = showMe.state.shown;
+    if (!shown || !askedReview || askedPatch?.review !== askedReview) return null;
+    const lines = (patch: string) => new Map(parseDiffToFiles(patch).map((file) => [file.path, newSideLines(file.patch)] as const));
+    return anchorDrawing([shown.drawing.view.html, shown.drawing.view.tall?.html ?? ''], lines(askedPatch.patch), new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)));
+  }, [showMe.state.shown?.drawing.id, askedReview, askedPatch, files]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Where the person dragged the picture: kept while the review is open, through the corner card and back.
+  const [sheetOffset, setSheetOffset] = useState<SheetOffset>(SHEET_HOME);
+  const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
+  /** A part of a picture opens its code: the chapter that holds the file (else All files), the lines painted. */
+  const openCode = (target: ShapeCodeTarget): boolean => {
+    if (!files.some((file) => file.path === target.path)) return false;
+    const index = chapterOf(chapters, target.path);
+    if (index === null) {
+      if (mode !== 'files') setMode('files');
+    } else {
+      setCurrent(index);
+      if (mode !== 'walkthrough') setMode('walkthrough');
+    }
+    move(target.path);
+    const [start, end] = targetLines(target);
+    setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
+    return true;
+  };
+  // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
+  // the latest render's open through this ref, so it sees the drawings and turns read since.
+  const showMeOpen = useRef(showMe.open);
+  showMeOpen.current = showMe.open;
+  const selectionActions = useMemo<GuideSelectionActions | undefined>(
+    () =>
+      showMe.state.canAsk
+        ? {
+            onShowMe: (selection) => showMeOpen.current({ file: selection.filePath, lines: [selection.lineStart, selection.lineEnd] }),
+            ...(onAsk
+              ? {
+                  onAsk: (selection) =>
+                    onAsk(`${baseName(selection.filePath)} ${selection.lineStart === selection.lineEnd ? 'line' : 'lines'} ${inboxReviewLines([selection.lineStart, selection.lineEnd])}: `),
+                }
+              : {}),
+            showMeIcon: <Pebble alive={false} size={15} />,
+          }
+        : undefined,
+    [showMe.state.canAsk, onAsk],
+  );
+  /**
+   * Show me again on an earlier round's picture: its lines where they are in this round (the same text, moved
+   * or not), else the lines the person pressed Show me on, else the lines it was asked on.
+   */
+  const againPlace = (): ShowMePlace | undefined => {
+    const shown = showMe.state.shown;
+    if (!shown) return undefined;
+    const { file, lines } = shown.drawing;
+    if (file && lines && askedPatch?.review === askedReview) {
+      const before = parseDiffToFiles(askedPatch.patch).find((f) => f.path === file);
+      const after = files.find((f) => f.path === file);
+      const now = before && after ? anchorLines(lines, newSideLines(before.patch), newSideLines(after.patch)) : null;
+      if (now) return { file, lines: now };
+    }
+    return shown.from ?? undefined;
+  };
+
+  // The Overview's picture, and in a later round which of its parts the agent redrew.
+  // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the guide viewer's own.
+  const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
+  const earlierReview = earlierReviews.at(-1) ?? null;
+  const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);
+  useEffect(() => {
+    setEarlierOverview(null);
+    if (!earlierReview || !overviewHtml) return;
+    let live = true;
+    inboxApi.guide(earlierReview).then(
+      (answer) => {
+        const parsed = parseGuideSnapshot(answer.snapshot);
+        const diagram = parsed.ok ? parsed.value.guide.overview?.diagram : undefined;
+        if (live && diagram?.kind === 'html') setEarlierOverview(diagram);
+      },
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [earlierReview, !!overviewHtml]); // eslint-disable-line react-hooks/exhaustive-deps
+  const overviewChanged = useMemo(
+    () =>
+      overviewHtml && earlierOverview
+        ? changedMarks([earlierOverview.source, earlierOverview.tall?.source ?? ''], [overviewHtml.source, overviewHtml.tall?.source ?? ''])
+        : null,
+    [overviewHtml, earlierOverview],
+  );
+  const overviewMeta = overviewChanged
+    ? `redrawn by ${author} for round ${round} · ${plural(overviewChanged.size, 'part')} changed`
+    : `drawn by ${author} with the guide`;
+  const renderOverviewDiagram = useCallback(
+    (diagram: GuideOverviewDiagram): ReactNode | null =>
+      diagram.kind === 'html' && diagram === overviewHtml ? (
+        <OverviewFigure drawn={inboxDrawnViewOf(diagram)} meta={overviewMeta} {...(overviewChanged ? { changed: overviewChanged } : {})} onCode={(target) => void openCode(target)} />
+      ) : null,
+    // openCode reads the latest render's state through its closure; the figure is redrawn when these change.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
+  );
+  const renderOverviewFigure = useCallback(
+    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <OverviewShowMe onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overviewHtml, showMe.state.canAsk],
+  );
 
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
   const toggleViewed = useCallback(
@@ -299,7 +452,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
     }
   };
 
-  const author = agentName(message.author);
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
       {(['walkthrough', 'files'] as const).map((value) => (
@@ -563,6 +715,10 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                 reveal={reveal}
                 viewed={viewedProp}
                 fileOpenIn={fileOpenIn}
+                {...(selectionActions ? { selectionActions } : {})}
+                renderOverviewDiagram={renderOverviewDiagram}
+                renderOverviewFigure={renderOverviewFigure}
+                highlight={highlight}
               />
             </ReaderPart>
           ) : null}
@@ -609,6 +765,36 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
           />
         </div>
       </div>
+      <ShowMeBox
+        state={showMe.state}
+        agent={author}
+        onWords={showMe.setWords}
+        onSend={() => void showMe.send()}
+        onBusy={(policy) => void showMe.busyChoice(policy)}
+        onStop={() => void showMe.stop()}
+        onClose={showMe.closeBox}
+      />
+      {showMe.state.shown?.as === 'sheet' && (
+        <ShowMeSheet
+          drawing={showMe.state.shown.drawing}
+          answer={showMe.state.shown.answer}
+          agent={author}
+          host={host}
+          offset={sheetOffset}
+          {...(phone ? {} : { onOffset: setSheetOffset })}
+          asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing, againPlace()) } : null}
+          onAgain={() => showMe.again(showMe.state.shown!.drawing)}
+          onCode={(drawn, el) => {
+            const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;
+            if (openCode(target)) showMe.toCorner({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });
+          }}
+          onShrink={() => showMe.toCorner(null)}
+          onClose={showMe.closePicture}
+        />
+      )}
+      {showMe.state.shown?.as === 'corner' && (
+        <ShowMeCorner drawing={showMe.state.shown.drawing} part={showMe.state.shown.part} onGrow={showMe.grow} onClose={showMe.closePicture} />
+      )}
     </section>
   );
 }

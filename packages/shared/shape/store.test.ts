@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, truncateSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxProjectKey } from "../inbox/project-key";
@@ -333,6 +333,50 @@ describe("images a drawing names", () => {
     expect(p.tall?.html).toContain(`files/${name}`);
     expect(p.more?.html).toContain(`files/${name}`);
     expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!))).toBe(true);
+  });
+
+  test("however the attribute is written, a file it names is copied", () => {
+    const { dir, store } = withFile();
+    for (const html of ['<svg><image xlink:href="crop.png"/></svg>', "<img src=crop.png>", '<img src = "crop.png">', "<svg><image href='crop.png'/></svg>"]) {
+      const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+      expect(r.ok).toBe(true);
+      if (!r.ok) continue;
+      const kept = store.read(r.id)!.views.picture!.html;
+      expect(kept).toMatch(/(?:src|href)="files\/[0-9a-f]{10}-crop\.png"/);
+      expect(kept).not.toContain("xlink:href");
+    }
+  });
+
+  test("a real files/ folder beside the board is copied, not taken for pictures the board keeps", () => {
+    const { dataDir, dir, store } = withFile();
+    mkdirSync(join(dir, "files"));
+    writeFileSync(join(dir, "files", "x.png"), PNG);
+    const r = store.update({ board: drawing('<img src="files/x.png">'), project, session, sourceDir: dir });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const name = /files\/([\w.-]+x\.png)/.exec(store.read(r.id)!.views.picture!.html)?.[1];
+    expect(name).toMatch(/^[0-9a-f]{10}-x\.png$/);
+    expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!))).toBe(true);
+  });
+
+  test("a link named .png is what it points at, and a picture past 10 MB is refused", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "secret.txt"), "not a picture");
+    symlinkSync(join(dir, "secret.txt"), join(dir, "link.png"));
+    const link = store.update({ board: drawing('<img src="link.png">'), project, session, sourceDir: dir });
+    expect(link.ok).toBe(false);
+    if (!link.ok) expect(link.errors.join()).toContain("is not a PNG, JPEG, GIF or WebP image");
+    symlinkSync(join(dir, "crop.png"), join(dir, "real.png"));
+    expect(store.update({ board: drawing('<img src="real.png">'), project, session, sourceDir: dir }).ok).toBe(true);
+
+    writeFileSync(join(dir, "big.png"), "");
+    truncateSync(join(dir, "big.png"), 10 * 1024 * 1024 + 1);
+    const big = store.update({ board: drawing('<img src="big.png">'), project, session, sourceDir: dir });
+    expect(big.ok).toBe(false);
+    if (!big.ok) expect(big.errors.join()).toContain("at most 10485760");
+    writeFileSync(join(dir, "fits.png"), "");
+    truncateSync(join(dir, "fits.png"), 10 * 1024 * 1024);
+    expect(store.update({ board: drawing('<img src="fits.png">'), project, session, sourceDir: dir }).ok).toBe(true);
   });
 
   test("a later version copies its images too", () => {

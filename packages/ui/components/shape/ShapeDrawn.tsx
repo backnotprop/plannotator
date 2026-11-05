@@ -29,7 +29,8 @@ import { useReducedMotion } from './Pebble';
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
   if (!resolve) return html;
-  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${resolve(src)}"`);
+  const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
 }
 
 export interface MarkState {
@@ -37,6 +38,11 @@ export interface MarkState {
   erasing: ReadonlySet<string>;
   noted: ReadonlySet<string>;
 }
+
+/** A tagged part's top padding at least: the tag (2 px down, about 19 px tall) and a gap above the part's words. */
+const TAG_ROOM = 28;
+/** A tagged part's own inline padding-top, to put back when its tag goes. */
+const tagPads = new WeakMap<HTMLElement, string>();
 
 export const NO_MARKS: MarkState = { fresh: new Set(), erasing: new Set(), noted: new Set() };
 
@@ -74,7 +80,7 @@ svg { overflow: visible; } svg svg { overflow: hidden; }
 svg text { fill: var(--ink); font-family: inherit; }
 svg .ink { stroke: var(--ink); fill: var(--paper); } svg .line { stroke: var(--ink); fill: none; }
 svg .grey { stroke: var(--grey); fill: none; } svg .acc { stroke: var(--mark); fill: none; }
-svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; fill: none; stroke: var(--grey); } svg .line.dash { stroke: var(--ink); } svg .acc.dash { stroke: var(--mark); } svg .alert.dash { stroke: var(--alert); } svg .grey.dash { stroke: var(--grey); } svg .acc-fill.dash { fill: var(--mark-soft); stroke: var(--mark); }
+svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; } svg .dash:not([fill]) { fill: none; } svg .dash:not([stroke]) { stroke: var(--grey); } svg .line.dash { stroke: var(--ink); } svg .acc.dash { stroke: var(--mark); } svg .alert.dash { stroke: var(--alert); } svg .grey.dash { stroke: var(--grey); } svg .acc-fill.dash { fill: var(--mark-soft); stroke: var(--mark); }
 svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2 { fill: var(--ink2); } svg .alert { stroke: var(--alert); fill: none; } svg .t-alert { fill: var(--alert); } svg .t-mono { font-family: var(--font-mono, ui-monospace, monospace); }
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
@@ -103,6 +109,13 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 @keyframes shp-swash { 0% { --s: 0%; } 22% { --s: 100%; } 70% { --s: 100%; opacity: 1; } 100% { --s: 100%; background-color: transparent; } }
 .board.reduce .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
 .board.reduce .mk.fresh { animation: none; background-size: 100% 100%; }
+
+/* A part a host tags: "changed" (a redrawn part, with .fresh) or "changed since asked" (.shp-stale: its code moved on).
+   The ring and the tag stay inside the part's own box, so they never cover a connector's label or a neighbour; the
+   tag gets room at the top of the part (the host's effect pads it), and an untagged part keeps its layout. */
+.mk.shp-stale { outline: 1.5px dashed color-mix(in oklab, var(--warning, var(--mark)) 80%, transparent) !important; outline-offset: -5px; }
+.mk[data-shp-tag]::after { content: attr(data-shp-tag); position: absolute; top: 2px; right: 8px; z-index: 1; font: 600 10.5px/1 var(--font-mono, ui-monospace, monospace); letter-spacing: .04em; text-transform: uppercase; padding: 4px 6px; border-radius: 6px; background: var(--mark); color: var(--primary-foreground); white-space: nowrap; pointer-events: none; }
+.mk.shp-stale[data-shp-tag]::after { background: color-mix(in oklab, var(--warning, var(--mark)) 22%, var(--paper)); color: color-mix(in oklab, var(--warning, var(--mark)) 60%, var(--ink)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--warning, var(--mark)) 50%, transparent); }
 
 /* A part that opens code. */
 .shp-cl { cursor: pointer; outline: 1.5px dashed transparent; outline-offset: 3px; transition: outline-color .15s; }
@@ -200,6 +213,8 @@ export interface ShapeDrawnProps {
   onRefHover?: (n: number | null) => void;
   /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
+  /** A fixed canvas in a narrow space keeps a readable size and scrolls sideways. Absent: it shrinks to fit. */
+  pan?: boolean;
   /**
    * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
    * screen pins it. Absent: a bubble only lights and opens, as before.
@@ -218,6 +233,10 @@ export interface ShapeDrawnProps {
   /** Select mode: a text selection inside a mark picks it. Board only. */
   select?: boolean;
   marks?: MarkState;
+  /** Marked parts whose code changed since the drawing was made: a dashed outline, and the `tags.stale` words on them. */
+  stale?: ReadonlySet<string>;
+  /** Words a host puts on parts: `fresh` on `marks.fresh` parts ("changed"), `stale` on `stale` ones. Absent: no tag. */
+  tags?: { fresh?: string; stale?: string };
   onHoverMark?: (el: HTMLElement | null) => void;
   /** A marked part was chosen; `text` is the selected words in Select mode. */
   onPickMark?: (el: HTMLElement, text?: string) => void;
@@ -265,7 +284,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';
   const scaled = canvas && !useTall;
   // No height to fill (a diagram in a flowing page): fit the width alone.
-  const pan = scaled && narrow;
+  const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
 
@@ -291,7 +310,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.childNodes.length) el.textContent = String(n);
+      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
       else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');
@@ -334,7 +353,10 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('pinpointing', pinpoint);
   }, [phase, skip, reduce, pinpoint, contentKey]);
 
-  // Marks.
+  // Marks, and a host's tags on them.
+  const stale = props.stale;
+  const freshTag = props.tags?.fresh;
+  const staleTag = props.tags?.stale;
   useLayoutEffect(() => {
     const board = rootRef.current?.querySelector<HTMLElement>('.board');
     if (!board) return;
@@ -343,8 +365,30 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       el.classList.toggle('noted', marks.noted.has(id));
       el.classList.toggle('erasing', marks.erasing.has(id));
       el.classList.toggle('fresh', marks.fresh.has(id));
+      const isStale = !!stale?.has(id);
+      el.classList.toggle('shp-stale', isStale);
+      const tag = isStale ? staleTag : marks.fresh.has(id) ? freshTag : undefined;
+      if (tag) {
+        el.setAttribute('data-shp-tag', tag);
+        // The tag sits in the part's corner: a part the drawing left in the flow becomes its containing block.
+        if (getComputedStyle(el).position === 'static') el.style.position = 'relative';
+        // Room for it above the part's own words; the part's own padding kept here (never in the DOM, where
+        // the drawing could have written it) to put back when the tag goes.
+        if (!tagPads.has(el)) {
+          tagPads.set(el, el.style.paddingTop);
+          const top = parseFloat(getComputedStyle(el).paddingTop) || 0;
+          if (top < TAG_ROOM) el.style.paddingTop = `${TAG_ROOM}px`;
+        }
+      } else {
+        el.removeAttribute('data-shp-tag');
+        const pad = tagPads.get(el);
+        if (pad !== undefined) {
+          el.style.paddingTop = pad;
+          tagPads.delete(el);
+        }
+      }
     }
-  }, [marks, contentKey]);
+  }, [marks, stale, freshTag, staleTag, contentKey]);
 
   // Bubbles: lit with their list row, flashed from it.
   useEffect(() => {
@@ -528,6 +572,9 @@ export function ShapeDiagram({
   resolveSrc,
   animate = true,
   className,
+  marks,
+  stale,
+  tags,
 }: {
   drawn: ShapeDrawnView;
   refs?: readonly ShapeRef[];
@@ -537,6 +584,12 @@ export function ShapeDiagram({
   /** Draw in on mount. Default true (reduced motion: a short fade). */
   animate?: boolean;
   className?: string;
+  /** Marks on parts by `data-mark` id (ShapeDrawn's): `noted` rings a part (you are here), `fresh` redraws one. Default none. */
+  marks?: MarkState;
+  /** Parts whose code changed since the drawing was made. Default none. */
+  stale?: ReadonlySet<string>;
+  /** Words on tagged parts (ShapeDrawn's `tags`). Default none. */
+  tags?: ShapeDrawnProps['tags'];
 }) {
   const [phase, setPhase] = useState<'entering' | 'drawn'>(animate ? 'entering' : 'drawn');
   const [hover, setHover] = useState<number | null>(null);
@@ -560,6 +613,9 @@ export function ShapeDiagram({
         }}
         onCode={onCode}
         resolveSrc={resolveSrc}
+        {...(marks ? { marks } : {})}
+        {...(stale ? { stale } : {})}
+        {...(tags ? { tags } : {})}
       />
     </div>
   );

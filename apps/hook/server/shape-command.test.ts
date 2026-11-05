@@ -252,11 +252,11 @@ describe("the Shape switch, through the entrypoint", () => {
           expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
         }
         expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
-        // The kit only prints a file: it runs either way, and stores nothing.
+        // Off, the kit is one more command that does not exist: nothing teaches the feature.
         const kit = await run("kit");
-        expect(kit.code).toBe(0);
-        expect(kit.stdout).toContain("export const pick");
-        expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+        expect(kit.code).toBe(1);
+        expect(kit.stdout).toBe("");
+        expect(kit.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
       }
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");

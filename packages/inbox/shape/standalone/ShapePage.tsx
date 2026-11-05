@@ -15,7 +15,7 @@
  * answer 404 and the page says Shape is off.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ShapeViewId } from '@plannotator/core/shape';
+import { shapeViewNow, type ShapeViewId } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapePanelTab } from '@plannotator/ui/components/shape';
@@ -38,8 +38,7 @@ export function parseShapeHash(hash: string): ShapeRoute {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const shape = params.get('shape');
   // A saved link to the old Requirements view opens What to know.
-  const raw = params.get('view');
-  const view = (raw === 'reqs' ? 'know' : raw) as ShapeViewId | null;
+  const view = shapeViewNow(params.get('view')) as ShapeViewId | null;
   const panel = params.get('panel') as ShapePanelTab | null;
   return {
     shape: shape && /^shp_[0-9A-Za-z]+$/.test(shape) ? shape : null,

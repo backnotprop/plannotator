@@ -21,6 +21,7 @@ import {
   shapeViewLabel,
   SHAPE_VIEWS,
   shapeViewContent,
+  shapeViewNow,
   type ShapeCodeTarget,
   type ShapeNote,
   type ShapeNoteInput,
@@ -39,7 +40,7 @@ import { ImageLightbox } from '../ImageLightbox';
 import { PopoutDialog } from '../PopoutDialog';
 import type { AIChatEntry } from '../../hooks/useAIChat';
 import type { AIProviderOption } from '../../utils/aiProvider';
-import type { CodeAnnotation, InputMethod } from '../../types';
+import type { CodeAnnotation, EditorMode, InputMethod } from '../../types';
 import { Pebble, useReducedMotion } from './Pebble';
 import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeKnow } from './ShapeKnow';
@@ -88,6 +89,8 @@ const GlobeIcon = () => (
 const ChatIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 5h16v11H9l-5 4z" /></svg>;
 const PenIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" /></svg>;
 const RefsIcon = () => <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><circle cx="7" cy="7" r="3" /><path d="M13 7h8M13 17h8" /><circle cx="7" cy="17" r="3" /></svg>;
+
+const noteNow = (note: ShapeNote): ShapeNote => (shapeViewNow(note.view) === note.view ? note : { ...note, view: 'know' });
 
 const SHORT: Record<ShapeViewId, string> = { picture: 'Picture', how: 'How', know: 'Know', code: 'Code' };
 
@@ -153,7 +156,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -173,7 +176,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   // ── views: erase the old one, draw the new one ──
   const views = useMemo(() => SHAPE_VIEWS.filter((v) => version && shapeViewContent(version.views, v.id)), [version]);
-  const [view, setView] = useState<ShapeViewId>(initialView ?? 'picture');
+  const [view, setView] = useState<ShapeViewId>(shapeViewNow(initialView) ?? 'picture');
   const viewRef = useRef(view);
   viewRef.current = view;
   const [leaving, setLeaving] = useState<ShapeViewId | null>(null);
@@ -190,12 +193,16 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const busy = agentDrawing || inFlight.length > 0;
 
   const [inputMethod, setInputMethod] = useState<InputMethod>('pinpoint');
-  // Off by default: a board is for looking at. Off, the pointer is a normal pointer and nothing lights up.
-  // The Annotate button in the dock turns on pointing (Pinpoint) and selecting words (Select).
-  const [annotating, setAnnotating] = useState(false);
+  const [mode, setMode] = useState<EditorMode>('selection');
+  // With readFirst a board is for looking at: the pointer is a normal pointer and nothing lights up,
+  // until the Annotate button in the dock turns on pointing (Pinpoint) and selecting words (Select).
+  const [annotating, setAnnotating] = useState(!readFirst);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const hoverEl = useRef<HTMLElement | null>(null);
   const [more, setMore] = useState(false);
+  const moreRef = useRef(more);
+  moreRef.current = more;
+  const toggleMoreRef = useRef(() => {});
   const [leavingMore, setLeavingMore] = useState<boolean | null>(null);
   const [target, setTarget] = useState<Target | null>(null);
 
@@ -234,7 +241,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   }, []);
   const closePanel = useCallback(() => setPanel(null), []);
 
-  const upsertNote = useCallback((note: ShapeNote) => {
+  const upsertNote = useCallback((saved: ShapeNote) => {
+    const note = noteNow(saved);
     setNotes((all) => {
       const at = all.findIndex((n) => n.id === note.id);
       if (at < 0) return [...all, note];
@@ -288,7 +296,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     host.load(id).then(
       async (data) => {
         if (!live) return;
-        setNotes(data.notes);
+        setNotes(data.notes.map(noteNow));
         setSession(data.session);
         setAgentDrawing(!!data.shape.drawing && Date.parse(data.shape.drawing.until) > Date.now());
         setLoaded(data);
@@ -418,6 +426,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         setPanel(null);
         return;
       }
+      // Show more is a page of the board: Esc comes back to the main board before it closes anything.
+      if (moreRef.current) {
+        e.preventDefault();
+        toggleMoreRef.current();
+        return;
+      }
       if (Date.now() > drawingUntil.current) return;
       e.preventDefault();
       setSkip(true);
@@ -496,7 +510,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     } else if (r.kind === 'image') {
       // Only an image the board keeps (files/…) or carries (data:image); nothing from outside.
       if (shapeUrlAllowed(r.target)) setViewer({ kind: 'image', ref: { ...r, images: r.images?.filter((im) => shapeUrlAllowed(im.src)) } });
-    } else if ((r.kind === 'pr' || r.kind === 'link') && shapeRefPicture(r)) {
+    } else if (readFirst && (r.kind === 'pr' || r.kind === 'link') && shapeRefPicture(r)) {
       // A PR or link with a picture: the number shows the picture; its own page is one more click, in the bubble.
       const images = r.images!.filter((im) => shapeUrlAllowed(im.src));
       setViewer({ kind: 'image', ref: { ...r, target: images[0]!.src, images } });
@@ -600,7 +614,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     return () => document.removeEventListener('pointerdown', away, true);
   }, [peek?.pinned, closePeek]);
 
-  const refsState = useMemo<RefsState>(() => ({ refs, hover: refHover, flash: refFlash, onHover: setRefHover, onOpen: openRef, onPeek: onRefPeek }), [refs, refHover, refFlash, openRef, onRefPeek]);
+  const refsState = useMemo<RefsState>(() => ({ refs, hover: refHover, flash: refFlash, onHover: setRefHover, onOpen: openRef, onPeek: readFirst ? onRefPeek : undefined }), [refs, refHover, refFlash, openRef, onRefPeek, readFirst]);
 
   // ── pointing at the board ──
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
@@ -769,7 +783,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           refFlash={refFlash}
           onRefHover={setRefHover}
           onRefOpen={(n) => void openRef(n)}
-          onRefPeek={onRefPeek}
+          onRefPeek={readFirst ? onRefPeek : undefined}
+          pan={readFirst}
           resolveSrc={assetUrl}
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
           onPickMark={(el, text) => pickMark(el, v, text)}
@@ -813,6 +828,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     setDrawKey((k) => k + 1);
     later(() => setLeavingMore(null), reduce ? 160 : ERASE_MS + 40);
   };
+  toggleMoreRef.current = toggleMore;
   const peekRefData = peek ? refs.find((r) => r.n === peek.n) : undefined;
   const chatOn = panel === 'ask' || panel === 'thread';
 
@@ -902,7 +918,22 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 </button>
               ))}
             </div>
-            {view !== 'code' && (
+            {view !== 'code' && !readFirst && !phone && (
+              <div className="shp-tstrip">
+                <AnnotationToolstrip
+                  inputMethod={inputMethod}
+                  onInputMethodChange={setInputMethod}
+                  mode={mode}
+                  onModeChange={setMode}
+                  compact
+                  iconOnly
+                  showHelpLink={false}
+                  hideQuickLabel
+                  hideRedline
+                />
+              </div>
+            )}
+            {view !== 'code' && readFirst && (
               <div className="shp-tstrip">
                 <button
                   type="button"
