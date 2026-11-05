@@ -7,7 +7,7 @@
  * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
  * own "Unsupported snapshot version" words.
  *
- * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
+ * What regresses: a Show me word (the `overview.diagram` rules, the refusal of `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
  * off. These texts change for everyone on purpose, so the test names the words
  * and not the texts; a control proves each word is real, with Code review on.
@@ -21,8 +21,8 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
 import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
-import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
-import { INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
+import { isReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -37,11 +37,11 @@ afterAll(() => rmSync(root, { recursive: true, force: true }));
  */
 const SHOW_ME_WORDS = {
   /** INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC */
-  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "review draw"],
-  /** INBOX_REVIEW_DRAW_HELP */
-  "review draw --help": ["review draw", "review drawings", "Show me", "data-code", "data-mark", "data-step"],
+  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "plannotator shape --help"],
+  /** INBOX_REVIEW_DRAW_GONE: what an older `review draw` gets */
+  "review draw": ["review_draw_gone", "Show me makes a Shape"],
   /** INBOX_REVIEW_CURATE_DRAWING_LINE and INBOX_REVIEW_RECHECK_DRAWING_LINE */
-  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's", "review drawings"],
+  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's"],
 };
 
 /** Each text an agent reads, with Code review on or off. */
@@ -91,16 +91,9 @@ test("Code review off: no agent text holds a Show me word", async () => {
 });
 
 test("Code review on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
-  const printed: string[] = [];
-  const code = await runReviewDrawCommand(["draw", "--help"], {
-    cwd: root,
-    ensureRunning: () => Promise.reject(new Error("help reads no Inbox")),
-    stdout: (text) => printed.push(text),
-  });
-  expect(code).toBe(0);
   const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
     get_guide_brief: (await agentTexts(true)).get_guide_brief!,
-    "review draw --help": printed.join("\n"),
+    "review draw": INBOX_REVIEW_DRAW_GONE,
     "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
   };
   const missing = Object.entries(SHOW_ME_WORDS).flatMap(([name, words]) =>
