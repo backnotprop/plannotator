@@ -100,7 +100,7 @@ const TAB_SHOULDER = 10;
  * continues the card's border, so the outline is one line with no seam. It is
  * part of the card: it scrolls with it.
  */
-function SectionTab({ fill, children }: { fill: string; children: React.ReactNode }) {
+function SectionTab({ fill, lead, children }: { fill: string; lead?: React.ReactNode; children: React.ReactNode }) {
   const controlRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   useLayoutEffect(() => {
@@ -144,6 +144,16 @@ function SectionTab({ fill, children }: { fill: string; children: React.ReactNod
           <path d={outline} style={{ fill: 'none', stroke: CARD_BORDER, strokeWidth: 1 }} />
         </svg>
       )}
+      {/* The host's lead (GuideView bare: the header's actions) on the same row, left of the tab, centred on it. It
+          ends 8px short of the tab and may only take the room left of it, so the two never meet. */}
+      {lead && (
+        <div
+          data-guide-section-tab-lead=""
+          style={{ position: 'absolute', left: 0, right: W + 8, top: 0, height: T, display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 8, minWidth: 0, pointerEvents: 'auto', visibility: size ? undefined : 'hidden' }}
+        >
+          {lead}
+        </div>
+      )}
       <div
         ref={controlRef}
         style={{ position: 'absolute', right: TAB_PAD_X, top: TAB_PAD_Y, pointerEvents: 'auto', visibility: size ? undefined : 'hidden' }}
@@ -170,6 +180,10 @@ interface GuideSectionCardProps {
   onRequestReveal: (filePath: string) => void;
   /** Renders guide links (`chapter:`, `code:`) in the chapter overview. */
   renderLink?: GuideLinkRenderer;
+  /** Each file's box as tall as its diff (GuideView `fitFileHeights`); see GuideFileCard `fitContent`. */
+  fitFileHeights?: boolean;
+  /** Drawn on the tab's row, left of the tab, when this card has one (GuideView `bare`: the header's actions). */
+  tabLead?: React.ReactNode;
 }
 
 /**
@@ -191,6 +205,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   onActivate,
   onRequestReveal,
   renderLink,
+  fitFileHeights = false,
+  tabLead,
 }) => {
   const [collapsedOverride, setCollapsedOverride] = useState<boolean | null>(null);
   const host = useGuideHost();
@@ -247,7 +263,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
   const withTab = (card: React.ReactNode, fill: string) =>
     tabbed ? (
       <div data-guide-section-tabbed="">
-        <SectionTab fill={fill}>{tab}</SectionTab>
+        <SectionTab fill={fill} lead={tabLead}>{tab}</SectionTab>
         {card}
       </div>
     ) : (
@@ -363,6 +379,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 focused={focusedFile === file.path}
                 revealTarget={targetBelongsHere}
                 onActivate={onActivate}
+                fitContent={fitFileHeights}
               />
             ))
           ) : host.renderSectionEmpty?.(index) ?? (

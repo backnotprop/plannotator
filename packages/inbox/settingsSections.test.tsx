@@ -199,6 +199,8 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   expect(navLink(el, 'general').getAttribute('aria-current')).toBe('page');
   // Capabilities' row comes with the settings read (it shows only while the Inbox has a capability to switch).
   await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
+  // Machines' comes with the first list read, its own read a moment after the settings'.
+  await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
   // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
   expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
@@ -748,6 +750,7 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   await until(() => el.querySelector('[data-settings-list]') !== null, 'the list of sections');
   expect(el.querySelector('.ib-snav')).toBeNull();
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
+  await until(() => el.querySelector('[data-settings-list] [data-settings-link="machines"]') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
   expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'about']);
   // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.

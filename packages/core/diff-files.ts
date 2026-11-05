@@ -112,6 +112,102 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   return files;
 }
 
+/** One line of a hunk, numbered on each side it exists on. `text` drops the ` `/`+`/`-` prefix. */
+export type DiffHunkLine =
+  | { kind: "context"; oldLine: number; newLine: number; text: string }
+  | { kind: "add"; newLine: number; text: string }
+  | { kind: "del"; oldLine: number; text: string };
+
+/**
+ * One `@@` hunk. Each side is the half-open line range `[start, end)` it
+ * covers; an empty side (`-3,0`) has `start === end`, placed after the line
+ * its header names. Lines past the hunk move by `newEnd - oldEnd`.
+ */
+export interface DiffHunk {
+  oldStart: number;
+  oldEnd: number;
+  newStart: number;
+  newEnd: number;
+  lines: DiffHunkLine[];
+}
+
+const HUNK_HEADER = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
+
+/**
+ * The hunks of one file's patch (a `DiffFile.patch`), in order, with every
+ * line numbered. The file header before the first hunk is skipped, and so is
+ * `\ No newline at end of file`. Returns null for anything else it cannot
+ * account for: a hunk whose lines do not add up to its header, hunks that
+ * overlap, an `@@` row it cannot read (combined `@@@` diffs included), or a
+ * line of content outside a hunk. A truncated or hand-edited patch is never
+ * read as a shorter valid one.
+ */
+export function diffHunkLines(patch: string): DiffHunk[] | null {
+  const rows = patch.split("\n");
+  const hunks: DiffHunk[] = [];
+  for (let i = 0; i < rows.length; ) {
+    const header = HUNK_HEADER.exec(rows[i]);
+    if (!header) {
+      if (!isFileHeaderRow(rows[i], hunks.length > 0)) return null;
+      i += 1;
+      continue;
+    }
+    const read = readHunk(header, rows, i + 1);
+    const previous = hunks.at(-1);
+    if (!read || (previous && (read.hunk.oldStart < previous.oldEnd || read.hunk.newStart < previous.newEnd))) return null;
+    hunks.push(read.hunk);
+    i = read.next;
+  }
+  return hunks;
+}
+
+/**
+ * True for a row that may stand outside a hunk. Before the first hunk that is
+ * the file header (`---`/`+++` included, but no other content row and no
+ * `@@` row); after it, only the blank row that ends the patch.
+ */
+function isFileHeaderRow(row: string, pastFirstHunk: boolean): boolean {
+  if (pastFirstHunk) return row === "";
+  if (row.startsWith("--- ") || row.startsWith("+++ ")) return true;
+  return !/^(?:@@|[ +-])/.test(row);
+}
+
+/** First line number a hunk side covers: an empty side's header names the line before it. */
+function sideStart(start: number, count: number): number {
+  return count === 0 ? start + 1 : start;
+}
+
+/** Reads the hunk whose header was just matched; `next` is the row after it. Null when the rows do not fit the header. */
+function readHunk(header: RegExpExecArray, rows: readonly string[], from: number): { hunk: DiffHunk; next: number } | null {
+  let oldLeft = Number(header[2] ?? "1");
+  let newLeft = Number(header[4] ?? "1");
+  let oldLine = sideStart(Number(header[1]), oldLeft);
+  let newLine = sideStart(Number(header[3]), newLeft);
+  const hunk: DiffHunk = { oldStart: oldLine, oldEnd: oldLine + oldLeft, newStart: newLine, newEnd: newLine + newLeft, lines: [] };
+  let i = from;
+  for (; oldLeft > 0 || newLeft > 0; i += 1) {
+    const row = rows[i];
+    if (row === undefined) return null;
+    const text = row.slice(1);
+    if (row.startsWith("\\")) continue;
+    if (row.startsWith(" ") && oldLeft > 0 && newLeft > 0) {
+      hunk.lines.push({ kind: "context", oldLine: oldLine++, newLine: newLine++, text });
+      oldLeft -= 1;
+      newLeft -= 1;
+    } else if (row.startsWith("-") && oldLeft > 0) {
+      hunk.lines.push({ kind: "del", oldLine: oldLine++, text });
+      oldLeft -= 1;
+    } else if (row.startsWith("+") && newLeft > 0) {
+      hunk.lines.push({ kind: "add", newLine: newLine++, text });
+      newLeft -= 1;
+    } else {
+      return null;
+    }
+  }
+  while (rows[i]?.startsWith("\\")) i += 1;
+  return { hunk, next: i };
+}
+
 /** Return true only when the complete source range is represented by one diff hunk. */
 export function isLineRangeInPatch(
   patch: string,
