@@ -14,6 +14,7 @@ import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
 import { SoftLineBreaksContext } from '@plannotator/ui/components/InlineMarkdown';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { INBOX_PERMISSION_FULL, isInboxPermissionSession } from '@plannotator/core/inbox-permission';
+import { inboxLaunchedSession } from '@plannotator/core/inbox-run-line';
 import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type InboxDraftFile, type InboxListGroupId, type InboxListRow, type InboxMessageWire, type InboxProjectRepo, type InboxQuestion, type InboxReplyDraft, type InboxRun, type InboxSentRecipient, type InboxThread, type InboxUpload } from '@plannotator/core/inbox-types';
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
@@ -22,6 +23,7 @@ import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkCont
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
 import { awayLine, outboxLine } from '../machines';
+import { snoozeBackAbove } from '../snoozeBack';
 import { HeldWrites } from './HeldWrites';
 import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEmbedBlock';
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
@@ -41,7 +43,7 @@ import { takeArrivalFocus } from '../threadStep';
 import type { InboxToastModel } from './Toast';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
-import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
+import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
@@ -152,7 +154,7 @@ import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
 import { linkHashtags, useInitiativeTags } from '../hashtags';
 import { replyWordsCount, withFreeName, withoutReplyWords, type ShapeReplyPart } from '../shape/addToReply';
-import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
+import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -1055,6 +1057,8 @@ export interface ThreadPaneProps {
    * the first thread it is given.
    */
   lookSeq?: number | null;
+  /** When this thread came back from its snooze, while the person stays in it (snoozeBack.ts); else null. */
+  snoozeBack?: string | null;
   /**
    * Seen on sight (design record "inbox-new-in-open-thread", approved
    * 2026-10-12): the seq the window's looks this visit covered (the look
@@ -1441,7 +1445,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
+export function ThreadPane({ notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, replyPart = null, onReplyPartTaken, onToastGone, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null, snoozeBack = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1819,6 +1823,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   );
   const fresh = useMemo(() => newSinceLook(thread.messages, boundary), [thread.messages, boundary]);
   const showNew = !one && fresh.size > 0;
+  // "Back from snooze" (snoozeBack.ts): the message it sits above is decided once, like the fold below.
+  const snoozeBackPlace = useRef<{ threadId: string; until: string; above: string | null } | null>(null);
+  if (!snoozeBack) snoozeBackPlace.current = null;
+  else if (snoozeBackPlace.current?.threadId !== thread.thread_id || snoozeBackPlace.current.until !== snoozeBack) {
+    snoozeBackPlace.current = { threadId: thread.thread_id, until: snoozeBack, above: snoozeBackAbove(thread.messages, fresh) };
+  }
+  const snoozeBackWords = snoozeBack ? `Back from snooze · ${inboxSnoozeWhen(snoozeBack)}` : '';
   // The fold is decided once, when the thread opens: opening a message never
   // makes others appear or disappear.
   const [foldState, setFoldState] = useState<FoldState | null>(null);
@@ -2139,7 +2150,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
   // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
-  const resumingSession = launchResumes ? (root.to?.session ?? null) : null;
+  const resumingSession = launchResumes ? inboxLaunchedSession(root) : null;
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
   const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
@@ -2155,7 +2166,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
   // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
-  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
+  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null || tookOverReply(thread) !== null;
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
@@ -2238,7 +2249,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const add = (host: string | null, session: string) => {
       if (!people.some((p) => p.session === session)) people.push({ host, session });
     };
-    const handed = activeHandoff(thread);
+    const handed = activeHandoff(thread) ?? tookOverReply(thread);
     if (handed?.to) add(handed.to.host, handed.to.session);
     // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
     if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
@@ -2982,16 +2993,18 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     };
   }, [updateChrome]);
 
-  // Where the thread opens: at the "New since you looked" divider with the
-  // last read line just above it, or at the top when nothing is new. Once per thread.
+  // Where the thread opens: at the "New since you looked" or "Back from snooze"
+  // line with the last read line just above it, or at the top when neither shows. Once per thread.
   const landed = useRef<string | null>(null);
   useLayoutEffect(() => {
     if (!foldState || foldState.threadId !== thread.thread_id || landed.current === thread.thread_id) return;
     landed.current = thread.thread_id;
     const body = bodyRef.current;
     if (!body) return;
-    const divider = body.querySelector<HTMLElement>('[data-new-divider]');
-    const above = divider?.previousElementSibling as HTMLElement | null | undefined;
+    const divider = body.querySelector<HTMLElement>('[data-new-divider], [data-snooze-back-line]');
+    const previous = divider?.previousElementSibling as HTMLElement | null | undefined;
+    // The back line must be on screen: the message above it (held open by an unsent pick, say) stays in view only if the line still fits below it.
+    const above = previous && (!divider!.hasAttribute('data-snooze-back-line') || previous.offsetHeight + divider!.offsetHeight + 12 <= body.clientHeight) ? previous : null;
     body.scrollTop = divider ? Math.max(0, (above ? above.offsetTop : divider.offsetTop) - 6) : 0;
   }, [foldState, thread.thread_id]);
 
@@ -4452,6 +4465,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // another way from such a session (the stdio shim run inside Claude Code), when that session polls now.
   const wakingSession = askedSession && repliedTo?.wakes === true ? askedSession : null;
   const replySession = lastTo?.session ?? askedSession;
+  // The run line speaks for the session the launch started. Words "your reply starts it again" and "your reply is
+  // waiting" are not about a reply waiting on another session, or a root that moved: that reply's own line says.
+  const runSpeaks = !runLine || (runLine.state !== 'stopped' && runLine.state !== 'missing') || (replySession ?? root.to?.session ?? null) === inboxLaunchedSession(root);
+  const shownRun = runSpeaks ? runLine : null;
   const replyWaiting = !!replySession && !last.delivery && !(lastTo === null && sent?.checked_at);
   // A 👍 the Inbox sent through to a waking session and that session has not taken yet (the person's reply
   // is not the last message then: the 👍 is offered only before it): its line reads the same connection.
@@ -4468,6 +4485,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // A reply that tags agents (approval "inbox-tag-agents", Lines): one line per tagged session, each with
   // its own state and Send now, under the owner's line. Their connections are read while one still waits.
   const lastTags = last.author.kind === 'person' && !isInboxNote(last) ? messageTags(last) : [];
+  // A reply waiting on a gone launched agent can still move: not taken, not archived. The line offers it while another session could take it.
+  const waitingCanMove = !!lastTo && !isDelivered(last, thread.messages[0]!) && !resolved;
+  const anotherCanTake = (pendingLive?.sessions ?? []).some((s) => s.session !== lastTo?.session && !lastTags.some((tag) => tag.session === s.session && tag.delivery && !tag.handed_away));
   const ownerHost = lastTo?.host ?? (repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? null) : null);
   const waitingTags = lastTags.filter((t) => t.wakes && !t.delivery).map((t) => t.session);
   const { connections: tagConnections, load: loadTagConnections } = useTagConnections(thread.thread_id, waitingTags, waitingTags.length > 0);
@@ -5009,7 +5029,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
+  const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -5613,7 +5633,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             <span>handed off {whenTime(handedOff.created_at)}</span>
           </div>
         )}
-        {row?.snoozed && (
+        {/* By this window's clock: an archived thread stays open across its time with no list read to end it. */}
+        {row?.snoozed && inboxRowSnoozed(row) && (
           <div className="ib-readline" data-snooze-line="">
             <Icon name="clock" size={16} />
             <div>Snoozed until {inboxSnoozeWhen(row.snoozed.until)}</div>
@@ -5694,10 +5715,18 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           if (hiddenNow.has(message.id)) return before;
           const isNew = showNew && fresh.has(message.id);
           // "New since you looked", above the first new message (not above the first message of the thread).
+          // "Back from snooze" takes that line's words when it sits there, and otherwise draws the same line itself.
+          const backHere = snoozeBackPlace.current?.above === message.id;
           if (isNew && index > 0 && thread.messages.findIndex((m) => fresh.has(m.id)) === index) {
             before.push(
-              <div className="ib-newdiv" key="new-divider" data-new-divider="" role="separator" aria-label={`New since you looked: ${plural(fresh.size, 'message')}`}>
-                New since you looked
+              <div className="ib-newdiv" key="new-divider" data-new-divider="" data-snooze-back-line={backHere ? '' : undefined} role="separator" aria-label={backHere ? `${snoozeBackWords}: ${plural(fresh.size, 'new message')}` : `New since you looked: ${plural(fresh.size, 'message')}`}>
+                {backHere ? snoozeBackWords : 'New since you looked'}
+              </div>,
+            );
+          } else if (backHere) {
+            before.push(
+              <div className="ib-newdiv" key="snooze-back-line" data-snooze-back-line="" role="separator" aria-label={snoozeBackWords}>
+                {snoozeBackWords}
               </div>,
             );
           }
@@ -5763,10 +5792,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 </article>,
               );
             }
-            if (message === last && runLine && !runInCard) {
+            if (message === last && shownRun && !runInCard) {
               before.push(
                 <div className="ib-msg" key="perm-run">
-                  <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />
+                  <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />
                 </div>,
               );
             }
@@ -6088,8 +6117,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     ))}
                   </ul>
                 )}
-                {message === last && runLine && !runInCard && <RunLine run={runLine} canOpen={!!openTerminal} canReaddress={!!last.to} guest={guest} onChanged={() => onRunChanged?.()} />}
-                {message === last && !runLine && delivered && tagLines.length > 0 && (
+                {message === last && shownRun && !runInCard && <RunLine run={shownRun} canOpen={!!openTerminal} canReaddress={waitingCanMove && anotherCanTake} guest={guest} onChanged={() => onRunChanged?.()} />}
+                {message === last && !shownRun && delivered && tagLines.length > 0 && (
                   // Lines (approval "inbox-tag-agents"): the owner first, then each tagged session, each with its own state.
                   <ul className="ib-tg-dl" data-tag-lines="" tabIndex={-1}>
                     <li data-tag-line={replySession ?? ''} data-delivery={delivered.state} data-owner="">
@@ -6126,7 +6155,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {tagSendNow.error}
                   </p>
                 )}
-                {message === last && !runLine && delivered?.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && delivered?.wait && tagLines.length === 0 && (
                   // Waiting on a busy agent (approval "inbox-busy-agent-reply"): the band, with its own minute clock.
                   <UndeliveredBand
                     wait={delivered.wait}
@@ -6137,7 +6166,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     restartName={restartName}
                   />
                 )}
-                {message === last && !runLine && delivered && !delivered.wait && tagLines.length === 0 && (
+                {message === last && !shownRun && delivered && !delivered.wait && tagLines.length === 0 && (
                   // tabIndex -1: Send to another session puts focus here once it moved the message.
                   <div className="ib-delivered" data-delivery={delivered.state} data-auto={delivered.autoAfterMin !== undefined ? '' : undefined} tabIndex={-1}>
                     <span className="ib-dl-main">
@@ -6168,11 +6197,24 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {sendNowError}
                   </p>
                 )}
-                {/* A launched agent that is gone: only a message addressed to it (its own `to`) can move; a reply to its answer cannot. */}
-                {message === last && (runLine ? runLine.state === 'missing' && !!last.to : delivered?.state === 'undelivered') && lastTo && (
+                {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
+                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                  <SendToAnotherSession
+                    messageId={last.id}
+                    ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
+                    project={thread.project.name}
+                    live={live}
+                    onReload={loadLive}
+                    onMoved={onChanged}
+                  />
+                )}
+                {/* A launched agent that is gone: the reply waiting on it can move, addressed to it or answering it. */}
+                {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
                     live={pendingLive}
                     onReload={loadPendingLive}
@@ -6533,6 +6575,28 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     Looks good
                   </button>
                 </Tip>
+              )}
+              {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
+              {showAskerNote && (
+                <div className="ib-footended" data-foot-ended="">
+                  {anyOtherLive && (
+                    <button
+                      type="button"
+                      className="ib-btn"
+                      data-ended-send=""
+                      onClick={() => {
+                        openBox();
+                        setRcptOpen(true);
+                      }}
+                    >
+                      <Icon name="forward" size={15} />
+                      Send to another session
+                    </button>
+                  )}
+                  <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
+                    Archive
+                  </button>
+                </div>
               )}
               {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
               {stepLists.length > 0 && (

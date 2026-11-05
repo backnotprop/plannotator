@@ -282,8 +282,11 @@ export function createInboxT3Wake(options: {
     retryAt.set(key, { at: now() + wait, wait });
   };
 
+  const keyOf = (item: InboxMessage, session: string) => `${store.deliveryIdOf(item, session)}.${session}`;
+
   const deliverOne = async (link: Link, item: InboxMessage, session: string): Promise<void> => {
-    const key = `${item.id}.${session}`;
+    const id = store.deliveryIdOf(item, session);
+    const key = `${id}.${session}`;
     const retry = retryAt.get(key);
     if (retry && retry.at > now()) return;
     const text = codexQueueMessage(options.commandOf(item, session));
@@ -291,10 +294,10 @@ export function createInboxT3Wake(options: {
     try {
       // One request per item (the delivery folder is the thread's): a retry re-sends the first words, so a thread
       // renamed between two tries is still one T3 turn.
-      await new T3Delivery(new T3Thread(link.rpc, session), link.credentials).sendFirst(text, `plannotator-inbox-${item.id}`);
+      await new T3Delivery(new T3Thread(link.rpc, session), link.credentials).sendFirst(text, `plannotator-inbox-${id}`);
       retryAt.delete(key);
       try {
-        store.recordDelivery(item.id, { host: INBOX_T3_HOST, session });
+        store.recordDelivery(id, { host: INBOX_T3_HOST, session });
       } catch {
         // Gone, or no longer this session's.
       }
@@ -348,20 +351,20 @@ export function createInboxT3Wake(options: {
     const sendable = new Set<string>();
     for (const [session, items] of pending) {
       const work = items.filter((item) => wakesItem(item, session) && !options.skip?.(item, session));
-      for (const item of work) pendingKeys.add(`${item.id}.${session}`);
+      for (const item of work) pendingKeys.add(keyOf(item, session));
       if (dead.has(session)) continue;
-      const todo = work.filter((item) => !refused.has(`${item.id}.${session}`));
+      const todo = work.filter((item) => !refused.has(keyOf(item, session)));
       if (todo.length === 0) continue;
       // Every item still inside its backoff: kept, and T3 is not asked until one comes due.
-      if (todo.every((item) => (retryAt.get(`${item.id}.${session}`)?.at ?? 0) > now())) {
-        for (const item of todo) sendable.add(`${item.id}.${session}`);
+      if (todo.every((item) => (retryAt.get(keyOf(item, session))?.at ?? 0) > now())) {
+        for (const item of todo) sendable.add(keyOf(item, session));
         continue;
       }
       const link = await homeOf(session);
       if (link === "unreachable") {
         // T3 could not be asked: kept, and tried again on the send's backoff.
         for (const item of todo) {
-          const key = `${item.id}.${session}`;
+          const key = keyOf(item, session);
           sendable.add(key);
           if ((retryAt.get(key)?.at ?? 0) <= now()) backOff(key);
         }
@@ -379,10 +382,10 @@ export function createInboxT3Wake(options: {
         if (stopped) return;
         // Denied for the grant's mode, or a mode it does not cover: kept for the agent's next read, never sent under this grant.
         if (!sendsInto(session, link)) {
-          refused.add(`${item.id}.${session}`);
+          refused.add(keyOf(item, session));
           continue;
         }
-        sendable.add(`${item.id}.${session}`);
+        sendable.add(keyOf(item, session));
         await deliverOne(link, item, session);
       }
     }

@@ -17,7 +17,7 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import type { InboxLaunchRecord, InboxQuestion } from "@plannotator/core/inbox-types";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
@@ -329,6 +329,103 @@ describe("a second agent behind LaunchHost", () => {
     expect(await launch.runOf(one.id)).toMatchObject({ state: "stopped", stopped_by_person: true, cause: null });
   });
 
+  describe("a row's Session ended is about the session it names", () => {
+    const pickOf = (key: string, kind: InboxQuestion["kind"], prompt: string, label: string) => ({ v: 1 as const, key, kind, prompt, selected: [label] });
+    const question = (prompt: string, labels: string[]) => `:::question\n${prompt}\n${labels.map((label) => `- ${label}`).join("\n")}\n:::`;
+    /** A launch that started as L and stopped; `ended` are the sessions read as not there. */
+    async function stopped() {
+      const world = setup();
+      const { store, clock, project, fake, launch } = world;
+      const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+      const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+      const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+      launch.begin(root);
+      await until(() => !!store.message(root.id)!.launch!.session_ref);
+      const L = store.message(root.id)!.to!.session;
+      fake.poll(L, false, clock.now);
+      store.recordDelivery(root.id, { host: FAKE, session: L });
+      await fake.host.stop("f1");
+      clock.now += INBOX_RUN_START_GRACE_MS * 2;
+      const ended = new Set<string>([L]);
+      store.setDeliveryPresence({ connection: () => null, askerLive: (session) => !ended.has(session), launchResumes: (threadId, session) => launch.resumes(threadId, session) });
+      const agent = (session: string) => ({ kind: "agent" as const, host: FAKE, session, name: "Fake Agent" });
+      const says = (body: string, session: string, replyTo: string, key: string) => store.sendMessage({ project_id: project.id, author: agent(session), body, reply_to: replyTo, wakes: true, idempotency_key: key }).message;
+      const pick = (messageId: string, label: string) => {
+        const q = store.questionsOf(messageId)[0]!;
+        store.savePicks(messageId, [{ key: q.key, revision: q.revision, answer: pickOf(q.key, q.kind, q.prompt, label) }]);
+      };
+      return { ...world, root, L, ended, says, pick, mark: () => store.listRow(root.id)!.session_ended };
+    }
+
+    test("the stopped launched session asked and is answered, though a live agent wrote last: not ended", async () => {
+      const w = await stopped();
+      const asked = w.says(question("Which?", ["One", "Two"]), w.L, w.root.id, "a1");
+      const later = w.says("Tagged in.", "ses_t", asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+    });
+
+    test("another agent asked and ended, though the stopped launched session wrote last: ended", async () => {
+      const w = await stopped();
+      w.ended.add("ses_t");
+      const asked = w.says(question("Which?", ["One", "Two"]), "ses_t", w.root.id, "a1");
+      const later = w.says("Noted.", w.L, asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply aimed at another session that ended: ended, while the launched session stays stopped", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      w.ended.add("ses_c");
+      w.store.sendReply(said.id, { words: "For you.", idempotency_key: "k1", to: { host: FAKE, session: "ses_c" } });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply waiting on the stopped launched session: not ended; its launch deleted: ended", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      expect(w.mark()).toBeUndefined();
+      w.store.sendReply(said.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+      await w.post(w.root.launch!.id, "delete");
+      expect(w.launch.resumes(w.root.id, w.L)).toBe(false);
+      expect(w.mark()).toBe(true);
+    });
+  });
+
+  test("only the session the launch started reads by its launch: a root moved to another session reads as that session", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    fake.host.start = async () => ({ ok: false, code: "missing", text: "Not installed." });
+    const failed = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(failed);
+    await until(() => !!store.message(failed.id)!.launch!.error);
+    const placeholder = store.message(failed.id)!.to!.session;
+    expect(launch.gone(failed.id, placeholder)).toBe(true);
+    store.readdressMessage(failed.id, { host: FAKE, session: "ses_c" });
+    expect(launch.gone(failed.id, "ses_c")).toBe(false);
+    expect(launch.resumes(failed.id, "ses_c")).toBe(false);
+  });
+
+  test("a started root moved away: the session it started still reads by its launch, the one it moved to does not", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => !!store.message(root.id)!.launch!.session_ref);
+    const L = store.message(root.id)!.to!.session;
+    expect(store.message(root.id)!.launch!.session).toBe(L);
+    fake.poll(L, false, Date.now());
+    store.readdressMessage(root.id, { host: FAKE, session: "ses_c" });
+    expect(launch.resumes(root.id, L)).toBe(true);
+    expect(launch.resumes(root.id, "ses_c")).toBe(false);
+  });
+
   test("a scratch launch's Delete purges its folder through its host", async () => {
     const { store, fake, launch, post } = setup();
     const target = launch.target({ launch: { agent: FAKE, scratch: true } })!;
@@ -348,6 +445,8 @@ describe("a second agent behind LaunchHost", () => {
     const root = store.startPersonThread({ project_id: project.id, body: "Hello.", to: { host: "gone-agent", session: "session-g1" }, idempotency_key: "send-gone", launch: record }).message;
 
     expect(await launch.runOf(root.id)).toBeNull();
+    // Nothing here can start it again, so a reply to it does not read as doing so.
+    expect(launch.resumes(root.id, "session-g1")).toBe(false);
     expect(launch.attachOf(root.id)).toBeNull();
     expect(launch.signature()).toBe(`${record.id}:-`);
     expect(() => launch.sweep(true)).not.toThrow();

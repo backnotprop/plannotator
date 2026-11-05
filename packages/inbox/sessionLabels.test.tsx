@@ -139,7 +139,7 @@ test('the deliveries frame says when a label changed; an older frame is a delive
   dispatchInboxFrame({ name: 'deliveries', data: '{"labels":true}', id: null }, handlers);
   dispatchInboxFrame({ name: 'deliveries', data: '{}', id: null }, handlers);
   dispatchInboxFrame({ name: 'deliveries', data: '', id: null }, handlers);
-  expect(seen).toEqual([{ labels: true }, { labels: false }, { labels: false }]);
+  expect(seen).toEqual([{ labels: true, sessions: false }, { labels: false, sessions: false }, { labels: false, sessions: false }]);
 });
 
 // --- Drawn ---------------------------------------------------------------------------------------------------------
