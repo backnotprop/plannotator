@@ -446,6 +446,7 @@ test('handed on, the new owner still there, the asker ended: a reply to the aske
   await waitFor('the aimed reply handed to the third session', () => third.commands.find((c) => c.id === aimed.reply.id));
 
   await page.goto(`${world.url}#thread=${asked.thread_id as string}`);
+  await page.reload();
   await expect(pane.locator('[data-thread-owner]')).toContainText('Ledger retry owner');
   await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
   await pane.locator('textarea').first().fill('Thanks, carry on.');
