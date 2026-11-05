@@ -41,6 +41,8 @@ export interface GuideReaderProps {
   reveal?: { path: string; token: number } | null;
   /** The review's Viewed ticks on each file's header. Absent: no Viewed control, as before. */
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
+  /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
+  bare?: boolean;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */
