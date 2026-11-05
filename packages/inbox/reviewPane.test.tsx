@@ -246,6 +246,23 @@ test.skipIf(!hasDom)('after a post: a follow-up main comment still posts; a push
   expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
 });
 
+test.skipIf(!hasDom)('a force-push under a post (pull_commit_gone): the PR is read again, and the decision is back at its new head', async () => {
+  await render({ ...thread, pull_theirs: true, pull_keys: [PR_KEY] });
+  reviewReply = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+  listHead = 'b'.repeat(40);
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(listReads.at(-1)).toContain('refresh=1');
+  expect(document.querySelector('[data-review-pull-moved]')?.getAttribute('data-review-pull-moved')).toBe('read');
+  expect(document.querySelector('[role="dialog"]')).toBeNull();
+  reviewReply = () => Response.json({ ok: true, prUrl: PR.url, submission: { status: 'complete' } });
+  await click('[data-review-posts] [data-decision-primary]');
+  await act(async () => dialogButton('Approve').click());
+  await settle();
+  expect(reviewPosts.at(-1)).toMatchObject({ action: 'approve', head_sha: 'b'.repeat(40) });
+});
+
 test.skipIf(!hasDom)('a comment posted once is never posted again, even after a push (pull_moved) and a read at the new head', async () => {
   const comment = { id: 'ann-1', type: 'comment', scope: 'line', filePath: 'src/settings/Layout.tsx', lineStart: 3, lineEnd: 3, side: 'new', text: 'Mirror the icons.', createdAt: 1 };
   annotations = [{ id: 'rec-1', message_id: REVIEW, created_at: '2026-10-11T10:40:00.000Z', annotation: comment, guide: { line_start: 3, line_end: 3, file: 'src/settings/Layout.tsx', side: 'new' } }];
