@@ -322,7 +322,7 @@ export default function GuideReader({
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
-  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
+  const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch icons={!!controlsHost} /> : null), [controlsHost]);
 
   const getDiffRendererProps = useCallback(
     ({ file, focused }: GuideDiffRendererContext): {
@@ -388,14 +388,14 @@ export default function GuideReader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone || controlsHost ? {} : { renderSectionTab }),
+      ...(phone ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, controlsHost, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
@@ -414,7 +414,6 @@ export default function GuideReader({
         sourceLine={sourceLine(snapshot)}
         bare={bare}
         actionsHost={controlsHost}
-        {...(controlsHost ? { headerActions: <DiffStyleSwitch /> } : {})}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />

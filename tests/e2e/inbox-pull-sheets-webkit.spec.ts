@@ -126,11 +126,13 @@ test('a sheet opened by mouse, focus still on the page: Escape closes it, back o
   await expect(comments).toBeFocused();
   await expect(review).toBeVisible();
 
+  // The rail is a sheet on a phone only.
+  await page.setViewportSize({ width: 390, height: 844 });
   const files = review.locator('[data-pull-review-files-button]');
   const rail = review.locator('.ib-rrail');
   await files.click();
   await expect(rail).toBeVisible();
-  await review.locator('.ib-rv-progress').click();
+  await review.locator('.ib-prp-fileshead').click();
   await page.keyboard.press('Escape');
   await expect(rail).toBeHidden();
   await expect(files).toBeFocused();

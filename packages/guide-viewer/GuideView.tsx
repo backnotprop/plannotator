@@ -210,7 +210,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   // The first card drawn: the first section, or "Everything else" when the guide has none.
   const firstCardIndex = guide.sections.length > 0 ? 0 : unplacedSection ? guide.sections.length : -1;
   const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex) : null;
-  const actionsOnTab = !!actions && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
+  const actionsOnTab = !!actions && !actionsHost && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
 
   return (
     <GuideViewportProvider className={bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>

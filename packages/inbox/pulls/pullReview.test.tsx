@@ -204,12 +204,13 @@ async function settle() {
   }
 }
 
+
 function mount(node: React.ReactNode) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox">{node}</div>);
+    root.render(<SidebarProvider><div className="pn-inbox">{node}</div></SidebarProvider>);
   });
 }
 
@@ -230,14 +231,14 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   await settle();
   expect(asked).toEqual([{ key: stack[0]!.key, scope: 'layer' }]);
   expect(shown.at(-1)).toEqual({ patch: expect.stringContaining('layer-412.ts') as unknown as string, title: 'Layer 412' });
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 1 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[0]!.key);
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   expect(asked.at(-1)).toEqual({ key: stack[0]!.key, scope: 'stack' });
   expect(shown.at(-1)!.patch).toContain('stack-412.ts');
 
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="layer"] input').click());
+  await act(async () => el(`[data-pull-layer-row="${stack[0]!.key}"]`).click());
   await settle();
   // Back to the layer: drawn from what was read, not asked again.
   expect(asked).toHaveLength(2);
@@ -247,7 +248,7 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
   expect(asked.at(-1)).toEqual({ key: stack[1]!.key, scope: 'layer' });
   expect(shown.at(-1)!.patch).toContain('layer-413.ts');
   expect(el('[data-pull-review]').getAttribute('data-pull-review')).toBe(stack[1]!.key);
-  expect(el('[data-pull-review-foot]').textContent).toContain('Layer 2 of 3');
+  expect(el('[data-pull-layer-row][aria-current="step"]').getAttribute('data-pull-layer-row')).toBe(stack[1]!.key);
 });
 
 test.skipIf(!hasDom)("Approve goes into the agent's thread as a reply to its last message, naming the layer", async () => {
@@ -268,7 +269,7 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
   expect(asked).toEqual([{ key: teammate.key, scope: 'layer' }]);
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(el<HTMLAnchorElement>('[data-pull-review-forge]').href).toBe(teammate.url);
-  expect(document.querySelector('[data-pull-scope-choice]')).toBeNull();
+  expect(document.querySelector('[data-pull-layer-all]')).toBeNull();
 });
 
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
@@ -295,7 +296,6 @@ test.skipIf(!hasDom)('a PR with no agent offers posting only: the comments go on
   expect(document.querySelector('[data-review-destination]')).toBeNull();
   expect(document.querySelector('[data-pull-review-forge]')).toBeNull();
   expect(el('[data-review-posts]').getAttribute('data-review-posts')).toBe('github');
-  expect(el('[data-pull-review-foot]').textContent).toContain('your review goes on the GitHub PR');
   await act(async () => el('[data-review-posts] [data-decision-primary]').click());
   await settle();
   await act(async () => dialogButton('Post Comments').click());
@@ -589,7 +589,7 @@ test.skipIf(!hasDom)("a Whole stack goes to the stack's one review thread, its l
   const two: InboxPullsAnswer = { ...model, links: { [stack[0]!.key]: linkTo('thr_claude', LAST), [stack[1]!.key]: codex } };
   mount(<Review stackId={STACK_ID} from={stack[1]!.key} answer={two} />);
   await settle();
-  await act(async () => el<HTMLInputElement>('[data-pull-scope-choice="stack"] input').click());
+  await act(async () => el('[data-pull-layer-all]').click());
   await settle();
   // No note about several agents: the verdict has one place to go.
   expect(document.querySelector('[data-pull-review-readonly]')).toBeNull();
@@ -837,7 +837,7 @@ test.skipIf(!hasDom)('one send at a time: Review with an agent waits while a thr
   expect(posted.filter((p) => p.path.endsWith('/messages'))).toHaveLength(1);
   // The link arrives: the stack has its thread, and the one button opens it.
   const owned: InboxPullLink = { ...link, thread_id: 'thr_new', via: 'owner', ask: 'guide', last: null, guide: null };
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: owned } })}</div>));
+  act(() => root!.render(<SidebarProvider><div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: owned } })}</div></SidebarProvider>));
   await settle();
   expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('open');
   expect(el<HTMLButtonElement>('[data-pulls-primary]').disabled).toBe(false);
@@ -856,9 +856,9 @@ test.skipIf(!hasDom)('Start a new agent closes the picker: it does not come back
   expect(document.querySelectorAll('[data-pulls-picker]').length).toBe(0);
   // Compose started the thread; later its agent ends: the stack offers a new thread, the picker stays closed.
   const live: InboxPullLink = { ...link, via: 'owner', ask: 'guide' };
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: live } })}</div>));
+  act(() => root!.render(<SidebarProvider><div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: live } })}</div></SidebarProvider>));
   await settle();
-  act(() => root!.render(<div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: { ...live, agent: { ...live.agent!, ended: true } } } })}</div>));
+  act(() => root!.render(<SidebarProvider><div className="pn-inbox">{page({ ...model, links: { [stack[0]!.key]: { ...live, agent: { ...live.agent!, ended: true } } } })}</div></SidebarProvider>));
   await settle();
   expect(el('[data-pulls-primary]').getAttribute('data-pulls-primary')).toBe('again');
   expect(el('[data-pulls-primary]').getAttribute('aria-expanded')).toBe('false');
@@ -1064,7 +1064,7 @@ test.skipIf(!hasDom)("one PR's picker stays with it: the custom words typed for 
   await act(async () => el<HTMLInputElement>('[data-pulls-ask-option="custom"] input').click());
   await typeWords('only the fallback chain for #869');
   // The person moves to PR B in the same page: its own button, closed.
-  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: {} }} stackId={b.key} /></div>));
+  act(() => root!.render(<SidebarProvider><div className="pn-inbox"><Page answer={{ ...model, links: {} }} stackId={b.key} /></div></SidebarProvider>));
   await settle();
   expect(document.querySelector('[data-pulls-picker]')).toBeNull();
   await openPicker();
@@ -1087,7 +1087,7 @@ test.skipIf(!hasDom)('once a thread starts, focus moves to the line that names i
   await settle();
   // The list reads the new thread: the PR is that thread's now.
   const owned: InboxPullLink = { ...link, via: 'owner', ask: 'guide', thread_id: 'thr_new', last: null, guide: null, agent: { host: 'claude-code', session: 'ses_billing', name: null } };
-  act(() => root!.render(<div className="pn-inbox"><Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} /></div>));
+  act(() => root!.render(<SidebarProvider><div className="pn-inbox"><Page answer={{ ...model, links: { [stack[2]!.key]: owned } }} stackId={STACK_ID} /></div></SidebarProvider>));
   await settle();
   expect(document.activeElement?.getAttribute('data-pulls-thread')).toBe('thr_new');
 });

@@ -979,117 +979,73 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
   await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(3);
-  await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 1 of 3 · only what this layer changes');
+  await expect(review.locator('[data-pull-layer-row][aria-current="step"]')).toContainText('This layer');
   await expect(review.getByRole('button', { name: /merge/i })).toHaveCount(0);
   expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/pulls/412');
   // No chapter card repeating the rail: the diffs take the width.
   await expect(review.locator('[data-guide-section-narrative]')).toBeHidden();
-  // The rail is the review app's tree: folders over their files, rows of 28 px touching, in the app's sans, a zero count
-  // left out; the diffs follow its order. The +/- stay in the rail.
-  await expect(review.locator('[data-review-folder="migrations"]')).toBeVisible();
+  // The rail is one column of names: a folder holding one thing merges into it, rows of 28 px touching, in the app's
+  // sans; A, D and R stay, the +/- leave the row for its tip. The diffs follow its order.
+  await expect(review.locator('[data-review-file="migrations/0042_retry_schedule.sql"]')).toContainText('migrations/0042_retry_schedule.sql');
+  await expect(review.locator('[data-review-folder="migrations"]')).toHaveCount(0);
   const railRow = await review.locator('[data-review-file]').first().evaluate((row) => {
     const name = row.querySelector('.truncate')!;
-    return { height: row.getBoundingClientRect().height, font: getComputedStyle(name).fontFamily, size: getComputedStyle(name).fontSize, circle: row.querySelector('[role="checkbox"] svg')!.getBoundingClientRect().width, text: row.textContent };
+    return { height: row.getBoundingClientRect().height, font: getComputedStyle(name).fontFamily, text: row.textContent ?? '' };
   });
-  expect(railRow).toMatchObject({ height: 28, size: '13px', circle: 14 });
+  expect(railRow.height).toBe(28);
   expect(railRow.font).not.toMatch(/mono/i);
   expect(railRow.text).toContain('A');
-  expect(railRow.text).not.toContain('-0');
+  expect(railRow.text).not.toMatch(/[+-]\d/);
   const railOrder = await review.locator('[data-review-file]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-review-file')));
   const diffOrder = await review.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => shell.getAttribute('data-guide-file-shell')));
   // (Within a section the viewer draws tests after code, whatever the patch's order, so tests sit out of this check.)
   const code = (paths: (string | null)[]) => paths.filter((path) => !path?.includes('.test.'));
   expect(code(diffOrder)).toEqual(code(railOrder));
-  const rail = await review.locator('.ib-rrail').boundingBox();
-  for (const row of await review.locator('[data-review-files] .review-count-columns').all()) {
-    const box = (await row.boundingBox())!;
-    expect(box.x + box.width).toBeLessThanOrEqual(rail!.x + rail!.width);
-  }
-  // One title, the header's: the reader draws none, the header names no repository, the strip only numbers.
+  // One title, the header's: the reader draws none, the header names no repository.
   await expect(review.locator('.ib-gbody h1')).toHaveCount(0);
   await expect(review.locator('.ib-vhead .ib-from')).toHaveCount(0);
-  await expect(review.locator('[data-pull-layer-step][aria-current="step"]')).toContainText('#412');
+  await expect(review.locator('[data-pull-layer-row][aria-current="step"]')).toContainText('#412');
   // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
   // last row ends within one row of its box's bottom.
   const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // Global comment sits on Split | Unified's row (owner, q-bfcf3a4a B), left of it, not over it: the strip, above the files.
-  await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
-  const addGlobal = (await review.locator('.ib-prr-strip [data-guide-global-comment-add]').boundingBox())!;
-  const layoutSwitch = (await review.locator('.ib-prr-strip [data-diff-style-switch]').boundingBox())!;
-  expect(Math.abs(addGlobal.y + addGlobal.height / 2 - (layoutSwitch.y + layoutSwitch.height / 2))).toBeLessThan(3);
-  expect(addGlobal.x + addGlobal.width).toBeLessThan(layoutSwitch.x);
-  // Flat, as the code review app is on one diff: the review area is one surface and a file its header and code, edge
-  // to edge, with no card around it and one hairline between files.
+  // Global comment is a quiet mark in the bar; Split | Unified a tab on the first file.
+  await expect(review.locator('.ib-vhead [data-guide-global-comment-add]')).toBeVisible();
+  await expect(review.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
+  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
+  // Flat: the code is a sheet on the rail's surface, a file its soft head and its lines, with no card and no rule.
   const frame = await review.evaluate((root) => {
     const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
     const none = { border: '0px', radius: '0px', fill: 'rgba(0, 0, 0, 0)' };
-    const [first, second] = [...root.querySelectorAll('[data-guide-file-shell]')];
+    const head = getComputedStyle(root.querySelector('[data-file-header]')!);
     return {
       none,
       section: read(root.querySelector('[data-guide-section]')!),
       box: read(root.querySelector('[data-guide-code-view-mounted]')!),
-      hairline: getComputedStyle(second!, '::before').height,
+      head: { rule: head.borderBottomWidth, filled: head.backgroundColor !== 'rgba(0, 0, 0, 0)' },
+      sameSurface: getComputedStyle(root.querySelector('.ib-vhead')!).backgroundColor === getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
+      sheet: getComputedStyle(root.querySelector('.ib-gbody')!).backgroundColor !== getComputedStyle(root.querySelector('.ib-rsplit')!).backgroundColor,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  await expect.poll(() => seams(review)).toEqual([1, 1]);
-  expect(frame.hairline).toBe('1px');
-  const pane = (await review.locator('.ib-gbody').boundingBox())!;
-  const edge = (await sqlShell.boundingBox())!;
-  expect([edge.x, edge.width]).toEqual([pane.x, pane.width]);
-  // The frame: a 37 px bar over everything, the rail beside the strip, the files and the foot and down to the window's
-  // foot, the strip a 33 px row of the app's --muted, the first file's header 16 px under it.
+  expect(frame).toMatchObject({ head: { rule: '0px', filled: true }, sameSurface: true, sheet: true });
+  // A 37 px bar over everything; the rail runs to the foot of the page, the code beside it.
   const layers = await review.evaluate((root) => {
     const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
-    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
-    const token = (name: string) => {
-      const probe = root.appendChild(document.createElement('div'));
-      probe.style.background = `var(${name})`;
-      const value = getComputedStyle(probe).backgroundColor;
-      probe.remove();
-      return value;
-    };
-    const [bar, rail, strip, body, foot] = ['.ib-vhead', '.ib-rrail', '.ib-prr-strip', '.ib-gbody', '.ib-prr-foot'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect, DOMRect];
-    return {
-      barHeight: bar.height,
-      railTop: rail.top - bar.bottom,
-      railFoot: root.getBoundingClientRect().bottom - rail.bottom,
-      besideRail: [strip.left, body.left, foot.left].map((left) => left - rail.right),
-      stripHeight: strip.height,
-      underStrip: box('[data-guide-file-shell] [slot="header-custom"]').top - strip.bottom,
-      footHeight: foot.height,
-      head: fill('.ib-vhead'), strip: fill('.ib-prr-strip'), foot: fill('.ib-prr-foot'), card: token('--card'), ground: token('--background'), muted: token('--muted'),
-    };
+    const [bar, rail, body] = ['.ib-vhead', '.ib-rrail', '.ib-gbody'].map(box) as [DOMRect, DOMRect, DOMRect];
+    return { barHeight: bar.height, railTop: rail.top - bar.bottom, railFoot: root.getBoundingClientRect().bottom - rail.bottom, beside: body.left - rail.right };
   });
-  expect(layers).toMatchObject({ barHeight: 37, railTop: 0, railFoot: 0, besideRail: [0, 0, 0], stripHeight: 33, underStrip: 16, footHeight: 37 });
-  expect(layers.strip).toBe(layers.muted);
-  expect(layers.foot).toBe(layers.head);
-  expect([layers.card, layers.ground]).not.toContain(layers.head);
-  // One row holds Global comment and Split | Unified at every width from 800 up, both inside the pane.
-  for (const width of [800, 1024, 1440]) {
-    await page.setViewportSize({ width, height: 900 });
-    // Read in one frame, once the resize's folds have landed: the row moves when the file rail folds.
-    await expect
-      .poll(() =>
-        review.evaluate((root) => {
-          const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
-          const style = root.querySelector('[data-diff-style-switch]')!.getBoundingClientRect();
-          const body = root.querySelector('.ib-gbody')!.getBoundingClientRect();
-          return Math.abs(add.y + add.height / 2 - (style.y + style.height / 2)) < 3 && add.right < style.left && add.left >= body.left && style.right <= body.right;
-        }),
-      )
-      .toBe(true);
-  }
-  // A short strip leaves its room to the layers: Global comment gives up its words (its globe and tooltip stay).
-  const addWidth = () => review.locator('[data-guide-global-comment-add]').evaluate((el) => el.getBoundingClientRect().width);
-  await page.setViewportSize({ width: 800, height: 900 });
-  await expect.poll(addWidth).toBeLessThan(40);
+  expect(layers).toEqual({ barHeight: 37, railTop: 0, railFoot: 0, beside: 0 });
+  // Scrolled past the first file, its Split | Unified tab has gone, and the same switch sits in the bar.
+  await page.setViewportSize({ width: 1440, height: 420 });
+  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 300));
+  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toBeVisible();
+  await review.locator('.ib-gbody').evaluate((el) => (el.scrollTop = 0));
+  await expect(review.locator('.ib-vhead [data-diff-style-switch]')).toHaveCount(0);
   await page.setViewportSize({ width: 1440, height: 900 });
-  await expect.poll(addWidth).toBeGreaterThan(100);
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -1107,8 +1063,7 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     node.textContent = text;
     return before;
   }, long);
-  const cut = await fn.locator('bdi').evaluate((node) => ({ cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
-  expect(cut).toEqual({ cut: true, overflow: 'ellipsis' });
+  await expect.poll(() => fn.locator('bdi').evaluate((node) => ({ cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }))).toEqual({ cut: true, overflow: 'ellipsis' });
   // Whole on hover, in the window's tooltip.
   await fn.hover();
   await expect(page.locator('[data-pn-tooltip]')).toContainText('#412 Retry schedule table and next-attempt time');
@@ -1116,30 +1071,20 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const after = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
   expect(after.x + after.width).toBeLessThanOrEqual(900);
   await fn.locator('bdi').evaluate((node, text) => (node.textContent = text), was);
-  // Under RAIL_FOLD_BELOW of review the file rail folds to the bar's Files button, and the diff takes the width.
-  await page.setViewportSize({ width: 960, height: 900 });
-  await expect(review.locator('.ib-rrail')).toBeHidden();
-  await expect(review.locator('[data-pull-review-files-button]')).toBeVisible();
-  const gbody = (await review.locator('.ib-gbody').boundingBox())!;
-  const split1024 = (await review.locator('.ib-rsplit').boundingBox())!;
-  expect(gbody.width).toBe(split1024.width);
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await expect(review.locator('.ib-rrail')).toBeVisible();
-
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
-  await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 2 of 3');
+  await expect(review.locator('[data-pull-layer-row][aria-current="step"]')).toContainText('#413');
 
   // Whole stack up to #413: from the lowest open layer's base, so #412's files and #413's, not the merged #411's.
-  await review.locator('[data-pull-scope-choice="stack"]').click();
+  await review.locator('[data-pull-layer-all]').click();
   await expect(review).toHaveAttribute('data-pull-scope', 'stack');
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(3);
   await expect(review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]')).toBeVisible({ timeout: 30_000 });
   await expect(review.locator('[data-guide-file-shell="src/charges/client.ts"]')).toHaveCount(0);
   expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/retry/charge-client...retry/backoff');
   await shot(page, '8-whole-stack', ['light']);
-  await review.locator('[data-pull-scope-choice="layer"]').click();
+  await review.locator(`[data-pull-layer-row="${LAYER_413}"]`).click();
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
   expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_413} layer`, `${LAYER_413} stack`]);
   page.off('request', watch);
@@ -1183,7 +1128,7 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   return { context, page };
 }
 
-test('nothing but a hairline between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
+test('the same small gap between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
   const hunk = (at: number) => `@@ -${at},3 +${at},3 @@\n ctx\n-old\n+new\n ctx\n`;
   const file = (path: string, ...ats: number[]) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${ats.map(hunk).join('')}`;
   const patch = [file('one-at-the-top.ts', 1), file('one-further-down.ts', 27), file('two-hunks.ts', 1, 40), file('three-hunks.ts', 10, 40, 80), file('last.ts', 1)].join('');
@@ -1191,88 +1136,76 @@ test('nothing but a hairline between files, whatever separators a file draws: ab
   try {
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell]')).toHaveCount(5);
-    await expect.poll(() => seams(review)).toEqual([1, 1, 1, 1]);
-    await review.getByRole('radio', { name: 'Unified' }).click();
-    await expect.poll(() => seams(review)).toEqual([1, 1, 1, 1]);
+    await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
+    await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
+    await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
   } finally {
     await context.close();
   }
 });
 
 test('Escape closes an open sheet wherever focus is; what used the key keeps it, and Tab out of a sheet closes it', async ({ browser }) => {
-  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF);
+  const { context, page } = await stubbedReview(browser, 1280, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    const rail = review.locator('.ib-rrail');
-    const files = review.locator('[data-pull-review-files-button]');
+    // The sidebar's room, for the diff beside the sheet.
+    await page.keyboard.press('ControlOrMeta+b');
+    await expect(page.locator('.ib-side').getByRole('button', { name: /Reviews/ })).toBeHidden();
     const panel = review.locator('.ib-gpanel');
     const comments = review.locator('.ib-vcomments');
     const esc = () => page.keyboard.press('Escape');
     // Closed, back on its button, the review still open.
-    const closesToButton = async (sheet: Locator, button: Locator) => {
+    const closes = async () => {
       await esc();
-      await expect(sheet).toBeHidden();
-      await expect(button).toBeFocused();
+      await expect(panel).toBeHidden();
+      await expect(comments).toBeFocused();
       await expect(review).toBeVisible();
     };
 
-    // From its own button.
-    await files.click();
-    await files.focus();
-    await closesToButton(rail, files);
+    // From its own button, and from a click on its heading.
     await comments.click();
     await comments.focus();
-    await closesToButton(panel, comments);
-
-    // A click on nothing in the sheet, or on its heading.
-    await files.click();
-    await review.locator('.ib-rv-progress').click();
-    await closesToButton(rail, files);
+    await closes();
     await comments.click();
     await panel.locator('.ib-sheet-h b').click();
-    await closesToButton(panel, comments);
+    await closes();
 
     // A click on the diff beside it leaves the sheet open, and Escape still closes it.
-    await files.click();
-    await page.mouse.click(760, 500);
-    await expect(rail).toBeVisible();
-    await closesToButton(rail, files);
+    const body = (await review.locator('.ib-gbody').boundingBox())!;
+    await comments.click();
+    await page.mouse.click(body.x + 12, 500);
+    await expect(panel).toBeVisible();
+    await closes();
 
-    // A line's composer takes the first Escape, whichever sheet is open.
+    // A line's composer takes the first Escape.
     const line = review.locator('[data-guide-file-shell="src/app.ts"] [data-line-type="change-addition"][data-column-number]').first();
-    await files.click();
-    await page.mouse.move(700, 300);
+    await comments.click();
     await line.evaluate((el) => el.scrollIntoView({ block: 'center' }));
     await line.click({ position: { x: 4, y: 4 } });
     const composer = page.getByPlaceholder('Leave feedback...');
     await expect(composer).toBeFocused();
     await esc();
     await expect(composer).toBeHidden();
-    await expect(rail).toBeVisible();
-    await closesToButton(rail, files);
+    await expect(panel).toBeVisible();
+    await closes();
 
-    // So does the global comment's, on either sheet.
+    // So does the global comment's.
     const addGlobal = review.locator('[data-guide-global-comment-add]');
     const global = page.getByPlaceholder('Add a global comment...');
-    for (const [sheet, button] of [[rail, files], [panel, comments]] as const) {
-      await button.click();
-      await addGlobal.click();
-      await expect(global).toBeFocused();
-      await esc();
-      await expect(global).toBeHidden();
-      // Focus is back on what opened the composer, a frame later.
-      await expect(addGlobal).toBeFocused();
-      await expect(sheet).toBeVisible();
-      await closesToButton(sheet, button);
-    }
+    await comments.click();
+    await addGlobal.click();
+    await expect(global).toBeFocused();
+    await esc();
+    await expect(global).toBeHidden();
+    // Focus is back on what opened the composer, a frame later.
+    await expect(addGlobal).toBeFocused();
+    await expect(panel).toBeVisible();
+    await closes();
 
     // A card's edit takes it too. (Its words are the panel's business, shared with the review app.)
-    await files.click();
     await line.click({ position: { x: 4, y: 4 } });
     await composer.fill('A line comment to edit.');
     await page.getByRole('button', { name: 'Add Comment' }).click();
-    await esc();
-    await expect(rail).toBeHidden();
     await comments.click();
     const card = panel.locator('[data-annotation-id]').first();
     await card.hover();
@@ -1282,35 +1215,56 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
     await esc();
     await expect(edit).toBeHidden();
     await expect(panel).toBeVisible();
-    await closesToButton(panel, comments);
+    await closes();
     // The world's other tests read this PR: its comment goes.
     await comments.click();
     await card.hover();
     await card.getByRole('button', { name: /delete/i }).click();
     await expect(card).toHaveCount(0);
-    await closesToButton(panel, comments);
+    await closes();
 
     // A menu's Escape is the menu's: the decision's other choices over an open sheet.
-    await files.click();
+    await comments.click();
     await page.getByRole('button', { name: 'More decisions' }).click();
     await expect(page.getByRole('menu')).toBeVisible();
     await esc();
     await expect(page.getByRole('menu')).toBeHidden();
-    await expect(rail).toBeVisible();
-    await page.mouse.click(760, 500);
-    await closesToButton(rail, files);
-
-    // Tab past a sheet's last row closes it: focus never lands unseen on what the sheet covered.
-    await files.click();
-    const rows = review.locator('[data-review-files] button, [data-review-files] [role="checkbox"]');
-    await rows.last().focus();
-    await page.keyboard.press('Tab');
-    await expect(rail).toBeHidden();
-    const landed = await page.evaluate(() => document.activeElement?.tagName);
-    expect(landed).not.toBe('BODY');
-    await expect(review).toBeVisible();
+    await expect(panel).toBeVisible();
+    await closes();
   } finally {
     await context.close();
+  }
+
+  // On a phone the rail is the sheet: the same closing, and Tab past its last row closes it.
+  const phone = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
+  try {
+    const review = phone.page.locator('[data-pull-review]');
+    const rail = review.locator('.ib-rrail');
+    const files = review.locator('[data-pull-review-files-button]');
+    const closes = async () => {
+      await phone.page.keyboard.press('Escape');
+      await expect(rail).toBeHidden();
+      await expect(files).toBeFocused();
+      await expect(review).toBeVisible();
+    };
+    await files.click();
+    await files.focus();
+    await closes();
+    await files.click();
+    await review.locator('.ib-prp-fileshead').click();
+    await closes();
+    // Focus never lands unseen on what the sheet covered.
+    await files.click();
+    await review.locator('[data-review-files] [data-review-file]').last().focus();
+    // The row, then its circle, which shows for the focus; then out.
+    await phone.page.keyboard.press('Tab');
+    await expect(review.locator('[data-review-files] [data-review-file]').last().locator('[role="checkbox"]')).toBeFocused();
+    await phone.page.keyboard.press('Tab');
+    await expect(rail).toBeHidden();
+    expect(await phone.page.evaluate(() => document.activeElement?.tagName)).not.toBe('BODY');
+    await expect(review).toBeVisible();
+  } finally {
+    await phone.context.close();
   }
 });
 
@@ -1322,7 +1276,7 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     const railOrder = await paths();
     // Git has README.md first: the tree puts the folder first, and the three files it has no node for come after it.
     expect(railOrder).toEqual(['src/app.ts', 'src/extraordinarily-long-module-file-name-for-the-rail-12.ts', 'a-link', 'aaa.ts', 'docs', 'README.md', 'a-link', 'docs/guide/intro.md', 'docs/index.md']);
-    await expect(review.locator('.ib-rv-progress')).toHaveText('0 of 9 files viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files');
     // A row the tree could not place reads as its full path.
     await expect(review.locator('[data-review-file="docs/guide/intro.md"]')).toContainText('docs/guide/intro.md');
     // The diffs follow the rail, each path drawn once.
@@ -1331,7 +1285,7 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     // Of a symlink turned into a file the viewer draws one half: the new file's.
     await expect(review.locator('[data-guide-file-shell="a-link"]')).toContainText('+1');
 
-    // A long name keeps its end in view, and only a cut one has a tooltip.
+    // A long name keeps its end in view, and the whole of it is in its tip.
     const cutName = await review.locator('[data-review-file^="src/extraordinarily"] .ib-rv-name').evaluate((name) => {
       const range = document.createRange();
       range.selectNodeContents(name);
@@ -1341,8 +1295,9 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     expect(cutName).toEqual({ cut: true, endInView: true });
     await review.locator('[data-review-file^="src/extraordinarily"] .ib-rv-name').hover();
     await expect(page.locator('[data-pn-tooltip]')).toContainText('src/extraordinarily-long-module-file-name-for-the-rail-12.ts');
+    // Any row's tip has what left the row: its path and its +/-.
     await review.locator('[data-review-file="aaa.ts"] .ib-rv-name').hover();
-    await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
+    await expect(page.locator('[data-pn-tooltip]')).toContainText(/aaa\.ts.*\+\d+.*-\d+/);
 
     // A path's two rows differ for a screen reader.
     expect(await review.locator('[data-review-file="a-link"]').evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')))).toEqual(['a-link, added', 'a-link, deleted']);
@@ -1353,47 +1308,35 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     await expect(circle).toHaveAttribute('aria-checked', 'false');
     const scroller = review.locator('.ib-gbody');
     const scrolled = await scroller.evaluate((el) => el.scrollTop);
+    // It shows under the pointer, not before.
+    await expect(circle).toBeHidden();
+    await review.locator('[data-review-file="src/app.ts"]').hover();
     await circle.click();
     await expect(circle).toHaveAttribute('aria-checked', 'true');
-    await expect(review.locator('.ib-rv-progress')).toHaveText('1 of 9 files viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files1 viewed');
     await expect(review.locator('[data-review-file="src/app.ts"]')).toHaveAttribute('aria-label', 'src/app.ts, viewed');
     await expect(header).toHaveAttribute('title', /not viewed/);
     expect(await scroller.evaluate((el) => el.scrollTop)).toBe(scrolled);
 
     // A path with two rows counts twice, so every row can end viewed.
+    await review.locator('[data-review-file="a-link"]').first().hover();
     await review.locator('[data-review-file="a-link"] [role="checkbox"]').first().click();
-    await expect(review.locator('.ib-rv-progress')).toHaveText('3 of 9 files viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files3 viewed');
 
     // A reload keeps them; the header's button takes the tick back off the circle.
     await page.reload();
     await expect(header).toBeVisible({ timeout: 30_000 });
     await expect(circle).toHaveAttribute('aria-checked', 'true');
-    await expect(review.locator('.ib-rv-progress')).toHaveText('3 of 9 files viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files3 viewed');
     await header.click();
     await expect(circle).toHaveAttribute('aria-checked', 'false');
-    await expect(review.locator('.ib-rv-progress')).toHaveText('2 of 9 files viewed');
+    await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files2 viewed');
   } finally {
     await context.close();
   }
 });
 
-test("the covered sidebar's edge never catches the rail: its right side is the rail's, and the page's edge comes back on leaving", async ({ browser }) => {
-  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
-  try {
-    await expect(page.locator('[data-pull-review] .ib-rrail')).toBeVisible();
-    const box = (await page.locator('[data-pull-review] .ib-rrail').boundingBox())!;
-    for (const x of [box.x + box.width - 28, box.x + box.width - 20, box.x + box.width - 12]) {
-      const inRail = await page.evaluate(([px, py]) => !!document.elementFromPoint(px!, py!)?.closest('.ib-rrail'), [x, box.y + box.height / 2]);
-      expect(inRail).toBe(true);
-    }
-    await page.goto(new URL(page.url()).origin);
-    await expect(page.locator('.ib-edge-pos')).toHaveCSS('display', 'flex');
-  } finally {
-    await context.close();
-  }
-});
-
-test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; under the rail\'s fold the Files sheet opens the same tree', async ({ browser }) => {
+test('the sheets cover the diff and nothing else, at 390, 800 and 1100; on a phone the Files sheet opens the same tree', async ({ browser }) => {
   for (const width of [1100, 800, 390]) {
     const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF);
     try {
@@ -1405,8 +1348,8 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
       const body = (await review.locator('.ib-gbody').boundingBox())!;
       expect(Math.abs(sheet.y - body.y)).toBeLessThanOrEqual(1);
       expect(Math.abs(sheet.y + sheet.height - (body.y + body.height))).toBeLessThanOrEqual(1);
-      // Whatever sits on the strip and the foot is what a click there reaches.
-      const uncovered = await review.locator('.ib-prr-strip :is(button, input), .ib-prr-foot :is(button, a)').evaluateAll((controls) =>
+      // Whatever sits in the bar is what a click there reaches.
+      const uncovered = await review.locator('.ib-vhead :is(button, input, a)').evaluateAll((controls) =>
         controls.filter((control) => {
           const box = control.getBoundingClientRect();
           if (!box.width) return false;
@@ -1420,13 +1363,12 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
     }
   }
 
-  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF);
+  const { context, page } = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
     const rail = review.locator('.ib-rrail');
     const button = review.locator('[data-pull-review-files-button]');
     await expect(rail).toBeHidden();
-    await expect(review.locator('select.ib-rv-jump')).toHaveCount(0);
     await expect(button).toHaveAttribute('aria-label', 'Files, 9');
     await button.click();
     await expect(rail).toBeVisible();
@@ -1442,13 +1384,13 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
     const sheet = (await rail.boundingBox())!;
     const body = (await review.locator('.ib-gbody').boundingBox())!;
     expect(Math.abs(sheet.y - body.y)).toBeLessThanOrEqual(1);
-    expect(sheet.width).toBeLessThanOrEqual(280);
     // One sheet at a time, from either side.
     await review.locator('.ib-vcomments').click();
     await expect(rail).toBeHidden();
     await button.click();
     await expect(review.locator('.ib-gpanel')).toBeHidden();
     // The circle leaves the sheet open; picking a file closes it, shows the file and gives focus back to the button.
+    await review.locator('[data-review-file="src/app.ts"]').hover();
     await review.locator('[data-review-file="src/app.ts"] [role="checkbox"]').click();
     await expect(rail).toBeVisible();
     await review.locator('[data-review-file="docs/index.md"]').click();
@@ -1468,128 +1410,108 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
     await expect(panel).toBeHidden();
     await expect(comments).toBeFocused();
 
-    // From a review 768 px wide the rail is a column again; at 728 it folds. Focus crosses with it, never to the page.
-    await button.focus();
+    // Out of the phone the rail is a column again, with focus on it, never on the page; an open sheet does not come
+    // back on the way back in.
+    await button.click();
+    await expect(rail).toBeVisible();
     await page.setViewportSize({ width: 1000, height: 900 });
     await expect(button).toHaveCount(0);
     await expect(rail).toBeVisible();
     await expect(review.locator('[data-review-files] button').first()).toBeFocused();
-    await page.setViewportSize({ width: 960, height: 900 });
+    await page.setViewportSize({ width: 390, height: 844 });
     await expect(rail).toBeHidden();
-    await expect(button).toBeFocused();
-
-    // An open sheet does not come back after the window has left the fold, to either side.
-    await button.click();
-    await expect(rail).toBeVisible();
-    await page.setViewportSize({ width: 1000, height: 900 });
-    await expect(button).toHaveCount(0);
-    await page.setViewportSize({ width: 800, height: 900 });
     await expect(button).toHaveAttribute('aria-expanded', 'false');
-    await expect(rail).toBeHidden();
-    await button.click();
-    await expect(rail).toBeVisible();
-    await page.setViewportSize({ width: 600, height: 900 });
-    await expect(review.locator('select.ib-rv-jump')).toBeVisible();
-    await page.setViewportSize({ width: 800, height: 900 });
-    await expect(button).toHaveAttribute('aria-expanded', 'false');
-    await expect(rail).toBeHidden();
   } finally {
     await context.close();
   }
 });
 
-test('the layer on screen is on the strip from the first draw: on opening, on Next layer, after a resize', async ({ browser }) => {
-  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF, {}, 'layer', STACK_ID);
+test('a stack in the rail: the layer on screen says so, and All layers is not pressed on a layer', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 1280, COLLIDING_PATHS_DIFF, {}, 'layer', STACK_ID);
   try {
     const review = page.locator('[data-pull-review]');
-    // Measured after the controls have come onto the row, which is what takes the layers' room.
-    const whole = () =>
-      review.evaluate((root) => {
-        const nav = root.querySelector('.ib-prr-layers')!;
-        const box = nav.getBoundingClientRect();
-        const tab = nav.querySelector('[aria-current="step"]')!.getBoundingClientRect();
-        return { over: nav.scrollWidth > nav.clientWidth, inside: tab.left >= box.left - 1 && tab.right <= box.right + 1 };
-      });
-    await expect(review.locator('[data-pull-controls] [data-diff-style-switch]')).toBeVisible();
-    await expect.poll(whole).toEqual({ over: true, inside: true });
-    for (const width of [1000, 1600, 1050, 800]) {
-      await page.setViewportSize({ width, height: 900 });
-      await expect.poll(async () => (await whole()).inside, `at ${width}`).toBe(true);
-    }
-    // Down the stack by its tabs, and back up by Next layer.
-    await review.locator('.ib-prr-layer:not(:disabled)').first().click();
-    await expect.poll(async () => (await whole()).inside).toBe(true);
-    await review.locator('.ib-prr-foot').getByRole('button', { name: /Next layer/ }).click();
-    await expect.poll(async () => (await whole()).inside).toBe(true);
+    const here = review.locator('[data-pull-layer-row][aria-current="step"]');
+    await expect(here).toBeVisible();
+    await expect(here).toContainText('This layer');
+    await expect(review.locator('[data-pull-layer-all]')).toHaveAttribute('aria-pressed', 'false');
   } finally {
     await context.close();
   }
 });
 
-test('the sidebar has its fill only beside this page; a short foot says where the review goes', async ({ browser }) => {
-  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF);
+test('the sidebar toggle: first in the bar, ⌘B and the button both hide and show it, and the page takes the room', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    const fill = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).backgroundColor);
-    const at = review.locator('.ib-prr-where-at');
-    const to = review.locator('.ib-prr-where-to');
-    await expect(at).toBeHidden();
-    await expect(to).toBeVisible();
-    expect(await fill('.ib-side')).not.toBe(await fill('.pn-inbox'));
-    await page.setViewportSize({ width: 1280, height: 900 });
-    await expect(at).toBeVisible();
-    await expect.poll(() => fill('.ib-side')).toBe(await fill('.pn-inbox'));
+    const trigger = review.locator('.ib-vhead [data-sidebar="trigger"]');
+    const left = async () => (await review.boundingBox())!.x;
+    await expect(review.locator('.ib-vhead > :first-child')).toHaveAttribute('data-sidebar', 'trigger');
+    // Open: the page sits beside the sidebar, whose rows a click reaches. Nothing lies under the page.
+    const reviews = page.locator('.ib-side').getByRole('button', { name: /Reviews/ }).first();
+    await expect(reviews).toBeVisible();
+    const row = (await reviews.boundingBox())!;
+    expect(await left()).toBeGreaterThanOrEqual(row.x + row.width);
+    expect(await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.ib-side'), [row.x + 8, row.y + 8])).toBe(true);
+    const beside = await left();
+    // The key hides it and the page takes the room; the rail stays.
+    await page.keyboard.press('ControlOrMeta+b');
+    await expect.poll(left).toBeLessThan(beside - 100);
+    await expect(review.locator('.ib-rrail')).toBeVisible();
+    await expect(reviews).toBeHidden();
+    // The button brings it back.
+    await trigger.click();
+    await expect.poll(left).toBe(beside);
+    await expect(reviews).toBeVisible();
+    // A narrow window keeps the rail and the sidebar; the toggle is how to give the code the room.
     await page.setViewportSize({ width: 800, height: 900 });
-    await expect.poll(() => fill('.ib-side')).not.toBe(await fill('.pn-inbox'));
-    // Back on the list the sidebar is as it is everywhere else.
-    await review.locator('.ib-back').click();
-    await expect(review).toHaveCount(0);
-    await expect.poll(() => fill('.ib-side')).toBe(await fill('.pn-inbox'));
+    await expect(review.locator('.ib-rrail')).toBeVisible();
+    await expect(reviews).toBeVisible();
+    await expect(review.locator('[data-pull-review-files-button]')).toHaveCount(0);
+    const narrow = (await review.locator('.ib-gbody').boundingBox())!.width;
+    await trigger.click();
+    await expect.poll(async () => (await review.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(narrow + 100);
   } finally {
     await context.close();
   }
 });
 
-test('the controls\' row and the foot on long words: layers fade and take the wheel, the note and where the review goes keep their words, the rail follows Text size', async ({ browser }) => {
-  // A stack's whole line with a long branch name.
-  const head = 'feature/an-extraordinarily-long-branch-name-for-a-layer-that-goes-on-and-on-and-on-and-on-and-on-and-on';
-  const stacked = await stubbedReview(browser, 1280, COLLIDING_PATHS_DIFF, { base: 'main', head }, 'stack', LOCALE);
+test('the rail\'s edge drags, within its limits, and keeps its width over a reload', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
   try {
-    const review = stacked.page.locator('[data-pull-review]');
-    // The rail reads the window's type ramp.
-    await review.evaluate((section) => section.style.setProperty('--ib-fs-13', '19px'));
-    await expect(review.locator('[data-review-file="aaa.ts"] .ib-rv-name')).toHaveCSS('font-size', '19px');
-    await review.evaluate((section) => section.style.removeProperty('--ib-fs-13'));
-    // The branch line gives way before where the review goes, and its tooltip has it all.
-    const where = review.locator('.ib-prr-where');
-    const to = where.locator('.ib-prr-where-to');
-    await expect(to).toContainText(/your (review|verdict) goes/);
-    expect(await to.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-    expect(await where.locator('.ib-prr-where-at').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    await where.hover();
-    await expect(stacked.page.locator('[data-pn-tooltip]')).toContainText(head);
+    const review = page.locator('[data-pull-review]');
+    const rail = review.locator('.ib-rrail');
+    const width = async () => (await rail.boundingBox())!.width;
+    const before = await width();
+    const drag = async (by: number) => {
+      const handle = (await review.locator('[data-pull-rail-handle]').boundingBox())!;
+      await page.mouse.move(handle.x + handle.width / 2, handle.y + 300);
+      await page.mouse.down();
+      await page.mouse.move(handle.x + handle.width / 2 + by, handle.y + 300, { steps: 4 });
+      await page.mouse.up();
+    };
+    await drag(60);
+    await expect.poll(width).toBe(before + 60);
+    await page.reload();
+    await expect(rail).toBeVisible({ timeout: 30_000 });
+    await expect.poll(width).toBe(before + 60);
+    // Never past its limits, and the diff keeps the rest.
+    await drag(2000);
+    await expect.poll(width).toBe(480);
+    await drag(-2000);
+    await expect.poll(width).toBe(180);
   } finally {
-    await stacked.context.close();
+    await context.close();
   }
+});
 
+test('the rail follows Text size', async ({ browser }) => {
   const { context, page } = await stubbedReview(browser, 1280, COLLIDING_PATHS_DIFF);
   try {
     const review = page.locator('[data-pull-review]');
-    // A stack too long for the row: its steps cloned, as many as a deep stack has.
-    const layers = review.locator('.ib-prr-layers');
-    await layers.evaluate((nav) => {
-      const step = nav.querySelector('.ib-prr-lstep')!;
-      for (let i = 0; i < 14; i++) nav.append(step.cloneNode(true));
-    });
-    await expect(layers).toHaveAttribute('data-over', '');
-    expect(await layers.evaluate((nav) => getComputedStyle(nav).maskImage)).toContain('linear-gradient');
-    // The note keeps its words beside them.
-    const note = review.locator('[data-pull-review-readonly]');
-    expect(await note.evaluate((el) => el.scrollWidth <= el.clientWidth && el.clientWidth > 0)).toBe(true);
-    // A mouse wheel reaches the layers past the edge.
-    await layers.hover();
-    await page.mouse.wheel(0, 200);
-    await expect.poll(() => layers.evaluate((nav) => nav.scrollLeft)).toBeGreaterThan(0);
+    // The rail reads the window's type ramp.
+    await review.evaluate((section) => section.style.setProperty('--ib-fs-12-5', '19px'));
+    await expect(review.locator('[data-review-file="aaa.ts"] .ib-rv-name')).toHaveCSS('font-size', '19px');
+    await review.evaluate((section) => section.style.removeProperty('--ib-fs-12-5'));
   } finally {
     await context.close();
   }
@@ -1615,35 +1537,27 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, while the rail is out.
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
-    const onRow = async (width: number) => {
+    // The bar has it at every width but a phone's, beside the title.
+    for (const width of [800, 1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
-      // Read in one frame, once the resize's folds have landed: the row moves when the file rail folds.
-      await expect
-        .poll(() =>
-          review.evaluate((root) => {
-            const words = root.querySelector('[data-pull-review-readonly]')!.getBoundingClientRect();
-            const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
-            return Math.abs(words.y + words.height / 2 - (add.y + add.height / 2)) < 3 && words.right < add.left;
-          }),
-        )
-        .toBe(true);
-    };
-    for (const width of [1280, 1440]) await onRow(width);
-    // Where the row is short the words lead the foot, nothing above the files.
-    for (const width of [1040, 800]) {
-      await page.setViewportSize({ width, height: 900 });
-      await expect(review.locator('.ib-prr-foot [data-pull-review-readonly]')).toBeVisible();
-      await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCount(0);
+      await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(review.locator('.ib-prr-strip [data-pull-review-readonly]')).toBeVisible();
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
       const before = node.textContent;
       node.textContent = `${'a-very-long-name-'.repeat(20)}'s pull request`;
       return before;
     });
-    for (const width of [1280, 1440]) await onRow(width);
+    for (const width of [800, 1280, 1440]) {
+      await page.setViewportSize({ width, height: 900 });
+      const out = await review.evaluate((root) => {
+        const words = root.querySelector('[data-pull-review-readonly]')!.getBoundingClientRect();
+        const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
+        return words.right <= add.left;
+      });
+      expect([width, out]).toEqual([width, true]);
+    }
     await note.evaluate((node, text) => (node.textContent = text), words);
 
     // From 1500 wide the comments are a column beside the diff, with neither the card's fill nor the diff's; folded, a card.
@@ -1724,8 +1638,8 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     await picker.locator('[data-pulls-ask-option="custom"]').click();
     await picker.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
     await shot(page, 'phone-5-ask-custom');
-    // Every control in the review's strip and foot is a 44 px target or more on a phone.
-    for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
+    // Every control in the row under the review's bar is a 44 px target or more on a phone (its 30 px plus its hit area).
+    for (const box of await review.locator('.ib-prp-row2 button').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height + 14))) expect(box).toBeGreaterThanOrEqual(36);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
     expect(width).toBeLessThanOrEqual(390);
 
@@ -1779,11 +1693,14 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   // The person's own PR with its agent: both endings, the agent's first; GitHub on a pick.
   const choice = review.locator('[data-review-destination]');
   await expect(choice).toHaveAttribute('data-review-destination', 'agent');
-  await expect(choice).toContainText('GitHub');
-  await expect(choice).toContainText('Claude Code');
+  // Marks, no words: each named for a screen reader and in its tip.
+  await expect(choice.getByRole('radio', { name: 'Post to the PR on GitHub' })).toHaveCount(1);
+  await expect(choice.getByRole('radio', { name: 'Send to Claude Code' })).toHaveCount(1);
+  await review.locator('[data-review-destination-choice="forge"]').hover();
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('Post to the PR on GitHub');
   await review.locator('[data-review-destination-choice="forge"]').click();
   await expect(review.locator('[data-review-posts="github"]')).toBeVisible();
-  await expect(review.locator('[data-pull-review-foot]')).toContainText('your review goes on the GitHub PR');
+  await expect(review.locator('[data-review-destination-choice="forge"]')).toHaveAttribute('data-on', '');
   await shot(page, '10-ending-choice');
   {
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
