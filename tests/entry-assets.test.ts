@@ -167,9 +167,9 @@ describe('review entry assets', () => {
 
   // The Inbox window's guided review (PLAN step 5) reaches the guide chain and
   // review-editor's diff renderer through GuidePane's one dynamic import of
-  // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). The single-file
-  // build inlines that chunk, so what this keeps waiting for Open is the
-  // mount (the diff render, the highlighter), not the bytes. A static import
+  // `#guide-reader` (packages/inbox/guide/GuideReader.tsx). That import is
+  // where the window's build splits (build/pack-inbox.ts), so the reader's
+  // bytes load on the first Open, never at page load (#2593). A static import
   // elsewhere would make the window depend on the reader directly, and that
   // boundary would be gone.
   // The surface a phone hosts (PLAN step S1) has no network at all: every
@@ -201,13 +201,14 @@ describe('review entry assets', () => {
     const readers = ['packages/inbox/guide/GuideReader.tsx', 'packages/inbox/guide/SurfaceGuideReader.tsx', 'packages/inbox/shape/ShapeBoard.tsx', 'packages/inbox/guide/PlatformPost.tsx'];
     const eager = walk('packages/inbox').filter((path) => !readers.includes(path) && heavy.test(read(path)));
     expect(eager).toEqual([]);
-    expect(read('packages/inbox/components/GuidePane.tsx')).toContain("lazy(() => import('#guide-reader'))");
+    // The window's parts (lazyParts.tsx): fetched in idle time, each through its dynamic import only.
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#guide-reader'))");
     // The surface's reader (one section per screen) and its diagram engine wait the same way.
     expect(read('packages/inbox/surface/SurfaceGuide.tsx')).toContain("lazy(() => import('#surface-guide-reader'))");
     expect(read('packages/inbox/surface/SurfaceDocument.tsx')).toContain("lazy(() => import('./SurfaceDiagram'))");
-    expect(read('packages/inbox/shape/ShapeParts.tsx')).toContain("lazy(() => import('#shape-board'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#shape-board'))");
     // The posting dialog waits for the review's ending, and nothing else imports it.
-    expect(read('packages/inbox/pulls/PostEnding.tsx')).toContain("lazy(() => import('#platform-post'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#platform-post'))");
     const post = /^import\s+(?!type\b)[^;]*from\s+['"](?:#platform-post|[^'"]*guide\/PlatformPost(?:\.tsx)?)['"]/m;
     expect(walk('packages/inbox').filter((path) => post.test(read(path)))).toEqual([]);
     // The board itself (ShapeSurface, through the shape index) reaches the window only through #shape-board.
@@ -230,7 +231,7 @@ describe('review entry assets', () => {
       );
     const eager = [...walk('packages/inbox'), ...walk('apps/inbox')].filter((path) => palette.test(read(path)));
     expect(eager).toEqual([]);
-    expect(read('packages/inbox/components/SearchHost.tsx')).toContain("lazy(() => import('#search-palette'))");
+    expect(read('packages/inbox/lazyParts.tsx')).toContain("lazyPart(() => import('#search-palette'))");
     expect(read('packages/inbox/package.json')).toContain('"#search-palette": "./search/SearchPalette.tsx"');
   });
 
@@ -405,16 +406,83 @@ describe('review entry assets', () => {
     });
   }
 
-  // The Inbox window, the phone's surface and the Shape page stay one self-contained page
-  // each (vite-plugin-singlefile): their servers serve them whole, with no
-  // asset route behind them.
-  for (const path of ['apps/hook/dist/inbox.html', 'apps/hook/dist/surface.html', 'apps/hook/dist/shape.html']) {
+  // The phone's surface and the Shape page stay one self-contained page each
+  // (vite-plugin-singlefile): a native shell loads the surface with no server
+  // and no network behind it, and the Shape page's server serves it whole, with
+  // no asset route behind it.
+  for (const path of ['apps/hook/dist/surface.html', 'apps/hook/dist/shape.html']) {
     test.skipIf(!existsSync(resolve(root, path)))(`${path} stays single-file`, () => {
       const html = readFileSync(resolve(root, path), 'utf8');
       const facts = { path, packed: html.includes(PACKED_ASSETS_MARKER), linksAssets: /(?:src|href)="\/assets\//.test(html) };
       expect(facts).toEqual({ path, packed: false, linksAssets: false });
     });
   }
+
+  // The Inbox window (#2593) is one file whose scripts are packed behind the
+  // page (build/pack-inbox.ts) and served by the Inbox. Inlined, every lazy
+  // part was parsed and run at page load and held for the tab's life (~150 MB
+  // for an empty Inbox). Going back to vite-plugin-singlefile or
+  // `inlineDynamicImports`, a static import of a lazy part, or a non-ASCII
+  // character in a script (V8 then keeps that script at two bytes per
+  // character) builds and passes everything else, so this reads the ARTIFACT.
+  const inboxWindow = 'apps/hook/dist/inbox.html';
+  /** One marker per part that must wait for first use, and so must be in the pack but not up front. */
+  const INBOX_LAZY_MARKERS: Record<string, string> = {
+    'guide viewer (#guide-reader)': 'data-guide-code-view-mounted',
+    'Shiki TypeScript grammar': '"scopeName":"source.ts"',
+    Mermaid: 'flowchart-v2',
+    Graphviz: 'viz_set_y_invert',
+    KaTeX: 'katex-display',
+  };
+  test.skipIf(!existsSync(resolve(root, inboxWindow)))(`${inboxWindow} loads its entry script up front and the review, diagrams and grammars on first use`, async () => {
+    const bundle = readFileSync(resolve(root, inboxWindow), 'utf8');
+    const app = openPackedApp(bundle);
+    const markerAt = bundle.indexOf(PACKED_ASSETS_MARKER);
+    expect(markerAt).toBeGreaterThan(0);
+    const indexAt = markerAt + PACKED_ASSETS_MARKER.length;
+    const packed = Object.keys(JSON.parse(bundle.slice(indexAt, bundle.indexOf('\n', indexAt))) as Record<string, unknown>);
+    const text = async (asset: string) => {
+      const answer = await app.answer(asset, 'GET', null, false);
+      expect({ asset, status: answer.status }).toEqual({ asset, status: 200 });
+      return answer.body.toString();
+    };
+    // Up front: the page and what it links (its entry script, any module preloads), with the static imports they make.
+    const upFront = new Map<string, string>();
+    const load = async (asset: string): Promise<void> => {
+      if (upFront.has(asset)) return;
+      const code = await text(asset);
+      upFront.set(asset, code);
+      for (const entry of new Bun.Transpiler({ loader: 'js' }).scanImports(code)) {
+        if (entry.kind === 'import-statement') await load(new URL(entry.path, `http://inbox${asset}`).pathname);
+      }
+    };
+    for (const m of app.html.matchAll(/(?:src|href)="(\/assets\/[^"]+)"/g)) await load(m[1]!);
+    const all = new Map<string, string>();
+    for (const asset of packed) all.set(asset, await text(asset));
+    const has = (codes: Iterable<string>, marker: string) => [...codes].some((code) => code.includes(marker));
+    const upFrontBytes = app.html.length + [...upFront.values()].reduce((n, code) => n + code.length, 0);
+    const facts = {
+      // The stylesheet stays in the page, so it paints as the single-file page did; only scripts are packed.
+      stylesheetInline: app.html.includes('<style') && !/<link rel="stylesheet"/.test(app.html),
+      onlyScriptsPacked: packed.every((asset) => asset.endsWith('.js')),
+      entryScripts: [...app.html.matchAll(/<script type="module"[^>]*\ssrc="\/assets\//g)].length,
+      preloadPlaceholder: bundle.includes('__VITE_PRELOAD__'),
+      lazyPartsPacked: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => !has(all.values(), marker)).map(([part]) => part),
+      lazyPartsUpFront: Object.entries(INBOX_LAZY_MARKERS).filter(([, marker]) => has(upFront.values(), marker)).map(([part]) => part),
+      nonAsciiScripts: [...all].filter(([, code]) => /[^\x00-\x7f]/.test(code)).map(([asset]) => asset),
+      upFrontUnderAThird: upFrontBytes / bundle.length < 1 / 3,
+    };
+    expect(facts).toEqual({
+      stylesheetInline: true,
+      onlyScriptsPacked: true,
+      entryScripts: 1,
+      preloadPlaceholder: false,
+      lazyPartsPacked: [],
+      lazyPartsUpFront: [],
+      nonAsciiScripts: [],
+      upFrontUnderAThird: true,
+    });
+  });
 });
 
 describe('marketing embeds', () => {

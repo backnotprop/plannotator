@@ -444,7 +444,7 @@ describe("the device door, on the binary", () => {
 
   test("7.14 to 7.18: attachments, a view, an HTML asset, an annotation saved and removed", async () => {
     const listed = (await (await door(`threads/${threadId}/attachments`)).json()) as Json;
-    expect(Object.keys(listed).sort()).toEqual(["annotations", "attachments", "inline_images", "serverSession"]);
+    expect(Object.keys(listed).sort()).toEqual(["annotations", "attachments", "earlier_annotations", "inline_images", "serverSession"]);
     expect(listed.attachments.map((a: Json) => a.name).sort()).toEqual(["retry-plan.md", "ticket.html"]);
     const md = listed.attachments.find((a: Json) => a.name === "retry-plan.md");
     const html = listed.attachments.find((a: Json) => a.name === "ticket.html");

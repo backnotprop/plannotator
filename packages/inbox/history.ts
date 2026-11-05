@@ -120,6 +120,46 @@ export function backBy(steps: number, history: HistoryLike = window.history, the
   return true;
 }
 
+/** How many notification clicks this page has signalled: the value `click=` carries. */
+let clickSignals = 0;
+
+/**
+ * The sign every notification click leaves for a desktop app that wraps this
+ * page. Its window may be hidden, `window.focus()` does not move it, and the
+ * click may route nowhere (the thread is already showing), so the app watches
+ * for this: the address gains `click=<n>` and at once returns to exactly what
+ * it was, in one task. `history.replaceState` makes each step a same-document
+ * navigation (Electron's `did-navigate-in-page`) with no history entry, no
+ * hashchange and no popstate, so no route read ever sees the value, and the
+ * entry keeps its state. `location.replace` would fire both events and drop the
+ * state (a phone's Back, `ibFrom`). See inbox-notifications-and-agents.md: this
+ * looks removable, and is not.
+ */
+export function signalNotificationClick(
+  history: Pick<History, 'state' | 'replaceState'> = window.history,
+  location: Pick<Location, 'href' | 'hash'> = window.location,
+): void {
+  const { href, hash } = location;
+  const { state } = history;
+  clickSignals += 1;
+  history.replaceState(state, '', hash ? `${hash}&click=${clickSignals}` : `#click=${clickSignals}`);
+  history.replaceState(state, '', href);
+}
+
+/**
+ * A hash without a `click=` value. The address never rests on one, but the
+ * browser's own history keeps it, so one can come back from the address bar's
+ * suggestions.
+ */
+export function withoutClickSignal(hash: string): string {
+  const rest = hash
+    .replace(/^#/, '')
+    .split('&')
+    .filter((part) => !/^click=\d+$/.test(part))
+    .join('&');
+  return rest ? `#${rest}` : '';
+}
+
 /** For tests: the traversal landed (what the popstate listener does). */
 export function backLanded(): void {
   settle();
