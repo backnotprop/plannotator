@@ -1636,8 +1636,8 @@ function Inbox() {
   const shapeOn = settings?.shape?.on === true && settings.guest !== true;
   const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
   const shapeHost = useMemo(
-    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
-    [shapes.subscribe, settings?.mcp_command],
+    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null), openIn: settings?.code_review?.on === true }),
+    [shapes.subscribe, settings?.mcp_command, settings?.code_review?.on],
   );
   // A `#shapes` link while Shape is off (or never on): the list, in its place.
   useEffect(() => {
@@ -4484,6 +4484,18 @@ function Inbox() {
     if (onReviews && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [onReviews, guestPage]);
+  // Code review turned off (from another window, say): nothing starts a review from here, and the box says why it went.
+  // Its words stay in memory for when it's back.
+  const reviewBoxOpen = !!compose?.review;
+  useEffect(() => {
+    if (settings === null || pullsShown) return;
+    if (reviewBoxOpen) {
+      closeCompose();
+      showToast({ icon: 'warn', lead: 'Code review is off', detail: 'no review was started', wrap: true });
+    }
+    if (route.page === 'reviews' && route.new) writeRoute({ ...route, new: false }, { replace: true });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [settings === null, pullsShown, reviewBoxOpen, route.page, route.new]);
   // `#reviews&new`: the box opens once, over the page, and the address goes back to the page (Back and a reload do not reopen it).
   useEffect(() => {
     if (route.page !== 'reviews' || !route.new || !pullsShown) return;
@@ -4982,11 +4994,14 @@ function Inbox() {
   const awayWait = openWaits && (((!!threadAway || !!threadLoad?.waiting) && threadLoad?.state === 'failed') || threadLoad?.state === 'refused');
   // The screen on top, which a phone shows alone (inbox.css): the list, a thread, a file.
   // A thread is on top once it has loaded, so a phone keeps the list until there is a thread to show (or its machine is away).
+  // A link into a thread in Reviews waits for the rows: drawn before them, the whole thread would show and then fold.
+  const reviewRowsPending = !!route.reviews && ((settings === null && !settingsReadFailed) || (pullsShown && !pulls.reviews && !pulls.error));
+  const threadReady = !!thread && thread.thread_id === route.thread && !reviewRowsPending;
   const view =
     route.page === 'inbox'
       ? fileOpen
         ? 'file'
-        : route.thread && (thread?.thread_id === route.thread || awayWait)
+        : route.thread && (threadReady || awayWait)
           ? 'thread'
           : 'list'
       : route.page;
@@ -5218,8 +5233,6 @@ function Inbox() {
   );
 
   // A thread opened from Reviews starts at its review (`reviewViewOf`); it is the same thread, and links back to the Inbox's view of it.
-  // A link into a thread in Reviews waits for the rows: drawn before them, the whole thread would show and then fold.
-  const reviewRowsPending = !!route.reviews && ((settings === null && !settingsReadFailed) || (pullsShown && !pulls.reviews && !pulls.error));
   const reviewRow = route.reviews && route.thread && pullsShown ? (pulls.reviews?.rows.find((row) => row.reviewed && row.thread_id === route.thread) ?? null) : null;
   const reviewView =
     reviewRow && thread && thread.thread_id === route.thread
@@ -5463,6 +5476,7 @@ function Inbox() {
         scope={route.scope ?? 'layer'}
         onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
         onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onPosted={pullsReloadRows}
         onSent={() => {
           close({ ...route, layer: null, scope: 'layer' });
           showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
@@ -5623,7 +5637,7 @@ function Inbox() {
         )}
         {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
             and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
-        {route.thread && !(thread && thread.thread_id === route.thread) && ((!phone && !stack.thread) || awayWait) && (
+        {route.thread && !threadReady && ((!phone && !stack.thread) || awayWait) && (
           <ThreadWait
             key={route.thread}
             load={threadLoad?.threadId === route.thread ? threadLoad : null}
@@ -5636,7 +5650,7 @@ function Inbox() {
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
           />
         )}
-        {route.thread && thread && thread.thread_id === route.thread && !reviewRowsPending && (
+        {route.thread && thread && threadReady && (
           <ThreadPane
             notice={
               <>
@@ -6224,6 +6238,7 @@ function Inbox() {
           home={settings?.home ?? null}
           board={boardEnabled === true}
           reviewPulls={compose.review ? reviewPulls : undefined}
+          reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.every((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           onSent={(sent) => {
             rememberSent(sent.session);
@@ -6306,12 +6321,14 @@ function Inbox() {
             }}
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
+            onPosted={pullsReloadRows}
             onAsk={ask.askWith}
           />
         ) : (
           <GuidePane
             thread={thread}
             message={guideMessage}
+            codeReview={settings?.code_review?.on === true}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
           />

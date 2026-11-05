@@ -102,10 +102,15 @@ describe("inboxReviewMove", () => {
     expect(inboxReviewMove(review({ thread_id: "t", ...changes("t"), answered: chat }))).toEqual({ move: "agents", reason: "feedback_sent" });
   });
 
-  test("a teammate's PR assigned to the person leaves On you once they've given a verdict, and a request still holds it", () => {
+  test("a teammate's PR assigned to the person leaves On you once they've answered or posted, and a request still holds it", () => {
     const pull = pr({ number: 412, mine: false, assigned: true } as never);
+    const words = { answered: { message_id: "m", at: "2026-11-04T11:00:00.000Z" } };
     expect(inboxReviewMove(review({ thread_id: "t" }), [pull])).toEqual({ move: "on_you", reason: "review_ready" });
-    expect(inboxReviewMove(review({ thread_id: "t", answered: { message_id: "m", at: "2026-11-04T11:00:00.000Z" } }), [pull])).toEqual({ move: "on_you", reason: "assigned" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...words }), [pull])).toEqual({ move: "waiting", reason: "others" });
+    expect(inboxReviewMove(review({ thread_id: "t" }), [pull], true)).toEqual({ move: "waiting", reason: "others" });
+    expect(inboxReviewMove(review({ thread_id: "t" }), [{ ...pull, requested: true }], true)).toEqual({ move: "on_you", reason: "requested" });
+    // The person's own PR still takes their verdict here: a post on it answers nothing.
+    expect(inboxReviewMove(review({ thread_id: "t" }), [pr({ number: 9 })], true)).toEqual({ move: "on_you", reason: "review_ready" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
     expect(inboxReviewMove(review({ thread_id: "t", ...changes("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
     expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [{ ...pull, requested: true }])).toEqual({ move: "on_you", reason: "requested" });
@@ -302,6 +307,36 @@ describe("a teammate's PR assigned to the person", () => {
     expect(rows({ ...assigned, requested: true }).map((r) => r.reason)).toEqual(["requested"]);
     expect(rows({ ...assigned, assigned: false }).map((r) => r.move)).toEqual(["not_reviewed"]);
   });
+
+  test("a posted review answers the reviews before it, not a later one; with no thread it clears the assignment, never a request", () => {
+    const pull = pr({ number: 1, mine: false, assigned: true });
+    const stacks = inboxPullStacks([pull]);
+    const link = { via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent: null, last: null, guide: null } as InboxPullLink;
+    const threaded = (at: string) => inboxReviewRows({ threads: [review({ thread_id: "t", reviewed_at: "2026-11-04T10:00:00.000Z" })], stacks, links: { [pull.key]: link }, pulls: [pull], posted: new Map([[pull.key, { at, head: null }]]) })[0]!;
+    expect(threaded("2026-11-04T11:00:00.000Z").move).toBe("waiting");
+    expect(threaded("2026-11-04T09:00:00.000Z")).toMatchObject({ move: "on_you", reason: "review_ready" });
+    const bare = (p: InboxPull) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([p]), links: {}, pulls: [p], posted: new Map([[p.key, { at: "2026-11-04T11:00:00.000Z", head: null }]]) })[0]!;
+    expect(bare(pull)).toMatchObject({ reviewed: false, move: "waiting", reason: "others" });
+    expect(bare({ ...pull, requested: true })).toMatchObject({ move: "on_you", reason: "requested" });
+  });
+
+  test("a thread on two of them leaves On you only once both are posted", () => {
+    const one = pr({ number: 1, mine: false, assigned: true });
+    const two = pr({ number: 2, mine: false, assigned: true, head: "other" });
+    const link = { via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent: null, last: null, guide: null } as InboxPullLink;
+    const at = { at: "2026-11-04T11:00:00.000Z", head: null };
+    const rowOf = (posted: [string, typeof at][]) => inboxReviewRows({ threads: [review({ thread_id: "t", reviewed_at: "2026-11-04T10:00:00.000Z" })], stacks: inboxPullStacks([one, two]), links: { [one.key]: link, [two.key]: link }, pulls: [one, two], posted: new Map(posted) }).find((row) => row.id === "t")!;
+    expect(rowOf([[one.key, at]])).toMatchObject({ move: "on_you", reason: "review_ready" });
+    expect(rowOf([[one.key, at], [two.key, at]])).toMatchObject({ move: "waiting" });
+  });
+
+  test("with no thread, a push past the posted review puts it back on the person; a record with no head still counts", () => {
+    const pull = pr({ number: 1, mine: false, assigned: true, head_sha: "new" });
+    const rowOf = (head: string | null) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: {}, pulls: [pull], posted: new Map([[pull.key, { at: "2026-11-04T11:00:00.000Z", head }]]) })[0]!;
+    expect(rowOf("old")).toMatchObject({ move: "on_you", reason: "assigned" });
+    expect(rowOf("new")).toMatchObject({ move: "waiting", reason: "others" });
+    expect(rowOf(null)).toMatchObject({ move: "waiting", reason: "others" });
+  });
 });
 
 describe("landed PRs", () => {
@@ -362,18 +397,17 @@ describe("landed PRs", () => {
     expect(inboxReviewLandingChanges({ threads, pulls: [reopened], links, landed: first.record }).forget).toEqual([pull.key]);
   });
 
-  test("Curating only while someone can: an ended agent or a closed thread hands the PR back to its own row, not reviewed", () => {
+  test("Curating only while someone can: an ended agent hands the PR back to its own row, not reviewed", () => {
     const pull = pr({ number: 412 });
     const stacks = inboxPullStacks([pull]);
     const link = (agent: InboxPullLink["agent"]): InboxPullLink => ({ via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent, last: null, guide: null } as InboxPullLink);
-    const rowsOf = (agent: InboxPullLink["agent"], closed?: (id: string) => boolean) => inboxReviewRows({ threads: [], stacks, links: { [pull.key]: link(agent) }, pulls: [pull], closed });
+    const rowsOf = (agent: InboxPullLink["agent"]) => inboxReviewRows({ threads: [], stacks, links: { [pull.key]: link(agent) }, pulls: [pull] });
     const live = { host: "claude-code", session: "s", name: null };
     expect(rowsOf(live).map((r) => [r.reviewed, r.reason])).toEqual([[true, "curating"]]);
-    for (const rows of [rowsOf({ ...live, ended: true }), rowsOf(live, () => true)]) {
-      expect(rows.length).toBe(1);
-      expect(rows[0]!.reviewed).toBe(false);
-      expect(rows[0]!.reason).not.toBe("curating");
-    }
+    const rows = rowsOf({ ...live, ended: true });
+    expect(rows.length).toBe(1);
+    expect(rows[0]!.reviewed).toBe(false);
+    expect(rows[0]!.reason).not.toBe("curating");
     // A review already there is not curating: an ended agent doesn't take it off the page.
     const reviewed = inboxReviewRows({ threads: [review({ thread_id: "t" })], stacks, links: { [pull.key]: link({ ...live, ended: true }) }, pulls: [pull] });
     expect(reviewed[0]!.reviewed).toBe(true);

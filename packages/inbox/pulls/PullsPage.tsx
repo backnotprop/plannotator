@@ -232,8 +232,6 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
   );
 }
 
-/** How long the primary waits for a just-started thread's link before it comes back anyway. */
-
 function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; phone: boolean; onClose: () => void }) {
   const { item, model, phone } = props;
   const stack = item.stack;
@@ -261,17 +259,19 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   }, [stack.id, phone]);
   const forge = forgeName(stack);
   const many = open.length > 1;
+  // A thread that only named the PR isn't a review of it: the page's rows say so, the stack stays Open, not reviewed.
+  const mentioned = !!link && !ended && props.state.reviews?.rows.find((row) => row.stacks.some((s) => s.id === stack.id))?.reviewed === false;
   // One review thread at a time: the picker opens only while there is none, or its agent has ended.
-  const canStart = open.length > 0 && (!link || ended);
+  const canStart = open.length > 0 && (!link || ended || mentioned);
   const primary = canStart ? (
     <button
       type="button"
       className="ib-btn ib-pri"
       onClick={(event) => props.onNewReview(reviewBoxPull(stack, { reviewed: false, thread_id: null, link, review: null }, model.links, projects), event.currentTarget)}
-      data-pulls-primary={link ? 'again' : 'review'}
+      data-pulls-primary={link && !mentioned ? 'again' : 'review'}
     >
       <Icon name="plus" size={15} />
-      {link ? 'Start a new review thread' : 'Review with an agent'}
+      {link && !mentioned ? 'Start a new review thread' : 'Review with an agent'}
     </button>
   ) : link && !ended ? (
     <button type="button" className="ib-btn ib-pri" onClick={() => props.onOpenThread(link.thread_id)} data-pulls-primary="open">
@@ -281,6 +281,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   ) : null;
   // The person's own review, in every state: straight into phase 1's review mode (layer by layer for a stack), no stop on the way.
   // A stack's whole diff is the review's own "This layer | Whole stack" switch, not a second button here.
+  const openThread = mentioned ? (
+    <button type="button" className="ib-btn" onClick={() => props.onOpenThread(link!.thread_id)} data-pulls-open-thread="">
+      Open thread
+    </button>
+  ) : null;
   const openDiff = start ? (
     <button type="button" className="ib-btn" onClick={() => props.onReview(stack.id, start.key, 'layer')} data-pulls-open-diff="">
       <Icon name="code" size={15} />
@@ -331,10 +336,11 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </Tip>
           )}
         </div>
-        {link && <ThreadLine link={link} ended={ended} now={now} />}
+        {link && <ThreadLine link={link} ended={ended} mentioned={mentioned} now={now} />}
         {(primary || openDiff) && (
           <div className="ib-pr-actions">
             {primary}
+            {openThread}
             {openDiff}
           </div>
         )}
@@ -363,7 +369,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
  * on its way, the last answer's time, or none yet), its last words under it; "Claude Code ended" once its session
  * ended. No box. Focus lands here when a thread has just started.
  */
-const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; now: number }>(function ThreadLine({ link, ended, now }, ref) {
+const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: boolean; mentioned?: boolean; now: number }>(function ThreadLine({ link, ended, mentioned, now }, ref) {
   const name = linkAgentName(link) ?? 'Agent';
   // The ask (the person started it), until the agent's guided review arrives in the thread.
   const asked = link.via === 'owner' && link.ask && !link.guide?.review ? (link.ask === 'custom' ? 'Custom curation on the way' : 'Guided review on the way') : null;
@@ -378,7 +384,7 @@ const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: bool
         ) : (
           <>
             <span>
-              Review thread with <b>{name}</b>
+              {mentioned ? 'Thread' : 'Review thread'} with <b>{name}</b>
             </span>
             <span className="ib-mut" data-pulls-ask={asked ? link.ask : undefined}>
               {asked ?? (link.last ? relativeTime(link.last.at, now) : 'No answer yet')}

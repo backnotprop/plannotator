@@ -77,8 +77,8 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewLinkListed, reviewLinkStack, unsentReview, type ReviewBoxPull, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
-import { ReviewRows, type ReviewKind } from './ReviewRows';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewLinkListed, reviewLinkStack, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { ReviewRows } from './ReviewRows';
 
 /** How long after the last keystroke a pasted link is read. */
 const REVIEW_LINK_PAUSE_MS = 300;
@@ -165,6 +165,8 @@ export interface ComposeDialogProps {
   board?: boolean;
   /** New review: the pull requests Reviews lists (`request.review`). */
   reviewPulls?: readonly ReviewBoxPull[];
+  /** How the read behind `reviewPulls` went: an empty list only means "none" once it was read. */
+  reviewPullsRead?: ReviewPullsRead;
   /** New review: a PR already in review was picked, so its thread opens rather than a second one starting. */
   onOpenReviewThread?: (threadId: string) => void;
 }
@@ -203,23 +205,28 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const statusId = `ib-cp-status-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
-  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : box ? unsentReview().body : ''));
+  const [typed] = useState(() => unsentReview(box?.pick));
+  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : box ? typed.body : ''));
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : box && unsentReview().link ? 'link' : 'local');
-  const [reviewLink, setReviewLink] = useState(() => (box ? unsentReview().link : ''));
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
+  // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
+  const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
+  const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
   const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
-  const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? null);
+  const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
   // A link: the picker's own way when the list has that PR, else a PR the Inbox knows only from this link.
-  const linkFound = box && reviewKind === 'link' && linkRead?.ok ? linkRead : null;
+  const linkFound = box && reviewKind === 'pr' && linkChosen && linkRead?.ok ? linkRead : null;
   const linkListed = linkFound ? reviewLinkListed(linkFound, props.reviewPulls ?? []) : null;
-  const linkThread = linkListed?.thread?.id ?? linkFound?.thread_id ?? null;
+  // Its review thread, chosen or not: the search's row says so, and choosing it opens the thread.
+  const linkThreadOf = (read: InboxReviewLinkAnswer | null) => (read?.ok ? (reviewLinkListed(read, props.reviewPulls ?? [])?.thread?.id ?? read.thread_id ?? null) : null);
+  const linkThread = linkFound ? linkThreadOf(linkFound) : null;
   const linkOnly = linkFound && !linkListed && !linkThread ? linkFound : null;
-  const boxPull = !box ? null : reviewKind === 'pr' ? reviewPick : linkListed && !linkThread ? linkListed : null;
+  const boxPull = !box || reviewKind !== 'pr' ? null : linkChosen ? (linkListed && !linkThread ? linkListed : null) : reviewPick;
   const pulls = request.pulls ?? request.draft?.pulls ?? (boxPull ? { keys: handoffKeys(boxPull.stack), projects: [...boxPull.projects], ask_line: pullHandoffAskLine(boxPull.stack, { kind: 'guide' }) } : null);
   // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
   // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
@@ -227,7 +234,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const boardChip = props.board === true && !card && !box;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
-  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ?? (box && unsentReview().threadName) ? { thread_name: request.threadName ?? unsentReview().threadName! } : null)));
+  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ?? (box && typed.threadName) ? { thread_name: request.threadName ?? typed.threadName! } : null)));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
@@ -311,7 +318,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // What a pasted link is, a moment after the typing stops.
   useEffect(() => {
     setLinkRead(null);
-    if (!box || reviewKind !== 'link' || !reviewLink.trim()) return;
+    if (!box || reviewKind !== 'pr' || !reviewLink.trim()) return;
     const read = new AbortController();
     const pause = setTimeout(() => {
       inboxApi.reviewLink(reviewLink.trim(), read.signal).then(
@@ -335,6 +342,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setReviewSummary(null);
       return;
     }
+    // Never the last project's: its branch would go into the message if Start came before this read.
+    setReviewSummary(null);
     const read = new AbortController();
     inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
@@ -394,10 +403,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // New review names its thread from what it reviews, not from the words.
   const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : linkOnly ? pullHandoffThreadName(reviewLinkStack(linkOnly.pull), null) : reviewKind !== 'local' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
   const threadName = draftThreadName(nameState);
+  // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
+  const keptAny = useRef(false);
   useEffect(() => {
-    if (box) keepUnsentReview({ body, threadName: threadName || null, link: reviewKind === 'link' ? reviewLink : '' });
+    if (!box) return;
+    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' && !linkChosen ? reviewPick : null, link: reviewKind === 'pr' && linkChosen ? reviewLink : '' });
+    keptAny.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!box, body, nameState, reviewKind, reviewLink]);
+  }, [!!box, body, nameState, reviewKind, reviewPick, reviewLink, linkChosen]);
   useEffect(() => {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
@@ -485,15 +498,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
-      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
+      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : box ? 'Nothing sent: no live agent is chosen.' : NOTHING_SENT_NO_AGENT);
       return;
     }
-    if (box && reviewKind === 'pr' && !boxPull) {
+    if (box && reviewKind === 'pr' && !boxPull && !linkOnly) {
       setError('Nothing sent: choose a pull request first.');
-      return;
-    }
-    if (box && reviewKind === 'link' && !boxPull && !linkOnly) {
-      setError('Nothing sent: paste a pull request link first.');
       return;
     }
     if (boxPull && pulls && pulls.keys.length > INBOX_PULL_OWNER_KEYS_MAX) {
@@ -703,7 +712,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull) && !(box && reviewKind === 'link' && !boxPull && !linkOnly));
+  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull && !linkOnly));
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -823,6 +832,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       onChanges={setReviewChanges}
       summary={reviewSummary}
       pulls={props.reviewPulls ?? []}
+      pullsRead={props.reviewPullsRead ?? 'read'}
       pick={reviewPick}
       onPick={(pull) => {
         setReviewMenu(false);
@@ -832,15 +842,32 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setReviewPick(pull);
+        setReviewLink('');
+        setLinkChosen(false);
+        toFollowsReview();
+        textRef.current?.focus();
+      }}
+      linkChosen={linkChosen}
+      onUseLink={() => {
+        setReviewMenu(false);
+        if (linkThreadOf(linkRead)) {
+          props.onClose();
+          props.onOpenReviewThread?.(linkThreadOf(linkRead)!);
+          return;
+        }
+        setLinkChosen(true);
         toFollowsReview();
         textRef.current?.focus();
       }}
       phone={phone}
       menu={reviewMenu}
       link={reviewLink}
-      onLink={setReviewLink}
+      onLink={(text) => {
+        setReviewLink(text);
+        setLinkChosen(false);
+      }}
       linkRead={linkRead}
-      linkInReview={!!linkThread}
+      linkInReview={!!linkThreadOf(linkRead)}
       onMenu={(open) => {
         setPicker(false);
         setFolderMenu(false);
@@ -982,6 +1009,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <ThreadNameChip
           state={nameState}
           suggested={reviewName ?? suggested}
+          hint={box ? 'Named from what it reviews until you type here.' : undefined}
           error={nameError}
           onChange={(next) => {
             setNameState(next);

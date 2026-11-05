@@ -197,6 +197,13 @@ describe('how a thread opens from Reviews', () => {
     expect(plan.folded.has('r1')).toBe(true);
   });
 
+  test('the first review is drawn even when the fold would have hidden it in a run', () => {
+    const thread = [msg('0'), msg('00'), msg('r1'), msg('1'), msg('2'), msg('r2'), msg('5')];
+    const plan = planOf(thread, 'r1', 'r2');
+    expect(planFolds(thread as never, new Set(), thread.length).hidden.flat()).toContain('r1');
+    expect(hiddenOf(plan)).not.toContain('r1');
+  });
+
   test('a thread started for the review leaves nothing out', () => {
     expect(planOf([msg('ask'), msg('1'), msg('r')], null, 'r').left).toEqual([]);
   });

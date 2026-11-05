@@ -4,7 +4,7 @@
  * the compiled binary. The binary runs `plannotator inbox --background` under
  * a temp PLANNOTATOR_DATA_DIR; simulated agents write through `plannotator
  * inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window. HOME is
- * never changed. `gh` and `glab` are sh fakes first on PATH: nothing reaches
+ * a scratch folder: the Inbox reads skills and agent config from it. `gh` and `glab` are sh fakes first on PATH: nothing reaches
  * GitHub or GitLab, and the real CLIs never run. The diffs they answer are
  * real `git diff`s of scratch repositories with invented names.
  *
@@ -514,7 +514,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forgeDir}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -770,18 +770,19 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
   await expect(pane.locator(`[data-pulls-layer="${STACK_ID}"]`)).toContainText('Draft');
   await expect(pane.locator('[data-pulls-layer="github.com/northwind/billing-svc#411"]')).toContainText('Merged');
   await expect(pane.locator('.ib-pr-base')).toContainText('main');
-  // Its review thread: the agent's line under the title (its last words under it), one button that opens the thread.
+  // Its agent's thread named the PR but holds no review of it: the agent's line under the title (its last words under
+  // it), the thread a button away, and a review can start.
   const line = pane.locator('[data-pulls-thread-line="live"]');
   await expect(line).toBeVisible();
-  await expect(line.locator('.ib-pr-thread-h')).toContainText('Review thread with Claude Code');
-  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Open review thread');
+  await expect(line.locator('.ib-pr-thread-h')).toContainText('Thread with Claude Code');
+  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Review with an agent');
+  await expect(pane.locator('[data-pulls-open-thread]')).toBeVisible();
   await expect(pane).not.toContainText(/\bhand/i);
   // The Board is off: no card chip, no Board words.
   await expect(pane.locator('[data-pulls-card]')).toHaveCount(0);
   await expect(pane).not.toContainText('Board');
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
-  // It has a review thread: no picker, and no way to add a second agent; the diff is one button away.
-  await expect(pane.locator('[data-pulls-primary="review"]')).toHaveCount(0);
+  // The diff is one button away.
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
   // The whole stack is the review's own switch: one Open the diff here.
   await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
@@ -950,7 +951,7 @@ test('the Board on, a card linking the stack: a quiet Board chip, its review thr
   await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
-  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Review thread with Claude Code');
+  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Thread with Claude Code');
   await shot(page, '6b-stack-board-on');
 });
 
@@ -1488,6 +1489,82 @@ test('New review: a local review with no card yet leaves the page when its threa
   expect(await rows()).not.toContain(off.thread_id);
 });
 
+test('New review: Code review turned off with the box open: it closes and says so, nothing is sent, and the words wait', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-compose-text] textarea').fill('Words for later.');
+  const sends: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/inbox/messages')) sends.push(request.url());
+  });
+  await setCodeReview(false);
+  await expect(box).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText('Code review is off').first()).toBeVisible();
+  expect(sends).toEqual([]);
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-new]').first().click({ timeout: 15_000 });
+  await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Words for later.');
+  await box.locator('[data-compose-text] textarea').fill('');
+  await box.locator('[data-compose-cancel]').click();
+});
+
+test('New review: the picker says what it knows, and the summary never shows the last choice while the next is read', async () => {
+  const { page } = world;
+  const openPicker = async () => {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#reviews`);
+    await page.locator('[data-reviews-new]').first().click();
+    const box = page.locator('[data-review-box]');
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+    return box;
+  };
+  let letGo = () => {};
+  const held = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  const reading = await openPicker();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toBeVisible();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toContainText('Reading your pull requests');
+  await shot(page, 'n-picker-reading');
+  letGo();
+  await page.waitForTimeout(100);
+  await page.unroute('**/api/inbox/reviews*');
+  await page.route('**/api/inbox/reviews*', (route) => route.abort());
+  await page.route('**/api/inbox/pulls?*', (route) => route.abort());
+  const failed = await openPicker();
+  await expect(failed.locator('[data-review-pulls-none="failed"]')).toBeVisible();
+  await shot(page, 'n-picker-failed');
+  await page.unroute('**/api/inbox/reviews*');
+  await page.unroute('**/api/inbox/pulls?*');
+
+  // Fresh, off the failed read: the box's summary, then the next choice with its read held back.
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  let again = () => {};
+  const slow = new Promise<void>((resolve) => (again = resolve));
+  await page.route('**/api/inbox/reviews/changes*', async (route) => {
+    await slow;
+    await route.continue().catch(() => {});
+  });
+  await box.locator('[data-review-choice="last"]').check({ force: true });
+  await expect(box.locator('[data-review-size]')).toHaveCount(0);
+  again();
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  await page.unroute('**/api/inbox/reviews/changes*');
+  await box.locator('[data-compose-cancel]').click();
+});
+
 test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
   const { page } = world;
   await page.goto(`${world.url}#reviews&new`);
@@ -1529,11 +1606,19 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await page.reload();
   const box = page.locator('[data-review-box]');
   await expect(box).toBeVisible();
-  await box.locator('[data-review-choice="link"]').check({ force: true });
+  // One Pull request row: its picker's search takes the link.
+  await expect(box.locator('[data-review-choice="link"]')).toHaveCount(0);
+  const openPicker = async () => {
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+  };
+  await openPicker();
+  await expect(box.locator('[data-review-pick]')).toContainText('Choose one, or paste a link');
   const field = box.locator('[data-review-link]');
   await expect(field).toBeFocused();
   await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
   const read = box.locator('[data-review-link-read]');
+  const found = box.locator('[data-review-link-option]');
 
   // Bitbucket and things that aren't links say so, and nothing can start.
   const before = forgeCalls().length;
@@ -1541,13 +1626,21 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await expect(read).toHaveText("Bitbucket links aren't supported yet.");
   await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
   await shot(page, 'l-box-bitbucket');
-  await field.fill('retries');
+  await field.fill('https://example.com/about');
   await expect(read).toHaveText("That isn't a pull request link.");
   expect(forgeCalls().length).toBe(before);
 
+  // Words still search the list.
+  await field.fill('RTL');
+  await expect(read).toHaveCount(0);
+  await expect(box.locator('[data-review-pull]')).toHaveCount(1);
+  await expect(box.locator('[data-review-pull]')).toContainText('RTL layout');
+
   // GitLab, through glab; a merged one says so.
   await field.fill('https://gitlab.com/northwind/mobile/-/merge_requests/44');
-  await expect(read).toContainText('northwind/mobile !44 Offline queue · merged');
+  await expect(found).toContainText('!44');
+  await expect(found).toContainText('Offline queue');
+  await expect(found).toContainText('merged');
   await expect(read).toContainText('Read with glab, signed in to gitlab.com');
   await shot(page, 'l-box-gitlab');
 
@@ -1562,9 +1655,16 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await page.goto(`${world.url}#reviews&new`);
   await page.reload();
   await expect(box).toBeVisible();
-  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await openPicker();
   await field.fill('northwind/payments#231');
-  await expect(read).toContainText('northwind/payments #231 Idempotent refunds');
+  await expect(found).toContainText('Idempotent refunds');
+  await expect(read).toContainText('Read with gh, signed in to github.com');
+  await shot(page, 'l-box-picker-link');
+  // Enter chooses it: the row then says what it is and how it was read.
+  await field.press('Enter');
+  await expect(field).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toContainText('northwind/payments #231');
+  await expect(box.locator('[data-review-pick]')).toContainText('Idempotent refunds');
   await expect(read).toContainText('Read with gh, signed in to github.com');
   await expect(box.locator('.ib-cp-to').last()).toContainText('New scratch folder');
   await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Review #231: Idempotent refunds');
@@ -1579,9 +1679,11 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await page.reload();
   await page.locator('[data-reviews-new]').first().click();
   await expect(box).toBeVisible();
-  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await openPicker();
   await field.fill('https://github.com/northwind/payments/pull/231/files');
-  await expect(read).toContainText('Idempotent refunds');
+  await expect(found).toContainText('Idempotent refunds');
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await found.click();
   await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
   const reads = forgeCalls().filter((call) => call.includes('northwind/payments')).length;
   await box.locator('[data-compose-send]').click();
@@ -1589,7 +1691,7 @@ test('New review, a pull request link: what was found and how it was read, a rep
 
   // The thread: the approved hand-off's words, and its row from the moment it starts, by number.
   const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Review #231: Idempotent refunds' });
-  await expect(row).toContainText('#231');
+  await expect(row.locator('.ib-pr-l3')).toContainText('#231');
   await expect(row).toContainText('Curating');
   await expect(page.getByText('https://github.com/northwind/payments/pull/231').first()).toBeVisible();
   await shot(page, 'l-curating');
@@ -1618,39 +1720,60 @@ test('New review, a pull request link: what was found and how it was read, a rep
   } as never);
   const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
   await expect(reviewed).toContainText('Review ready', { timeout: 15_000 });
-  await expect(reviewed).toContainText('#231');
+  await expect(reviewed.locator('.ib-pr-l3')).toContainText('#231');
   await page.setViewportSize({ width: 1440, height: 900 });
   await shot(page, 'l-review-ready');
 
-  // The same link again: nothing starts, and Start review opens that thread.
+  // The same link again: nothing starts, and choosing it opens that thread.
   await page.locator('[data-reviews-new]').first().click();
   await expect(box).toBeVisible();
-  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await openPicker();
   await field.fill('northwind/payments#231');
   await expect(read).toContainText('Already in review');
+  await expect(found).toContainText('open it');
   const rows = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
-  await box.locator('[data-compose-send]').click();
+  await found.click();
   await expect(box).toHaveCount(0);
   await expect(page).toHaveURL(new RegExp(`thread=${threadId}`));
   expect(await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length)).toBe(rows);
 
-  // A PR the list has goes the picker's way: from its own project.
+  // A PR the list has goes the picker's way: its stack's hand-off, from its own project.
   await page.locator('[data-reviews-new]').first().click();
   await expect(box).toBeVisible();
-  await box.locator('[data-review-choice="link"]').check({ force: true });
+  await openPicker();
   await field.fill('https://github.com/northwind/web-app/pull/880');
-  await expect(read).toContainText('RTL layout');
+  await expect(found).toContainText('RTL layout');
+  await found.click();
   await expect(box.locator('.ib-cp-rvfrompull')).toBeVisible();
+  const sent: Record<string, unknown>[] = [];
+  await page.route('**/api/inbox/messages', async (route) => {
+    sent.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.abort();
+  });
+  await box.locator('[data-compose-send]').click();
+  await expect.poll(() => sent.length).toBe(1);
+  await page.unroute('**/api/inbox/messages');
+  expect((sent[0]!.pulls as { keys: string[] }).keys).toContain('github.com/northwind/web-app#880');
+  expect(sent[0]!.review).toBeUndefined();
 
-  // Left and opened again: the link typed comes back with the words.
+  // Left and opened again: the link chosen comes back with the words, read again.
   await box.locator('[data-compose-text] textarea').fill('Only the sidebar');
   await box.locator('[data-compose-cancel]').click();
   await expect(box).toHaveCount(0);
   await page.locator('[data-reviews-new]').first().click();
-  await expect(field).toHaveValue('https://github.com/northwind/web-app/pull/880');
+  await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
   await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Only the sidebar');
-  await box.locator('[data-compose-text] textarea').fill('');
+  // A failed link can't be chosen, and picking from the list drops the link.
+  await box.locator('[data-review-pick]').click();
+  await field.fill('https://bitbucket.org/acme/mobile/pull-requests/88');
+  await expect(read).toHaveText("Bitbucket links aren't supported yet.");
+  await field.press('Enter');
+  await expect(field).toBeVisible();
   await field.fill('');
+  await box.locator('[data-review-pull]').first().click();
+  await expect(field).toHaveCount(0);
+  await expect(read).toHaveCount(0);
+  await box.locator('[data-compose-text] textarea').fill('');
   await box.locator('[data-compose-cancel]').click();
 });
 
@@ -1788,8 +1911,9 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   // A reply sent from the view takes nothing off the screen, even a message that was new when it opened.
   const replying = await claude.send({ project_path: world.projects.web, thread: 'replying', subject: 'Replying', body: 'New before the review.' });
   await reviewFor('replying', 'Replying review');
+  // Straight in, with no reload: a reload after the first open could land after that open marked it read.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&thread=${replying.thread_id}`);
-  await page.reload();
   await expect(page.getByText('New before the review.')).toBeVisible();
   await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const reply = page.getByRole('textbox', { name: 'Reply to Claude Code' });
@@ -1809,14 +1933,44 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
   await expect(page.locator('[data-pulls-nav]')).toBeVisible();
+  await expect(page.locator('[data-thread-wait="loading"]')).toBeVisible();
+  await shot(page, 'r-pending');
   await page.waitForTimeout(400);
   await expect(page.getByText('Before one.')).toHaveCount(0);
+  // A phone has no pane beside the list: it keeps the list, saying it is reading, never a white page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await expect(page.locator('[data-pulls-list]').getByText('Reading your pull requests')).toBeVisible();
+  await expect(page.locator('[data-thread-wait]')).toHaveCount(0);
+  await shot(page, 'r-pending-phone');
   letGo();
   await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByText('Before one.')).toHaveCount(0);
   await page.unroute('**/api/inbox/reviews*');
 
-  // Code review off: the thread's view is the off page, live and on a fresh link, and the thread itself loses nothing.
+  // The row goes while the person is in the thread (archived from another window): the link to what was left out went
+  // with it, so the thread shows whole, and stays whole if the row comes back.
+  const archive = (threadId: string, resolved: boolean) => page.request.post(`${world.url}api/inbox/messages/${threadId}/resolve`, { data: { resolved } });
+  await fresh(long.thread_id);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  await archive(long.thread_id, true);
+  await expect(page.getByText('Before one.')).toBeVisible({ timeout: 15_000 });
+  await archive(long.thread_id, false);
+  await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Before one.')).toBeVisible();
+
+  // A thread handed a PR and archived before its review: the PR is back to Review with an agent, not "on the way".
+  const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });
+  expect((await page.request.post(`${world.url}api/inbox/pulls/owner`, { data: { keys: [LOCALE], thread_id: handed.thread_id, ask: 'guide' } })).status()).toBe(200);
+  await archive(handed.thread_id, true);
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator(`[data-pulls-row="${LOCALE}"], [data-pulls-row]`).filter({ hasText: '#869' }).first().click();
+  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Review with an agent');
+
+  // Code review off: the thread's view is the off page on a fresh link, and the thread itself loses nothing.
   await setCodeReview(false);
   await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
   await page.reload();

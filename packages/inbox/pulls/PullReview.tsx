@@ -29,7 +29,7 @@ import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -41,6 +41,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
@@ -67,6 +68,8 @@ export interface PullReviewProps {
   onBack: () => void;
   /** The verdict went. */
   onSent: () => void;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
 }
 
 const NO_BLOCKS: never[] = [];
@@ -134,7 +137,7 @@ function dropStale(layerKey: string, scope: string, keptId: string): void {
   }
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
@@ -242,6 +245,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
   const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+
+  // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
+  const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
+  const fileOpenIn = useCallback((path: string) => (repoKey ? <OpenInFile scope={{ repo: repoKey }} path={path} /> : null), [repoKey]);
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
@@ -421,6 +428,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               keep(keptId, { comments: left, viewed });
               setComments(left);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
           />
         ) : canDecide ? (
@@ -552,7 +560,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">

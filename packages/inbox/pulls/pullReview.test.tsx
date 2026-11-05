@@ -822,6 +822,33 @@ test.skipIf(!hasDom)("the box: the person's words make it a custom curation, and
   expect(sent[0]!.pullAsk).toBe('custom');
 });
 
+test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with PR B, and are still there for PR A', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const pickOf = (id: string): ReviewBoxPull => ({ ...boxPick(), id });
+  const open = (pick: ReviewBoxPull) => mount(<ComposeDialog request={{ review: { pick } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  const closeIt = () => {
+    act(() => root!.unmount());
+    root = null;
+  };
+  open(pickOf('stack-a'));
+  await settle();
+  await act(async () => {
+    const input = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'just the retries');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  closeIt();
+  open(pickOf('stack-b'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('');
+  closeIt();
+  open(pickOf('stack-a'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
+  expect(sent).toHaveLength(0);
+});
+
 test.skipIf(!hasDom)('the box: words typed and left come back when it opens again, with no prompt, and a started review leaves nothing behind', async () => {
   const started: StartThreadInput[] = [];
   const sent: ComposeSent[] = [];
@@ -979,6 +1006,11 @@ test.skipIf(!hasDom)("a note drafted on one layer does not ride into the next la
 const LOCALE_PR = (fields: Partial<InboxPull> = {}) =>
   pull(869, { repo: 'northwind/web-app', title: 'Fall back to English for missing strings', head: 'locale-fallback', ...fields });
 const handoffOf = (p: InboxPull, ask?: Parameters<typeof pullHandoffMessage>[1]) => pullHandoffMessage(inboxPullStacks([p])[0]!, ask);
+
+test("a teammate's PR: the agent is told to leave it alone: no push, no comment on it, no approval, no merge", () => {
+  const text = handoffOf({ ...model.pulls.find((p) => p.number === 869)!, mine: false, author: 'jun' });
+  for (const forbidden of ['push', 'comment', 'approve', 'merge']) expect(text).toMatch(new RegExp(`Don't[^.]*${forbidden}`));
+});
 
 /** The owner's approved text, word for word (`.product/approved/pull-handoff-message/approval.md`). */
 const APPROVED_OWN = `You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.
