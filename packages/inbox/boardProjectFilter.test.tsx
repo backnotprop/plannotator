@@ -112,6 +112,8 @@ function scriptFetch() {
       const body = JSON.parse(String(init.body)) as { name: string };
       return json({ initiative: { id: 'ini_01JX0000000000000000000009', name: body.name, created_at: AT, created_by: { kind: 'person' }, updated_at: AT, deleted_at: null } });
     }
+    const initiativeAt = url.pathname.match(/^\/api\/inbox\/initiatives\/([^/]+)$/);
+    if (initiativeAt && init?.method === 'POST') return json({ initiative: INITIATIVES.find((i) => i.id === initiativeAt[1]) });
     if (url.pathname === '/api/inbox/sessions') return json({ serverSession: 's', home: '/Users/ada', projects: [] });
     const one = url.pathname.match(/^\/api\/inbox\/cards\/([^/]+)$/);
     if (one && init?.method === 'POST') {
@@ -361,7 +363,7 @@ test.if(hasDom)('the opened card sets its initiative, and takes it out', async (
   expect($('[data-board-live]')!.textContent).toContain('Memory');
 });
 
-test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiatives… renames and deletes, asking first', async () => {
+test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiatives… renames in place', async () => {
   scriptFetch();
   let refreshed = 0;
   draw({ onChanged: () => (refreshed += 1) });
@@ -384,15 +386,61 @@ test.if(hasDom)('New initiative… makes one from the filter menu; Edit initiati
   await settle();
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'rename', name: 'Shape v2' } });
 
-  // Delete asks once, naming what happens to its cards (three are in Shape).
-  await act(async () => dialog.querySelector<HTMLElement>(`[data-initiative-row="${SHAPE}"] [data-initiative-delete]`)!.click());
-  const ask = dialog.querySelector<HTMLElement>(`[data-initiative-delete-ask="${SHAPE}"]`)!;
-  expect(ask.textContent).toContain('Its 3 cards go to No initiative.');
-  const before = posts.length;
-  await act(async () => ask.querySelector<HTMLElement>('[data-initiative-delete-yes]')!.click());
+});
+
+// The owner, 2026-11-04: "delete initiatives very simply without friction". The failures guarded: a question coming
+// back; an Undo drawn under the modal (the page behind it is inert, so it could not be pressed) or lost on Done; a
+// double click deleting the row that moved up under the pointer.
+test.if(hasDom)('Delete is one click with no question; the toast inside the dialog undoes it, and Done hands the Undo to the window', async () => {
+  scriptFetch();
+  const toasts: ({ lead: string; detail?: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
   await settle();
-  expect(posts.length).toBe(before + 1);
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  const row = (id: string) => dialog.querySelector<HTMLElement>(`[data-initiative-row="${id}"]`);
+  const del = (id: string) => row(id)!.querySelector<HTMLElement>('[data-initiative-delete]')!;
+
+  await act(async () => del(SHAPE).click());
+  await settle();
   expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'delete' } });
+  expect(row(SHAPE)).toBeNull();
+  const inside = dialog.querySelector<HTMLElement>('.ib-toast')!;
+  expect(inside.textContent).toContain('Deleted');
+  expect(inside.textContent).toContain('“Shape”');
+  // Undo by its button: the dialog's fields take a Z.
+  expect(inside.querySelector('[data-toast-undo]')!.getAttribute('aria-keyshortcuts')).toBeNull();
+  await act(async () => inside.querySelector<HTMLElement>('[data-toast-undo]')!.click());
+  await settle();
+  expect(posts.at(-1)).toMatchObject({ path: `/api/inbox/initiatives/${SHAPE}`, body: { op: 'restore' } });
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+  expect(row(SHAPE)).not.toBeNull();
+
+  // The second click of a double click writes nothing.
+  const before = posts.length;
+  await act(async () => del(SHAPE).dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 })));
+  await settle();
+  expect(posts.length).toBe(before);
+
+  // Two deletes in one toast, undone together, by the window's toast once the dialog closed.
+  await act(async () => del(SHAPE).click());
+  await settle();
+  await act(async () => del(MEMORY).click());
+  await settle();
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+  expect($('[data-dialog="initiatives"]')).toBeNull();
+  const handed = toasts.at(-1)!;
+  expect(handed.lead).toBe('Deleted');
+  await act(async () => handed.onUndo!());
+  await settle();
+  expect(posts.slice(-2).map((p) => [p.path, p.body.op])).toEqual([
+    [`/api/inbox/initiatives/${SHAPE}`, 'restore'],
+    [`/api/inbox/initiatives/${MEMORY}`, 'restore'],
+  ]);
 });
 
 test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a failed fetch says the one line, a taken name the server's words", async () => {
@@ -427,6 +475,198 @@ test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a fai
   expect(await tryAdd('Release')).toBe('That did not save. Try again.');
   answer = 'taken';
   expect(await tryAdd('shape')).toBe('There is already an initiative named Shape.');
+});
+
+// Restores answered per initiative: what the two Undos must survive.
+function scriptRestores(answers: Record<string, 'taken' | 'offline' | undefined>) {
+  scriptFetch();
+  const scripted = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1:1');
+    const at = url.pathname.match(/^\/api\/inbox\/initiatives\/([^/]+)$/);
+    if (at && init?.method === 'POST' && JSON.parse(String(init.body)).op === 'restore') {
+      posts.push({ path: url.pathname, body: { op: 'restore' } });
+      const answer = answers[at[1]!];
+      if (answer === 'offline') throw new TypeError('Failed to fetch');
+      if (answer === 'taken') {
+        return new Response(JSON.stringify({ code: 'initiative_exists', error: `There is already an initiative named ${INITIATIVES.find((i) => i.id === at[1])!.name}.` }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ initiative: INITIATIVES.find((i) => i.id === at[1]) }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    }
+    return scripted(input, init);
+  }) as typeof fetch;
+}
+const restores = () => posts.filter((p) => p.body.op === 'restore').map((p) => p.path.split('/').at(-1));
+
+async function openInitiatives() {
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  return {
+    dialog,
+    del: async (id: string) => {
+      await act(async () => dialog.querySelector<HTMLElement>(`[data-initiative-row="${id}"] [data-initiative-delete]`)!.click());
+      await settle();
+    },
+    undo: async () => {
+      await act(async () => dialog.querySelector<HTMLElement>('.ib-toast [data-toast-undo]')!.click());
+      await settle();
+    },
+    error: () => dialog.querySelector('[data-initiative-error]')?.textContent ?? null,
+  };
+}
+
+// The review's picture: the line said the name was taken while the toast still offered the Undo that had just failed.
+test.if(hasDom)('the dialog: a refused Undo stops offering it, the others still come back, and focus stays in the dialog; a failed save can be tried again', async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
+  scriptRestores(answers);
+  let changed = 0;
+  draw({ onChanged: () => changed++ });
+  const { dialog, del, undo, error } = await openInitiatives();
+
+  await del(MEMORY);
+  await undo();
+  expect(error()).toBe('That did not save. Try again.');
+  expect(dialog.querySelector('.ib-toast [data-toast-undo]')).not.toBeNull();
+
+  // Refused alone: the line, no toast, a read (who took the name shows), focus on the name field and not the page.
+  answers[MEMORY] = 'taken';
+  const before = changed;
+  await undo();
+  expect(error()).toBe('There is already an initiative named Memory.');
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+  expect(changed).toBeGreaterThan(before);
+  expect(document.activeElement).toBe(dialog.querySelector('[data-initiative-new-name]'));
+
+  // Refused first, with another waiting behind it: that one is still restored.
+  await del(MEMORY);
+  await del(SHAPE);
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  posts.length = 0;
+  await undo();
+  expect(restores()).toEqual([MEMORY, SHAPE]);
+  expect(error()).toBe('There is already an initiative named Memory.');
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+});
+
+// The review's order: Alpha refused with two waiting, the second click of a double click took one of their Undos.
+test.if(hasDom)('the dialog: a double click on Undo restores once and keeps what is left', async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline', [SHAPE]: 'offline' };
+  scriptRestores(answers);
+  draw();
+  const { dialog, del, error } = await openInitiatives();
+  await del(MEMORY);
+  await del(SHAPE);
+  posts.length = 0;
+  const button = dialog.querySelector<HTMLElement>('.ib-toast [data-toast-undo]')!;
+  await act(async () => {
+    button.click();
+    button.click();
+  });
+  await settle();
+  expect(restores()).toEqual([MEMORY, SHAPE]);
+  expect(error()).toBe('That did not save. Try again.');
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+});
+
+// Done pressed while the restore is on its way: the window's toast offered Undo for what was already back.
+test.if(hasDom)("Done during the dialog's Undo hands the window's toast only what the restore leaves out", async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
+  scriptRestores(answers);
+  const scripted = globalThis.fetch;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && JSON.parse(String(init.body)).op === 'restore') await held;
+    return scripted(input, init);
+  }) as typeof fetch;
+  const toasts: ({ lead: string; detail?: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
+  const { dialog, del, undo } = await openInitiatives();
+  await del(SHAPE);
+  await del(MEMORY);
+  await undo();
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+  expect($('[data-dialog="initiatives"]')).toBeNull();
+  expect(toasts.filter((t) => t?.lead === 'Deleted')).toEqual([]);
+
+  await act(async () => release());
+  await settle();
+  const handed = toasts.at(-1)!;
+  expect([handed.lead, handed.detail]).toEqual(['Deleted', '“Memory”']);
+  expect(handed.onUndo).toBeDefined();
+});
+
+// Seven seconds from the delete would take the Undo away just after the line said to try again.
+test.if(hasDom)("a failed save in the dialog gives its Undo the toast's full time again", async () => {
+  scriptRestores({ [MEMORY]: 'offline' });
+  draw();
+  const { dialog, del, undo } = await openInitiatives();
+  await del(MEMORY);
+  const realSet = globalThis.setTimeout;
+  const armed: number[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    armed.push(ms ?? 0);
+    return realSet(fn, ms, ...(rest as []));
+  }) as typeof setTimeout;
+  try {
+    await undo();
+  } finally {
+    globalThis.setTimeout = realSet;
+  }
+  expect(dialog.querySelector('.ib-toast [data-toast-undo]')).not.toBeNull();
+  expect(armed).toContain(7000);
+});
+
+// The review's blocker: after Done, one refused name lost every other initiative in the toast, and a failed save left nothing to press.
+test.if(hasDom)("the window's Undo after Done: every restore is tried; a failed save offers Undo again, for what is still out", async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'taken' };
+  scriptRestores(answers);
+  const toasts: ({ lead: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
+  const { dialog, del } = await openInitiatives();
+  const done = async () => {
+    await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+    await settle();
+  };
+  await del(MEMORY);
+  await del(SHAPE);
+  await done();
+  posts.length = 0;
+
+  // A name taken, with another behind it: the other comes back, the line says why, and no Undo is left to fail again.
+  await act(async () => toasts.at(-1)!.onUndo!());
+  await settle();
+  expect(restores()).toEqual([MEMORY, SHAPE]);
+  expect(toasts.at(-1)!.lead).toBe('There is already an initiative named Memory.');
+  expect(toasts.at(-1)!.onUndo).toBeUndefined();
+});
+
+test.if(hasDom)("the window's Undo after a failed save: pressed again, it tries what is still out and nothing that came back", async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
+  scriptRestores(answers);
+  const toasts: ({ lead: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
+  const { dialog, del } = await openInitiatives();
+  await del(SHAPE);
+  await del(MEMORY);
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+  posts.length = 0;
+  await act(async () => toasts.at(-1)!.onUndo!());
+  await settle();
+  expect(restores()).toEqual([SHAPE, MEMORY]);
+  expect(toasts.at(-1)!.lead).toBe('That did not save. Try again.');
+
+  answers[MEMORY] = undefined;
+  posts.length = 0;
+  await act(async () => toasts.at(-1)!.onUndo!());
+  await settle();
+  expect(restores()).toEqual([MEMORY]);
+  expect(toasts.at(-1)).toBeNull();
 });
 
 test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {

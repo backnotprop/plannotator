@@ -59,6 +59,21 @@ describe('sendTargetsOf', () => {
     expect(targets.map((t) => t.message.id)).toEqual(['msg_b1', 'msg_a1']);
   });
 
+  test("a launched agent's permission question takes only its answer: the words go to the agent's own latest message", () => {
+    const m = [message('msg_a1', 'ses_a', []), message('msg_p1', 'perm:ses_a', ['picked'])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.questions.length])).toEqual([
+      ['msg_p1', 1],
+      ['msg_a1', 0],
+    ]);
+  });
+
+  test('before the launched agent wrote, the words go to the thread the person started for it, never to the permission question', () => {
+    const root = { id: 'msg_1', thread_id: 'msg_1', author: { kind: 'person' }, body: 'Fix it', to: { host: 'claude-code', session: 'ses_a' } } as unknown as InboxMessageWire;
+    const targets = sendTargetsOf(thread([root, message('msg_p1', 'perm:ses_a', ['open'])]));
+    expect(targets.map((t) => t.message.id)).toEqual(['msg_1']);
+  });
+
   test('the latest agent message from a session with nothing to send comes last, empty, for the words', () => {
     const m = [message('msg_a1', 'ses_a', ['picked']), message('msg_b1', 'ses_b', [])];
     const targets = sendTargetsOf(thread(m));
@@ -184,6 +199,12 @@ describe('wordsMessage: who the next reply goes to after a session ended', () =>
     expect(wordsMessage(thread([ended, moved, next, elsewhere])).id).toBe('msg_3');
     const again = reply('msg_5', { to: { host: 'pi', session: 'ses_third' }, took_over: true });
     expect(wordsMessage(thread([ended, moved, next, again])).id).toBe('msg_5');
+  });
+
+  test('a permission prompt after the take over is not an agent writing: the words stay', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const prompt = message('msg_3', 'perm:ses_new', []);
+    expect(wordsMessage(thread([ended, moved, prompt])).id).toBe('msg_2');
   });
 
   test('a hand-off after the take over owns the next reply', () => {
