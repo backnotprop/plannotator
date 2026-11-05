@@ -20,7 +20,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxListRow, InboxThread } from "@plannotator/core/inbox-types";
+import { INBOX_HOST_NAMES, type InboxListRow, type InboxThread } from "@plannotator/core/inbox-types";
 import { INBOX_BRIDGE_EVENT_PATH, INBOX_BRIDGE_POLL_PATH, INBOX_WAKES_META_KEY, parseInboxBridgeCommands } from "@plannotator/shared/inbox/connection";
 import { startInboxServer, type InboxServer } from "./inbox";
 
@@ -320,5 +320,149 @@ describe("a thread with one agent behaves as before", () => {
     await personReplies(server, asked.message_id, "us-east-1", "k1");
     await reads(client, asked.thread_id, null);
     expect((await row(server, asked.thread_id)).sent?.checked_at).toBeString();
+  });
+});
+
+describe("who settled a reply no connection wakes", () => {
+  const lineOf = async (server: InboxServer, threadId: string) => {
+    const delivery = (await row(server, threadId)).delivery!;
+    return { read_by: delivery.read_by ?? null, state: delivery.state };
+  };
+
+  test("another agent's read: still settled, and the row names who read it, so it never claims the agent it was for took it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    // A session of another host, new to this thread; it wrote elsewhere, so the Inbox knows what it is.
+    const other = join(project, "..", "elsewhere");
+    mkdirSync(other, { recursive: true });
+    await agentSends(client, other, "ses_claude", CLAUDE, "Unrelated.");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_claude");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: "claude-code", state: "delivered" });
+    // Another read changes nothing, but the agent it was for reading it does: it has it now.
+    await reads(client, asked.thread_id, "ses_never_seen");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBe("claude-code");
+    await reads(client, asked.thread_id, "cursor-1");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+  });
+
+  test("hosts are free text: one the Inbox has no name for, asking or reading, or one spelled two ways, never gets a name", async () => {
+    const { server, client, project } = await setup();
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_lower", CURSOR, "Unrelated.");
+    await agentSends(client, elsewhere, "ses_mystery", { host: "mystery-agent", name: "Mystery", wakes: false }, "Unrelated.");
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+
+    // The asker wrote its host another way: the same agent, so never "Read by Cursor" on a reply to Cursor.
+    const spelled = await agentSends(client, project, "cursor-caps", { host: "Cursor", name: "Cursor", wakes: false }, "Which region?");
+    await personReplies(server, spelled.message_id, "us-east-1", "k1");
+    await reads(client, spelled.thread_id, "ses_lower");
+    expect(await lineOf(server, spelled.thread_id)).toEqual({ read_by: null, state: "delivered" });
+
+    // A host the Inbox cannot name read it: no line can say who.
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which zone?");
+    await personReplies(server, asked.message_id, "a", "k2");
+    await reads(client, asked.thread_id, "ses_mystery");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+    // And a known agent reading a reply to an unknown host: the same, by the asker's side of the rule.
+    const unknown = await agentSends(client, project, "ses_other", { host: "mystery-agent", name: "Mystery", wakes: false }, "Which rack?");
+    await personReplies(server, unknown.message_id, "r1", "k3");
+    await reads(client, unknown.thread_id, "ses_claude");
+    expect(await lineOf(server, unknown.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("each agent has its own name, apart from the `claude` alias: a shared name would hide who read a reply", () => {
+    const names = Object.entries(INBOX_HOST_NAMES).filter(([host]) => host !== "claude").map(([, name]) => name);
+    expect(names).toEqual([...new Set(names)]);
+    expect(INBOX_HOST_NAMES.claude).toBe(INBOX_HOST_NAMES["claude-code"]);
+  });
+
+  test("two ids of one agent are one agent: `claude` and `claude-code` never read as someone else", async () => {
+    const { server, client, project } = await setup();
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_code", CLAUDE, "Unrelated.");
+    const asked = await agentSends(client, project, "ses_claude_old", { host: "claude", name: "Claude Code", wakes: false }, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_code");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a reader that only polls is known by its connection: the row names it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await poll(server, "ses_pi_quiet", "pi", project);
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_pi_quiet");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: "pi", state: "delivered" });
+  });
+
+  test("a reply addressed to a session is that session's: another agent reading it is no one's read", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await poll(server, "ses_pi", "pi", project);
+    const response = await fetch(`${base(server)}/api/inbox/messages/${asked.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "us-east-1", to: { host: "pi", session: "ses_pi" } }),
+    });
+    expect(response.status).toBe(200);
+    await reads(client, asked.thread_id, "ses_claude");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+    expect((await thread(server, asked.thread_id)).messages[0]!.agent_checked_by ?? null).toBeNull();
+  });
+
+  test("the agent it was for: no name, the line stays Delivered", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "cursor-1");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a new session id of the same host may be that agent restarted, and an unknown one may too: no name", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_never_seen");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+
+    const again = await agentSends(client, project, "cursor-2", CURSOR, "And which zone?", undefined);
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "cursor-3", CURSOR, "Unrelated.");
+    await personReplies(server, again.message_id, "a", "k2");
+    await reads(client, again.thread_id, "cursor-3");
+    expect(await lineOf(server, again.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a reply to a waking session is never settled by another read, so it never says who read it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "ses_pi", PI, "Which region?");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_claude");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+    expect((await row(server, asked.thread_id)).delivery?.state).not.toBe("delivered");
+  });
+
+  test("past a reply still owed to a waking session: the settled one still names its reader", async () => {
+    const { server, client, project } = await setup();
+    const first = await agentSends(client, project, "ses_pi", PI, "Pi asks.");
+    const second = await agentSends(client, project, "cursor-1", CURSOR, "Cursor asks.", first.message_id);
+    await personReplies(server, first.message_id, "To Pi.", "k1");
+    await personReplies(server, second.message_id, "To Cursor.", "k2");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await reads(client, first.thread_id, "ses_claude");
+    expect((await thread(server, first.thread_id)).messages.at(-1)?.delivery?.read_by).toBe("claude-code");
+    expect((await lineOf(server, first.thread_id)).read_by).toBe("claude-code");
   });
 });
