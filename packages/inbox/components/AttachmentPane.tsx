@@ -1700,7 +1700,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [props.records, props.attachments, props.projectRoot, attachment]);
   const currentKey = recordKey(attachment.path, annotationVersion);
   const otherFiles = documents.some((d) => d.path !== currentKey);
-  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list.
+  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list, or it has earlier ones.
   const hasPanel = !isDownload || otherFiles || earlierCount > 0;
   const groups = useMemo(() => groupAnnotationsByDocument(documents, currentKey), [documents, currentKey]);
   const openInDocument = (_path: string, id: string) => {
@@ -1814,8 +1814,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     .join(', ');
   /** The thread's annotations on files other than this one (the foot of the drawer says so). */
   const elsewhere = props.records.filter((r) => recordKey(r.path, r.version) !== currentKey).length;
-  /** All this file has is earlier comments: nothing may read as if they are gone ("Comments 0", "No annotations yet"). */
-  const onlyEarlier = earlierCount > 0 && annotations.length === 0 && elsewhere === 0;
+  /** This file has earlier comments and no current ones: nothing may read as if they are gone ("Comments 0", "No annotations yet"). */
+  const onlyEarlier = earlierCount > 0 && annotations.length === 0;
   /** Full screen's ⋯ offers the other version, as the changed chip does. */
   const versionAction = versionChip?.action ? { label: versionChip.action.label, onSelect: () => chooseVersion(versionChip!.action!.to) } : null;
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
@@ -2391,6 +2391,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   replies={earlierReplies}
                   count={earlierCount}
                   current={annotations.length}
+                  // Closed, the column is hidden: a long list waits to be seen before it is drawn.
+                  shown={!(drawerMode || sheetMode) || panelOpen}
                   inAllFiles={otherFiles && scope === 'all'}
                 />
               ) : undefined
@@ -2498,7 +2500,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name="chevD" size={13} />
                 </button>
               )}
-              {!(onlyEarlier && props.strip.picks === 0 && props.strip.annotations === 0) && (
+              {!(onlyEarlier && elsewhere === 0 && props.strip.picks === 0 && props.strip.annotations === 0) && (
               <p className="ib-fvsend" data-strip-chip="">
                 <b>{chipText}</b> {props.strip.picks === 0 && props.strip.annotations === 1 ? 'rides' : 'ride'} your next Send to {props.agent}.
                 {elsewhere > 0 && ` ${elsewhere} ${elsewhere === 1 ? 'is' : 'are'} on other files.`}

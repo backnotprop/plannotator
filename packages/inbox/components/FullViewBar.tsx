@@ -49,7 +49,7 @@ export interface FullViewBarProps {
   armed: boolean;
   /** The pen, on an HTML file that takes comments. */
   onToggleArmed?: () => void;
-  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and no other file has any. */
+  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and has none to list, here or on another file. */
   comments: {
     count: number;
     /** Comments a Send already carried on this file (earlierComments.ts). Absent or 0: the count is today's. */

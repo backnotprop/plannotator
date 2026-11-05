@@ -11,6 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
 import { attachmentSequence, type AttachmentStep } from './stepping';
 import { earlierCommentsOn } from './earlierComments';
+import { videoCommentAnnotation } from './attachments';
 import { EarlierCommentsList } from './components/EarlierCommentsList';
 
 const hasDom = typeof document !== 'undefined';
@@ -76,8 +77,8 @@ interface Harness {
   step?: (id: string) => void;
 }
 
-function Pane({ harness = {}, records: start = [], earlier = [EARLIER], full: startFull = true, phone = false }: { harness?: Harness; records?: InboxAnnotationRecord[]; earlier?: InboxAnnotationRecord[]; full?: boolean; phone?: boolean }) {
-  const [open, setOpen] = useState(notes);
+function Pane({ harness = {}, records: start = [], earlier = [EARLIER], full: startFull = true, phone = false, only }: { harness?: Harness; records?: InboxAnnotationRecord[]; earlier?: InboxAnnotationRecord[]; full?: boolean; phone?: boolean; only?: InboxAttachmentState }) {
+  const [open, setOpen] = useState(only ?? notes);
   const [records, setRecords] = useState(start);
   const noop = () => {};
   harness.setRecords = setRecords;
@@ -85,7 +86,7 @@ function Pane({ harness = {}, records: start = [], earlier = [EARLIER], full: st
   return (
     <AttachmentPane
       attachment={open}
-      attachments={[notes, other]}
+      attachments={only ? [only] : [notes, other]}
       records={records}
       earlierRecords={earlier}
       agent="Claude Code"
@@ -144,6 +145,11 @@ const click = async (el: HTMLElement) => {
   await act(async () => el.click());
   await settle();
 };
+/** Full screen and a phone keep the column closed until the comment button opens it. */
+const openColumn = async () => {
+  const comments = host!.querySelector<HTMLButtonElement>('[data-full-view-comments]');
+  if (comments?.getAttribute('aria-expanded') === 'false') await click(comments);
+};
 
 describe('the comments button', () => {
   test.skipIf(!hasDom)('desktop: "2 · 3" with the 3 muted; a muted "3" with no current comments; today\'s number with no earlier comments', async () => {
@@ -189,36 +195,41 @@ for (const [mode, props] of [
     test.skipIf(!hasDom)('open with no comments of your own; your first comment keeps it open', async () => {
       const harness: Harness = {};
       await render(<Pane {...props} harness={harness} />);
+      await openColumn();
       expect(row().getAttribute('aria-expanded')).toBe('true');
       expect(listed()?.textContent).toBe('"Plan"Say why.');
       await act(async () => harness.setRecords!([draft('d1')]));
       await settle();
       expect(row().getAttribute('aria-expanded')).toBe('true');
-      expect(listed()).not.toBeNull();
+      expect(listed() === null).toBe(false);
     });
 
     test.skipIf(!hasDom)('folded to its row with comments of your own, and a click opens it; removing your last comment opens it', async () => {
       const harness: Harness = {};
       await render(<Pane {...props} harness={harness} records={[draft('d1')]} />);
+      await openColumn();
       expect(row().getAttribute('aria-expanded')).toBe('false');
-      expect(listed()).toBeNull();
+      expect(listed() === null).toBe(true);
       await click(row());
-      expect(listed()).not.toBeNull();
+      expect(listed() === null).toBe(false);
       await click(row());
-      expect(listed()).toBeNull();
+      expect(listed() === null).toBe(true);
       await act(async () => harness.setRecords!([]));
       await settle();
-      expect(listed()).not.toBeNull();
+      expect(listed() === null).toBe(false);
     });
 
     test.skipIf(!hasDom)('it sits in the comments column, after the current comments, read only', async () => {
       await render(<Pane {...props} records={[draft('d1')]} />);
+      await openColumn();
       await click(row());
       expect(column().contains(section())).toBe(true);
       const card = column().querySelector('[data-annotation-id="d1"]')!;
-      expect(card.compareDocumentPosition(section()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(Boolean(card.compareDocumentPosition(section()!) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
       // The row is the section's one control: no edit, delete or selection on an earlier comment.
-      expect([...section()!.querySelectorAll('button, textarea, a')]).toEqual([row()]);
+      const controls = [...section()!.querySelectorAll('button, textarea, a')];
+      expect(controls.length).toBe(1);
+      expect(controls[0] === row()).toBe(true);
     });
   });
 }
@@ -229,7 +240,7 @@ describe('nothing reads as gone', () => {
     const text = column().textContent!;
     expect(column().querySelector('.ib-sheet-h')!.textContent).toBe('Comments');
     expect(text).not.toContain('No annotations yet');
-    expect(column().querySelector('[data-strip-chip]')).toBeNull();
+    expect(column().querySelector('[data-strip-chip]') === null).toBe(true);
     expect(text).toContain('Write the reply');
     expect(row().textContent).toBe('Earlier1');
   });
@@ -245,12 +256,16 @@ describe('nothing reads as gone', () => {
     expect(column().querySelector('[data-strip-chip]')!.textContent).toContain('1 annotation');
     expect(column().querySelector('[data-strip-chip]')!.textContent).toContain('on other files');
     expect(row().textContent).toBe('Earlier on this file1');
+    // No zero, for the eye or the ear: the only number here is the earlier one.
+    expect(column().querySelector('.ib-sheet-h')!.textContent).toBe('Comments');
+    expect(reads()).toBe('1');
+    expect(button().getAttribute('aria-label')).toBe('Comments, 1 earlier');
   });
 });
 
 test.skipIf(!hasDom)('a file with no earlier comments is exactly today\'s: no section, and the empty message and the foot stay', async () => {
   await render(<Pane earlier={[{ ...EARLIER, path: other.path }]} />);
-  expect(section()).toBeNull();
+  expect(section() === null).toBe(true);
   expect(column().querySelector('.ib-sheet-h')!.textContent).toContain('0');
   expect(column().textContent).toContain('No annotations yet');
   expect(column().querySelector('[data-strip-chip]')!.textContent).toContain('0 annotations');
@@ -280,5 +295,52 @@ test.skipIf(!hasDom)('the list stands alone, with no host around it', async () =
   });
   expect(host.querySelector('[data-earlier-comment="ann_old"]')!.textContent).toBe('"Plan"Say why.');
   expect(host.textContent).toContain('From your reply');
-  expect(host.querySelector('button')).toBeNull();
+  expect(host.querySelector('button') === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('a closed drawer draws the row and not the list, however long it is, and opening draws it', async () => {
+  const many = Array.from({ length: 40 }, (_, i) => ({ ...EARLIER, id: `old-${i}` }));
+  await render(<Pane earlier={many} />);
+  expect(row().getAttribute('aria-expanded')).toBe('true');
+  expect(host!.querySelectorAll('[data-earlier-comment]').length).toBe(0);
+  await openColumn();
+  expect(host!.querySelectorAll('[data-earlier-comment]').length).toBe(40);
+});
+
+test.skipIf(!hasDom)('a download takes no comments: a column only when it has earlier ones to list', async () => {
+  const pdf = { ...file('att_01K7CCCCCCCCCCCCCCCCCCCCCC', 'terms.pdf'), kind: 'file' } as InboxAttachmentState;
+  await render(<Pane only={pdf} earlier={[{ ...EARLIER, path: pdf.path }]} full={false} />);
+  expect(host!.querySelector('.ib-view')!.classList.contains('ib-nopanel')).toBe(false);
+  expect(section() === null).toBe(false);
+  act(() => root?.unmount());
+  host?.remove();
+
+  await render(<Pane only={pdf} earlier={[]} full={false} />);
+  expect(host!.querySelector('.ib-view')!.classList.contains('ib-nopanel')).toBe(true);
+  expect(section() === null).toBe(true);
+});
+
+test.skipIf(!hasDom)('the list opening on its own moves nothing; only a press on the row brings its first comment in', async () => {
+  const real = Element.prototype.scrollIntoView;
+  const scrolled: string[] = [];
+  Element.prototype.scrollIntoView = function (this: Element) {
+    scrolled.push(this.getAttribute('data-earlier-comment') ?? '');
+  };
+  try {
+    await render(<Pane full={false} />);
+    expect(scrolled.filter(Boolean)).toEqual([]);
+    await click(row());
+    await click(row());
+    expect(scrolled.filter(Boolean)).toEqual(['ann_old']);
+  } finally {
+    Element.prototype.scrollIntoView = real;
+  }
+});
+
+test.skipIf(!hasDom)('a film\'s earlier comments read by time inside a reply, whatever order they were made in', () => {
+  const film = { ...notes, kind: 'video' } as InboxAttachmentState;
+  const at = (id: string, time: number) => ({ ...EARLIER, id, annotation: videoCommentAnnotation({ id, name: 'cut.mp4', time, text: `At ${time}` }) }) as unknown as InboxAnnotationRecord;
+  const [reply] = earlierCommentsOn([at('late', 90), at('early', 10), at('middle', 40)], film);
+  expect(reply!.comments.map((c) => c.id)).toEqual(['early', 'middle', 'late']);
+  expect(reply!.comments[0]!.spot).toBe('At 0:10');
 });

@@ -3,9 +3,10 @@ import type { EarlierReply } from '../earlierComments';
 import { Icon } from '../icons';
 import { EarlierCommentsList } from './EarlierCommentsList';
 
-/** The comments button's name, for a screen reader: today's when there are no earlier comments. */
+/** The comments button's name, for a screen reader: today's when there are no earlier comments, and never a zero beside them. */
 export function commentsLabel(count: number, earlier: number): string {
-  return earlier > 0 ? `Comments, ${count}, ${earlier} earlier` : `Comments, ${count}`;
+  if (earlier === 0) return `Comments, ${count}`;
+  return count === 0 ? `Comments, ${earlier} earlier` : `Comments, ${count}, ${earlier} earlier`;
 }
 
 /**
@@ -29,7 +30,7 @@ export function CommentCount({ count, earlier, phone = false, bump = 0 }: { coun
  * Earlier comments in the comments column, under the current ones. Folded to its row when you have comments of your
  * own on the file, open when you have none. Your first comment leaves it as it is, and removing your last opens it.
  */
-export function EarlierSection({ replies, count, current, inAllFiles }: { replies: readonly EarlierReply[]; count: number; current: number; inAllFiles: boolean }) {
+export function EarlierSection({ replies, count, current, inAllFiles, shown }: { replies: readonly EarlierReply[]; count: number; current: number; inAllFiles: boolean; shown: boolean }) {
   const [open, setOpen] = useState(current === 0);
   const sectionRef = useRef<HTMLElement>(null);
   const opened = useRef(false);
@@ -56,7 +57,7 @@ export function EarlierSection({ replies, count, current, inAllFiles }: { replie
         <span>{inAllFiles ? 'Earlier on this file' : 'Earlier'}</span>
         <span className="ib-earlier-n">{count}</span>
       </button>
-      {open && <EarlierCommentsList replies={replies} />}
+      {open && shown && <EarlierCommentsList replies={replies} />}
     </section>
   );
 }

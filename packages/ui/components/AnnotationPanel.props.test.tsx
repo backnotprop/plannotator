@@ -153,8 +153,8 @@ describe('AnnotationPanel host section at the timeline foot', () => {
     await mount(<AnnotationPanel {...base} annotations={[annotation]} timelineFooter={<div data-host-foot="" />} />);
     const foot = host!.querySelector('[data-host-foot]')!;
     const card = host!.querySelector('[data-annotation-id="a1"]')!;
-    expect(foot.parentElement).toBe(card.closest('.flex-col.gap-1\\.5'));
-    expect(card.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(foot.parentElement === card.closest('.flex-col.gap-1\\.5')).toBe(true);
+    expect(Boolean(card.compareDocumentPosition(foot) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
   });
 
   test.skipIf(!hasDom)('hideEmptyMessage drops the empty message and keeps the way to other files; absent, the message stays', async () => {
@@ -171,6 +171,6 @@ describe('AnnotationPanel host section at the timeline foot', () => {
     const other = { path: '/other.md', label: 'other.md', isCurrent: false, annotations: [annotation] };
     await mount(<AnnotationPanel {...base} annotations={[]} hideEmptyMessage annotationScope="current" onAnnotationScopeChange={() => {}} documentGroups={[other] as never} />);
     expect(host!.textContent).not.toContain('No annotations yet');
-    expect(host!.querySelector('[data-annotation-view-all]')).not.toBeNull();
+    expect(host!.querySelector('[data-annotation-view-all]') === null).toBe(false);
   });
 });

@@ -5,7 +5,7 @@
  */
 import { AnnotationType, type Annotation } from '@plannotator/ui/types';
 import { formatInboxVideoTime, readInboxVideoTime, type InboxAnnotationRecord, type InboxAttachmentState } from '@plannotator/core/inbox-types';
-import { annotationOf, annotationQuote, annotationTag, codeRangeOf } from './attachments';
+import { annotationOf, annotationQuote, annotationTag, codeRangeOf, compareVideoTimes } from './attachments';
 import { clockTime, dateTime, dayWords } from './format';
 import { isWordlessMarkup } from './markup';
 
@@ -67,12 +67,15 @@ export function earlierCommentsOn(
   now: Date = new Date(),
 ): EarlierReply[] {
   const replies = new Map<string, { at: string; comments: EarlierComment[] }>();
-  for (const record of records) {
-    if (record.sent_reply_id === null || !isSameFile(record, attachment)) continue;
-    const annotation = annotationOf(record);
-    const reply = replies.get(record.sent_reply_id) ?? { at: record.updated_at, comments: [] };
+  // A film's comments read by time, as its current ones do ("By time"); any other file's have no time and keep their order.
+  const here = records
+    .filter((record) => record.sent_reply_id !== null && isSameFile(record, attachment))
+    .map((record) => ({ record, annotation: annotationOf(record) }))
+    .sort((a, b) => compareVideoTimes(a.annotation, b.annotation));
+  for (const { record, annotation } of here) {
+    const reply = replies.get(record.sent_reply_id!) ?? { at: record.updated_at, comments: [] };
     reply.comments.push({ id: record.id, words: wordsOf(annotation), spot: spotOf(annotation) });
-    replies.set(record.sent_reply_id, reply);
+    replies.set(record.sent_reply_id!, reply);
   }
   return [...replies.entries()]
     .sort(([, a], [, b]) => b.at.localeCompare(a.at))
