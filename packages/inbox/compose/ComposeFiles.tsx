@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxDraftFile, type InboxDraftPasted, type InboxUpload } from '@plannotator/core/inbox-types';
 import type { DraftFileUploader, ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { InboxApiError } from '../api';
+import type { ReuseSource } from '../reuse';
 import { httpDraftFileUploader } from '../replyDraftHttp';
 import { formatBytes } from '../format';
 import { Icon, type IconName } from '../icons';
@@ -32,6 +33,10 @@ export interface ComposeFile {
   preview: string | null;
   /** A long paste attached as a file (pastedText.ts): the words it holds, so Put back can return them. */
   pasted?: PastedText | null;
+  /** A file already in the Inbox, added by reference: its bytes' hash from the first moment. */
+  reuse?: { sha256: string } | null;
+  /** Just pointed at (added again): the tile says so for a moment. */
+  flash?: boolean;
 }
 
 /** A long paste the person can put back in the box. */
@@ -110,6 +115,8 @@ export function useComposeFiles(
   initial: readonly InboxDraftFile[],
   options: {
     onPasted?: (names: string[]) => void;
+    /** A reused file's bytes are in this message already: for the host's polite live region. */
+    onAlready?: (name: string) => void;
     machine?: string | null;
     text?: ComposeFilesText;
     onPutBack?: () => void;
@@ -132,6 +139,8 @@ export function useComposeFiles(
   filesRef.current = files;
   const onPasted = useRef(options.onPasted);
   onPasted.current = options.onPasted;
+  const onAlready = useRef(options.onAlready);
+  onAlready.current = options.onAlready;
   const onPutBack = useRef(options.onPutBack);
   onPutBack.current = options.onPutBack;
   // Linked machines: a reply to another machine's thread uploads its files to that machine.
@@ -210,6 +219,57 @@ export function useComposeFiles(
   const add = useCallback((list: Iterable<File>) => {
     for (const file of list) addOne(file);
   }, []);
+
+  /** The tile holding these bytes, whichever way they came. */
+  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256), []);
+
+  /**
+   * A file the Inbox already holds, as a tile (the attachment's reuse button). No bytes travel: the answer is a
+   * pending upload naming the same blob. Bytes already in this message are not added twice: their tile says so.
+   */
+  const addExisting = useCallback((source: ReuseSource) => {
+    const here = holding(source.sha256);
+    if (here) {
+      patch(here.key, { flash: true });
+      setTimeout(() => patch(here.key, { flash: false }), 900);
+      onAlready.current?.(source.name);
+      return;
+    }
+    const reuse = uploader.current.reuse;
+    if (!reuse) return;
+    const key = `local-${newUuid()}`;
+    const fresh: ComposeFile = { key, name: source.name, size: source.size, state: 'uploading', progress: 0, upload: null, error: null, preview: source.preview, reuse: { sha256: source.sha256 } };
+    filesRef.current = [...filesRef.current, fresh];
+    setFiles((current) => [...current, fresh]);
+    const controller = new AbortController();
+    aborts.current.set(key, controller);
+    const settled = reuse(source.id, source.version, { signal: controller.signal })
+      .then((upload) => {
+        patch(key, { state: 'done', progress: 1, upload });
+        return upload;
+      })
+      .catch((cause) => {
+        if (!(cause instanceof DOMException && cause.name === 'AbortError')) {
+          patch(key, { state: 'refused', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+        }
+        return null;
+      })
+      .finally(() => {
+        aborts.current.delete(key);
+        inFlight.current.delete(key);
+      });
+    inFlight.current.set(key, settled);
+    onPasted.current?.([source.name]);
+  }, [holding]);
+
+  /** Take these bytes out of the message (the reuse button's second click). */
+  const removeHolding = useCallback((sha256: string) => {
+    const here = holding(sha256);
+    if (!here) return;
+    release(here.key);
+    filesRef.current = filesRef.current.filter((file) => file.key !== here.key);
+    setFiles((current) => current.filter((file) => file.key !== here.key));
+  }, [holding]);
 
   const remove = useCallback((key: string) => {
     release(key);
@@ -527,9 +587,11 @@ export function useComposeFiles(
     [],
   );
 
+  // A file is this Inbox's to reuse: not across to another machine's thread, and not for a host that keeps bytes elsewhere.
+  const canReuse = !options.machine && Boolean(uploader.current.reuse);
   const uploaded = files.filter((file) => file.state === 'done' && file.upload).map((file) => file.upload!);
   const uploading = files.some((file) => file.state === 'uploading');
-  return { files, add, attach, remove, forget, reset, detach, current, paste, takeText, putBack, pastedDraft, draftFiles, restoreDraft, follow, uploaded, uploading };
+  return { files, add, canReuse, addExisting, holding, removeHolding, attach, remove, forget, reset, detach, current, paste, takeText, putBack, pastedDraft, draftFiles, restoreDraft, follow, uploaded, uploading };
 }
 
 /** A phone's picker offers the photo library and Files (iOS gives no Paste for a picture in a text field). */
@@ -672,6 +734,7 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
 
 function detailOf(file: ComposeFile): string {
   if (file.state === 'refused') return file.error ?? 'Not attached.';
+  if (file.state === 'uploading' && file.reuse) return `Adding… ${formatBytes(file.size)}`;
   if (file.state === 'uploading') return `Uploading… ${Math.round(file.progress * 100)}% of ${formatBytes(file.size)}`;
   const upload = file.upload!;
   return `${inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type)}, ${formatBytes(upload.size)}`;
@@ -778,9 +841,10 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
         ) : (
         <div
           key={file.key}
-          className={`ib-cp-file${file.state === 'refused' ? ' ib-refused' : ''}`}
+          className={`ib-cp-file${file.state === 'refused' ? ' ib-refused' : ''}${file.flash ? ' ib-cp-flash' : ''}`}
           data-compose-file={file.state}
           data-compose-file-name={file.name}
+          data-compose-file-reuse={file.reuse ? '' : undefined}
         >
           {file.preview ? (
             <span className="ib-fi ib-thumb">
@@ -796,7 +860,7 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
             <span className={file.state === 'refused' ? 'ib-cp-ferr' : 'ib-kd'} role={file.state === 'refused' ? 'alert' : undefined}>
               {detailOf(file)}
             </span>
-            {file.state === 'uploading' && (
+            {file.state === 'uploading' && !file.reuse && (
               <span className="ib-cp-prog" aria-hidden="true">
                 <i style={{ width: `${Math.round(file.progress * 100)}%` }} />
               </span>

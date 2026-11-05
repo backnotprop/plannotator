@@ -42,6 +42,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   inboxUploadAttachments,
+  inboxUploadFromAttachment,
   INBOX_UPLOAD_MAX_BYTES,
   readInboxUploadText,
   receiveInboxUpload,
@@ -253,6 +254,18 @@ export function createInboxCompose(options: {
         throw new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
       }
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
+      return json({ upload });
+    }
+    // A file the Inbox already holds, for the message being written: no bytes in the body.
+    if (path === "/api/inbox/uploads/reuse") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await options.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const hit = typeof body.attachment_id === "string" ? store.attachment(body.attachment_id) : null;
+      if (!hit) throw new InboxError("upload_not_found", "That file is no longer in the Inbox.");
+      const version = body.version === "current" ? "current" : "sent";
+      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString() });
       return json({ upload });
     }
     const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);

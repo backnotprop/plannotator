@@ -9,6 +9,7 @@ import { Icon, type IconName } from '../icons';
 import { FileName } from './FileName';
 import { OpenInTileMenu, type OpenInSurface } from './OpenIn';
 import { Tip } from './Tip';
+import { ReuseButton, useReuse } from '../reuse';
 
 /** The icon a tile (and the stepper's list) shows for a file of this kind. */
 export function iconOf(attachment: InboxAttachmentState): IconName {
@@ -99,16 +100,18 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
   const tall = ratio < TALL_RATIO;
   const wide = ratio > WIDE_IMAGE_RATIO;
   const source = useInboxFileSource();
+  const reuse = useReuse();
   const src = source.imageUrl(image, readableVersion(image));
   const changed = changedLine(image, true);
   // A changed image keeps its comment count beside the changed line.
   const detail = `${changed ?? sizeLine(image)}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
   const label = `View ${image.name}, ${inboxAttachmentKindLabel(image.kind, image.name, image.media_type)}${changed ? `, ${changed.toLowerCase()}` : ''}${count > 0 ? `, ${plural(count, 'comment')}` : ''}`;
-  return (
+  const frame = { flex: `${shown} 1 ${Math.round(shown * 160)}px`, maxWidth: `min(100%, ${Math.round(shown * 230)}px)` };
+  const item = (
     <button
       type="button"
       className="ib-gal-item"
-      style={{ flex: `${shown} 1 ${Math.round(shown * 160)}px`, maxWidth: `min(100%, ${Math.round(shown * 230)}px)` }}
+      style={reuse ? undefined : frame}
       onClick={() => onOpen(image)}
       aria-label={label}
       data-gallery-image={image.id}
@@ -141,6 +144,14 @@ function GalleryImage({ image, count, onOpen }: { image: InboxAttachmentState; c
         <span className={changed ? 'ib-ch' : 'ib-kd'}>{detail}</span>
       </span>
     </button>
+  );
+  // The button is the frame's sibling (a button in a button is invalid). No reuse here: the frame as it was.
+  if (!reuse) return item;
+  return (
+    <div className={`ib-gal-w${count > 0 ? ' ib-gal-w-count' : ''}`} style={frame}>
+      {item}
+      <ReuseButton file={image} surface="gallery" />
+    </div>
   );
 }
 
@@ -181,6 +192,7 @@ export function AttachmentTiles({
 }) {
   const newestKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'openNewest' });
   const source = useInboxFileSource();
+  const reuse = useReuse();
   if (attachments.length === 0) return null;
   const header = placement === 'header';
   const images = header ? [] : attachments.filter((a) => readInboxAttachmentKind(a.kind) === 'image');
@@ -239,10 +251,11 @@ export function AttachmentTiles({
           );
           // The ⋯ is the tile button's sibling (a button inside a button is invalid), in a wrapper the grid lays out.
           const withMenu = (tile: React.ReactElement) =>
-            openIn === 'apps' ? (
-              <div className="ib-att-w" key={attachment.id} data-open-in-tile={attachment.id}>
+            openIn === 'apps' || reuse ? (
+              <div className={`ib-att-w${reuse ? ' ib-att-w-reuse' : ''}${openIn === 'apps' ? ' ib-att-w-more' : ''}`} key={attachment.id} data-open-in-tile={openIn === 'apps' ? attachment.id : undefined}>
                 {tile}
-                <OpenInTileMenu attachment={attachment} version={readableVersion(attachment)} onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined} />
+                <ReuseButton file={attachment} surface="tile" />
+                {openIn === 'apps' && <OpenInTileMenu attachment={attachment} version={readableVersion(attachment)} onOpenAs={onOpenAs && opensInWindow(attachment) ? (view) => onOpenAs(attachment, view) : undefined} />}
               </div>
             ) : (
               tile

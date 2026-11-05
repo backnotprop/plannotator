@@ -2314,6 +2314,8 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
+  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  duration_ms?: number;
 }
 
 /** The session a draft was written for, with enough to name it after it has ended. */

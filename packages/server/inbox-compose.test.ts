@@ -355,6 +355,44 @@ describe("worktrees and a slow git (#1919)", () => {
 });
 
 describe("uploads", () => {
+  test("reuse: a file the Inbox holds becomes a pending upload with no new bytes, and goes out as an ordinary attachment", async () => {
+    const { server, dataDir, billing } = await setup();
+    const blobs = () => readdirSync(join(dataDir, "inbox", "blobs")).filter((name) => /^[0-9a-f]{64}$/.test(name));
+    await poll(server, "ses-pi", "pi", billing);
+    const first = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const started = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "r0", uploads: [first.upload_id] })).json()) as { thread_id: string; message: InboxMessage };
+    const source = started.message.attachments![0]!;
+    const before = blobs();
+
+    const answer = await post(server, "/api/inbox/uploads/reuse", { attachment_id: source.id, version: "sent" });
+    expect(answer.status).toBe(200);
+    const reused = ((await answer.json()) as { upload: InboxUpload }).upload;
+    expect([reused.name, reused.kind, reused.sha256, reused.width, reused.height]).toEqual([source.name, source.kind, source.sent_sha256, source.width, source.height]);
+    expect(reused.upload_id).not.toBe(first.upload_id);
+    expect(blobs()).toEqual(before);
+
+    const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Again.", idempotency_key: "r1", uploads: [reused.upload_id] })).json()) as { message: InboxMessage };
+    const made = sent.message.attachments![0]!;
+    expect(made.id).not.toBe(source.id);
+    expect(made.path).not.toBe(source.path);
+    expect(readFileSync(made.path).equals(Buffer.from(PNG))).toBe(true);
+    expect(blobs()).toEqual(before);
+    // The agent's line is the one any upload gets, with no word of where it came from.
+    const commands = await poll(server, "ses-pi", "pi", billing);
+    expect(commands.find((command) => command.id === sent.message.id)!.body).toBe(`Again.\n\nAttached: ref02.png (${made.path})`);
+  });
+
+  test("reuse refuses a stale tab, another site, an unknown or malformed id, and a GET", async () => {
+    const { server } = await setup();
+    const ask = (body: Record<string, unknown>, headers: Record<string, string> = {}) => post(server, "/api/inbox/uploads/reuse", body, headers);
+    const unknown = await ask({ attachment_id: inboxId("att"), version: "sent" });
+    expect([unknown.status, ((await unknown.json()) as { code: string }).code]).toEqual([404, "upload_not_found"]);
+    expect((await ask({ attachment_id: { nope: 1 }, version: "sent" })).status).toBe(404);
+    expect((await ask({ attachment_id: inboxId("att"), serverSession: "another-run" })).status).toBe(409);
+    expect((await ask({ attachment_id: inboxId("att") }, { Origin: "https://evil.example", "Sec-Fetch-Site": "cross-site" })).status).toBe(403);
+    expect((await fetch(`${base(server)}/api/inbox/uploads/reuse`)).status).toBe(405);
+  });
+
   test("become ordinary attachments: a real read-only file with its name, viewable, listed unchanged, named in the wake", async () => {
     const { server, billing, dataDir } = await setup();
     const text = await upload(server, "notes.md", "# Notes\n\nThe export.");

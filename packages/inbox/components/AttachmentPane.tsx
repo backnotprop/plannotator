@@ -61,6 +61,7 @@ import { CONTENTS_RAIL_MIN_PANE_WIDTH as RAIL_MIN_PAGE_WIDTH } from '@plannotato
 import { ContentsHide, ContentsPanel, type ContentsButtonMode } from './ContentsPanel';
 import { DeferredMarkdownContentsRail } from '@plannotator/ui/components/DeferredMarkdownContentsRail';
 import { FullViewBar, GATHERED, type FullViewBarHandle, type ToolbarState } from './FullViewBar';
+import { ReuseButton } from '../reuse';
 import { FullScreenComposer, FullScreenComposerContext, type FullScreenComposerValue } from './FullScreenComposer';
 import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '../fullScreenComposer';
 import { useHtmlPageComment } from './HtmlPageComment';
@@ -1868,6 +1869,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
         <FullViewBar
           ref={barRef}
           phone={phone}
+          reuse={<ReuseButton file={attachment} surface="bar" version={effectiveVersion} big={phone} />}
           state={shownToolbar}
           onState={(next) => {
             // Each control flies from where it rests: measured before the state changes.
@@ -1970,6 +1972,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           </span>
           <span className="ib-sp" />
           {isHtml && !props.readOnly && !linkedTop && <HtmlSurfaceControls armed={armed} onToggleArmed={() => setArmed((v) => !v)} />}
+          <ReuseButton file={attachment} surface="pane" version={effectiveVersion} />
           {props.openIn && <OpenInControl attachment={attachment} version={effectiveVersion} surface={props.openIn} label={!folded} big={phone} />}
           {/* A source that writes nothing (the tour) offers no Download: nothing leaves the window. */}
           {source.writes && (

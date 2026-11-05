@@ -216,6 +216,8 @@ const ALLOWLIST: readonly DoorRoute[] = [
   { method: "GET", route: /^skills$/, window: () => "/api/inbox/skills" },
   { method: "GET", route: /^skills\/content$/, window: () => "/api/inbox/skills/content" },
   // Uploads and drawings (7.48, 7.49): raw bodies, the key in the query; never through the relay.
+  // A file the phone can already see, for the message being written: no bytes, so an ordinary JSON route.
+  { method: "POST", route: /^uploads\/reuse$/, window: () => "/api/inbox/uploads/reuse" },
   { method: "POST", route: /^uploads$/, window: () => "/api/inbox/uploads", raw: { max: INBOX_UPLOAD_MAX_BYTES, code: "upload_too_large", what: "a file" } },
   { method: "POST", route: /^markups$/, window: () => "/api/inbox/markups", raw: { max: INBOX_DEVICE_MARKUP_MAX_BYTES, code: "markup_too_large", what: "a drawing" } },
   // A pending pasted-text upload's words (approval "inbox-paste-attachment"), read only: a linked machine's

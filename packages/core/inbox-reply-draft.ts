@@ -247,4 +247,9 @@ export interface DraftFileUploader {
   upload(file: File, options: { signal: AbortSignal; onProgress: (loaded: number, total: number) => void }): Promise<InboxUpload>;
   /** A long paste's words, read back for Put back after a reload or in another window. */
   readText(uploadId: string): Promise<string>;
+  /**
+   * A file this host already holds, as a ref of its own: no bytes travel, and the file names the version on
+   * screen. Absent: the host cannot, and the window offers no control for it.
+   */
+  reuse?(attachmentId: string, version: 'current' | 'sent', options: { signal: AbortSignal }): Promise<InboxUpload>;
 }
