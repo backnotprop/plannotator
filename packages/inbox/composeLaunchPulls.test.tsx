@@ -67,7 +67,7 @@ async function open(current: (typeof PROJECTS)[number] | null, pulls: typeof PUL
         onDeleted={() => {}}
         onClose={() => {}}
         transport={{
-          sessions: async () => ({ serverSession: 's', home: '/Users/me', projects: [], launch: { agents: [{ agent: AGENT, name: 'Claude Code' }], projects: PROJECTS } }),
+          sessions: async () => ({ serverSession: 's', home: '/Users/me', projects: [], launch: { agents: [{ agent: AGENT, name: 'Claude Code' }], projects: PROJECTS, scratch: { root: '/Users/me/scratch' } } }),
           startThread: async (input) => {
             starts.push(input.to);
             return { thread_id: 't1' };
@@ -112,7 +112,7 @@ for (const [where, current] of [
   });
 }
 
-test.skipIf(!hasDom)("the folder menu offers only the pull request's project", async () => {
+test.skipIf(!hasDom)("the folder menu offers only the pull request's project: no other, and no scratch folder, so nothing can start outside it", async () => {
   await open(null);
   act(() => inDialog('button[data-compose-to]')!.click());
   await until(() => inDialog(`[data-compose-start="${AGENT}"]`) !== null, 'the start row');

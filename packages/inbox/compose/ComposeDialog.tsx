@@ -219,10 +219,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const anyLive = composeTargets(projects).length > 0;
   const groups = useMemo(() => composeGroups(projects, current, lastSent), [projects, current, lastSent]);
   // Launch: a new session To names instead of a live one (the agent, and the project it starts in).
-  // For a pull request (`pulls`): only its projects, so the default start is where its agent works and nothing else is offered.
+  // For a pull request (`pulls`): only its projects and no scratch folder, so the default start is where its agent works and nothing else is offered.
   const launch = useMemo(() => {
     const offered = model?.launch;
-    return offered && pulls ? { ...offered, projects: offered.projects.filter((p) => pulls.projects.includes(p.id)) } : offered;
+    return offered && pulls ? { agents: offered.agents, projects: offered.projects.filter((p) => pulls.projects.includes(p.id)) } : offered;
   }, [model?.launch, pulls]);
   const canStart = !!launch && launch.agents.length > 0 && launch.projects.length > 0;
   const [startPick, setStartPick] = useState<{ agent: string; projectId: string } | null>(null);
