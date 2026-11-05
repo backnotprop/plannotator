@@ -213,7 +213,8 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
+import { createInboxReviewIndex } from "./inbox-reviews";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -1014,6 +1015,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
+  const reviewIndex = createInboxReviewIndex(store);
   const pullLinkStore: InboxPullLinkStore = {
     threadsOf: (id) => store.threadsOf(id),
     threadMessageIds: (id) => store.threadMessageIds(id),
@@ -3579,6 +3582,25 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
+      }
+      // Reviews (approval "inbox-reviews-page"; inbox-reviews.ts and core's inbox-reviews.ts): one row per thread with
+      // a review card (the same thread the Inbox lists, never a copy), with the PRs it owns, plus the listed PRs no
+      // review thread owns. The PR part is the pulls list's own read (same cache, same hosts). Same guards as the
+      // pulls list: refused before anything runs (no git, gh or glab) while Code review is off.
+      if (path === "/api/inbox/reviews") {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const { projectsByRepo, wanted } = await pullProjects();
+        const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        const stacks = inboxPullStacks(listed.pulls);
+        const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
+        const rows = inboxReviewRows({ threads: reviewIndex.threads(), stacks, links, pulls: listed.pulls, pullReasons });
+        return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
       // Pull requests: the person hands a PR (or a stack's PRs) to an agent's thread, the one compose's Send (to a
       // live session, or to an agent it launches) just started for it. The Inbox keeps that choice

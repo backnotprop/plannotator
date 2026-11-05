@@ -155,7 +155,7 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed }: GuideReaderProps) {
+export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false }: GuideReaderProps) {
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
@@ -369,6 +369,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         focusedFile={focusedFile}
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
+        bare={bare}
       />
       {globalAnchor && globalDraftKey && (
         <CommentPopover

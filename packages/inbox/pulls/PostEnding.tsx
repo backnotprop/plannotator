@@ -78,12 +78,8 @@ export function reviewEnding(pull: InboxPull | null, hasAgent: boolean, picked: 
 export interface PostEndingProps {
   /** The PR this review can be posted to; null or unpostable (closed, its head unknown): the agent's ending alone. */
   pull: InboxPull | null;
-  /**
-   * The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending.
-   * `unavailable`: why it cannot take this review (a Whole stack over several agents' layers): its option is shown
-   * off, with these words as its tooltip, and the review posts.
-   */
-  agent: { name: string; host?: string | null; control: ReactNode; unavailable?: string } | null;
+  /** The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending. */
+  agent: { name: string; host?: string | null; control: ReactNode } | null;
   comments: readonly CodeAnnotation[];
   /** What the comments were written on (PlatformPost's `anchor`). */
   anchor: 'diff' | 'guide' | 'stack';
@@ -111,7 +107,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     return headSha ? { ...listed, head_sha: headSha } : null;
   }, [pull, headSha]);
   const rules = target ? platformRules(target) : null;
-  const destination: ReviewDestination = !target ? 'agent' : !agent || agent.unavailable ? 'forge' : picked;
+  const destination: ReviewDestination = !target ? 'agent' : !agent ? 'forge' : picked;
   const choose = onPick;
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
@@ -179,16 +175,15 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     [run],
   );
 
-  if (!target || !rules || !spec) return agent && !agent.unavailable ? <>{agent.control}</> : null;
+  if (!target || !rules || !spec) return agent ? <>{agent.control}</> : null;
 
   const choice = agent && (
     <div className="ib-seg ib-seg-sm ib-rv-dest" role="radiogroup" aria-label="Where your review goes" data-review-destination={destination}>
       {(['forge', 'agent'] as const).map((value) => {
-        const off = value === 'agent' && !!agent.unavailable;
-        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : off ? agent.unavailable! : `Send to ${agent.name}`;
+        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : `Send to ${agent.name}`;
         return (
-          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-off={off ? '' : undefined} data-review-destination-choice={value} title={words}>
-            <input type="radio" name={name} checked={destination === value} disabled={off} onChange={() => choose(value)} aria-label={words} />
+          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-review-destination-choice={value} title={words}>
+            <input type="radio" name={name} checked={destination === value} onChange={() => choose(value)} aria-label={words} />
             {value === 'forge' ? <PRPlatformIcon platform={target.platform} className="ib-rv-dest-mark" /> : <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />}
             {!phone && <span aria-hidden="true">{value === 'forge' ? rules.label : agent.name}</span>}
           </label>
@@ -200,7 +195,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   return (
     <>
       {choice}
-      {destination === 'agent' && agent && !agent.unavailable ? (
+      {destination === 'agent' && agent ? (
         agent.control
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
