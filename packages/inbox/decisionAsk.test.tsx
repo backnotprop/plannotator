@@ -89,6 +89,8 @@ async function open() {
 const box = (el: ParentNode) => el.querySelector('input') as HTMLInputElement;
 const go = (el: ParentNode) => el.querySelector('[data-ask-go]') as HTMLButtonElement | null;
 const copy = (el: ParentNode) => el.querySelector('[data-ask-copy]') as HTMLButtonElement | null;
+/** The line under the heading: the part that says who would answer, when someone can. */
+const lede = (el: ParentNode) => el.querySelector('[data-decision-ask] > p')!.textContent ?? '';
 
 function type(el: ParentNode, words: string) {
   const input = box(el);
@@ -110,7 +112,7 @@ test.skipIf(!hasDom)('a press sends the question as an Ask to the running agent,
   live = [group('harbor', [session('ses-a', 'claude-code')])];
   const el = await open();
   expect(go(el)!.textContent).toContain('Claude Code');
-  expect(el.textContent).toContain('Claude Code reads your threads');
+  expect(lede(el)).toContain('Claude Code');
   expect(go(el)!.disabled).toBe(true);
   type(el, '   ');
   expect(go(el)!.disabled).toBe(true);
@@ -126,12 +128,23 @@ test.skipIf(!hasDom)('a press sends the question as an Ask to the running agent,
   expect(window.location.hash).toBe('#thread=msg_answer');
 });
 
+test.skipIf(!hasDom)('with no agent running the line under the heading promises no reader: it is the line with an agent, less the sentence about that agent', async () => {
+  live = [group('harbor', [session('ses-a', 'claude-code')])];
+  const withAgent = lede(await open());
+  act(() => root?.unmount());
+  host?.remove();
+  live = [];
+  const alone = lede(await open());
+  expect(withAgent).toContain('Claude Code');
+  expect(alone).not.toBe(withAgent);
+  expect(withAgent.startsWith(alone)).toBe(true);
+});
+
 test.skipIf(!hasDom)('with no agent running it says so and offers Copy of the question; nothing is sent and nothing goes looking', async () => {
   const el = await open();
   expect(el.querySelector('[data-ask-none]')!.textContent).toContain('No agent is running');
   expect(go(el)).toBeNull();
   expect(copy(el)!.disabled).toBe(true);
-  expect(el.textContent).not.toContain('reads your threads');
   type(el, 'Why did we drop DockView?');
   expect(copy(el)!.disabled).toBe(false);
   await act(async () => {
