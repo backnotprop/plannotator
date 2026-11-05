@@ -113,6 +113,8 @@ let replyAnswer: () => Response = () => new Response('{}');
 let annotations: InboxAnnotationRecord[] = [];
 /** Which sessions are still there, by id (answers `?asker=` for any session); null: `sessions.asker` as set. */
 let liveness: Record<string, boolean> | null = null;
+/** What `/to` refuses with, when it does. */
+let moveRefusal: string | null = null;
 /**
  * A session whose `?asker=` reads wait (a slow /sessions round trip): each read waits on its own, in order, until
  * `held[i]` is called; null: none waits.
@@ -125,6 +127,7 @@ beforeEach(() => {
   posted = [];
   sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
   liveness = null;
+  moveRefusal = null;
   holdAsker = null;
   annotations = [];
   replyAnswer = () => Response.json({ reply: {}, questions: [], replayed: false });
@@ -132,6 +135,7 @@ beforeEach(() => {
     const path = String(input);
     if (init?.method === 'POST') {
       posted.push({ path, body: JSON.parse(String(init.body)) });
+      if (moveRefusal && path.endsWith('/to')) return Response.json({ code: moveRefusal, error: 'Refused.' }, { status: 422 });
       if (path.endsWith('/reply')) return replyAnswer();
       return Response.json({ questions: [] });
     }
@@ -756,8 +760,44 @@ test.skipIf(!hasDom)('a reply saved for a session that ended can move: the plain
   expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
 });
 
+test.skipIf(!hasDom)('a session the reply already tags is not offered; with no other, neither is the move', async () => {
+  sessions = { sessions: [live('ses_b', 'pi'), live('ses_c', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const tagged = () => personReply({ tags: [{ host: 'pi', session: 'ses_b', wakes: true, delivery: { host: 'pi', session: 'ses_b', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } }] });
+  const both = await render(threadOf(asking(), tagged()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (both.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...both.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_c']);
+  act(() => root?.unmount());
+  host?.remove();
+  sessions = { sessions: [live('ses_b', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const only = await render(threadOf(asking(), tagged()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(!!only.querySelector('[data-readdress-open]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('a reply the session itself already read is not offered', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const opened = asking();
+  const el = await render(threadOf({ ...opened, agent_checked_seq: 9 }, personReply({ seq: 2 })), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(!!el.querySelector('[data-delivery]')).toBe(true);
+  expect(!!el.querySelector('[data-readdress-open]')).toBe(false);
+});
+
+test.skipIf(!hasDom)('the session came back as the person moved the reply: the form closes, with no refusal to read', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  moveRefusal = 'not_addressed';
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(!!el.querySelector('[data-readdress-choice]')).toBe(false);
+  expect(!!el.querySelector('.ib-route-error')).toBe(false);
+});
+
 test.skipIf(!hasDom)('after a move: no ended note, the next reply answers the moved one, and it is to the new session', async () => {
-  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_other', live: true } };
+  // The session that asked reads as ended, as it does in the window: only the move keeps the note away.
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  liveness = { ses_asker: false, ses_other: true };
   const moved = personReply({ to: { host: 'pi', session: 'ses_other' }, took_over: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:53:00.000Z' } });
   const el = await render(threadOf(asking(), moved), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   expect(el.querySelector('[data-asker-ended]')).toBeNull();

@@ -2377,6 +2377,8 @@ pre code.pn-code[data-keep-layout] {
 .ib-esc { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-esc kbd { font-family: var(--font-sans); font-size: var(--ib-fs-11, 11px); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 @media (max-width: 560px), (pointer: coarse) { .ib-esc { display: none; } }
+.ib-route-acts { flex-wrap: wrap; }
+.ib-route-acts .ib-btn { max-width: 100%; }
 @media (max-width: 560px) { .pn-inbox .ib-route-acts .ib-btn.ib-pri { flex: 1; justify-content: center; } }
 @media (prefers-reduced-motion: no-preference) {
   .ib-route { animation: ib-route-in 140ms ease-out; }

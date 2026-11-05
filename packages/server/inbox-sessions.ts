@@ -194,6 +194,12 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
 export const INBOX_ASKER_RESTART_GRACE_MS = 90_000;
 
 /**
+ * How long a session handed an item to go into its running turn counts as there with no poll. A connection from before
+ * the tick stopped waiting on a steer does not poll until the steer goes in, which a long tool call can hold for minutes.
+ */
+export const INBOX_ASKER_STEER_GRACE_MS = 10 * 60_000;
+
+/**
  * Whether the agent message a reply answers came from a session that has ended: one that can be known to (its
  * connection wakes it) and that the Inbox has not heard from, with the grace. A reply going elsewhere takes its place.
  */
@@ -484,6 +490,11 @@ export function createInboxLiveSessions(options: {
     trackWaitsOf(session, entry, at);
   };
 
+  /** When each session was last handed an item to go into its running turn (`INBOX_ASKER_STEER_GRACE_MS`). */
+  const steering = new Map<string, number>();
+  const steerHanded = (session: string) => void steering.set(session, now());
+  const steerDone = (session: string) => void steering.delete(session);
+
   const isLive = (entry: SeenSession) =>
     entry.wakeOnly !== undefined
       ? now() - entry.lastSeen <= INBOX_WAKE_ONLY_LIVE_MS && options.wakeOnlyStatus?.(entry.wakeOnly) !== "dead"
@@ -554,6 +565,8 @@ export function createInboxLiveSessions(options: {
     const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
       !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
+    const steered = steering.get(session);
+    if (steered !== undefined && now() - steered <= INBOX_ASKER_STEER_GRACE_MS) return true;
     return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
   };
 
@@ -830,6 +843,17 @@ export function createInboxLiveSessions(options: {
   };
 
   /**
+   * The sessions with a waking message that `askerLive` reads as there, the only ones a row can call ended, each once
+   * however it is known: a change means one of them ended or came back, so a row's "Session ended" may have moved
+   * (`sessions` on `event: deliveries`). A turn starting, an MCP call or its window running out does not change it.
+   */
+  const presenceSignature = (): string => {
+    const known = new Set([...sessions.keys(), ...mcpSeen.keys(), ...steering.keys()]);
+    const there = [...known].filter((session) => options.store.hasWakingMessage(session) && askerLive(session)).sort();
+    return [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", ...there].join("|");
+  };
+
+  /**
    * Everything the rows' delivery reads from the sessions, as one string:
    * which sessions are live, busy or idle, can take Send now, and are still
    * there for the asker grace (MCP presence and the Inbox's own start
@@ -837,18 +861,6 @@ export function createInboxLiveSessions(options: {
    * out), so the server compares it on a short timer and tells the windows
    * when it moved (`event: deliveries`). O(sessions), from memory.
    */
-  /**
-   * Which sessions `askerLive` reads as there: a change means some session ended or came back, so a row's "Session
-   * ended" may have moved (`sessions` on `event: deliveries`). A session's turn starting or ending does not change it.
-   */
-  const presenceSignature = (): string => {
-    const t = now();
-    const parts: string[] = [t - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : ""];
-    for (const [id, entry] of sessions) if (entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(id);
-    for (const [id, entry] of mcpSeen) if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
-    return parts.join("|");
-  };
-
   const deliverySignature = (): string => {
     const t = now();
     const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges)];
@@ -1126,6 +1138,8 @@ export function createInboxLiveSessions(options: {
     deliveredIntoTurn,
     deliverySignature,
     presenceSignature,
+    steerHanded,
+    steerDone,
     hostSessions,
     restartCount,
     restartAgents,

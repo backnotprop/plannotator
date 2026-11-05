@@ -97,7 +97,7 @@ function link(url: string, extra: Partial<ConstructorParameters<typeof PeerLink>
     onRecord: (record) => records.push(record),
     onChange: () => {},
     onRevoked: () => void revoked++,
-    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000 },
+    timings: { silenceMs: 400, backoffMinMs: 50, backoffMaxMs: 200, requestMs: 2000, sendMs: 2000, deliveriesMs: 30 },
     ...extra,
   });
   cleanups.push(() => peer.stop());
@@ -210,6 +210,22 @@ describe("the list (rule 5)", () => {
     await until("told", () => told === 1);
     expect(rowsAtTold).toBeGreaterThanOrEqual(2);
     expect(peer.list!.rows[0]).toMatchObject({ thread_id: "msg_a", session_ended: true });
+  });
+
+  test("many of those frames read the list once, after they stopped; the windows hear of a session that moved in any of them", async () => {
+    const told: boolean[] = [];
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n', ...Array.from({ length: 5 }, () => "event: deliveries\ndata: {}\n\n")],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a" }] }] }),
+    });
+    const { peer } = link(d.url, { onDeliveries: (change) => void told.push(change.sessions) });
+    peer.start();
+    await until("told", () => told.length >= 1);
+    await Bun.sleep(100);
+    expect(told).toEqual([true]);
+    // The first read of the list, then one for all six frames.
+    expect(d.stats.threads).toBe(2);
   });
 
   test("a list older than the one held is dropped", () => {

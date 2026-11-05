@@ -13,7 +13,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { InboxStore } from '../shared/inbox/store';
 import { inboxDeliveryState, type InboxListRow, type InboxListSection, type InboxRowDelivery } from '@plannotator/core/inbox-types';
 import { deliveryLine, waitInputs, type DeliveryLineInput, type RecipientConnection } from './deliveryLine';
-import { hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
+import { deliveriesReadList, hasMovingDelivery, rowDeliveryLine, rowDeliveryName, rowDeliverySpoken, rowTimeIso } from './rowDelivery';
 
 const time = (iso: string) => `at ${iso.slice(11, 16)}`;
 const AT = '2026-10-20T15:41:00.000Z';
@@ -121,6 +121,17 @@ describe('the row words', () => {
     // Saved because the session that asked ended: its coming back moves it. Saved for an agent that reads: only its read does.
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'ended' }]))).toBe(true);
     expect(hasMovingDelivery(section([{ ...base, state: 'saved', reason: 'reads' }]))).toBe(false);
+  });
+
+  test('a session that ended or came back reads the list again even when no row has a reply to move', () => {
+    const section = (deliveries: (InboxRowDelivery | null)[]): InboxListSection[] => [
+      { id: 'sent', label: 'Sent', threads: deliveries.map((delivery) => ({ delivery }) as unknown as InboxListRow) },
+    ];
+    const quiet = section([null, { ...base, state: 'delivered' }]);
+    expect(deliveriesReadList({ labels: false, sessions: false }, quiet)).toBe(false);
+    expect(deliveriesReadList({ labels: false, sessions: true }, quiet)).toBe(true);
+    expect(deliveriesReadList({ labels: true, sessions: false }, quiet)).toBe(true);
+    expect(deliveriesReadList(undefined, section([{ ...base, state: 'queued' }]))).toBe(true);
   });
 });
 

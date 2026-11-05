@@ -658,11 +658,13 @@ export class InboxWake {
       (this.steerable || busy === false);
     if (!this.delivering && this.pending.size > 0 && (this.idleTicks >= 2 || urgent)) {
       this.delivering = true;
-      try {
-        await this.deliverNext(this.idleTicks < 2 && urgent);
-      } finally {
-        this.delivering = false;
-      }
+      // Not awaited: a steer resolves only when the message enters the run, which a long tool call can hold for
+      // minutes, and the tick has to go on polling meanwhile, or the session reads as ended (the Claude Code mod's way).
+      void this.deliverNext(this.idleTicks < 2 && urgent)
+        .catch(() => undefined)
+        .finally(() => {
+          this.delivering = false;
+        });
     }
   }
 

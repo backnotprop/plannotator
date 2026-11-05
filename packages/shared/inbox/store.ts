@@ -646,6 +646,8 @@ export class InboxStore {
   private projectLabels: Map<string, string> | null = null;
   private projectGroups: { heads: Map<string, string>; members: Map<string, string[]> } | null = null;
   private readonly messages = new Map<string, InboxMessage>();
+  /** The agent sessions with a message through a waking connection (`hasWakingMessage`, read every second). */
+  private readonly wakingSessions = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -866,6 +868,7 @@ export class InboxStore {
           this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
         }
         this.messages.set(line.record.id, line.record);
+        if (line.record.wakes === true && line.record.author.kind === "agent" && line.record.author.session) this.wakingSessions.add(line.record.author.session);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
           const members = this.threadMembers.get(line.record.thread_id);
@@ -6002,35 +6005,60 @@ export class InboxStore {
    * Refused once delivered (`already_delivered`); `to` null means the chosen
    * session is not live (`session_not_live`). The same session writes nothing.
    *
-   * `askerEnded`: the server read that the session the reply answers has ended
-   * (only a waking session can be known to). A plain reply moves only then (a
-   * live session's reply is still on its way: `not_addressed`), and the moved
-   * reply takes that session's place (`took_over`).
+   * `targetEnded`: the server read that the session it waits on has ended (only a waking session can be known to). A
+   * plain reply moves only then, and an addressed one is refused when it reads false: a session still there has it on
+   * its way (`not_addressed`). A plain reply a read already settled, or a session it already tags, is refused as taken.
+   * A plain reply takes the earlier ones saved for that session with it, so none stays owed to it with no line saying so.
+   * `tookOver`: the session the reply answers had ended, so the moved reply takes its place (`took_over`).
    */
-  readdressMessage(messageId: string, to: InboxAddressee | null, options: { askerEnded?: boolean } = {}): InboxMessage {
+  readdressMessage(messageId: string, to: InboxAddressee | null, options: { targetEnded?: boolean; tookOver?: boolean } = {}): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    const askerEnded = options.askerEnded === true;
-    if (message.author.kind !== "person" || (!message.to && !askerEnded) || isInboxNote(message)) {
+    if (message.author.kind !== "person" || (!message.to && options.targetEnded !== true) || isInboxNote(message)) {
       throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
     }
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    const taken = () => new InboxError("already_delivered", "That session already took this message.");
+    const checkedSeq = this.messages.get(message.thread_id)?.agent_checked_seq ?? 0;
+    if (!message.to && checkedSeq >= (this.messageSeq.get(message.id) ?? 0)) throw taken();
     if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
+    if (tagOf(message, to.session)) throw taken();
     if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
+    if (message.to && options.targetEnded === false) {
+      throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
+    }
     const at = this.stamp();
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
-    const next: InboxMessage = {
-      ...message,
+    const moved = (m: InboxMessage): InboxMessage => ({
+      ...m,
       to: { host: to.host, session: to.session },
       deliver_now_at: null,
       deliver_now_by: null,
       wait_started_at: null,
-      ...(askerEnded ? { took_over: true } : {}),
-    };
+      ...(options.tookOver ? { took_over: true } : {}),
+    });
+    if (!message.to) {
+      const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+      const askedSession = asked?.author.kind === "agent" ? asked.author.session : null;
+      for (const earlier of this.threadMessages(message.thread_id)) {
+        if (earlier.id === message.id) break;
+        if (earlier.author.kind !== "person" || earlier.to || earlier.delivery || hasTags(earlier) || isInboxNote(earlier) || earlier.tidy) continue;
+        const answers = earlier.reply_to ? this.messages.get(earlier.reply_to) : undefined;
+        if (!askedSession || answers?.author.kind !== "agent" || answers.author.session !== askedSession) continue;
+        if (checkedSeq >= (this.messageSeq.get(earlier.id) ?? 0)) continue;
+        this.appendMessage(moved(earlier), at);
+      }
+    }
+    const next = moved(message);
     this.appendMessage(next, at);
     return next;
+  }
+
+  /** Whether a message of this session came through a waking connection: only such a session can be called ended. */
+  hasWakingMessage(session: string): boolean {
+    return this.wakingSessions.has(session);
   }
 
   /**

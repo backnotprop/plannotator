@@ -224,7 +224,7 @@ describe("the row's Session ended", () => {
     ended.add("ses_a");
     expect(row(asked.id).delivery).toMatchObject({ state: "saved", reason: "ended" });
     expect(row(asked.id).session_ended).toBe(true);
-    store.readdressMessage(reply.id, { host: "pi", session: "ses_b" }, { askerEnded: true });
+    store.readdressMessage(reply.id, { host: "pi", session: "ses_b" }, { targetEnded: true, tookOver: true });
     expect(row(asked.id).session_ended).toBeUndefined();
     expect(store.threadOwner(asked.id)).toEqual({ host: "pi", session: "ses_b" });
     // An agent writing after it owns the thread again by the usual rule.

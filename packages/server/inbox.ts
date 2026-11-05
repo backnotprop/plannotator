@@ -2805,11 +2805,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // A busy session that can take an item mid-turn: what has waited long enough goes in now.
     const steer = live.deliveryConnectionOf(session);
     if (sendNow && steer?.busy === true && steer.send_now) autoSendFor(session, tags);
-    const commands = () =>
-      store
+    const commands = () => {
+      const list = store
         .pendingReplies(session, { tags })
         .filter((reply) => !withdrawnTidy(reply))
         .map((reply) => replyCommand(reply, sendNow, session));
+      // Handed an item for the running turn: an older connection may not poll again until it goes in.
+      if (list.some((command) => command.now === true)) live.steerHanded(session);
+      return list;
+    };
     // Ask AI: said on every answer until the client connects, so an answer that no one read loses nothing.
     const askWaits = () => (ask.waits(session) ? { [INBOX_ASK_WAITS_FIELD]: true } : {});
     const now = commands();
@@ -2857,12 +2861,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     }
     // Send now could not go into the running turn: the reply reads as queued again and waits for idle.
     if (body.type === "send_now_failed" && typeof body.id === "string") {
+      live.steerDone(session);
       store.clearDeliverNow(body.id, session);
       return json({ ok: true });
     }
     if (body.type !== "delivered" || typeof body.id !== "string") {
       throw new InboxError("validation_error", 'type: "delivered" with the reply id, or "state" with busy.', { field: "type" });
     }
+    live.steerDone(session);
     // An item the Inbox marked to go in by itself: whether it went into the running turn, or waited for the
     // turn to end (the session was seen idle after the mark: its own Ask question held the turn).
     const marked = store.message(body.id);
@@ -3095,16 +3101,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // `sessions`: a session ended or came back, which moves a row's "Session ended" whatever else it says.
   const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean) => void>();
   let lastDeliverySignature = "";
-  let lastPresenceSignature = "";
+  let lastPresenceSignature = live.presenceSignature();
   let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature();
-    const moved = signature !== lastDeliverySignature;
-    const labels = live.labelVersion() !== lastLabelVersion;
-    if (!moved && !labels) return;
     const presence = live.presenceSignature();
     const sessions = presence !== lastPresenceSignature;
+    const moved = sessions || signature !== lastDeliverySignature;
+    const labels = live.labelVersion() !== lastLabelVersion;
+    if (!moved && !labels) return;
     lastDeliverySignature = signature;
     lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();

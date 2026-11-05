@@ -5803,10 +5803,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   </p>
                 )}
                 {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
-                {message === last && delivered?.ended && !lastTo && askedSession && (
+                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
+                    taken={lastTags.map((tag) => tag.session)}
                     project={thread.project.name}
                     live={live}
                     onReload={loadLive}
@@ -5817,6 +5818,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}
+                    taken={lastTags.map((tag) => tag.session)}
                     project={thread.project.name}
                     live={pendingLive}
                     onReload={loadPendingLive}

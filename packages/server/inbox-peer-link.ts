@@ -40,9 +40,11 @@ export interface PeerLinkTimings {
   requestMs: number;
   /** One outbox try. */
   sendMs: number;
+  /** How long `deliveries` frames gather before one read of the list: each read is the whole list. */
+  deliveriesMs: number;
 }
 
-export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000 };
+export const PEER_LINK_TIMINGS: PeerLinkTimings = { silenceMs: 20_000, backoffMinMs: 250, backoffMaxMs: 30_000, requestMs: 15_000, sendMs: 15_000, deliveriesMs: 5_000 };
 
 /** A record from the other machine's event stream, as the window's stream passes it on. */
 export interface PeerRecord {
@@ -124,6 +126,8 @@ export class PeerLink {
   private listing: Promise<void> | null = null;
   private listAgain = false;
   private flushTimer: ReturnType<typeof setTimeout> | null = null;
+  private deliveriesTimer: ReturnType<typeof setTimeout> | null = null;
+  private deliveriesSessions = false;
   private flushDelay = 0;
   private readonly t: PeerLinkTimings;
 
@@ -160,6 +164,21 @@ export class PeerLink {
     this.wake?.();
     if (this.flushTimer) clearTimeout(this.flushTimer);
     this.flushTimer = null;
+    if (this.deliveriesTimer) clearTimeout(this.deliveriesTimer);
+    this.deliveriesTimer = null;
+  }
+
+  /** That machine's live sessions moved: one read of its list for all that moved in `deliveriesMs`, at its end. */
+  private deliveriesMoved(sessions: boolean): void {
+    this.deliveriesSessions ||= sessions;
+    if (this.deliveriesTimer) return;
+    this.deliveriesTimer = setTimeout(() => {
+      this.deliveriesTimer = null;
+      const moved = this.deliveriesSessions;
+      this.deliveriesSessions = false;
+      void this.refreshList().then(() => this.options.onDeliveries?.({ sessions: moved }));
+    }, this.t.deliveriesMs);
+    (this.deliveriesTimer as { unref?: () => void }).unref?.();
   }
 
   /** The person acted on this machine: redial now instead of waiting out the backoff. */
@@ -281,8 +300,7 @@ export class PeerLink {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
           } else if (parsed.event === "deliveries") {
-            const sessions = (JSON.parse(parsed.data) as Json).sessions === true;
-            void this.refreshList().then(() => this.options.onDeliveries?.({ sessions }));
+            this.deliveriesMoved((JSON.parse(parsed.data) as Json).sessions === true);
           }
         }
       }

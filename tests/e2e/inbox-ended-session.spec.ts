@@ -80,6 +80,7 @@ class Connection {
   constructor(
     readonly session: string,
     readonly startedAt: number,
+    readonly label?: string,
   ) {
     this.loop = this.run();
   }
@@ -101,6 +102,7 @@ class Connection {
         started_at: this.startedAt,
         busy: false,
         idle_since: this.startedAt,
+        ...(this.label ? { label: this.label } : {}),
       }).catch(() => null);
       if (!response) continue;
       for (const command of parseInboxBridgeCommands(await response.text())) {
@@ -322,13 +324,25 @@ test('nothing live: the note says the reply will wait, Send sends at once, and t
 test('a saved reply moves to a session that started later, which then keeps the thread: the next reply goes to it without asking', async () => {
   const { page } = world;
   const pane = page.locator('section.ib-pane');
-  const late = new Connection('pi-session-late', Date.now() - 60_000);
+  const late = new Connection('pi-session-late', Date.now() - 60_000, 'Nightly ledger sync retry budget and backoff');
   world.connections.push(late);
   const saved = (await threadMessages()).at(-1)!;
 
   await pane.locator('[data-readdress-open]').click();
   await pane.locator('[data-readdress-session="pi-session-late"]').click();
   await shot('5-move');
+  // On a phone a long session name wraps the buttons, and Cancel stays on the screen.
+  await page.setViewportSize({ width: 320, height: 700 });
+  const form = pane.locator('[data-readdress-choice]');
+  await form.getByRole('button', { name: 'Cancel' }).scrollIntoViewIfNeeded();
+  // Against the form, which a sideways scroll moves with its buttons: a row too wide for it runs off the screen.
+  const inside = await form.evaluate((el) => {
+    const edge = el.getBoundingClientRect().right;
+    return [...el.querySelectorAll('.ib-route-acts .ib-btn')].map((button) => button.getBoundingClientRect().right <= edge + 0.5);
+  });
+  expect(inside).toEqual([true, true]);
+  await page.screenshot({ path: join(proofDir, '5-move-phone.png') });
+  await page.setViewportSize({ width: 1440, height: 900 });
   await pane.locator('[data-readdress-send]').click();
   const moved = await waitFor('the moved reply handed to the later session', () => late.commands[0]);
   expect(moved).toMatchObject({ id: saved.id, redirected_from: 'Pi' });

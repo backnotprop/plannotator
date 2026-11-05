@@ -65,6 +65,14 @@ export function rowTimeIso(row: InboxListRow): string {
 }
 
 /**
+ * Whether an `event: deliveries` reads the list again: a session's label changed, a session ended or came back (a
+ * row's "Session ended", on a row with no reply too), or some row's delivery can still move.
+ */
+export function deliveriesReadList(change: { labels: boolean; sessions: boolean } | undefined, sections: readonly InboxListSection[] | null): boolean {
+  return !!change?.labels || !!change?.sessions || hasMovingDelivery(sections);
+}
+
+/**
  * Some row's delivery can still move with the live sessions, so
  * `event: deliveries` reads the list again: anything but delivered, and
  * saved for an agent that only reads the thread (`reads`), which only a store
