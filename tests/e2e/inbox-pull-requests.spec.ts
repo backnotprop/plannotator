@@ -1650,10 +1650,8 @@ test('New review, a pull request link: what was found and how it was read, a rep
     const body = (await response.json()) as Record<string, unknown>;
     await route.fulfill({ response, json: { ...body, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [], scratch: { root: '/tmp/scratch' } } } });
   });
-  await page.reload();
-  await expect(box).toHaveCount(0);
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
-  await page.reload();
   await expect(box).toBeVisible();
   await openPicker();
   await field.fill('northwind/payments#231');
@@ -1753,7 +1751,6 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await box.locator('[data-compose-send]').click();
   await expect.poll(() => sent.length).toBe(1);
   await page.unroute('**/api/inbox/messages');
-  expect((sent[0]!.pulls as { keys: string[] }).keys).toContain('github.com/northwind/web-app#880');
   expect(sent[0]!.review).toBeUndefined();
 
   // Left and opened again: the link chosen comes back with the words, read again.

@@ -222,7 +222,7 @@ export function ReviewRows(props: {
       ) : (
         <>
           <Row label="Pull request">
-            <button ref={button} type="button" className="ib-cp-tobtn" aria-haspopup="listbox" aria-expanded={menu} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
+            <button ref={button} type="button" className="ib-cp-tobtn ib-cp-rvpick" aria-haspopup="listbox" aria-expanded={menu} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
               {linkPull ? (
                 <>
                   <RefMarkIcon kind="pr" state={linkStateWord(linkPull) ?? 'open'} size={14} />
