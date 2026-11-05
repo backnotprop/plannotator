@@ -26,6 +26,7 @@
 import { chmodSync, mkdirSync, readdirSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
+import type { InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_DRAFT_BODY_MAX } from "./drafts";
 import { InboxError } from "./schema";
 
@@ -58,6 +59,17 @@ export interface InboxAskTurn {
   stopped?: boolean;
   /** Why `answer` is only part of one: the session went away, another message took the turn, or it failed. */
   failure?: "gone" | "taken_over" | "failed";
+  /**
+   * Show me (code review in the Inbox, while Code review is on): the question
+   * asks the agent to draw (`question` is `inboxShowMeRequest`'s words), about
+   * `show_me`'s review, file and lines. Absent: a plain Ask, words only.
+   */
+  kind?: "show_me";
+  show_me?: InboxShowMeTarget;
+  /** Show me again: the round of the picture it asks to redraw (its request says so). A retry sends it again. */
+  again_of_round?: number;
+  /** The drawing the agent sent for this Show me (`plannotator review draw`): its id in the review's drawings. */
+  drawing?: string;
 }
 
 export interface InboxAskConversation {
@@ -210,6 +222,46 @@ export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: st
       return isInboxId("msg", threadId) && !threadExists(threadId);
     }),
   );
+}
+
+/** A Show me's input, as the window sends it: `{ kind: "show_me", show_me, again_of_round? }`. */
+export interface InboxShowMeInput {
+  target: InboxShowMeTarget;
+  againOfRound?: number;
+}
+
+const SHOW_ME_KEYS = ["review", "file", "lines", "round", "words"];
+
+/**
+ * The shape of a Show me's input (`kind`, `show_me`, `again_of_round`); null
+ * for a plain Ask. What it points at is checked by the route, which knows the
+ * thread: here only that each field is the right kind of value.
+ */
+export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown; again_of_round?: unknown }): InboxShowMeInput | null {
+  if (input.kind === undefined && input.show_me === undefined && input.again_of_round === undefined) return null;
+  const bad = (message: string, field: string) => new InboxError("validation_error", message, { field });
+  if (input.kind !== "show_me") throw bad('kind: "show_me", or none for a plain question.', "kind");
+  const raw = input.show_me;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw bad("show_me: { review, file, lines, round, words? }.", "show_me");
+  const s = raw as Record<string, unknown>;
+  for (const key of Object.keys(s)) if (!SHOW_ME_KEYS.includes(key)) throw bad(`show_me.${key}: not a field (review, file, lines, round, words).`, "show_me");
+  if (!isInboxId("msg", s.review)) throw bad("show_me.review: the review's message id.", "show_me");
+  const file = s.file === null || s.file === undefined ? null : s.file;
+  if (file !== null && (typeof file !== "string" || file.trim() === "" || file.length > 1000)) throw bad("show_me.file: a file of the review, or null for the Overview.", "show_me");
+  const lines = s.lines === null || s.lines === undefined ? null : s.lines;
+  const line = (n: unknown) => typeof n === "number" && Number.isSafeInteger(n) && n >= 1;
+  if (lines !== null && (!Array.isArray(lines) || lines.length !== 2 || !line(lines[0]) || !line(lines[1]) || (lines[0] as number) > (lines[1] as number))) {
+    throw bad("show_me.lines: [first, last], whole line numbers from 1, first ≤ last.", "show_me");
+  }
+  if ((file === null) !== (lines === null)) throw bad("show_me.file and show_me.lines go together (both null: the Overview).", "show_me");
+  if (s.words !== undefined && (typeof s.words !== "string" || s.words.length > INBOX_ASK_TEXT_MAX)) throw bad(`show_me.words: at most ${INBOX_ASK_TEXT_MAX} characters.`, "show_me");
+  const again = input.again_of_round;
+  if (again !== undefined && (typeof again !== "number" || !Number.isSafeInteger(again) || again < 1)) throw bad("again_of_round: the round the drawing was asked in.", "again_of_round");
+  const words = typeof s.words === "string" && s.words.trim() ? s.words : undefined;
+  return {
+    target: { review: s.review as string, file: file as string | null, lines: lines as [number, number] | null, round: typeof s.round === "number" ? s.round : 1, ...(words ? { words } : {}) },
+    ...(again !== undefined ? { againOfRound: again as number } : {}),
+  };
 }
 
 /** The checks on an ask's input, before anything is written. */

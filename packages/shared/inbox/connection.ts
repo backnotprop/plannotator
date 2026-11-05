@@ -64,6 +64,7 @@ export const INBOX_TOOL_ACTIONS = [
   'read_thread',
   'search',
   'resolve_message',
+  'snooze_thread',
   'submit_guide',
   'get_guide_brief',
   'card',
@@ -449,6 +450,13 @@ function wakeSteps(value: unknown): { done: number; total: number; doing: string
 }
 
 /**
+ * Actions with no line in the agent tool's description: the name in `action`
+ * and its field's description say what they do, and a field description does
+ * not count toward the 2,048 (the owner: do not grow the main description).
+ */
+export const INBOX_AGENT_ACTIONS_NO_LINE: readonly string[] = ['snooze_thread']
+
+/**
  * The agent tool's own line for an action whose Inbox lead is long (the
  * description must stay under Claude Code's 2,048 characters, and every Pi and
  * OpenCode request carries it).
@@ -657,7 +665,7 @@ export function inboxAgentTool(
   const description = [
     INBOX_TOOL_LEAD,
     '',
-    ...tools.map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
+    ...tools.filter((tool) => !INBOX_AGENT_ACTIONS_NO_LINE.includes(tool.name)).map((tool) => `- ${tool.name}: ${INBOX_AGENT_ACTION_LEADS[tool.name] ?? leadOf(tool.description)}`),
     ...(options.wakes === false ? [] : ['', INBOX_TOOL_WAKE_NOTE]),
     '',
     // The Board off: no card action, one line that it exists (nothing changes while it is on).

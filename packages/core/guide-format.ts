@@ -30,8 +30,25 @@ export const GUIDE_SNAPSHOT_VERSION = 1 as const;
  */
 export const GUIDE_SNAPSHOT_OVERVIEW_VERSION = 2 as const;
 
+/**
+ * Format version 3 adds a drawn overview picture: `guide.overview.diagram`
+ * may carry `css`, `width`, `height` and `tall` (an HTML picture drawn by
+ * Shape's renderer in the Inbox's code review). A snapshot carries version 3
+ * exactly when its diagram has one of them, so a version-2 reader (strict)
+ * never meets them; a source-only diagram stays version 2 byte for byte.
+ */
+export const GUIDE_SNAPSHOT_DRAWN_VERSION = 3 as const;
+
 /** Every snapshot version the current parser reads. */
-export const GUIDE_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION] as const;
+export const GUIDE_SNAPSHOT_VERSIONS = [GUIDE_SNAPSHOT_VERSION, GUIDE_SNAPSHOT_OVERVIEW_VERSION, GUIDE_SNAPSHOT_DRAWN_VERSION] as const;
+
+/** The drawn-picture keys of an overview diagram (format version 3). */
+const DRAWN_DIAGRAM_KEYS = ["css", "width", "height", "tall"] as const;
+
+/** Whether an overview diagram uses a version-3 key. */
+export function guideDiagramIsDrawn(diagram: GuideOverviewDiagram | undefined): boolean {
+  return !!diagram && DRAWN_DIAGRAM_KEYS.some((key) => diagram[key] !== undefined);
+}
 export type GuideSnapshotVersion = (typeof GUIDE_SNAPSHOT_VERSIONS)[number];
 
 const OVERVIEW_DIAGRAM_KINDS: readonly GuideOverviewDiagramKind[] = ["mermaid", "html"];
@@ -99,7 +116,9 @@ export type GuideSnapshotGuide = CodeGuideOutput & { readonly reviewed: readonly
 
 /**
  * Versioned data contract shared by downloaded files, the CDN viewer, and
- * hosted guides. `version` is 1, or 2 when `guide.overview` is present.
+ * hosted guides. `version` is 1, or 2 when `guide.overview` is present, or 3
+ * when its diagram is a drawn picture (`css`, `width` and `height`, `tall`:
+ * code review's overview drawing), so a v2 reader never meets those fields.
  */
 export interface GuideSnapshot {
   readonly kind: typeof GUIDE_SNAPSHOT_KIND;
@@ -116,6 +135,8 @@ export interface GuideSnapshot {
 export type GuideSnapshotV1 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_VERSION };
 /** A version-2 snapshot: the guide carries an overview. */
 export type GuideSnapshotV2 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_OVERVIEW_VERSION };
+/** A version-3 snapshot: the overview's diagram is a drawn picture. */
+export type GuideSnapshotV3 = GuideSnapshot & { readonly version: typeof GUIDE_SNAPSHOT_DRAWN_VERSION };
 
 /**
  * What a producer captures when a guide job LAUNCHES: the exact review the
@@ -164,7 +185,7 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
   const overview = guide.overview ? copyOverview(guide.overview) : undefined;
   return {
     kind: GUIDE_SNAPSHOT_KIND,
-    version: overview ? GUIDE_SNAPSHOT_OVERVIEW_VERSION : GUIDE_SNAPSHOT_VERSION,
+    version: overview ? (guideDiagramIsDrawn(overview.diagram) ? GUIDE_SNAPSHOT_DRAWN_VERSION : GUIDE_SNAPSHOT_OVERVIEW_VERSION) : GUIDE_SNAPSHOT_VERSION,
     exportedAt: input.exportedAt ?? new Date().toISOString(),
     guide: {
       title: guide.title,
@@ -186,11 +207,21 @@ export function buildGuideSnapshot(input: BuildGuideSnapshotInput): GuideSnapsho
   };
 }
 
-/** Only `{ text, diagram? }` travels: stray producer fields never reach a snapshot. */
+/** Only `{ text, diagram? }` travels (a drawn diagram's own keys with it): stray producer fields never reach a snapshot. */
 function copyOverview(overview: GuideOverview): GuideOverview {
-  return overview.diagram
-    ? { text: overview.text, diagram: { kind: overview.diagram.kind, source: overview.diagram.source } }
-    : { text: overview.text };
+  const d = overview.diagram;
+  if (!d) return { text: overview.text };
+  return {
+    text: overview.text,
+    diagram: {
+      kind: d.kind,
+      source: d.source,
+      ...(d.css !== undefined && { css: d.css }),
+      ...(d.width !== undefined && { width: d.width }),
+      ...(d.height !== undefined && { height: d.height }),
+      ...(d.tall !== undefined && { tall: { source: d.tall.source, ...(d.tall.css !== undefined && { css: d.tall.css }) } }),
+    },
+  };
 }
 
 /** Stable parse failure for malformed or unsupported snapshot data. */
@@ -300,7 +331,7 @@ function parseSection(input: unknown, path: string): Parsed<GuideSection> {
   return { ok: true, value: { title: title.value, overview: overview.value, diffs } };
 }
 
-function parseOverview(input: unknown, path: string): Parsed<GuideOverview> {
+function parseOverview(input: unknown, path: string, version: GuideSnapshotVersion): Parsed<GuideOverview> {
   const object = asRecord(input, path);
   if (isFail(object)) return object;
   const s = strict(object.value, ["text", "diagram"], path);
@@ -311,7 +342,9 @@ function parseOverview(input: unknown, path: string): Parsed<GuideOverview> {
   const dpath = `${path}.diagram`;
   const dobj = asRecord(s.value.diagram, dpath);
   if (isFail(dobj)) return dobj;
-  const d = strict(dobj.value, ["kind", "source"], dpath);
+  // The drawn keys exist only in version 3: a version-2 document stays as strict as every version-2 reader.
+  const drawnVersion = version === GUIDE_SNAPSHOT_DRAWN_VERSION;
+  const d = strict(dobj.value, drawnVersion ? ["kind", "source", ...DRAWN_DIAGRAM_KEYS] : ["kind", "source"], dpath);
   if (isFail(d)) return d;
   const kind = d.value.kind;
   if (typeof kind !== "string" || !OVERVIEW_DIAGRAM_KINDS.includes(kind as GuideOverviewDiagramKind)) {
@@ -320,7 +353,48 @@ function parseOverview(input: unknown, path: string): Parsed<GuideOverview> {
   const source = str(d.value.source, `${dpath}.source`, { nonEmpty: true });
   if (isFail(source)) return source;
   const diagram: GuideOverviewDiagram = { kind: kind as GuideOverviewDiagramKind, source: source.value };
+  if (drawnVersion) {
+    const drawn = parseDrawnKeys(d.value, dpath, kind as GuideOverviewDiagramKind);
+    if (isFail(drawn)) return drawn;
+    Object.assign(diagram, drawn.value);
+  }
   return { ok: true, value: { text: text.value, diagram } };
+}
+
+const CANVAS_MIN = 200;
+const CANVAS_MAX = 4000;
+
+/** A version-3 diagram's drawn keys: HTML only, a canvas given whole or not at all. */
+function parseDrawnKeys(record: Record<string, unknown>, dpath: string, kind: GuideOverviewDiagramKind): Parsed<Partial<GuideOverviewDiagram>> {
+  const out: Partial<GuideOverviewDiagram> = {};
+  const used = DRAWN_DIAGRAM_KEYS.filter((key) => record[key] !== undefined);
+  if (used.length > 0 && kind !== "html") return fail(`${dpath}.${used[0]}`, "Only an html diagram takes css, width, height or tall");
+  const css = optStr(record, "css", dpath);
+  if (isFail(css)) return css;
+  if (css.value !== undefined) out.css = css.value;
+  for (const key of ["width", "height"] as const) {
+    const value = record[key];
+    if (value === undefined) continue;
+    if (typeof value !== "number" || !Number.isInteger(value) || value < CANVAS_MIN || value > CANVAS_MAX) {
+      return fail(`${dpath}.${key}`, `Expected a whole number from ${CANVAS_MIN} to ${CANVAS_MAX}`);
+    }
+    out[key] = value;
+  }
+  if ((out.width === undefined) !== (out.height === undefined)) return fail(dpath, "width and height go together (a fixed canvas), or neither");
+  if (record.tall !== undefined) {
+    const tpath = `${dpath}.tall`;
+    const tobj = asRecord(record.tall, tpath);
+    if (isFail(tobj)) return tobj;
+    const t = strict(tobj.value, ["source", "css"], tpath);
+    if (isFail(t)) return t;
+    const tsource = str(t.value.source, `${tpath}.source`, { nonEmpty: true });
+    if (isFail(tsource)) return tsource;
+    const tcss = optStr(t.value, "css", tpath);
+    if (isFail(tcss)) return tcss;
+    out.tall = { source: tsource.value, ...(tcss.value !== undefined && { css: tcss.value }) };
+  }
+  if (Object.keys(out).length === 0) return fail(dpath, "A version-3 diagram carries css, width and height, or tall");
+  return { ok: true, value: out };
 }
 
 function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<GuideSnapshotGuide> {
@@ -340,7 +414,7 @@ function parseGuide(input: unknown, version: GuideSnapshotVersion): Parsed<Guide
   if (isFail(intent)) return intent;
   let overview: GuideOverview | undefined;
   if (s.value.overview !== undefined) {
-    const parsed = parseOverview(s.value.overview, `${path}.overview`);
+    const parsed = parseOverview(s.value.overview, `${path}.overview`, version);
     if (isFail(parsed)) return parsed;
     overview = parsed.value;
   }
@@ -517,8 +591,17 @@ function parseTheme(input: unknown): Parsed<GuideSnapshotTheme | undefined> {
   return { ok: true, value: palette.value === undefined ? {} : { palette: palette.value } };
 }
 
-/** Parse an unknown value into a snapshot (version 1 or 2). Never throws. */
-export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
+/**
+ * What a parse accepts. `versions`: the snapshot versions read (default every
+ * one this parser knows); a reader that must answer as an older release did
+ * (the Inbox with Code review off: 1 and 2) names its own.
+ */
+export interface GuideSnapshotParseOptions {
+  readonly versions?: readonly GuideSnapshotVersion[];
+}
+
+/** Parse an unknown value into a snapshot (version 1, 2 or 3). Never throws. */
+export function parseGuideSnapshot(input: unknown, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   const object = asRecord(input, "$");
   if (isFail(object)) return object;
   const s = strict(
@@ -529,7 +612,7 @@ export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
   if (isFail(s)) return s;
   if (s.value.kind !== GUIDE_SNAPSHOT_KIND) return fail("$.kind", `Expected ${GUIDE_SNAPSHOT_KIND}`);
   const version = s.value.version;
-  if (!GUIDE_SNAPSHOT_VERSIONS.includes(version as GuideSnapshotVersion)) {
+  if (!(options.versions ?? GUIDE_SNAPSHOT_VERSIONS).includes(version as GuideSnapshotVersion)) {
     return fail("$.version", `Unsupported snapshot version: ${String(version)}`);
   }
   const exportedAt = str(s.value.exportedAt, "$.exportedAt", { nonEmpty: true });
@@ -560,15 +643,15 @@ export function parseGuideSnapshot(input: unknown): GuideSnapshotParseResult {
   };
 }
 
-/** Parse serialized JSON into a snapshot (version 1 or 2). Never throws. */
-export function parseGuideSnapshotJson(text: string): GuideSnapshotParseResult {
+/** Parse serialized JSON into a snapshot (version 1, 2 or 3). Never throws. */
+export function parseGuideSnapshotJson(text: string, options: GuideSnapshotParseOptions = {}): GuideSnapshotParseResult {
   let input: unknown;
   try {
     input = JSON.parse(text);
   } catch {
     return fail("$", "Snapshot is not valid JSON");
   }
-  return parseGuideSnapshot(input);
+  return parseGuideSnapshot(input, options);
 }
 
 // ---------------------------------------------------------------------------
