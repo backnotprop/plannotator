@@ -41,6 +41,11 @@ export interface GuideDiffRendererProps {
   /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
+  /**
+   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
+   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
+   */
+  onContentHeightChange?: (height: number) => void;
 }
 
 export interface GuideDiffRendererContext {
@@ -105,6 +110,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
   /**
+   * A picture slot under the title when the guide's overview has no diagram
+   * (the Inbox's code review: "Show me" asks the agent for one). Answering
+   * null (or absent) leaves the guide exactly as it is.
+   */
+  renderOverviewFigure?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
    * edge (the Inbox: its Split | Unified switch on the first card). Called with
    * each card's index (the "Everything else" card's is the number of
@@ -146,6 +157,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * Absent (guides.show, the VS Code reader): no button and no list.
    */
   globalComments?: GuideGlobalComments;
+  /**
+   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
+   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
+   * which the renderer's measured height then corrects).
+   */
+  diffStyle?: 'split' | 'unified';
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

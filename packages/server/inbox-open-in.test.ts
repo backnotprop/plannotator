@@ -8,15 +8,17 @@
  * has its own temp data dir; Tailscale is a scripted runner, never the CLI.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { OpenInApp, OpenInPlatform } from "@plannotator/core/open-in-apps";
+import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { createShapeStore } from "@plannotator/shared/shape/store";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
-import type { AvailableOpenInApp } from "./open-in";
+import { openWithApp, type AvailableOpenInApp } from "./open-in";
 
 type Json = Record<string, any>;
 
@@ -68,7 +70,7 @@ function world() {
   return { root, dataDir, project };
 }
 
-type Launch = { how: "reveal" | "app" | "default"; path: string; app?: string };
+type Launch = { how: "reveal" | "app" | "default"; path: string; app?: string; line?: number };
 
 /** A launcher that records instead of starting anything. */
 function recordingLauncher(platform: OpenInPlatform, apps: string[] = ["reveal", "vscode", "cursor", "terminal"], answer: { ok: true } | { ok: false; error: string } = { ok: true }) {
@@ -83,7 +85,7 @@ function recordingLauncher(platform: OpenInPlatform, apps: string[] = ["reveal",
     platform,
     apps: () => apps.map((id) => catalog[id]!),
     reveal: async (path) => (launches.push({ how: "reveal", path }), answer),
-    openWithApp: async (app: OpenInApp, path) => (launches.push({ how: "app", path, app: app.id }), answer),
+    openWithApp: async (app: OpenInApp, path, line) => (launches.push({ how: "app", path, app: app.id, ...(line ? { line } : {}) }), answer),
     openWithSystemDefault: async (path) => (launches.push({ how: "default", path }), answer),
   };
   return { launcher, launches };
@@ -239,6 +241,370 @@ describe("Inbox Open in: the launch route", () => {
   });
 });
 
+describe("Inbox Open in: a file a reference names", () => {
+  const FILE = "/api/inbox/open-in/file";
+  const REPO = "github.com/acme/billing";
+
+  /** An Inbox with Code review and Shape on, a thread in the project, a shape on it, and the project on a repository. */
+  async function referenced(extra: Parameters<typeof startInboxServer>[0] = {}) {
+    const w = world();
+    const made = createShapeStore({ dataDir: w.dataDir }).update({
+      board: { title: "Kettle", claim: "Built.", views: { picture: { html: '<p data-mark="k">One whistle</p>' } } },
+      project: { root: w.project, name: "billing" },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    const recording = recordingLauncher("mac");
+    const server = await start(w.dataDir, {
+      openInLauncher: recording.launcher,
+      codeReview: true,
+      shape: true,
+      readProjectRepo: async () => ({ display: "acme/billing", host: "github.com" }),
+      ...extra,
+    });
+    const prj = server.store.ensureProject({ name: "billing", root: w.project });
+    const sent = server.store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "A review." });
+    const base = `http://127.0.0.1:${server.port}`;
+    const check = async (query: Record<string, string>) => (await (await fetch(`${base}${FILE}?${new URLSearchParams(query)}`)).json()) as Json;
+    const open = (body: Json) => fetch(`${base}${FILE}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return { ...w, server, ...recording, thread: sent.message.thread_id, shape: made.id, base, check, open };
+  }
+
+  test("opens the file at its real path and line, from a thread, a shape or a PR's repository", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "export {};\n");
+    const path = join(r.project, "src/app.ts");
+
+    for (const scope of [{ thread: r.thread }, { shape: r.shape }]) {
+      expect(await r.check({ ...scope, path: "src/app.ts" })).toEqual({ found: true, path, kind: "code" });
+      expect(await (await r.open({ ...scope, path: "src/app.ts", app_id: "vscode", line: 12 })).json()).toEqual({ ok: true });
+    }
+    expect(r.launches).toEqual([
+      { how: "app", path, app: "vscode", line: 12 },
+      { how: "app", path, app: "vscode", line: 12 },
+    ]);
+    r.launches.length = 0;
+    // A project's origin is read behind the first ask for it (the PR page's list has asked by then).
+    await r.check({ repo: REPO, path: "src/app.ts" });
+    await Bun.sleep(30);
+    expect(await r.check({ repo: REPO, path: "src/app.ts" })).toEqual({ found: true, path, kind: "code" });
+    await r.open({ repo: REPO, path: "src/app.ts", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path }]);
+  });
+
+  test("a file that is not here: found is false, and a launch answers missing", async () => {
+    const r = await referenced();
+    expect(await r.check({ thread: r.thread, path: "src/gone.ts" })).toEqual({ found: false });
+    expect(await answerOf(await r.open({ thread: r.thread, path: "src/gone.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+    // A repository no project here is on, and a thread or shape that does not exist: nothing to find it in.
+    expect(await r.check({ repo: "github.com/acme/elsewhere", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ thread: "msg_nope", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ shape: "shp_nope", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ path: "plan.md" })).toEqual({ found: false });
+    expect(r.launches).toEqual([]);
+  });
+
+  test("a path outside the project is refused, however it is written, and so is a secret", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.root, "secret.txt"), "outside\n");
+    writeFileSync(join(r.project, ".env"), "KEY=1\n");
+    symlinkSync(join(r.root, "secret.txt"), join(r.project, "out.txt"));
+    symlinkSync(r.root, join(r.project, "up"));
+    symlinkSync(join(r.project, ".env"), join(r.project, "config.txt"));
+    for (const path of ["../secret.txt", "src/../../secret.txt", join(r.root, "secret.txt"), "~/secret.txt", "out.txt", "up/secret.txt", ".env", ".env::$DATA", "config/.env .", "config.txt", "..%2fsecret.txt"]) {
+      expect([path, await r.check({ thread: r.thread, path })]).toEqual([path, { found: false }]);
+      expect([path, ...(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" })))]).toEqual([path, 422, "open_not_allowed"]);
+    }
+    expect(r.launches).toEqual([]);
+    // A root in the request means nothing.
+    expect(await r.check({ thread: r.thread, root: r.root, path: "secret.txt" })).toEqual({ found: false });
+  });
+
+  test("the per-kind policy holds: a script opens in an editor, never its default app; an unknown file only in Finder", async () => {
+    const r = await referenced();
+    expect(await answerOf(await r.open({ thread: r.thread, path: "deploy.sh", app_id: "default" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "build.zip", app_id: "vscode" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "plan.md", app_id: "terminal" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "run.command", app_id: "default" }))).toEqual([422, "open_not_allowed"]);
+    expect(r.launches).toEqual([]);
+    await r.open({ thread: r.thread, path: "deploy.sh", app_id: "cursor" });
+    await r.open({ thread: r.thread, path: "shot.png", app_id: "default" });
+    expect(r.launches.map((l) => l.how)).toEqual(["app", "default"]);
+  });
+
+  /** A linked worktree of the project, as git leaves it: a folder whose `.git` is a file. */
+  function worktree(r: { root: string }, name: string, files: Record<string, string>) {
+    const dir = realpathSync(mkdtempSync(join(r.root, `${name}-`)));
+    const gitdir = join(dir, "..", `${name}-gitdir-${dir.slice(-6)}`);
+    mkdirSync(gitdir);
+    writeFileSync(join(dir, ".git"), `gitdir: ${gitdir}\n`);
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+    return dir;
+  }
+
+  const AGENT = { kind: "agent", host: "claude-code", session: "ses_b", name: "Claude Code" } as const;
+
+  test("an agent in a linked worktree: its links open the worktree's file, never the main checkout's copy", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    writeFileSync(join(r.project, "src/only-main.ts"), "main\n");
+    const wt = worktree(r, "wt", { "src/app.ts": "worktree\n", "src/only-here.ts": "worktree\n" });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: wt });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(wt, "src/app.ts"));
+    expect((await r.check({ ...scope, path: "src/only-here.ts" })).path).toBe(join(wt, "src/only-here.ts"));
+    expect((await r.check({ ...scope, path: join(wt, "src/app.ts") })).path).toBe(join(wt, "src/app.ts"));
+    // A file the worktree does not have: the main checkout's copy is not the agent's file.
+    expect(await r.check({ ...scope, path: "src/only-main.ts" })).toEqual({ found: false });
+    // Named absolutely, it means that file.
+    expect((await r.check({ ...scope, path: join(r.project, "src/only-main.ts") })).path).toBe(join(r.project, "src/only-main.ts"));
+
+    await r.open({ ...scope, path: "src/app.ts", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path: join(wt, "src/app.ts") }]);
+  });
+
+  test("a worktree that is gone: the project's own copy", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "plan.md"), "# main\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.root, "removed-worktree") });
+    expect((await r.check({ thread: sent.message.thread_id, message: sent.message.id, path: "plan.md" })).path).toBe(join(r.project, "plan.md"));
+  });
+
+  test("a board written from a linked worktree opens that worktree's file, and the project's once the worktree is gone", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    const wt = worktree(r, "wt", { "app.ts": "worktree\n", "new.ts": "worktree\n" });
+    const made = createShapeStore({ dataDir: r.dataDir }).update({
+      board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+      project: { root: r.project, name: "billing", worktree: wt },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(wt, "app.ts"));
+    expect((await r.check({ shape: made.id, path: "new.ts" })).path).toBe(join(wt, "new.ts"));
+    // Its file viewer reads the same checkout.
+    const read = (await (await fetch(`${r.base}/api/shapes/${made.id}/code/file?path=app.ts`)).json()) as Json;
+    expect(JSON.stringify(read)).toContain("worktree");
+    rmSync(wt, { recursive: true, force: true });
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(r.project, "app.ts"));
+  });
+
+  test("a real worktree under the project (`.claude/worktrees/n`): a file only in main is not the agent's", async () => {
+    const r = await referenced();
+    const git = (...args: string[]) => {
+      const done = spawnSync("git", ["-C", r.project, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+      });
+      if (done.status !== 0) throw new Error(done.stderr);
+    };
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    git("init", "-q");
+    git("add", "src/app.ts");
+    git("commit", "-qm", "one");
+    git("worktree", "add", "-q", "-b", "n", ".claude/worktrees/n");
+    writeFileSync(join(r.project, "src/main-new.ts"), "main\n");
+    const nested = join(r.project, ".claude/worktrees/n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: nested });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(nested, "src/app.ts"));
+    expect(await r.check({ ...scope, path: "src/main-new.ts" })).toEqual({ found: false });
+  });
+
+  test("a diff's path starts at the top of the repository, an agent's link at its folder", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "packages/server"), { recursive: true });
+    writeFileSync(join(r.project, "package.json"), "{}\n");
+    writeFileSync(join(r.project, "packages/server/package.json"), "{}\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.project, "packages/server") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "package.json" })).path).toBe(join(r.project, "packages/server/package.json"));
+    expect((await r.check({ ...scope, from: "root", path: "package.json" })).path).toBe(join(r.project, "package.json"));
+    await r.open({ ...scope, from: "root", path: "package.json", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path: join(r.project, "package.json") }]);
+  });
+
+  test("a branch switch removed the agent's subfolder: still its worktree, not main", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    writeFileSync(join(r.project, "src/only-main.ts"), "main\n");
+    const wt = worktree(r, "wt", { "src/app.ts": "worktree\n" });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(wt, "feat") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(wt, "src/app.ts"));
+    expect(await r.check({ ...scope, path: "src/only-main.ts" })).toEqual({ found: false });
+  });
+
+  test("a base_path is no way in: not a folder without a `.git`, not the home folder even with one", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "open-in-home-")));
+    roots.push(dir);
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".git"), { recursive: true });
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/id_rsa"), "secret\n");
+    mkdirSync(join(home, "notes"));
+    writeFileSync(join(home, "notes/a.md"), "# a\n");
+    const loose = join(dir, "etc");
+    mkdirSync(loose);
+    writeFileSync(join(loose, "hosts"), "secret\n");
+    const r = await referenced({ openInHome: home });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    for (const base_path of [home, join(home, "notes"), loose]) {
+      const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path });
+      const scope = { thread: sent.message.thread_id, message: sent.message.id };
+      for (const path of [".ssh/id_rsa", "notes/a.md", "hosts", "../.ssh/id_rsa"]) expect((await r.check({ ...scope, path })).found).toBe(false);
+      expect((await r.check({ ...scope, path: join(home, ".ssh/id_rsa") })).found).toBe(false);
+    }
+  });
+
+  test("the home folder by another spelling is still the home folder", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "open-in-home-")));
+    roots.push(dir);
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".git"), { recursive: true });
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/id_rsa"), "secret\n");
+    const spelled = join(dir, "linkhome");
+    symlinkSync(home, spelled);
+    // The home folder named through a link, a base under the real folder; the home folder real, a base through the link.
+    for (const [openInHome, base_path] of [[spelled, home], [home, spelled]] as const) {
+      const r = await referenced({ openInHome });
+      const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+      const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path });
+      expect((await r.check({ thread: sent.message.thread_id, message: sent.message.id, path: ".ssh/id_rsa" })).found).toBe(false);
+    }
+  });
+
+  test("a `.git` file that names nothing is no worktree", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    for (const dotGit of ["", "not a gitdir line\n", `gitdir: ${join(r.root, "nowhere")}\n`]) {
+      const loose = realpathSync(mkdtempSync(join(r.root, "loose-")));
+      writeFileSync(join(loose, ".git"), dotGit);
+      writeFileSync(join(loose, "hosts"), "secret\n");
+      const made = createShapeStore({ dataDir: r.dataDir }).update({
+        board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+        project: { root: r.project, name: "billing", worktree: loose },
+        session: { id: "ses_a", host: "claude-code" },
+      });
+      if (!made.ok) throw new Error(JSON.stringify(made));
+      expect(await r.check({ shape: made.id, path: "hosts" })).toEqual({ found: false });
+    }
+  });
+
+  test("a board's worktree that is not one (no `.git` file) is not read: not by Open in, not by its file viewer", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    const loose = realpathSync(mkdtempSync(join(r.root, "etc-")));
+    writeFileSync(join(loose, "hosts"), "secret\n");
+    const made = createShapeStore({ dataDir: r.dataDir }).update({
+      board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+      project: { root: r.project, name: "billing", worktree: loose },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    expect(await r.check({ shape: made.id, path: "hosts" })).toEqual({ found: false });
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(r.project, "app.ts"));
+    const read = await (await fetch(`${r.base}/api/shapes/${made.id}/code/file?path=hosts`)).text();
+    expect(read).not.toContain("secret");
+  });
+
+  test("an agent in a subfolder: a link starts at its folder, and at the top of its checkout", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/ledger.ts"), "ledger\n");
+    writeFileSync(join(r.project, "src/near.ts"), "near\n");
+    writeFileSync(join(r.project, "near.ts"), "top\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.project, "src") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/ledger.ts" })).path).toBe(join(r.project, "src/ledger.ts"));
+    expect((await r.check({ ...scope, path: "near.ts" })).path).toBe(join(r.project, "src/near.ts"));
+    expect((await r.check({ ...scope, path: "../near.ts" })).path).toBe(join(r.project, "near.ts"));
+  });
+
+  test("a reply from another project: an absolute link means that file; a relative one starts in the sender's project", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "billing\n");
+    const other = realpathSync(mkdtempSync(join(r.root, "other-")));
+    writeFileSync(join(other, "app.ts"), "other\n");
+    writeFileSync(join(other, "theirs.ts"), "other\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Hello.", reply_to: r.thread, from_project: { name: "other", root: other } } as never);
+    expect(sent.message.from_project?.root).toBe(other);
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: join(r.project, "app.ts") })).path).toBe(join(r.project, "app.ts"));
+    expect((await r.check({ ...scope, path: join(other, "theirs.ts") })).path).toBe(join(other, "theirs.ts"));
+    expect((await r.check({ ...scope, path: "app.ts" })).path).toBe(join(other, "app.ts"));
+  });
+
+  test("a message scope reads only its own thread: another thread's message brings no root", async () => {
+    const r = await referenced();
+    const elsewhere = realpathSync(mkdtempSync(join(r.root, "elsewhere-")));
+    writeFileSync(join(elsewhere, ".git"), "gitdir: /x\n");
+    writeFileSync(join(elsewhere, "secret.ts"), "there\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const stray = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "There.", base_path: elsewhere });
+    // Without the thread rule, this message's folder would answer.
+    expect((await r.check({ thread: stray.message.thread_id, message: stray.message.id, path: "secret.ts" })).found).toBe(true);
+    expect(await r.check({ thread: r.thread, message: stray.message.id, path: "secret.ts" })).toEqual({ found: false });
+    expect(await answerOf(await r.open({ thread: r.thread, message: stray.message.id, path: "secret.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+  });
+
+  test("only a whole, safe line number reaches the launcher", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "export {};\n");
+    const path = join(r.project, "app.ts");
+    for (const line of ["12; rm -rf /", "12", 12.5, -1, 0, [12], {}, null, true, 1e24]) {
+      r.launches.length = 0;
+      await r.open({ thread: r.thread, path: "app.ts", app_id: "vscode", line });
+      expect([line, r.launches]).toEqual([line, [{ how: "app", path, app: "vscode" }]]);
+    }
+  });
+
+  test("only a regular file: a folder or a pipe has no control, and a read of one does not hang", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "folder.ts"));
+    spawnSync("mkfifo", [join(r.project, "pipe.ts")]);
+    expect(existsSync(join(r.project, "pipe.ts"))).toBe(true);
+    for (const path of ["folder.ts", "pipe.ts"]) {
+      expect(await r.check({ thread: r.thread, path })).toEqual({ found: false });
+      expect(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+    }
+    expect(r.launches).toEqual([]);
+  });
+
+  test("a read from another site is refused", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "export {};\n");
+    const answer = await fetch(`${r.base}${FILE}?thread=${r.thread}&path=app.ts`, { headers: { Origin: "https://evil.example" } });
+    expect(answer.status).toBe(403);
+  });
+
+  test("a stale tab is turned away, and with Code review off the route answers nothing", async () => {
+    const r = await referenced();
+    expect(await answerOf(await r.open({ thread: r.thread, path: "plan.md", app_id: "vscode", serverSession: "stale" }))).toEqual([409, "session_mismatch"]);
+    expect(r.launches).toEqual([]);
+    const off = await referenced({ codeReview: false });
+    expect(await answerOf(await fetch(`${off.base}${FILE}?thread=${off.thread}&path=plan.md`))).toEqual([409, "code_review_off"]);
+    expect(await answerOf(await off.open({ thread: off.thread, path: "plan.md", app_id: "vscode" }))).toEqual([409, "code_review_off"]);
+    expect(off.launches).toEqual([]);
+  });
+});
+
 describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
   const launchTest = process.platform === "win32" ? test.skip : test;
   launchTest("reveal and the default app run the platform's own launcher with the realpath, nothing else", async () => {
@@ -260,6 +626,41 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
       expect(lines).toEqual([`open ${join(project, "shot.png")}`, `open -R ${join(project, "build.zip")}`]);
     } else {
       expect(lines).toEqual([`xdg-open ${join(project, "shot.png")}`, `xdg-open ${project}`]);
+    }
+  });
+
+  launchTest("a line goes in the URL of an app that has a scheme on macOS, to the CLI of one that takes it elsewhere; a path's spaces stay one argument", async () => {
+    const { root } = world();
+    const stubs = join(root, "stubs");
+    mkdirSync(stubs);
+    const log = join(stubs, "launches.log");
+    for (const name of ["open", "code", "subl"]) {
+      writeFileSync(join(stubs, name), `#!/bin/sh\nfor a in "$@"; do echo "${name}|$a" >> "${log}"; done\nexit 0\n`);
+      chmodSync(join(stubs, name), 0o755);
+    }
+    setEnv("PATH", stubs);
+    const code = getOpenInApp("vscode")!;
+    const sublime = getOpenInApp("sublime-text")!;
+    const file = "/work/my app/src/a#b.ts";
+    expect(await openWithApp(code, file, 12)).toEqual({ ok: true });
+    expect(await openWithApp(sublime, file, 12)).toEqual({ ok: true });
+    expect(await openWithApp(code, file)).toEqual({ ok: true });
+    const lines = readFileSync(log, "utf8").trim().split("\n");
+    if (process.platform === "darwin") {
+      expect(lines).toEqual([
+        "open|-a",
+        "open|Visual Studio Code",
+        "open|vscode://file/work/my%20app/src/a%23b.ts:12",
+        // `open -a` takes no line: this one opens at the top.
+        "open|-a",
+        "open|Sublime Text",
+        `open|${file}`,
+        "open|-a",
+        "open|Visual Studio Code",
+        `open|${file}`,
+      ]);
+    } else {
+      expect(lines).toEqual([`code|--goto`, `code|${file}:12`, `subl|${file}:12`, `code|${file}`]);
     }
   });
 });
@@ -362,7 +763,7 @@ describe("Inbox Open in: over the tailnet", () => {
   test("the launch and the app list answer local_only; the owner opens the new-tab page", async () => {
     const { dataDir, project } = world();
     const { launcher, launches } = recordingLauncher("mac");
-    const server = await start(dataDir, { openInLauncher: launcher, tailscale, publishTailnet: true });
+    const server = await start(dataDir, { openInLauncher: launcher, tailscale, publishTailnet: true, codeReview: true });
     const ids = await attach(server, project, ["plan.md", "page.html"]);
     const listener = server.tailscale.listenerPort()!;
     expect(listener).not.toBeNull();
@@ -375,6 +776,10 @@ describe("Inbox Open in: over the tailnet", () => {
       });
     expect(await answerOf(await through("/api/inbox/open-in/apps"))).toEqual([403, "local_only"]);
     expect(await answerOf(await through("/api/inbox/open-in", { method: "POST", body: JSON.stringify({ attachment_id: ids["plan.md"], app_id: "vscode" }) }))).toEqual([403, "local_only"]);
+    // A file a reference names: the same, before anything else about it is read.
+    const thread = "msg_any";
+    expect(await answerOf(await through(`/api/inbox/open-in/file?thread=${thread}&path=plan.md`))).toEqual([403, "local_only"]);
+    expect(await answerOf(await through("/api/inbox/open-in/file", { method: "POST", body: JSON.stringify({ thread, path: "plan.md", app_id: "vscode" }) }))).toEqual([403, "local_only"]);
     expect(launches).toEqual([]);
     const page = await through(`/api/inbox/attachments/${ids["page.html"]}/page`);
     expect(page.status).toBe(303);

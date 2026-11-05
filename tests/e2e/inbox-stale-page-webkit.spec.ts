@@ -4,7 +4,7 @@
  *
  * The Inbox runs from source as this repo's release (tests/e2e/stale-page-inbox.ts), serving the built window. The
  * first page load is served as an older release served it: the build's one release literal (stalePage.ts
- * `pageBuild`) is rewritten to the release before. What is proved:
+ * `pageBuild`, in the entry script) is rewritten to the release before. What is proved:
  * - a phone (390 x 844) shows "Inbox updated to X · Reload" at the list's top, and at the thread's top once a thread
  *   covers the list;
  * - Reload pressed inside the reply box's 500 ms pause saves the reply draft before the page goes (the save answered
@@ -94,17 +94,30 @@ async function open(browser: Browser, phone: boolean, colorScheme: 'light' | 'da
   return context.newPage();
 }
 
-/** The next page load is served as the release before served it: the build's one release literal says `older`. */
+/**
+ * The next page load is served as the release before served it: the build's one release literal says `older`. The
+ * literal is in the window's entry script, which the page names (`/assets/<name>`, build/pack-inbox.ts), not in the page.
+ */
 async function serveOlderPageOnce(page: Page) {
+  let entry: string | null = null;
   let served = false;
   await page.route('**/*', async (route) => {
-    if (served || route.request().resourceType() !== 'document') return route.fallback();
-    served = true;
+    const request = route.request();
+    if (served) return route.fallback();
+    if (request.resourceType() === 'document') {
+      const response = await route.fetch();
+      const html = await response.text();
+      entry = /<script[^>]*\bsrc="(\/assets\/[^"]+\.js)"/.exec(html)?.[1] ?? null;
+      expect(entry, 'the page names its entry script').not.toBeNull();
+      return route.fulfill({ response, body: html });
+    }
+    if (new URL(request.url()).pathname !== entry) return route.fallback();
     const response = await route.fetch();
-    const html = await response.text();
+    served = true;
+    const script = await response.text();
     const literal = JSON.stringify(version);
-    expect(html.split(literal).length - 1, 'the build names its release once (stalePage.ts pageBuild)').toBe(1);
-    await route.fulfill({ response, body: html.replace(literal, JSON.stringify(older)) });
+    expect(script.split(literal).length - 1, 'the build names its release once (stalePage.ts pageBuild)').toBe(1);
+    await route.fulfill({ response, body: script.replace(literal, JSON.stringify(older)) });
   });
 }
 
@@ -174,6 +187,55 @@ test('a desktop: the notice beside the thread is the list\'s, and × hides it fo
   await asked;
   await page.waitForTimeout(200);
   await expect(notice).toHaveCount(0);
+});
+
+/** The next page load is the page of a release whose entry script the Inbox no longer has. */
+async function servePageWithGoneEntry(page: Page, times: number): Promise<{ documents: number }> {
+  const seen = { documents: 0 };
+  await page.route('**/*', async (route) => {
+    if (route.request().resourceType() !== 'document') return route.fallback();
+    seen.documents += 1;
+    if (seen.documents > times) return route.fallback();
+    const response = await route.fetch();
+    const html = await response.text();
+    const gone = html.replace(/(<script type="module"[^>]*\ssrc=")\/assets\/[^"]+\.js"/, '$1/assets/index-gone.js"');
+    expect(gone, 'the page names its entry script').not.toBe(html);
+    await route.fulfill({ response, body: gone });
+  });
+  return seen;
+}
+
+test('an older page whose entry script is gone reloads by itself onto the Inbox\'s own page, never blank', async ({ browser }) => {
+  const page = await open(browser, false);
+  const seen = await servePageWithGoneEntry(page, 1);
+  await page.goto(`${url}#thread=${thread}`);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  expect(seen.documents).toBe(2);
+  await expect(page.locator('[data-stale-page]')).toHaveCount(0);
+  // Where the person was: the reload keeps the address's thread.
+  expect(new URL(page.url()).hash).toBe(`#thread=${thread}`);
+});
+
+test('the same old page coming back after a page that loaded reloads again (a rollback, then forward)', async ({ browser }) => {
+  const page = await open(browser, false);
+  await servePageWithGoneEntry(page, 1);
+  await page.goto(url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  await page.unrouteAll({ behavior: 'wait' });
+  await expect.poll(() => page.evaluate(() => sessionStorage.getItem('plannotator-entry-gone'))).toBeNull();
+  const again = await servePageWithGoneEntry(page, 1);
+  await page.goto(url);
+  await expect(page.locator('.ib-lbody [data-thread-id]').first()).toBeVisible();
+  expect(again.documents).toBe(2);
+});
+
+test('a page that keeps coming back with its entry script gone reloads once, not in a loop', async ({ browser }) => {
+  const page = await open(browser, false);
+  const seen = await servePageWithGoneEntry(page, Number.MAX_SAFE_INTEGER);
+  await page.goto(url);
+  await expect.poll(() => seen.documents).toBe(2);
+  await page.waitForTimeout(2000);
+  expect(seen.documents).toBe(2);
 });
 
 test('the shots: a phone (the list, then a thread) and a desktop, light and dark', async ({ browser }) => {

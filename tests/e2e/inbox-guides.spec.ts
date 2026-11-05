@@ -320,6 +320,12 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   const added = (line: number) => auth.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(2)).toBeVisible({ timeout: 30_000 });
+  // The file's box is as tall as its lines: no empty band under them (the guided review in a thread, as on the PR page).
+  await expect.poll(async () => {
+    const box = (await auth.locator('[data-guide-code-view-mounted]').boundingBox())!;
+    const rows = await auth.locator('[data-line-type][data-column-number]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().bottom)));
+    return box.y + box.height - rows;
+  }).toBeLessThan(24);
 
   // A range: drag across the new side's line numbers 2 to 3, as in the review app.
   const from = (await added(2).boundingBox())!;
@@ -349,6 +355,10 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toContainText('package.json · line 3');
   await expect(viewer.locator('[data-strip-chip]')).toHaveText('2 comments');
   await shot('4.3-guide-comments-in-the-panel');
+  // A short list keeps its own height: the foot stays right under it, not at the bottom of the column.
+  const foot = (await viewer.locator('.ib-gstrip').boundingBox())!;
+  const lastCard = (await panel.locator('[data-annotation-id]').last().boundingBox())!;
+  expect(foot.y - (lastCard.y + lastCard.height)).toBeLessThan(80);
 
   // Kept in the store with the thread's annotations, keyed to the message and the file.
   const model = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: { message_id: string; path: string; guide: { side: string; line_start: number; line_end: number } }[] };

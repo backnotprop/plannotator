@@ -130,6 +130,26 @@ test("a message from a linked worktree lands in the main repository's project an
   expect(server.store.message(fromMain.message_id)?.base_path).toBeUndefined();
 });
 
+test("a linked worktree of another repository replying into a thread keeps the worktree as its base, on a host that sends no folder", async () => {
+  const { root, main, dataDir } = world();
+  const other = join(root, "other");
+  mkdirSync(other);
+  writeFileSync(join(other, "README.md"), "# other\n");
+  git(root, "init", "-q", other);
+  git(other, "add", ".");
+  git(other, "commit", "-qm", "init");
+  const otherTree = join(root, "other-wt");
+  git(other, "worktree", "add", "-q", otherTree, "-b", "feature");
+  const server = await start(dataDir);
+  const client = await agent(server);
+  const asked = await send(client, { project_path: main, body: "Which one?", agent_session: "ses_main" });
+  const fromTree = await send(client, { project_path: otherTree, reply_to: asked.message_id, body: "From my worktree.", agent_session: "ses_wt" });
+  const fromItsMain = await send(client, { project_path: other, reply_to: asked.message_id, body: "From its main checkout.", agent_session: "ses_other" });
+  expect(server.store.message(fromTree.message_id)?.base_path).toBe(otherTree);
+  expect(server.store.message(fromTree.message_id)?.from_project?.root).toBe(other);
+  expect(server.store.message(fromItsMain.message_id)?.base_path).toBeUndefined();
+});
+
 test("images relative to the worktree resolve there, and from anywhere else on this computer", async () => {
   const { main, worktree, dataDir } = world();
   const server = await start(dataDir);

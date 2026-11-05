@@ -22,6 +22,11 @@ export interface InboxAskParts {
   fileButton: ReactNode;
   /** The window. Outside the thread's section: see AskChat. */
   layer: ReactNode;
+  /**
+   * Open the open thread's chat with these words in its box, after any words
+   * already there (code review's Ask on selected lines). Nothing while Ask is off.
+   */
+  askWith: (words: string) => void;
 }
 
 /** Lucide's sparkles: the Inbox's own icons have no such mark, and `packages/inbox` does not depend on lucide. */
@@ -40,6 +45,9 @@ function SparklesIcon() {
  * otherwise. Picking a row only changes `#thread=`, so the window shows the
  * chat of whatever thread is on screen and the two can never disagree.
  */
+/** Each seed's token, unique in this window. */
+let seedCount = 0;
+
 export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: InboxAskOptions): InboxAskParts {
   const store = useMemo(() => new ChatWindowStore(), []);
   const minimized = useSyncExternalStore(store.subscribe, () => store.minimized);
@@ -50,6 +58,7 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
   const [read, setRead] = useState<{ threadId: string; model: InboxAskModel } | null>(null);
   const [picked, setPicked] = useState<InboxAskChat | null>(null);
   const [focusRequest, setFocusRequest] = useState(0);
+  const [seed, setSeed] = useState<{ threadId: string; words: string; token: number } | null>(null);
   /** The thread whose box takes focus once it can: only after a press here, never when the list moves to a thread. */
   const wantsFocus = useRef<string | null>(null);
   const askForFocus = (threadId: string) => {
@@ -141,7 +150,23 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
       </Tip>
     ) : null;
 
+  // One function for the window's life (a review's selection actions hold it): the thread on screen through its ref.
+  const askWith = useCallback(
+    (words: string) => {
+      const thread = onScreen.current;
+      if (!thread) return;
+      openChats.current.add(thread);
+      store.setMinimized(false);
+      seedCount += 1;
+      setSeed({ threadId: thread, words, token: seedCount });
+      wantsFocus.current = thread;
+      setFocusRequest((count) => count + 1);
+    },
+    [store],
+  );
+
   return {
+    askWith,
     button: icon('ib-iconbtn ib-artbtn'),
     fileButton: icon(pressed ? 'ib-fvb ib-on' : 'ib-fvb'),
     layer: askFor ? (
@@ -154,6 +179,7 @@ export function useInboxAsk({ on, threadId, phone, openThread, replyInThread }: 
           picked={picked?.thread_id === askFor ? picked : null}
           phone={phone}
           focusRequest={focusRequest}
+          seed={seed?.threadId === askFor ? seed : null}
           takeFocus={() => {
             if (wantsFocus.current !== askFor) return false;
             wantsFocus.current = null;

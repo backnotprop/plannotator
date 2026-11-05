@@ -13,16 +13,18 @@
  *  - the agent drawn top left instead of on the row's third line;
  *  - two repositories of one name in the list told apart by nothing;
  *  - initials that read as "PR" or "MR" on this page;
- *  - a rail of files that share their name and last folder, each row the same text.
+ *  - a rail of files that share their name and last folder, each row the same text;
+ *  - a PR in two views or none, a stack split by a view, the menu's counts not following the view and the project,
+ *    the on-you count following the view, an assigned PR not on the person.
  */
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { inboxPullItems } from '@plannotator/core/inbox-types';
 import { initials, repoLabels } from './labels';
-import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
+import { layerPill, ladderHeading, pullCount, pullFilterOf, pullGroups, pullRows, pullViewOf, rowLine, rowMeta, stackTitle, type PullFilter } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { railRows } from './rail';
-import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, otherLayerAgents, stackAgentsWords, stackLink, stackVerdictLink } from './topology';
+import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, stackLink, stackVerdictLink } from './topology';
 
 function pr(fields: Partial<InboxPull> & { number: number; head: string }): InboxPull {
   const repo = fields.repo ?? 'northwind/payments-gateway';
@@ -80,7 +82,6 @@ describe('several agents on one stack (#2)', () => {
     expect(layerVerdictLink(layers[1]!, stack!, links)!.thread_id).toBe('claude');
     expect(layerVerdictLink(layers[2]!, stack!, links)!.thread_id).toBe('codex');
     expect(layerVerdictLink(layers[3]!, stack!, links)!.thread_id).toBe('codex');
-    expect(otherLayerAgents(stack!, links).map((o) => [o.link.thread_id, o.layers.map((l) => l.number)])).toEqual([['codex', [3, 4]]]);
   });
 
   test('a layer under the only linked one, with two agents on the stack, goes to neither', () => {
@@ -103,7 +104,6 @@ describe('several agents on one stack (#2)', () => {
     const [fork] = inboxPullStacks([a, b, c]);
     const forked = { [a.key]: link('claude'), [b.key]: link('codex') };
     expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('claude');
-    expect(otherLayerAgents(fork!, forked).map((o) => [o.link.thread_id, o.layers.map((l) => l.number)])).toEqual([['codex', [2]]]);
   });
 
   test("a fork: a layer on B takes B's agent, though its cousin C (another agent) comes just before it in the list", () => {
@@ -119,29 +119,30 @@ describe('several agents on one stack (#2)', () => {
     expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('codex');
   });
 
-  test("a Whole stack verdict goes to an agent only when every layer under it is that agent's; else to none", () => {
-    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers.
-    const whole = stackVerdictLink(layers[3]!, stack!, links);
-    expect(whole.link).toBeNull();
-    expect(whole.agents.map((a) => a.thread_id).sort()).toEqual(['claude', 'codex']);
-    // Up to #2: Claude's alone.
-    expect(stackVerdictLink(layers[1]!, stack!, links).link!.thread_id).toBe('claude');
-    // A layer of no agent under the agent's own goes with it.
-    expect(stackVerdictLink(layers[3]!, stack!, { [layers[0]!.key]: link('claude') }).link!.thread_id).toBe('claude');
-    expect(stackAgentsWords(['Claude Code', 'Codex'])).toBe('Claude Code and Codex each have layers here. Send to an agent from This layer.');
-    expect(stackAgentsWords(['Claude Code', 'Claude Code'])).toBe('2 Claude Code threads each have layers here. Send to an agent from This layer.');
+  test("a Whole stack verdict goes to the stack's one review thread, its lowest linked layer's, whoever linked a layer above", () => {
+    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers, and goes to Claude's thread.
+    expect(stackVerdictLink(layers[3]!, stack!, links)!.thread_id).toBe('claude');
+    expect(stackVerdictLink(layers[1]!, stack!, links)!.thread_id).toBe('claude');
+    // Only a higher layer linked: the stack's thread is that one.
+    expect(stackVerdictLink(layers[0]!, stack!, { [layers[2]!.key]: link('codex') })!.thread_id).toBe('codex');
+    // A teammate's layer takes no verdict here; a teammate's linked layer is not the person's stack thread.
+    const theirs = { ...layers[0]!, mine: false };
+    const [mixed] = inboxPullStacks([theirs, ...layers.slice(1)]);
+    expect(stackVerdictLink(theirs, mixed!, links)).toBeNull();
+    expect(stackVerdictLink(layers[1]!, mixed!, links)!.thread_id).toBe('codex');
   });
 });
 
 describe("the agent on the row's third line (the owner on #2608)", () => {
-  test('a PR an agent has: "#48201 · Claude Code has it · …"; one it opened, "opened it"; an ended one "had it"', () => {
+  test('one review thread, however it began: "#48201 · Review thread with Claude Code · …"; an ended agent, "OpenCode ended"', () => {
     const one = pr({ number: 48201, head: 'x', checks: 'pending' });
     const [item] = inboxPullItems(inboxPullStacks([one]), () => true);
-    expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Claude Code has it · checks running');
-    expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'has it' });
-    expect(rowLine(item!, link('t'))).toBe('#48201 · Claude Code opened it · checks running');
+    expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Review thread with Claude Code · checks running');
+    expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'Review thread with Claude Code' });
+    // The agent's own thread named the PR: the same words (no "opened it").
+    expect(rowLine(item!, link('t'))).toBe('#48201 · Review thread with Claude Code · checks running');
     const ended = link('t', { via: 'owner', agent: { host: 'opencode', session: 's', name: null, ended: true } });
-    expect(rowLine(item!, ended)).toBe('#48201 · OpenCode had it · checks running');
+    expect(rowLine(item!, ended)).toBe('#48201 · OpenCode ended · checks running');
     expect(rowMeta(item!, null).agent).toBeNull();
   });
 });
@@ -179,6 +180,28 @@ describe('what the list says when it could not read everything (#5, #6, #8, #26)
     const model = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 100, total: 133 } }] });
     const [notice] = pullsNotices(model);
     expect(notice).toMatchObject({ head: 'Showing 100 of 133', link: { href: 'https://github.com/pulls' } });
+  });
+
+  test("Others failing alone is said of Others only: its last read shown, else pull requests by others aren't; never \"Nothing open\"", () => {
+    const none = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'unavailable' }] });
+    expect(pullsNotices(none).map((n) => n.line)).toEqual(["GitHub didn't answer; pull requests by others aren't shown."]);
+    expect(pullsEmptyWords(none).kind).toBe('unread');
+    const kept = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', others_error: 'rate_limited', others_last_read: '2026-11-03T09:00:00.000Z' }] });
+    expect(pullsNotices(kept).map((n) => n.line)).toEqual(['GitHub asked to slow down; showing its last read.']);
+    // The host's own read failed too: said once, as the host's.
+    const both = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable', others_error: 'unavailable' }] });
+    expect(pullsNotices(both).map((n) => n.key)).toEqual(['unavailable:false']);
+  });
+
+  test("what Others left out or failed to read is said where Others shows (All, Others), never in Mine or To review", () => {
+    const cut = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 12, total: null, of: 'others' }, others_error: 'unavailable' }] });
+    expect(pullsNotices(cut).map((n) => n.line)).toEqual(["GitHub didn't answer; pull requests by others aren't shown.", 'Not every pull request on github.com was read.']);
+    expect(pullsNotices(cut, 'others')).toHaveLength(2);
+    expect(pullsNotices(cut, 'mine')).toEqual([]);
+    expect(pullsNotices(cut, 'review')).toEqual([]);
+    // The person's own searches cut: every view says so.
+    const own = answer({ hosts: [{ cli: 'gh', host: 'github.com', login: 'dana', capped: { shown: 50, total: 80 } }] });
+    expect(pullsNotices(own, 'mine').map((n) => n.key)).toEqual(['capped:github.com']);
   });
 
   test('a read not limited to the projects never counts what it shows against the forge total, and is never "Nothing open"', () => {
@@ -296,5 +319,73 @@ describe('the review rail (#17)', () => {
       { kind: 'file', path: 'src/a.ts', dir: 'src/', name: 'a.ts' },
       { kind: 'file', path: 'src/b.ts', dir: 'src/', name: 'b.ts' },
     ]);
+  });
+});
+
+describe('the views and the project (approval "pr-list-filters")', () => {
+  const W = 'northwind/web-app';
+  const B = 'northwind/billing-svc';
+  // dana's own two-layer stack in web-app with a teammate's layer on top; jun's PR asked of dana; mei's PR assigned to
+  // dana; tomas's PR asked of no one; a draft of mei's; a merged one of mei's; and in billing-svc, dana's own and one
+  // asked of her.
+  const pulls = [
+    pr({ repo: W, number: 1, head: 'a' }),
+    pr({ repo: W, number: 2, head: 'b', base: 'a', author: 'tomas', mine: false }),
+    pr({ repo: W, number: 3, head: 'c', author: 'jun', mine: false, requested: true }),
+    pr({ repo: W, number: 4, head: 'd', author: 'mei', mine: false, assigned: true }),
+    pr({ repo: W, number: 5, head: 'e', author: 'tomas', mine: false }),
+    pr({ repo: W, number: 6, head: 'f', author: 'mei', mine: false, state: 'draft' }),
+    pr({ repo: W, number: 7, head: 'g', author: 'mei', mine: false, state: 'merged', merged_at: '2026-11-02T10:00:00.000Z' }),
+    pr({ repo: B, number: 8, head: 'h' }),
+    pr({ repo: B, number: 9, head: 'i', author: 'jun', mine: false, requested: true }),
+  ];
+  const model = answer({ pulls, projects: { [`github.com/${W}`]: ['prj_web'], [`github.com/${B}`]: ['prj_bill'] } });
+  const numbers = (filter: PullFilter, project: string | null = null) =>
+    pullRows(pullGroups(model, project, filter))
+      .map((item) => item.stack.layers.map((l) => l.number).join('+'))
+      .sort();
+
+  test('each PR is in one view: the person wrote it, else it is asked of them (requested or assigned), else others', () => {
+    expect(pullViewOf({ mine: true, requested: true, assigned: true })).toBe('mine');
+    expect(pullViewOf({ mine: false, requested: true })).toBe('review');
+    expect(pullViewOf({ mine: false, requested: false, assigned: true })).toBe('review');
+    expect(pullViewOf({ mine: false, requested: false })).toBe('others');
+  });
+
+  test('a stack stays whole, kept when any open layer is in the view; a merged layer alone never puts it there', () => {
+    expect(numbers('all')).toEqual(['1+2', '3', '4', '5', '6', '8', '9']);
+    expect(numbers('mine')).toEqual(['1+2', '8']);
+    expect(numbers('review')).toEqual(['3', '4', '9']);
+    // tomas's layer on dana's stack puts the whole stack in Others too; mei's merged #7 is in no view.
+    expect(numbers('others')).toEqual(['1+2', '5', '6']);
+  });
+
+  test('the project narrows every view; the counts the menu shows follow both', () => {
+    expect(numbers('review', 'prj_bill')).toEqual(['9']);
+    expect(numbers('mine', 'prj_web')).toEqual(['1+2']);
+    expect(pullCount(model, null, 'all')).toBe(7);
+    expect(pullCount(model, null, 'mine')).toBe(2);
+    expect(pullCount(model, null, 'review')).toBe(3);
+    expect(pullCount(model, null, 'others')).toBe(3);
+    expect(pullCount(model, 'prj_web', 'all')).toBe(5);
+    expect(pullCount(model, 'prj_bill', 'others')).toBe(0);
+  });
+
+  test('on you follows the project, not the view: an assigned PR is on the person', () => {
+    // On you: #3 (requested), #4 (assigned), #9 (requested).
+    expect(pullGroups(model, null).on_you.map((i) => i.focus.number).sort()).toEqual([3, 4, 9]);
+    expect(pullGroups(model, 'prj_web').on_you.map((i) => i.focus.number).sort()).toEqual([3, 4]);
+    const assigned = pullGroups(model, null).on_you.find((i) => i.focus.number === 4)!;
+    expect(assigned.reason).toBe('assigned');
+    expect(rowLine(assigned, null)).toBe('#4 · assigned to you');
+    expect(layerPill(pulls[3]!)).toEqual({ text: 'Assigned to you', tone: 'you' });
+  });
+
+  test('the address: a known view, else All', () => {
+    expect(pullFilterOf('review')).toBe('review');
+    expect(pullFilterOf('others')).toBe('others');
+    expect(pullFilterOf(null)).toBe('all');
+    expect(pullFilterOf('everything')).toBe('all');
+    expect(pullFilterOf('')).toBe('all');
   });
 });

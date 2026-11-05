@@ -27,10 +27,13 @@ export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['f
  * The visible words of each form: "6 open questions" / "6 open" / "6". With
  * action items: "2 open action items" alone, "6 questions, 2 action items"
  * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
+ * `permission` (only a launched agent's permission prompts wait): "1 permission
+ * waiting" / "1 waiting" / "1".
  */
-export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0): string {
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false): string {
   const n = questions + actions;
   if (form === 'count') return String(n);
+  if (permission) return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
   return openItemsLabel(questions, actions);
 }
@@ -52,6 +55,27 @@ export function footFitCandidates(max: OpenQuestionsLabelForm): FootFit[] {
     { form, tight: false },
     { form, tight: true },
   ]);
+}
+
+/**
+ * A way to draw the foot of full screen's card on a phone. `fit` is the foot's `data-fit` (inbox.css), its tokens:
+ * `chips`: "2 comments" becomes its icon and the number; `link`: "Open in thread" becomes "Thread"; `stack`: the chips
+ * take a row of their own over the paperclip, the mic and the link; `wrap`: the chips may wrap in that row.
+ */
+export interface CardFootFit extends FootFit {
+  fit: string;
+}
+
+/**
+ * What yields on the card's foot, in order, until the row holds: the open questions' words (as in the thread's foot),
+ * then the comments' word, then the link's first words; the icons, numbers and targets never shrink. Only then, with
+ * text sizes a phone's row cannot hold, do the chips take their own row, with their words back as far as they fit.
+ */
+export function cardFootFitCandidates(): CardFootFit[] {
+  const count: FootFit = { form: 'count', tight: false };
+  const rows = (forms: readonly FootFit[], fit: string) => forms.map((form) => ({ ...form, fit }));
+  const words = footFitCandidates('full').filter((c) => !c.tight);
+  return [...rows(words, ''), ...rows([count], 'chips'), ...rows([count], 'chips link'), ...rows(words, 'stack'), ...rows([count], 'stack chips'), ...rows([count], 'stack chips link wrap')];
 }
 
 /** A way to draw the row's buttons with the checklist button beside them: `steps`, its chevron gone. */
@@ -187,12 +211,13 @@ function rowMids(row: Element): number[] {
     .map((r) => r.top + r.height / 2);
 }
 
-/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-label`). */
+/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-permission`, `data-oq-label`). */
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
   const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions);
+  const permission = button.hasAttribute('data-oq-permission');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');

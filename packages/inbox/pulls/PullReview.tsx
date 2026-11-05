@@ -5,24 +5,31 @@
  * Viewed ticks, the comments panel, ui's DecisionControl in the header) on one
  * layer of a stack, or on the whole stack up to a layer.
  *
- * - The strip under the header names every layer bottom to top, the one on
+ * - One title, the header's (approval "pr-page-review-with-agent"): the
+ *   reader draws none of its own (`GuideReader` `bare`), and the strip under
+ *   the header names every layer by its number, bottom to top, the one on
  *   screen marked, with "This layer | Whole stack" (native radios).
+ * - Under 900 px of review the file rail folds into the "Files · N files"
+ *   picker over the diff (`RAIL_FOLD_BELOW`), so the diff keeps the width.
  * - "This layer" is the PR's own diff; "Whole stack" is the compare from the
  *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
  * - The foot says which layer this is, and "Next layer" moves up the stack.
- * - Approve / Send feedback go into the agent's thread as the person's reply
- *   (`pullVerdictReply`), when an agent's thread is tied to the stack; a
- *   teammate's PR has no agent here, so its diff reads without a verdict.
- *   No merge button, and nothing is posted to the forge.
+ * - Approve / Send feedback go into the review thread as the person's reply
+ *   (`pullVerdictReply`): This layer's to the layer's own agent thread
+ *   (`layerVerdictLink`), Whole stack's to the stack's one review thread
+ *   (`stackVerdictLink`); a teammate's PR has no agent here, so its diff
+ *   reads without a verdict. No merge button, and nothing is posted to the
+ *   forge unless the person chooses to post.
  *
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
-import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { inboxPullRepoKey, type InboxPullDiffAnswer, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
@@ -34,6 +41,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
+import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
@@ -41,10 +49,12 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { railRows } from './rail';
-import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackAgentsWords, stackVerdictLink } from './topology';
+import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+/** The review's width (px) under which its file rail folds into the Files picker over the diff. */
+const RAIL_FOLD_BELOW = 900;
+const GuideReader = GuideReaderPart.Part;
 
 export interface PullReviewProps {
   model: InboxPullsAnswer | null;
@@ -130,17 +140,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
-  // The verdict goes to this layer's own agent thread (its stack's only as a fallback), and only on the person's
-  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict covers the
-  // layers under this one too: it goes to an agent only when they are all that agent's (posting still can).
-  const routed = useMemo(() => {
-    if (!stack || !model || !layer) return { link: null, blocked: null };
-    if (scope !== 'stack') return { link: layerVerdictLink(layer, stack, model.links), blocked: null };
-    const { link: one, agents } = stackVerdictLink(layer, stack, model.links);
-    return { link: one, blocked: agents.length > 1 ? { words: stackAgentsWords(agents.map((a) => linkAgentName(a) ?? 'Agent')), link: layerVerdictLink(layer, stack, model.links) } : null };
+  // The verdict goes to this layer's own review thread (its stack's only as a fallback), and only on the person's
+  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict goes to the
+  // stack's one review thread (its lowest linked layer's), as the stack view names it.
+  const link = useMemo(() => {
+    if (!stack || !model || !layer) return null;
+    return scope === 'stack' ? stackVerdictLink(layer, stack, model.links) : layerVerdictLink(layer, stack, model.links);
   }, [stack, model, layer, scope]);
-  const link = routed.link;
-  const blocked = routed.blocked;
   const agent = linkAgentName(link);
   const open = stack ? stack.layers.filter(isOpen) : [];
   // Where this layer sits on its own line of the stack (a fork's sibling branch is not counted).
@@ -217,7 +223,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setSelectedId(id);
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
-  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
+  // Both measured once the review is drawn: while the list is read, a loading pane stands in its place.
+  const drawn = !!(model && stack && layer);
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
+  // Under RAIL_FOLD_BELOW of review width the file rail folds into the Files picker over the diff (as on a phone), so
+  // the diff keeps the room.
+  const [splitRef, railFolded] = useNarrowerThan<HTMLDivElement>(RAIL_FOLD_BELOW, false, drawn);
+  const filesPicker = phone || railFolded;
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   useEffect(() => {
@@ -231,6 +243,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
   const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+
+  // Open in: what is on disk in a clone of this repository, which may not be the PR's version; nothing when no clone holds the file.
+  const repoKey = stack ? inboxPullRepoKey(stack.host, stack.repo) : null;
+  const fileOpenIn = useCallback((path: string) => (repoKey ? <OpenInFile scope={{ repo: repoKey }} path={path} /> : null), [repoKey]);
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
@@ -324,7 +340,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <div className="ib-vhead">
           <button type="button" className="ib-back" onClick={onBack}>
             <Icon name="back" size={15} />
-            Pull requests
+            Reviews
           </button>
         </div>
         <div className="ib-pr-empty" role={modelError || model ? 'alert' : undefined}>
@@ -350,7 +366,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
@@ -358,17 +374,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       <div className="ib-vhead">
         <button type="button" className="ib-back" onClick={onBack}>
           <Icon name="back" size={15} />
-          {phone ? <span className="ib-sr">Pull requests</span> : 'Pull requests'}
+          {phone ? <span className="ib-sr">Reviews</span> : 'Reviews'}
         </button>
         <span className="ib-vsep" />
-        {/* A long title is cut with "…" (the whole of it on hover, and in the diff's own heading): the verdict stays on screen. */}
+        {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
         <span className="ib-fn ib-prr-fn" title={`${label} ${layer.title}`} data-pull-review-title="">
           <RefMarkIcon kind="pr" state={layer.state} size={15} />
           <span className="ib-prr-num">{label}</span>
           <bdi>{layer.title}</bdi>
-        </span>
-        <span className="ib-from" title={stack.repo}>
-          {stack.repo}
         </span>
         <span className="ib-sp" />
         {folded && readerComments && (
@@ -398,9 +411,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                       </span>
                     ),
                   }
-                : blocked
-                  ? { name: linkAgentName(blocked.link) ?? 'Agent', host: blocked.link?.agent?.host ?? null, control: null, unavailable: blocked.words }
-                  : null
+                : null
             }
             comments={comments}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
@@ -446,9 +457,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                 >
                   <RefMarkIcon kind="pr" state={l.state} size={13} />
                   <span>{inboxPullLabel(l)}</span>
-                  {here && !phone && (
-                    <bdi className="ib-prr-lt">{l.title}</bdi>
-                  )}
                 </button>
               </span>
             );
@@ -456,7 +464,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         </nav>
         {scopeSwitch}
       </div>
-      <div className="ib-rsplit">
+      <div className="ib-rsplit" ref={splitRef}>
         <nav className="ib-rrail" aria-label="Changed files">
           {/* The files, then a folder heading over each group when names repeat in deep folders (`railRows`). */}
           <ul className="ib-rv-list" data-review-files="">
@@ -499,7 +507,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </div>
         </nav>
         <div className="ib-gbody">
-          {phone && files.length > 0 && (
+          {filesPicker && files.length > 0 && (
             <div className="ib-rv-phonebar" data-review-phonebar="">
               <select className="ib-rv-jump" aria-label="Go to a file" value="" onChange={(event) => event.target.value && move(event.target.value)}>
                 <option value="" disabled>
@@ -526,8 +534,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           )}
           {!canDecide && !posted && !diffError && (
-            <p className="ib-prr-note" data-pull-review-readonly={blocked ? 'agents' : layer.mine ? 'unlinked' : 'teammate'}>
-              {blocked ? blocked.words : layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
+            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
+              {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
             </p>
           )}
           {sendError && (
@@ -547,9 +555,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
             </p>
           ) : snapshot ? (
-            <Suspense fallback={null}>
-              <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
-            </Suspense>
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              </OpenInCodeSpans>
+            </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
               Reading the diff…

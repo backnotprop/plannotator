@@ -10,11 +10,13 @@
  * The choice shows only when both can happen: with no agent (or a teammate's PR, whose agent path takes no
  * verdict), posting is the only ending; with no PR to post to, the agent's is.
  */
-import { lazy, Suspense, useCallback, useId, useMemo, useState, type ReactNode } from 'react';
+import { Suspense, useCallback, useEffect, useId, useMemo, useState, type ReactNode } from 'react';
+import { PlatformPostPart } from '../lazyParts';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
+import { LazyBlockBoundary } from '@plannotator/ui/components/LazyBlockBoundary';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
 import { inboxApi } from '../api';
 import { RowAgentTiles } from '../components/RowAgents';
@@ -24,7 +26,13 @@ import type { PlatformAction } from '../guide/platform-post-types';
 import { platformRules, postablePull, postedWords, resolvePlatformDecisionAction } from './postRules';
 
 // `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
-const PlatformPost = lazy(() => import('#platform-post'));
+const PlatformPost = PlatformPostPart.Part;
+
+/** Draws nothing: hands the boundary's notice to the host once it commits. */
+function LoadFailed({ notice, onFailed }: { notice: ReactNode; onFailed: (notice: ReactNode) => void }) {
+  useEffect(() => onFailed(notice), [notice, onFailed]);
+  return null;
+}
 
 export type ReviewDestination = 'forge' | 'agent';
 
@@ -70,12 +78,8 @@ export function reviewEnding(pull: InboxPull | null, hasAgent: boolean, picked: 
 export interface PostEndingProps {
   /** The PR this review can be posted to; null or unpostable (closed, its head unknown): the agent's ending alone. */
   pull: InboxPull | null;
-  /**
-   * The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending.
-   * `unavailable`: why it cannot take this review (a Whole stack over several agents' layers): its option is shown
-   * off, with these words as its tooltip, and the review posts.
-   */
-  agent: { name: string; host?: string | null; control: ReactNode; unavailable?: string } | null;
+  /** The agent the other ending sends to ("Claude Code"), with its control; null: posting is the only ending. */
+  agent: { name: string; host?: string | null; control: ReactNode } | null;
   comments: readonly CodeAnnotation[];
   /** What the comments were written on (PlatformPost's `anchor`). */
   anchor: 'diff' | 'guide' | 'stack';
@@ -103,11 +107,25 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     return headSha ? { ...listed, head_sha: headSha } : null;
   }, [pull, headSha]);
   const rules = target ? platformRules(target) : null;
-  const destination: ReviewDestination = !target ? 'agent' : !agent || agent.unavailable ? 'forge' : picked;
+  const destination: ReviewDestination = !target ? 'agent' : !agent ? 'forge' : picked;
   const choose = onPick;
   const [open, setOpen] = useState<{ action: PlatformAction; chooseEvent: boolean } | null>(null);
   // Kept once opened: a partial or refused attempt's plan (its narrowed retry) survives a Cancel and a reopen.
   const [mounted, setMounted] = useState(false);
+  // The dialog's chunk could not arrive: ui's notice (with Reload) beside the control, which stays usable. The
+  // next Post or Comment… asks for the chunk again.
+  const [loadFailure, setLoadFailure] = useState<ReactNode>(null);
+  const loadFailed = useCallback((notice: ReactNode) => {
+    PlatformPostPart.retry();
+    setOpen(null);
+    setMounted(false);
+    setLoadFailure(notice);
+  }, []);
+  const openDialog = useCallback((mode: { action: PlatformAction; chooseEvent: boolean }) => {
+    setLoadFailure(null);
+    setMounted(true);
+    setOpen(mode);
+  }, []);
   // The review that went: shown done (never posted twice) until the PR's head moves or a new comment is written. A
   // comment already posted on this PR is never posted again, at any head (Start review keeps its comments after a
   // post); a follow-up carries only what is new (or a main comment).
@@ -141,10 +159,9 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
       if (spec.items.some((item) => item.id === id && item.muted)) return;
       const mode = resolvePlatformDecisionAction(id, comments.length > 0, rules.requestChangesSupported);
       if (!mode) return;
-      setMounted(true);
-      setOpen(mode);
+      openDialog(mode);
     },
-    [spec, rules, busy, open, comments.length],
+    [spec, rules, busy, open, comments.length, openDialog],
   );
   const handlers = useMemo<Record<DecisionActionId, DecisionHandler>>(
     () => ({
@@ -158,16 +175,15 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
     [run],
   );
 
-  if (!target || !rules || !spec) return agent && !agent.unavailable ? <>{agent.control}</> : null;
+  if (!target || !rules || !spec) return agent ? <>{agent.control}</> : null;
 
   const choice = agent && (
     <div className="ib-seg ib-seg-sm ib-rv-dest" role="radiogroup" aria-label="Where your review goes" data-review-destination={destination}>
       {(['forge', 'agent'] as const).map((value) => {
-        const off = value === 'agent' && !!agent.unavailable;
-        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : off ? agent.unavailable! : `Send to ${agent.name}`;
+        const words = value === 'forge' ? `Post to the ${rules.mrLabel} on ${rules.label}` : `Send to ${agent.name}`;
         return (
-          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-off={off ? '' : undefined} data-review-destination-choice={value} title={words}>
-            <input type="radio" name={name} checked={destination === value} disabled={off} onChange={() => choose(value)} aria-label={words} />
+          <label key={value} className="ib-seg-o" data-on={destination === value ? '' : undefined} data-review-destination-choice={value} title={words}>
+            <input type="radio" name={name} checked={destination === value} onChange={() => choose(value)} aria-label={words} />
             {value === 'forge' ? <PRPlatformIcon platform={target.platform} className="ib-rv-dest-mark" /> : <RowAgentTiles participants={undefined} agent={{ kind: 'agent', host: agent.host ?? null }} tip={false} />}
             {!phone && <span aria-hidden="true">{value === 'forge' ? rules.label : agent.name}</span>}
           </label>
@@ -179,10 +195,11 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
   return (
     <>
       {choice}
-      {destination === 'agent' && agent && !agent.unavailable ? (
+      {destination === 'agent' && agent ? (
         agent.control
       ) : (
         <span className="ib-rv-decide" data-review-decision="" data-review-posts={target.platform}>
+          {loadFailure}
           {isDone ? (
             <>
               <button type="button" className="ib-btn ib-sm ib-rv-posted-done" disabled data-review-posted-done={done!.action}>
@@ -194,10 +211,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
                 type="button"
                 className="ib-btn ib-sm"
                 disabled={busy || !!open}
-                onClick={() => {
-                  setMounted(true);
-                  setOpen({ action: 'comment', chooseEvent: false });
-                }}
+                onClick={() => openDialog({ action: 'comment', chooseEvent: false })}
                 data-review-post-followup=""
               >
                 Comment…
@@ -208,35 +222,38 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
           )}
         </span>
       )}
+      {/* The dialog is a chunk the Inbox serves: one that cannot arrive says so beside the control, never the window unmounted. */}
       {mounted && (
-        <Suspense fallback={null}>
-          <PlatformPost
-            pull={target}
-            open={open}
-            comments={comments}
-            anchor={anchor}
-            post={async (request) => {
-              const response = await inboxApi.pullReviewPost(request);
-              if (response.status === 409 && onMoved) {
-                const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
-                if (answer?.code === 'pull_moved') {
-                  setOpen(null);
-                  onMoved();
+        <LazyBlockBoundary fallback={(notice) => <LoadFailed notice={notice} onFailed={loadFailed} />}>
+          <Suspense fallback={null}>
+            <PlatformPost
+              pull={target}
+              open={open}
+              comments={comments}
+              anchor={anchor}
+              post={async (request) => {
+                const response = await inboxApi.pullReviewPost(request);
+                if (response.status === 409 && onMoved) {
+                  const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+                  if (answer?.code === 'pull_moved') {
+                    setOpen(null);
+                    onMoved();
+                  }
                 }
-              }
-              return response;
-            }}
-            onClose={() => setOpen(null)}
-            onPosted={(result) => {
-              setOpen(null);
-              // A follow-up comment after an approval still reads as the approval.
-              const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-              const went = new Set(result.posted);
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
-              onPosted({ ...result, action, label: rules.label });
-            }}
-          />
-        </Suspense>
+                return response;
+              }}
+              onClose={() => setOpen(null)}
+              onPosted={(result) => {
+                setOpen(null);
+                // A follow-up comment after an approval still reads as the approval.
+                const action = sameHead && result.action === 'comment' ? done!.action : result.action;
+                const went = new Set(result.posted);
+                setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
+                onPosted({ ...result, action, label: rules.label });
+              }}
+            />
+          </Suspense>
+        </LazyBlockBoundary>
       )}
     </>
   );

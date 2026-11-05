@@ -1,7 +1,7 @@
 /**
  * `plannotator shape …`: an agent's side of Shape (SPEC.md §4, "CLI").
- * Unreleased (HIDDEN_SUBCOMMANDS): its help text is a DRAFT until the owner
- * approves it word for word.
+ * Unreleased (HIDDEN_SUBCOMMANDS). Its help text is built in
+ * packages/core/shape-skill.ts.
  *
  *   update   store a version of a board (the first one creates the shape)
  *   read     the latest version, and the notes waiting for the agent
@@ -19,18 +19,49 @@
  * of text otherwise. A refusal goes to stderr as `<code>: <message>` and exits
  * 1; bad usage exits 2.
  */
-import { readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
-import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
-import { diffShapeVersions, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
+import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
+import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
+import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
 import { SHAPE_COMMAND_USAGE } from "./cli";
 
 export { SHAPE_COMMAND_USAGE };
 
-/** DRAFT. What `plannotator shape` (help included) says while Shape is off. */
-export const SHAPE_OFF_TEXT = "shape_off: Shape is off. The person turns it on in the Plannotator Inbox: Settings → Capabilities → Shape.";
+/** What `plannotator shape` (help included; not `on` or `off`) says while Shape is off. */
+export const SHAPE_OFF_TEXT = "shape_off: Shape is off. To turn it on, run `plannotator shape on` (the same switch as the Plannotator Inbox's Settings → Capabilities → Shape).";
+
+/**
+ * `plannotator shape on|off`: the person's switch from a terminal, the same
+ * config.json `inboxShape` the Inbox's Settings switch writes
+ * (@plannotator/shared/shape/switch). The only shape commands that run while
+ * Shape is off (index.ts). One plain line out; exit 1 when config.json could
+ * not be saved, 2 on extra arguments.
+ */
+export function runShapeSwitch(
+  argv: readonly string[],
+  deps: { stdout?: (text: string) => void; stderr?: (text: string) => void } = {},
+): number {
+  const out = deps.stdout ?? ((text: string) => process.stdout.write(`${text}\n`));
+  const err = deps.stderr ?? ((text: string) => process.stderr.write(`${text}\n`));
+  const which = argv[0];
+  if (which !== "on" && which !== "off") {
+    err("shape: on or off.");
+    return 2;
+  }
+  if (argv.length > 1) {
+    err(`shape ${which} takes no arguments.`);
+    return 2;
+  }
+  if (!setShapeSwitch(which === "on")) {
+    err(`config_not_saved: ${SHAPE_SWITCH_NOT_SAVED}`);
+    return 1;
+  }
+  out(which === "on" ? "Shape is on." : "Shape is off.");
+  return 0;
+}
 
 type Op = "update" | "read" | "drawing" | "answer" | "done" | "list";
 const OPS: readonly Op[] = ["update", "read", "drawing", "answer", "done", "list"];
@@ -64,7 +95,7 @@ const ALLOWED: Record<Op, readonly string[]> = {
 
 export function parseShapeCommand(argv: readonly string[]): { ok: true; command: ParsedShapeCommand } | { ok: false; error: string } {
   const op = argv[0] as Op | undefined;
-  if (!op || !OPS.includes(op)) return { ok: false, error: op ? `Unknown shape command: ${op}` : "A shape command: update, read, drawing, answer, done, list or open." };
+  if (!op || !OPS.includes(op)) return { ok: false, error: `Unknown shape command: ${op ?? ""}` };
   const out: ParsedShapeCommand = { op, id: null, file: null, base: null, thread: null, through: null, project: null, version: null, notes: false, all: false, json: false, re: null, text: null };
   const positional: string[] = [];
   for (let i = 1; i < argv.length; i++) {
@@ -120,12 +151,14 @@ export interface ShapeCommandDeps {
   stdout?: (text: string) => void | Promise<void>;
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
-  projectRootOf?: (folder: string) => Promise<{ root: string; name: string }>;
+  projectRootOf?: (folder: string) => Promise<ShapeProject>;
 }
 
 async function defaultProjectRoot(folder: string) {
   const resolved = await resolveInboxProjectRoot(folder);
-  return { root: resolved.root, name: resolved.name };
+  // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
+  const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
+  return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
 }
 
 /** Write to stdout and settle once the text is flushed (or the pipe is closed). */
@@ -159,7 +192,12 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch {
       return null;
     }
-    return (deps.projectRootOf ?? defaultProjectRoot)(folder);
+    const rootOf = deps.projectRootOf ?? defaultProjectRoot;
+    const project = await rootOf(folder);
+    if (c.project || folder === deps.cwd) return project;
+    // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
+    const here = await rootOf(deps.cwd).catch(() => null);
+    return here?.root === project.root ? here : project;
   };
 
   /** Output where a closed pipe changes nothing: the reader is gone either way. */
@@ -192,11 +230,12 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
-    let project: { name: string; root: string } | null = null;
+    let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
       if (!record) return refuse("not_found", `No shape ${c.id}. List them with \`plannotator shape list\`.`);
-      project = record.project;
+      // Written from this folder now: the store moves the board there if it is the same project.
+      project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
       if (!project) return refuse("project_unresolved", `${folder} is not a folder. Pass --project <folder>.`);
@@ -219,7 +258,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     const before = result.v > 1 ? store.read(result.id, result.v - 1) : null;
     const after = store.read(result.id, result.v);
     const changed = before && after ? summarizeShapeDiff(diffShapeVersions(before, after)) : [];
-    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed }, null, 2));
+    const notes = after ? shapeBoardNotes(after) : [];
+    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed, ...(notes.length ? { notes } : {}) }, null, 2));
     return 0;
   }
 

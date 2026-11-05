@@ -51,6 +51,9 @@ export {
   type ChatFrameProps,
   type ChatFrameRootProps,
   type ChatFrameState,
+  followPointer,
+  isOnTitleRow,
+  startsGesture,
 } from './ChatFrame';
 export { CHAT_COMPOSER_FIELD_BOX, ChatComposer, type ChatComposerProps } from './ChatComposer';
 export {

@@ -9,10 +9,9 @@
  * server); without, they are read-only, as on guides.show and the phone.
  *
  * Mounted only through GuidePane's dynamic import (`#guide-reader`,
- * tests/entry-assets.test.ts). The single-file build inlines it: its bytes
- * ship in inbox.html and its modules (the guide chain, the diff renderer) run
- * at page load; what waits for Open is the mount, the diff render and the
- * highlighter, as with every lazy runtime in Plannotator's single-file apps.
+ * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
+ * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
+ * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
  * through the chain's `renderSectionTab`); a phone draws every diff Unified
  * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
@@ -21,7 +20,7 @@
  * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
@@ -34,10 +33,13 @@ import type {
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
+import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/CommentPopover';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
+import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
@@ -76,6 +78,8 @@ export interface GuideDiffComments {
   ) => void;
   onSelectAnnotation: (id: string | null) => void;
   onDeleteAnnotation: (id: string) => void;
+  /** Choices before the comment box (Comment · Ask · Show me). Absent: the comment box opens at once. */
+  selectionActions?: DiffSelectionActions;
 }
 
 /**
@@ -92,8 +96,9 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    fileOpenIn?: (filePath: string) => ReactNode;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -109,6 +114,7 @@ export const GuideDiff: FC<
       {...props}
       readOnly={!comments}
       commentOnly={!!comments}
+      fileOpenIn={fileOpenIn}
       contextExpansionAvailable={false}
       diffStyle={diffStyle}
       diffOverflow={diffOverflow}
@@ -128,6 +134,7 @@ export const GuideDiff: FC<
       onEditAnnotation={comments?.onEditAnnotation ?? noop}
       onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
       onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
+      {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
       {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
     />
   );
@@ -156,7 +163,22 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed }: GuideReaderProps) {
+export default function GuideReader({
+  snapshot,
+  reviewed,
+  onReviewedChange,
+  comments,
+  mode = 'walkthrough',
+  reveal = null,
+  viewed,
+  fileOpenIn,
+  selectionActions,
+  renderOverviewDiagram,
+  renderOverviewFigure,
+  highlight = null,
+  bare = false,
+}: GuideReaderProps) {
+  const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
@@ -187,6 +209,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
 
   // Line comments: the selection the toolbar opens on, as the review app keeps it (one, on the focused card).
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
+  // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
+  useEffect(() => {
+    if (!highlight) return;
+    setFocusedFile(highlight.path);
+    setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
+  }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps
   const commentsRef = useRef(comments);
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
@@ -299,8 +327,10 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -315,11 +345,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
               onEditAnnotation: editComment,
               onSelectAnnotation: selectComment,
               onDeleteAnnotation: deleteComment,
+              ...(selectionActions ? { selectionActions: selectionActions as DiffSelectionActions } : {}),
             },
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -355,13 +386,21 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
       ...(phone ? {} : { renderSectionTab }),
+      ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
+      ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(globalComments ? { globalComments } : {}),
+      // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
+      diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
   );
+
+  // The window's wrap for a code span, for the viewer's own inline parser.
+  const codeSpan = useContext(CodeSpanContext);
 
   return (
     <GuideHostProvider value={host}>
+      <GuideCodeSpanContext.Provider value={codeSpan}>
       <GuideView
         guide={guide}
         reviewed={ticks}
@@ -370,7 +409,11 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         focusedFile={focusedFile}
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
+        bare={bare}
+        // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
+        fitFileHeights
       />
+      </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover
           anchorEl={globalAnchor}

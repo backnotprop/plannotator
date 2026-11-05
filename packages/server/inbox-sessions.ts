@@ -40,7 +40,7 @@ import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type 
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
+import { graphemesOf, inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { parseEngine, parseLoadedPlugin, parseSessionFolder, runtimeOf, tagUpdateFix, type LoadedPlugin } from "./inbox-restart";
 
@@ -58,6 +58,8 @@ export interface InboxLiveSession {
   wrote_thread: boolean;
   /** Its connection can deliver into a running turn (Send now); false when it does not say. */
   send_now: boolean;
+  /** The session's label (issue #2450), on the window's route for this computer's owner only; absent when it has none. */
+  label?: string;
 }
 
 /**
@@ -119,6 +121,10 @@ interface SeenSession {
   holding: number;
   busy: boolean | null;
   idleSince: number | null;
+  /** When its current turn started (busy went true); null while idle or unknown. A launched thread's "working · N min". */
+  busySince?: number | null;
+  /** How many polls it started (launch: a stopped or respawned session counts as live again only once it polls anew). */
+  polls?: number;
   /** The last time it was seen idle (busy false); null when never. Decides whether an automatic mark went into a turn. */
   idleAt?: number | null;
   /**
@@ -192,22 +198,46 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
  */
 export const INBOX_WAKE_ONLY_LIVE_MS = 60 * 60_000;
 
-/** The longest session label kept, in characters (code points, so a pair is never split). */
+/** The longest session label kept, in user-perceived characters (`graphemesOf`, so a family emoji or a flag is never split). */
 export const INBOX_SESSION_LABEL_MAX = 60;
 
 /**
  * A poll's `label` as the window may draw it: control characters, line
  * separators and bidi controls stripped (the same characters a thread name
  * refuses), trimmed, at most INBOX_SESSION_LABEL_MAX characters. Null for
- * anything that is not a string, or that leaves nothing visible.
+ * anything that is not a string, that leaves nothing visible, or that reads
+ * as the person (`readsAsYou`).
  */
 export function cleanInboxSessionLabel(value: unknown): string | null {
   if (typeof value !== "string") return null;
-  // Twice as many UTF-16 units always hold that many characters, so the first cut never spends on the rest of a long string.
-  const input = Array.from(value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join("");
+  // Twice as many UTF-16 units always hold that many code points, so the first cut never spends on the rest of a long
+  // string. Whole characters only: the last one of a string cut there may be half of one, and what is kept stays
+  // within INBOX_SESSION_LABEL_INPUT_MAX code points.
+  const head = value.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2);
+  const parts = graphemesOf(head);
+  if (head.length < value.length) parts.pop();
+  let points = 0;
+  let input = "";
+  for (const part of parts) {
+    points += Array.from(part).length;
+    if (points > INBOX_SESSION_LABEL_INPUT_MAX) break;
+    input += part;
+  }
   const text = input.replace(/[\p{Cc}\p{Zl}\p{Zp}\p{Bidi_Control}]/gu, "").trim();
-  const label = Array.from(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
-  return label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim() ? label : null;
+  const label = graphemesOf(text).slice(0, INBOX_SESSION_LABEL_MAX).join("").trimEnd();
+  const visible = label.replace(/\p{Default_Ignorable_Code_Point}/gu, "").trim();
+  return visible && !readsAsYou(visible) ? label : null;
+}
+
+/**
+ * A label that reads as the person: "You", ignoring case, spacing and zero-width characters. A label is display
+ * only, but a message's author shows it where the person's own messages say "You", and Claude Code's comes from
+ * the session's transcript, which its own model can append to. An agent's name stays allowed (a session named "Pi"
+ * or "Codex" is a real name); the agent's mark beside the name, and "Claude Code · Review" where two sessions share
+ * a label, tell those apart.
+ */
+function readsAsYou(label: string): boolean {
+  return label.replace(/[\s\p{Default_Ignorable_Code_Point}]+/gu, "").toLowerCase() === "you";
 }
 
 const iso = (ms: number) => new Date(ms).toISOString();
@@ -295,6 +325,7 @@ export function createInboxLiveSessions(options: {
   const applyState = (entry: SeenSession, body: Record<string, unknown>, at: number) => {
     if (typeof body.busy !== "boolean") return;
     if (body.busy) {
+      if (entry.busy !== true) entry.busySince = at;
       setDeliveryFlags(entry, true, entry.sendNow);
       entry.idleSince = null;
     } else {
@@ -366,6 +397,24 @@ export function createInboxLiveSessions(options: {
     return !(typeof entry.idleAt === "number" && entry.idleAt >= marked);
   };
 
+  /**
+   * Every session's label as its latest poll sent it (issue #2450: the `@` picker, the list rows' agents, a
+   * message's author): live sessions and the ones that ended while this Inbox ran, so a finished thread keeps
+   * its names until the Inbox restarts. Display only, like the To picker's: nothing routes on it, nothing is
+   * stored, and no MCP read carries it. The routes give it to this computer's owner only (`isOwnerRequest`).
+   * No prototype, so a session id like "__proto__" or "constructor" is a plain key.
+   */
+  const labels = (): Record<string, string> => {
+    const out = Object.create(null) as Record<string, string>;
+    for (const [session, entry] of sessions) if (entry.label) out[session] = entry.label;
+    return out;
+  };
+  /** One session's label (`labels`); null when it has none. */
+  const labelOf = (session: string): string | null => sessions.get(session)?.label ?? null;
+  /** Bumped each time a poll changes a label: the windows read the rows again (`event: deliveries`, `labels`). */
+  let labelChanges = 0;
+  const labelVersion = () => labelChanges;
+
   /** A poll arrived: the session is live, and says where it works. Returns the call to make when the poll answers. */
   const pollStarted = async (session: string, host: string, body: Record<string, unknown>): Promise<() => void> => {
     const at = now();
@@ -389,7 +438,9 @@ export function createInboxLiveSessions(options: {
     setDeliveryFlags(entry, entry.busy, body[INBOX_SEND_NOW_POLL_FIELD] === true);
     entry.tags = body[INBOX_TAGS_POLL_FIELD] === true;
     // Sent on every poll, so the latest stands: empty clears it, and an older connection never has one.
-    entry.label = cleanInboxSessionLabel(body.label);
+    const label = cleanInboxSessionLabel(body.label);
+    if ((entry.label ?? null) !== label) labelChanges += 1;
+    entry.label = label;
     entry.ask = body[INBOX_ASK_POLL_FIELD] === true;
     // What the session loaded (additive poll fields; an older connection sends neither).
     entry.plugin = parseLoadedPlugin(body.plugin);
@@ -401,6 +452,7 @@ export function createInboxLiveSessions(options: {
     entry.startedAt = finiteMs(body.started_at) ?? entry.startedAt;
     entry.lastSeen = at;
     entry.holding += 1;
+    entry.polls = (entry.polls ?? 0) + 1;
     applyState(entry, body, at);
     sessions.set(session, entry);
     trackWaitsOf(session, entry, at);
@@ -875,6 +927,12 @@ export function createInboxLiveSessions(options: {
     return !!entry && isLive(entry);
   };
 
+  /** A live session's turn state (a launched thread's run line); null when it is not live. */
+  const runStateOf = (session: string): { busy: boolean | null; busySince: number | null; polls: number } | null => {
+    const entry = sessions.get(session);
+    return entry && isLive(entry) ? { busy: entry.busy, busySince: entry.busy === true ? (entry.busySince ?? null) : null, polls: entry.polls ?? 0 } : null;
+  };
+
   /**
    * Whether `session` of `host` holds or made a bridge poll within the live
    * window now: its connection (the Claude Code mod, Pi, OpenCode 2) will
@@ -904,12 +962,26 @@ export function createInboxLiveSessions(options: {
       headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" },
     });
 
-  /** The window's routes; null when the path is not one of them. */
-  const route = async (req: Request, path: string): Promise<Response | null> => {
+  /**
+   * The window's routes; null when the path is not one of them. `owner`: this computer's owner asks (this
+   * computer, the owner's tailnet login, their phone): only then does a session carry its `label`.
+   * `byGuest`: the request is a tailnet guest's (`isGuest`), so a new message it writes is marked `by_guest`.
+   */
+  const route = async (req: Request, path: string, owner = false, byGuest = false): Promise<Response | null> => {
     const sessionsMatch = /^\/api\/inbox\/threads\/([A-Za-z0-9_]+)\/sessions$/.exec(path);
     if (sessionsMatch) {
       if (req.method !== "GET") return answer({ error: "Use GET." }, 405);
-      const live = liveFor(sessionsMatch[1]!);
+      const found = liveFor(sessionsMatch[1]!);
+      // Send to another session's rows (issue #2450): the label, absent when the session has none.
+      const live = owner
+        ? {
+            ...found,
+            sessions: found.sessions.map((session) => {
+              const label = labelOf(session.session);
+              return label ? { ...session, label } : session;
+            }),
+          }
+        : found;
       const asker = new URL(req.url).searchParams.get("asker");
       const recipients = (new URL(req.url).searchParams.get("recipients") ?? "")
         .split(",")
@@ -960,6 +1032,7 @@ export function createInboxLiveSessions(options: {
       body: body.body,
       idempotency_key: body.idempotency_key,
       to: target ? { host: target.host, session: target.session } : null,
+      ...(byGuest ? { by_guest: true } : {}),
     });
     return answer({ message: result.message, replayed: result.replayed });
   };
@@ -1025,6 +1098,7 @@ export function createInboxLiveSessions(options: {
     route,
     allLive,
     isSessionLive,
+    runStateOf,
     pollsNow,
     composeTarget,
     connectionOf,
@@ -1038,11 +1112,15 @@ export function createInboxLiveSessions(options: {
     waitOf,
     deliveredIntoTurn,
     deliverySignature,
+    hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
     restartCount,
     restartAgents,
     mcpAgents,
     tagTargets,
     wakesTagged,
+    labels,
+    labelOf,
+    labelVersion,
   };
 }
