@@ -29,7 +29,7 @@ describe("feedbackAgentNames", () => {
         { name: "Pi" },
         "",
         "   ",
-        "The inbox list is infuriating, always jumping around",
+        "The search box forgets my last query, every single time",
         "Codex",
       ]),
     ).toEqual(["Claude Code", "Codex"]);
@@ -68,7 +68,7 @@ describe("sendProductFeedback against a Worker that predates agents", () => {
     }) as typeof fetch;
     return { bodies, fake };
   }
-  const payload: ProductFeedbackPayload = { message: "The list jumps around", version: "0.28.40", os: "macOS", surface: "inbox", agents: ["Claude Code", "Codex"] };
+  const payload: ProductFeedbackPayload = { message: "The search box forgets my last query.", version: "0.28.40", os: "macOS", surface: "inbox", agents: ["Claude Code", "Codex"] };
 
   test("the feedback goes again without the names, and is sent", async () => {
     const { bodies, fake } = oldWorker();

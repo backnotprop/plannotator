@@ -132,7 +132,7 @@ describe("validation", () => {
 describe("agents", () => {
   const stored = async (agents: unknown) => {
     const d = deps();
-    const res = await handleRequest(post({ message: "The list jumps around", surface: "inbox", agents }), d);
+    const res = await handleRequest(post({ message: "The search box forgets my last query.", surface: "inbox", agents }), d);
     return { status: res.status, rows: d.store.rows };
   };
 

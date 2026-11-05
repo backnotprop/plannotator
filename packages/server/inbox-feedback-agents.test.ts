@@ -74,9 +74,9 @@ describe("the Feedback route adds the names", () => {
 
   test("the names go with the person's words; nothing else is added", async () => {
     const { sent, post } = route(() => ["Claude Code", "Codex"]);
-    const res = await post({ message: "The inbox list keeps jumping", serverSession: "s" });
+    const res = await post({ message: "The search box forgets my last query.", serverSession: "s" });
     expect(res!.status).toBe(200);
-    expect(sent[0]).toEqual({ message: "The inbox list keeps jumping", version: "0.28.40", os: "macOS", surface: "inbox", agents: ["Claude Code", "Codex"] });
+    expect(sent[0]).toEqual({ message: "The search box forgets my last query.", version: "0.28.40", os: "macOS", surface: "inbox", agents: ["Claude Code", "Codex"] });
   });
 
   test("the window cannot choose the names: an agents field from the page is refused", async () => {
