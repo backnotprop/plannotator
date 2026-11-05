@@ -1241,6 +1241,9 @@ export class InboxLink {
       }
       this.backoffMs = 0
       this.retryAt = 0
+      // What the Inbox stopped handing out is done with here: handed out again (the reply moved back), it is new.
+      const handedOut = new Set(commands.map((command) => command.id))
+      for (const id of this.settled) if (!handedOut.has(id)) this.settled.delete(id)
       for (const command of commands) {
         if (this.settled.has(command.id) || this.elsewhere.has(command.id)) continue
         const known = this.pending.get(command.id)

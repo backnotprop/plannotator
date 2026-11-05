@@ -263,6 +263,22 @@ describe("Hand off", () => {
     expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.to).toEqual({ host: "claude-code", session: OWNER });
     expect((await poll(server, OWNER, project)).map((c) => c.id)).toEqual([stored.id]);
     expect(await poll(server, HERDR, herdr)).toEqual([]);
+    // The thread reads one line for it: no "was told to stop" beside its delivery.
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.tags ?? []).toEqual([]);
+  });
+
+  test("words after a hand-off, moved when the new owner stopped: the hand-off goes along", async () => {
+    let now = 1_000_000;
+    const { server, project, herdr, asked } = await world(100, () => now);
+    const handed = (await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
+    const more = (await reply(server, handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(server, "ses-c", project);
+    const moved = await post(server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: "ses-c" } });
+    expect(moved.status).toBe(200);
+    expect((await poll(server, "ses-c", project)).map((c) => c.id)).toEqual([handed.id, more.id]);
+    expect(await poll(server, HERDR, herdr)).toEqual([]);
   });
 
   test("Undo after the window is refused, and the thread stays handed off", async () => {

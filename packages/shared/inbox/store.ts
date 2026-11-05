@@ -6023,8 +6023,12 @@ export class InboxStore {
     if (!message.to && checkedSeq >= (this.messageSeq.get(message.id) ?? 0)) throw taken();
     if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
-    const tag = tagOf(message, to.session);
-    if (tag?.delivery && !tag.handed_away) throw taken();
+    // Through a tag: a notice it was handed away with is not the reply, and a tag it has not taken yet cannot deliver twice.
+    const tookIt = (m: InboxMessage) => {
+      const tag = tagOf(m, to.session);
+      return !!tag?.delivery && !tag.handed_away;
+    };
+    if (tookIt(message)) throw taken();
     if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
     if (options.targetLive) throw new InboxError("session_still_live", "That session is still running, so it still gets this. Nothing was changed.");
     if (!message.to && !options.tookOver) throw notAddressed();
@@ -6032,15 +6036,22 @@ export class InboxStore {
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
     const moved = (m: InboxMessage): InboxMessage => {
-      for (const name of [m.id, inboxClaimName(m.id, to.session)]) {
+      // No old claim on it stands, the Claude Code mod's included (its claims are per session, under its own folder).
+      const claims = [join(this.dir, "claims", m.id), join(this.dir, "claims", inboxClaimName(m.id, to.session))];
+      if (/^[A-Za-z0-9_-][A-Za-z0-9._-]*$/.test(to.session)) claims.push(join(this.dir, "..", "claude-code-mod", to.session, "inbox", "claims", m.id));
+      for (const claim of claims) {
         try {
-          rmSync(join(this.dir, "claims", name), { recursive: true, force: true });
+          rmSync(claim, { recursive: true, force: true });
         } catch {
           // A leftover claim: that session reports the reply instead of delivering it.
         }
       }
+      // It is that session's own now, not also a tag of it.
+      const { tags: allTags, ...rest } = m;
+      const tags = (allTags ?? []).filter((t) => t.session !== to.session);
       return {
-        ...m,
+        ...rest,
+        ...(tags.length > 0 ? { tags } : {}),
         to: { host: to.host, session: to.session },
         deliver_now_at: null,
         deliver_now_by: null,
@@ -6056,8 +6067,8 @@ export class InboxStore {
     const from = owedTo(message);
     for (const earlier of this.threadMessages(message.thread_id)) {
       if (earlier.id === message.id) break;
-      if (earlier.author.kind !== "person" || earlier.delivery || hasTags(earlier) || isInboxNote(earlier) || earlier.tidy) continue;
-      if (!from || owedTo(earlier) !== from) continue;
+      if (earlier.author.kind !== "person" || earlier.delivery || isInboxNote(earlier) || earlier.tidy) continue;
+      if (!from || owedTo(earlier) !== from || tookIt(earlier)) continue;
       if (!earlier.to && checkedSeq >= (this.messageSeq.get(earlier.id) ?? 0)) continue;
       this.appendMessage(moved(earlier), at);
     }

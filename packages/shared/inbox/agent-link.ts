@@ -760,6 +760,9 @@ export class InboxWake {
       }
       this.backoffMs = 0;
       this.retryAt = 0;
+      // What the Inbox stopped handing out is done with here: handed out again (the reply moved back), it is new.
+      const handedOut = new Set(commands.map((command) => command.id));
+      for (const id of this.settled) if (!handedOut.has(id)) this.settled.delete(id);
       for (const command of commands) {
         // A later poll may carry `now` (the person pressed Send now): the newest command wins.
         if (!this.settled.has(command.id)) this.pending.set(command.id, command);

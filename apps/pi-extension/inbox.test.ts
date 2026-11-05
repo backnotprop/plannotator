@@ -600,7 +600,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([`${replyId}.${first.sessionId}`]);
 		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
 		expect(delivered?.session).toBe(first.sessionId);
-		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}), delivered at ${delivered?.at}`);
+		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}.${first.sessionId}), delivered at ${delivered?.at}`);
 	}, 120_000);
 
 	test("two Pi processes on one session: the reply goes to the one the person works in, once, and follows them back to the other", async () => {

@@ -679,15 +679,43 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     pass();
     expect((await taggedPoll("ses-other")).map((c) => c.id)).toEqual([written.id]);
     expect((await move(written.id, "ses-other")).status).toBe(200);
-    expect((await taggedPoll("ses-other")).map((c) => c.id)).toEqual([written.id]);
+    const [command] = await taggedPoll("ses-other");
+    expect(command).toMatchObject({ id: written.id });
+    // It is that session's own now: no "also tags" itself, and no second line for it in the thread.
+    expect(command!.also_tagged).toBeUndefined();
+    expect(command!.tagged).toBeUndefined();
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === written.id)?.tags ?? []).toEqual([]);
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-other", host: "pi", type: "delivered", id: written.id });
     expect(await taggedPoll("ses-other")).toEqual([]);
+  });
+
+  test("an earlier reply goes along even with a tag, unless the session it moves to took it through that tag", async () => {
+    const { server, project, asked, move, pass } = await ended();
+    const taggedPoll = async (session: string) =>
+      parseInboxBridgeCommands(await (await bridge(server, INBOX_BRIDGE_POLL_PATH, { session, host: "pi", project_path: project, waitMs: 0, [INBOX_TAGS_POLL_FIELD]: true })).text());
+    await taggedPoll("ses-c");
+    await taggedPoll("ses-d");
+    const forC = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One, for c.", tags: [{ host: "pi", session: "ses-c" }] })).json()) as { reply: { id: string } }).reply;
+    expect((await taggedPoll("ses-c")).map((c) => c.id)).toEqual([forC.id]);
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-c", host: "pi", type: "delivered", id: forC.id });
+    const forD = ((await (await reply(server, asked.message_id, { idempotency_key: "k2", words: "Two, for d.", tags: [{ host: "pi", session: "ses-d" }] })).json()) as { reply: { id: string } }).reply;
+    const last = ((await (await reply(server, asked.message_id, { idempotency_key: "k3", words: "Three." })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await taggedPoll("ses-c");
+    expect((await move(last.id, "ses-c")).status).toBe(200);
+    // ses-c has the first already; the second comes to it with its tag on ses-d kept.
+    expect((await taggedPoll("ses-c")).map((c) => c.id)).toEqual([forD.id, last.id]);
+    const after = (await thread(server, asked.thread_id)).messages;
+    expect(after.find((m) => m.id === forC.id)?.to ?? null).toBeNull();
+    expect(after.find((m) => m.id === forD.id)?.tags?.map((t) => t.session)).toEqual(["ses-d"]);
   });
 
   describe("a real wake killed while a steer waits for the running turn", () => {
     /** A reply on its way into `ses-asker`'s running turn through a real wake, which is then killed. */
     async function killedMidSteer() {
       const world = await ended();
+      // Past the Inbox's own start grace, so only the session's silence counts from here.
+      world.pass();
       const dataDir = join(roots.at(-1)!, "data");
       const connection = new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] });
       let steered = 0;
@@ -719,11 +747,10 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     test("no grace for a wake that goes on polling: it reads as ended, and the session the reply moves to delivers it once", async () => {
       const { server, asked, written, row, move, pass, session, until, isLive, stopAll } = await killedMidSteer();
       try {
-        // Its held poll ends as the killed process's connection closes, which counts as heard from: time goes on past that.
-        await until(async () => {
-          pass();
-          return (await row()).session_ended === true;
-        });
+        // Once, past the plain grace and well inside the 10 minutes an older connection gets (its last poll has ended).
+        await Bun.sleep(150);
+        pass(INBOX_ASKER_GRACE_MS + 1);
+        await until(async () => (await row()).session_ended === true);
         expect((await row()).session_ended).toBe(true);
         const next = session("ses-next");
         await until(() => isLive("ses-next"));
@@ -752,11 +779,9 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     test("moved away and back to the same session, resumed: the move is a new delivery, so it gets it", async () => {
       const { written, row, move, pass, session, until, isLive, stopAll } = await killedMidSteer();
       try {
-        // Its held poll ends as the killed process's connection closes, which counts as heard from: time goes on past that.
-        await until(async () => {
-          pass();
-          return (await row()).session_ended === true;
-        });
+        await Bun.sleep(150);
+        pass();
+        await until(async () => (await row()).session_ended === true);
         const between = session("ses-between");
         await until(() => isLive("ses-between"));
         // It stops before it takes the reply.
