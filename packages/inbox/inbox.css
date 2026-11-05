@@ -6846,6 +6846,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 
 /* Earlier comments (EarlierSection.tsx): at the foot of the comments column's timeline, in its one scroll area. The row
    stays in view while its list scrolls. A comment reads as a resolved one: a card's quote and words, dimmed, no actions. */
+/* The panel takes the column's height, so its own scroll area scrolls. It grew past the column before, and a list too
+   long for the column was cut off beside the thread with no way to reach the rest. */
+.pn-inbox .ib-apanel > [data-annotation-panel] { flex: 1 1 0; min-height: 0; }
 .ib-earlier { margin: 2px -8px -8px; padding: 0 8px 8px; }
 .ib-earlier[data-after] { padding-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .pn-inbox .ib-earlier-row { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% + 16px); margin: 0 -8px; padding: 7px 14px; border: 0; background: var(--card); font-size: var(--ib-fs-11, 11px); font-weight: 500; color: var(--muted-foreground); text-align: left; cursor: pointer; }
@@ -6864,6 +6867,8 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-phone :is(.ib-earlier-q, .ib-earlier-sub) { font-size: var(--ib-fs-12, 12px); }
 /* The count on the comments button: earlier comments are muted beside today's number. */
 .ib-earlier-cnt { font-weight: 500; color: var(--muted-foreground); }
+/* A phone's toolbar: a muted two-digit count takes no more room than today's single digit, clear of the reply pill. */
+.pn-inbox .ib-fvdock-phone .ib-fvb.ib-fvcount:has(.ib-earlier-cnt) { gap: 3px; padding: 0 5px; }
 
 /* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
    its pill, the image's size bar and "Your marked-up copy" chip, a text file's toolstrip, its Contents button and the

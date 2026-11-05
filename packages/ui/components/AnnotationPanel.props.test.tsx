@@ -147,7 +147,7 @@ describe('AnnotationPanel consumer props', () => {
 });
 
 describe('AnnotationPanel host section at the timeline foot', () => {
-  const base = { isOpen: true, blocks: [], onSelect: () => {}, onDelete: () => {}, selectedId: null } as const;
+  const base = { isOpen: true, blocks: [], onSelect: () => {}, onDelete: () => {}, selectedId: null };
 
   test.skipIf(!hasDom)('timelineFooter sits inside the scroll area, after the cards, so they scroll as one', async () => {
     await mount(<AnnotationPanel {...base} annotations={[annotation]} timelineFooter={<div data-host-foot="" />} />);
