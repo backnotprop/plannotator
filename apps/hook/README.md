@@ -112,7 +112,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your d
 
 ## Remote / Devcontainer Usage
 
-When running Claude Code in a remote environment (SSH, devcontainer, WSL), set `PLANNOTATOR_REMOTE=1` (or `true`) and these environment variables:
+Over SSH, remote mode turns on by itself, so you only need to forward the port (`19432` unless you set `PLANNOTATOR_PORT`). WSL2 does not need remote mode. Devcontainers and Docker are not detected, so set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` there; in a VS Code devcontainer you need this only if the browser does not open by itself. See the [remote and devcontainers guide](https://plannotator.ai/docs/guides/remote-and-devcontainers/).
 
 ```bash
 export PLANNOTATOR_REMOTE=1

@@ -434,6 +434,8 @@ Host your-server
     LocalForward 9999 localhost:9999
 ```
 
+In remote mode the server listens on every interface (`0.0.0.0`), so anyone who can reach the port can use it: bind or forward the port only on networks you trust.
+
 ---
 
 ## Security
