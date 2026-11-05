@@ -6703,6 +6703,9 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   /* The whole row is the 44 px target (the link's ::after), its text centered. */
   .ib-fbk-rel li { position: relative; display: flex; align-items: center; min-height: 44px; padding: 4px 0; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
+  /* Over a keyboard: a shorter box and one line of at most two rows leave the line, the "what is sent" line and Send all in the sheet. */
+  :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
+  :root[data-ib-keyboard] .ib-fbk-rel li > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }

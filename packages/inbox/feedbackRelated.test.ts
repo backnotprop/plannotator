@@ -15,10 +15,10 @@ const DOC = 'https://plannotator.ai/docs/reference/inbox/#what-you-see';
 const release = (title: string, version = 'v0.28.40') => ({ title, version });
 const FROZEN: RelatedData = {
   features: [
-    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'trash'], reason: 'Already there.', url: DOC },
-    { title: 'Dictate your replies', phrases: ['by voice', 'microphone'], reason: 'Already there.', url: DOC },
-    { title: 'Settings, Rows', phrases: ['compact row', 'cramped'], reason: 'Already there.', url: DOC },
-    { title: 'Over your tailnet', phrases: ['on my phone', 'mobile app'], reason: 'Already there.', url: DOC },
+    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'move to trash'], reason: 'Already there.', url: DOC },
+    { title: 'Dictate your replies', phrases: ['by voice', 'use microphone'], reason: 'Already there.', url: DOC },
+    { title: 'Settings, Rows', phrases: ['compact row', 'row too cramped'], reason: 'Already there.', url: DOC },
+    { title: 'Over your tailnet', phrases: ['use on my phone', 'mobile app'], reason: 'Already there.', url: DOC },
   ],
   releases: [
     release('Mark unread'),
@@ -70,6 +70,20 @@ describe('the gate stays quiet', () => {
 
   test('a long message with a stray word or two shows nothing', () => {
     expect(titles("I love the inbox but when I come back after lunch there are a lot of threads and I can't tell what needs me. It would be nice to see only the ones with questions.")).toEqual([]);
+  });
+
+  test('a feature stays out of a message with more than a few real words, even when it says the phrase', () => {
+    expect(titles('love everything about this tool except the missing done button honestly')).toEqual([]);
+    expect(titles('this tool lacks a done button')).toEqual(['Archive']);
+  });
+
+  test('only the start of a huge paste is read', () => {
+    expect(titles(`${'lorem '.repeat(700)}need a done button`)).toEqual([]);
+    expect(titles(`${'lorem '.repeat(600)}need a done button`)).toEqual(['Archive']);
+  });
+
+  test('words in nearly every title carry too little to show one', () => {
+    expect(titles('something quite different')).toEqual([]);
   });
 
   test('a few letters are not worth a line', () => {
@@ -161,8 +175,38 @@ describe('the shipped file holds public titles and nothing else', () => {
     expect(text).not.toMatch(/\/Users\/|\/home\/|C:\\\\Users|gh[pousr]_[A-Za-z0-9]{20,}|github_pat_|[\w.+-]+@[\w-]+\.[a-z]{2,}/i);
   });
 
-  test('a hand-list phrase is more than one common word, or a word no message says by chance', () => {
-    // The first list fired on "done", "talk", "light", "clear" and "find": 9 of 20 off-topic sentences.
-    for (const feature of data.features) for (const phrase of feature.phrases) expect(['done', 'talk', 'light', 'dark', 'clear', 'find', 'remove', 'close', 'delete', 'voice', 'phone', 'mobile', 'compact', 'start', 'theme']).not.toContain(phrase);
+  // The shipped hand list over the frozen titles: a new release's title must not fail a tagged build.
+  const shippedList = relatedIndex({ ...FROZEN, features: shipped.features });
+  const shippedTitles = (text: string) => relatedLinks(shippedList, text).map((link) => link.title);
+
+  test('a hand-list phrase is never one word: one word fires under praise and bug reports', () => {
+    for (const feature of shipped.features) for (const phrase of feature.phrases) expect(phrase).toContain(' ');
+  });
+
+  test.each([
+    'this is my favorite tool',
+    'this tool is trash',
+    'docker compose fails on startup',
+    'please pin the version in the installer',
+    'this reminds me of linear',
+    'the plan page is broken on my phone',
+    'new message sound is too loud',
+  ])('the hand list says nothing under: %s', (text) => {
+    expect(shippedTitles(text)).toEqual([]);
+  });
+
+  test.each([
+    ['need a done button', 'Archive'],
+    ['close a thread when I am finished', 'Archive'],
+    ['mark as unread', 'Mark unread'],
+    ['mark a thread as unread', 'Mark unread'],
+    ['pin a thread', 'Pin a thread'],
+    ['remind me later', 'Snooze a thread'],
+    ['reply by voice', 'Dictate your replies'],
+    ['compose a message', 'New message'],
+    ['please add dark mode', 'Settings, Appearance'],
+    ['can I use this on my phone', 'Over your tailnet'],
+  ])('the hand list answers: %s', (text, title) => {
+    expect(shippedTitles(text)).toContain(title);
   });
 });

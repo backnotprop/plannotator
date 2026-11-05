@@ -29,21 +29,22 @@ const OUT_FILE = 'packages/inbox/feedbackRelated.data.json';
 
 /**
  * Features people ask for by another name, which no title can match ("done
- * button" for Archive). By hand: keep it about this short, in whole phrases,
- * and check each reason against the product when you add one. A single common
- * word here misfires on unrelated messages ("talk to me about pricing").
+ * button" for Archive). By hand: keep it about this short, and check each
+ * reason against the product when you add one. Two words or more, always: a
+ * single word fires under praise and bug reports ("this tool is trash", "docker
+ * compose fails") and then says "Already there".
  */
 export const RELATED_FEATURES: RelatedFeature[] = [
-  { title: 'Archive', phrases: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash'], reason: "Already there: the archive icon in a thread's header ends it. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
-  { title: 'Mark unread', phrases: ['unread'], reason: "Already there: on a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'Pin a thread', phrases: ['pin', 'star thread', 'favorite', 'favourite', 'bookmark'], reason: 'Already there: right-click a thread and choose Pin thread.', url: `${DOCS}#what-you-see` },
-  { title: 'Snooze a thread', phrases: ['snooze', 'remind me', 'postpone'], reason: 'Already there: right-click a row and choose Snooze.', url: `${REPO_URL}/releases/tag/v0.28.46` },
-  { title: 'Dictate your replies', phrases: ['by voice', 'voice input', 'voice reply', 'use voice', 'microphone', 'dictate', 'speech to text'], reason: 'Already there: press the mic to record.', url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'New message', phrases: ['compose', 'new message', 'write first'], reason: 'Already there: the pencil beside Search writes to a running agent first.', url: `${DOCS}#what-you-see` },
-  { title: 'Search', phrases: ['search message', 'search thread', 'find thread', 'find message', 'search across'], reason: 'Already there: Search at the top of the sidebar, grouped by threads and messages.', url: `${DOCS}#what-you-see` },
-  { title: 'Settings, Appearance', phrases: ['dark mode', 'light mode', 'font size', 'text size', 'change theme', 'own theme'], reason: 'Already there: light, dark or system, the text size and the colors.', url: `${DOCS}#what-you-see` },
-  { title: 'Settings, Rows', phrases: ['compact row', 'compact list', 'rows compact', 'cramped', 'density'], reason: 'Already there: density, first line, unread style and more.', url: `${REPO_URL}/releases/tag/v0.28.47` },
-  { title: 'Over your tailnet', phrases: ['on my phone', 'on phone', 'from my phone', 'on mobile', 'mobile app', 'iphone app', 'android app', 'ipad'], reason: 'Already there: open the Inbox from your other devices over your tailnet.', url: `${DOCS}#over-your-tailnet` },
+  { title: 'Archive', phrases: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], reason: "Already there: the archive icon in a thread's header ends it. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
+  { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], reason: "Already there: on a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
+  { title: 'Pin a thread', phrases: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], reason: 'Already there: right-click a thread and choose Pin thread.', url: `${DOCS}#what-you-see` },
+  { title: 'Snooze a thread', phrases: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], reason: 'Already there: right-click a row and choose Snooze.', url: `${REPO_URL}/releases/tag/v0.28.46` },
+  { title: 'Dictate your replies', phrases: ['by voice', 'voice input', 'voice reply', 'use voice', 'use microphone', 'microphone input', 'microphone button', 'dictate reply', 'dictate message', 'speech to text'], reason: 'Already there: press the mic to record.', url: `${REPO_URL}/releases/tag/v0.28.43` },
+  { title: 'New message', phrases: ['compose message', 'compose new message', 'compose button', 'write first', 'write to agent first', 'start new message', 'write new message', 'send new message', 'new message button'], reason: 'Already there: the pencil beside Search writes to a running agent first.', url: `${DOCS}#what-you-see` },
+  { title: 'Search', phrases: ['search message', 'search thread', 'find thread', 'find message', 'search across thread', 'search across message', 'search all message'], reason: 'Already there: Search at the top of the sidebar, grouped by threads and messages.', url: `${DOCS}#what-you-see` },
+  { title: 'Settings, Appearance', phrases: ['dark mode', 'light mode', 'font size', 'text size', 'change theme', 'own theme', 'own color'], reason: 'Already there: light, dark or system, the text size and the colors.', url: `${DOCS}#what-you-see` },
+  { title: 'Settings, Rows', phrases: ['compact row', 'compact list', 'rows compact', 'row density', 'list density', 'density option', 'rows feel cramped', 'list too cramped', 'row too cramped'], reason: 'Already there: density, first line, unread style and more.', url: `${REPO_URL}/releases/tag/v0.28.47` },
+  { title: 'Over your tailnet', phrases: ['use on my phone', 'use on phone', 'open on my phone', 'inbox on my phone', 'use from my phone', 'reply from my phone', 'open from my phone', 'check from my phone', 'use on mobile', 'mobile app', 'iphone app', 'android app', 'ipad app'], reason: 'Already there: open the Inbox from your other devices over your tailnet.', url: `${DOCS}#over-your-tailnet` },
 ];
 
 export interface ReleaseInput {
@@ -62,13 +63,15 @@ const NOT_A_FEATURE = /^(what's changed|what's new|install|new contributors|comm
 /** A section whose heading only groups its bullets: each bullet is the line. */
 const GROUPING = /smaller|additional|other|fixes|bug|ux improvements/i;
 /** A bullet that only credits someone or names a PR: no feature in it. */
-const ONLY_A_CREDIT = /^(authored|reported|requested|closes|closing|thanks|credit)\b/i;
+const ONLY_A_CREDIT = /^(authored|reported|requested|closes|closing|thanks|credit)\b|^#\d+|\bby @/i;
 /** A line with an address in it stays out, even a public one: nobody needs it under a feedback box. */
 const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 /** A heading that only names the product: what is under it is the feature. */
 const ONLY_THE_PRODUCT = /^plannotator( inbox)?$/i;
 /** Bots and trackers: nobody files feedback about these. */
 const NOT_A_REQUEST = /^(chore\(deps\)|bump |dependency dashboard|pre-release manual qa)/i;
+/** Open issues that must not be offered to everyone who types a word in their title. #956: a security report. */
+const SKIPPED_ISSUES = new Set([956]);
 
 const plain = (text: string) =>
   text
@@ -134,7 +137,7 @@ export function buildRelatedData(input: { releases: ReleaseInput[]; issues: Titl
     }
   }
   const issues: RelatedIssue[] = input.issues
-    .filter((issue) => !NOT_A_REQUEST.test(issue.title) && !HAS_EMAIL.test(issue.title))
+    .filter((issue) => !SKIPPED_ISSUES.has(issue.number) && !NOT_A_REQUEST.test(issue.title) && !HAS_EMAIL.test(issue.title))
     .sort((a, b) => b.number - a.number)
     .map((issue) => ({ title: plain(issue.title), number: issue.number }));
   const open = new Map(issues.map((issue) => [issue.number, issue]));
@@ -180,11 +183,35 @@ export function draftNotes(root: string): ReleaseInput | null {
   return existsSync(file) ? { tag: `v${version}`, body: readFileSync(file, 'utf8') } : null;
 }
 
-export function writeRelatedIndex(root: string, gh: GhRunner): RelatedData {
-  const data = buildRelatedData(readRelatedInput(gh, draftNotes(root)));
-  // An empty answer that still exits 0 must not wipe the file in a release commit.
-  if (data.releases.length < 50 || data.issues.length === 0) throw new Error(`Suspiciously little from GitHub: ${data.releases.length} release lines, ${data.issues.length} issues. Nothing written.`);
+/** Lines the last file had, or null when there is no readable file to compare with. */
+function existingCounts(out: string): { releases: number; issues: number } | null {
+  try {
+    const old = JSON.parse(readFileSync(out, 'utf8')) as RelatedData;
+    return { releases: old.releases.length, issues: old.issues.length };
+  } catch {
+    return null;
+  }
+}
+
+/** An answer this much smaller than the last file is a bad read, not a quiet month. Open issues do fall, so they get more room. */
+const MIN_RELEASES_KEPT = 0.9;
+const MIN_ISSUES_KEPT = 0.5;
+
+export function writeRelatedIndex(root: string, gh: GhRunner, warn: (line: string) => void = console.error): RelatedData {
+  const draft = draftNotes(root);
+  const input = readRelatedInput(gh, draft);
+  const version = (JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { version: string }).version;
+  if (!draft && !input.releases.some((release) => release.tag === `v${version}`)) {
+    warn(`WARNING: no RELEASE_NOTES_v${version}.md here and no published v${version}: this file will not know about the release you are cutting.`);
+  }
+  const data = buildRelatedData(input);
   const out = join(root, OUT_FILE);
+  const last = existingCounts(out);
+  // An empty or partial answer that still exits 0 must not shrink the file in a release commit.
+  const floor = last ? { releases: Math.ceil(last.releases * MIN_RELEASES_KEPT), issues: Math.ceil(last.issues * MIN_ISSUES_KEPT) } : { releases: 50, issues: 1 };
+  if (data.releases.length < floor.releases || data.issues.length < Math.max(floor.issues, 1)) {
+    throw new Error(`Suspiciously little from GitHub: ${data.releases.length} release lines and ${data.issues.length} issues, against ${last ? `${last.releases} and ${last.issues} in the file` : 'no file'}. Nothing written. If that is right, delete the file and run this again.`);
+  }
   writeFileSync(`${out}.tmp`, serializeRelatedData(data));
   renameSync(`${out}.tmp`, out);
   return data;

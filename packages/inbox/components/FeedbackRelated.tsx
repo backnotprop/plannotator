@@ -1,15 +1,22 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+/// <reference path="../assets.d.ts" />
+import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
 import { relatedIndex, relatedLinks, type RelatedData, type RelatedIndex, type RelatedLink } from '../feedbackRelated';
 
 /** How long after the last keystroke the list may change. */
 export const RELATED_PAUSE_MS = 500;
 /** Below the dialog's foot, when the pinned dialog is taller than what is left of the window. */
 const FOOT_ROOM = 16;
+/** Above the box in the sheet over a keyboard, once the title has scrolled away. */
+const BOX_HEAD = 4;
 
-/** Indexed at the first open, not for a window that never opens the form. In the single-file build the file is already in the page: no request. */
+/**
+ * Parsed at the first open: `?raw` keeps the file a string in the page, so a
+ * window that never opens the form holds none of its objects (#2593). In the
+ * single-file build it is already in the page: no request.
+ */
 let loading: Promise<RelatedIndex> | null = null;
 function loadRelatedIndex(): Promise<RelatedIndex> {
-  loading ??= import('../feedbackRelated.data.json').then((data) => relatedIndex(data.default as RelatedData));
+  loading ??= import('../feedbackRelated.data.json?raw').then((file) => relatedIndex(JSON.parse(file.default) as RelatedData));
   return loading;
 }
 
@@ -36,6 +43,25 @@ function pointerRestsOn(element: HTMLElement | null): element is HTMLElement {
   return !!element && window.matchMedia('(hover: hover)').matches && element.matches(':hover');
 }
 
+const keyboardIsUp = () => document.documentElement.hasAttribute('data-ib-keyboard');
+
+/** A phone's keyboard (phone.ts trackKeyboard marks the page): followed only in the sheet. */
+function useKeyboardUp(phone: boolean): boolean {
+  const [up, setUp] = useState(false);
+  useEffect(() => {
+    if (!phone) {
+      setUp(false);
+      return;
+    }
+    const read = () => setUp(keyboardIsUp());
+    read();
+    const watch = new MutationObserver(read);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['data-ib-keyboard'] });
+    return () => watch.disconnect();
+  }, [phone]);
+  return up;
+}
+
 /**
  * The lines for what is typed, changed only after a pause: the old lines stay
  * while the person types, so the form does not flicker. Nothing here makes a
@@ -49,11 +75,13 @@ export function useFeedbackRelated(options: {
   phone: boolean;
   boxRef: RefObject<HTMLTextAreaElement | null>;
   actionsRef: RefObject<HTMLElement | null>;
+  listRef: RefObject<HTMLElement | null>;
 }): RelatedLink[] {
-  const { message, frozen, phone, boxRef, actionsRef } = options;
+  const { message, frozen, phone, boxRef, actionsRef, listRef } = options;
   const [index, setIndex] = useState<RelatedIndex | null>(null);
   const [links, setLinks] = useState<RelatedLink[]>([]);
   const pinned = useRef<HTMLElement | null>(null);
+  const keyboardUp = useKeyboardUp(phone);
 
   useEffect(() => {
     let current = true;
@@ -70,7 +98,7 @@ export function useFeedbackRelated(options: {
 
   useEffect(() => {
     if (frozen || !index) return;
-    let actions: HTMLElement | null = null;
+    let stopWaiting = () => {};
     const show = () => {
       const next = relatedLinks(index, message);
       const dialog = boxRef.current?.closest('dialog') ?? null;
@@ -81,17 +109,44 @@ export function useFeedbackRelated(options: {
       setLinks(next);
     };
     const timer = setTimeout(() => {
-      // Send must not move under a pointer about to press it.
-      if (pointerRestsOn(actionsRef.current)) {
-        actions = actionsRef.current;
+      const actions = actionsRef.current;
+      const list = listRef.current;
+      if (list?.contains(document.activeElement)) {
+        // A focused link must not vanish: focus would fall to the page. Tabbing to the next link is still inside.
+        const left = (event: FocusEvent) => {
+          if (list.contains(event.relatedTarget as Node | null)) return;
+          list.removeEventListener('focusout', left);
+          show();
+        };
+        list.addEventListener('focusout', left);
+        stopWaiting = () => list.removeEventListener('focusout', left);
+      } else if (pointerRestsOn(actions)) {
+        // Send must not move under a pointer about to press it.
         actions.addEventListener('pointerleave', show, { once: true });
+        stopWaiting = () => actions.removeEventListener('pointerleave', show);
       } else show();
     }, RELATED_PAUSE_MS);
     return () => {
       clearTimeout(timer);
-      actions?.removeEventListener('pointerleave', show);
+      stopWaiting();
     };
-  }, [message, frozen, index, phone, boxRef, actionsRef]);
+  }, [message, frozen, index, phone, boxRef, actionsRef, listRef]);
+
+  // Over a keyboard the sheet has room for one line and Send, not three. The rest come back with the room.
+  const shown = keyboardUp ? links.slice(0, 1) : links;
+
+  // The title yields as the keyboard rises, not when a line shows: the box is under the caret and stays there.
+  useLayoutEffect(() => {
+    const box = boxRef.current;
+    const dialog = box?.closest('dialog');
+    if (!keyboardUp || !box || !dialog) return;
+    const settle = () => {
+      dialog.scrollTop += box.getBoundingClientRect().top - dialog.getBoundingClientRect().top - BOX_HEAD;
+    };
+    if (document.activeElement === box) settle();
+    box.addEventListener('focus', settle);
+    return () => box.removeEventListener('focus', settle);
+  }, [keyboardUp, boxRef]);
 
   // Another window size, or a phone's sheet: centering and the sheet's own rules apply again.
   useEffect(() => {
@@ -104,13 +159,13 @@ export function useFeedbackRelated(options: {
     return () => window.removeEventListener('resize', release);
   }, [phone]);
 
-  return links;
+  return shown;
 }
 
 /** Always in the DOM so a screen reader hears the lines arrive; empty, it takes no room. */
-export function FeedbackRelated({ links }: { links: RelatedLink[] }) {
+export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; listRef: RefObject<HTMLDivElement | null> }) {
   return (
-    <div className="ib-fbk-rel" role="status" data-feedback-related="">
+    <div className="ib-fbk-rel" role="status" data-feedback-related="" ref={listRef}>
       {links.length > 0 && (
         <>
           <p className="ib-fbk-rel-h">Might be related</p>

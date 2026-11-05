@@ -10,6 +10,8 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { buildRelatedData, draftNotes, readRelatedInput, releaseTitles, serializeRelatedData, writeRelatedIndex, type GhRunner } from './feedback-related-index';
 
+import shipped from '../packages/inbox/feedbackRelated.data.json';
+
 const notes = (lines: string) => `Follow us\n\n| [v0.1.0](x) | old |\n\n## What's New in v9\n\nIntro.\n\n${lines}\n\n## Install / Update\n\nrun this\n`;
 
 const roots: string[] = [];
@@ -27,6 +29,7 @@ function fakeRoot(version = '0.29.0'): string {
 }
 
 const manyReleases = Array.from({ length: 60 }, (_, n) => JSON.stringify({ tag: `v0.28.${n}`, draft: false, prerelease: false, body: notes(`### Line ${n} here`) })).join('\n');
+const silent = () => {};
 const fakeGh = (answers: { releases?: string; issues?: unknown[]; pulls?: unknown[] } = {}): GhRunner => (args) => {
   if (args[0] === 'api') return answers.releases ?? manyReleases;
   if (args[0] === 'issue') return JSON.stringify(answers.issues ?? [{ number: 7, title: 'An open issue' }]);
@@ -48,8 +51,8 @@ describe('release notes', () => {
   test('a draft or prerelease is never read: the logged in owner can see notes nobody else can', () => {
     const data = buildRelatedData({
       releases: [
-        { tag: 'v0.30.0', draft: true, body: notes('### Secret unannounced thing') },
-        { tag: 'v0.30.0-rc.1', prerelease: true, body: notes('### Prerelease thing') },
+        { tag: 'v0.31.0', draft: true, body: notes('### Secret unannounced thing') },
+        { tag: 'v0.30.0', prerelease: true, body: notes('### Prerelease thing') },
         { tag: 'v0.29.0', draft: false, prerelease: false, body: notes('### Public thing') },
         { tag: 'v0.19.9', body: notes('### Too old') },
       ],
@@ -57,6 +60,15 @@ describe('release notes', () => {
       pulls: [],
     });
     expect(data.releases).toEqual([{ title: 'Public thing', version: 'v0.29.0' }]);
+  });
+
+  test('a line that is only numbers or names a person stays out', () => {
+    const data = buildRelatedData({
+      releases: [{ tag: 'v0.29.0', body: notes('### #1921, #1915, #1927\n\n### #1356, #1355 by @someone\n\n### Open VSX support, requested by @someone in #1110\n\n### #914, contributed by @someone\n\n### A real feature') }],
+      issues: [],
+      pulls: [],
+    });
+    expect(data.releases.map((line) => line.title)).toEqual(['A real feature']);
   });
 
   test('a repeated heading keeps the newest release that has it', () => {
@@ -92,6 +104,11 @@ describe('issues and PRs', () => {
     expect(data.issues).toEqual([{ title: 'Real request', number: 9 }]);
   });
 
+  test('an issue on the skip list stays out, and so do the words of a PR that cites it', () => {
+    const data = buildRelatedData({ releases: [], issues: [{ number: 956, title: 'A skipped report' }, { number: 9, title: 'Real request' }], pulls: [{ number: 10, title: 'Fix the report (#956)' }] });
+    expect(data.issues).toEqual([{ title: 'Real request', number: 9 }]);
+  });
+
   test('bots and trackers stay out', () => {
     const data = buildRelatedData({ releases: [], issues: [{ number: 245, title: 'Dependency Dashboard' }, { number: 9, title: 'Real request' }], pulls: [{ number: 10, title: 'chore(deps): bump things (#9)' }] });
     expect(data.issues).toEqual([{ title: 'Real request', number: 9 }]);
@@ -111,10 +128,27 @@ describe('issues and PRs', () => {
 });
 
 describe('the new release', () => {
+  test('no notes file and no published release: it says so, loudly, and still writes', () => {
+    const warnings: string[] = [];
+    const data = writeRelatedIndex(fakeRoot('0.29.0'), fakeGh(), (line) => warnings.push(line));
+    expect(warnings.length).toBe(1);
+    expect(warnings[0]).toContain('RELEASE_NOTES_v0.29.0.md');
+    expect(data.releases.length).toBe(60);
+  });
+
+  test('notes file there, or the version already published: no warning', () => {
+    const warnings: string[] = [];
+    const drafted = fakeRoot('0.29.0');
+    writeFileSync(join(drafted, 'RELEASE_NOTES_v0.29.0.md'), notes('### The newest feature'));
+    writeRelatedIndex(drafted, fakeGh(), (line) => warnings.push(line));
+    writeRelatedIndex(fakeRoot('0.28.5'), fakeGh(), (line) => warnings.push(line));
+    expect(warnings).toEqual([]);
+  });
+
   test("its draft notes count, since GitHub has them only after the tag", () => {
     const root = fakeRoot('0.29.0');
     writeFileSync(join(root, 'RELEASE_NOTES_v0.29.0.md'), notes('### The newest feature'));
-    const data = writeRelatedIndex(root, fakeGh());
+    const data = writeRelatedIndex(root, fakeGh(), silent);
     expect(data.releases[0]).toEqual({ title: 'The newest feature', version: 'v0.29.0' });
   });
 
@@ -124,6 +158,12 @@ describe('the new release', () => {
     writeFileSync(join(root, 'RELEASE_NOTES_v0.28.5.md'), notes('### Stale draft'));
     const input = readRelatedInput(fakeGh(), draftNotes(root));
     expect(JSON.stringify(input.releases)).not.toContain('Stale draft');
+  });
+});
+
+describe('the hand list', () => {
+  test('the shipped file carries the list as written here: an edit here needs the file rewritten', () => {
+    expect(shipped.features).toEqual(buildRelatedData({ releases: [], issues: [], pulls: [] }).features);
   });
 });
 
@@ -142,14 +182,34 @@ describe('a bad read writes nothing', () => {
 
   test('gh answers with almost nothing', () => {
     const root = fakeRoot();
-    expect(() => writeRelatedIndex(root, fakeGh({ releases: '' }))).toThrow('Nothing written');
-    expect(() => writeRelatedIndex(root, fakeGh({ issues: [] }))).toThrow('Nothing written');
+    expect(() => writeRelatedIndex(root, fakeGh({ releases: '' }), silent)).toThrow('Nothing written');
+    expect(() => writeRelatedIndex(root, fakeGh({ issues: [] }), silent)).toThrow('Nothing written');
     expect(kept(root)).toBe('KEPT');
+  });
+
+  test('a read far smaller than the file already there writes nothing, though it clears the bare minimum', () => {
+    const root = fakeRoot();
+    const file = join(root, 'packages/inbox/feedbackRelated.data.json');
+    const big = serializeRelatedData({
+      features: [],
+      releases: Array.from({ length: 899 }, (_, n) => ({ title: `Line ${n}`, version: 'v0.28.1' })),
+      issues: Array.from({ length: 71 }, (_, n) => ({ title: `Issue ${n}`, number: n + 1 })),
+    });
+    writeFileSync(file, big);
+    expect(() => writeRelatedIndex(root, fakeGh(), silent)).toThrow('Nothing written');
+    expect(kept(root)).toBe(big);
+  });
+
+  test('a normal month against the file already there writes: a few lines fewer, open issues closed', () => {
+    const root = fakeRoot();
+    writeRelatedIndex(root, fakeGh({ issues: [{ number: 1, title: 'One' }, { number: 2, title: 'Two' }] }), silent);
+    const data = writeRelatedIndex(root, fakeGh({ issues: [{ number: 1, title: 'One' }] }), silent);
+    expect(JSON.parse(kept(root))).toEqual(data);
   });
 
   test('a good read writes a file that reads back the same', () => {
     const root = fakeRoot();
-    const data = writeRelatedIndex(root, fakeGh());
+    const data = writeRelatedIndex(root, fakeGh(), silent);
     expect(JSON.parse(kept(root))).toEqual(data);
     expect(kept(root)).toBe(serializeRelatedData(data));
   });

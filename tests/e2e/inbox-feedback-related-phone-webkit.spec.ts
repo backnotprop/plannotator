@@ -8,8 +8,10 @@
  *   keyboard rise (the same simulation as inbox-fullscreen-keyboard.spec.ts);
  * - a 390 by 470 window.
  *
- * Each requires: the box and the line show above the keyboard, the box does
- * not move when the line appears, and Send can still be reached.
+ * Each requires: the box and the line show above the keyboard and the box does
+ * not move when the line appears. With the keyboard up Send and the "what is
+ * sent" line show too, with no scrolling; in the short window Send is a scroll
+ * away.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-feedback-related-phone-webkit.spec.ts`.
@@ -75,6 +77,14 @@ async function sendReachable(page: Page) {
   expect(at.y + at.height).toBeLessThanOrEqual((await bottomOfScreen(page)) + 0.5);
 }
 
+/** Fully inside the sheet as it is now, nothing scrolled by hand: the sheet clips what it scrolls. */
+async function showsInSheet(page: Page, selector: string) {
+  const sheet = (await page.locator('dialog.ib-fbk-phone').boundingBox())!;
+  const at = (await page.locator(selector).first().boundingBox())!;
+  expect(at.y, selector).toBeGreaterThanOrEqual(sheet.y);
+  expect(at.y + at.height, selector).toBeLessThanOrEqual(sheet.y + sheet.height);
+}
+
 async function lineAboveKeyboard(page: Page) {
   const box = page.locator('[data-feedback-message]');
   const before = (await box.boundingBox())!;
@@ -86,21 +96,48 @@ async function lineAboveKeyboard(page: Page) {
   const line = (await page.locator('[data-feedback-related] li').boundingBox())!;
   expect(line.height).toBeGreaterThanOrEqual(44);
   expect(line.y + line.height).toBeLessThanOrEqual(await bottomOfScreen(page));
-  await sendReachable(page);
+}
+
+async function keyboardUp(page: Page) {
+  await page.evaluate((keyboard) => {
+    const vv = window.visualViewport!;
+    Object.defineProperty(vv, 'height', { configurable: true, get: () => window.innerHeight - keyboard });
+    vv.dispatchEvent(new Event('resize'));
+  }, KEYBOARD);
+  await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--ib-vvh'))).toBe(`${844 - KEYBOARD}px`);
+  await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
 }
 
 test.describe('390 by 844, the visual viewport loses the keyboard', () => {
   test.use({ viewport: { width: 390, height: 844 } });
-  test('the line shows above it, the box stays, Send can be reached', async ({ page }) => {
+
+  test('the box, the line, what is sent and Send all show, with no scrolling', async ({ page }) => {
     await openSheet(page);
-    await page.evaluate((keyboard) => {
-      const vv = window.visualViewport!;
-      Object.defineProperty(vv, 'height', { configurable: true, get: () => window.innerHeight - keyboard });
-      vv.dispatchEvent(new Event('resize'));
-    }, KEYBOARD);
-    await expect.poll(() => page.evaluate(() => document.documentElement.style.getPropertyValue('--ib-vvh'))).toBe(`${844 - KEYBOARD}px`);
-    await page.evaluate(() => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))));
+    await keyboardUp(page);
     await lineAboveKeyboard(page);
+    for (const part of ['[data-feedback-message]', '[data-feedback-related] li', '[data-feedback-what]', '[data-feedback-send]']) await showsInSheet(page, part);
+  });
+
+  test('before any line, the same: Send already shows', async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    for (const part of ['[data-feedback-message]', '[data-feedback-what]', '[data-feedback-send]']) await showsInSheet(page, part);
+  });
+
+  test('several matches show one line, at most two rows, and Send still shows', async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    await page.keyboard.type('quick labels please', { delay: 15 });
+    await page.waitForTimeout(800);
+    expect(await page.locator('[data-feedback-related] a').count()).toBeLessThanOrEqual(1);
+    await showsInSheet(page, '[data-feedback-send]');
+  });
+
+  test('from the email field the sheet stays where the person put it', async ({ page }) => {
+    await openSheet(page);
+    await page.locator('[data-feedback-contact]').focus();
+    await keyboardUp(page);
+    await showsInSheet(page, '[data-feedback-contact]');
   });
 });
 
@@ -109,6 +146,7 @@ test.describe('a 390 by 470 window', () => {
   test('the line shows on screen, the box stays, Send can be reached', async ({ page }) => {
     await openSheet(page);
     await lineAboveKeyboard(page);
+    await sendReachable(page);
   });
 });
 

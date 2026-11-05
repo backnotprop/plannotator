@@ -386,12 +386,44 @@ describe.skipIf(!hasDom)('Might be related under the box', () => {
     await act(async () => new Promise((done) => setTimeout(done, 30)));
     type(dialog.box(), 'need a done button');
     expect(list().childNodes.length).toBe(0);
+    await act(async () => new Promise((done) => setTimeout(done, 100)));
+    expect(list().childNodes.length).toBe(0);
     await pause();
     const link = list().querySelector('a')!;
     expect(link.textContent).toBe('Archive');
     expect(link.getAttribute('target')).toBe('_blank');
     expect(link.getAttribute('rel')).toBe('noopener noreferrer');
     expect(link.getAttribute('href')!.startsWith('https://plannotator.ai/docs/')).toBe(true);
+  });
+
+  test('more typing restarts the pause: words already replaced never draw a line', async () => {
+    const dialog = render();
+    await act(async () => new Promise((done) => setTimeout(done, 30)));
+    type(dialog.box(), 'need a done button');
+    await act(async () => new Promise((done) => setTimeout(done, 100)));
+    type(dialog.box(), 'translate the interface into Spanish');
+    // Past the first words' pause, not yet past the last words'.
+    await act(async () => new Promise((done) => setTimeout(done, 450)));
+    expect(list().childNodes.length).toBe(0);
+  });
+
+  test('the list is a live region from the start, so a screen reader hears a line appear', () => {
+    render();
+    expect(list().getAttribute('role')).toBe('status');
+    expect(list().childNodes.length).toBe(0);
+  });
+
+  test('a focused link is not pulled away: the list waits until focus leaves it', async () => {
+    const dialog = await typeAndPause('need a done button');
+    const link = list().querySelector('a')!;
+    link.focus();
+    type(dialog.box(), 'works great, thank you');
+    await pause();
+    expect(list().querySelector('a') === link).toBe(true);
+    expect(document.activeElement === link).toBe(true);
+    await act(async () => dialog.box().focus());
+    expect(list().childNodes.length).toBe(0);
+    expect(document.activeElement === dialog.box()).toBe(true);
   });
 
   test('no match draws nothing: the slot stays empty', async () => {

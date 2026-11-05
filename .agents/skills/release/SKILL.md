@@ -147,7 +147,7 @@ After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 bun scripts/feedback-related-index.ts
 ```
 
-It reads public release notes, open issue titles and open PR titles with `gh`, and rewrites `packages/inbox/feedbackRelated.data.json`. If `gh` fails or GitHub answers with suspiciously little, it writes nothing and exits 1: fix that before you go on. Glance at the diff, because issue titles are strangers' words that ship in the window. CI and the builds never run this script.
+It reads public release notes, open issue titles and open PR titles with `gh`, and rewrites `packages/inbox/feedbackRelated.data.json`. If `gh` fails or the answer is far smaller than the file already there, it writes nothing and exits 1: fix that before you go on. A `WARNING` about `RELEASE_NOTES_v<version>.md` means the release you are cutting is not in the list: write the notes first and run it again. Glance at the diff, because issue titles are strangers' words that ship in the window. CI and the builds never run this script.
 
 ---
 

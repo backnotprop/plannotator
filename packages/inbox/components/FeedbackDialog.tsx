@@ -52,10 +52,11 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
   const actionsRef = useRef<HTMLDivElement>(null);
+  const relatedRef = useRef<HTMLDivElement>(null);
   const closed = useRef(false);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
-  const related = useFeedbackRelated({ message, frozen: phase !== 'edit', phone, boxRef, actionsRef });
+  const related = useFeedbackRelated({ message, frozen: phase !== 'edit', phone, boxRef, actionsRef, listRef: relatedRef });
 
   useEffect(() => {
     boxRef.current?.focus();
@@ -155,7 +156,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
                 : `${(FEEDBACK_MESSAGE_MAX - count).toLocaleString('en-US')} characters left`}
             </p>
           )}
-          <FeedbackRelated links={related} />
+          <FeedbackRelated links={related} listRef={relatedRef} />
           {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
           <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
             Category and email are optional

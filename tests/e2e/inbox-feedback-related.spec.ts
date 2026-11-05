@@ -88,7 +88,7 @@ const layout = (page: Page) =>
       return { x, y, width, height };
     };
     const dialog = document.querySelector('dialog[open]')!;
-    return { dialog: rect(dialog), parts: [...dialog.querySelectorAll('form > *')].map(rect) };
+    return { dialog: rect(dialog), parts: [...dialog.querySelectorAll('form > *:not([data-feedback-related])')].map(rect) };
   });
 
 test('nothing typed leaves the window, while typing or when a line shows', async ({ page }) => {
@@ -115,7 +115,11 @@ test('no match leaves the form laid out exactly as it was', async ({ page }) => 
   await page.keyboard.type('translate the interface into Spanish', { delay: 15 });
   await page.waitForTimeout(PAST_THE_PAUSE);
   await expect(lines(page)).toHaveCount(0);
-  expect(await layout(page)).toEqual(today);
+  const typed = await layout(page);
+  expect(typed).toEqual(today);
+  // The empty slot itself takes no room: the same form without it sits the same.
+  await page.addStyleTag({ content: '[data-feedback-related] { display: none; }' });
+  expect(await layout(page)).toEqual(typed);
 });
 
 test('a line shows under the box: the box stays put and the dialog grows down only', async ({ page }) => {

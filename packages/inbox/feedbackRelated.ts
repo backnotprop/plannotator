@@ -10,7 +10,7 @@
  * real requests gets a line, and most of those are right.
  */
 
-/** A feature people ask for by another name. Fires on whole phrases only: single words misfired on 9 of 20 off-topic sentences. */
+/** A feature people ask for by another name. Whole phrases only: a single word fires under praise and bug reports ("this tool is trash"), and then says "Already there". */
 export interface RelatedFeature {
   title: string;
   phrases: string[];
@@ -143,10 +143,18 @@ export function relatedIndex(data: RelatedData): RelatedIndex {
   return { entries, documents, averageLength: entries.length ? length / entries.length : 1 };
 }
 
-/** The phrase's first word, then its last within reach (one word of slack): "mark as done", not "done … mark". */
+/** Every word of the phrase, in order, with at most one word between neighbours: "close a thread", "mark a thread as unread". */
 function saysPhrase(said: string[], phrase: string[]): boolean {
-  const last = phrase[phrase.length - 1]!;
-  return said.some((word, at) => word === phrase[0] && (phrase.length === 1 || said.slice(at + 1, at + phrase.length + 1).includes(last)));
+  return said.some((word, start) => {
+    if (word !== phrase[0]) return false;
+    let at = start;
+    for (const next of phrase.slice(1)) {
+      if (said[at + 1] === next) at += 1;
+      else if (said[at + 2] === next) at += 2;
+      else return false;
+    }
+    return true;
+  });
 }
 
 /** Up to three lines for what is typed, best first; none is the usual answer. Never throws on any text. */
