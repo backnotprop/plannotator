@@ -3,8 +3,8 @@
  * sent with the guide (`overview.diagram`, kind html), drawn inline with
  * Shape's `ShapeDiagram`. A click on a part opens its code. In a later round
  * whose agent redrew it, the parts that changed redraw and keep a "changed"
- * tag. A review with no picture gets one Show me here, which asks for a
- * picture of the whole review.
+ * tag. A review with no picture gets one Show me in its heading, which asks
+ * for a picture of the whole review.
  */
 import { useState } from 'react';
 import type { ShapeCodeTarget, ShapeDrawnView } from '@plannotator/core/shape';
@@ -51,19 +51,12 @@ export function OverviewFigure({
   );
 }
 
-/** The Overview of a review that came with no picture: Show me asks the agent for one of the whole review. */
-export function OverviewShowMe({ onShowMe }: { onShowMe: () => void }) {
+/** A review that came with no picture: Show me, one of the review's own actions in its heading, asks the agent for one of the whole review. */
+export function ShowMeButton({ onShowMe }: { onShowMe: () => void }) {
   return (
-    <section className="ib-ov-fig ib-ov-ask" aria-label="How it works" data-overview-show-me="">
-      <div className="ib-ov-fig-h">
-        <Pebble alive={false} size={16} className="ib-sm-peb" />
-        <b>How it works</b>
-        <span className="ib-sp" />
-        <button type="button" className="ib-btn ib-pri ib-sm-send" onClick={onShowMe} data-overview-show-me-button="">
-          <Pebble alive={false} size={15} className="ib-sm-peb" />
-          Show me
-        </button>
-      </div>
-    </section>
+    <button type="button" className="ib-btn ib-pri ib-sm-send gv-head-showme" onClick={onShowMe} data-overview-show-me="" data-overview-show-me-button="">
+      <Pebble alive={false} size={14} className="ib-sm-peb" />
+      Show me
+    </button>
   );
 }

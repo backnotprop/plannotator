@@ -168,9 +168,27 @@ const click = async (selector: string) => {
   await settle();
 };
 
+test.skipIf(!hasDom)('the top bar holds what the rail held: Walkthrough | All files, the chapter menu, the title; no rail, and no Split | Unified in the bar', async () => {
+  await render();
+  const bar = document.querySelector<HTMLElement>('[data-review-message] .ib-vhead')!;
+  expect(document.querySelector('[data-review-message] .ib-rrail')).toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="walkthrough"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-mode-choice="files"]')).not.toBeNull();
+  expect(bar.querySelector('[data-review-jump]')?.textContent).toContain('Overview');
+  expect(bar.querySelector('[data-review-title]')?.textContent).toBe('Token refresh');
+  // Less to read: the way back is its arrow, still named for a screen reader and a tooltip.
+  const back = bar.querySelector<HTMLElement>('.ib-back')!;
+  expect(back.textContent).toBe('');
+  expect(back.getAttribute('aria-label')).toBe('Thread');
+  // Nothing of the old header's: the review's name is said once.
+  expect(bar.textContent).not.toContain('· from');
+  // The layout is above the diffs, not in the bar (the browser walk draws it there).
+  expect(bar.querySelector('[data-diff-style-switch]')).toBeNull();
+});
+
 test.skipIf(!hasDom)("a teammate's pull request (the thread holds only theirs): the review reads with no Approve or Request changes, and its card waits on no verdict", async () => {
   await render({ ...thread, pull_theirs: true });
-  expect(document.querySelector('[data-review-chapters]')).not.toBeNull();
+  expect(document.querySelector('[data-review-jump="walkthrough"]')).not.toBeNull();
   expect(document.querySelector('[data-review-decision]')).toBeNull();
   expect(document.querySelector('[data-decision-primary]')).toBeNull();
   expect(document.querySelector('[data-asker-ended]')).toBeNull();
