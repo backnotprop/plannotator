@@ -875,10 +875,10 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await expect(board(page)).toBeVisible();
   await expect(page.locator('[data-show-me-box]')).toHaveCount(0);
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
-  await selectLines(page, WORKER, 14, 16);
+  await selectLines(page, WORKER, 16, 17);
   await chooser(page).getByRole('button', { name: 'Show me' }).click();
   await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
-  await expect(page.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 14–16');
+  await expect(page.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 16–17');
   await page.getByRole('button', { name: 'Close Show me' }).click();
   expect(world.agent.asked.length).toBe(asked);
   expect(world.errors).toEqual([]);
