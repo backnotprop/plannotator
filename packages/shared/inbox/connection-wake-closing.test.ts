@@ -17,6 +17,7 @@ import {
   inboxAckLine,
   inboxWakeAgo,
   inboxWakeCommand,
+  inboxWakeDetailsLine,
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "./connection";
@@ -150,6 +151,14 @@ test("the still-open sentence comes out of the wake only when the Inbox named it
   expect(text).toContain("\n\nAnswered 1 question.\n\nGo ahead.\n\n## Answers to your questions\n\nQ1: yes\n\n");
   // An older Inbox: no context, so the body is still the only place it is said.
   expect(wake({ body })).toContain(STILL_OPEN);
+});
+
+test("a line a host will hold drops nothing open and nothing else", () => {
+  const line = (c: Record<string, unknown>) => inboxWakeDetailsLine("msg_01THREAD", context(c), { now: NOW, queued: true });
+  expect(line({ open_questions: 0, open_actions: 0 })).toBe("[Thread msg_01THREAD: 14 messages]");
+  expect(line({ open_questions: 0, open_actions: 0, last_agent_at: before(HOUR) })).toBe("[Thread msg_01THREAD: 14 messages. Your last message was an hour ago]");
+  expect(line({ open_questions: 1, open_actions: 0 })).toBe("[Thread msg_01THREAD: 14 messages, 1 question open, don't re-ask it]");
+  expect(line({ open_questions: 0, open_actions: 2 })).toBe("[Thread msg_01THREAD: 14 messages, 2 action items open]");
 });
 
 test("the person's own words that read the same as the sentence stay: only the paragraph at the store's position goes", () => {

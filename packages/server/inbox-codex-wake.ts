@@ -292,7 +292,8 @@ const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
  */
 export function codexWakeText(command: InboxReplyCommand): string {
   const { body } = inboxWakeCommand(command);
-  const template = inboxWakeText({ ...command, body: BODY_SLOT }).split(`${INBOX_TOOL_NAME} `).join("");
+  // Worded now and held by the host from here (Codex, Qwen, T3 Code): `queued`, so it never says "nothing open".
+  const template = inboxWakeText({ ...command, body: BODY_SLOT }, Date.now(), { queued: true }).split(`${INBOX_TOOL_NAME} `).join("");
   return template.replace(BODY_SLOT, () => body);
 }
 

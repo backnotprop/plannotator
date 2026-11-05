@@ -663,3 +663,15 @@ describe("a registry record", () => {
     expect(qwenRecordLive({ ...record, procStart: "another-boot:123" })).toBe(false);
   });
 });
+
+test("a wake Qwen holds never says nothing open, since the agent may ask first; the person's words stay", async () => {
+  const w = await world();
+  const sent = await qwenSends(w.client, w.project, "A plain update.");
+  await reply(w.server, sent.message_id, "Keep going, nothing open on my side.");
+  await w.server.qwenWake.sweep();
+  await until(() => w.session.received.length > 0);
+  const text = String((w.session.received.at(-1)!.frame as { message: { content: string } }).message.content);
+  expect(text.split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages. Your last message was just now]`);
+  expect(text.split("nothing open")).toHaveLength(2);
+  expect(text).toContain("Keep going, nothing open on my side.");
+});

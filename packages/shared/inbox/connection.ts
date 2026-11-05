@@ -1315,9 +1315,11 @@ const wakePlural = (n: number, word: string): string => `${n} ${word}${n === 1 ?
  * `[Thread <id>: 14 messages, 1 question open, don't re-ask it. Your last
  * message was a minute ago]`, under the wake's first lines, or '' without the
  * Inbox's data (an older Inbox). A Re-ask asks for the questions again, so it
- * leaves out "don't re-ask".
+ * leaves out "don't re-ask". `queued`: the text goes into a host's queue and
+ * may wait there through a turn, so it never says "nothing open": the agent
+ * may have asked something by the time it reads this.
  */
-export function inboxWakeDetailsLine(threadId: unknown, context: unknown, options: { now: number; reask?: boolean }): string {
+export function inboxWakeDetailsLine(threadId: unknown, context: unknown, options: { now: number; reask?: boolean; queued?: boolean }): string {
   const thread = wakeThreadId(threadId)
   if (!thread || !context || typeof context !== 'object') return ''
   const { messages, open_questions, open_actions, last_agent_at } = context as Record<string, unknown>
@@ -1328,8 +1330,9 @@ export function inboxWakeDetailsLine(threadId: unknown, context: unknown, option
   const open: string[] = []
   if (questions > 0) open.push(`${wakePlural(questions, 'question')} open${options.reask ? '' : `, don't re-ask ${questions === 1 ? 'it' : 'them'}`}`)
   if (actions > 0) open.push(`${wakePlural(actions, 'action item')} open`)
+  const state = open.join(', ') || (options.queued ? '' : 'nothing open')
   const ago = inboxWakeAgo(last_agent_at, options.now)
-  return `[Thread ${thread}: ${wakePlural(count, 'message')}, ${open.join(', ') || 'nothing open'}${ago ? `. Your last message was ${ago}` : ''}]`
+  return `[Thread ${thread}: ${wakePlural(count, 'message')}${state ? `, ${state}` : ''}${ago ? `. Your last message was ${ago}` : ''}]`
 }
 
 /**
@@ -1421,6 +1424,7 @@ export function inboxWakeText(
     context?: unknown
   },
   now: number = Date.now(),
+  wording: { queued?: boolean } = {},
 ): string {
   // Tidy: the body is the wake; it spans threads, so the closing line names none.
   if (command.tidy === true) {
@@ -1435,7 +1439,7 @@ export function inboxWakeText(
   const steps = wakeSteps(command.steps)
   const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
   const { body, context } = inboxWakeCommand(command)
-  const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true })
+  const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true, queued: wording.queued === true })
   const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''
   // No details (a brand new thread, a hand-off notice, an older Inbox): the wake still names its thread.
   const thread = wakeThreadId(command.thread_id)

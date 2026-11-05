@@ -183,6 +183,24 @@ describe("the details line", () => {
     expect(text).toContain("Not yet.");
   });
 
+  test("the text a host queues: no nothing open, and what is open still reads as open, as the other hosts word it", async () => {
+    const w = await setup();
+    const sent = await w.send("Quota is climbing.");
+    await w.reply(sent.message_id, "Check the cache.");
+    const [plain] = await w.poll();
+    expect(codexQueueMessage(plain!).split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages. Your last message was just now]`);
+    expect(inboxWakeText(plain!).split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages, nothing open. Your last message was just now]`);
+    expect(modWakeText(plain!).split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages, nothing open. Your last message was just now]`);
+
+    const asking = await setup();
+    const asked = await asking.send(`${QUESTION}\n\n${ACTION}`);
+    await asking.reply(asked.message_id, "Not yet.");
+    const [open] = await asking.poll();
+    const line = `[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it, 1 action item open. Your last message was just now]`;
+    expect(codexQueueMessage(open!).split("\n")[2]).toBe(line);
+    expect(inboxWakeText(open!).split("\n")[2]).toBe(line);
+  });
+
   test("an action item open reads as open, with no word about re-asking; one the agent cleared reads as nothing open", async () => {
     const w = await setup();
     const sent = await w.send(ACTION);
@@ -252,7 +270,7 @@ describe("the Replying to line", () => {
     for (const text of [inboxWakeText(command!), modWakeText(command!), codexQueueMessage(command!)]) {
       const own = ownLines(text);
       expect(own).toHaveLength(4);
-      expect(own[1]).toStartWith(`[Thread ${first.thread_id}: 3 messages, `);
+      expect(own[1]).toStartWith(`[Thread ${first.thread_id}: 3 messages`);
       expect(own[2]).toStartWith(`[Replying to your message from just now (${first.message_id}): "`);
       expect(own[2]).not.toMatch(/^.*: ".*["[\]].*"\]$/);
       expect(own[3]).toBe(INBOX_WAKE_CLOSING_LINE);
