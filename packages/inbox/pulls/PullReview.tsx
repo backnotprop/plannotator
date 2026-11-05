@@ -26,7 +26,7 @@
  * window's storage per layer and scope until the verdict goes.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { GuideReaderPart, ReaderPart } from '../lazyParts';
+import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
@@ -56,6 +56,8 @@ import { FileTreeMark } from './fileTreeMark';
 import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
+import { RailScopeSwitch } from './RailScope';
+import { useTreeScope } from '@plannotator/review-editor/hooks/useTreeScope';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
@@ -506,7 +508,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }, [sheet]);
   // Opening the Files sheet, focus goes to its first row.
   useEffect(() => {
-    if (filesSheet) railRef.current?.querySelector<HTMLElement>('button')?.focus({ preventScroll: true });
+    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button, [data-repo-file-tree] button, [data-pull-layer-row] button')?.focus({ preventScroll: true });
   }, [filesSheet]);
   const closeComments = () => {
     setSheet(false);
@@ -575,10 +577,27 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const toggleViewed = useCallback((path: string) => write({ viewed: viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path] }), [viewed, comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // The rail's Changes | All files (the review app's switch, remembered as it remembers it). All files is the
+  // repository at the head the patch on screen was read at (else the list's); with no head known it is not offered.
+  const [treeScope, setTreeScope] = useTreeScope();
+  const repoSha = diff?.head_sha ?? layer?.head_sha ?? null;
+  const allFiles = treeScope === 'all' && !!repoSha;
+  // A file of the repository the PR does not change, shown whole in place of the diff.
+  const [repoOpen, setRepoOpen] = useState<string | null>(null);
+  useEffect(() => setRepoOpen(null), [layerKey, scope, repoSha]);
   // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button.
   const pickFile = (path: string) => {
+    setRepoOpen(null);
     move(path);
     if (filesSheet) closeFiles();
+  };
+  const openRepoFile = (path: string) => {
+    setRepoOpen(path);
+    if (filesSheet) closeFiles();
+  };
+  const pickScope = (next: 'changes' | 'all') => {
+    setTreeScope(next);
+    if (next === 'changes') setRepoOpen(null);
   };
 
   // The verdict: one reply to the agent's last message in its thread.
@@ -685,10 +704,36 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setFilesSheet((open) => !open);
     setSheet(false);
   };
+  const seenCount = files.filter((f) => viewedSet.has(f.path)).length;
+  const scopeSwitch = repoSha ? <RailScopeSwitch scope={allFiles ? 'all' : 'changes'} changed={files.length} onSelect={pickScope} /> : undefined;
   const rail = (
     <>
       {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} wholeCounts={scope === 'stack' && diff ? { add: files.reduce((sum, f) => sum + f.additions, 0), del: files.reduce((sum, f) => sum + f.deletions, 0) } : undefined} onLayer={onLayer} />}
-      <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} onSelect={pickFile} onToggleViewed={toggleViewed} />
+      {allFiles && repoSha ? (
+        <PanePart>
+          <PullAllFilesPart.Part
+            pullKey={layer.key}
+            sha={repoSha}
+            files={files}
+            viewed={viewedSet}
+            comments={comments}
+            activePath={reveal?.path ?? null}
+            openPath={repoOpen}
+            head={
+              <div className="ib-prp-fileshead">
+                {scopeSwitch}
+                <span className="ib-sp" />
+                {seenCount > 0 && <span>{seenCount} viewed</span>}
+              </div>
+            }
+            onSelect={pickFile}
+            onOpen={openRepoFile}
+            onToggleViewed={toggleViewed}
+          />
+        </PanePart>
+      ) : (
+        <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} onSelect={pickFile} onToggleViewed={toggleViewed} head={scopeSwitch} />
+      )}
     </>
   );
 
@@ -827,7 +872,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             data-pull-rail-handle=""
           />
         )}
-        <div className="ib-gbody" ref={setDiffBody}>
+        <div className="ib-gbody" ref={setDiffBody} data-repo-open={repoOpen && repoSha ? '' : undefined}>
+          {repoOpen && repoSha && (
+            <PanePart>
+              <PullRepoFilePart.Part key={repoOpen} pullKey={layer.key} sha={repoSha} path={repoOpen} />
+            </PanePart>
+          )}
           {posted && (
             <div className="ib-prr-posted" role="status" data-pull-review-posted={posted.action}>
               <Icon name="checkCircle" size={15} />

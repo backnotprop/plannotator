@@ -62,7 +62,11 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRFileBytes, fetchPRTree, reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import { compareRepoPaths, type RepoFileListing } from "@plannotator/shared/review-core";
+import { handleRepoFileRequest, handleRepoFilesRequest, type HandlerResult, type RepoFileRead } from "@plannotator/shared/repo-files";
+import { readRepoWorkingTreeFile } from "@plannotator/shared/repo-files-node";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -578,7 +582,18 @@ export interface InboxPulls {
   readHead(key: string): string | null;
   /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
   hasCommit(key: string, sha: string): Promise<boolean | null>;
+  /**
+   * The rail's All files: every file of the PR's repository at a head commit this Inbox read for it (`snapshot`, the
+   * head the patch on screen was read at, or the list's), as the review app's `GET /api/repo-files` answers
+   * (`RepoFilesResponse`), from the forge's tree API. Any other commit is refused as stale (409).
+   */
+  repoFiles(key: string, params: URLSearchParams): Promise<HandlerResult>;
+  /** One file of that listing as text, as the review app's `GET /api/repo-file` answers (`RepoFileResponse`). */
+  repoFile(key: string, params: URLSearchParams): Promise<HandlerResult>;
 }
+
+/** The most listings All files keeps (one per PR and head). */
+const REPO_LISTINGS_KEPT = 8;
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 /** The most commits GitHub lists for a pull request. */
@@ -665,6 +680,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
+  const listings = new Map<string, Promise<RepoFileListing | null>>();
 
   const signedIn = (cli: RefCli): Promise<Set<string>> => {
     const hit = signed.get(cli);
@@ -697,6 +713,62 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       if (set.has(host)) return cli;
     }
     return null;
+  };
+
+  // --- All files (the rail's "All files"): the forge's tree at a head this Inbox read ---
+  const snapshot = (params: URLSearchParams): string => (params.get("snapshot") ?? "").toLowerCase();
+  /** The heads All files may list for a PR: the one its patch was read at, and the list's. */
+  const headsOf = (key: string): Set<string> => {
+    const heads = new Set<string>();
+    const read = readHeads.get(key);
+    if (read) heads.add(read);
+    const listed = known.get(key)?.head_sha;
+    if (listed) heads.add(listed.toLowerCase());
+    return heads;
+  };
+  const forgeRef = (pull: InboxPull): PRRef | null => {
+    if (pull.platform === "github") {
+      const parts = splitPath(pull.repo);
+      return parts ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number } : null;
+    }
+    return { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+  };
+  /** The CLI the list reads the host with, watched: a rate limit holds the host's reads as a diff's does. */
+  const forgeRuntime = (pull: InboxPull): PRRuntime => ({
+    runCommand: async (cmd, args, options) => {
+      const cli = cmd as RefCli;
+      const result = await run(cli, args, options?.env);
+      if (result.exitCode !== 0 && refErrorOf(cli, result) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+      return result;
+    },
+  });
+  const repoAt = (key: string): { pull: InboxPull | null; unavailable: { reason: "unsupported" | "failed"; message: string } | null } => {
+    const pull = known.get(key);
+    if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) {
+      return { pull: null, unavailable: { reason: "unsupported", message: "That pull request is not in the list. Refresh the list and try again." } };
+    }
+    if (!forgeRef(pull)) return { pull: null, unavailable: { reason: "unsupported", message: "The repository's files could not be listed." } };
+    return { pull, unavailable: null };
+  };
+  /** One listing per PR and head, kept while it holds (a failure is asked again next time). */
+  const listingOf = (pull: InboxPull, sha: string): Promise<RepoFileListing | null> => {
+    const id = `${pull.key}\u0000${sha}`;
+    const hit = listings.get(id);
+    if (hit) return hit;
+    if (now() < (holdUntil.get(pull.host) ?? 0)) return Promise.resolve(null);
+    const pending = fetchPRTree(forgeRuntime(pull), forgeRef(pull)!, sha)
+      .then((tree): RepoFileListing | null =>
+        tree
+          ? { paths: [...tree.paths].sort(compareRepoPaths), revision: { kind: "commit", label: sha.slice(0, 7) }, live: false, ...(tree.truncated ? { truncated: true } : {}) }
+          : null,
+      )
+      .catch(() => null);
+    listings.set(id, pending);
+    void pending.then((listing) => {
+      if (!listing) listings.delete(id);
+    });
+    while (listings.size > REPO_LISTINGS_KEPT) listings.delete(listings.keys().next().value!);
+    return pending;
   };
 
   const read = (host: string, state: HostState, repos: readonly string[]): Promise<void> => {
@@ -984,6 +1056,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       if (commits.includes(sha.toLowerCase())) return true;
       // GitHub lists at most 250: past that, not listed says nothing.
       return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
+    },
+    async repoFiles(key, params) {
+      const at = repoAt(key);
+      return handleRepoFilesRequest({
+        params,
+        unavailable: at.unavailable,
+        isCurrentSnapshot: (snapshot) => !!at.pull && headsOf(key).has(snapshot.toLowerCase()),
+        loadListing: () => listingOf(at.pull!, snapshot(params)),
+      });
+    },
+    async repoFile(key, params) {
+      const at = repoAt(key);
+      const sha = snapshot(params);
+      return handleRepoFileRequest({
+        params,
+        unavailable: at.unavailable,
+        isCurrentSnapshot: (asked) => !!at.pull && headsOf(key).has(asked.toLowerCase()),
+        loadListing: () => listingOf(at.pull!, sha),
+        read: (path, maxBytes): Promise<RepoFileRead> => {
+          const pull = at.pull!;
+          if (now() < (holdUntil.get(pull.host) ?? 0)) return Promise.resolve({ kind: "unavailable" });
+          return fetchPRFileBytes(forgeRuntime(pull), forgeRef(pull)!, sha, path, maxBytes);
+        },
+        // A forge's listing is never on disk; the shared reader keeps the one way in should that change.
+        readWorkingTree: readRepoWorkingTreeFile,
+      });
     },
     async diff(key, scope) {
       const pull = known.get(key);
