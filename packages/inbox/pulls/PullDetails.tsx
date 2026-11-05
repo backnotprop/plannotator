@@ -86,11 +86,11 @@ function Face({ login, host, size, bot, team, state }: { login: string; host: st
   );
 }
 
-const CheckMark = ({ state }: { state: InboxPullCheckState }) =>
+const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boolean }) =>
   state === 'pending' ? (
     <span className="ib-prd-ring" aria-hidden="true" />
   ) : (
-    <span className="ib-prd-cmark" data-state={state} aria-hidden="true">
+    <span className="ib-prd-cmark" data-state={quiet ? 'quiet' : state} aria-hidden="true">
       <Icon name={state === 'pass' ? 'checkCircle' : 'xCircle'} size={15} />
     </span>
   );
@@ -141,7 +141,7 @@ function CheckRow({ check }: { check: InboxPullCheck }) {
   const name = checkName(check);
   const inner = (
     <>
-      <CheckMark state={check.state} />
+      <CheckMark state={check.state} quiet={!!check.note} />
       <Tip cut content={name}>
         <span className="ib-prd-rname">{name}</span>
       </Tip>
@@ -162,21 +162,33 @@ function CheckRow({ check }: { check: InboxPullCheck }) {
 }
 
 /** What needs eyes first; the passed ones behind a line that opens. */
-function CheckRows({ checks }: { checks: readonly InboxPullCheck[] }) {
+/** This many passed checks read as a list; a project's hundred read as a line that opens. */
+const PASSED_SHOWN = 5;
+
+export function CheckRows({ checks }: { checks: readonly InboxPullCheck[] }) {
   const [all, setAll] = useState(false);
-  const passed = checks.filter((c) => c.state === 'pass').length;
-  const failing = checks.filter((c) => c.state !== 'pass');
-  const rows = all || !failing.length ? checks : failing;
+  const needEyes = checks.filter((c) => c.state !== 'pass');
+  const passed = checks.filter((c) => c.state === 'pass' && !c.note);
+  const quiet = checks.filter((c) => c.state === 'pass' && c.note);
+  const done = passed.length + quiet.length;
+  const folds = done > 0 && (needEyes.length > 0 || done > PASSED_SHOWN);
+  const words = [
+    ...(passed.length ? [`${passed.length} passed`] : []),
+    ...[...new Set(quiet.map((c) => c.note!))].map((note) => `${quiet.filter((c) => c.note === note).length} ${note.toLowerCase()}`),
+  ].join(', ');
+  const rows = all || !folds ? [...needEyes, ...passed, ...quiet] : needEyes;
   return (
     <>
-      <ul className="ib-prd-rows" data-pull-details-checks-list="">
-        {rows.map((check, index) => (
-          <CheckRow key={`${index}:${check.name}`} check={check} />
-        ))}
-      </ul>
-      {passed > 0 && failing.length > 0 && (
+      {rows.length > 0 && (
+        <ul className="ib-prd-rows" data-pull-details-checks-list="">
+          {rows.map((check, index) => (
+            <CheckRow key={`${index}:${check.name}`} check={check} />
+          ))}
+        </ul>
+      )}
+      {folds && (
         <button type="button" className="ib-prd-more" aria-expanded={all} onClick={() => setAll(!all)}>
-          {all ? 'Show less' : `${passed} passed`}
+          {all ? 'Show less' : words}
         </button>
       )}
     </>
@@ -251,7 +263,7 @@ export function PullDetails({ layer, description, headSha, data, failed, onRetry
   );
   const conversation = comments.length > 0 && (
     <>
-      <h3 className="ib-prd-h">{people.length === 1 ? '1 comment' : `${people.length} comments`}</h3>
+      {people.length > 0 && <h3 className="ib-prd-h">{people.length === 1 ? '1 comment' : `${people.length} comments`}</h3>}
       <div className="ib-prd-convo">
         {people.map(card)}
         {botComments.length > 0 && (bots ? botComments.map(card) : (

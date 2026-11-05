@@ -16,6 +16,26 @@ function fileRef(layer: Layer, headSha: string | null | undefined): string | nul
 }
 
 /** The forge's address for a path in this layer's description, or null when it has none (it climbs out of the repo). */
+/**
+ * A line holding nothing but `<br>` draws as those words in the Inbox's Markdown (dependabot's bodies have one). Inside
+ * a code fence it is code, and stays.
+ */
+export function withoutLoneBreaks(markdown: string): string {
+  let fence: string | null = null;
+  return markdown
+    .split('\n')
+    .filter((line) => {
+      const mark = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+      if (mark) {
+        if (!fence) fence = mark[0]!;
+        else if (mark[0] === fence) fence = null;
+        return true;
+      }
+      return fence !== null || !/^\s*<br\s*\/?>\s*$/i.test(line);
+    })
+    .join('\n');
+}
+
 export function forgeFileUrl(layer: Layer, headSha: string | null | undefined, href: string): string | null {
   const ref = fileRef(layer, headSha);
   const root = layer.url.replace(/(?:\/-)?\/(?:pull|merge_requests)\/\d+.*$/, '');

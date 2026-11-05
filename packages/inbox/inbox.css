@@ -8440,6 +8440,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-branch { display: flex; align-items: center; gap: 5px; min-width: 0; font-size: 12.5px; color: var(--muted-foreground); }
 .ib-prd-branch svg { flex: none; opacity: 0.7; }
 .ib-prd-ref { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The base is usually short, and the head long: the head gives way first. */
+.ib-prd-ref.ib-prd-base { flex: none; max-width: 50%; }
 .ib-prd-base { flex: 0 10 auto; }
 .pn-inbox .ib-prd-iconbtn { flex: none; display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border-radius: 8px; color: var(--muted-foreground); align-self: flex-start; }
 .pn-inbox .ib-prd-iconbtn:hover { background: var(--ib-prp-fill); color: var(--foreground); }
@@ -8468,6 +8470,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ib-prd-rows li { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
 .ib-prd-rname { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A real project's failed checks share their first words: cut, four rows read the same, so what needs eyes reads whole. */
+[data-pull-details-check="fail"] .ib-prd-rname, [data-pull-details-check="pending"] .ib-prd-rname { white-space: normal; overflow-wrap: anywhere; }
+.ib-prd-cmark[data-state="quiet"] { color: var(--muted-foreground); }
 .ib-prd-rstate { flex: none; margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); }
 .ib-prd-rstate[data-state="approved"] { color: var(--success, #0a7f33); }
 .ib-prd-rstate[data-state="changes"] { color: var(--destructive); }
@@ -8489,6 +8494,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-cbody { flex: 1 1 auto; min-width: 0; }
 .pn-inbox .ib-prd-cbody .ib-body { font-size: 13.5px; line-height: 1.55; }
 .pn-inbox .ib-prd-cbody .ib-body :is(p, ul, ol) { margin-block: 0 6px; font-size: inherit; }
+/* A bot's report opens with a heading: it stays a comment's size. */
+.pn-inbox .ib-prd-cbody .ib-body :is(h1, h2) { font-size: 14px; line-height: 1.35; margin: 8px 0 4px; letter-spacing: normal; }
+.pn-inbox .ib-prd-cbody .ib-body :is(h3, h4, h5, h6) { font-size: 13.5px; line-height: 1.4; margin: 8px 0 4px; }
 .ib-prd-chead { display: flex; align-items: baseline; gap: 8px; min-width: 0; margin-bottom: 2px; font-size: 13px; color: var(--muted-foreground); }
 .ib-prd-chead b { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-weight: 550; color: var(--foreground); }
 .ib-prd-at { flex: none; font-size: 12.5px; }

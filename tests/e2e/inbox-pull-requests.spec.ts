@@ -1197,7 +1197,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     comments: [
       { id: 'c1', author: { login: 'kim' }, body: 'Could the key include the attempt?', createdAt: '2026-11-01T09:00:00Z', url: 'https://github.com/n/w/pull/1#c1' },
       { id: 'c2', author: null, body: 'Words of a gone account.', createdAt: '2026-11-01T10:00:00Z', url: '' },
-      { id: 'c3', author: { login: 'codecov[bot]' }, body: 'Coverage is up.', createdAt: '2026-11-01T11:00:00Z', url: '' },
+      { id: 'c3', author: { login: 'codecov[bot]' }, body: '## Coverage\n\nCoverage is up.', createdAt: '2026-11-01T11:00:00Z', url: '' },
     ],
     reviews: [{ id: 'r1', author: { login: 'mei' }, state: 'CHANGES_REQUESTED', body: '', submittedAt: '2026-11-01T08:00:00Z' }],
     statusCheckRollup: [
@@ -1256,6 +1256,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await expect(panel).not.toContainText('Coverage is up.');
     await panel.locator('[data-pull-details-bots]').click();
     await expect(panel).toContainText('Coverage is up.');
+    // A bot's report opening with a heading stays a comment's size.
+    expect(await panel.locator('.ib-prd-cbody h2', { hasText: 'Coverage' }).evaluate((h) => parseFloat(getComputedStyle(h).fontSize))).toBeLessThanOrEqual(14);
     // The tab behind the panel does not peek out.
     await expect(review.locator('[data-guide-section-tab]').first()).toBeHidden();
     // Escape closes it, back on its button; the tab returns.

@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { forgeFileUrl, isLiveLink } from './descriptionLinks';
+import { forgeFileUrl, isLiveLink, withoutLoneBreaks } from './descriptionLinks';
 
 const github = { url: 'https://github.com/acme/app/pull/12', platform: 'github' as const, repo: 'acme/app', head: 'kim/retry', head_repo: 'acme/app', head_sha: 'a'.repeat(40) };
 const gitlab = { url: 'https://gitlab.example/group/app/-/merge_requests/9', platform: 'gitlab' as const, repo: 'group/app', head: 'kim/retry', head_repo: 'group/app', head_sha: null };
@@ -33,5 +33,13 @@ describe('which links stay live', () => {
   test("the web's schemes only, as the browser parses the link", () => {
     for (const href of ['https://a.example/', 'http://a.example/', 'mailto:kim@a.example']) expect(isLiveLink(new URL(href))).toBe(true);
     for (const href of ['vscode://file/etc/passwd', 'ssh://a.example', 'tel:123', 'java\tscript:alert(1)', 'file:///etc/passwd']) expect(isLiveLink(new URL(href))).toBe(false);
+  });
+});
+
+describe('withoutLoneBreaks', () => {
+  test("a line of only <br> goes, as dependabot writes it; one among words or in a code fence stays", () => {
+    expect(withoutLoneBreaks('Bumps it.\n\n<br />\n\nCommits')).toBe('Bumps it.\n\n\nCommits');
+    expect(withoutLoneBreaks('one<br>two')).toBe('one<br>two');
+    expect(withoutLoneBreaks('```html\n<br />\n```')).toBe('```html\n<br />\n```');
   });
 });

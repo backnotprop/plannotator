@@ -520,6 +520,7 @@ packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
+packages/inbox/pulls/pullDetails.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
