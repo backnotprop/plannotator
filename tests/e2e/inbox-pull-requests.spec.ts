@@ -1110,6 +1110,8 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     // The diffs follow the rail, each path drawn once.
     const diffOrder = await review.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => shell.getAttribute('data-guide-file-shell')!));
     expect(diffOrder).toEqual([...new Set(railOrder)]);
+    // Of a symlink turned into a file the viewer draws one half: the new file's.
+    await expect(review.locator('[data-guide-file-shell="a-link"]')).toContainText('+1');
 
     // A long name keeps its end in view, and only a cut one has a tooltip.
     const cutName = await review.locator('[data-review-file^="src/extraordinarily"] .ib-rv-name').evaluate((name) => {

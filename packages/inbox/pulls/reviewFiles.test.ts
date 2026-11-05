@@ -18,10 +18,16 @@ describe('reviewFiles', () => {
     expect(parsed[0]!.path).toBe('README.md');
   });
 
-  test('the rebuilt diff holds every file in the rail\'s order', () => {
+  test('the rebuilt diff holds every file, each path where the rail first has it', () => {
     const { files, patch } = reviewFiles(COLLIDING_PATHS_DIFF);
-    expect(parseDiffToFiles(patch).map((file) => file.path)).toEqual(files.map((file) => file.path));
-    expect(parseDiffToFiles(patch).map((file) => file.status)).toEqual(files.map((file) => file.status));
+    const rebuilt = parseDiffToFiles(patch);
+    expect(rebuilt.length).toBe(parsed.length);
+    expect([...new Set(rebuilt.map((file) => file.path))]).toEqual([...new Set(files.map((file) => file.path))]);
+  });
+
+  test('a path\'s two halves keep git\'s order, so the viewer, which draws a path\'s last, draws the new file', () => {
+    const halves = parseDiffToFiles(reviewFiles(COLLIDING_PATHS_DIFF).patch).filter((file) => file.path === 'a-link');
+    expect(halves.map((file) => file.status)).toEqual(['deleted', 'added']);
   });
 
   test('nothing lost when the tree places every file, and an empty diff is empty', () => {
