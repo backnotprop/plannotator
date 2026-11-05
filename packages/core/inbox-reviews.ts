@@ -323,8 +323,6 @@ export function inboxReviewGroups(rows: readonly InboxReviewRow[]): InboxReviewG
 const byNewest = (a: { updated_at: string }, b: { updated_at: string }) => (a.updated_at < b.updated_at ? 1 : a.updated_at > b.updated_at ? -1 : 0);
 const latest = (times: readonly string[]) => times.reduce((a, b) => (b > a ? b : a), "");
 
-const inboxPullStillOpen = (pull: InboxPull | undefined) => !!pull && inboxPullIsOpen(pull);
-
 const landingFields = (pull: InboxPull) => ({
   key: pull.key,
   url: pull.url,
@@ -409,7 +407,7 @@ export function inboxReviewRows(input: {
   const owned = reviewOwned(byThread, all.values(), input.links);
   const recorded = input.landed ?? [];
   const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
-    ...recorded.filter((landing) => landing.thread_id === threadId && !inboxPullStillOpen(all.get(landing.key))),
+    ...recorded.filter((landing) => landing.thread_id === threadId),
     ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
   ];
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));
