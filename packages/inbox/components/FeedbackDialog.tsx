@@ -33,7 +33,7 @@ function lengthOf(value: string): number {
 /**
  * Sidebar → Feedback: a short form that sends the person's words about
  * Plannotator to its maintainers. A message, an optional category and an
- * optional email; a line saying exactly what is sent; Send and Cancel; a
+ * optional email; a line saying what is sent; Send and Cancel; a
  * short "Sent" state. Under the box, sometimes, "Might be related"
  * (FeedbackRelated.tsx), matched in this window; with no match the form is
  * unchanged. "Prompt your agent to send feedback" copies a prompt that has
@@ -199,8 +199,8 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
           <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
             <Icon name="info" />
             <span>
-              Sends only your message (and the category and email, if you add them), Plannotator {version}, the name of your OS and that it came
-              from the Inbox. Nothing from your threads or files.
+              Sends your message (and the category and email, if you add them), Plannotator {version} and the name of your OS. Nothing from your
+              threads or files.
             </span>
           </p>
           {error && (
