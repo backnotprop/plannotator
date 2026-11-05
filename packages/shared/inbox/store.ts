@@ -135,7 +135,7 @@ import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
 import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
-import { inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
@@ -1203,6 +1203,22 @@ export class InboxStore {
     const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: at === undefined ? now.toISOString() : new Date(at as string).toISOString() };
     this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
     return snooze;
+  }
+
+  /**
+   * A snooze write a linked machine held for this one. Its time can pass on the way, and then it is not refused: the
+   * person wanted the thread back by then. A snooze still running here returns now, as if the write had landed in
+   * time (its mark included), and with none there is nothing to do. Null: the thread has no snooze.
+   */
+  setHeldSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze | null {
+    if (inboxSnoozeRefusal(until, this.now()) !== "past") return this.setSnooze(threadId, until, at);
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const running = this.snoozeList.find((entry) => entry.thread_id === threadId && inboxSnoozeRunning(entry.until, this.now()));
+    if (!running) return this.snoozeList.find((entry) => entry.thread_id === threadId) ?? null;
+    const returned: InboxSnooze = { ...running, until: new Date(until as string).toISOString() };
+    this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), returned]);
+    return returned;
   }
 
   /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */

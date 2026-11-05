@@ -24,9 +24,10 @@
  *    (`link-back`, `unlink`).
  */
 
-import { inboxRowArchived, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { inboxSnoozeRefusal } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
@@ -154,9 +155,8 @@ export interface MachineSnoozeAnswer {
   held: string | null;
 }
 
-/** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). */
+/** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
 export function machineHeldWords(name: string, state: string | null): string {
-  if (state === "revoked") return `Not sent: ${name} removed the link. Link it again to send.`;
   return state !== null && state !== "online" && state !== "connecting" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}: this applies once ${name} confirms.`;
 }
 
@@ -206,6 +206,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
+const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;
@@ -657,6 +658,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (REPLY_ROUTE.test(route) && (typeof body.seen_through_seq !== "number" || !Number.isSafeInteger(body.seen_through_seq))) {
       throw new InboxError("validation_error", "seen_through_seq: a reply to another machine carries the newest seq of the thread the person saw.", { field: "seen_through_seq" });
     }
+    // A time already gone when it is asked for is the asker's to hear now. One that goes by in the queue is for that machine to settle.
+    if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null);
@@ -689,7 +692,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return row ? [{ peer, row }] : [];
     });
     if (owners.length === 0) {
-      if (peers.size === 0) return null;
+      if (peers.size === 0 || !isInboxId("msg", threadId)) return null;
       // Right after this Inbox starts, a machine that is away has sent no list, so the thread may be there.
       const unknown = [...peers.values()].filter((peer) => peer.list === null && peer.state !== "needs_update" && peer.state !== "revoked").map((peer) => links.get(peer.id)?.name ?? "A linked machine");
       if (unknown.length > 0) throw new InboxError("machine_offline", `This thread may be on ${unknown.join(" or ")}, whose threads are not known yet (away or still connecting). Nothing changed.`);

@@ -12,8 +12,7 @@
  *   2  One queue per machine   `drain`: one sender loop per machine, oldest
  *                              first, one request at a time (FIFO per machine
  *                              is FIFO per thread).
- *   3  Refusals leave          `settle`: a 4xx ends the entry, with a notice
- *                              (none for a held snooze whose time lapsed).
+ *   3  Refusals leave          `settle`: a 4xx ends the entry, with a notice.
  *   4  Unlink/revoke empties   `dropMachine`: "not delivered", or "may have
  *                              been delivered" for one that had left.
  *   7  Atomic file             append-only lines; `compact` writes a temp file
@@ -99,11 +98,6 @@ export interface OutboxEntry {
 export type OutboxAnswer = { status: number; body: unknown } | null;
 
 export type AnswerClass = "delivered" | "refused" | "revoked" | "retry";
-
-/** A held snooze whose time passed while its machine was away: not applying it is right, so nothing is worth a notice. */
-function lapsedSnooze(route: string, answer: { status: number; body: unknown }): boolean {
-  return answer.status === 409 && /^threads\/[^/]+\/snooze$/.test(route) && (answer.body as { code?: unknown } | null)?.code === "snooze_past";
-}
 
 /**
  * Rules 3 and 17: what the owner's answer means for the entry. 2xx lands; a
@@ -362,7 +356,7 @@ export class InboxOutbox {
       status: answer.status,
       answer: answer.body,
       settled_at: at,
-      notice: state === "refused" && !lapsedSnooze(entry.route, answer) ? { kind: "refused", at } : null,
+      notice: state === "refused" ? { kind: "refused", at } : null,
     });
   }
 

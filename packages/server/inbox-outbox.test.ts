@@ -186,20 +186,6 @@ describe("rule 2: one queue per machine, one request at a time", () => {
 });
 
 describe("rule 3: refused answers leave the outbox", () => {
-  test("a held snooze whose time lapsed settles with no notice; any other refusal of a snooze, and snooze_past elsewhere, keep theirs", async () => {
-    const outbox = InboxOutbox.open(dataDir());
-    outbox.submit(B, "threads/msg_1/snooze", { idempotency_key: "lapsed", until: "2026-01-01T00:00:00Z" });
-    outbox.submit(B, "threads/msg_2/snooze", { idempotency_key: "newer", until: "2027-01-01T00:00:00Z" });
-    outbox.submit(B, "messages/m1/reply", reply("other"));
-    const past = { status: 409, body: { code: "snooze_past", error: "That time has passed." } };
-    const answers = owner(past, { status: 409, body: { code: "snoozes_newer" } }, past);
-    for (let i = 0; i < 3; i++) await outbox.drain(B, answers.send);
-    expect(outbox.get("lapsed")!.state).toBe("refused");
-    expect(outbox.get("lapsed")!.notice).toBeNull();
-    expect(outbox.notices().map((e) => e.key)).toEqual(["newer", "other"]);
-    expect(outbox.list(B, "pending")).toEqual([]);
-  });
-
   test("a 4xx ends the entry with a notice and it is never sent again (F3)", async () => {
     const outbox = InboxOutbox.open(dataDir());
     outbox.submit(B, "messages/m1/reply", reply("k1"));

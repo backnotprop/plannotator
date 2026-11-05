@@ -109,7 +109,7 @@ describe("snooze_thread, the agent's call", () => {
     const { server, client, send } = await setup();
     const a = await send(ASK, "ses_a");
     const year = new Date().getUTCFullYear() + 1;
-    for (const until of [`${year}-06-01T09:00:00`, `06/25/${year}`, String(year), "Nov 12", `${year}-02-31T08:00:00Z`, `${year}-06-01`, "tomorrow"]) {
+    for (const until of [`${year}-06-01T09:00:00`, `06/25/${year}`, String(year), "Nov 12", `${year}-02-31T08:00:00Z`, `${year}-06-01`, `${year}-06-01t09:00:00z`, "tomorrow"]) {
       const refused = await call(client, { thread_id: a.thread_id, until });
       expect([until, refused.isError]).toEqual([until, true]);
       expect(refused.content[0]!.text).toStartWith("validation_error: until: an ISO 8601 time with its zone");
@@ -155,7 +155,10 @@ describe("snooze_thread, the agent's call", () => {
     expect(past.content[0]!.text).toStartWith("snooze_past: ");
     const unknown = await call(client, { thread_id: "msg_nope", until: later(60_000) });
     expect(unknown.isError).toBe(true);
-    expect(unknown.content[0]!.text).toStartWith("thread_not_found: ");
+    // No machine linked: nothing about a linked machine's ids.
+    expect(unknown.content[0]!.text).toBe("thread_not_found: No thread msg_nope.");
+    const empty = await call(client, { thread_id: "  ", until: later(60_000) });
+    expect(empty.content[0]!.text).toBe("validation_error: thread_id: required.");
     expect(server.store.snoozes()).toEqual([]);
   });
 

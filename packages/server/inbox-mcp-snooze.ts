@@ -56,6 +56,7 @@ export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeM
     },
     async (input) =>
       guarded(async () => {
+        if (!input.thread_id.trim()) throw new InboxError("validation_error", "thread_id: required.", { field: "thread_id" });
         if (input.until !== null) refuseAgentUntil(input.until);
         const threadId = context.store.message(input.thread_id)?.thread_id ?? null;
         if (threadId) {
