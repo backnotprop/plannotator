@@ -78,7 +78,8 @@
   },
   "files": [
     "**/*.ts",
-    "!**/*.test.ts"
+    "!**/*.test.ts",
+    "shape-kit.mjs"
   ],
   "scripts": {
     "prepack": "bun run --cwd ../.. build:viewer-pin"
