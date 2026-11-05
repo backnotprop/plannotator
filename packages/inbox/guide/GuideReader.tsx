@@ -222,6 +222,10 @@ export default function GuideReader({
   commentsRef.current = comments;
   const pendingRef = useRef(pendingSelection);
   pendingRef.current = pendingSelection;
+  // The PR page and the review sign a new comment with the person's name, as the review app does; a thread's guided
+  // review, there with Code review off, leaves it unsigned as on main.
+  const signs = bare || threadHeading;
+  const signed = useCallback((): { author?: string } => (signs ? { author: getIdentity() } : {}), [signs]);
   // Line comments go to the diffs; global comments (on the whole review) to the guide's header.
   const annotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope !== 'general') : NO_ANNOTATIONS), [comments?.annotations]);
   const globalAnnotations = useMemo(() => (comments ? comments.annotations.filter((a) => a.scope === 'general') : NO_ANNOTATIONS), [comments?.annotations]);
@@ -236,12 +240,12 @@ export default function GuideReader({
     const draftKey = `guide-global:${wiring.draftScope}`;
     // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
     void wiring
-      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, author: getIdentity(), createdAt: Date.now() })
+      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, ...signed(), createdAt: Date.now() })
       // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
       .then((saved) => {
         if (!saved) restoreCommentDraft(draftKey, text);
       });
-  }, []);
+  }, [signed]);
   const addComment = useCallback<GuideDiffComments['onAddAnnotationForFile']>(
     (filePath, type, text, suggestedCode, originalCode, conventionalLabel, decorations, tokenMeta) => {
       const range = pendingRef.current;
@@ -267,13 +271,13 @@ export default function GuideReader({
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
         createdAt: Date.now(),
-        author: getIdentity(),
+        ...signed(),
         conventionalLabel,
         decorations,
       });
       setPendingSelection(null);
     },
-    [files],
+    [files, signed],
   );
   const editComment = useCallback<GuideDiffComments['onEditAnnotation']>((id, text, suggestedCode, originalCode, conventionalLabel, decorations) => {
     const wiring = commentsRef.current;

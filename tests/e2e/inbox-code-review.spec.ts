@@ -144,6 +144,9 @@ function payoutsProject(parent: string): { project: string; patch: string } {
   return { project, patch: git('diff', '--cached') };
 }
 
+/** The off test's far-hunk file, as main draws it (measured on main's metrics). */
+const FAR_HEIGHT_ON_MAIN = 159;
+
 const REVIEW_GUIDE = {
   title: 'Retry failed payouts',
   intent: 'Retry only the payouts Stripe calls retryable, with backoff, and record each attempt once.',
@@ -1109,8 +1112,12 @@ test('the chapter menu after a key press: a quiet ring on its button, none round
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
   const { page, claude } = world;
+  // A file whose hunk starts past its first line, so a separator draws above it: the spacing the PR page drops.
+  const far = 'src/payouts/schedule.ts';
+  const farPatch = `diff --git a/${far} b/${far}\nindex 1111111..2222222 100644\n--- a/${far}\n+++ b/${far}\n@@ -30,3 +30,3 @@ export const SCHEDULE = {\n   daily: true,\n-  hour: 2,\n+  hour: 3,\n   zone: 'UTC',\n`;
+  const guide = { ...REVIEW_GUIDE, unplacedFiles: [...REVIEW_GUIDE.unplacedFiles, far] };
   await setCodeReview(true);
-  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const review = await claude.submitGuide({ project_path: world.project, guide, patch: `${world.patch}${farPatch}`, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
     await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
@@ -1123,8 +1130,25 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     // The PR page's flush files and quiet bars are its own: this reader keeps its spacing around a hunk's separator.
     const shell = page.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
-    // The fixture's lines at main's metrics; flush, the box would be smaller.
+    // The fixture's lines at main's metrics.
     expect(Math.round((await shell.boundingBox())!.height)).toBe(446);
+    // A hunk past line 1 draws its separator with main's spacing; flush, the box would be smaller.
+    const farShell = page.locator(`[data-guide-file-shell="${far}"]`);
+    await farShell.scrollIntoViewIfNeeded();
+    await expect(farShell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+    expect(Math.round((await farShell.boundingBox())!.height)).toBe(FAR_HEIGHT_ON_MAIN);
+
+    // A comment here reads as on main: no name line, on the card or in the comments.
+    const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
+    await shell.scrollIntoViewIfNeeded();
+    await shell.hover();
+    await added.click();
+    const composer = page.getByPlaceholder('Leave feedback...');
+    await expect(composer).toBeVisible();
+    await composer.fill('Unsigned while Code review is off.');
+    await page.getByRole('button', { name: 'Add Comment' }).click();
+    await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
+    await expect(page.getByText(/\(me\)/)).toHaveCount(0);
   } finally {
     await setCodeReview(true);
   }

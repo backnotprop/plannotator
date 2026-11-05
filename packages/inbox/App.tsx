@@ -1515,8 +1515,9 @@ function Inbox() {
       adoptSavedTextSize(next.text_size);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffStyle(next.diff_style);
-      // The name on the person's comments, as plan and code review read it; nothing posted carries it.
-      if (next.display_name) configStore.init({ displayName: next.display_name });
+      // The name on the person's comments on the PR page and the review, as plan and code review read it; nothing posted
+      // carries it. Only with Code review on: off, every comment reads as on main.
+      if (next.display_name && next.code_review?.on) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
       setSettings(next);
       setSettingsReadFailed(false);
