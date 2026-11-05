@@ -3171,8 +3171,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
   /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
-     has the room above the keyboard. The draft stays as it was and comes back with the foot. */
-  :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input, [contenteditable="true"]):focus) .ib-pfoot { display: none; }
+     has the room above the keyboard. The draft stays as it was and comes back with the foot. A radio or a checkbox
+     (a question card's options) opens no keyboard, so picking one never hides Reply. */
+  :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input:not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]):focus) .ib-pfoot { display: none; }
   /* The skill picker: full width directly above the reply box (its outer edges, 10 px above it), which sits on the
      keyboard; never a sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing and
      40% of the visible height (ComposerField, caretMenu.ts phoneSkillListHeight), the description under the name; a

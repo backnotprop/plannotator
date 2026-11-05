@@ -495,6 +495,7 @@ packages/ui/components/StartCutPath.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
+packages/inbox/listDeltaWindow.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx
