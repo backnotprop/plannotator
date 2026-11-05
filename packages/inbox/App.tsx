@@ -109,7 +109,8 @@ import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
-import { useInboxSound } from './sound';
+import { snoozeBackAfter, type SnoozeBack } from './snoozeBack';
+import { pageInFront, useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
 import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
@@ -1056,6 +1057,7 @@ function Inbox() {
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
   const threadOnScreenRef = useRef<{ threadId: string; covered: boolean } | null>(null);
+  const [openThreadCovered, setOpenThreadCovered] = useState(false);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
     // New questions ring the doorbell on their own rules (sound.ts), whatever notifications say.
@@ -4148,6 +4150,40 @@ function Inbox() {
     : null;
   // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
   const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
+  // "Back from snooze" (snoozeBack.ts): set while rendering, so the thread's first draw has the line and can open at it.
+  const openThreadId = thread && thread.thread_id === route.thread ? thread.thread_id : null;
+  const [keptBack, setKeptBack] = useState<SnoozeBack | null>(null);
+  const snoozeBack = snoozeBackAfter(keptBack, openThreadId, listedOpenRow);
+  if (snoozeBack !== keptBack) setKeptBack(snoozeBack);
+  // The return under a thread already open (the opening look is on its way otherwise): the look comes once the window
+  // is in front and nothing covers the thread (seen on sight's rule), so until then the row keeps its clock.
+  const backUnderOpen = openThreadId && listedOpenRow?.snooze_back && !looking.has(openThreadId) && !openThreadCovered ? openThreadId : null;
+  useEffect(() => {
+    if (!backUnderOpen) return;
+    let taken = false;
+    const take = () => {
+      if (taken || !pageInFront()) return;
+      taken = true;
+      // Up to what this window has looked at: a message waiting below the view stays unseen (seenOnSight.ts).
+      const through = lookRef.current?.threadId === backUnderOpen ? lookRef.current.through : null;
+      trackLook(
+        backUnderOpen,
+        inboxApi
+          .seen(backUnderOpen, through)
+          .then(() => refreshList(false))
+          .catch(() => {
+            taken = false;
+          }),
+      );
+    };
+    take();
+    window.addEventListener('focus', take);
+    document.addEventListener('visibilitychange', take);
+    return () => {
+      window.removeEventListener('focus', take);
+      document.removeEventListener('visibilitychange', take);
+    };
+  }, [backUnderOpen, refreshList, trackLook]);
   /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
   const listShown = useMemo(() => (shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
@@ -5632,6 +5668,7 @@ function Inbox() {
             }
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
+            snoozeBack={snoozeBack?.until ?? null}
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
             attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
             onRunChanged={() => void refreshThread(thread.thread_id)}
@@ -5746,6 +5783,7 @@ function Inbox() {
             covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null}
             onScreenChange={(state) => {
               threadOnScreenRef.current = state;
+              setOpenThreadCovered(state?.covered ?? false);
             }}
             backLabel={fromCard ? 'Board' : listTitle}
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
