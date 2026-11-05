@@ -693,6 +693,8 @@ test('the unsaved comment question stays beside the drawer: its foot and Write t
         await context.close();
       }
     }
+  }
+});
 
 type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
 
