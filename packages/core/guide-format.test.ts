@@ -15,7 +15,7 @@ import {
   type GuideSnapshot,
   type GuideSnapshotV1,
 } from "./guide-format";
-import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL, FIXTURE_V1_PR, FIXTURE_V2_OVERVIEW, GUIDE_SNAPSHOT_FIXTURES } from "./guide-format-fixtures";
+import { FIXTURE_PATCH_TS_JSON, FIXTURE_V1_LOCAL, FIXTURE_V1_PR, FIXTURE_V2_HTML, FIXTURE_V2_OVERVIEW, GUIDE_SNAPSHOT_FIXTURES } from "./guide-format-fixtures";
 
 const VIEWER = {
   baseUrl: "https://guides.show/v1/",
@@ -68,7 +68,7 @@ describe("parseGuideSnapshot rejects what it must", () => {
     ["unknown top-level field", (s) => (s.annotations = []), "$"],
     ["unknown guide field", (s) => (s.guide.saved = true), "$.guide"],
     ["unknown section field", (s) => (s.guide.sections[0].order = 1), "$.guide.sections[0]"],
-    ["unknown version", (s) => (s.version = 3), "$.version"],
+    ["unknown version", (s) => (s.version = 4), "$.version"],
     // Version 1 has no overview: a v1 reader never sees one.
     ["overview on a version-1 snapshot", (s) => (s.guide.overview = { text: "x" }), "$.guide"],
     ["empty overview text", (s) => { s.version = 2; s.guide.overview = { text: "  " }; }, "$.guide.overview.text"],
@@ -261,4 +261,49 @@ describe("format version 2: the overview", () => {
     const body = html.slice(html.indexOf('<div id="root">'), html.indexOf(`<script id="${GUIDE_SNAPSHOT_SCRIPT_ID}"`));
     expect(body).toContain("The guard in [`refresh`](symbol:src/auth.ts#refresh) runs first");
   });
+});
+
+describe("format version 3: a drawn overview picture (code review's Show me)", () => {
+  const pieces = {
+    reviewed: [true, false],
+    review: { rawPatch: FIXTURE_PATCH_TS_JSON, gitRef: "origin/main..HEAD", diffType: "since-base", base: "origin/main", source: FIXTURE_V1_LOCAL.source },
+    generator: FIXTURE_V1_LOCAL.generator,
+    exportedAt: FIXTURE_V1_LOCAL.exportedAt,
+  };
+  const drawn = { kind: "html" as const, source: '<div data-mark="a" data-code="src/auth.ts#L2">guard</div>', css: ".a { color: var(--ink); }", width: 800, height: 360, tall: { source: "<div>guard</div>" } };
+  const v3 = (diagram: unknown) => ({ ...JSON.parse(JSON.stringify(FIXTURE_V2_HTML)), version: 3, guide: { ...JSON.parse(JSON.stringify(FIXTURE_V2_HTML.guide)), overview: { text: "x", diagram } } });
+
+  test("a guide whose html diagram carries css, a canvas or tall builds version 3 and reads back unchanged", () => {
+    const { reviewed: _r, ...guide } = FIXTURE_V2_HTML.guide;
+    const built = buildGuideSnapshot({ ...pieces, guide: { ...guide, overview: { text: "x", diagram: drawn } } });
+    expect(built.version).toBe(3);
+    const parsed = parseGuideSnapshot(JSON.parse(JSON.stringify(built)));
+    expect(parsed.ok && parsed.value.guide.overview?.diagram).toEqual(drawn);
+  });
+
+  test("an html diagram with only a source still builds version 2, byte for byte", () => {
+    const { reviewed: _r, ...guide } = FIXTURE_V2_HTML.guide;
+    const built = buildGuideSnapshot({ ...pieces, guide });
+    expect(built.version).toBe(2);
+    expect(JSON.stringify(built)).toBe(JSON.stringify({ ...FIXTURE_V2_HTML, review: { ...FIXTURE_V2_HTML.review } }));
+  });
+
+  test("drawn fields are refused on a version-2 document: a v2 reader never sees them", () => {
+    const parsed = parseGuideSnapshot({ ...v3(drawn), version: 2 });
+    expect(parsed.ok).toBe(false);
+    if (!parsed.ok) expect(parsed.error.path).toBe("$.guide.overview.diagram");
+  });
+
+  const bad: Array<[string, unknown]> = [
+    ["a version-3 diagram with none of its fields", { kind: "html", source: "<div/>" }],
+    ["width without height", { kind: "html", source: "<div/>", width: 800 }],
+    ["a canvas out of range", { kind: "html", source: "<div/>", width: 100, height: 300 }],
+    ["drawn fields on a mermaid diagram", { kind: "mermaid", source: "flowchart LR", css: "x" }],
+    ["an unknown tall field", { kind: "html", source: "<div/>", tall: { source: "<div/>", width: 400 } }],
+  ];
+  for (const [name, diagram] of bad) {
+    test(`refuses ${name}`, () => {
+      expect(parseGuideSnapshot(v3(diagram)).ok).toBe(false);
+    });
+  }
 });

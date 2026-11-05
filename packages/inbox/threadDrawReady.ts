@@ -13,7 +13,8 @@
  * held up, and a language or KaTeX already loaded costs nothing.
  *
  * A chunk that fails is asked for again on the next open (the Inbox may be
- * back). A chunk that stalls holds a read at most DRAW_READY_CAP_MS once: later
+ * back), unless the Inbox answers 404 for it: the tab is older than the
+ * Inbox's build, and only Reload brings it. A chunk that stalls holds a read at most DRAW_READY_CAP_MS once: later
  * opens draw at once while it is still on its way, and ui swaps the finished
  * markup in when it lands.
  */
@@ -23,7 +24,8 @@ import type { Block } from '@plannotator/ui/types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { areLanguagesAttached, areThemesAttached, getFiletypeFromFileName, getHighlighterIfLoaded } from '@pierre/diffs';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
-import { ensureHighlight, forgetHighlightRejection } from '@plannotator/ui/utils/codeHighlight';
+import { ensureHighlight, forgetHighlightRejection, highlightRejection } from '@plannotator/ui/utils/codeHighlight';
+import { failedChunkUrl } from '@plannotator/ui/components/LazyBlockBoundary';
 import { getMathRenderer, loadMathRenderer } from '@plannotator/ui/utils/math';
 import { isGraphvizLanguage, isMermaidLanguage } from '@plannotator/ui/components/diagramLanguages';
 import { DEFAULT_SYNTAX_THEME, resolveFenceTheme } from '@plannotator/ui/utils/syntaxTheme';
@@ -88,12 +90,38 @@ let parsed = new Map<string, { body: string; needs: Needs }>();
 /** A load that outlived the cap once and is still on its way: later reads do not wait for it again. */
 const stalled = new WeakSet<Promise<unknown>>();
 
-/** `lang` attached in every theme of `themes`, asking again for a pair that failed before. */
+/** Pairs whose chunk the Inbox answered 404 for: asking again cannot bring it this session. */
+const gone = new Set<string>();
+/** Loads already looked at once they failed. */
+const checked = new WeakSet<Promise<boolean>>();
+
+/** `lang` attached in every theme of `themes`, asking again for a pair that failed before, unless its chunk is gone. */
 function grammar(lang: string, themes: readonly string[]): Promise<unknown>[] {
   return themes.map((name) => {
+    const key = `${lang} ${name}`;
+    if (gone.has(key)) return ensureHighlight(lang, name);
     forgetHighlightRejection(lang, name);
-    return ensureHighlight(lang, name);
+    const load = ensureHighlight(lang, name);
+    if (!checked.has(load)) {
+      checked.add(load);
+      void load.then((ok) => {
+        if (!ok) checkGone(lang, name, key);
+      });
+    }
+    return load;
   });
+}
+
+/** One HEAD for a failed pair's chunk, as ui's LazyLoadNotice does: a 404 is remembered, anything else asks again. */
+function checkGone(lang: string, name: string, key: string): void {
+  const url = failedChunkUrl(highlightRejection(lang, name)?.cause);
+  if (url === null || typeof fetch !== 'function') return;
+  fetch(url, { method: 'HEAD', cache: 'no-store' }).then(
+    (response) => {
+      if (response.status === 404) gone.add(key);
+    },
+    () => {},
+  );
 }
 
 /** Resolves when every load has settled, or at the cap; a load that stalled once is not waited for again. */
@@ -145,6 +173,10 @@ export function threadDrawReady(thread: InboxThread): Promise<void> {
   return waitFor(langs, [theme], math);
 }
 
+/** The needs of the last Markdown and text files read, by name, with the text they were read from. */
+const read = new Map<string, { text: string; needs: Needs }>();
+const READ_KEPT = 8;
+
 /**
  * The same for an attachment the pane draws: a Markdown or text file through ui's Viewer (its fences and math),
  * a code file through Pierre's file view (its language, in Pierre's own themes). `highlight` false: a code file
@@ -158,7 +190,11 @@ export function attachmentDrawReady(kind: string, name: string, text: string, hi
     return waitFor([lang], [DEFAULT_SYNTAX_THEME.dark, DEFAULT_SYNTAX_THEME.light], false);
   }
   if (kind === 'markdown' || kind === 'text') {
-    const found = needs(text);
+    const seen = read.get(name);
+    const found = seen && seen.text === text ? seen.needs : needs(text);
+    read.delete(name);
+    read.set(name, { text, needs: found });
+    if (read.size > READ_KEPT) read.delete(read.keys().next().value!);
     return waitFor(found.langs, [theme], found.math);
   }
   return Promise.resolve();

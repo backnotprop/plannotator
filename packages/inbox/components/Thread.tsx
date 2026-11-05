@@ -27,6 +27,7 @@ import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEm
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
+import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
@@ -3616,7 +3617,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
   const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
-    setFull(false);
+    // On the device's own route (fileToThread): a phone or a stacked window has no room beside the thread, so the file closes.
+    if (phone || fileStacked) onOpenFile(null);
+    else setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
     // back to it where the caret was (as R did with the box open before the composer).
     // openBox's other resets still apply (a New message, the route choice and an error go).
@@ -4132,6 +4135,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           ...(target.actions.length > 0 ? { actions: target.actions } : {}),
           ...(feedback ? { feedback } : {}),
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
+          // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
+          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
           ...(last && uploads.length > 0 ? { uploads } : {}),
           ...(tags.length > 0 ? { tags } : {}),

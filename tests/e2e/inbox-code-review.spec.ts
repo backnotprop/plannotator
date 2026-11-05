@@ -223,8 +223,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
-    // Held for 0.28.50 (packages/server/inbox.ts heldSwitch): the Code review switch shows while off only with this.
-    // 0.28.50 removes this line.
+    // Held until the next big release (packages/server/inbox.ts heldSwitch): the Code review switch shows while off only with this.
+    // That release removes this line.
     PLANNOTATOR_INBOX_PREVIEW: '1',
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),

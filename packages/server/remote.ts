@@ -185,8 +185,9 @@ export async function startBunServerOnAvailablePort<TServer>(
 }
 
 /**
- * Bind local sessions to loopback, but keep remote sessions reachable via the
- * container or host network interface for SSH/devcontainer/Docker forwarding.
+ * Bind local sessions to loopback. Remote sessions bind every interface so other
+ * devices and published Docker ports can reach them; `ssh -L` and editor port
+ * forwards reach loopback.
  */
 export function getServerHostname(): string {
   return isRemoteSession() ? "0.0.0.0" : LOOPBACK_HOST;
