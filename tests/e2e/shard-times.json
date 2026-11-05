@@ -68,6 +68,7 @@
   "inbox-mark-unread.spec.ts": 7,
   "inbox-markdown-anchors.spec.ts": 19,
   "inbox-markdown-links.spec.ts": 7,
+  "inbox-memory-soak.spec.ts": 180,
   "inbox-message-comments.spec.ts": 17,
   "inbox-message-images.spec.ts": 4,
   "inbox-message-links.spec.ts": 6,
