@@ -400,12 +400,18 @@ export function FailedDialog({
   home,
   onRetry,
   onClose,
+  machineName,
+  error,
 }: {
-  update: Update;
-  details: UpdateDetails | null;
+  update: Pick<Update, 'current' | 'releaseUrl'>;
+  details: Pick<UpdateDetails, 'failure' | 'log' | 'command'> | null;
   home: string | null;
   onRetry: () => void;
   onClose: () => void;
+  /** The update failed on this linked machine: the same reasons, said about it. */
+  machineName?: string;
+  /** Try Again was refused. */
+  error?: string | null;
 }) {
   const code = details?.failure?.exit_code;
   const tls = details?.failure?.tls;
@@ -431,11 +437,11 @@ export function FailedDialog({
           : `Plannotator is still ${update.current}.${code !== undefined ? ` The install script exited with code ${code}.` : ''}`;
   return (
     <Modal label={mismatch ? 'The update stopped' : "The update didn't install"} onClose={onClose} testId="failed">
-      <h2>{mismatch ? 'The update stopped' : <>The update didn&apos;t install</>}</h2>
+      <h2>{mismatch ? 'The update stopped' : <>The update didn&apos;t install</>}{machineName ? ` on ${machineName}` : ''}</h2>
       <p className="ib-sub">{sub}</p>
       {details && (
         <>
-          <p className="ib-sum">{mismatch || couldNotDownload ? 'Details are in the log:' : 'The log says what went wrong:'}</p>
+          <p className="ib-sum">{machineName ? `On ${machineName}, ` : ''}{mismatch || couldNotDownload ? (machineName ? 'details are in the log:' : 'Details are in the log:') : machineName ? 'the log says what went wrong:' : 'The log says what went wrong:'}</p>
           <CommandRow text={tildePath(details.log, home)} />
           {prepare && (
             <>
@@ -487,6 +493,7 @@ export function FailedDialog({
           )}
         </>
       )}
+      {error && <div className="ib-error">{error}</div>}
       <div className="ib-acts-row">
         <button type="button" className="ib-btn" onClick={onClose}>
           Close

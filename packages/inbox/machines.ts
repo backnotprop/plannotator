@@ -66,6 +66,8 @@ export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
  * runs an older Plannotator (rule 22: "update", never "reconnecting"). Null for a machine that is there.
  */
 export function awayLine(machine: Pick<MachineView, 'name' | 'state' | 'since' | 'version'>, now: Date = new Date()): string | null {
+  // A machine this Inbox just updated is restarting, not asleep.
+  if ((machine as Pick<MachineView, 'update'>).update?.phase === 'restarting') return `${machine.name} is restarting to finish its update`;
   if (machine.state === 'offline') return `${machine.name} asleep since ${shortTime(machine.since, now)}`;
   if (machine.state === 'needs_update') return `Update Plannotator on ${machine.name} to see its threads here`;
   return null;
@@ -76,6 +78,50 @@ export function threadAwayLine(machine: MachineView | undefined, now: Date = new
   const line = machine ? awayLine(machine, now) : null;
   if (!line) return null;
   return machine!.state === 'offline' ? `${line}. This thread opens when it is back.` : `${line}.`;
+}
+
+/** What a linked machine's update says, in the sidebar and in Settings → Machines. Null: nothing to say. */
+export interface MachineNotice {
+  kind: 'update' | 'by_hand' | 'too_old' | 'updating' | 'ready' | 'restarting' | 'not_back' | 'updated' | 'failed';
+  /** The word in the sidebar and on the Settings button. */
+  word: string;
+  /** What Settings adds to the machine's line. */
+  line: string;
+  /** The sidebar's tooltip. */
+  tip: string;
+  busy: boolean;
+}
+
+export function machineNotice(machine: Pick<MachineView, 'name' | 'self' | 'update' | 'state'>): MachineNotice | null {
+  const u = machine.update;
+  if (machine.self || !u) return null;
+  const to = u.target ?? 'the newest version';
+  const name = machine.name;
+  switch (u.phase) {
+    case 'behind':
+      if (!u.can_update) return { kind: 'too_old', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). See how to update it.`, busy: false };
+      if (!u.self_update) return { kind: 'by_hand', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). See how to update it.`, busy: false };
+      return { kind: 'update', word: 'Update', line: `${to} is out`, tip: `${name} runs an older Plannotator (${u.from}). Update it to ${to}.`, busy: false };
+    case 'updating':
+      return { kind: 'updating', word: 'Updating', line: `updating to ${to}`, tip: `Updating ${name} to ${to}`, busy: true };
+    case 'ready':
+      return { kind: 'ready', word: 'Restart', line: `${to} is installed, Inbox still on ${u.from}`, tip: `${to} is installed on ${name}. Its Inbox needs a restart.`, busy: false };
+    case 'restarting':
+      return { kind: 'restarting', word: 'Restarting', line: `restarting on ${to}`, tip: `${name} is restarting on ${to}`, busy: true };
+    case 'not_back':
+      return { kind: 'not_back', word: 'Not back', line: `has not come back after restarting`, tip: `${name} has not come back after restarting`, busy: false };
+    case 'updated':
+      return { kind: 'updated', word: 'Updated', line: `updated from ${u.from}`, tip: `${name} is on ${to}`, busy: false };
+    case 'failed':
+      return { kind: 'failed', word: 'Failed', line: `update to ${to} didn't install`, tip: `The update to ${to} didn't install on ${name}`, busy: false };
+  }
+}
+
+/** Snooze on a row of a machine whose Inbox is too old to keep one: it says so instead of vanishing. */
+export function snoozeBlockedBy(row: Pick<InboxListRow, 'machine'>, model: MachinesModel): MachineView | null {
+  const id = rowMachine(row, model);
+  if (id === null) return null;
+  return model.linked.find((machine) => machine.id === id && machine.snooze_old === true && machine.snoozes !== true) ?? null;
 }
 
 /** How Settings → Machines describes a linked machine's state, in its row's second line. */

@@ -141,6 +141,8 @@ export interface SettingsPageProps {
   machines?: MachineView[];
   /** A link or an Unlink happened: read the machines again. */
   onMachinesChanged?: () => void;
+  /** Open a machine's update dialog. Absent on a page that offers no updates (a tailnet guest's). */
+  onMachineUpdate?: (machineId: string) => void;
 }
 
 /**
@@ -1023,7 +1025,7 @@ export function SettingsPage(props: SettingsPageProps) {
         );
         break;
       case 'machines':
-        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} />;
+        body = <MachinesSection machines={machines} via={via} onChanged={() => props.onMachinesChanged?.()} onMachineUpdate={props.onMachineUpdate} />;
         break;
       case 'archived':
         body = archived ?? (
