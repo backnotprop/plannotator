@@ -1010,7 +1010,6 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
-  await expect(fn).toHaveAttribute('title', '#412 Retry schedule table and next-attempt time');
   for (const width of [1280, 1100, 900, 800, 760]) {
     await page.setViewportSize({ width, height: 900 });
     const decision = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
@@ -1027,6 +1026,10 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   }, long);
   const cut = await fn.locator('bdi').evaluate((node) => ({ cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
   expect(cut).toEqual({ cut: true, overflow: 'ellipsis' });
+  // Whole on hover, in the window's tooltip.
+  await fn.hover();
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('#412 Retry schedule table and next-attempt time');
+  await page.mouse.move(0, 0);
   const after = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
   expect(after.x + after.width).toBeLessThanOrEqual(900);
   await fn.locator('bdi').evaluate((node, text) => (node.textContent = text), was);
@@ -1088,8 +1091,9 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   const context = await browser.newContext({ viewport: { width, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   await page.route('**/api/inbox/pulls/diff*', async (route) => {
-    const real = await route.fetch();
-    await route.fulfill({ status: 200, json: { ...(await real.json()), patch, ...answer } });
+    // The window can close with a read still out.
+    const real = await route.fetch().catch(() => null);
+    if (real) await route.fulfill({ status: 200, json: { ...(await real.json()), patch, ...answer } });
   });
   await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(pull)}&layer=${encodeURIComponent(pull)}&scope=${scope}`);
   await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
@@ -1126,6 +1130,8 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     await review.locator('[data-review-file="aaa.ts"] .ib-rv-name').hover();
     await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
 
+    // A path's two rows differ for a screen reader.
+    expect(await review.locator('[data-review-file="a-link"]').evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')))).toEqual(['a-link, added', 'a-link, deleted']);
     // The circle names its file, ticks without moving to it, and shows on the file's header.
     const circle = review.locator('[data-review-file="src/app.ts"] [role="checkbox"]');
     const header = review.locator('[data-guide-file-shell="src/app.ts"]').getByRole('button', { name: /viewed/i }).first();
@@ -1195,6 +1201,14 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
     await button.click();
     await expect(rail).toBeVisible();
     await expect(button).toHaveAttribute('aria-expanded', 'true');
+    // Focus opens on the first row, and Escape closes the sheet, back on its button, the review still open.
+    await expect(review.locator('[data-review-files] button').first()).toBeFocused();
+    await page.keyboard.press('Escape');
+    await expect(rail).toBeHidden();
+    await expect(button).toBeFocused();
+    await expect(review).toBeVisible();
+    await button.click();
+    await expect(rail).toBeVisible();
     const sheet = (await rail.boundingBox())!;
     const body = (await review.locator('.ib-gbody').boundingBox())!;
     expect(Math.abs(sheet.y - body.y)).toBeLessThanOrEqual(1);
@@ -1211,10 +1225,96 @@ test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; u
     await expect(rail).toBeHidden();
     await expect(button).toBeFocused();
     await expect(review.locator('[data-guide-file-shell="docs/index.md"]')).toBeInViewport();
-    // A wider window has the rail back, as a column.
-    await page.setViewportSize({ width: 1100, height: 900 });
+    // The comments' sheet closes the same way: Escape from inside, its X, each back on its button.
+    const comments = review.locator('.ib-vcomments');
+    const panel = review.locator('.ib-gpanel');
+    await comments.click();
+    await panel.getByRole('button', { name: 'Close the comments' }).focus();
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+    await expect(comments).toBeFocused();
+    await comments.click();
+    await panel.getByRole('button', { name: 'Close the comments' }).click();
+    await expect(panel).toBeHidden();
+    await expect(comments).toBeFocused();
+
+    // From a review 768 px wide the rail is a column again; at 728 it folds. Focus crosses with it, never to the page.
+    await button.focus();
+    await page.setViewportSize({ width: 1000, height: 900 });
     await expect(button).toHaveCount(0);
     await expect(rail).toBeVisible();
+    await expect(review.locator('[data-review-files] button').first()).toBeFocused();
+    await page.setViewportSize({ width: 960, height: 900 });
+    await expect(rail).toBeHidden();
+    await expect(button).toBeFocused();
+
+    // An open sheet does not come back after the window has left the fold, to either side.
+    await button.click();
+    await expect(rail).toBeVisible();
+    await page.setViewportSize({ width: 1000, height: 900 });
+    await expect(button).toHaveCount(0);
+    await page.setViewportSize({ width: 800, height: 900 });
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(rail).toBeHidden();
+    await button.click();
+    await expect(rail).toBeVisible();
+    await page.setViewportSize({ width: 600, height: 900 });
+    await expect(review.locator('select.ib-rv-jump')).toBeVisible();
+    await page.setViewportSize({ width: 800, height: 900 });
+    await expect(button).toHaveAttribute('aria-expanded', 'false');
+    await expect(rail).toBeHidden();
+  } finally {
+    await context.close();
+  }
+});
+
+test('the layer on screen is on the strip from the first draw: on opening, on Next layer, after a resize', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF, {}, 'layer', STACK_ID);
+  try {
+    const review = page.locator('[data-pull-review]');
+    // Measured after the controls have come onto the row, which is what takes the layers' room.
+    const whole = () =>
+      review.evaluate((root) => {
+        const nav = root.querySelector('.ib-prr-layers')!;
+        const box = nav.getBoundingClientRect();
+        const tab = nav.querySelector('[aria-current="step"]')!.getBoundingClientRect();
+        return { over: nav.scrollWidth > nav.clientWidth, inside: tab.left >= box.left - 1 && tab.right <= box.right + 1 };
+      });
+    await expect(review.locator('[data-pull-controls] [data-diff-style-switch]')).toBeVisible();
+    await expect.poll(whole).toEqual({ over: true, inside: true });
+    for (const width of [1000, 1600, 1050, 800]) {
+      await page.setViewportSize({ width, height: 900 });
+      await expect.poll(async () => (await whole()).inside, `at ${width}`).toBe(true);
+    }
+    // Down the stack by its tabs, and back up by Next layer.
+    await review.locator('.ib-prr-layer:not(:disabled)').first().click();
+    await expect.poll(async () => (await whole()).inside).toBe(true);
+    await review.locator('.ib-prr-foot').getByRole('button', { name: /Next layer/ }).click();
+    await expect.poll(async () => (await whole()).inside).toBe(true);
+  } finally {
+    await context.close();
+  }
+});
+
+test('the sidebar has its fill only beside this page; a short foot says where the review goes', async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 800, COLLIDING_PATHS_DIFF);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const fill = (selector: string) => page.locator(selector).first().evaluate((el) => getComputedStyle(el).backgroundColor);
+    const at = review.locator('.ib-prr-where-at');
+    const to = review.locator('.ib-prr-where-to');
+    await expect(at).toBeHidden();
+    await expect(to).toBeVisible();
+    expect(await fill('.ib-side')).not.toBe(await fill('.pn-inbox'));
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await expect(at).toBeVisible();
+    await expect.poll(() => fill('.ib-side')).toBe(await fill('.pn-inbox'));
+    await page.setViewportSize({ width: 800, height: 900 });
+    await expect.poll(() => fill('.ib-side')).not.toBe(await fill('.pn-inbox'));
+    // Back on the list the sidebar is as it is everywhere else.
+    await review.locator('.ib-back').click();
+    await expect(review).toHaveCount(0);
+    await expect.poll(() => fill('.ib-side')).toBe(await fill('.pn-inbox'));
   } finally {
     await context.close();
   }

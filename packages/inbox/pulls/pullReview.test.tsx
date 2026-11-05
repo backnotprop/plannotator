@@ -1522,13 +1522,11 @@ test.skipIf(!hasDom)('a layer that changes no files says so, instead of "Reading
   expect(document.body.textContent).not.toContain('Reading the diff');
 });
 
-// The cut itself is measured in tests/e2e/inbox-pull-requests.spec.ts (happy-dom lays nothing out).
-test.skipIf(!hasDom)('a long title is kept whole in the review header\'s hover', async () => {
-  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
-  const titled: InboxPullsAnswer = { ...model, pulls: model.pulls.map((p) => (p.key === stack[0]!.key ? { ...p, title: long } : p)) };
-  mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={titled} />);
+// The bar's height and the sidebar's fill hang on this class: without it both jump when the list arrives.
+test.skipIf(!hasDom)('while the list is read the page already has the wide frame', async () => {
+  mount(<PullReview model={null} modelError={null} stackId={STACK_ID} layerKey={stack[0]!.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
   await settle();
-  expect(el('[data-pull-review-title]').getAttribute('title')).toBe(`#412 ${long}`);
+  expect(el('[data-pull-review]').classList.contains('ib-prr-wide')).toBe(true);
 });
 
 test.skipIf(!hasDom)('an ended agent stays named: "Claude Code ended"; no Reply; Start a new review thread opens the picker without it', async () => {

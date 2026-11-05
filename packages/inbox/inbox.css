@@ -7809,14 +7809,14 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    same tree as a sheet over the diff. */
 .ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
 .ib-prreview.ib-railfold .ib-rrail { display: none; }
-.ib-prreview.ib-prr-wide.ib-railfold.ib-files-open .ib-rrail { display: flex; position: absolute; top: 0; left: 0; bottom: 0; grid-column: 1 / 2; grid-row: 2 / 3; width: min(280px, 100%); z-index: 6; background: var(--background); box-shadow: 16px 0 48px rgba(0, 0, 0, 0.18); }
+.ib-prreview.ib-prr-wide.ib-railfold.ib-files-open .ib-rrail { display: flex; position: absolute; top: 0; left: 0; bottom: 0; grid-column: 1 / 2; grid-row: 2 / 3; width: min(280px, 100%); z-index: 6; background: var(--background); box-shadow: 16px 0 48px rgba(0, 0, 0, 0.18); clip-path: inset(0 -64px 0 0); }
 /* A folded sheet covers the diff and nothing else: its containing block is the diff's grid area, so the layers, the
    scope, Split | Unified, Global comment and Next layer stay on screen and in reach, on a phone too. */
-.ib-review.ib-prreview.ib-fold.ib-panel-open .ib-gpanel { grid-column: -2 / -1; grid-row: 2 / 3; padding-bottom: 0; }
+.ib-review.ib-prreview.ib-fold.ib-panel-open .ib-gpanel { grid-column: -2 / -1; grid-row: 2 / 3; padding-bottom: 0; clip-path: inset(0 0 0 -64px); }
 .pn-inbox .ib-prreview .ib-vhead .ib-vfiles { flex: none; white-space: nowrap; }
 /* Sidebar and page apart, on this page only (the owner on the 800 px picture): the review app's rows of layers sit on
    --muted, so the Inbox's sidebar takes that fill over its own ground, and its line the page's half strength. */
-.pn-inbox:has(.ib-prreview.ib-prr-wide) .ib-side { background: color-mix(in oklab, var(--muted) 60%, var(--ib-ground)); border-right-color: color-mix(in oklch, var(--border) 50%, transparent); }
+.pn-inbox[data-stack~="thread"]:has(.ib-prreview.ib-prr-wide) .ib-side { background: color-mix(in oklab, var(--muted) 60%, var(--ib-ground)); border-right-color: color-mix(in oklch, var(--border) 50%, transparent); }
 /* What the list could not read, or read only in part: a quiet line over the groups. */
 .ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
 .ib-pr-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; overflow-wrap: anywhere; }

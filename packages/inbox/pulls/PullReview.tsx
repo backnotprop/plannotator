@@ -25,7 +25,7 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
@@ -56,6 +56,15 @@ const RAIL_FOLD_BELOW = 760;
 /** The review's width (px) under which the controls' row has no room for the read-only note: it moves to the foot. */
 const NOTE_ON_STRIP_FROM = 900;
 const GuideReader = lazy(() => import('#guide-reader'));
+
+/** The layer on screen brought to the middle of the strip, when the layers do not all fit. */
+function centerCurrentLayer(strip: HTMLElement): void {
+  const here = strip.querySelector<HTMLElement>('[aria-current="step"]');
+  if (!here || strip.scrollWidth <= strip.clientWidth) return;
+  const box = strip.getBoundingClientRect();
+  const at = here.getBoundingClientRect();
+  strip.scrollLeft += at.left + at.width / 2 - (box.left + box.width / 2);
+}
 
 export interface PullReviewProps {
   model: InboxPullsAnswer | null;
@@ -241,12 +250,49 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const [filesSheet, setFilesSheet] = useState(false);
   const filesSheetId = useId();
   const filesButton = useRef<HTMLButtonElement>(null);
+  const sheetButton = useRef<HTMLButtonElement>(null);
+  const railRef = useRef<HTMLElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    if (!railFolded) setFilesSheet(false);
-  }, [railFolded]);
+    if (!railFolded || phone) setFilesSheet(false);
+  }, [railFolded, phone]);
   useEffect(() => {
     if (sheet) setFilesSheet(false);
   }, [sheet]);
+  // Opening the Files sheet, focus goes to its first row.
+  useEffect(() => {
+    if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button')?.focus({ preventScroll: true });
+  }, [filesSheet]);
+  const closeComments = () => {
+    setSheet(false);
+    sheetButton.current?.focus({ preventScroll: true });
+  };
+  const closeFiles = () => {
+    setFilesSheet(false);
+    filesButton.current?.focus({ preventScroll: true });
+  };
+  // Escape closes either sheet, from inside it or from its button (as ReviewPane's), and focus goes back to the button.
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key !== 'Escape' || event.defaultPrevented) return;
+    if (folded && sheet) {
+      event.preventDefault();
+      closeComments();
+    } else if (filesSheet) {
+      event.preventDefault();
+      closeFiles();
+    }
+  };
+  // Crossing a fold takes away what held focus (a button, or a rail or panel that hides): focus moves to the same
+  // thing's other shape, so it never drops to the page.
+  const lastFocus = useRef<HTMLElement | null>(null);
+  useLayoutEffect(() => {
+    const held = lastFocus.current;
+    const now = document.activeElement;
+    if (!held || (now && now !== held && now !== document.body) || (held.isConnected && held.getClientRects().length > 0)) return;
+    const first = (root: HTMLElement | null) => root?.querySelector<HTMLElement>('button, [tabindex="0"]');
+    const moved = railRef.current?.contains(held) ? filesButton.current : panelRef.current?.contains(held) ? sheetButton.current : held.matches('.ib-vfiles') ? first(railRef.current) : held.matches('.ib-vcomments') ? first(panelRef.current) : null;
+    moved?.focus({ preventScroll: true });
+  }, [railFolded, folded]);
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -277,9 +323,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button.
   const pickFile = (path: string) => {
     move(path);
-    if (!filesSheet) return;
-    setFilesSheet(false);
-    filesButton.current?.focus();
+    if (filesSheet) closeFiles();
   };
 
   // The verdict: one reply to the agent's last message in its thread.
@@ -339,19 +383,18 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // The strip scrolls sideways (a phone, a deep stack): the layer on screen is brought into it, never left off its edge.
   const stripRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    const strip = stripRef.current;
-    const here = strip?.querySelector<HTMLElement>('[aria-current="step"]');
-    if (!strip || !here || strip.scrollWidth <= strip.clientWidth) return;
-    const box = strip.getBoundingClientRect();
-    const at = here.getBoundingClientRect();
-    strip.scrollLeft += at.left + at.width / 2 - (box.left + box.width / 2);
+    if (stripRef.current) centerCurrentLayer(stripRef.current);
   }, [layerKey, phone, stack?.layers.length]);
   // More layers than fit: the strip's edges fade as on a phone (`data-over` in inbox.css).
   const [layersOver, setLayersOver] = useState(false);
   useEffect(() => {
     const strip = stripRef.current;
     if (!strip || phone || typeof ResizeObserver === 'undefined') return;
-    const read = () => setLayersOver(strip.scrollWidth > strip.clientWidth);
+    // Again on every change of width: the controls arrive on the row after the first draw and take room from the layers.
+    const read = () => {
+      setLayersOver(strip.scrollWidth > strip.clientWidth);
+      centerCurrentLayer(strip);
+    };
     read();
     const observer = new ResizeObserver(read);
     observer.observe(strip);
@@ -361,7 +404,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   if (!model || !stack || !layer) {
     return (
-      <section className="ib-viewer ib-review ib-prreview" aria-label="Review" data-pull-review="">
+      <section className={`ib-viewer ib-review ib-prreview${phone ? '' : ' ib-prr-wide'}`} aria-label="Review" data-pull-review="">
         <div className="ib-vhead">
           <button type="button" className="ib-back" onClick={onBack}>
             <Icon name="back" size={15} />
@@ -411,6 +454,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
+      onFocusCapture={(event) => {
+        lastFocus.current = event.target;
+      }}
     >
       <div className="ib-vhead" ref={headRef}>
         <button type="button" className="ib-back" onClick={onBack}>
@@ -427,6 +473,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               setFilesSheet((open) => !open);
               setSheet(false);
             }}
+            onKeyDown={onSheetKey}
             aria-expanded={filesSheet}
             aria-controls={filesSheetId}
             aria-label={`Files, ${files.length}`}
@@ -437,17 +484,21 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </button>
         )}
         {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
-        <span className="ib-fn ib-prr-fn" title={`${label} ${layer.title}`} data-pull-review-title="">
-          <RefMarkIcon kind="pr" state={layer.state} size={15} />
-          <span className="ib-prr-num">{label}</span>
-          <bdi>{layer.title}</bdi>
-        </span>
+        <Tip content={`${label} ${layer.title}`} when={(title) => isTextCut(title.querySelector('bdi'))}>
+          <span className="ib-fn ib-prr-fn" data-pull-review-title="">
+            <RefMarkIcon kind="pr" state={layer.state} size={15} />
+            <span className="ib-prr-num">{label}</span>
+            <bdi>{layer.title}</bdi>
+          </span>
+        </Tip>
         <span className="ib-sp" />
         {folded && readerComments && (
           <button
             type="button"
+            ref={sheetButton}
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
+            onKeyDown={onSheetKey}
             aria-expanded={sheet}
             aria-controls={sheetId}
             aria-label={`Comments, ${comments.length}`}
@@ -535,7 +586,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           {scopeSwitch}
           {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         </div>
-        <nav className="ib-rrail" id={filesSheetId} aria-label="Changed files">
+        <nav className="ib-rrail" id={filesSheetId} ref={railRef} aria-label="Changed files" onKeyDown={onSheetKey}>
           <ReviewRailTree
             tree={tree}
             loose={loose}
@@ -603,13 +654,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           )}
         </div>
-        <div className="ib-apanel ib-gpanel" id={sheetId} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
+        <div className="ib-apanel ib-gpanel" id={sheetId} ref={panelRef} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined} onKeyDown={onSheetKey}>
           {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+              <button type="button" className="ib-iconbtn" onClick={closeComments} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>

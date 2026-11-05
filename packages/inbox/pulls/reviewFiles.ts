@@ -30,6 +30,8 @@ export function reviewFiles(rawPatch: string): ReviewFiles {
   const files = [...order.map((index) => parsed[index]!), ...loose];
   // Every chunk of a path at the tree's place for it, the rest after the tree.
   const inTree = new Set(order.map((index) => parsed[index]!.path));
-  const forViewer = [...order.flatMap((index) => parsed.filter((file) => file.path === parsed[index]!.path)), ...loose.filter((file) => !inTree.has(file.path))];
+  const byPath = new Map<string, DiffFile[]>();
+  for (const file of parsed) byPath.set(file.path, [...(byPath.get(file.path) ?? []), file]);
+  const forViewer = [...order.flatMap((index) => byPath.get(parsed[index]!.path)!), ...loose.filter((file) => !inTree.has(file.path))];
   return { files, tree, loose, patch: forViewer.map((file) => (file.patch.endsWith('\n') ? file.patch : `${file.patch}\n`)).join('') };
 }

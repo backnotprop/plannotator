@@ -1794,15 +1794,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saved;
   };
 
+  /** The name on the person's comments (config.json `displayName`); null when never set. */
+  const displayNameState = (): string | null => {
+    const name = loadConfig().displayName;
+    return typeof name === 'string' && name ? name : null;
+  };
   /**
    * The window's text size (config.json `inboxTextSize`): the body size in px
    * the Inbox's type ramp scales from, 12 to 15; 14 (the window as it has
    * always been drawn) while unset or unreadable.
    */
-  const displayNameState = (): string | null => {
-    const name = loadConfig().displayName;
-    return typeof name === 'string' && name ? name : null;
-  };
   const textSizeState = (): InboxTextSize => {
     const value = loadConfig().inboxTextSize;
     return isInboxTextSize(value) ? value : INBOX_TEXT_SIZE_DEFAULT;

@@ -51,11 +51,19 @@ export function ReviewRailTree({ tree, loose, files, viewed, commentCount, onSel
     return countColumnVars(add, del);
   }, [files]);
 
+  // A path changed twice (a symlink turned into a file) has two rows: a screen reader tells them apart by the change.
+  const doubled = useMemo(() => {
+    const paths = new Set<string>();
+    const twice = new Set<string>();
+    for (const file of files) (paths.has(file.path) ? twice : paths).add(file.path);
+    return twice;
+  }, [files]);
+
   const fileRow = (file: DiffFile, name: string, depth: number, key: string) => {
     const seen = viewed.has(file.path);
     return (
       <li key={key}>
-        <button type="button" className="file-tree-item ib-rv-file" style={{ paddingLeft: indent(depth) }} aria-label={`${file.path}${seen ? ', viewed' : ''}`} data-review-file={file.path} onClick={() => onSelect(file.path)}>
+        <button type="button" className="file-tree-item ib-rv-file" style={{ paddingLeft: indent(depth) }} aria-label={`${file.path}${doubled.has(file.path) ? `, ${file.status}` : ''}${seen ? ', viewed' : ''}`} data-review-file={file.path} onClick={() => onSelect(file.path)}>
           <span className="ib-rv-file-main">
             <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />
             <span className="ib-rv-letter">
