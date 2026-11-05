@@ -1020,7 +1020,7 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         });
       }
 
-      test('moved on to a file in another thread, the same pane: its card stays empty and the words go to the first thread’s draft', async () => {
+      test('moved on to a file in another thread: its card stays empty and the words go to the first thread’s draft', async () => {
         const { w, context, page } = await start();
         await page.goto(`${w.url}${fileHash(w)}`);
         const { card, field } = await transcribing(page, w);

@@ -244,12 +244,13 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
   );
 }
 
-/** One card per thread: a take on its way stays with the thread it was said in when the same pane shows another. */
-export function FullScreenComposer(props: FullScreenComposerProps) {
-  return <ThreadComposer key={props.value.threadId} {...props} />;
-}
-
-interface FullScreenComposerProps {
+export function FullScreenComposer({
+  value,
+  noun,
+  comment,
+  foldedByDefault = false,
+  onMinimized,
+}: {
   value: FullScreenComposerValue;
   /** What a comment is on ("this image", "this video", "this page"). */
   noun: 'image' | 'video' | 'page' | null;
@@ -259,9 +260,7 @@ interface FullScreenComposerProps {
   foldedByDefault?: boolean;
   /** The person minimized the card (a comment with no words yet drops its draft). */
   onMinimized?: () => void;
-}
-
-function ThreadComposer({ value, noun, comment, foldedByDefault = false, onMinimized }: FullScreenComposerProps) {
+}) {
   const { reply, phone, threadId } = value;
   const takesComments = comment !== null;
   const hasDraft = reply.value.trim() !== '';

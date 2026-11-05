@@ -230,6 +230,19 @@ for (const phone of PHONES) {
       await expect(card(page).locator('[data-fcomp-comments] .ib-fcomp-w')).not.toHaveCSS('clip', 'auto');
     });
 
+    test('320 px, questions that arrive with the card open: the row fits them', async () => {
+      await page.setViewportSize({ width: 320, height: 568 });
+      const t = await seed(short, 2, false);
+      await page.goto('about:blank');
+      await page.goto(fileUrl(t, 'shot.png'));
+      await card(page).waitFor();
+      await page.locator('[data-fcomp-mode="reply"]').tap();
+      await expect.poll(() => footProblems(page)).toEqual([]);
+      await short.send({ project_path: project, subject: `Widget ${threads}`, thread: `widget-${threads}`, body });
+      await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
+      await expect.poll(() => footProblems(page)).toEqual([]);
+    });
+
     test('what yields: at 320 the pill is its icon and number, at 390 its words come back beside the bare count', async () => {
       await page.setViewportSize({ width: 320, height: 568 });
       await page.goto('about:blank');
