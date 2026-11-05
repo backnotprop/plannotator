@@ -456,6 +456,20 @@ export function inboxBodyWithBro(description: string): string {
 }
 
 /**
+ * A remembered tool list as it reads with Bro mode off: only a running Inbox can say the switch is on, and a list kept
+ * from one that had it on must not outlive the person turning it off.
+ */
+export function inboxToolsWithoutBro(tools: InboxToolInfo[]): InboxToolInfo[] {
+  return tools.map((tool) => {
+    const properties = tool.inputSchema.properties as Record<string, { description?: unknown }> | undefined
+    const body = properties?.body
+    if (typeof body?.description !== 'string' || !body.description.includes(INBOX_BRO_LINE)) return tool
+    const description = body.description.replace(` ${INBOX_BRO_LINE}`, '')
+    return { ...tool, inputSchema: { ...tool.inputSchema, properties: { ...properties, body: { ...body, description } } } }
+  })
+}
+
+/**
  * The agent tool's own words for the fields whose Inbox description is long
  * (the MCP server's are written for a raw MCP client, which has no other
  * guide): every Pi and OpenCode request carries the tool whole, so these keep
