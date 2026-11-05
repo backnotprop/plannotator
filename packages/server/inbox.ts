@@ -3643,10 +3643,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const [oldId, newId] = [url.searchParams.get("old"), url.searchParams.get("new")];
             const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
             // Only a file the diff changes: the route is for that diff's arrows, not for any file whose blob id one knows.
-            if (ids && !parseDiffToFiles((await pulls.diff(key, scope)).patch).some((file) => file.path === filePath)) {
-              return json({ serverSession, oldContent: null, newContent: null });
-            }
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids)) });
+            const changed = ids ? parseDiffToFiles((await pulls.diff(key, scope)).patch).find((file) => file.path === filePath) : null;
+            if (ids && !changed) return json({ serverSession, oldContent: null, newContent: null });
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids, changed?.oldPath)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -4555,12 +4554,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
         const { sha256 } = message.guide;
         const projectRoot = store.project(message.project_id)?.root ?? null;
-        const contents = await inboxGuideFileContents(store, sha256, filePath, projectRoot, (ids) => {
+        const contents = await inboxGuideFileContents(store, sha256, filePath, projectRoot, (ids, oldPath) => {
           if (!codeReviewOn()) return null;
           const pullKey = guidePullKey(store, sha256);
           // Only a PR of this message's own project: a guide cannot name any PR on this machine to read its files.
           return pullKey && pulls.find(pullKey)
-            ? pullRoots(pullKey).then((roots) => (projectRoot && roots.includes(projectRoot) ? pulls.fileContents(pullKey, "layer", filePath, roots, ids) : { oldContent: null, newContent: null }))
+            ? pullRoots(pullKey).then((roots) => (projectRoot && roots.includes(projectRoot) ? pulls.fileContents(pullKey, "layer", filePath, roots, ids, oldPath) : { oldContent: null, newContent: null }))
             : null;
         });
         return json({ serverSession, ...contents });

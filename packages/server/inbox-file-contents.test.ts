@@ -6,7 +6,7 @@
  *
  * What regresses:
  *  - anything run (gh, glab, git) while Code review is off, for an unknown PR,
- *    another site, a bad path or a fork;
+ *    another site or a bad path;
  *  - a file read at the wrong commits (the base branch's tip instead of where
  *    the head left it; another head than the patch on screen), or the forge
  *    asked again for what a clone or the cache already has;
@@ -266,11 +266,29 @@ describe("a PR's file", () => {
     expect(f.reads.filter((read) => read === fileAt("f13.ts", HEAD)).length).toBe(1);
   });
 
-  test("a fork's layer, an unknown PR: nothing runs", async () => {
+  test("a fork's layer reads from the base repository, where its commits are reachable by id", async () => {
     const f = scripted(ghPull({ headRepository: { nameWithOwner: "dana/billing-svc" } }));
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
     const pulls = await listed(f);
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual({ oldContent: null, newContent: null });
-    expect(f.reads).toEqual([]);
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    // Text that is not the patch's still opens nothing.
+    f.files.set(fileAt("src/b.ts", HEAD), "something else\n");
+    f.files.set(fileAt("src/b.ts", BASE), "old\n");
+    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("a renamed file's old side is read at its old path", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/new-name.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/old-name.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "layer", "src/new-name.ts", [], IDS, "src/old-name.ts")).toEqual({ oldContent: "old\n", newContent: "new\n" });
+  });
+
+  test("an unknown PR: nothing runs", async () => {
+    const f = scripted();
+    const pulls = await listed(f);
     await expect(pulls.fileContents("github.com/elsewhere/thing#9", "layer", "src/a.ts", [], IDS)).rejects.toMatchObject({ code: "pull_unknown" });
     expect(f.reads).toEqual([]);
   });
@@ -303,11 +321,12 @@ describe("a PR's file", () => {
     let clock = 1_000_000;
     const pulls = await listed(f, async () => null, () => clock);
     f.failWith = { stderr: "gh: API rate limit exceeded (HTTP 403)" };
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+    const failed = { oldContent: null, newContent: null, failed: true };
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(failed);
     const asked = f.reads.length;
     expect(asked).toBeGreaterThan(0);
     // Held: asks nothing, for any file.
-    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual(failed);
     expect(f.reads.length).toBe(asked);
     // Over: the same file reads.
     f.failWith = null;
@@ -454,6 +473,29 @@ describe("the PR route", () => {
     expect(w.forge.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
   });
 
+  test("a renamed and edited file through the route: the old side comes from its old path", async () => {
+    const w = await world({ codeReview: true });
+    writeFileSync(join(w.project, "before.ts"), "a\nb\nc\nd\ne\nf\ng\nh\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "one");
+    const baseSha = w.git("rev-parse", "HEAD").trim();
+    w.git("mv", "before.ts", "after.ts");
+    writeFileSync(join(w.project, "after.ts"), "a\nb\nc\nd\ne\nf\ng\nH\n");
+    w.git("add", ".");
+    w.git("commit", "-qm", "two");
+    const headSha = w.git("rev-parse", "HEAD").trim();
+    const patch = w.git("diff", "-M", `${baseSha}..${headSha}`);
+    await w.sendGuide(patch, ["after.ts"]);
+    w.forge.pull = ghPull({ headRefOid: headSha });
+    w.forge.mergeBase = baseSha;
+    w.forge.patch = patch;
+    w.forge.headNow = headSha;
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    const [, oldId, newId] = /^index ([0-9a-f]+)\.\.([0-9a-f]+)/m.exec(patch)!;
+    const response = await fetch(`${w.base}/api/inbox/pulls/file?key=${encodeURIComponent(KEY)}&scope=layer&path=after.ts&old=${oldId}&new=${newId}`);
+    expect(await contentsOf(response)).toEqual({ oldContent: "a\nb\nc\nd\ne\nf\ng\nh\n", newContent: "a\nb\nc\nd\ne\nf\ng\nH\n" });
+  });
+
   test("a file the diff does not change is not read, whatever blob id comes with it", async () => {
     const w = await world({ codeReview: true });
     w.forge.patch = `diff --git a/a.ts b/a.ts\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-old\n+new\n`;
@@ -491,14 +533,14 @@ describe("a guide's file", () => {
   const PR_SOURCE = { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } as const;
   const patchOf = (path: string) => `diff --git a/${path} b/${path}\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`;
   /** A guide of a PR whose blobs this clone does not have. */
-  const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string, project?: string) =>
+  const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string, project?: string, rawPatch = patchOf(path)) =>
     w.sendGuide("", [], {
       ...(project ? { project_path: project } : {}),
       patch: undefined,
       guide: undefined,
       snapshot: buildGuideSnapshot({
         guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: path, summary: "s" }] }] },
-        review: { rawPatch: patchOf(path), gitRef: "main...head", source: PR_SOURCE },
+        review: { rawPatch, gitRef: "main...head", source: PR_SOURCE },
         reviewed: [],
       } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
     });
@@ -537,6 +579,16 @@ describe("a guide's file", () => {
     expect(response.status).toBe(200);
     expect(await contentsOf(response)).toEqual(NO_CONTENTS);
     expect(w.forge.reads).toEqual([]);
+  });
+
+  test("a guide of a PR that renamed and edited a file reads the old side at its old path", async () => {
+    const w = await world({ codeReview: true });
+    w.forge.files.set(fileAt("after.ts", HEAD), "new\n");
+    w.forge.files.set(fileAt("before.ts", BASE), "old\n");
+    const patch = `diff --git a/before.ts b/after.ts\nsimilarity index 90%\nrename from before.ts\nrename to after.ts\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/before.ts\n+++ b/after.ts\n@@ -1 +1 @@\n-old\n+new\n`;
+    const id = await prGuide(w, "after.ts", undefined, patch);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    expect(await contentsOf(await w.askGuide(id, "after.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
   });
 
   test("a guide in another project naming this PR reads nothing of it", async () => {
@@ -583,7 +635,7 @@ describe("a guide's file", () => {
     expect(await contentsOf(await w.askGuide(id, "a.ts"))).toEqual({ oldContent: "one\ntwo\nthree\n", newContent: "one\n2\nthree\n" });
   });
 
-  test("a file the patch does not change is never read; an added, deleted or renamed one has no arrows", async () => {
+  test("a file the patch does not change is never read; an added or deleted one has no arrows; a renamed one opens", async () => {
     const w = await world({ codeReview: true });
     writeFileSync(join(w.project, "secret.env"), "TOKEN=1\n");
     writeFileSync(join(w.project, "gone.ts"), "gone\n");
@@ -597,9 +649,10 @@ describe("a guide's file", () => {
     const staged = w.git("diff", "--cached", "-M");
     const id = await w.sendGuide(staged, ["a.ts", "gone.ts", "renamed.ts", "added.ts"]);
     expect(patch).toContain("a.ts");
-    for (const path of ["secret.env", "gone.ts", "renamed.ts", "added.ts"]) {
+    for (const path of ["secret.env", "gone.ts", "added.ts"]) {
       expect(await contentsOf(await w.askGuide(id, path))).toEqual(NO_CONTENTS);
     }
+    expect(await contentsOf(await w.askGuide(id, "renamed.ts"))).toEqual({ oldContent: "a\nb\nc\nd\ne\nf\ng\nh\n", newContent: "a\nb\nc\nd\ne\nf\ng\nH\n" });
     expect((await contentsOf(await w.askGuide(id, "a.ts"))).newContent).toBe("one\n2\nthree\n");
   });
 

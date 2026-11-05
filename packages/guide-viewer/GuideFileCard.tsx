@@ -127,8 +127,8 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const [opened, setOpened] = useState(false);
   const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
-    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && file.status === 'modified' && !file.oldPath) : estimateDiffHeight(file.patch)),
-    [fitContent, file.patch, file.status, file.oldPath, diffStyle, opensWholeFiles],
+    () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle, !!opensWholeFiles && (file.status === 'modified' || file.status === 'renamed')) : estimateDiffHeight(file.patch)),
+    [fitContent, file.patch, file.status, diffStyle, opensWholeFiles],
   );
   // The content's height as the renderer last reported it (plus the box's border), kept while the CodeView is
   // unmounted so the box does not jump when it leaves the outer window.

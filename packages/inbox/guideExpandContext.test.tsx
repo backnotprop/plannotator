@@ -9,7 +9,7 @@
  * in a read-only diff or a comment-only one (the review app's gate stopped
  * both); a click that opens nothing, or a box that does not grow with what it
  * opened; a file with no text to open keeping its arrows or logging an error; a
- * renamed, added or deleted file showing arrows; a request from a host that
+ * added or deleted file showing arrows; a request from a host that
  * passed no reader. (A real browser's boxes: tests/e2e/inbox-pull-requests.spec.ts.)
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -35,6 +35,7 @@ plugin({
 });
 // The review app's worker pool imports Vite's `?worker&inline`, which Bun cannot load.
 mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => ({
+  ReviewWorkerPoolProvider: ({ children }: { children: unknown }) => children,
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
 }));
@@ -155,7 +156,7 @@ async function draw(node: React.ReactNode) {
 }
 
 const boxHeight = (path: string) => Number.parseFloat(host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.minHeight);
-const reader = (patch: string, files: string[], fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<{ oldContent: string | null; newContent: string | null }>) => (
+const reader = (patch: string, files: string[], fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<{ oldContent: string | null; newContent: string | null; failed?: true }>) => (
   <GuideReader snapshot={snapshotOf(patch, files)} reviewed={[false]} onReviewedChange={() => {}} {...(fileContents ? { fileContents } : {})} />
 );
 
@@ -223,10 +224,9 @@ test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments
   expect(arrows().length).toBeGreaterThan(0);
 });
 
-test.skipIf(!hasDom)('nothing to open (no contents, a refused read, a failed read): the first click takes the arrows away, the diff as it came, nothing logged', async () => {
-  const answers: (() => Promise<{ oldContent: string | null; newContent: string | null }>)[] = [
+test.skipIf(!hasDom)('nothing to open (no contents, text that does not fit): the first click takes the arrows away, the diff as it came, nothing logged', async () => {
+  const answers: (() => Promise<{ oldContent: string | null; newContent: string | null; failed?: true }>)[] = [
     async () => ({ oldContent: null, newContent: null }),
-    () => Promise.reject(Object.assign(new Error('Code review is off.'), { status: 409 })),
     // Contents that do not reconcile with the patch's hunks: the file moved on.
     async () => ({ oldContent: whole(OLD), newContent: whole([...NEW, 'one more']) }),
   ];
@@ -248,7 +248,50 @@ test.skipIf(!hasDom)('nothing to open (no contents, a refused read, a failed rea
   logged.mockRestore();
 });
 
-test.skipIf(!hasDom)('an added, deleted or renamed file costs no read and has no arrows; a changed one beside them does', async () => {
+// Guards a slow first click looking like a dead one.
+test.skipIf(!hasDom)('while a first read is on its way the file says so; once it lands it stops', async () => {
+  let land: (contents: { oldContent: string; newContent: string }) => void = () => {};
+  await draw(reader(MODIFIED, ['a.ts'], () => new Promise((resolve) => (land = resolve))));
+  const view = views()[0]!;
+  expect(view.hasAttribute('data-reading-whole-file')).toBe(false);
+  await act(async () => arrows()[0]!.click());
+  expect(view.hasAttribute('data-reading-whole-file')).toBe(true);
+  await act(async () => land({ oldContent: whole(OLD), newContent: whole(NEW) }));
+  await settle();
+  expect(view.hasAttribute('data-reading-whole-file')).toBe(false);
+});
+
+// Guards a brief forge failure taking the arrows away until a reload.
+test.skipIf(!hasDom)('a read that failed keeps the arrows, and the next click asks again and opens', async () => {
+  const logged = spyOn(console, 'error').mockImplementation(() => {});
+  for (const failure of [
+    () => Promise.reject(new Error('offline')),
+    async () => ({ oldContent: null, newContent: null, failed: true as const }),
+  ]) {
+    let asks = 0;
+    await draw(
+      reader(MODIFIED, ['a.ts'], async () => {
+        asks += 1;
+        return asks === 1 ? failure() : { oldContent: whole(OLD), newContent: whole(NEW) };
+      }),
+    );
+    const before = rows();
+    await act(async () => arrows()[0]!.click());
+    await settle();
+    expect(asks).toBe(1);
+    expect(arrows().length).toBeGreaterThan(0);
+    await act(async () => arrows()[0]!.click());
+    await settle();
+    expect(asks).toBe(2);
+    expect(rows()).toBeGreaterThan(before);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
+  logged.mockRestore();
+});
+
+test.skipIf(!hasDom)('an added or deleted file costs no read and has no arrows; a changed one and a renamed one beside them do', async () => {
   const asked: string[] = [];
   await draw(
     reader(`${ADDED}${DELETED}${RENAMED}${MODIFIED}`, ['new.ts', 'gone.ts', 'to.ts', 'a.ts'], async (path) => {
@@ -257,10 +300,13 @@ test.skipIf(!hasDom)('an added, deleted or renamed file costs no read and has no
     }),
   );
   expect(asked).toEqual([]);
-  for (const path of ['new.ts', 'gone.ts', 'to.ts']) {
-    expect(host!.querySelector(`[data-guide-file-shell="${path}"] diffs-container`)!.shadowRoot!.querySelectorAll('[data-expand-button]').length).toBe(0);
-  }
-  expect(arrows().length).toBeGreaterThan(0);
+  const arrowsOf = (path: string) => host!.querySelector(`[data-guide-file-shell="${path}"] diffs-container`)!.shadowRoot!.querySelectorAll<HTMLElement>('[data-expand-button]');
+  for (const path of ['new.ts', 'gone.ts']) expect(arrowsOf(path).length).toBe(0);
+  expect(arrowsOf('a.ts').length).toBeGreaterThan(0);
+  expect(arrowsOf('to.ts').length).toBeGreaterThan(0);
+  await act(async () => arrowsOf('to.ts')[0]!.click());
+  await settle();
+  expect(asked).toEqual(['to.ts']);
 });
 
 test.skipIf(!hasDom)('a host that passes no reader: no request of any kind, no arrows, as before', async () => {

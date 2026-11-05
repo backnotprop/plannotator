@@ -673,6 +673,10 @@ const HUNK_SEPARATOR_HEIGHT = 32;
 const SCROLLS_WITH_PAGE_CSS = `
   [data-code] { padding-bottom: 0 !important; }
   [data-diffs-header] { container-type: scroll-state; container-name: sticky-header; }
+  [data-expand-index] [data-separator-content] { justify-self: start; }
+  :host([data-reading-whole-file]) [data-expand-button] { cursor: progress; animation: reading-whole-file 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+  @keyframes reading-whole-file { 50% { opacity: 0.5; } }
+  @media (prefers-reduced-motion: reduce) { :host([data-reading-whole-file]) [data-expand-button] { animation: none; } }
   @container sticky-header scroll-state(stuck: top) {
     [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
   }
@@ -1884,6 +1888,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const wholeFileGoneRef = useRef(wholeFileGone);
   wholeFileGoneRef.current = wholeFileGone;
   useEffect(() => setWholeFileGone(false), [fileSetKey]);
+  const wholeFileFailedRef = useRef(0);
   const loadWholeFile = useStableCallback((fileDiff: FileDiffMetadata): Promise<FileDiffLoadedFiles> => {
     const generation = fileSetKeyRef.current;
     const entry = [...itemIdToFileRef.current].find(([, candidate]) => candidate.path === fileDiff.name);
@@ -1898,7 +1903,10 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const controller = new AbortController();
     augmentRef.current.get(itemId)?.controller.abort();
     augmentRef.current.set(itemId, { status: 'pending', controller, generation });
-    return read(file, controller.signal).then(
+    // The arrows say a read is on its way (SCROLLS_WITH_PAGE_CSS): the click's rows arrive with it.
+    const shown = viewerRef.current?.getInstance()?.getRenderedItems().find((candidate) => candidate.id === itemId)?.element;
+    shown?.setAttribute('data-reading-whole-file', '');
+    return read(file, controller.signal).finally(() => shown?.removeAttribute('data-reading-whole-file')).then(
       (data) => {
         augmentRef.current.set(itemId, { status: 'done', controller, generation });
         if (data?.oldContent == null || data.newContent == null) return none();
@@ -1909,11 +1917,17 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
           newFile: { name: file.path, contents: data.newContent },
         };
       },
-      () => none(),
+      // The read failed: the arrows stay, and Pierre's next click asks again. Nobody is waiting on one this view let go of.
+      (cause: unknown) => {
+        augmentRef.current.set(itemId, { status: 'done', controller, generation });
+        if (controller.signal.aborted || fileSetKeyRef.current !== generation) return new Promise<never>(() => {});
+        wholeFileFailedRef.current += 1;
+        throw cause;
+      },
     );
   });
-  // Only a file changed in place has both sides to open.
-  const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' && !file.oldPath);
+  // Only a file with both sides has anything to open.
+  const opensWholeFiles = !!fetchFileContent && !wholeFileGone && files.some((file) => file.status === 'modified' || file.status === 'renamed');
 
   // A comment on a line an arrow opened, after a reload: the gap is closed again. Open what holds it (a first read if
   // need be), then scroll, once the rows are there. Answers whether it took the jump on.
@@ -1924,13 +1938,14 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     if (isLineRangeInPatch(file.patch, Math.min(range.start, range.end), Math.max(range.start, range.end), side)) return null;
     let frame = 0;
     let asked = false;
+    const failures = wholeFileFailedRef.current;
     const deadline = performance.now() + REVEAL_WAIT_MS;
     const step = () => {
       const viewer = viewerRef.current?.getInstance();
       const rendered = viewer?.getRenderedItems().find((candidate) => candidate.id === itemId);
       const instance = rendered?.type === 'diff' ? rendered.instance : null;
       const fileDiff = rendered?.type === 'diff' ? rendered.item.fileDiff : null;
-      if (wholeFileGoneRef.current || performance.now() > deadline) return onDone();
+      if (wholeFileGoneRef.current || wholeFileFailedRef.current !== failures || performance.now() > deadline) return onDone();
       if (instance && fileDiff && !fileDiff.isPartial) {
         for (const line of [range.start, range.end]) instance.revealLine(newLineOf(fileDiff, line, side));
         return onDone();

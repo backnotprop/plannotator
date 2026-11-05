@@ -569,7 +569,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const without = Number.parseFloat(boxHeight('a.ts'));
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split', opensWholeFiles: true } });
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
-    // Nothing more to open in a file that is not changed in place.
+    await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'renamed', oldPath: 'b.ts' }] }), diffStyle: 'split', opensWholeFiles: true } });
+    expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without + 32);
+    // Nothing more to open in a file with one side.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [{ ...file, status: 'added' }] }), diffStyle: 'split', opensWholeFiles: true } });
     expect(Number.parseFloat(boxHeight('a.ts'))).toBe(without);
   });

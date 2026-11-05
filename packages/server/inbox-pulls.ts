@@ -403,7 +403,7 @@ export interface InboxPulls {
    * PR the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
-  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PatchBlobIds | null): Promise<InboxFileContents>;
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PatchBlobIds | null, oldPath?: string): Promise<InboxFileContents>;
 }
 
 /** A local clone's read of one file at one commit (`<sha>:<path>`), capped. Null: this clone can't say. "none": it has the commit but no usable text. */
@@ -783,14 +783,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
       return answer;
     },
-    async fileContents(key, scope, path, roots, ids) {
+    async fileContents(key, scope, path, roots, ids, oldPath) {
       const none: InboxFileContents = { oldContent: null, newContent: null };
       // Nothing to check a text against (GitLab's whole-stack patches carry no index line): no arrows, and nothing runs.
       if (!ids) return none;
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
-      // A fork's commits live in the fork; the diff stays as it came.
-      if (!!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) return none;
       // The commit the patch on screen was read at, when the Inbox read one, else the list's. A patch whose head moved
       // during its read is the client's to catch (its answer has no head_sha, so it asks nothing); the blob ids catch the rest.
       const head = shaOf(readHeads.get(key) ?? pull.head_sha);
@@ -842,8 +840,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
         return read;
       };
-      const textAt = (sha: string): Promise<string | null> => {
-        const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${path}`;
+      const textAt = (sha: string, filePath: string): Promise<string | null> => {
+        const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${filePath}`;
         const hit = fileTexts.get(textKey);
         if (hit) {
           // Used again: the last to go.
@@ -853,14 +851,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
         const read = inTurn(async () => {
           for (const root of roots) {
-            const local = await gitRead(root, sha, path, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
+            const local = await gitRead(root, sha, filePath, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
             if (local === "none") return null;
             if (local !== null) return local;
           }
           const endpoint =
             pull.platform === "github"
-              ? `repos/${parts.owner}/${parts.repo}/contents/${compareRef(path)}?ref=${sha}`
-              : `projects/${project}/repository/files/${encodeURIComponent(path)}/raw?ref=${sha}`;
+              ? `repos/${parts.owner}/${parts.repo}/contents/${compareRef(filePath)}?ref=${sha}`
+              : `projects/${project}/repository/files/${encodeURIComponent(filePath)}/raw?ref=${sha}`;
           const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
           return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
         });
@@ -886,16 +884,16 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return read;
       };
       try {
-        const newContent = await textAt(head);
+        const newContent = await textAt(head, path);
         if (newContent === null || !isBlob(newContent, ids.newId)) return none;
         const base = await mergeBase();
         if (!base) return none;
-        const oldContent = await textAt(base);
+        const oldContent = await textAt(base, oldPath ?? path);
         // The list can be behind the patch, and a merged PR's base can be its head: only the patch's own blobs open.
         return oldContent === null || !isBlob(oldContent, ids.oldId) ? none : { oldContent, newContent };
       } catch {
-        // A forge that did not answer (rate limited, offline, signed out, not JSON): no arrows, and the next look asks again.
-        return none;
+        // A forge that did not answer (rate limited, offline, signed out, not JSON): the next click asks again.
+        return { ...none, failed: true };
       }
     },
   };

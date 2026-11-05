@@ -147,8 +147,8 @@ const MERGE_BASE = 'b'.repeat(40);
 /** A file with lines far from its one change, in the teammate's PR: the expand arrows have somewhere to open. */
 const TOKENS_PATH = 'src/settings/tokens.ts';
 const TOKENS = Array.from({ length: 60 }, (_, i) => `export const SPACE_${i + 1} = ${i + 1};`);
-// Past the change the two sides number apart: new line 46 is old line 45.
-const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SPACE_30 = 32;', 'export const SPACE_30_5 = 34;'] : [line]));
+// Past the change the two sides number far apart: new line 75 is old line 45.
+const TOKENS_CHANGED = TOKENS.flatMap((line, i) => (i === 29 ? ['export const SPACE_30 = 32;', ...Array.from({ length: 30 }, (_, n) => `export const EXTRA_${n} = ${n};`)] : [line]));
 
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
@@ -1167,6 +1167,11 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
 
 test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
   const { page } = world;
+  // A page with no diff holds no workers.
+  await page.goto(`${world.url}#pulls`);
+  await page.reload();
+  await expect(page.locator(`[data-pulls-row="${TEAMMATE}"]`)).toBeVisible({ timeout: 30_000 });
+  expect(page.workers()).toEqual([]);
   await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
   const review = page.locator('[data-pull-review]');
   const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
@@ -1196,6 +1201,7 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await page.getByRole('button', { name: 'Add Comment' }).click();
   await expect(review.locator('[data-review-posts] [data-decision-primary]')).toContainText('Post Comments');
   // The old side's line 45 quotes the old text, not the new file's line 45.
+  await box.evaluate((el) => el.scrollIntoView({ block: 'end' }));
   await shell.locator('[data-expand-up]:visible').last().click();
   const oldSide = shell.locator('[data-column-number="45"]').first();
   await expect(oldSide).toBeVisible({ timeout: 10_000 });
@@ -1209,6 +1215,10 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await review.getByRole('button', { name: 'Comments, 2' }).click();
   await review.locator('.ib-gpanel').getByText('Why 20 and not a named step?').first().click();
   await expect(shell.locator('[data-column-number="20"]').last()).toBeInViewport({ timeout: 10_000 });
+  // The old side numbers apart from the new: its comment opens the line it was written on.
+  await review.locator('.ib-gpanel').getByText('Why is this one kept?').first().click();
+  await expect(shell.locator('[data-column-number="45"]').first()).toBeInViewport({ timeout: 10_000 });
+  await expect(shell.getByText(TOKENS[44]!).first()).toBeInViewport();
   await review.locator('[data-review-posts] [data-decision-primary]').click();
   const dialog = page.getByRole('dialog');
   await expect(dialog.locator('[data-outside-diff-note]')).toContainText('outside the diff');

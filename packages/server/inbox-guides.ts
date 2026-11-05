@@ -194,11 +194,11 @@ export async function inboxGuideFileContents(
   sha256: string,
   path: string,
   root: string | null,
-  forge?: (ids: PatchBlobIds) => Promise<InboxFileContents> | null,
+  forge?: (ids: PatchBlobIds, oldPath: string | undefined) => Promise<InboxFileContents> | null,
 ): Promise<InboxFileContents> {
   const none: InboxFileContents = { oldContent: null, newContent: null };
   const file = patchFilesOf(store, sha256).find((f) => f.path === path);
-  if (!file || file.oldPath) return none;
+  if (!file) return none;
   const ids = patchBlobIds(file.patch);
   if (!ids) return none;
   const { oldId, newId } = ids;
@@ -220,7 +220,7 @@ export async function inboxGuideFileContents(
     return oldContent !== null && newContent !== null ? { oldContent, newContent } : none;
   }
   // The forge's reader checks both texts against these ids.
-  return (await forge?.(ids)) ?? none;
+  return (await forge?.(ids, file.oldPath)) ?? none;
 }
 
 /** The key the Pull requests list would give the pull request a guide is of, or null. */

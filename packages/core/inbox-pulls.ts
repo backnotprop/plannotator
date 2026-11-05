@@ -161,6 +161,8 @@ export type InboxPullDiffScope = "layer" | "stack";
  * nothing to open into (see `GET /api/inbox/pulls/file`): the diff then shows as it came, with no arrows.
  */
 export interface InboxFileContents {
+  /** The forge did not answer (rate limited, offline): both texts are null for now, and asking again may work. */
+  failed?: true;
   oldContent: string | null;
   newContent: string | null;
 }

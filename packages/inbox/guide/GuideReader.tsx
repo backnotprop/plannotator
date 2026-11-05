@@ -23,7 +23,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
-import type { InboxFileContents } from '@plannotator/core/inbox-types';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -31,7 +30,9 @@ import type {
   ConventionalLabel,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
+import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
 import { openedLinesQuote } from '../attachments';
+import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -159,26 +160,23 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false, fileContents }: GuideReaderProps) {
+/**
+ * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
+ * reader on screen and end with the last, so a page with no diff does not hold them.
+ */
+export default function GuideReader(props: GuideReaderProps) {
+  return (
+    <ReviewWorkerPoolProvider>
+      <Reader {...props} />
+    </ReviewWorkerPoolProvider>
+  );
+}
+
+function Reader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false, fileContents }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
-  // Only a file changed in place has both sides to open: an added or deleted file is already whole, and a renamed one stays as it came.
-  const wholeFiles = useRef(new Map<string, { patch: string; contents: InboxFileContents }>());
-  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(
-    () =>
-      fileContents
-        ? async (file, signal) => {
-            if (file.status !== 'modified' || file.oldPath) return null;
-            // A viewer mounted again asks again: what this patch already has is not read twice.
-            const kept = wholeFiles.current.get(file.path);
-            if (kept?.patch === file.patch) return kept.contents;
-            const contents = await fileContents(file.path, signal, file.patch);
-            wholeFiles.current.set(file.path, { patch: file.patch, contents });
-            return contents;
-          }
-        : undefined,
-    [fileContents],
-  );
+  const wholeFiles = useRef<KeptWholeFiles>(new Map());
+  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
