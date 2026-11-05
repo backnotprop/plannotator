@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { isShapeId } from "@plannotator/shared/shape/format";
 import { createShapeStore, shapesDirOf } from "@plannotator/shared/shape/store";
 import { selfCommand } from "./inbox-command";
-import { runningShapeServer, startShapeServer, type ShapeServerEntry } from "@plannotator/server/shape";
+import { runningShapeServer, startShapeServer, type RunningShapeServer } from "@plannotator/server/shape";
 
 const START_TIMEOUT_MS = 10_000;
 const START_LOCK = "server.start.lock";
@@ -34,6 +34,12 @@ export interface ShapeOpenDeps {
   stderr?: (text: string) => void;
   /** How long to wait for a started server (tests shorten it). */
   startTimeoutMs?: number;
+  /**
+   * Bare `plannotator shape`: when a Shape page is already open on the running server, print the address and open
+   * no second tab (the open page shows each new version by itself). `shape open` always opens one: an agent runs it
+   * on purpose. When the count cannot be read (an older server, no answer in time), a page is opened.
+   */
+  reuseOpenPage?: boolean;
 }
 
 /** `shape open` arguments: one board id at most, and `--json`. */
@@ -96,7 +102,7 @@ function defaultSpawn(dataDir: string): void {
 }
 
 /** The running Shapes server, starting one detached when none runs. Throws when it cannot start. */
-export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "spawnServer" | "startTimeoutMs">): Promise<ShapeServerEntry> {
+export async function ensureShapeServer(deps: Pick<ShapeOpenDeps, "dataDir" | "spawnServer" | "startTimeoutMs">): Promise<RunningShapeServer> {
   const running = await runningShapeServer(deps.dataDir);
   if (running) return running;
   const release = takeStartLock(deps.dataDir);
@@ -127,7 +133,7 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
     err(`not_found: No shape ${parsed.id}. List them with \`plannotator shape list\`.`);
     return 1;
   }
-  let entry: ShapeServerEntry;
+  let entry: RunningShapeServer;
   try {
     entry = await ensureShapeServer(deps);
   } catch (error) {
@@ -135,6 +141,10 @@ export async function runShapeOpen(argv: readonly string[], deps: ShapeOpenDeps)
     return 1;
   }
   const url = shapePageUrl(entry.url, parsed.id);
+  if (deps.reuseOpenPage && (entry.pages ?? 0) > 0) {
+    out(url);
+    return 0;
+  }
   const opened = await deps.openUrl(url);
   if (parsed.json) out(JSON.stringify({ url, opened: opened === "opened" }));
   else out(url);

@@ -525,6 +525,8 @@ async function session(sessionId) {
   while (!stopped) {
     const response = await post("/api/inbox/bridge/poll", { waitMs: 1000, project_path: agent.cwd, started_at: startedAt, busy, idle_since: busy ? null : idleSince }).catch(() => null);
     if (!response) {
+      // The test's scratch folder is gone: nothing can stop this session any more, so it ends itself.
+      if (!fs.existsSync(STATE)) process.exit(0);
       reconnect();
       await sleep(300);
       continue;
