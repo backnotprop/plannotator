@@ -132,9 +132,9 @@ export function localReviewMessage(input: { changes: InboxReviewChanges; project
     .join('\n\n');
 }
 
-/** The hand-off for a walkthrough: the person's words say what. */
+/** The hand-off for a walkthrough: the person's words say what, and come first, so a row's preview shows them. */
 export function walkthroughMessage(words: string): string {
-  return ['Please walk me through this, using /review-walkthrough. Don\'t change any code.', words.trim()].join('\n\n');
+  return [words.trim(), 'Please walk me through this, using /review-walkthrough. Don\'t change any code.'].join('\n\n');
 }
 
 /** The thread's suggested name: "Review web-app: uncommitted on main". */

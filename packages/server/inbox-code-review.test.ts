@@ -338,7 +338,7 @@ describe("the skills catalog", () => {
     expect(onList.some((s) => s.name === "review-guide")).toBe(false);
 
     const on = await catalog(true, own);
-    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-recheck", "agents-project:deploy"]);
+    expect(on.map((s) => `${s.root}:${s.name}`)).toEqual(["plannotator:review-curate", "plannotator:review-walkthrough", "plannotator:review-recheck", "agents-project:deploy"]);
     expect(on[0]!.humanOnly).toBe(true);
   });
 
@@ -362,7 +362,7 @@ describe("what an agent's tool carries", () => {
   };
 
   // Off is byte-equal to an Inbox that has no Code review at all: config.json without the key, and with it false.
-  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's field", async () => {
+  test("off: tools/list is byte-equal whether the switch was never set or turned off; on adds only submit_guide's fields", async () => {
     const w = await world();
     const never = JSON.stringify(await rawList(w.base));
     expect(never).not.toContain("Approve or Send feedback");
@@ -370,10 +370,13 @@ describe("what an agent's tool carries", () => {
     const on = JSON.stringify(await rawList(w.base));
     await w.setCodeReview(false);
     expect(JSON.stringify(await rawList(w.base))).toBe(never);
-    // On: the only change is submit_guide's `review` property.
+    // On: the only change is submit_guide's `review` and `walkthrough` properties.
     const strip = (list: string) => {
       const parsed = JSON.parse(list) as { tools: { name: string; inputSchema: { properties: Record<string, unknown> } }[] };
-      for (const tool of parsed.tools) if (tool.name === "submit_guide") delete tool.inputSchema.properties.review;
+      for (const tool of parsed.tools) if (tool.name === "submit_guide") {
+        delete tool.inputSchema.properties.review;
+        delete tool.inputSchema.properties.walkthrough;
+      }
       return JSON.stringify(parsed);
     };
     expect(on).not.toBe(never);

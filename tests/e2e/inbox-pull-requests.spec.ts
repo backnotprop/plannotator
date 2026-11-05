@@ -1818,6 +1818,94 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await box.locator('[data-compose-cancel]').click();
 });
 
+test('New review, a walkthrough: the words are the ask, its thread is named from them, and the code comes with no verdict', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&new`);
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-review-choice="walkthrough"]').check({ force: true });
+  // Nothing but the words: no changes to choose, no picker, and Start waits for them.
+  await expect(box.locator('[data-review-choices="changes"]')).toHaveCount(0);
+  await expect(box.locator('[data-review-pick]')).toHaveCount(0);
+  const words = box.locator('[data-compose-text] textarea');
+  await expect(words).toBeFocused();
+  await expect(words).toHaveAttribute('placeholder', 'What should it walk you through?');
+  await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+  await words.fill('How does a failed charge get retried? Start from the webhook.');
+  await expect(box.locator('[data-compose-send]')).not.toHaveClass(/ib-dis/);
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveValue('Failed charge');
+  await shot(page, 'w-box');
+  for (const [width, height] of [[390, 844], [320, 700]] as const) {
+    await page.setViewportSize({ width, height });
+    await shot(page, `w-box-${width}`, ['light']);
+    const row = box.locator('[data-review-choices="kind"]');
+    expect(await row.evaluate((group) => group.getBoundingClientRect().right <= group.parentElement!.getBoundingClientRect().right)).toBe(true);
+  }
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+
+  // Its row from the start, by the word, under a name that came from what was typed.
+  await expect(box.locator('[data-compose-thread-name] input')).toHaveCount(0);
+  const row = page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Failed charge' });
+  await expect(row).toContainText('Walkthrough');
+  await expect(row).toContainText('Curating');
+  await expect(page.getByText('/review-walkthrough').first()).toBeVisible();
+  const threadId = await page.evaluate(() => new URLSearchParams(location.hash.slice(1)).get('thread'));
+  await shot(page, 'w-curating');
+
+  // The agent names files and lines, and sends its own patch too: it isn't looked at.
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    reply_to: threadId,
+    patch: '',
+    body: 'A failed charge starts at the webhook.',
+    guide: {
+      title: 'How a failed charge gets retried',
+      intent: 'Follow one failed charge.',
+      sections: [
+        { title: 'Where it starts', overview: 'The webhook takes the event.', diffs: [{ file: 'src/i18n/fallback.ts', lines: '1-2', summary: 'The first lines.' }] },
+        { title: 'Between', overview: 'Words with no code beside them.', diffs: [] },
+      ],
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+  } as never);
+  const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
+  await expect(reviewed).toContainText('Ready', { timeout: 15_000 });
+  await expect(reviewed).toContainText('Walkthrough');
+  await expect(reviewed).toHaveAttribute('data-pulls-move', 'on_you');
+
+  // The card asks nothing and counts nothing.
+  const card = page.locator('[data-review-card]').last();
+  await expect(card).toContainText('Walkthrough');
+  await expect(card).not.toContainText('Waiting on you');
+  await expect(card).not.toContainText('+0');
+  await expect(card).toContainText('1 file');
+  await shot(page, 'w-card');
+
+  // Open: the code once, not side by side, and no verdict to give.
+  await card.locator('[data-review-start]').click();
+  await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Unified', exact: true })).toHaveCount(0);
+  await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
+  await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
+  await page.waitForTimeout(1200);
+  await shot(page, 'w-pane');
+  await page.getByRole('button', { name: 'All files', exact: true }).first().click().catch(() => page.getByText('All files').first().click());
+  await expect(page.getByText('Every file', { exact: true }).first()).toBeVisible();
+  await expect(page.locator('.ib-rrail .ib-add')).toHaveCount(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.waitForTimeout(600);
+  await shot(page, 'w-pane-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#thread=${encodeURIComponent(threadId!)}`);
+  await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
+  await shot(page, 'w-thread');
+});
+
 test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {
   const { page, claude } = world;
   const first = await claude.send({ project_path: world.projects.web, thread: 'asking', subject: 'Which retry cap?', body: 'A plain note from earlier.' });
