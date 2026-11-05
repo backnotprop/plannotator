@@ -212,7 +212,7 @@ export function ReviewRows(props: {
   return (
     <>
       <Row label="Review">
-        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local changes'], ['pr', 'Pull request']]} />
+        <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local'], ['pr', 'Pull request']]} />
       </Row>
       {kind === 'local' ? (
         <Row label="Changes">

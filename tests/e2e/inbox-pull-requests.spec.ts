@@ -841,7 +841,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
 }
 
 /** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice, [data-compose-send]';
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice input, [data-compose-send]';
 
 test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
@@ -1670,6 +1670,30 @@ test('New review, a pull request link: what was found and how it was read, a rep
   await shot(page, 'l-box-link');
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'l-box-link-phone');
+  // The phone's toggle: slim, on the label's line, as tall as the row below, with room for a third choice at 320 too.
+  await box.locator('[data-review-choices="kind"]').evaluate((group) => {
+    const third = group.lastElementChild!.cloneNode(true) as HTMLElement;
+    third.lastChild!.textContent = 'Walkthrough';
+    third.removeAttribute('data-on');
+    third.dataset.tryThird = '';
+    group.append(third);
+  });
+  for (const width of [390, 320]) {
+    await page.setViewportSize({ width, height: 700 });
+    await shot(page, `l-box-three-choices-${width}`, ['light']);
+    const fit = await box.locator('[data-review-choices="kind"]').evaluate((group) => {
+      const row = group.parentElement!;
+      const label = row.querySelector('.ib-cp-tol')!.getBoundingClientRect();
+      const toggle = group.getBoundingClientRect();
+      const box = row.getBoundingClientRect();
+      return { sameLine: Math.abs(label.top + label.height / 2 - (toggle.top + toggle.height / 2)) < 3, height: box.height, inside: toggle.right <= box.right, toRow: row.parentElement!.querySelector('[data-compose-to], .ib-cp-to:not(.ib-cp-rvrow)')?.getBoundingClientRect().height ?? 0 };
+    });
+    expect(fit.sameLine).toBe(true);
+    expect(fit.inside).toBe(true);
+    expect(fit.height).toBeLessThanOrEqual(fit.toRow + 1);
+  }
+  await box.locator('[data-try-third]').evaluate((third) => third.remove());
+  await page.setViewportSize({ width: 390, height: 844 });
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.unroute('**/api/inbox/sessions*');
 

@@ -7762,10 +7762,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
 .ib-cp[data-phone] .ib-cp-choices { flex: 0 1 auto; }
-.ib-cp[data-phone] .ib-cp-choice { justify-content: center; min-height: 44px; padding: 0 6px; }
+/* A slim toggle on the label's line, as tall as the rows below it; its tap target still reaches 44px. */
+.ib-cp[data-phone] .ib-cp-choice { justify-content: center; height: 38px; padding: 0 8px; }
+.ib-cp[data-phone] .ib-cp-choice input { inset: -3px 0; height: auto; }
 .ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; text-align: right; }
-.ib-cp[data-phone] .ib-cp-rvrow .ib-cp-tol { flex: 0 0 100%; }
+.ib-cp[data-phone] .ib-cp-rvrow:has(> .ib-cp-tobtn) .ib-cp-tol { flex: 0 0 100%; }
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
+@media (max-width: 359px) {
+  /* The narrowest phones: three choices still fit beside "Review". */
+  .ib-cp[data-phone][data-review-box] .ib-cp-rvrow .ib-cp-tol { min-width: 0; }
+  .ib-cp[data-phone][data-review-box] .ib-cp-rvrow { gap: 8px; }
+  .ib-cp[data-phone] .ib-cp-choice { padding: 0 5px; }
+}
 .ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-rvcurating { margin: 14px 0 0 34px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
