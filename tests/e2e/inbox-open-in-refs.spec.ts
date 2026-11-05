@@ -713,6 +713,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(linkOnlyInPr.locator('[data-target-line]').first()).toContainText('schedule30');
       await expect(linkOnlyInPr.locator('[data-open-in-caret]')).toHaveCount(0);
       await expect(linkOnlyInPr.locator('[data-code-hover-forge]')).toBeVisible();
+      // A file that is there: no "not attached" tooltip beside its code.
+      await page.waitForTimeout(800);
+      await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
       await page.mouse.move(1, 1);
 
       // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
@@ -786,6 +789,8 @@ for (const colorScheme of ['light', 'dark'] as const) {
 
 /** Press in the text before `words`, and drag past them into the text after. */
 async function dragAcross(page: Page, words: Locator) {
+  // The page draws the message again once it has read the settings.
+  await expect.poll(() => words.boundingBox()).not.toBeNull();
   const box = (await words.boundingBox())!;
   const y = box.y + box.height / 2;
   await page.mouse.move(box.x - 30, y);
