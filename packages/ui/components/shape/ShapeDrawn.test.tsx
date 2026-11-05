@@ -202,3 +202,96 @@ describe.skipIf(!hasDom)('a drawn view', () => {
     }
   });
 });
+
+describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures', () => {
+  const REFS: ShapeRef[] = [
+    { n: 1, kind: 'image', title: 'The dialog', target: 'files/a.png' },
+    { n: 2, kind: 'link', title: 'The docs', target: 'https://example.com/docs' },
+    { n: 3, kind: 'pr', title: 'The PR', target: 'https://example.com/pr/1', images: [{ src: 'files/pr.png', alt: 'Its page' }] },
+  ];
+  const hit = (el: Element, type: string, init: Record<string, unknown> = {}) => act(async () => { el.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, composed: true }), init)); });
+
+  test('a radio the kit draws survives the sanitizer, with the name, class and checked its css reads', async () => {
+    const { shadow } = await draw({ html: '<label class="pick on-a"><input type="radio" name="follow" class="f-a" checked=""><span>Path A</span></label><label class="pick"><input type="radio" name="follow" class="f-b"></label>' });
+    const radios = [...shadow.querySelectorAll<HTMLInputElement>('input[type="radio"]')];
+    expect(radios.map((r) => [r.name, r.className, r.hasAttribute('checked')])).toEqual([['follow', 'f-a', true], ['follow', 'f-b', false]]);
+    expect(shadow.querySelector('label.pick.on-a')).not.toBeNull();
+  });
+
+  test('an input still cannot load anything', async () => {
+    const { shadow } = await draw({ html: '<input type="image" src="https://evil.invalid/x.png">' });
+    expect(shadow.querySelector('input')?.getAttribute('src') ?? null).toBeNull();
+  });
+
+  test('a number the agent drew stays its own; an empty one gets its number; one with no reference goes', async () => {
+    const { shadow } = await draw({ html: '<svg><g data-ref="1"><circle r="9"></circle></g></svg><span data-ref="2"></span><span data-ref="9">x</span>', refs: REFS });
+    const own = shadow.querySelector('[data-ref="1"]')!;
+    expect(own.querySelector('circle')).not.toBeNull();
+    expect(own.classList.contains('own')).toBe(true);
+    const plain = shadow.querySelector('[data-ref="2"]')!;
+    expect(plain.textContent).toBe('2');
+    expect(plain.classList.contains('own')).toBe(false);
+    expect(shadow.querySelector('[data-ref="9"]')).toBeNull();
+  });
+
+  test('kept pictures reach the host, in HTML and in SVG, and nothing else is rewritten', async () => {
+    const { shadow } = await draw({ html: '<img src="files/a.png"><svg><image href="files/b.png"></image></svg><img src="data:image/png;base64,AAAA">', resolveSrc: (src) => `/assets/${src}` });
+    const imgs = [...shadow.querySelectorAll('img')].map((i) => i.getAttribute('src'));
+    expect(imgs).toEqual(['/assets/files/a.png', 'data:image/png;base64,AAAA']);
+    expect(shadow.querySelector('image')?.getAttribute('href')).toBe('/assets/files/b.png');
+  });
+
+  test('a mouse over a number peeks; leaving hides it; a click opens it', async () => {
+    const peeks: [number | null, string][] = [];
+    const opens: number[] = [];
+    const { shadow } = await draw({ html: '<span data-ref="1"></span>', refs: REFS, onRefPeek: (n, _el, how) => peeks.push([n, how]), onRefOpen: (n) => opens.push(n) });
+    const b = shadow.querySelector('[data-ref="1"]')!;
+    expect(b.hasAttribute('title')).toBe(false);
+    await hit(b, 'pointerover', { pointerType: 'mouse' });
+    await hit(b, 'pointerout', { pointerType: 'mouse' });
+    expect(peeks).toEqual([[1, 'hover'], [null, 'hover']]);
+    await hit(b, 'click');
+    expect(opens).toEqual([1]);
+  });
+
+  test('a finger: no hover, and a tap pins the bubble instead of opening', async () => {
+    const peeks: [number | null, string][] = [];
+    const opens: number[] = [];
+    const { shadow } = await draw({ html: '<span data-ref="1"></span>', refs: REFS, onRefPeek: (n, _el, how) => peeks.push([n, how]), onRefOpen: (n) => opens.push(n) });
+    const b = shadow.querySelector('[data-ref="1"]')!;
+    await hit(b, 'pointerover', { pointerType: 'touch' });
+    expect(peeks).toEqual([]);
+    await hit(b, 'pointerdown', { pointerType: 'touch' });
+    await hit(b, 'click');
+    expect(peeks).toEqual([[1, 'tap']]);
+    expect(opens).toEqual([]);
+  });
+
+  test('a link with a picture opens the picture; one without opens its page', async () => {
+    const opens: number[] = [];
+    const realOpen = window.open;
+    const opened: unknown[] = [];
+    window.open = ((url: string) => { opened.push(url); return null; }) as typeof window.open;
+    try {
+      const { shadow } = await draw({ html: '<span data-ref="3"></span><span data-ref="2"></span>', refs: REFS, onRefPeek: () => {}, onRefOpen: (n) => opens.push(n) });
+      await hit(shadow.querySelector('[data-ref="3"]')!, 'click');
+      expect(opens).toEqual([3]);
+      expect(opened).toEqual([]);
+      await hit(shadow.querySelector('[data-ref="2"]')!, 'click');
+      expect(opened).toEqual(['https://example.com/docs']);
+    } finally {
+      window.open = realOpen;
+    }
+  });
+
+  test('without a peek (a diagram in another host) a number keeps its title and opens as before', async () => {
+    const opens: number[] = [];
+    const { shadow } = await draw({ html: '<span data-ref="1"></span>', refs: REFS, onRefOpen: (n) => opens.push(n) });
+    const b = shadow.querySelector('[data-ref="1"]')!;
+    expect(b.getAttribute('title')).toBe('The dialog');
+    await hit(b, 'pointerdown', { pointerType: 'touch' });
+    await hit(b, 'click');
+    expect(opens).toEqual([1]);
+  });
+});
+
