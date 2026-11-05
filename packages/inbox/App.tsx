@@ -2451,7 +2451,7 @@ function Inbox() {
   // dialog, and never on a load that showed it. Never through the tailnet,
   // even for the owner, who can read the agents there (like the other one-time
   // dialogs; Settings → Agents asks the same thing), never while an update
-  // dialog is open or a reply is being typed, and it waits while Settings is open.
+  // dialog is open or a reply is being typed, and it waits while Settings or another dialog is open.
   const soundSettled = settings !== null && (!(settings.sound?.dialog_due === true && (settings.via ?? 'local') === 'local') || soundClaimed);
   const agentNoteReady =
     agentsSettled && latest !== null && soundSettled && soundDialog === 'none' && updateDialog === null && !restarting && route.page !== 'settings' && route.page !== 'tour';
@@ -2459,7 +2459,7 @@ function Inbox() {
     if (!agentNoteReady || agentNoteDecided.current) return;
     let cancelled = false;
     const decide = () => {
-      if (cancelled || agentNoteDecided.current || replyInProgress()) return false;
+      if (cancelled || agentNoteDecided.current || replyInProgress() || modalOpen()) return false;
       agentNoteDecided.current = true;
       const model = settings?.via === 'tailnet' ? null : agentsRef.current;
       const rows = model ? noteQuestionRows(model) : [];

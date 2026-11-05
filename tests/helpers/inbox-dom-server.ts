@@ -51,7 +51,8 @@
  * (`{ thread, ids: { <name>: <attachment id> } }`).
  *
  * The Inbox is published over the tailnet by a scripted `tailscale`, and the
- * first line adds `tailnet: { listener, host, login }`: a request to that
+ * first line adds `tailnet: { listener, host, login }` (as with `bro-offer`:
+ * version 0.30.0, the Bro mode offer next): a request to that
  * loopback port with that Host and login is one `tailscale serve` hands over.
  *
  * With `tags` (approval "inbox-tag-agents"), the mock's sample threads are
@@ -265,6 +266,23 @@ if (decisionsMode) {
   mkdirSync(dataDir, { recursive: true });
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ experimental: { decisionMode: true } }));
 }
+// The Bro mode offer (approval "bro-mode"): the one way a test meets it; Snooze and the switches behind the person, so
+// only it can be next, and one login beside the owner's, for a guest's calls over the tailnet.
+const broOfferMode = extra === "bro-offer";
+if (broOfferMode) {
+  mkdirSync(dataDir, { recursive: true });
+  const day = 24 * 3_600_000;
+  writeFileSync(
+    join(dataDir, "config.json"),
+    JSON.stringify({
+      updateCheck: false,
+      inboxBoard: false,
+      inboxSteps: false,
+      inboxTailscaleAllow: ["guest@example.com"],
+      inboxSnoozeIntro: { firstUseAt: new Date().toISOString(), snoozedAt: new Date(Date.now() - 3 * day).toISOString() },
+    }),
+  );
+}
 const reloadHostsMode = extra === "reload-hosts";
 const restartMode = extra === "restart" || reloadHostsMode;
 const claudeDir = join(dataDir, "claude");
@@ -319,6 +337,7 @@ const server = await startInboxServer({
   ...(phonesMode ? { tailscale, pairingProbes } : {}),
   ...(openInMode ? { openInLauncher, tailscale, publishTailnet: true } : {}),
   ...(whatsNewMode ? { version: "0.28.19", binaryPath: null } : {}),
+  ...(broOfferMode ? { version: "0.30.0", binaryPath: null, broOffer: true, tailscale, publishTailnet: true } : {}),
   // Every window reads usage when it opens: only `accounts` finds a `cswap`, and never on this process's own PATH, which can hold a real one.
   // No kept answer: the tests change the fake between reads.
   accounts: { environment: createAgentEnvironmentFor({ platform: process.platform, homeDir: scratchHome, env: { HOME: scratchHome, PATH: extra === "accounts" ? join(dataDir, "cswap-bin") : "" } }), cacheMs: 0 },
@@ -683,7 +702,7 @@ for (let i = 0; i < (firstRunMode ? 0 : count); i++) {
       : [],
   });
 }
-const tailnet = openInMode ? { listener: server.tailscale.listenerPort(), host: `macbook.tail0000.ts.net:${server.port}`, login: "ramos@example.com" } : undefined;
+const tailnet = openInMode || broOfferMode ? { listener: server.tailscale.listenerPort(), host: `macbook.tail0000.ts.net:${server.port}`, login: "ramos@example.com" } : undefined;
 const tagWorld = extra === "tags" ? await seedTagWorld(`http://127.0.0.1:${server.port}`, server.token, join(projectsDir, "tags")) : null;
 const tags = tagWorld ? { ids: tagWorld.ids, sessions: TAG_SESSIONS } : undefined;
 process.stdout.write(`${JSON.stringify({ port: server.port, worlds, ...(tailnet ? { tailnet } : {}), ...(tags ? { tags } : {}) })}\n`);
