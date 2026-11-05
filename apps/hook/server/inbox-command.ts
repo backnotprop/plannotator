@@ -614,8 +614,11 @@ function usageError(message: string): never {
 }
 
 export interface InboxCommandAssets {
-  /** The built window (`apps/hook/dist/inbox.html`), embedded by the binary. */
-  htmlContent?: string;
+  /**
+   * Reads the built window (`apps/hook/dist/inbox.html`), embedded by the binary. A function because
+   * only serving needs the page, and every agent session keeps an `inbox mcp` process running.
+   */
+  htmlContent?: () => string;
   /** The global `--json` flag (index.ts takes it out of the arguments first); `status` reads it, `stop` and `restart` refuse it. */
   json?: boolean;
 }
@@ -744,7 +747,7 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     if (connect) await connectRunningInbox(entry);
     process.exit(0);
   }
-  return serveInbox(dataDir, !noOpen, assets.htmlContent, tailscale, connect);
+  return serveInbox(dataDir, !noOpen, assets.htmlContent?.(), tailscale, connect);
 }
 
 /**
