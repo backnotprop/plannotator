@@ -1225,7 +1225,7 @@ Pull request
 
 What to do
 1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).
-2. After that, we discuss it in this thread. If I ask for changes, make them, push them to the branch if you can, and send me the updated review here. Don't comment on the pull request, approve it or merge it.`;
+2. After that, we discuss it in this thread. Bring up what you notice or want to ask without waiting for me. If I ask for changes, make them, push them to the branch if you can, and send me the updated review here. Don't comment on the pull request, approve it or merge it.`;
 
 test('the person\'s own PR: the approved hand-off, word for word', () => {
   expect(handoffOf(LOCALE_PR())).toBe(APPROVED_OWN);
@@ -1348,7 +1348,7 @@ Stack
 
 What to do
 1. Send me a guided review of the whole stack's diff, from main to retry/dunning, using /review-curate (its instructions are at the end of this message). Walk it layer by layer, in landing order, with what to watch in each.
-2. After that, we discuss it in this thread. If I ask for changes, make them, push them to the branches if you can, and send me the updated review here. Don't comment on the pull requests, approve them or merge them.`);
+2. After that, we discuss it in this thread. Bring up what you notice or want to ask without waiting for me. If I ask for changes, make them, push them to the branches if you can, and send me the updated review here. Don't comment on the pull requests, approve them or merge them.`);
   // Custom words replace the walk; a teammate's layer names its author; an unsafe top head becomes "the top pull
   // request's branch"; an unsafe link is left out.
   const mixed = inboxPullStacks([stack[0]!, stack[1]!, pull(414, { head: 'x`y', base: 'retry/backoff', mine: false, author: 'tomas', url: 'https://evil.example/414' })])[0]!;

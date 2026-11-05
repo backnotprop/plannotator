@@ -243,6 +243,12 @@ export function handoffStack(stack: InboxPullStack, links: Readonly<Record<strin
     : { ...stack, layers, base: layers[0]!.base, open_base: layers[0]!.base };
 }
 
+/**
+ * Step 2's line on using the thread, every PR's (the owner on a teammate's PR: "You should also be encouraged to use the
+ * review thread with the user"). Draft wording, not yet approved: awaits the owner in `pull-handoff-pushes`.
+ */
+const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiting for me.';
+
 /** " on dana/web-app (a fork)" after a branch whose head is on a fork, so the agent knows where it lives; else nothing. */
 function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
   const fork = pull.head_repo;
@@ -299,7 +305,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const feedback = mine
     ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
-  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${feedback}`;
+  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
