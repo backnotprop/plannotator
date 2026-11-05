@@ -1,4 +1,5 @@
 import { createContext, useContext, type ReactNode } from "react";
+import { isCodeFilePath } from "@plannotator/core/code-file";
 
 /**
  * What a host makes of a link to a local path (`[the mock](mock.html)`):
@@ -33,6 +34,12 @@ export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
  */
 export type CodeSpanRenderer = (text: string, code: ReactNode) => ReactNode;
 export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
+
+/** An inline code span as drawn (`children`), through the host's wrap when it names a code file. */
+export function CodeSpan({ text, children }: { text: string; children: ReactNode }) {
+  const wrap = useContext(CodeSpanContext);
+  return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
+}
 
 export function useLocalLinkResolver(): LocalLinkResolver | null {
   return useContext(LocalLinkContext);

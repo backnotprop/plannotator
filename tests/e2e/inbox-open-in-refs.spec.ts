@@ -138,7 +138,7 @@ function fakes(dir: string, launches: string, patch: string) {
 
 const REVIEW_GUIDE = {
   title: 'Back off between retries',
-  intent: 'Wait before retrying.',
+  intent: 'Wait before retrying, in `src/retry.ts:3`; `react.js` is not one of ours.',
   sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }, { file: 'src/only-on-the-pr.ts', summary: 'A new file.' }] }],
 };
 
@@ -148,7 +148,7 @@ function board(patch: string) {
     claim: 'Built. The loop now waits [^1].',
     views: {
       picture: { html: '<svg viewBox="0 0 700 240" width="700" height="240"><g data-step="1" data-mark="loop" data-code="src/ledger.ts#L1" data-ref="1"><rect class="ink" x="40" y="70" width="260" height="90" rx="12"/><text x="170" y="120" text-anchor="middle">The retry loop</text></g><g data-step="2" data-mark="gone" data-ref="3"><rect class="acc-fill" x="400" y="70" width="260" height="90" rx="12"/><text x="530" y="120" text-anchor="middle" class="t-acc">A file that is gone</text></g></svg>', width: 700, height: 240 },
-      know: 'The loop waits 0.5 s, 2 s, then 8 s [^1].',
+      know: 'The loop waits 0.5 s, 2 s, then 8 s [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
       code: {
         stage: 'after',
         guide: { title: 'Back off between retries', intent: 'Wait before retrying.', sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }] }] },
@@ -362,6 +362,48 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(launched().at(-1)).toContain(realPath('src/retry.ts'));
       await expect(popout).toBeVisible();
 
+      // What to know: a code span opens the list at its line. One that is not a file stays a plain span.
+      await page.reload();
+      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+      await expect(page.locator('.shp-view.v-know.drawn')).toBeVisible(); // its fade in has finished, for the picture
+      const knowSpan = page.locator('.shp-know [data-open-in-span="src/ledger.ts"]');
+      await knowSpan.click();
+      const knowMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
+      await expect(knowMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `13-board-know-code-span-${colorScheme}`);
+      const knowCount = launched().length;
+      await knowMenu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(knowCount + 1);
+      expect(launched().at(-1)).toContain(realPath('src/ledger.ts'));
+      await page.locator('.shp-know [data-open-in-span="react.js"]').click();
+      await expect(page.locator('.shp-know [data-open-in-span="react.js"]')).toHaveCount(0);
+      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+      // The number beside it is still the number.
+      await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
+      // Annotating, a click on the words picks them: no menu.
+      await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
+      await expect(page.locator('.shp-know [data-open-in-span]')).toHaveCount(0);
+      await page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }).click();
+      await page.waitForTimeout(350);
+      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+
+      // The review's own words: its intent names a file.
+      await page.goto(`${world.url}#thread=${world.reviewThread}`);
+      await page.getByRole('button', { name: 'Start review' }).first().click();
+      const reader = page.locator('section[data-review-mode]');
+      const guideSpan = reader.locator('[data-open-in-span="src/retry.ts"]');
+      await guideSpan.click();
+      const guideMenu = page.locator('[data-open-in-menu="src/retry.ts"]');
+      await expect(guideMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `14-guide-code-span-${colorScheme}`);
+      const guideCount = launched().length;
+      await guideMenu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(guideCount + 1);
+      expect(launched().at(-1)).toContain(realPath('src/retry.ts'));
+      await reader.locator('[data-open-in-span="react.js"]').click();
+      await expect(reader.locator('[data-open-in-span="react.js"]')).toHaveCount(0);
+      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+
       // The review's diff header: a file on disk has it, one only the change has does not.
       await openReviewFiles(page);
       const onDisk = page.locator('[data-guide-file-shell="src/retry.ts"]');
@@ -441,6 +483,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
       await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
       await page.waitForTimeout(600); // the sheet has finished rising, for the picture
+      await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
       await shot(page, `09-phone-shape-${colorScheme}`);
 
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
@@ -496,6 +539,16 @@ test('an agent in a linked worktree: its message, review and board open the work
     expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
     await row.locator('.shp-ref-open').click();
     await expect(page.locator('[data-popout]')).toContainText('BACKOFF_MS');
+
+    // The board's and the review's own words start in the worktree too. (With the panel open, a click on the board only closes the panel.)
+    await page.reload();
+    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+    await page.locator('.shp-know [data-open-in-span="src/ledger.ts"]').click();
+    expect(await pick('src/ledger.ts')).toContain(inTree('src/ledger.ts'));
+    await page.goto(`${world.url}#thread=${world.treeReviewThread}`);
+    await page.getByRole('button', { name: 'Start review' }).first().click();
+    await page.locator('section[data-review-mode] [data-open-in-span="src/retry.ts"]').click();
+    expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
   } finally {
     await context.close();
   }
@@ -520,6 +573,9 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
+    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+    await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
+    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
     expect(asked).toEqual([]);
   } finally {
     await context.close();

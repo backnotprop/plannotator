@@ -46,6 +46,7 @@ import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeKnow } from './ShapeKnow';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
+import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
 
@@ -197,6 +198,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   // With readFirst a board is for looking at: the pointer is a normal pointer and nothing lights up,
   // until the Annotate button in the dock turns on pointing (Pinpoint) and selecting words (Select).
   const [annotating, setAnnotating] = useState(!readFirst);
+  const codeSpan = React.useContext(CodeSpanContext);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const hoverEl = useRef<HTMLElement | null>(null);
   const [more, setMore] = useState(false);
@@ -836,6 +838,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   return (
     <RefsCtx.Provider value={refsState}>
+    {/* While annotating, a click on the board's words picks them: a code span is only words. */}
+    <CodeSpanContext.Provider value={annotating ? null : codeSpan}>
       <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
@@ -1142,6 +1146,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           </PopoutDialog>
         )}
       </div>
+    </CodeSpanContext.Provider>
     </RefsCtx.Provider>
   );
 }

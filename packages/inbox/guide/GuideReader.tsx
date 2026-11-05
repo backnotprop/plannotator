@@ -20,7 +20,7 @@
  * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
+import { useCallback, useContext, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
@@ -33,7 +33,9 @@ import type {
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
+import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/CommentPopover';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
@@ -393,8 +395,12 @@ export default function GuideReader({
     [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
   );
 
+  // The window's wrap for a code span, for the viewer's own inline parser.
+  const codeSpan = useContext(CodeSpanContext);
+
   return (
     <GuideHostProvider value={host}>
+      <GuideCodeSpanContext.Provider value={codeSpan}>
       <GuideView
         guide={guide}
         reviewed={ticks}
@@ -407,6 +413,7 @@ export default function GuideReader({
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />
+      </GuideCodeSpanContext.Provider>
       {globalAnchor && globalDraftKey && (
         <CommentPopover
           anchorEl={globalAnchor}

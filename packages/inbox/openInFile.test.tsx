@@ -8,11 +8,13 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
+import { GuideCodeSpanContext, renderInlineMarkdown } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
-const { OpenInCodeSpan, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { ShapeInline } = (hasDom ? await import('@plannotator/ui/components/shape/inline') : {}) as typeof import('@plannotator/ui/components/shape/inline');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
 type Asked = { method: string; url: string; body: Record<string, unknown> | null };
@@ -183,5 +185,49 @@ describe('a code span that names a file', () => {
     await settle();
     expect(span()).toBeNull();
     expect(host!.querySelector('code')).not.toBeNull();
+  });
+});
+
+describe('code spans in a guide and a board', () => {
+  const scope = { shape: 'shp_x' };
+  const spans = () => [...host!.querySelectorAll('[data-open-in-span]')].map((el) => el.getAttribute('data-open-in-span'));
+
+  test.skipIf(!hasDom)('a guide: a span naming a file is the control, others and a link label are not', async () => {
+    const renderLink = (href: string, label: ReactNode, key: number) => <button key={key} data-link={href}>{label}</button>;
+    await act(async () =>
+      root!.render(
+        <GuideCodeSpanContext.Provider value={(text, code) => <OpenInCodeSpan scope={scope} text={text}>{code}</OpenInCodeSpan>}>
+          <p>{renderInlineMarkdown('See `src/a.ts:3`, `not code` and [`src/label.ts`](code:src/label.ts).', { renderLink })}</p>
+        </GuideCodeSpanContext.Provider>,
+      ),
+    );
+    expect(spans()).toEqual(['src/a.ts']);
+    expect(host!.querySelector('[data-link]')!.querySelector('code')!.textContent).toBe('src/label.ts');
+  });
+
+  test.skipIf(!hasDom)('a board: a span naming a file is the control, a number stays a number', async () => {
+    await act(async () =>
+      root!.render(
+        <OpenInCodeSpans scope={scope} on>
+          <p><ShapeInline text="See **`src/b.ts`**, `not code`." /></p>
+        </OpenInCodeSpans>,
+      ),
+    );
+    expect(spans()).toEqual(['src/b.ts']);
+  });
+
+  test.skipIf(!hasDom)('with Code review off, and with no host, both draw the same plain span', async () => {
+    const drawn = async (node: ReactNode) => {
+      await act(async () => root!.render(<div>{node}</div>));
+      return host!.innerHTML;
+    };
+    const guide = () => <p>{renderInlineMarkdown('See `src/a.ts`.')}</p>;
+    const board = () => <p><ShapeInline text="See `src/a.ts`." /></p>;
+    const plainGuide = await drawn(guide());
+    const plainBoard = await drawn(board());
+    expect(await drawn(<GuideCodeSpanContext.Provider value={null}>{guide()}</GuideCodeSpanContext.Provider>)).toBe(plainGuide);
+    expect(await drawn(<OpenInCodeSpans scope={scope} on={false}>{board()}</OpenInCodeSpans>)).toBe(plainBoard);
+    expect(spans()).toEqual([]);
+    expect(asked.filter((a) => a.url.includes('/open-in/'))).toHaveLength(0);
   });
 });

@@ -41,7 +41,7 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
-import { OpenInFile } from '../components/OpenIn';
+import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
@@ -557,7 +557,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">

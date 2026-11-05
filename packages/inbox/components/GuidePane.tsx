@@ -28,7 +28,7 @@ import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
-import { OpenInFile } from './OpenIn';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -269,7 +269,9 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
             </div>
           ) : snapshot ? (
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} fileOpenIn={codeReview ? fileOpenIn : undefined} />
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
+                <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} fileOpenIn={codeReview ? fileOpenIn : undefined} />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : null}
         </div>

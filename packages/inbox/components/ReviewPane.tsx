@@ -70,7 +70,7 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
-import { OpenInFile } from './OpenIn';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -706,6 +706,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -720,6 +721,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 renderOverviewFigure={renderOverviewFigure}
                 highlight={highlight}
               />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : null}
         </div>

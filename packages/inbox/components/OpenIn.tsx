@@ -1,7 +1,8 @@
 import { inboxUrl } from '../inboxUrl';
-import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { loadOpenInApps, useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
@@ -313,6 +314,21 @@ export function OpenInCodeSpan({ scope, text, children }: { scope: OpenInFileSco
   const named = projectFileOfLink(text);
   if (phone || !writes || !named) return <>{children}</>;
   return <OpenInCodeSpanMenu scope={scope} path={named.path} line={named.line}>{children}</OpenInCodeSpanMenu>;
+}
+
+/**
+ * Code spans in what `children` draws (a message, a board, and a guide through its reader): each that names a file
+ * opens the list. `on` is Code review.
+ */
+export function OpenInCodeSpans({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
+  const key = JSON.stringify(scope);
+  const render = useMemo(
+    () => (on ? (text: string, code: ReactNode) => <OpenInCodeSpan scope={scope} text={text}>{code}</OpenInCodeSpan> : null),
+    // `key` names the scope.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, on],
+  );
+  return <CodeSpanContext.Provider value={render}>{children}</CodeSpanContext.Provider>;
 }
 
 const CODE_SPAN_CLICK_MS = 200;
