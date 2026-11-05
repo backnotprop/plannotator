@@ -1,7 +1,7 @@
 /**
  * Escape closes an open sheet wherever focus is: a click on nothing leaves focus on the page, and WebKit never moves it
- * to a clicked button. Not a new shortcut: the same Escape, the same way App's pages read it. What already used this
- * key (a composer, a card, a menu) or is a place to type keeps it: a second Escape closes the sheet.
+ * to a clicked button. Not a new shortcut: the same Escape, read the way App's pages read it. What already used this
+ * key (a composer, a card, a menu: they stop or mark it) or is a place to type keeps it: a second Escape closes the sheet.
  */
 
 import { useEffect, useRef } from 'react';
@@ -15,7 +15,7 @@ export function useSheetEscape(open: boolean, close: () => void): void {
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || isComposingKey(event) || modalOpen()) return;
       const from = keyTarget(event);
-      if (from && (isEditableTarget(from) || inOverlay(from) || from.closest('[role="menu"], [role="listbox"], [aria-haspopup][aria-expanded="true"]'))) return;
+      if (from && (isEditableTarget(from) || inOverlay(from))) return;
       event.preventDefault();
       closeRef.current();
     };

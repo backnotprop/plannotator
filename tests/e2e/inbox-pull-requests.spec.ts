@@ -1180,6 +1180,30 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
       await closesToButton(sheet, button);
     }
 
+    // A card's edit takes it too. (Its words are the panel's business, shared with the review app.)
+    await files.click();
+    await line.click({ position: { x: 4, y: 4 } });
+    await composer.fill('A line comment to edit.');
+    await page.getByRole('button', { name: 'Add Comment' }).click();
+    await esc();
+    await expect(rail).toBeHidden();
+    await comments.click();
+    const card = panel.locator('[data-annotation-id]').first();
+    await card.hover();
+    await card.getByRole('button', { name: 'Edit annotation' }).click();
+    const edit = panel.locator('textarea').first();
+    await expect(edit).toBeFocused();
+    await esc();
+    await expect(edit).toBeHidden();
+    await expect(panel).toBeVisible();
+    await closesToButton(panel, comments);
+    // The world's other tests read this PR: its comment goes.
+    await comments.click();
+    await card.hover();
+    await card.getByRole('button', { name: /delete/i }).click();
+    await expect(card).toHaveCount(0);
+    await closesToButton(panel, comments);
+
     // A menu's Escape is the menu's: the decision's other choices over an open sheet.
     await files.click();
     await page.getByRole('button', { name: 'More decisions' }).click();
