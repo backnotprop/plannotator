@@ -19,27 +19,29 @@ A VS Code development container usually opens the browser by itself. If it does 
 | Variable | Purpose |
 |----------|---------|
 | `PLANNOTATOR_REMOTE=1` | Forces remote mode, which binds to `0.0.0.0` and uses port `19432` unless `PLANNOTATOR_PORT` is set |
-| `PLANNOTATOR_PORT=9999` | Optional. Uses another port instead of `19432` |
+| `PLANNOTATOR_PORT=9999` | Optional. Uses another port instead of `19432`. `forwardPorts` must list the same port |
 
 Setting `PLANNOTATOR_PORT` without `PLANNOTATOR_REMOTE=1` is not enough for a published Docker port, because local mode binds to `127.0.0.1` inside the container. A VS Code forwarded port can still reach that address.
 
+For Docker without a development container, set remote mode and publish the port to your own computer only: `docker run -e PLANNOTATOR_REMOTE=1 -p 127.0.0.1:19432:19432 your-image`. Keep a forwarded port's visibility private.
+
 ## Port Forwarding
 
-Ensure port 9999 (or your chosen port) is forwarded to your host. In VS Code devcontainers, add it to `forwardPorts` as shown above.
+If you added the sample, make sure port 9999 (or your chosen port) is forwarded to your host. In VS Code devcontainers, `forwardPorts` in the sample does this.
 
 ## Usage
 
 1. Run OpenCode in your container (`opencode` or `opencode web`)
 2. Ask the agent to create a plan
-3. When `submit_plan` is called, Plannotator starts on port 9999
-4. Open `http://localhost:9999` in your host browser
+3. When `submit_plan` is called, Plannotator starts. With the sample, it uses port 9999
+4. If the browser does not open, open `http://localhost:9999` in your host browser, or the port you set
 5. Approve or deny the plan
 
 **Note:** Browser opening depends on your container/browser setup. If nothing opens automatically, navigate to the forwarded URL manually when you see the agent call `submit_plan`.
 
 ## OpenCode Web
 
-`opencode web` works in devcontainers. Forward port 4096 (default) for the OpenCode UI, and port 9999 for Plannotator:
+`opencode web` works in devcontainers. Forward port 4096 (default) for the OpenCode UI. If you added the sample, also forward port 9999 for Plannotator:
 
 ```json
 {
