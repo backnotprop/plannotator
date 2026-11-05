@@ -21,7 +21,7 @@
  * teammate or the forge is Waiting on others.
  */
 
-import { inboxPullIsOpen, inboxPullLongLived, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
+import { inboxPullIsOpen, inboxPullLongLived, inboxPullRefOfUrl, type InboxPull, type InboxPullHost, type InboxPullLink, type InboxPullReason, type InboxPullStack } from "./inbox-pulls";
 import type { InboxReviewVerdict } from "./inbox-review";
 
 /** Where a review's changes came from: the guide snapshot's `source` and `review` (base), as the message records them. */
@@ -186,6 +186,8 @@ export interface InboxReviewLanding {
   number: number;
   title: string;
   platform: InboxPull["platform"];
+  /** The PR's head branch, when known: a review of that branch is a review of this PR. */
+  head: string | null;
   /**
    * The thread's latest review when this was first seen, when that review was not newer than the landing; else null.
    * Later on the row compares review ids, never clocks: a review with another id came after the record.
@@ -199,15 +201,20 @@ export interface InboxReviewLanding {
  */
 export const INBOX_REVIEW_CLOCK_SKEW_MS = 5 * 60_000;
 
+/** A record's identity: two threads on one PR each have their own, against their own review. */
+export function inboxReviewLandingId(landing: Pick<InboxReviewLanding, "key" | "thread_id">): string {
+  return `${landing.thread_id} ${landing.key}`;
+}
+
 /** The record for a PR seen merged or closed now, against the thread's review as it stands. */
 export function inboxReviewLandingOf(
-  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at">,
+  pull: Pick<InboxReviewLanding, "key" | "url" | "number" | "title" | "platform" | "state" | "at" | "head">,
   threadId: string,
   review: Pick<InboxReviewThread, "latest_review_id" | "reviewed_at"> | null,
 ): InboxReviewLanding {
   const landedAt = pull.at ? Date.parse(pull.at) : NaN;
   const newer = !!review && !Number.isNaN(landedAt) && Date.parse(review.reviewed_at) > landedAt + INBOX_REVIEW_CLOCK_SKEW_MS;
-  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, through_review: review && !newer ? review.latest_review_id : null };
+  return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, through_review: review && !newer ? review.latest_review_id : null };
 }
 
 /** One row of the Reviews page. */
@@ -331,7 +338,16 @@ const landingFields = (pull: InboxPull) => ({
   platform: pull.platform,
   state: pull.state === "closed" ? ("closed" as const) : ("merged" as const),
   at: pull.merged_at ?? pull.updated_at,
+  head: pull.head,
 });
+
+/** The review is of a landed PR: its source names it or its branch; a review with no source is taken to be of it. */
+function reviewIsOfLanding(review: InboxReviewThread, landed: readonly InboxReviewLanding[]): boolean {
+  const source = review.source;
+  if (!source) return true;
+  if (source.pr) return landed.some((landing) => bareUrl(landing.url) === bareUrl(source.pr!.url));
+  return !!source.branch && landed.some((landing) => landing.head === source.branch);
+}
 
 /**
  * Per thread: the PRs it owns and the link that ties them. A PR the person handed it (`via: "owner"`), or one the
@@ -362,10 +378,10 @@ export function inboxReviewLandingChanges(input: {
   landed: readonly InboxReviewLanding[];
 }): { record: InboxReviewLanding[]; forget: string[] } {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
-  const known = new Set(input.landed.map((landing) => landing.key));
+  const known = new Set(input.landed.map((landing) => inboxReviewLandingId(landing)));
   const record: InboxReviewLanding[] = [];
   for (const [threadId, own] of reviewOwned(byThread, input.pulls, input.links)) {
-    for (const pull of own.pulls) if (!inboxPullIsOpen(pull) && !known.has(pull.key)) record.push(inboxReviewLandingOf(landingFields(pull), threadId, byThread.get(threadId) ?? null));
+    for (const pull of own.pulls) if (!inboxPullIsOpen(pull) && !known.has(inboxReviewLandingId({ key: pull.key, thread_id: threadId }))) record.push(inboxReviewLandingOf(landingFields(pull), threadId, byThread.get(threadId) ?? null));
   }
   const openNow = new Set(input.pulls.filter(inboxPullIsOpen).map((pull) => pull.key));
   return { record, forget: input.landed.filter((landing) => openNow.has(landing.key)).map((landing) => landing.key) };
@@ -400,15 +416,23 @@ export function inboxReviewRows(input: {
   pullReasons?: ReadonlyMap<string, InboxPullReason>;
   /** The recorded landings. A merged PR in `pulls` with no record yet counts the same. */
   landed?: readonly InboxReviewLanding[];
+  /** Every PR the person handed to a thread (pull key → thread), on the list or not: one with no record may still be open. */
+  owners?: ReadonlyMap<string, { thread_id: string }>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
   for (const pull of input.pulls ?? input.stacks.flatMap((s) => s.layers)) if (!all.has(pull.key)) all.set(pull.key, pull);
   const owned = reviewOwned(byThread, all.values(), input.links);
   const recorded = input.landed ?? [];
+  const ownersOf = new Map<string, string[]>();
+  for (const [key, owner] of input.owners ?? []) ownersOf.set(owner.thread_id, [...(ownersOf.get(owner.thread_id) ?? []), key]);
+  const ownedKeys = (threadId: string, review: InboxReviewThread | null): string[] => {
+    const named = review?.source?.pr ? inboxPullRefOfUrl(review.source.pr.url)?.key : null;
+    return [...(ownersOf.get(threadId) ?? []), ...(owned.get(threadId)?.pulls.map((pull) => pull.key) ?? []), ...(named ? [named] : [])];
+  };
   const landingsOf = (threadId: string, pulls: readonly InboxPull[], review: InboxReviewThread | null): InboxReviewLanding[] => [
     ...recorded.filter((landing) => landing.thread_id === threadId),
-    ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
+    ...pulls.filter((pull) => !inboxPullIsOpen(pull) && !recorded.some((landing) => landing.key === pull.key && landing.thread_id === threadId)).map((pull) => inboxReviewLandingOf(landingFields(pull), threadId, review)),
   ];
   const stacksOf = (pulls: readonly InboxPull[]) => input.stacks.filter((stack) => stack.layers.some((layer) => inboxPullIsOpen(layer) && pulls.some((p) => p.key === layer.key)));
 
@@ -420,7 +444,9 @@ export function inboxReviewRows(input: {
     const open = pulls.filter(inboxPullIsOpen);
     // Landed: every PR it owns merged or closed, and no review came after, or the person approved the one that did.
     const landed = open.length === 0 ? landingsOf(threadId, pulls, review) : [];
-    if (landed.length > 0 && (!review || review.verdict?.verdict === "approved" || landed.some((landing) => landing.through_review === review.latest_review_id))) return;
+    // Only when every PR it owns is accounted for: one with no record may be open, just off this list.
+    const allDone = landed.length > 0 && ownedKeys(threadId, review).every((key) => landed.some((landing) => landing.key === key));
+    if (allDone && (!review || landed.some((landing) => landing.through_review === review.latest_review_id) || (review.verdict?.verdict === "approved" && reviewIsOfLanding(review, landed)))) return;
     if (review?.resolved_at && review.reviewed_at <= review.resolved_at && open.length === 0) return;
     const stacks = stacksOf(open);
     for (const stack of stacks) attached.add(stack.id);

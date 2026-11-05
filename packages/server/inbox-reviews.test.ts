@@ -24,15 +24,17 @@
  *    source its snapshot names.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxMessage, InboxReviewRow, InboxReviewsAnswer } from "@plannotator/core/inbox-types";
+import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
+import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
-import { createInboxReviewIndex, type InboxReviewIndexStore } from "./inbox-reviews";
+import { createInboxPullLinks, INBOX_PULL_LINKS_FILE } from "./inbox-pull-links";
+import { createInboxPullStates, createInboxReviewIndex, type InboxReviewIndexStore } from "./inbox-reviews";
 import type { RefRunner } from "./ref-cards";
 
 const roots: string[] = [];
@@ -329,6 +331,118 @@ describe("a PR that left the list", () => {
     w.forge.prState.answer = null;
     const r1 = await w.sendReview("failed", "r1", undefined, w.prGuide(CLOSED_URL, 500));
     expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(1);
+  });
+});
+
+describe("the state reads", () => {
+  const thread = (id: string, pr?: string): InboxReviewThread =>
+    ({ thread_id: id, latest_review_id: `${id}_r1`, reviewed_at: "2026-11-01T10:00:00.000Z", source: pr ? { kind: "pr", pr: { url: pr } } : null }) as unknown as InboxReviewThread;
+  const key = (n: number) => `github.com/northwind/billing-svc#${n}`;
+  const url = (n: number) => `https://github.com/northwind/billing-svc/pull/${n}`;
+  const GITHUB: InboxPullHost = { cli: "gh", host: "github.com", login: "dana" };
+  function reader(answer: (endpoint: string) => string | null) {
+    const reads: string[] = [];
+    const landed: InboxReviewLanding[] = [];
+    let at = 1_000_000;
+    const states = createInboxPullStates({
+      now: () => at,
+      run: async (cli, args) => {
+        const endpoint = args[3]!;
+        reads.push(`${cli} ${endpoint}`);
+        const out = answer(endpoint);
+        return out === null ? { stdout: "", stderr: "no", exitCode: 1 } : { stdout: out, stderr: "", exitCode: 0 };
+      },
+      onLand: (record, forget = []) => {
+        for (let i = landed.length - 1; i >= 0; i--) if (forget.includes(landed[i]!.key)) landed.splice(i, 1);
+        landed.push(...record);
+      },
+    });
+    const look = (threads: InboxReviewThread[], options: { owners?: [string, string][]; hosts?: InboxPullHost[] } = {}) =>
+      states.look({ threads, pulls: [], hosts: options.hosts ?? [GITHUB], owners: new Map((options.owners ?? []).map(([k, t]) => [k, { thread_id: t }])), landed: [...landed] });
+    return { reads, landed, look, pass: (ms: number) => (at += ms) };
+  }
+  const closed = JSON.stringify({ state: "closed", merged_at: null, closed_at: "2026-11-02T10:00:00Z", title: "T", html_url: url(1), head: { ref: "b" } });
+  const merged = JSON.stringify({ state: "closed", merged_at: "2026-11-02T10:00:00Z", title: "T", html_url: url(1) });
+
+  test("a host that failed this list is not read", async () => {
+    const r = reader(() => closed);
+    await r.look([thread("t", url(1))], { hosts: [{ ...GITHUB, error: "unavailable" }] });
+    expect(r.reads).toEqual([]);
+  });
+
+  test("the CLI is the one the host uses, whatever the host is called", async () => {
+    const r = reader(() => closed);
+    await r.look([thread("t")], { owners: [["git.example.com/group/app#7", "t"]], hosts: [{ cli: "glab", host: "git.example.com", login: "d" }] });
+    expect(r.reads).toEqual([`glab projects/${encodeURIComponent("group/app")}/merge_requests/7`]);
+  });
+
+  test("one read of the list starts at most 5, and the rest wait", async () => {
+    const r = reader(() => null);
+    const threads = [1, 2, 3, 4, 5, 6, 7].map((n) => thread(`t${n}`, url(n)));
+    await r.look(threads);
+    expect(r.reads).toHaveLength(5);
+    await r.look(threads);
+    expect(r.reads).toHaveLength(7);
+  });
+
+  test("only a thread with a review is read for: a thread with none has no row to get wrong", async () => {
+    const r = reader(() => closed);
+    await r.look([], { owners: [[key(1), "no_review"]] });
+    expect(r.reads).toEqual([]);
+  });
+
+  test("a merged record is never read again; a closed one is checked after a day, and a reopen forgets it", async () => {
+    let answer = merged;
+    const r = reader(() => answer);
+    await r.look([thread("m", url(1))]);
+    expect(r.landed.map((l) => l.state)).toEqual(["merged"]);
+    r.pass(30 * 24 * 60 * 60_000);
+    await r.look([thread("m", url(1))]);
+    expect(r.reads).toHaveLength(1);
+
+    const c = reader(() => answer);
+    answer = closed;
+    await c.look([thread("c", url(1))]);
+    expect(c.landed.map((l) => l.state)).toEqual(["closed"]);
+    c.pass(60 * 60_000);
+    await c.look([thread("c", url(1))]);
+    expect(c.reads).toHaveLength(1);
+    c.pass(24 * 60 * 60_000);
+    answer = JSON.stringify({ state: "open", title: "T", html_url: url(1) });
+    await c.look([thread("c", url(1))]);
+    expect(c.reads).toHaveLength(2);
+    expect(c.landed).toEqual([]);
+  });
+
+  test("a second thread on a PR already recorded gets its own record", async () => {
+    const r = reader(() => closed);
+    await r.look([thread("a", url(1))]);
+    r.pass(31 * 60_000);
+    await r.look([thread("a", url(1)), thread("b", url(1))]);
+    expect(r.landed.map((l) => l.thread_id).sort()).toEqual(["a", "b"]);
+  });
+});
+
+describe("the record", () => {
+  test("survives a restart, and a read-only folder never fails the list's read", () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-landed-")));
+    roots.push(dir);
+    const landing: InboxReviewLanding = { key: "github.com/o/r#1", thread_id: "t", state: "closed", at: null, url: "https://github.com/o/r/pull/1", number: 1, title: "T", platform: "github", head: null, through_review: "t_r1" };
+    createInboxPullLinks(dir).land([landing]);
+    expect(createInboxPullLinks(dir).landings()).toEqual([landing]);
+    const file = join(inboxDir(dir), INBOX_PULL_LINKS_FILE);
+    const whole = JSON.parse(readFileSync(file, "utf8"));
+    whole.landed.bad = { thread_id: "t", url: "https://x", number: 1, state: "gone" };
+    writeFileSync(file, JSON.stringify(whole));
+    expect(createInboxPullLinks(dir).landings()).toEqual([landing]);
+    chmodSync(inboxDir(dir), 0o500);
+    try {
+      const store = createInboxPullLinks(dir);
+      expect(() => store.land([{ ...landing, thread_id: "u" }])).not.toThrow();
+      expect(store.landings()).toHaveLength(2);
+    } finally {
+      chmodSync(inboxDir(dir), 0o700);
+    }
   });
 });
 

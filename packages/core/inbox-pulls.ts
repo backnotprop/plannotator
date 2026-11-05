@@ -474,14 +474,24 @@ export function inboxPullGroups(items: readonly InboxPullItem[]): InboxPullGroup
   };
 }
 
+/** A repository path as a forge names one: `owner/repo`, GitLab's groups included. Never `.` or `..`, nor anything a URL could smuggle in. */
+const INBOX_PULL_REPO = /^(?!.*(?:^|\/)\.{1,2}(?:\/|$))[A-Za-z0-9._-]+(?:\/[A-Za-z0-9._-]+)+$/;
+
 /** A pull or merge request's parts from its web address (`/pull/N`, `/pulls/N`, `/-/merge_requests/N`), its key included; null for anything else. */
 export function inboxPullRefOfUrl(url: string): { key: string; platform: InboxPull["platform"]; host: string; repo: string; number: number } | null {
-  const match = /^https:\/\/([A-Za-z0-9.-]+)\/(.+?)\/(pulls?|-\/merge_requests)\/(\d+)(?:[/?#].*)?$/.exec(url);
-  if (!match) return null;
+  const match = /^https:\/\/([A-Za-z0-9.-]+)\/([^?#]+?)\/(pulls?|-\/merge_requests)\/(\d+)(?:[/?#].*)?$/.exec(url);
+  if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
   const host = match[1]!.toLowerCase();
   const repo = match[2]!;
   const number = Number(match[4]);
   return { key: `${host}/${repo}#${number}`, platform: match[3] === "-/merge_requests" ? "gitlab" : "github", host, repo, number };
+}
+
+/** A pull key's parts (`host/repo#number`); null for anything else. */
+export function inboxPullRefOfKey(key: string): { host: string; repo: string; number: number } | null {
+  const match = /^([A-Za-z0-9.-]+)\/(.+)#(\d+)$/.exec(key);
+  if (!match || !INBOX_PULL_REPO.test(match[2]!)) return null;
+  return { host: match[1]!.toLowerCase(), repo: match[2]!, number: Number(match[3]) };
 }
 
 /**
