@@ -437,6 +437,28 @@ test('full screen’s composer: the words land in the reply', async () => {
   await context.close();
 });
 
+test('full screen’s composer on a phone at 320: dictating, the status has the row, with Cancel, the clock and the mic inside the box', async () => {
+  const w = await mainWorld();
+  const { context, page } = await open(speech, w, { phone: true, viewport: { width: 320, height: 568 } });
+  await page.goto(`${w.url}#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`);
+  const card = page.locator('[data-fcomp]');
+  await expect(card).toBeVisible();
+  await card.getByRole('radio', { name: 'Reply' }).tap();
+  w.send({ upstream: [{ text: 'Looks right.' }] });
+  await mic(card).click();
+  await expect(line(card, 'tap')).toBeVisible();
+  await expect(card.locator('[data-fcomp-open-thread]')).toBeHidden();
+  await expect(card.locator('[data-fcomp-comments]')).toBeHidden();
+  const [box, clip, cancel, clock, button] = await Promise.all(['', '.ib-fcomp-clip', '[data-voice-cancel]', '.ib-dttime', '[data-voice-mic]'].map(async (part) => (await (part ? card.locator(part) : card).boundingBox())!));
+  expect(clip!.x + clip!.width).toBeLessThanOrEqual(cancel!.x);
+  expect(cancel!.x + cancel!.width).toBeLessThanOrEqual(clock!.x);
+  expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
+  expect(button!.x + button!.width).toBeLessThanOrEqual(box!.x + box!.width);
+  await mic(card).click();
+  await expect(card.locator('[data-fcomp-field] textarea')).toHaveValue('Looks right.');
+  await context.close();
+});
+
 /** The microphone itself, not the window's idea of it: answers how many of its tracks are open. */
 async function watchMic(page: Page): Promise<() => Promise<number>> {
   await page.addInitScript(() => {

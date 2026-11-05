@@ -19,6 +19,7 @@
  *   corner control (`onGather`; `tucked`: inert, flown into the corner in
  *   inbox.css). The corner control says "Draft" while a draft waits; one press
  *   brings everything back with focus in the card's field.
+ * - On a phone the pill sits left of the toolbar when both fit on the row, else above it (`pillAbove`).
  * - The pill (30 px, "Reply draft" while a draft waits, else the tab's label)
  *   is left for a card folded by default (an HTML page on a phone opens clear)
  *   and for a host that gives no `onGather`. The pill gives the card back and
@@ -28,6 +29,7 @@
  *   paste or a drop on the card attaches as in the box. They are the box's
  *   files (one reply), shown here with the box's tiles.
  *
+ * - On a phone the toolbar is one row: what yields when it runs short is `cardFootFitCandidates` (footFit.ts).
  * - "N comments" opens the thread's list of comments (AnnotationsChip.tsx). The list is the card's sibling, never
  *   its child: the card's backdrop filter would hold a phone's sheet, a fixed box, inside the card.
  *
@@ -46,7 +48,7 @@ import { Icon } from '../icons';
 import { Tip } from './Tip';
 import { useComposerState, type ComposerMode } from '../fullScreenComposer';
 import { openItemsLabel } from '../openQuestions';
-import { drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
+import { cardFootFitCandidates, drawOpenQuestionsForm, fitFootRow, footFitCandidates, openQuestionsFormText, type CardFootFit, type FootFit, type OpenQuestionsLabelForm } from '../footFit';
 
 /** The thread's reply, as the composer's Reply tab shows and sends it (Thread.tsx builds it). */
 export interface FullScreenReply {
@@ -127,10 +129,19 @@ function useSentFlash(sentAt: number | null): boolean {
   return on;
 }
 
-const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** "2 comments", one flex item. Short of room, a phone keeps the number (`.ib-fcomp-w` goes visually hidden, so the name stays whole). */
+/** The least room between a phone's pill and the toolbar on one row. */
+const PILL_BAR_GAP = 4;
+
+const Count = ({ n, word }: { n: number; word: string }) => (
+  <span>
+    {n}
+    <span className="ib-fcomp-w">{` ${word}${n === 1 ? '' : 's'}`}</span>
+  </span>
+);
 
 /** The chips of what rides the Send, and the open questions (a way to them, in the thread). */
-function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef: RefObject<HTMLButtonElement | null>; onComments: () => void }) {
+function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; phone: boolean; linkRef: RefObject<HTMLButtonElement | null>; onComments: () => void }) {
   const chips = useRef<HTMLSpanElement>(null);
   const [form, setForm] = useState<OpenQuestionsLabelForm>('full');
   const n = reply.openQuestions;
@@ -138,17 +149,35 @@ function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef
   const label = openItemsLabel(n, a);
   // The thread foot's own fit (footFit.ts), on this row: the longest words ("2 open questions"), then "2 open", then
   // "2", that keep the chips on one line and inside the row. Tried on the page before paint.
+  // A phone's whole foot has one row to share, so its fit goes further (`cardFootFitCandidates`, footFit.ts).
   const fit = useCallback(() => {
     const row = chips.current;
     const button = row?.querySelector<HTMLElement>('[data-fcomp-questions]');
+    const foot = row?.closest<HTMLElement>('[data-fcomp-foot]');
+    if (phone && row && foot) {
+      const apply = (next: CardFootFit) => {
+        foot.setAttribute('data-fit', next.fit);
+        if (button) drawOpenQuestionsForm(button, next);
+      };
+      const fits = () => row.scrollWidth <= row.clientWidth + 1 && foot.scrollWidth <= foot.clientWidth + 1;
+      // Null: the row is not laid out (dictating, it steps aside). The fit stays until it is back.
+      const next = fitFootRow(row, cardFootFitCandidates(), apply, fits);
+      if (next) setForm(next.form);
+      return;
+    }
     if (!row || !button) return;
     const apply = (next: FootFit) => drawOpenQuestionsForm(button, next);
     const fits = () => row.scrollWidth <= row.clientWidth + 1;
     const next = fitFootRow(row, footFitCandidates('full').filter((c) => !c.tight), apply, fits) ?? { form: 'full' as const, tight: false };
     apply(next);
     setForm(next.form);
-  }, []);
+  }, [phone]);
   useLayoutEffect(() => fit());
+  // The foot outlives this row ("Sent to …" takes its place for a moment): the fit goes with the chips.
+  useLayoutEffect(() => {
+    const foot = chips.current?.closest('[data-fcomp-foot]');
+    return () => foot?.removeAttribute('data-fit');
+  }, []);
   useEffect(() => {
     const row = chips.current;
     if (!row || typeof ResizeObserver === 'undefined') return;
@@ -163,13 +192,13 @@ function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef
       {reply.picks > 0 && (
         <span className="ib-fcomp-chip">
           <Icon name="check" size={12} />
-          {plural(reply.picks, 'pick')}
+          <Count n={reply.picks} word="pick" />
         </span>
       )}
       {reply.actions > 0 && (
         <span className="ib-fcomp-chip">
           <Icon name="check" size={12} />
-          {plural(reply.actions, 'action item')}
+          <Count n={reply.actions} word="action item" />
         </span>
       )}
       {reply.annotations > 0 && (
@@ -184,7 +213,7 @@ function Rides({ reply, linkRef, onComments }: { reply: FullScreenReply; linkRef
           onClick={onComments}
         >
           <Icon name="comment" size={12} />
-          {plural(reply.annotations, 'comment')}
+          <Count n={reply.annotations} word="comment" />
         </button>
       )}
       {/* The thread foot's words (openItemsLabel): "2 open questions", "1 open action item", "2 questions, 1 action item".
@@ -243,6 +272,23 @@ export function FullScreenComposer({
   /** Where focus goes once the next state is drawn: the card's field (restored, a tab picked) or the pill (minimized). */
   const focusNext = useRef<'field' | 'pill' | null>(null);
   const sent = useSentFlash(reply.sentAt);
+  /** A phone's pill shares the toolbar's row until they would touch (a narrow phone, "Draft", 75/78): then it sits above. */
+  const [pillAbove, setPillAbove] = useState(false);
+  useLayoutEffect(() => {
+    const pill = phone && state.minimized ? pillRef.current : null;
+    const view = pill?.closest('.ib-fullview');
+    const bar = view?.querySelector('[data-full-view-bar]');
+    if (!pill || !view || !bar) {
+      setPillAbove(false);
+      return;
+    }
+    const check = () => setPillAbove(pill.getBoundingClientRect().right + PILL_BAR_GAP > bar.getBoundingClientRect().left);
+    check();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(check);
+    for (const el of [pill, bar, view]) observer.observe(el);
+    return () => observer.disconnect();
+  });
   // Files dropped on the card attach to the reply, as on the reply box (a comment takes no files: Reply only).
   const drop = useFileDrop((list) => reply.onDropFiles(list), !state.minimized && mode === 'reply' && !value.tucked);
   const errorId = `ib-fcomp-err-${threadId}`;
@@ -296,7 +342,7 @@ export function FullScreenComposer({
     return (
       <>
       {keptComment(false)}
-      <div className={`ib-fcomp-pillwrap${phone ? ' ib-phone' : ''}`} data-fcomp-pillwrap="" inert={value.tucked || undefined} {...(phone ? {} : { 'data-file-foot': '' })}>
+      <div className={`ib-fcomp-pillwrap${phone ? ' ib-phone' : ''}`} data-fcomp-pill-above={pillAbove ? '' : undefined} data-fcomp-pillwrap="" inert={value.tucked || undefined} {...(phone ? {} : { 'data-file-foot': '' })}>
         <button
           type="button"
           ref={pillRef}
@@ -363,13 +409,14 @@ export function FullScreenComposer({
         {showSent ? (
           <span className="ib-fcomp-sent" data-fcomp-sent="">
             <Icon name="checkCircle" size={13} />
-            Sent to {reply.to}
+            <span className="ib-fcomp-sentl">Sent to {reply.to}</span>
           </span>
         ) : reply.conflict ? (
           <span className="ib-fcomp-note">This reply changed in another window.</span>
         ) : (
           <Rides
             reply={reply}
+            phone={phone}
             linkRef={commentsRef}
             onComments={() => {
               setCardHeight(cardRef.current?.offsetHeight ?? 0);
@@ -379,7 +426,8 @@ export function FullScreenComposer({
         )}
         <VoiceFoot voice={voice} phone={phone} />
         <button type="button" className="ib-fcomp-link" onClick={reply.onOpenThread} data-fcomp-open-thread="">
-          Open in thread
+          <span className="ib-fcomp-lo">Open in </span>
+          <span className="ib-fcomp-lt">thread</span>
         </button>
       </div>
     ) : null;
