@@ -107,6 +107,10 @@ export function inboxReviewSkill(name: string): InboxReviewSkill | undefined {
 
 /** The heading the person's comments on a guided review's diff ride under in their reply (the window's `guideFeedback`). */
 export const INBOX_GUIDE_FEEDBACK_TITLE = 'Feedback on the guided review';
+/** The heading the window's Send opens the feedback on the thread's messages with (`# …`; packages/inbox attachments.ts). */
+export const INBOX_MESSAGE_FEEDBACK_TITLE = 'Feedback on your messages';
+/** The heading the window's Send opens the feedback on attached files with (`# …`). */
+export const INBOX_ATTACHMENT_FEEDBACK_TITLE = 'Feedback on the attached files';
 
 /** The parts of a thread's message `inboxThreadHadReview` reads. */
 export interface InboxReviewThreadMessage {

@@ -303,3 +303,17 @@ describe('the generator, on what the source could grow', () => {
     expect(() => renderInboxThreadCss(css)).toThrow();
   });
 });
+
+describe('a compound that is only an attribute', () => {
+  const cssOf = (selector: string) => renderInboxThreadCss(`${selector} { color: red; }`);
+
+  test('a combinator after it scopes, as after any other compound', () => {
+    expect(cssOf('[data-a] [data-b] > svg').css).toBe(':where(.pn-inbox) [data-a] [data-b] > svg { color: red; }\n');
+  });
+
+  test('after the page\'s element it is what the rule styles, so the rule stays', () => {
+    const { css, dropped } = cssOf(':root.dark [data-a] [data-b]');
+    expect(dropped).toEqual([]);
+    expect(css).toBe(':root.dark :where(.pn-inbox) [data-a] [data-b] { color: red; }\n');
+  });
+});

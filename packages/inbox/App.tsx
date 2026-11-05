@@ -72,6 +72,7 @@ import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
 import { AccountsProvider, useAccounts } from './useAccounts';
+import { InitiativeTagsContext, type InitiativeTags } from './hashtags';
 import { SidebarShell } from './shell/SidebarShell';
 import { InboxList } from './components/InboxList';
 import { useTidy } from './components/Tidy';
@@ -141,7 +142,7 @@ import { installPlainTextPaste } from '@plannotator/ui/utils/pasteInsert';
 import { LIST_MIN_WIDTH, THREAD_BESIDE_FILE_WIDTH, paneGutters, useStack } from './stack';
 import { threadPanelShows, useThreadPanel } from './threadPanel';
 import { ListColumnEdge } from './shell/ListColumnEdge';
-import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute } from './history';
+import { backBy, backTo, pushScreen, settleLanding, whileWritingRoute, withoutClickSignal } from './history';
 import { parseFileView, sameScreenAnyView } from './fileView';
 import { fileEntryOp, fullExitFile, fullFromSide, pageBackPastSwitch, withFullMark, type FrameMove, type FullMark } from './fullScreenOrigin';
 import { adoptSavedTheme, inboxServerSync } from './theme';
@@ -364,7 +365,7 @@ function readRoute(): Route {
 }
 
 function routeOf(fullHash: string): Route {
-  const hash = fullHash.replace(/^#/, '');
+  const hash = withoutClickSignal(fullHash).replace(/^#/, '');
   const settingsAt = parseSettingsHash(hash);
   if (settingsAt) return { page: 'settings', project: null, thread: null, section: settingsAt.section, pair: settingsAt.pair, experimental: settingsAt.experimental };
   const params = new URLSearchParams(hash);
@@ -536,6 +537,12 @@ function stripStrayMsg(): void {
   if (!params.has('msg') || params.get('thread')) return;
   const hash = hashOf(readRoute());
   window.history.replaceState(window.history.state, '', hash || window.location.pathname + window.location.search);
+}
+
+/** A notification click's `click=` come back from the browser's own history (history.ts) leaves the address bar. */
+function stripClickSignal(): void {
+  const clean = withoutClickSignal(window.location.hash);
+  if (clean !== window.location.hash) window.history.replaceState(window.history.state, '', clean || window.location.pathname + window.location.search);
 }
 
 /**
@@ -1110,6 +1117,7 @@ function Inbox() {
     const onHash = () => {
       // A Back this window started: its rewrite of the entry it landed on comes first (history.ts settleLanding).
       settleLanding();
+      stripClickSignal();
       stripStrayMsg();
       settleTourEntry();
       const oldExperimental = settleOldExperimental();
@@ -1148,6 +1156,7 @@ function Inbox() {
       setTimeout(() => place(false), 300);
       setTimeout(() => place(false), 1000);
     };
+    stripClickSignal();
     stripStrayMsg();
     settleOldExperimental();
     window.addEventListener('hashchange', onHash);
@@ -1530,9 +1539,12 @@ function Inbox() {
   const cardsSeq = useRef(0);
   /** Whether the Board is on (`boardEnabled` below), for the reads that run outside a render. */
   const boardOnRef = useRef(false);
+  /** When the last cards read started: an opened `#` preview reads them only when that is older than 5 s. */
+  const cardsReadAt = useRef(0);
   const refreshCards = useCallback(async (): Promise<CardsModel | null> => {
     if (!boardOnRef.current) return null;
     const mine = ++cardsSeq.current;
+    cardsReadAt.current = Date.now();
     try {
       const next = await inboxApi.cards();
       // An older read never replaces a newer one that landed first.
@@ -1634,6 +1646,31 @@ function Inbox() {
    * "board-initiatives"). One the Inbox does not hold (deleted, a stale link) is no filter once the
    * cards have loaded; before that the id filters as it stands.
    */
+  // `#` in a composer names these (approval "board-hashtags"): the Board's live initiatives, with their cards counted.
+  // The live initiatives, the same array while their ids and names stay: every message's tag links
+  // (`linkHashtags`) follow it, so a list or cards read that changes neither redraws no message.
+  const initiativesKey = liveInitiatives(cards?.initiatives)
+    .map((i) => `${i.id}\u0000${i.name}`)
+    .join('\u0001');
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- keyed on the ids and names, on purpose
+  const tagInitiatives = useMemo(() => liveInitiatives(cards?.initiatives), [initiativesKey]);
+  // An opened preview reads the cards again (a tag written since in a thread no card links), at most once in 5 s.
+  const refreshForPeek = useCallback(() => {
+    if (Date.now() - cardsReadAt.current < 5_000) return;
+    void refreshCards();
+  }, [refreshCards]);
+  const initiativeTags = useMemo<InitiativeTags>(() => {
+    const counts = new Map<string, number>();
+    const live = (cards?.cards ?? []).filter((card) => card.column !== 'dropped');
+    for (const card of live) if (card.initiative) counts.set(card.initiative, (counts.get(card.initiative) ?? 0) + 1);
+    const rows = new Map<string, InboxListRow>();
+    for (const row of [...(latest?.sections.flatMap((s) => s.threads) ?? []), ...(latest?.snoozed ?? []), ...(latest?.pins ?? [])]) if (!rows.has(row.thread_id)) rows.set(row.thread_id, row);
+    // A thread the list leaves out (archived) still has its row in the cards payload.
+    for (const [id, row] of Object.entries(cards?.threads ?? {})) if (row && !rows.has(id)) rows.set(id, row);
+    const projects = new Map((latest?.projects ?? []).map((p) => [p.id, p.name] as const));
+    const mentions = new Map(Object.entries(cards?.initiative_threads ?? {}));
+    return { initiatives: tagInitiatives, counts, cards: live, rows, projects, mentions, refresh: refreshForPeek };
+  }, [cards, latest, tagInitiatives, refreshForPeek]);
   const boardInitiative = route.page === 'board' ? boardInitiativeOf(route.initiative, cards ? liveInitiatives(cards.initiatives) : null) : null;
   useEffect(() => {
     if (!onBoard) {
@@ -1857,6 +1894,9 @@ function Inbox() {
             stepsBus.emit(event.thread_id);
             return;
           }
+          // Any other record may be a message that tags a thread (the person's own send too): the next `#`
+          // preview reads the cards again, whatever the 5 s guard says.
+          cardsReadAt.current = 0;
           const now = routeRef.current;
           if (now.page === 'tour' && event?.kind === 'message' && event.first && event.message.author.kind === 'agent') {
             const threadId = event.message.thread_id;
@@ -5654,6 +5694,7 @@ function Inbox() {
   }
 
   return (
+    <InitiativeTagsContext.Provider value={initiativeTags}>
     <div
       ref={rootRef}
       className="pn-inbox"
@@ -6134,6 +6175,7 @@ function Inbox() {
           />
         ))}
     </div>
+    </InitiativeTagsContext.Provider>
   );
 }
 
