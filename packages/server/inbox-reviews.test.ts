@@ -103,7 +103,7 @@ function forge() {
   return { run, calls, prState };
 }
 
-async function world() {
+async function world(options: { repoDelayMs?: number } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reviews-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -121,6 +121,7 @@ async function world() {
     refRunner: f.run,
     readProjectRepo: async () => {
       originReads += 1;
+      if (options.repoDelayMs) await Bun.sleep(options.repoDelayMs);
       return { display: "northwind/billing-svc", host: "github.com" };
     },
   });
@@ -150,6 +151,44 @@ async function world() {
 }
 
 const rowsOf = (answer: InboxReviewsAnswer, threadId: string): InboxReviewRow[] => answer.rows.filter((row) => row.thread_id === threadId);
+
+describe("the read that follows the store (?cached=1)", () => {
+  test("never calls a forge, cold or warm", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.sendReview("retries", "r1");
+    // Cold: nothing read since the Inbox started.
+    const before = w.forge.calls.length;
+    const cold = (await (await fetch(`${w.base}/api/inbox/reviews?cached=1`)).json()) as { cold?: boolean };
+    expect(cold.cold).toBe(true);
+    expect(w.forge.calls.length).toBe(before);
+    // Warm: a real read has been. A new review names a PR off the list, which the next real read asks the forge about.
+    await w.reviews();
+    await Bun.sleep(20);
+    w.forge.prState.answer = { state: "open", draft: false };
+    await w.sendReview("off-list", "r2", undefined, w.prGuide("https://github.com/northwind/billing-svc/pull/999", 999));
+    const warm = w.forge.calls.length;
+    const res = await fetch(`${w.base}/api/inbox/reviews?cached=1`);
+    expect(((await res.json()) as InboxReviewsAnswer).rows.length).toBeGreaterThan(0);
+    await Bun.sleep(20);
+    expect(w.forge.calls.slice(warm)).toEqual([]);
+    // The read is due, so the quiet above is the route's doing.
+    await w.reviews();
+    await Bun.sleep(20);
+    expect(w.forge.calls.slice(warm).some((call) => call.args.includes("repos/northwind/billing-svc/pulls/999"))).toBe(true);
+  });
+
+  test("two reads while the first waits on git: neither answers no rows, and the cache keeps the rows", async () => {
+    const w = await world({ repoDelayMs: 200 });
+    await w.setCodeReview(true);
+    await w.sendReview("retries", "r1");
+    const answers = await Promise.all([w.reviews(), Bun.sleep(30).then(() => w.reviews())]);
+    // The PRs come from the forge: a read that lost the project answers its own local row and nothing else.
+    for (const answer of answers) expect(answer.rows.some((row) => row.stacks.length > 0)).toBe(true);
+    const cached = (await (await fetch(`${w.base}/api/inbox/reviews?cached=1`)).json()) as InboxReviewsAnswer;
+    expect(cached.rows.some((row) => row.stacks.length > 0)).toBe(true);
+  });
+});
 
 describe("off", () => {
   test("Code review off: the route refuses and nothing runs (no gh, no glab, no origin read)", async () => {

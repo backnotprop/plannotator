@@ -102,6 +102,15 @@ describe("inboxReviewMove", () => {
     expect(inboxReviewMove(review({ thread_id: "t", ...changes("t"), answered: chat }))).toEqual({ move: "agents", reason: "feedback_sent" });
   });
 
+  test("a teammate's PR assigned to the person leaves On you once they've given a verdict, and a request still holds it", () => {
+    const pull = pr({ number: 412, mine: false, assigned: true } as never);
+    expect(inboxReviewMove(review({ thread_id: "t" }), [pull])).toEqual({ move: "on_you", reason: "review_ready" });
+    expect(inboxReviewMove(review({ thread_id: "t", answered: { message_id: "m", at: "2026-11-04T11:00:00.000Z" } }), [pull])).toEqual({ move: "on_you", reason: "assigned" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...changes("t") }), [pull])).toEqual({ move: "waiting", reason: "others" });
+    expect(inboxReviewMove(review({ thread_id: "t", ...approved("t") }), [{ ...pull, requested: true }])).toEqual({ move: "on_you", reason: "requested" });
+  });
+
   test("an approved review of the person's linked PR leaves On you, where the pulls rule alone keeps it", () => {
     const pull = pr({ number: 412 });
     // The audit's finding: linked and checks done is On you whatever the person answered.
@@ -351,6 +360,23 @@ describe("landed PRs", () => {
     expect(inboxReviewLandingChanges({ threads: [review({ thread_id: "t", latest_review_id: "t_r2" })], pulls: [pull], links, landed: first.record }).record).toEqual([]);
     const reopened = pr({ number: 10, head: "feature" });
     expect(inboxReviewLandingChanges({ threads, pulls: [reopened], links, landed: first.record }).forget).toEqual([pull.key]);
+  });
+
+  test("Curating only while someone can: an ended agent or a closed thread hands the PR back to its own row, not reviewed", () => {
+    const pull = pr({ number: 412 });
+    const stacks = inboxPullStacks([pull]);
+    const link = (agent: InboxPullLink["agent"]): InboxPullLink => ({ via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent, last: null, guide: null } as InboxPullLink);
+    const rowsOf = (agent: InboxPullLink["agent"], closed?: (id: string) => boolean) => inboxReviewRows({ threads: [], stacks, links: { [pull.key]: link(agent) }, pulls: [pull], closed });
+    const live = { host: "claude-code", session: "s", name: null };
+    expect(rowsOf(live).map((r) => [r.reviewed, r.reason])).toEqual([[true, "curating"]]);
+    for (const rows of [rowsOf({ ...live, ended: true }), rowsOf(live, () => true)]) {
+      expect(rows.length).toBe(1);
+      expect(rows[0]!.reviewed).toBe(false);
+      expect(rows[0]!.reason).not.toBe("curating");
+    }
+    // A review already there is not curating: an ended agent doesn't take it off the page.
+    const reviewed = inboxReviewRows({ threads: [review({ thread_id: "t" })], stacks, links: { [pull.key]: link({ ...live, ended: true }) }, pulls: [pull] });
+    expect(reviewed[0]!.reviewed).toBe(true);
   });
 
   test("a thread with a PR off the list and no record stays: it may be open (a teammate's stack, its bottom merged)", () => {

@@ -1,6 +1,7 @@
-import { expect, test } from 'bun:test';
+import { describe, expect, test } from 'bun:test';
+import { planFolds } from '@plannotator/core/inbox-folding';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
-import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewRowLine, reviewRowsIn, reviewViewOf, saveReviewFolds } from './reviewsModel';
+import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewOpenPlan, reviewRowLine, reviewRowsIn, reviewViewOf, saveReviewFolds } from './reviewsModel';
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = fields.repo ?? 'northwind/web-app';
@@ -145,6 +146,60 @@ test('before the first review: what was read and needs nothing is left out; a ne
   expect(reviewEarlierHidden(thread, 'm_r', new Set(['new']))).toEqual(['read', 'answered', 'todo-done']);
   expect(reviewEarlierHidden(thread, 'gone', new Set())).toEqual([]);
   expect(reviewEarlierHidden([msg('m_r')], 'm_r', new Set())).toEqual([]);
+});
+
+describe('how a thread opens from Reviews', () => {
+  const msg = (id: string, fields = {}) => ({ id, author: { kind: 'agent' }, ...fields });
+  const question = (id: string) => msg(id, { questions: [{ key: 'q', kind: 'choice', state: 'open', revision: 0, sent_revision: 0 }] as never });
+  const actionItem = (id: string, over: Record<string, unknown> = {}) => msg(id, { actions: [{ key: 'a-1', kind: 'action', state: 'open', revision: 0, sent_revision: 0, ...over }] as never });
+  const planOf = (messages: ReturnType<typeof msg>[], first: string | null, latest: string | null, fresh = new Set<string>()) =>
+    reviewOpenPlan({ messages: messages as never, firstReviewId: first, latestReviewId: latest, fresh, folds: planFolds(messages as never, fresh, messages.length) });
+  const hiddenOf = (plan: { hidden: string[][] }) => plan.hidden.flat();
+
+  test('six read messages, a question and an action item among them: both show, open, and the rest is left out with no row to click', () => {
+    const thread = [msg('a'), msg('b'), question('q'), actionItem('t'), msg('c'), msg('d'), msg('r'), msg('after')];
+    const plan = planOf(thread, 'r', 'r');
+    expect(plan.left).toEqual(['a', 'b', 'c', 'd']);
+    for (const id of ['q', 't', 'r']) {
+      expect(hiddenOf(plan)).not.toContain(id);
+      expect(plan.folded.has(id)).toBe(false);
+    }
+    expect(plan.hidden).toEqual([]);
+  });
+
+  test('a staged Done still waits on the person, so its note box and its way to undo stay', () => {
+    const staged = actionItem('t', { state: 'picked', action_result: { by: 'person', status: 'done', staged: true } });
+    const thread = [msg('a'), staged, msg('b'), msg('c'), msg('d'), msg('e'), msg('r')];
+    const plan = planOf(thread, 'r', 'r');
+    expect(plan.left).not.toContain('t');
+    expect(plan.folded.has('t')).toBe(false);
+    expect(hiddenOf(plan)).not.toContain('t');
+  });
+
+  test('three messages, a review, five more, all read: the review is drawn and open, however the fold runs', () => {
+    const thread = [msg('a'), msg('b'), msg('c'), msg('r'), msg('1'), msg('2'), msg('3'), msg('4'), msg('5')];
+    const plan = planOf(thread, 'r', 'r');
+    expect(plan.left).toEqual(['a', 'b', 'c']);
+    expect(hiddenOf(plan)).not.toContain('r');
+    expect(plan.folded.has('r')).toBe(false);
+    // "N earlier messages" says what a click shows: every id in a run is a message still to draw.
+    for (const id of hiddenOf(plan)) expect(plan.left).not.toContain(id);
+  });
+
+  test('after the first review too: a question stays out of the runs, which split around it, and the first review of several is drawn', () => {
+    const thread = [msg('r1'), msg('1'), msg('2'), question('q'), msg('3'), msg('4'), msg('r2'), msg('5'), msg('6')];
+    const plan = planOf(thread, 'r1', 'r2');
+    expect(hiddenOf(plan)).not.toContain('q');
+    expect(hiddenOf(plan)).not.toContain('r1');
+    expect(hiddenOf(plan)).not.toContain('r2');
+    expect(plan.folded.has('q')).toBe(false);
+    expect(plan.folded.has('r2')).toBe(false);
+    expect(plan.folded.has('r1')).toBe(true);
+  });
+
+  test('a thread started for the review leaves nothing out', () => {
+    expect(planOf([msg('ask'), msg('1'), msg('r')], null, 'r').left).toEqual([]);
+  });
 });
 
 test('the groups start folded, are remembered, and a bad stored value is the default', () => {

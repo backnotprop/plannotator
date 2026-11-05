@@ -48,7 +48,7 @@ import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
-import { reviewEarlierHidden, type ReviewView } from '../pulls/reviewsModel';
+import { reviewOpenPlan, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -976,6 +976,8 @@ export function MessageBody({
 
 export interface ThreadPaneProps {
   /** Opened from Reviews: the line and title over the messages, and what came before the review folded. */
+  /** The thread is open in Reviews (the address), whatever its row says from one read to the next. */
+  inReviews?: boolean;
   reviewView?: ReviewView | null;
   /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
   onInReviews?: () => void;
@@ -1421,7 +1423,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
+export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -1798,16 +1800,18 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
     setFoldState(fold);
   }
-  // Opened from Reviews: the review is open whatever was read, and so is what shows before it because it waits on the person.
-  const reviewOpened = useRef<string | null>(null);
-  if (reviewView && reviewOpened.current !== thread.thread_id) {
-    reviewOpened.current = thread.thread_id;
-    const left = new Set(reviewView.firstReviewId ? reviewEarlierHidden(thread.messages, reviewView.firstReviewId, fresh) : []);
-    const firstAt = thread.messages.findIndex((m) => m.id === reviewView.firstReviewId);
-    const open = new Set(thread.messages.slice(0, Math.max(firstAt, 0)).map((m) => m.id).filter((id) => !left.has(id)));
-    if (reviewView.latestReviewId) open.add(reviewView.latestReviewId);
-    if ([...open].some((id) => fold!.folded.has(id))) {
-      fold = { ...fold, folded: new Set([...fold.folded].filter((id) => !open.has(id))) };
+  // Opened from Reviews: decided once too, on the Inbox's fold (`reviewOpenPlan`). A reply sent or a Done ticked here never
+  // makes anything vanish, and neither does a row that comes or goes. Decided again only when the same thread moves between
+  // the Inbox's view and this one. A window that can't tell what was read (`boundary`, null) leaves nothing out.
+  const reviewPlan = useRef<{ key: string; left: ReadonlySet<string> } | null>(null);
+  const reviewPlanKey = `${thread.thread_id}:${inReviews ? 'reviews' : 'inbox'}`;
+  if (reviewPlan.current?.key !== reviewPlanKey) {
+    const wasReviews = reviewPlan.current?.key === `${thread.thread_id}:reviews`;
+    const folds = wasReviews ? planFolds(thread.messages, fresh, boundary) : fold;
+    const plan = inReviews && reviewView ? reviewOpenPlan({ messages: thread.messages, firstReviewId: boundary === null ? null : reviewView.firstReviewId, latestReviewId: reviewView.latestReviewId, fresh, folds }) : null;
+    reviewPlan.current = { key: reviewPlanKey, left: new Set(plan?.left ?? []) };
+    if (plan || wasReviews) {
+      fold = { threadId: thread.thread_id, folded: plan?.folded ?? folds.folded, hidden: plan?.hidden ?? folds.hidden.map((run) => [...run]), revealed: new Set() };
       setFoldState(fold);
     }
   }
@@ -1816,8 +1820,8 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
   // Opened from Reviews: what came before the first review stays out of this view (the link over the messages opens the
   // thread whole; expand-all and a link to one of those messages show them here).
   const [earlierShownIn, setEarlierShownIn] = useState<string | null>(null);
-  const hiddenEarlier = reviewView?.firstReviewId && earlierShownIn !== thread.thread_id ? reviewEarlierHidden(thread.messages, reviewView.firstReviewId, fresh) : [];
-  if (landing && hiddenEarlier.includes(landing.messageId)) setEarlierShownIn(thread.thread_id);
+  const hiddenEarlier = earlierShownIn !== thread.thread_id ? reviewPlan.current.left : NO_IDS;
+  if (landing && hiddenEarlier.has(landing.messageId)) setEarlierShownIn(thread.thread_id);
   const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...hiddenEarlier]);
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
