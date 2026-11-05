@@ -7708,9 +7708,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvopt .ib-cp-op { flex: 1; }
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
-.ib-cp[data-phone] .ib-cp-choices { flex: 1; }
-.ib-cp[data-phone] .ib-cp-choice { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 0 3px; }
-.ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; padding-left: 74px; }
+.ib-cp[data-phone] .ib-cp-choices { flex: 0 1 auto; }
+.ib-cp[data-phone] .ib-cp-choice { justify-content: center; min-height: 44px; padding: 0 11px; }
+.ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; text-align: right; }
+.ib-cp[data-phone] .ib-cp-rvrow .ib-cp-tol { flex: 0 0 100%; }
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
 .ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-rvcurating { margin: 14px 0 0 34px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
