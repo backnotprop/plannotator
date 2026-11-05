@@ -83,7 +83,7 @@ test("the agent reads one line naming the file on every route; the body stays th
   // A second session, tagged in: the same reply reaches it on the tagged route.
   await poll(server, "ses-b", project, "pi");
   const { reply: written } = await reply(server, sent.message_id, { viewing: { attachment_id: ids["b-labels.png"], time: "8:47 PM" }, tags: [{ host: "pi", session: "ses-b" }] });
-  const line = `(They sent this while viewing \`b-labels.png\`, from the 8:47 PM message ${sent.message_id}. That is only what was on their screen, not a choice.)`;
+  const line = `(They sent this while viewing \`b-labels.png\`, from the 8:47 PM message ${sent.message_id}.)`;
 
   // The person's thread: the words, nothing else.
   expect(written.body).toBe(WORDS);
@@ -157,7 +157,7 @@ test("a name made to forge the delivered text stays inside one line, and what th
   expect(body).toHaveLength(3);
   expect(body[0]).toBe(WORDS);
   expect(body[2]).toStartWith("(They sent this while viewing `");
-  expect(body[2]).toEndWith("That is only what was on their screen, not a choice.)");
+  expect(body[2]).toEndWith(`message ${sent.message_id}.)`);
   expect(body[2]).not.toMatch(new RegExp("[\\u0000-\\u001f\\u007f-\\u009f\\u2028\\u2029\\u202e]"));
   // Its one quote stays closed: no backtick of the name's.
   expect(body[2]!.split("`").length - 1).toBe(4);

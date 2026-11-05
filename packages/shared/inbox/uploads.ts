@@ -102,7 +102,7 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
   const time = viewing.time ? inboxViewingText(viewing.time, VIEWING_TIME_MAX) : "";
   const from = `the ${time ? `${time} ` : ""}message ${inboxViewingText(viewing.message_id)}`;
   const what = page ? `\`${page}\`, linked from \`${name}\` in ${from}` : `\`${name}\`${viewing.as_sent ? " as first sent" : ""}, from ${from}`;
-  return `(They sent this while viewing ${what}. That is only what was on their screen, not a choice.)`;
+  return `(They sent this while viewing ${what}.)`;
 }
 
 /**
