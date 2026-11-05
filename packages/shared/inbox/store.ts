@@ -175,8 +175,9 @@ import {
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
 import {
   inboxHashtags,
+  inboxInitiativeBareName,
+  inboxInitiativeJoinKey,
   inboxInitiativeNameKey,
-  inboxInitiativeOfTag,
   inboxInitiativeTagKey,
   inboxTaggedInitiative,
   INBOX_INITIATIVE_NAME_MAX,
@@ -6307,55 +6308,58 @@ export class InboxStore {
 
   /**
    * The live initiative a card tool's `initiative` means: its `ini_` id, or
-   * its name, ignoring case, or else the first one made with the same tag key
-   * (inboxInitiativeTagKey, so "Code-Review" and "#CodeReview" mean "Code
-   * review"; a name of no letters or digits has no key). Null when none is, a
-   * stale id included.
+   * its name, ignoring case, or else the first made with the same join key
+   * (inboxInitiativeJoinKey). Null when none is, a stale id included.
    */
   initiativeNamed(value: string): InboxInitiative | null {
-    return this.initiativeAnswering(value, (name, live) => inboxInitiativeOfTag(inboxInitiativeTagKey(name), live));
+    return this.initiativeAnswering(value, inboxInitiativeJoinKey);
   }
 
   /**
    * The live initiative `initiative_delete` means: its `ini_` id, or its name
-   * ignoring case and spaces only. Narrower than initiativeNamed: a card put in
-   * the wrong one can be moved, but "C#" (the tag key "c") must never delete "C++".
+   * ignoring case, spaces and a leading `#` only. Narrower than initiativeNamed:
+   * a card put in the wrong one can be moved, a deleted initiative cannot.
    */
   initiativeToDelete(value: string): InboxInitiative | null {
-    const spaceless = (name: string) => inboxInitiativeNameKey(name).replace(/\s+/gu, "");
-    return this.initiativeAnswering(value, (name, live) => live.find((i) => spaceless(i.name) === spaceless(name)) ?? null);
+    return this.initiativeAnswering(value, (name) => inboxInitiativeNameKey(inboxInitiativeBareName(name)).replace(/\s+/gu, ""));
   }
 
-  /** A live one by `ini_` id, else by name ignoring case, else whatever `wider` finds among the live ones. */
-  private initiativeAnswering(value: string, wider: (name: string, live: InboxInitiative[]) => InboxInitiative | null): InboxInitiative | null {
+  /** A live one by `ini_` id, else by name ignoring case, else the first made with `name`'s `key` (an empty key matches nothing). */
+  private initiativeAnswering(value: string, key: (name: string) => string): InboxInitiative | null {
     const text = value.trim();
     const byId = isInboxInitiativeId(text) ? this.initiativesById.get(text) : undefined;
     if (byId?.deleted_at === null) return byId;
     // In the order they were made, as a tag reads them (`initiatives()` breaks a same-millisecond tie by random id).
     const live = [...this.initiativesById.values()].filter((i) => i.deleted_at === null);
     const name = text.replace(/\s+/g, " ");
-    return live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name)) ?? wider(name, live);
+    const exact = live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name));
+    if (exact) return exact;
+    const wanted = key(name);
+    return wanted ? (live.find((i) => key(i.name) === wanted) ?? null) : null;
   }
 
   /**
-   * A card's initiative given by the card tool's `initiative`: `""` is none;
+   * A card's initiative given by the card tool's `initiative`: `""` is none, and
+   * so is that written out (two quote characters, as agents do send it);
    * a live initiative it names (initiativeNamed) is that one; a stale `ini_`
    * id is ignored (null: the card's initiative stays as it is, never one named
-   * after the id); anything else is a new one's name, without a leading `#`
-   * ("#Billing" makes "Billing"; "#" alone is refused as an empty name), checked
+   * after the id), and a value only shaped like an id ("ini_abc", cut short or
+   * upper-cased) is not found rather than a name; anything else is a new one's
+   * name, without a leading `#` ("#Billing" makes "Billing"; "#" alone is
+   * refused as an empty name), checked
    * here (one line, the length) and made by `initiativeOfPick` only once the card
    * write can no longer be refused, so a refused card leaves no initiative behind.
    */
   private initiativePick(value: unknown): { id: string | null } | { make: string } | null {
     if (typeof value !== "string") throw new InboxError("validation_error", "initiative: a name, or \"\" for none.", { field: "initiative" });
-    if (value.trim() === "") return { id: null };
-    const named = this.initiativeNamed(value);
+    const text = value.trim();
+    if (text === "" || text === '""' || text === "''") return { id: null };
+    const named = this.initiativeNamed(text);
     if (named) return { id: named.id };
-    if (isInboxInitiativeId(value.trim())) return null;
-    const name = value.trim().replace(/^#+\s*/u, "");
-    // Without the `#` it may be a live name after all ("#!!!" has no tag key, "!!!" is that name).
-    const bare = this.initiativeNamed(name);
-    return bare ? { id: bare.id } : { make: this.cardText(name, "initiative", INBOX_INITIATIVE_NAME_MAX) };
+    if (isInboxInitiativeId(text)) return null;
+    const name = inboxInitiativeBareName(text);
+    if (/^ini_\S*$/iu.test(name)) throw new InboxError("initiative_not_found", `No initiative ${name}.`, { field: "initiative" });
+    return { make: this.cardText(name, "initiative", INBOX_INITIATIVE_NAME_MAX) };
   }
 
   private initiativeOfPick(pick: { id: string | null } | { make: string }, by: InboxAuthor): string | null {
@@ -6802,10 +6806,9 @@ export class InboxStore {
       ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
-    // A thread the person tagged, linked now to a card in none: the card goes in that initiative,
-    // unless this very call picks (the last change wins: an agent's name, or its "").
+    // A thread the person tagged, linked now to a card in none: the card goes in that initiative.
     const added = threads.filter((thread) => !card.threads.includes(thread));
-    const tagged = added.length > 0 && !pick && this.cardWire(next).initiative === null ? this.threadTaggedInitiative(added) : null;
+    const tagged = added.length > 0 && this.cardWire(next).initiative === null ? this.threadTaggedInitiative(added) : null;
     if (tagged) return this.setCardInitiative(id, tagged, { kind: "person" });
     return next;
   }

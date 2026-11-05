@@ -81,6 +81,17 @@ export function cardLineText(card: InboxCardWire, initiativeName: (id: string) =
   return parts.join(" · ");
 }
 
+/** Each initiative's cards as the person sees them on the Board: a cancelled one left out. */
+function initiativeCardCounts(store: InboxStore): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const card of store.listCards()) {
+    if (card.column === "dropped") continue;
+    const id = store.cardWire(card).initiative;
+    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  return counts;
+}
+
 /**
  * The live initiatives, oldest first, each with how many cards it holds on
  * the whole Board (every project: an initiative crosses them; cancelled cards
@@ -90,12 +101,7 @@ export function cardLineText(card: InboxCardWire, initiativeName: (id: string) =
 export function cardInitiativesSummary(store: InboxStore): { line: string; initiatives: { id: string; name: string; cards: number }[] } {
   const live = store.initiatives().filter((initiative) => initiative.deleted_at === null);
   if (live.length === 0) return { line: "", initiatives: [] };
-  const counts = new Map<string, number>();
-  for (const card of store.listCards()) {
-    if (card.column === "dropped") continue;
-    const id = store.cardWire(card).initiative;
-    if (id) counts.set(id, (counts.get(id) ?? 0) + 1);
-  }
+  const counts = initiativeCardCounts(store);
   const initiatives = live.map((initiative) => ({ id: initiative.id, name: initiative.name, cards: counts.get(initiative.id) ?? 0 }));
   const line = `Initiatives: ${initiatives.map((i) => `${i.name} (${i.cards} card${i.cards === 1 ? "" : "s"})`).join(", ")}.`;
   return { line, initiatives };
@@ -184,7 +190,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     if (!input.initiative?.trim()) throw new InboxError("validation_error", "initiative: the one to delete, by name or id (list shows them).", { field: "initiative" });
     const named = store.initiativeToDelete(input.initiative);
     if (!named) throw new InboxError("initiative_not_found", `No initiative ${input.initiative.trim()}.`, { field: "initiative" });
-    const cards = store.listCards().filter((card) => store.cardWire(card).initiative === named.id).length;
+    const cards = initiativeCardCounts(store).get(named.id) ?? 0;
     const gone = store.deleteInitiative(named.id);
     return {
       text: `Deleted the initiative ${JSON.stringify(gone.name)}. Its ${cards} card${cards === 1 ? " stays" : "s stay"} on the Board, in no initiative.`,

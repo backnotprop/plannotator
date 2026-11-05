@@ -457,6 +457,20 @@ describe("the Board page's routes: New card and the look", () => {
     ]);
   });
 
+  // The clean room saw list say "Counted (1 card)" and the delete "Its 2 cards stay": a cancelled card counted by one only.
+  test("list and the delete count an initiative's cards the same: a cancelled one left out of both", async () => {
+    const { card } = await world();
+    const kept = await card({ op: "create", title: "Kept", initiative: "Counted" });
+    const cancelled = await card({ op: "create", title: "Cancelled", initiative: "Counted" });
+    await card({ op: "drop", card_id: cancelled.structuredContent.card.id, reason: "superseded" });
+    expect(kept.isError).toBeUndefined();
+    const listed = await card({ op: "list" });
+    expect(listed.content[0]!.text).toContain("Initiatives: Counted (1 card).");
+    const gone = await card({ op: "initiative_delete", initiative: "Counted" });
+    expect(gone.content[0]!.text).toContain("Its 1 card stays");
+    expect(gone.structuredContent.cards_kept).toBe(1);
+  });
+
   // What the agent is told when the person's tag beats the name it gave: the card line names the real one, and the
   // nudge must not claim a "Billing" that was never made.
   test("an agent's create on a thread the person tagged: the answer names the tagged initiative, no nudge, none made", async () => {
@@ -473,7 +487,7 @@ describe("the Board page's routes: New card and the look", () => {
     expect(made.structuredContent.initiative_hint).toBeUndefined();
     expect(server.store.initiatives().map((i) => i.name)).toEqual(["Shape"]);
 
-    // Named the punctuation-insensitive way, later, by say: it joins, and the last change holds.
+    // Written another way, later, by say: it joins, and the last change holds.
     const review = server.store.createInitiative({ name: "Code review", by: { kind: "person" } });
     const moved = await card({ op: "say", card_id: made.structuredContent.card.id, initiative: "#CodeReview" });
     expect(moved.structuredContent.card.initiative).toBe(review.id);
@@ -542,12 +556,14 @@ describe("the Board page's routes: New card and the look", () => {
     expect(((await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { card: { id: string } }).card.id).toBe(id);
 
     expect((await card({ op: "initiative_delete", initiative: "Billing" })).content[0]!.text).toContain("No initiative Billing.");
-    // Never by the wider key a card's name joins by: "C#" and "C++" share it, and the delete has no Undo for an agent.
+    // Never a near name: the delete has no Undo for an agent.
     const plus = (await card({ op: "create", title: "Bindings", initiative: "C++" })).structuredContent.card.initiative as string;
     const near = await card({ op: "initiative_delete", initiative: "C#" });
     expect(near.isError).toBe(true);
     expect(near.content[0]!.text).toContain("No initiative C#.");
     expect((await card({ op: "list" })).structuredContent.initiatives).toEqual([{ id: plus, name: "C++", cards: 1 }]);
+    // Written as a tag, it still names it.
+    expect((await card({ op: "initiative_delete", initiative: "#c++" })).structuredContent.initiative.name).toBe("C++");
     expect((await card({ op: "initiative_delete" })).isError).toBe(true);
   });
 });

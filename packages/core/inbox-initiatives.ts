@@ -15,10 +15,10 @@
  * The person names, renames and deletes them. An agent puts a card in one
  * through the card tool's `initiative`, a name or a live one's id (approval
  * "board-initiatives", "Agents and initiatives"): a name matches a live one
- * exactly, ignoring case, or else by the tag key (`inboxInitiativeTagKey`), so
- * "Code-Review", "Code Review" and "#CodeReview" are one; anything no live
- * initiative answers to makes a new one, the only way an agent makes one. An
- * agent may delete one too (op `initiative_delete`); only the person renames.
+ * exactly, ignoring case, or else by `inboxInitiativeJoinKey`, so "Code-Review",
+ * "Code Review" and "#CodeReview" are one; anything no live initiative answers
+ * to makes a new one, the only way an agent makes one. An agent may delete one
+ * too (op `initiative_delete`); only the person renames.
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
@@ -87,6 +87,21 @@ export function inboxCardInitiativeOf(card: { initiative?: string | null }, live
 
 /** Threads an initiative's preview lists (the window's `initiativePeek`); the rest read "+N more". */
 export const INBOX_INITIATIVE_PEEK_THREADS = 3;
+
+/** A name without the leading `#` an agent may copy from a tag: "#Billing" is "Billing". */
+export function inboxInitiativeBareName(name: string): string {
+  return name.trim().replace(/^#+\s*/u, "");
+}
+
+/**
+ * What an agent's name joins a live initiative by: case, spaces, `-`, `_` and a
+ * leading `#` ignored, nothing else. Narrower than a tag's key, which only has
+ * letters and digits to go on: here "C#" must not join "C++", "Q&A" "QA", or
+ * "v12" "v1.2". Empty for a name of only those marks: that joins nothing.
+ */
+export function inboxInitiativeJoinKey(name: string): string {
+  return inboxInitiativeBareName(name).toLowerCase().replace(/[\s_-]+/gu, "");
+}
 
 /** A hashtag's key: letters and digits only, lowercased (not locale-dependent, the same in the server and every browser), so `#CodeReview`, `#code-review` and "Code review" are one. */
 export function inboxInitiativeTagKey(name: string): string {
