@@ -7812,6 +7812,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
 }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-review.ib-rv-walk .ib-vhead:has([data-review-destination]) { gap: 2px; }
   .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide .md\:inline { display: none; }
   .ib-rv-walk .ib-vhead:has([data-review-destination]) .ib-rv-decide [data-slot='button-icon'] { display: inline-flex; }
 }

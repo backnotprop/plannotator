@@ -897,8 +897,8 @@ test('Viewed takes its click at every scroll: one Split | Unified shows at a tim
       await frames();
       const seen = await look(top);
       const docked = await pane.locator('.ib-vhead [data-review-diff-style-docked]').count();
-      expect(`${top}: ${seen.tabs > 0 ? 'tab' : 'dock'} ${docked}`).toBe(`${top}: ${seen.tabs > 0 ? 'tab 0' : 'dock 1'}`);
       expect(`${top}: ${seen.covered}`).toBe(`${top}: 0`);
+      expect(`${top}: ${seen.tabs > 0 ? 'tab' : 'dock'} ${docked}`).toBe(`${top}: ${seen.tabs > 0 ? 'tab 0' : 'dock 1'}`);
       const box = (await body.boundingBox())!;
       const spot = seen.spots.find((at) => at.y - box.y < 40);
       if (spot && !nearTop) nearTop = { ...spot, top };
