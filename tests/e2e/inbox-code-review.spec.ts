@@ -1186,6 +1186,17 @@ test('a phone: the bar shows on the file under the finger while it moves, then g
     await settled(body);
     expect(await thumbOpacity(thumb)).toBe('0');
 
+    // A tap on the code is no movement: a phone's sticky hover must not bring the bar up, with the composer it opens or after it.
+    const tapped = (await shell.locator('[data-line-type]').nth(2).boundingBox())!;
+    await page.touchscreen.tap(tapped.x + tapped.width * 0.6, tapped.y + tapped.height / 2);
+    await expect(page.getByPlaceholder('Leave feedback...')).toBeVisible();
+    await page.waitForTimeout(300);
+    expect(await thumbOpacity(thumb)).toBe('0');
+    await page.getByRole('button', { name: 'Close expanded comment' }).tap();
+    await expect(page.getByPlaceholder('Leave feedback...')).toHaveCount(0);
+    await page.waitForTimeout(300);
+    expect(await thumbOpacity(thumb)).toBe('0');
+
     // Hidden, it takes no finger: what is under that strip is the header. Showing, it is the bar.
     const bar = (await shell.locator('[data-diff-hscrollbar]').boundingBox())!;
     const barUnder = () =>
