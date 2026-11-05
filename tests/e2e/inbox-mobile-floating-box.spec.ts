@@ -47,9 +47,9 @@ let long: SimAgent;
 let serverSession = '';
 let threads = 0;
 
-async function seed(agent: SimAgent, comments: number): Promise<Thread> {
+async function seed(agent: SimAgent, comments: number, questions = true): Promise<Thread> {
   const n = ++threads;
-  const sent = await agent.send({ project_path: project, subject: `Widget ${n}`, thread: `widget-${n}`, body, attachments: ['f/plan.md', 'f/shot.png', 'f/page.html'] });
+  const sent = await agent.send({ project_path: project, subject: `Widget ${n}`, thread: `widget-${n}`, body: questions ? body : 'No decisions.', attachments: ['f/plan.md', 'f/shot.png', 'f/page.html'] });
   const thread = sent.thread_id as string;
   const model = (await (await fetch(new URL(`/api/inbox/threads/${thread}/attachments`, url))).json()) as { attachments: { id: string; name: string }[] };
   const ids = Object.fromEntries(model.attachments.map((a) => [a.name, a.id]));
@@ -212,6 +212,18 @@ for (const phone of PHONES) {
         }
       });
     }
+
+    test('320 px, comments and no questions: the lone pill gives up its word rather than wrap', async () => {
+      await page.setViewportSize({ width: 320, height: 568 });
+      const t = await seed(short, 2, false);
+      await page.goto('about:blank');
+      await page.goto(fileUrl(t, 'shot.png'));
+      await card(page).waitFor();
+      await page.locator('[data-fcomp-mode="reply"]').tap();
+      await expect(card(page).locator('[data-voice-mic]')).toBeVisible();
+      await expect.poll(() => footProblems(page)).toEqual([]);
+      await expect(card(page).locator('[data-fcomp-comments] .ib-fcomp-w')).not.toHaveCSS('clip', 'auto');
+    });
 
     test('what yields: at 320 the pill is its icon and number, at 390 its words come back beside the bare count', async () => {
       await page.setViewportSize({ width: 320, height: 568 });
@@ -407,34 +419,59 @@ for (const phone of PHONES) {
       }
     });
 
-    for (const width of [390, 430]) {
-      test(`${width} px with motion on: Hide tools and back, the pill lands on the toolbar's row`, async () => {
-        const t = await seed(short, 2);
+    test('with motion on: the pill holds the toolbar’s row through Hide tools and back, and moves if the width changed meanwhile', async () => {
+      const t = await seed(short, 2);
+      const away = async (width: number) => {
         await page.setViewportSize({ width, height: 700 });
-        await page.emulateMedia({ reducedMotion: 'no-preference' });
-        try {
-          await page.goto('about:blank');
-          await page.goto(fileUrl(t, 'page.html'));
-          await page.locator('.ib-htmlframe iframe').waitFor();
-          await page.locator('[data-fcomp-pill]').waitFor();
-          await page.locator('[data-full-view-hide]').tap();
-          await page.locator('[data-full-view-handle]').waitFor();
-          await page.waitForTimeout(600);
+        await page.goto('about:blank');
+        await page.goto(fileUrl(t, 'page.html'));
+        await page.locator('.ib-htmlframe iframe').waitFor();
+        await page.locator('[data-fcomp-pill]').waitFor();
+        await page.locator('[data-full-view-hide]').tap();
+        await page.locator('[data-full-view-handle]').waitFor();
+        // Past the flight out (340 ms).
+        await page.waitForTimeout(600);
+      };
+      await page.emulateMedia({ reducedMotion: 'no-preference' });
+      try {
+        for (const width of [390, 430]) {
+          await away(width);
           await page.locator('[data-full-view-handle]').tap();
-          await expect
-            .poll(
-              async () => {
-                const [pill, bar] = await Promise.all([page.locator('[data-fcomp-pill]').boundingBox(), page.locator('[data-full-view-bar]').boundingBox()]);
-                return Math.abs(pill!.y + pill!.height - (bar!.y + bar!.height));
-              },
-              { timeout: 2_000 },
-            )
-            .toBeLessThanOrEqual(2);
-        } finally {
-          await page.emulateMedia({ reducedMotion: 'reduce' });
+          // Every frame of the flight back (360 ms) and past it.
+          const raisedBy = await page.evaluate(
+            () =>
+              new Promise<number>((done) => {
+                const from = performance.now();
+                let most = 0;
+                const frame = () => {
+                  const pill = document.querySelector('[data-fcomp-pill]')?.getBoundingClientRect();
+                  if (pill) most = Math.max(most, innerHeight - pill.bottom);
+                  if (performance.now() - from > 800) done(most);
+                  else requestAnimationFrame(frame);
+                };
+                frame();
+              }),
+          );
+          // 14 px off the window's foot, on the row; raised, 74.
+          expect(raisedBy, `${width} px`).toBeLessThan(40);
         }
-      });
-    }
+        // A phone turned while the tools were away: it lands above, not under the toolbar.
+        await away(430);
+        await page.setViewportSize({ width: 320, height: 700 });
+        await page.locator('[data-full-view-handle]').tap();
+        await expect
+          .poll(
+            async () => {
+              const [pill, bar] = await Promise.all([page.locator('[data-fcomp-pill]').boundingBox(), page.locator('[data-full-view-bar]').boundingBox()]);
+              return pill!.y + pill!.height <= bar!.y;
+            },
+            { timeout: 1_000 },
+          )
+          .toBe(true);
+      } finally {
+        await page.emulateMedia({ reducedMotion: 'reduce' });
+      }
+    });
   });
 }
 

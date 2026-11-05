@@ -291,12 +291,19 @@ export function FullScreenComposer({
       setPillAbove(false);
       return;
     }
-    const check = () => setPillAbove(pill.getBoundingClientRect().right + PILL_BAR_GAP > bar.getBoundingClientRect().left);
+    const tucked = value.tucked;
+    const flying = (el: Element | null) => el?.getAnimations?.().some((animation) => animation.playState === 'running');
+    const check = () => {
+      // Gathered or in flight (Hide tools and back), both fly to the corner and are not where they land: the pill keeps
+      // its place and is measured at `transitionend`, so it never jumps.
+      if (tucked || flying(bar) || flying(pill.parentElement)) return;
+      setPillAbove(pill.getBoundingClientRect().right + PILL_BAR_GAP > bar.getBoundingClientRect().left);
+    };
     check();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(check);
     for (const el of [pill, bar, view]) observer.observe(el);
-    // The toolbar flies back from the corner on a transform, which no ResizeObserver sees: measured where it lands.
+    // The flight is a transform, which no ResizeObserver sees.
     view.addEventListener('transitionend', check);
     return () => {
       observer.disconnect();
