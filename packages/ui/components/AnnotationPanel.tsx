@@ -243,6 +243,18 @@ interface PanelProps {
    * Absent: no crop.
    */
   imageRegionSrc?: (src: string) => string | null;
+  /**
+   * The host's own section at the foot of the timeline, inside its scroll area,
+   * so the cards and the section scroll as one (the Inbox's earlier comments).
+   * Absent: no wrapper element, exactly as before.
+   */
+  timelineFooter?: React.ReactNode;
+  /**
+   * An empty timeline without "No annotations yet" and its hint, for a host
+   * that has something else to show there (see `timelineFooter`). The way to
+   * other files' comments stays. Default false: exactly as before.
+   */
+  hideEmptyMessage?: boolean;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -289,6 +301,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   renderCardBody,
   imageRegionSrc,
   onNavigateAnchor,
+  timelineFooter,
+  hideEmptyMessage = false,
 }) => {
   // `#Heading` links in comment text; nothing is parsed unless the host can navigate.
   const sectionRefs = useMemo(
@@ -635,21 +649,25 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
             Select text in the document to comment. Question and option text is selectable too.
           </p>
         ) : timelineCount === 0 ? (
-          (!directEdits || directEdits.length === 0) && (
-            <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <p className="text-xs text-muted-foreground/60">
-                No annotations yet
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground/40">
-                {emptyHint}
-              </p>
+          (!directEdits || directEdits.length === 0) && (!hideEmptyMessage || (scopeEnabled && otherGroupCount > 0)) && (
+            <div className={`flex flex-col items-center justify-center px-4 ${hideEmptyMessage ? 'py-1' : 'py-16'} text-center`}>
+              {!hideEmptyMessage && (
+                <>
+                  <p className="text-xs text-muted-foreground/60">
+                    No annotations yet
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground/40">
+                    {emptyHint}
+                  </p>
+                </>
+              )}
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
                   type="button"
                   data-pn-touch-target="true"
                   data-annotation-view-all="true"
                   onClick={() => onAnnotationScopeChange!('all')}
-                  className="mt-3 cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary"
+                  className={`${hideEmptyMessage ? '' : 'mt-3 '}cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary`}
                 >
                   View all {otherGroupCount} in {otherGroups.length} other file{otherGroups.length === 1 ? '' : 's'}
                 </button>
@@ -738,6 +756,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
           </>
         )}
+        {timelineFooter}
         </div>
       </OverlayScrollArea>
 
