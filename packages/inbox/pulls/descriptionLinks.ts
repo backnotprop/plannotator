@@ -4,7 +4,7 @@
  * schemes stay links; a body is someone else's words, and `vscode:` or `ssh:` would launch an app from a click.
  */
 
-import type { InboxPull } from '@plannotator/core/inbox-pulls';
+import type { InboxPull } from '@plannotator/core/inbox-types';
 
 type Layer = Pick<InboxPull, 'url' | 'platform' | 'repo' | 'head' | 'head_repo' | 'head_sha'>;
 

@@ -11,7 +11,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type MouseEvent } from 'react';
 import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
-import type { InboxPull } from '@plannotator/core/inbox-pulls';
+import type { InboxPull } from '@plannotator/core/inbox-types';
 import { ContextMarkdown } from '../components/ContextMarkdown';
 import { forgeFileUrl, isLiveLink } from './descriptionLinks';
 
