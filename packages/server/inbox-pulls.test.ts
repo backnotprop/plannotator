@@ -31,6 +31,8 @@ import {
   createInboxPulls,
   GITHUB_SEARCH_MAX_CHARS,
   githubPullSearches,
+  GITHUB_PULLS_QUERY,
+  INBOX_PULL_DESCRIPTION_MAX_CHARS,
   INBOX_PULL_DIFF_MAX_BYTES,
   INBOX_PULLS_FRESH_MS,
   linkInboxPulls,
@@ -102,8 +104,10 @@ interface Forge {
   calls: { cli: string; args: string[] }[];
   graphql: () => { cli: string; args: string[] }[];
   fail: string | null;
-  /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
+  /** The head commit `gh api … pulls/N --jq …` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
+  /** The description that read answers, by PR number. */
+  bodies: Record<string, string | null>;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -112,10 +116,14 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     calls: [],
     fail: null,
     heads: null,
+    bodies: {},
     graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
-      if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
+      if (cli === "gh" && args.includes("--jq")) {
+        const number = String(args[3]!.split("/").at(-1));
+        return { stdout: `${JSON.stringify({ sha: f.heads ? f.heads.shift() ?? "" : number.padStart(40, "a"), body: f.bodies[number] ?? null })}\n`, stderr: "", exitCode: 0 };
+      }
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
       if (cli === "gh" && args.includes("graphql")) {
@@ -232,6 +240,7 @@ function gitlabForge(): Forge {
     calls: [],
     fail: null,
     heads: null,
+    bodies: {},
     graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
@@ -413,8 +422,8 @@ describe("on", () => {
 
     const unknown = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/elsewhere/thing#9")}&scope=layer`);
     expect(unknown.status).toBe(404);
-    // The layer: its head, its patch, its head again; the stack: its compare.
-    expect(w.forge.calls.length).toBe(before + 4);
+    // The layer: its PR, its patch, its PR again; the stack: its compare, and its PR for the description.
+    expect(w.forge.calls.length).toBe(before + 5);
   });
 });
 
@@ -628,7 +637,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await w.pulls();
     const before = w.forge.calls.length;
     const answer = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#22")}&scope=stack`)).json()) as { head: string; base: string };
-    const call = w.forge.calls[before]!;
+    const call = w.forge.calls.slice(before).find((c) => !c.args.includes("--jq"))!;
     expect(call.args[3]).toBe("repos/northwind/billing-svc/compare/charge-client...dana:feat-2");
     expect(answer).toMatchObject({ base: "charge-client", head: "dana:feat-2" });
   });
@@ -646,7 +655,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
     const answer = await pulls.diff("github.com/northwind/billing-svc#21", "stack");
     expect(answer.base).toBe("main");
-    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname").map((c) => c.args[3])).toEqual([
+    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname" && !c.args.includes("--jq")).map((c) => c.args[3])).toEqual([
       "repos/northwind/billing-svc/compare/charge-client...feat",
       "repos/northwind/billing-svc/compare/main...feat",
     ]);
@@ -670,6 +679,108 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     const before = calls.length;
     await expect(pulls.diff("gitlab.com/northwind/ledger#5:pull", "stack")).rejects.toMatchObject({ code: "pull_diff_fork" });
     expect(calls.length).toBe(before);
+  });
+
+  describe("the PR's description", () => {
+    const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+    const KEY = "github.com/northwind/billing-svc#412";
+    const reads = (f: Forge) => f.calls.filter((c) => c.args.includes("--jq"));
+
+    test("comes with the head read a layer already makes: no extra call", async () => {
+      const f = forge();
+      f.bodies["412"] = "  ## Why\n\nThe schedule table.\n";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const before = f.calls.length;
+      const answer = await pulls.diff(KEY, "layer");
+      expect(answer.description).toBe("## Why\n\nThe schedule table.");
+      expect(answer.head_sha).toBe("412".padStart(40, "a"));
+      // Its head, its patch, its head again.
+      expect(f.calls.length).toBe(before + 3);
+    });
+
+    test("none, or only whitespace, is null", async () => {
+      for (const body of [null, "", "  \n\t "]) {
+        const f = forge();
+        f.bodies["412"] = body;
+        const pulls = createInboxPulls({ run: f.run });
+        await pulls.list(repos);
+        expect((await pulls.diff(KEY, "layer")).description).toBeNull();
+      }
+    });
+
+    test("a whole stack's diff carries this layer's, from one read beside its compare, and each layer has its own", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      f.bodies["413"] = "The backoff.";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const before = reads(f).length;
+      expect((await pulls.diff(KEY, "stack")).description).toBe("The schedule.");
+      expect(reads(f).length).toBe(before + 1);
+      expect((await pulls.diff("github.com/northwind/billing-svc#413", "stack")).description).toBe("The backoff.");
+      expect((await pulls.diff("github.com/northwind/billing-svc#413", "layer")).description).toBe("The backoff.");
+    });
+
+    test("a read that fails costs the description, never the diff", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      for (const failed of [{ stdout: "", stderr: "HTTP 502", exitCode: 1 }, { stdout: "not json", stderr: "", exitCode: 0 }]) {
+        const run: typeof f.run = async (cli, args, env) => (args.includes("--jq") ? failed : f.run(cli, args, env));
+        for (const scope of ["layer", "stack"] as const) {
+          const pulls = createInboxPulls({ run });
+          await pulls.list(repos);
+          const answer = await pulls.diff(KEY, scope);
+          expect(answer.patch).toContain("diff of");
+          expect(answer.description).toBeNull();
+        }
+      }
+    });
+
+    test("a reused answer reads nothing again", async () => {
+      const f = forge();
+      f.bodies["412"] = "The schedule.";
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      await pulls.diff(KEY, "layer");
+      const before = f.calls.length;
+      expect((await pulls.diff(KEY, "layer")).description).toBe("The schedule.");
+      expect(f.calls.length).toBe(before);
+    });
+
+    test("past the cap it is cut, and says so", async () => {
+      const f = forge();
+      f.bodies["412"] = "x".repeat(INBOX_PULL_DESCRIPTION_MAX_CHARS + 10);
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      const { description } = await pulls.diff(KEY, "layer");
+      expect(description!.length).toBe(INBOX_PULL_DESCRIPTION_MAX_CHARS + 3);
+      expect(description!.endsWith("\n\n…")).toBe(true);
+    });
+
+    test("the list asks for no description and reads no PR, row by row", async () => {
+      const f = forge();
+      const pulls = createInboxPulls({ run: f.run });
+      await pulls.list(repos);
+      expect(GITHUB_PULLS_QUERY).not.toMatch(/\bbody\b/);
+      expect(f.calls.filter((c) => c.args.includes("--hostname") && !c.args.includes("graphql"))).toEqual([]);
+    });
+
+    test("GitLab: the same read, its `description`", async () => {
+      const f = gitlabForge();
+      const endpoint = "projects/northwind%2Fdata%2Fledger/merge_requests/61";
+      const run: typeof f.run = async (cli, args, env) =>
+        args[3] === endpoint
+          ? { stdout: JSON.stringify({ sha: "c".repeat(40), description: "Adds the CSV export.\n" }), stderr: "", exitCode: 0 }
+          : args[3] === `${endpoint}/raw_diffs`
+            ? { stdout: "a patch\n", stderr: "", exitCode: 0 }
+            : f.run(cli, args, env);
+      const pulls = createInboxPulls({ run });
+      await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
+      const answer = await pulls.diff("gitlab.com/northwind/data/ledger#61:pull", "layer");
+      expect(answer.description).toBe("Adds the CSV export.");
+      expect(answer.head_sha).toBe("c".repeat(40));
+    });
   });
 
   test("a diff past the cap is refused as too large", async () => {

@@ -65,6 +65,16 @@ export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
 
+/** The longest description kept: over GitHub's own limit, so only a GitLab description past it is cut. */
+export const INBOX_PULL_DESCRIPTION_MAX_CHARS = 66_000;
+
+/** A PR's description as the forge answered it, or null when it has none. */
+function descriptionOf(value: unknown): string | null {
+  const text = typeof value === "string" ? value.trim() : "";
+  if (!text) return null;
+  return text.length > INBOX_PULL_DESCRIPTION_MAX_CHARS ? `${text.slice(0, INBOX_PULL_DESCRIPTION_MAX_CHARS)}\n\n…` : text;
+}
+
 /** A commit id as the forge answered it (40 or 64 hex digits), or null. */
 function shaOf(value: unknown): string | null {
   return typeof value === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(value) ? value.toLowerCase() : null;
@@ -669,20 +679,23 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // A layer's head commit, read around its patch: a push between the two reads leaves it unknown (no post).
-      const headNow = async (): Promise<string | null> => {
+      // The PR as the forge has it now, one call: its head commit (read around a layer's patch: a push between the two
+      // reads leaves it unknown, no post) and its description.
+      const pullNow = async (): Promise<{ sha: string | null; description: string | null } | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
+        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body}"] : [])]).catch(() => null);
         if (!read || read.exitCode !== 0) return null;
-        if (pull.platform === "github") return shaOf(read.stdout.trim());
         try {
-          const mr = obj(JSON.parse(read.stdout));
-          return shaOf(mr.sha) ?? shaOf(obj(mr.diff_refs).head_sha);
+          const answer = obj(JSON.parse(read.stdout));
+          if (pull.platform === "github") return { sha: shaOf(answer.sha), description: descriptionOf(answer.body) };
+          return { sha: shaOf(answer.sha) ?? shaOf(obj(answer.diff_refs).head_sha), description: descriptionOf(answer.description) };
         } catch {
           return null;
         }
       };
-      const headBefore = scope === "layer" ? await headNow() : null;
+      const before = scope === "layer" ? await pullNow() : null;
+      // A whole stack's compare names no PR: this layer's description comes from one read beside it.
+      const beside = scope === "stack" ? pullNow() : null;
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -707,10 +720,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           throw new InboxPullsError("pull_diff_failed", "glab answered something other than a compare.");
         }
       }
-      const headAfter = headBefore ? await headNow() : null;
+      const headBefore = before?.sha ?? null;
+      const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
+      const description = (before ?? (await beside))?.description ?? null;
       if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, ...(scope === "layer" ? { head_sha } : {}) };
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, ...(scope === "layer" ? { head_sha } : {}) };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);

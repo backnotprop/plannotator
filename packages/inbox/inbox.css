@@ -7791,6 +7791,35 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-wide:not(.ib-railfold) .ib-prr-foot { grid-column: 2; grid-row: 3; }
 .ib-prr-wide:not(.ib-railfold):not(.ib-fold) .ib-gpanel { grid-column: 3; grid-row: 1 / -1; }
 
+/* The PR's own description at the head of its diff (PullDescription): the review app's compact Markdown, 13 px. Long,
+   it starts folded and opens into a box of its own height, so the diff stays near. */
+.ib-prr-desc { padding: 12px 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-desc-body { --ib-desc-fold: 112px; }
+.ib-prr-desc[data-pull-description="folded"] { cursor: pointer; }
+.ib-prr-desc[data-pull-description="folded"] .ib-prr-desc-body { max-height: var(--ib-desc-fold); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
+.ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: min(55vh, 560px); overflow-y: auto; overscroll-behavior: auto; }
+.ib-prr-desc-body .ib-body { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
+.ib-prr-desc-body article > :empty { display: none; }
+.ib-prr-desc-body article > :not(:empty):not(:not(:empty) ~ *) { margin-top: 0; }
+.ib-prr-desc-body article > :last-child { margin-bottom: 0; }
+.ib-prr-desc-body h1 { font-size: 15px; line-height: 1.35; margin: 12px 0 6px; letter-spacing: normal; }
+.ib-prr-desc-body h2 { font-size: 14px; line-height: 1.35; margin: 12px 0 4px; }
+.ib-prr-desc-body :is(h3, h4, h5, h6) { font-size: 13px; line-height: 1.4; margin: 10px 0 4px; }
+.ib-prr-desc-body p { font-size: 13px; line-height: 1.6; margin-bottom: 8px; }
+.ib-prr-desc-body .text-sm { font-size: 13px; line-height: 1.55; }
+.ib-prr-desc-body hr { margin: 14px 0; }
+.ib-prr-desc-body summary { font-size: 13px; }
+.ib-prr-desc-body blockquote { margin: 8px 0; }
+.ib-prr-desc-body .my-5 { margin-block: 10px; }
+.ib-prr-desc-body pre { font-size: 12px; }
+.ib-prr-desc-body pre code.pn-code { padding: 8px 10px; }
+.ib-prr-desc-body :is(img, video) { max-width: 100%; height: auto; border-radius: 6px; }
+.pn-inbox .ib-prr-desc-more { display: block; margin-top: 6px; padding: 2px 0; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--muted-foreground); }
+.pn-inbox .ib-prr-desc-more:hover { color: var(--foreground); }
+.ib-prreview.ib-prr-wide .ib-gbody:has(> .ib-prr-desc) > .w-full { padding-top: 0; }
+/* Whose PR this is, quiet beside its title. */
+.ib-prreview .ib-vhead > .ib-prr-note { flex: 0 1 auto; min-width: 0; margin: 0 0 0 2px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments
    button and the verdict never leave the window. */
@@ -7856,6 +7885,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
+  /* The foot's words read as two lines beside Next layer, not two narrow columns. */
+  .ib-prr-foot:has(> .ib-prr-note) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; }
+  .ib-prr-foot:has(> .ib-prr-note) > * { grid-column: 2; grid-row: 1 / 3; }
+  .ib-prr-foot > .ib-prr-note { grid-column: 1; grid-row: 1; margin: 0; }
+  .ib-prr-foot:has(> .ib-prr-note) > .ib-prr-where { grid-column: 1; grid-row: 2; }
+  .ib-prr-foot .ib-prr-note:has(+ .ib-prr-where)::after { content: none; }
+  /* A description takes little of a phone's screen until it is opened. */
+  .ib-prr-desc-body { --ib-desc-fold: 64px; }
+  .ib-prr-desc { padding: 8px 12px; }
+  .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: 38vh; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
   .ib-prr-layers { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }

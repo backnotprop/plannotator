@@ -47,6 +47,7 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { ReviewRailTree } from './ReviewRailTree';
+import { PullDescription } from './PullDescription';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
 import { inOverlay } from '../shortcuts/guards';
 import { reviewFiles } from './reviewFiles';
@@ -442,8 +443,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     </div>
   );
 
-  const readOnlyWords = layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`;
-  const readOnlyNote = !canDecide && !posted && !diffError && (
+  // Whose PR this is, or that it has no thread yet: beside the title or on the strip, on the foot where those run short.
+  const readOnlyWords = layer.mine ? 'No review thread yet' : layer.author ? `by ${layer.author}` : '';
+  const readOnlyNote = !canDecide && !posted && !diffError && !!readOnlyWords && (
     <Tip cut content={readOnlyWords}>
       <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
         {readOnlyWords}
@@ -494,13 +496,15 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </button>
         )}
         {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
-        <Tip content={`${label} ${layer.title}`} when={(title) => isTextCut(title.querySelector('bdi'))}>
+        {/* The title as the forge has it, with who wants to merge what, as the review app's overview says it. */}
+        <Tip content={`${label} ${layer.title} · ${layer.author ?? 'A teammate'} wants to merge ${layer.head} into ${layer.base}`}>
           <span className="ib-fn ib-prr-fn" data-pull-review-title="">
             <RefMarkIcon kind="pr" state={layer.state} size={15} />
             <span className="ib-prr-num">{label}</span>
             <bdi>{layer.title}</bdi>
           </span>
         </Tip>
+        {!phone && !noteOffStrip && !layer.mine && readOnlyNote}
         <span className="ib-sp" />
         {folded && readerComments && (
           <button
@@ -591,7 +595,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               );
             })}
           </nav>
-          {!phone && !noteOffStrip && readOnlyNote}
+          {!phone && !noteOffStrip && layer.mine && readOnlyNote}
           {scopeSwitch}
           {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         </div>
@@ -610,6 +614,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </div>
         </nav>
         <div className="ib-gbody">
+          <PullDescription markdown={diff?.description} repo={layer.repo} host={layer.host} />
           {phone && files.length > 0 && (
             <div className="ib-rv-phonebar" data-review-phonebar="">
               <select className="ib-rv-jump" aria-label="Go to a file" value="" onChange={(event) => event.target.value && move(event.target.value)}>
@@ -636,7 +641,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {phone && readOnlyNote}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}
@@ -695,7 +699,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         </div>
         <div className="ib-prr-foot" data-pull-review-foot="">
-          {!phone && noteOffStrip && readOnlyNote}
+          {(phone || noteOffStrip) && readOnlyNote}
           {/* A long branch name gives way before where the review goes; the whole line on hover when either is cut. */}
           <Tip content={whereEnd ? `${whereWords} · ${whereEnd}` : whereWords} when={(line) => Array.from(line.children).some((part) => isTextCut(part) || part.getClientRects().length === 0)}>
             <span className="ib-prr-where">

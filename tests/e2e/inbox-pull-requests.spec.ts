@@ -179,9 +179,9 @@ function writeForge(dir: string) {
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
     'fi',
-    // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
+    // A PR read around its patch (`--jq`): the list's `headRefOid` for that number, and its description.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"; printf "%040d\\n" "${4##*/}"; exit 0',
+    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); printf \'{"sha":"%040d","body":%s}\\n\' "$n" "$body"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
@@ -353,6 +353,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const forgeDir = join(root, 'forge');
   const forge = writeForge(forgeDir);
+  // Two layers' descriptions, read through the real path (`--jq`); no other PR here has one.
+  writeFileSync(join(forgeDir, 'gh-body-413.json'), JSON.stringify('Backs off between the attempts.'));
+  writeFileSync(join(forgeDir, 'gh-body-414.json'), JSON.stringify('The emails, in a draft until they are reviewed.'));
   // The authors' pictures: a loopback server the fake forge's avatarUrl names (allowed under the test sandbox only).
   const avatars = await startFakeAvatars();
   avatarOf = avatars.url;
@@ -1097,6 +1100,141 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   return { context, page };
 }
 
+test("the PR's description at the head of its diff: a short one whole, a long one folded with the diff beside it, an empty one nothing", async ({ browser }) => {
+  const comment = '<!-- A template comment nobody should read. -->';
+  const longBody = [
+    comment,
+    '## Why',
+    '',
+    'Charges that fail today are retried by hand.',
+    '',
+    '![Retry timeline](https://user-images.githubusercontent.com/1/timeline.png)',
+    '',
+    '<img src="https://github.com/user-attachments/assets/abc" alt="Dashboard after" width="600">',
+    '',
+    '| Area | Risk |',
+    '| --- | --- |',
+    '| `schedule.ts` | Low |',
+    '',
+    '<script>window.scripted = true</script>',
+    '',
+    '[The ticket](https://example.invalid/ticket)',
+    '',
+    ...Array.from({ length: 480 }, (_, i) => (i % 3 === 2 ? '' : `Line ${i} of the rollout notes.`)),
+  ].join('\n');
+  const first = (review: Locator) => review.locator('[data-guide-file-shell]').first();
+  for (const width of [1440, 390]) {
+    // Short: whole, no way to open it, the title not stacked a second time.
+    const short = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: `${comment}\n\nMoves the settings to logical properties.` });
+    try {
+      const review = short.page.locator('[data-pull-review]');
+      const section = review.locator('[data-pull-description]');
+      await expect(section).toHaveAttribute('data-pull-description', width === 390 ? /whole|folded/ : 'whole');
+      await expect(section).toContainText('Moves the settings to logical properties.');
+      await expect(section).not.toContainText('A template comment');
+      if (width === 1440) await expect(section.getByRole('button')).toHaveCount(0);
+      await expect(review.locator('[data-pull-review-title]')).toHaveCount(1);
+      await expect(section.getByText('RTL layout for the settings pages')).toHaveCount(0);
+    } finally {
+      await short.context.close();
+    }
+
+    // Long: folded, and the first file stays on screen, opened too. Nothing it holds loads or runs.
+    const asked: string[] = [];
+    const long = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: longBody });
+    try {
+      const { page } = long;
+      page.on('request', (request) => asked.push(request.url()));
+      await page.reload();
+      const review = page.locator('[data-pull-review]');
+      const section = review.locator('[data-pull-description]');
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      const more = section.getByRole('button', { name: 'Show more' });
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect((await section.boundingBox())!.height).toBeLessThanOrEqual(width === 390 ? 112 : 172);
+      await expect(first(review)).toBeInViewport();
+      // What is clipped takes no Tab stops.
+      expect(await section.locator('.ib-prr-desc-body').evaluate((body) => (body as HTMLElement).inert)).toBe(true);
+
+      await more.click();
+      await expect(section).toHaveAttribute('data-pull-description', 'open');
+      await expect(section.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+      await expect(first(review)).toBeInViewport();
+      expect((await section.boundingBox())!.height).toBeLessThan(page.viewportSize()!.height * 0.75);
+      // It reads inside its box, and the words past it scroll there.
+      const body = section.locator('.ib-prr-desc-body');
+      await expect.poll(() => body.evaluate((el) => el.scrollHeight > el.clientHeight * 2)).toBe(true);
+      await expect(section.getByRole('link', { name: 'The ticket' })).toBeVisible();
+      await expect(section.locator('table')).toContainText('schedule.ts');
+      await expect(section).not.toContainText('A template comment');
+      // A picture is its words: nothing asked of its host, no script run.
+      await expect(section.getByText('Retry timeline')).toBeVisible();
+      await expect(section.getByText('Dashboard after')).toBeVisible();
+      await expect(section.locator('img')).toHaveCount(0);
+      expect(asked.filter((url) => /githubusercontent|github\.com\/user-attachments/.test(url))).toEqual([]);
+      expect(await page.evaluate(() => (window as { scripted?: boolean }).scripted)).toBeUndefined();
+
+      await section.getByRole('button', { name: 'Show less' }).click();
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      // The words folded open on a click as well.
+      await body.click({ force: true });
+      await expect(section).toHaveAttribute('data-pull-description', 'open');
+    } finally {
+      await long.context.close();
+    }
+
+    // Empty: nothing at all, whether the forge said none or only spaces; the first file where it always is.
+    for (const description of [null, '']) {
+      const empty = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description });
+      try {
+        const review = empty.page.locator('[data-pull-review]');
+        await expect(first(review)).toBeVisible();
+        await expect(review.locator('[data-pull-description]')).toHaveCount(0);
+        await expect(review.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+        // Whose PR it is: beside the title, on a phone at the foot, and nothing above the diff.
+        await expect(review.locator(width === 390 ? '.ib-prr-foot [data-pull-review-readonly]' : '.ib-vhead [data-pull-review-readonly]')).toHaveText('by tomas');
+        await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCount(0);
+      } finally {
+        await empty.context.close();
+      }
+    }
+  }
+});
+
+test('each layer shows its own description, through the forge read: Next layer changes it, Whole stack keeps it, none is none', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    const open = async (key: string, scope: string) => {
+      await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(STACK_ID)}&layer=${encodeURIComponent(key)}&scope=${scope}`);
+      await page.reload();
+      await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    };
+    const section = page.locator('[data-pull-review] [data-pull-description]');
+    await open(LAYER_413, 'layer');
+    await expect(section).toHaveText('Backs off between the attempts.');
+    await page.locator(`[data-pull-review] [data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
+    await page.locator('[data-pull-review]').getByRole('radio', { name: 'Whole stack' }).click();
+    await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
+    await open(LAYER_412, 'layer');
+    await expect(section).toHaveCount(0);
+    // A layer opens folded, whatever the last one did.
+    await page.route('**/api/inbox/pulls/diff*', async (route) => {
+      const real = await route.fetch().catch(() => null);
+      if (real) await route.fulfill({ status: 200, json: { ...(await real.json()), description: Array.from({ length: 60 }, (_, i) => `Line ${i}.`).join('\n\n') } });
+    });
+    await open(LAYER_413, 'layer');
+    await section.getByRole('button', { name: 'Show more' }).click();
+    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    await page.locator(`[data-pull-review] [data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', STACK_ID);
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+  } finally {
+    await context.close();
+  }
+});
+
 test('nothing but a hairline between files, whatever separators a file draws: above its first hunk, between hunks, in Split and Unified', async ({ browser }) => {
   const hunk = (at: number) => `@@ -${at},3 +${at},3 @@\n ctx\n-old\n+new\n ctx\n`;
   const file = (path: string, ...ats: number[]) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n${ats.map(hunk).join('')}`;
@@ -1481,9 +1619,6 @@ test('the controls\' row and the foot on long words: layers fade and take the wh
     });
     await expect(layers).toHaveAttribute('data-over', '');
     expect(await layers.evaluate((nav) => getComputedStyle(nav).maskImage)).toContain('linear-gradient');
-    // The note keeps its words beside them.
-    const note = review.locator('[data-pull-review-readonly]');
-    expect(await note.evaluate((el) => el.scrollWidth <= el.clientWidth && el.clientWidth > 0)).toBe(true);
     // A mouse wheel reaches the layers past the edge.
     await layers.hover();
     await page.mouse.wheel(0, 200);
@@ -1510,9 +1645,10 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const box = shell.locator('[data-guide-code-view-mounted="true"]');
     await expect(box).toBeVisible({ timeout: 30_000 });
 
-    // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, while the rail is out.
+    // Whose PR it is: plain words (no band) beside its title, while the bar has room; never "tomas's pull request".
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(note).toHaveText('by tomas');
     const onRow = async (width: number) => {
       await page.setViewportSize({ width, height: 900 });
       // Read in one frame, once the resize's folds have landed: the row moves when the file rail folds.
@@ -1520,8 +1656,9 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
         .poll(() =>
           review.evaluate((root) => {
             const words = root.querySelector('[data-pull-review-readonly]')!.getBoundingClientRect();
-            const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
-            return Math.abs(words.y + words.height / 2 - (add.y + add.height / 2)) < 3 && words.right < add.left;
+            const title = root.querySelector('[data-pull-review-title]')!.getBoundingClientRect();
+            const comments = root.querySelector('.ib-vcomments')!.getBoundingClientRect();
+            return Math.abs(words.y + words.height / 2 - (title.y + title.height / 2)) < 3 && words.left >= title.right && words.right < comments.left;
           }),
         )
         .toBe(true);
@@ -1534,11 +1671,11 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
       await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCount(0);
     }
     await page.setViewportSize({ width: 1440, height: 900 });
-    await expect(review.locator('.ib-prr-strip [data-pull-review-readonly]')).toBeVisible();
+    await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toBeVisible();
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
       const before = node.textContent;
-      node.textContent = `${'a-very-long-name-'.repeat(20)}'s pull request`;
+      node.textContent = `by ${'a-very-long-name-'.repeat(20)}`;
       return before;
     });
     for (const width of [1280, 1440]) await onRow(width);

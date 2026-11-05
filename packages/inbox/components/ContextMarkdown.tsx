@@ -21,7 +21,8 @@ export function ContextMarkdown({
   ...data
 }: {
   markdown: string;
-  messageId: string;
+  /** The message whose images the markdown may show. None: the host's `ImageResolverContext` decides. */
+  messageId?: string;
   onImage?: (src: string, alt: string) => void;
   /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: they stay plain). */
   refRepo?: { display: string; host?: string } | null;
@@ -45,7 +46,7 @@ export function ContextMarkdown({
         stickyActions={false}
         disableCodePathValidation
         refRepo={refRepo}
-        imageBaseDir={inboxMessageImageBase(messageId)}
+        imageBaseDir={messageId ? inboxMessageImageBase(messageId) : undefined}
         onImageClick={onImage}
         questionDecisionLines={false}
         answerOnly
