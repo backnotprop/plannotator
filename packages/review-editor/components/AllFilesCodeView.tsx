@@ -407,6 +407,11 @@ export interface AllFilesCodeViewProps {
    */
   onContentHeightChange?: (height: number) => void;
   /**
+   * No spacing around a hunk separator, nor at the foot of a file beyond the code's padding, so a host's files sit
+   * flush (the Inbox's PR page). Absent: as before.
+   */
+  flushFiles?: boolean;
+  /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
    * keyboard shortcuts, no /api/file-content augmentation, no open-in
@@ -751,6 +756,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
   onContentHeightChange,
+  flushFiles = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
   onAddEditorCommentForFile,
@@ -3189,12 +3195,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
       // That 32 already holds the separator's margins, and Pierre's `spacing` adds 8 px either side as well (it is also
-      // the code's bottom padding, hence the second key). Here it only leaves spare room at the list's foot; a list that
-      // reports its height would draw it as a gap under the file.
-      ...(reportsContentHeight && { spacing: 0, paddingBottom: 8 }),
+      // the code's bottom padding, hence the second key).
+      ...(flushFiles && { spacing: 0, paddingBottom: 8 }),
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, reportsContentHeight],
+    [compactTouchLayout, customLineHeight, flushFiles],
   );
   itemMetricsRef.current = itemMetrics;
 

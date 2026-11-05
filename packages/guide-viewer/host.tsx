@@ -168,6 +168,8 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * which the renderer's measured height then corrects).
    */
   diffStyle?: 'split' | 'unified';
+  /** The renderer's files sit flush (no spacing around a separator): a content-fit box's estimate counts it so. */
+  flushFiles?: boolean;
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

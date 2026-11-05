@@ -618,16 +618,21 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const hunk = (at: number) => `@@ -${at},2 +${at},2 @@\n ctx\n-a\n+b\n`;
     const patchOf = (...ats: number[]) => `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n${ats.map(hunk).join('')}`;
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
-    const box = async (patch: string) => {
+    const box = async (patch: string, flushFiles = false) => {
       const file: DiffFile = { path: 'a.ts', patch, additions: 1, deletions: 1, status: 'modified' };
-      await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
+      await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified', flushFiles } });
       return boxHeight('a.ts');
     };
-    // Each hunk draws three rows in Unified.
+    // Each hunk draws three rows in Unified. Every Inbox reader keeps its separators' spacing.
     expect(await box(patchOf(1))).toBe(`${59 + 3 * 20}px`);
-    expect(await box(patchOf(10))).toBe(`${59 + 3 * 20 + 32}px`);
-    expect(await box(patchOf(1, 30))).toBe(`${59 + 6 * 20 + 32}px`);
-    expect(await box(patchOf(10, 30, 50))).toBe(`${59 + 9 * 20 + 3 * 32}px`);
+    expect(await box(patchOf(10))).toBe(`${59 + 3 * 20 + 40}px`);
+    expect(await box(patchOf(1, 30))).toBe(`${59 + 6 * 20 + 48}px`);
+    expect(await box(patchOf(10, 30, 50))).toBe(`${59 + 9 * 20 + 40 + 2 * 48}px`);
+    // The PR page's files sit flush: a flat 32.
+    expect(await box(patchOf(1), true)).toBe(`${59 + 3 * 20}px`);
+    expect(await box(patchOf(10), true)).toBe(`${59 + 3 * 20 + 32}px`);
+    expect(await box(patchOf(1, 30), true)).toBe(`${59 + 6 * 20 + 32}px`);
+    expect(await box(patchOf(10, 30, 50), true)).toBe(`${59 + 9 * 20 + 3 * 32}px`);
   });
 
   // Guards the same growth on a file with no final newline: the viewer draws that note as a row of its own.
