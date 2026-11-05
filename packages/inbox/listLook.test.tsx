@@ -477,7 +477,7 @@ describe('the saved look', () => {
 });
 
 describe.if(hasDom)('the ⋮ menu', () => {
-  test('four checkboxes after Refresh, unchecked by default, each a menuitemcheckbox', async () => {
+  test('four checkboxes after Refresh and the view (listView.ts), unchecked by default, each a menuitemcheckbox', async () => {
     const el = render('narrow');
     await openMenu(el);
     const popup = document.querySelector<HTMLElement>('[data-tidy-menu-popup]')!;
@@ -486,6 +486,8 @@ describe.if(hasDom)('the ⋮ menu', () => {
     expect(items.map((i) => [i.getAttribute('role'), i.textContent, i.getAttribute('aria-checked')])).toEqual([
       ['menuitem', 'Tidy', null],
       ['menuitem', 'Refresh', null],
+      ['menuitemradio', 'Grouped', 'true'],
+      ['menuitemradio', 'List', 'false'],
       ['menuitemcheckbox', 'Highlight thread subject', 'false'],
       ['menuitemcheckbox', 'Compact rows', 'false'],
       ['menuitemcheckbox', 'Hide agent icons', 'false'],
@@ -558,7 +560,7 @@ describe.if(hasDom)('the ⋮ menu', () => {
     let customized = 0;
     stored.set(LIST_LOOK_COOKIES.hideAgents, '1');
     await openMenu(render('narrow', () => customized++));
-    const rows = document.querySelector<HTMLElement>('[data-tidy-menu-popup] [role="group"]')!;
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-tidy-menu-popup] [role="group"]')].find((group) => document.getElementById(group.getAttribute('aria-labelledby') ?? '')?.textContent === 'Rows')!;
     const items = [...rows.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
     expect(items.map((i) => [i.getAttribute('role'), i.textContent])).toEqual([
       ['menuitemcheckbox', 'Highlight thread subject'],

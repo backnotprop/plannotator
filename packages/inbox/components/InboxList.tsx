@@ -29,6 +29,7 @@ import { attachPullToRefresh } from '../pullRefresh';
 import { TidyMenu, type TidyController } from './Tidy';
 import { awayLine, type MachinesModel } from '../machines';
 import { listLookClasses, useListLook } from '../listLook';
+import { flatRows, useListView, type ListPlaces, type ListSort } from '../listView';
 import { useInboxTextSize } from '../textSize';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { relativeTime, relativeWords, useRelativeClock } from '../relativeTime';
@@ -57,9 +58,15 @@ export interface InboxListProps {
   selectedThreadId: string | null;
   /**
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
+   * one. In the list's header beside the title, never above the rows, so no row moves when it comes or goes
+   * (approval "inbox-list-view", R1). Always one line: a long project name is cut with "…", the whole line then in a tooltip.
    */
   notice: { count: number; project?: string | null } | null;
+  /**
+   * When the list on screen was last sorted whole (listView.ts `ListSort`): List keeps each row's place between
+   * sorts, as the groups do. Absent: every render is a sort (a list that never holds, the tour).
+   */
+  sort?: ListSort;
   /** This page is older than the Inbox (StalePageNotice, stalePage.ts): at the list's top, above the notifications line. */
   stale?: ReactNode;
   /** The one-time notifications line (record 6.1), above everything else. */
@@ -375,27 +382,35 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
 }
 
 /**
- * The held list's "N new" line: one line at every width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…"
- * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
- * while it is cut the whole line is the tooltip.
+ * The held list's "N new · Show": a pill in the list's header beside the title (approval "inbox-list-view", R1: in
+ * the list's body it pushed every row down under the pointer when it came, and up when it went). One line at every
+ * width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…" wrapped onto two). "N new in" and Show never
+ * shrink; the project's name takes the rest and is cut with "…", and while it is cut the whole line is the tooltip.
+ * The button is the hit area (a finger's 44 px on a phone); the pill inside it is what shows.
  */
 function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
   const full = project ? `${count} new in ${project}` : `${count} new`;
   return (
     <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
-      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
-        <Icon name="inbox" size={15} />
-        <span className="ib-notice-text">
-          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
-          {/* A space for the line's text and accessible name; the flex gap draws it. */}
-          {project && ' '}
-          {project && (
-            <bdi className="ib-notice-proj" data-notice-project={project}>
-              {project}
-            </bdi>
-          )}
+      <button type="button" className="ib-hnotice" onClick={onShow} data-inbox-notice="">
+        <span className="ib-hnotice-pill">
+          <Icon name="inbox" size={14} />
+          <span className="ib-notice-text">
+            <span className="ib-notice-n">
+              {`${count} new`}
+              {/* A phone's header has room for "1 new" and Show only: it hides " in <project>" for the eye alone. */}
+              {project && <span className="ib-notice-in"> in</span>}
+            </span>
+            {/* A space for the line's text and accessible name; the flex gap draws it. */}
+            {project && ' '}
+            {project && (
+              <bdi className="ib-notice-proj" data-notice-project={project}>
+                {project}
+              </bdi>
+            )}
+          </span>
+          <b>Show</b>
         </span>
-        <b>Show</b>
       </button>
     </Tip>
   );
@@ -1019,6 +1034,9 @@ export function InboxList(props: InboxListProps) {
   });
   // The list's look options in its ⋮ menu (listLook.ts), all off by default.
   const [look, setLook] = useListLook(props.rememberLook !== false);
+  // Grouped (the default) or List (listView.ts), this browser's choice in the same ⋮ menu.
+  const [view, setView] = useListView(props.rememberLook !== false);
+  const asList = view === 'list';
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
   // Another project on a phone: the list starts at its top. The list itself stays mounted (its Quiet fold and,
@@ -1104,6 +1122,21 @@ export function InboxList(props: InboxListProps) {
   const refreshHintId = useId();
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
+  // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
+  // list is sorted whole (`props.sort`), as the groups keep theirs. Worked out in both views, so a switch to List
+  // finds the places the list on screen has.
+  const places = useRef<ListPlaces | null>(null);
+  const sortEpoch = props.sort?.epoch;
+  const sortKeep = props.sort?.keep ?? null;
+  const flat = useMemo(
+    () => flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }),
+    [props.sections, sortEpoch, sortKeep],
+  );
+  useLayoutEffect(() => {
+    places.current = flat.places;
+  }, [flat]);
+  // List draws the Snoozed band as the groups do: folded, under the rows.
+  const listBand = asList ? (visible.find((s) => s.id === 'snoozed') ?? null) : null;
   // The band comes back folded: it shows only while something is snoozed, and each time it is new.
   const bandShown = visible.some((s) => s.id === 'snoozed');
   useEffect(() => {
@@ -1125,14 +1158,15 @@ export function InboxList(props: InboxListProps) {
     if (!pinColumn || !settled) return '';
     const keys = new Set<string>();
     for (const section of props.sections) {
-      if (section.id === 'quiet' ? !quietOpen : section.id === 'snoozed' ? !snoozedOpen : false) continue;
+      // List draws Quiet's rows (no fold); the Snoozed band folds in both views.
+      if (section.id === 'quiet' ? !quietOpen && !asList : section.id === 'snoozed' ? !snoozedOpen : false) continue;
       for (const row of section.threads) {
         const key = openCountsKey(row);
         if (key) keys.add(key);
       }
     }
     return [...keys].sort().join(' ');
-  }, [pinColumn, settled, props.sections, quietOpen, snoozedOpen]);
+  }, [pinColumn, settled, props.sections, quietOpen, snoozedOpen, asList]);
   const textSize = useInboxTextSize();
   // ThemeProvider puts the palette's classes on <html> while it renders, before this list's layout effects run.
   const { colorTheme, resolvedMode } = useTheme();
@@ -1182,6 +1216,36 @@ export function InboxList(props: InboxListProps) {
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
+  /** One row, the same in both views; `drawn` is the group the held list draws it in. */
+  const renderRow = (row: InboxListRow, drawn: InboxListGroupId) => (
+    <ListRow
+      key={row.thread_id}
+      row={row}
+      project={props.projectNames?.get(row.project.id) ?? row.project.name}
+      away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
+      drawn={drawn}
+      // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
+      shape={props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
+      full={fullWords}
+      filtered={noProject}
+      selected={row.thread_id === props.selectedThreadId}
+      lit={lit(row)}
+      onOpen={openRow}
+      onMarkRead={props.onMarkRead ? markRead : undefined}
+      onMarkUnread={props.onMarkUnread ? markUnread : undefined}
+      onSendNow={props.onSendNow ? sendNow : undefined}
+      day={day}
+      menu={menuRow === row.thread_id}
+      pinned={props.pinned?.has(row.thread_id) === true}
+      pinColumn={pinColumn}
+      keys={rowKeys}
+      pill={look.highlight}
+      compact={look.compact}
+      noPreview={look.hidePreview}
+      relative={look.relativeTime}
+      titleFirst={look.titleFirst}
+    />
+  );
   return (
     <section
       ref={listEl}
@@ -1219,6 +1283,8 @@ export function InboxList(props: InboxListProps) {
             Refresh the list
           </span>
         )}
+        {/* "N new · Show" beside the title: the header's height never changes, so no row moves when it comes or goes. */}
+        {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
         {/* Search shows where New message does: a phone always, a wider window only while the main sidebar (which holds its own Search) is closed. */}
         {props.onSearch && headerCompose && (
           <Tip content={withShortcut('Search', { scope: inboxSearchShortcuts, action: 'openSearch' })}>
@@ -1264,6 +1330,7 @@ export function InboxList(props: InboxListProps) {
             onLook={(key, on) => setLook({ [key]: on })}
             threadPanel={props.threadPanel}
             onCustomize={props.onCustomizeRows}
+            view={props.rememberLook !== false ? { value: view, onChange: setView } : undefined}
           />
         )}
       </div>
@@ -1299,12 +1366,17 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
-          {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
           {visible.every((section) => section.id === 'snoozed') && props.empty}
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
           <LazyRowTips.Provider value={true}>
-          {visible.map((section) => {
+          {asList && flat.rows.length > 0 && (
+            // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
+            <div className="ib-group" data-section-id="list" data-flat-list="">
+              {flat.rows.map(({ row, drawn }) => renderRow(row, drawn))}
+            </div>
+          )}
+          {(asList ? (listBand ? [listBand] : []) : visible).map((section) => {
             const quiet = section.id === 'quiet';
             const snoozed = section.id === 'snoozed';
             const open = quiet ? quietOpen : snoozed ? snoozedOpen : true;
@@ -1323,36 +1395,7 @@ export function InboxList(props: InboxListProps) {
                     {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
                   </div>
                 )}
-                {open &&
-                  section.threads.map((row) => (
-                    <ListRow
-                      key={row.thread_id}
-                      row={row}
-                      project={props.projectNames?.get(row.project.id) ?? row.project.name}
-                      away={!!row.machine && (props.machines?.away.has(row.machine) ?? false)}
-                      drawn={section.id}
-                      // A phone's row has no hover action (a hover on a touch screen is a first tap): Mark read is in the thread's header there.
-                      shape={props.phone ? 'phone' : twoLine ? 'narrow' : 'wide'}
-                      full={fullWords}
-                      filtered={noProject}
-                      selected={row.thread_id === props.selectedThreadId}
-                      lit={lit(row)}
-                      onOpen={openRow}
-                      onMarkRead={props.onMarkRead ? markRead : undefined}
-                      onMarkUnread={props.onMarkUnread ? markUnread : undefined}
-                      onSendNow={props.onSendNow ? sendNow : undefined}
-                      day={day}
-                      menu={menuRow === row.thread_id}
-                      pinned={props.pinned?.has(row.thread_id) === true}
-                      pinColumn={pinColumn}
-                      keys={rowKeys}
-                      pill={look.highlight}
-                      compact={look.compact}
-                      noPreview={look.hidePreview}
-                      relative={look.relativeTime}
-                      titleFirst={look.titleFirst}
-                    />
-                  ))}
+                {open && section.threads.map((row) => renderRow(row, section.id))}
               </div>
             );
           })}

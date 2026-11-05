@@ -1083,6 +1083,17 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
 .ib-notice-n { flex-shrink: 0; }
 .ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* "N new · Show" in the list's header beside the title (approval "inbox-list-view", R1): never above the rows, so
+   no row moves when it comes or goes. The button is the hit area; the pill inside is what shows. It shrinks before
+   the buttons after it, its project's name first (above). */
+.ib-hnotice { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; height: 32px; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; white-space: nowrap; text-align: left; cursor: pointer; border-radius: 999px; }
+.ib-hnotice-pill { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: var(--ib-fs-13, 13px); font-weight: 450; }
+.ib-hnotice-pill > svg, .ib-hnotice-pill b { flex-shrink: 0; }
+.ib-hnotice-pill > svg { color: var(--muted-foreground); }
+.ib-hnotice-pill b { color: var(--primary); font-weight: 550; }
+.ib-hnotice:hover .ib-hnotice-pill { background: color-mix(in oklch, var(--primary) 15%, var(--card)); }
+.pn-inbox .ib-hnotice:focus-visible { outline: none; }
+.pn-inbox .ib-hnotice:focus-visible .ib-hnotice-pill { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
@@ -3063,6 +3074,16 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
+  /* The header's "N new · Show" on a phone: a finger's height, between the title and the header's buttons, which
+     keep their 44 px. The room left reads "1 new" and Show; "in <project>" stays for a screen reader. */
+  .ib-hnotice { position: relative; flex-shrink: 0; height: 44px; margin-left: 2px; }
+  .ib-hnotice-pill { height: 30px; padding: 0 10px; gap: 5px; }
+  .ib-hnotice-pill > svg { display: none; }
+  /* "N new" and Show never shrink (the title gives way first), and the title's resting ↻, invisible on a phone
+     (no hover), gives its room back while the pill shows; a refresh still turns it. */
+  .ib-hnotice .ib-notice-text { flex-shrink: 0; }
+  .ib-lhead:has(.ib-hnotice) .ib-lhead-title:not([data-refreshing]) svg.ib-ic-refresh { display: none; }
+  .ib-hnotice :is(.ib-notice-in, .ib-notice-proj) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }
@@ -7196,6 +7217,9 @@ dialog.ib-lo .ib-lo-frame .ib-listcol.ib-lo-list { position: relative; inset: au
 .ib-pmi-box { display: grid; place-items: center; width: 15px; height: 15px; flex: none; border: 1.5px solid color-mix(in oklab, var(--foreground) 38%, transparent); border-radius: 4px; }
 .ib-pmi-box[data-on] { border-color: var(--primary); background: var(--primary); color: var(--primary-foreground); }
 .ib-pmi .ib-pmi-box .ib-ic { width: 11px; height: 11px; color: inherit; }
+/* The list's view, one of two (listView.ts): the same box, round, with a dot when chosen. */
+.ib-pmi-box[data-radio] { border-radius: 50%; }
+.ib-pmi-box[data-radio][data-on]::after { content: ''; width: 5px; height: 5px; border-radius: 50%; background: currentcolor; }
 .ib-pmi.ib-pmi-noicon { padding-left: 31px; }
 /* A phone's sheet: its icons stay 15 px (Icon's own size), its items 12 px apart. */
 .ib-pm-pos[data-phone] .ib-pmi.ib-pmi-noicon { padding-left: 39px; }
