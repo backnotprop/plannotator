@@ -7744,7 +7744,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvsize { margin-left: auto; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); white-space: nowrap; }
 .ib-cp-rvsize b { font-weight: 500; }
 .ib-cp-rvfrompull { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-cp-picker.ib-cp-rvpulls { top: calc(100% + 4px); left: 110px; width: min(600px, calc(100% - 124px)); }
+.ib-cp-picker.ib-cp-rvpulls:not([data-phone]) { top: calc(100% + 4px); left: 110px; width: min(600px, calc(100% - 124px)); }
 .ib-cp-rvpulls .ib-cp-list { display: block; }
 .ib-cp-rvopt { display: flex; gap: 8px; }
 .ib-cp-rvrow .ib-cp-tobtn .ib-cp-tod { flex: none; }
