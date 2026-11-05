@@ -621,10 +621,10 @@ export function createInboxLiveSessions(options: {
    */
   const stuck = (session: string, itemId: string): boolean =>
     inboxClaimAbandoned(store.dir, itemId, session, { there: askerLive(session), startedAt: sessions.get(session)?.wakeStartedAt ?? null }, now());
-  /** The person's items in a thread, not taken yet, that `session` claimed and will never deliver (`stuck`); absent when none. */
+  /** The thread's latest person item `session` owes, when that session claimed it and will never deliver it (`stuck`). */
   const stuckField = (threadId: string, session: string): { stuck?: string[] } => {
-    const ids = (store.thread(threadId)?.messages ?? []).filter((m) => m.author.kind === "person" && !m.delivery && stuck(session, m.id)).map((m) => m.id);
-    return ids.length > 0 ? { stuck: ids } : {};
+    const owed = (store.thread(threadId)?.messages ?? []).filter((m) => m.author.kind === "person" && store.isOwner(m, session)).at(-1);
+    return owed && !owed.delivery && stuck(session, owed.id) ? { stuck: [owed.id] } : {};
   };
 
   /**
