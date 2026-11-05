@@ -240,6 +240,52 @@ describe("a launched agent that never starts", () => {
     expect(rowsOf(await w.reviews(), thread_id)).toEqual([]);
   });
 
+  test("nor is one whose CLI is gone", async () => {
+    const fake = fakeLaunchHost();
+    fake.host.start = async () => ({ ok: false, code: "missing", text: "Not installed." });
+    const w = await world({ launchHost: fake.host });
+    await w.setCodeReview(true);
+    const project = w.server.store.ensureProject({ name: "billing-svc", root: w.project });
+    const started = await fetch(`${w.base}/api/inbox/messages`, {
+      method: "POST",
+      headers: { Origin: w.base, "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: w.server.serverSession, to: { launch: { agent: FAKE, project_id: project.id } }, body: "Please review.", idempotency_key: "00000000-0000-4000-8000-000000000004", review: { kind: "local", changes: "uncommitted", branch: "main", base: null, ask: "guide" } }),
+    });
+    expect(started.status).toBe(200);
+    const { thread_id } = (await started.json()) as { thread_id: string };
+    const stateOf = async () => ((await (await fetch(`${w.base}/api/inbox/threads/${thread_id}`)).json()) as { run?: { state?: string } }).run?.state;
+    for (let tries = 0; tries < 100 && (await stateOf()) !== "missing"; tries++) await Bun.sleep(50);
+    expect(await stateOf()).toBe("missing");
+    expect(rowsOf(await w.reviews(), thread_id)).toEqual([]);
+  });
+
+  test("nor is one stopped before it wrote, once the stop has settled", async () => {
+    const fake = fakeLaunchHost();
+    const w = await world({ launchHost: fake.host });
+    await w.setCodeReview(true);
+    const project = w.server.store.ensureProject({ name: "billing-svc", root: w.project });
+    const started = await fetch(`${w.base}/api/inbox/messages`, {
+      method: "POST",
+      headers: { Origin: w.base, "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: w.server.serverSession, to: { launch: { agent: FAKE, project_id: project.id } }, body: "Please review.", idempotency_key: "00000000-0000-4000-8000-000000000005", review: { kind: "local", changes: "uncommitted", branch: "main", base: null, ask: "guide" } }),
+    });
+    expect(started.status).toBe(200);
+    const { thread_id, launch } = (await started.json()) as { thread_id: string; launch: { id: string } };
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ reason: "curating" }]);
+    for (let tries = 0; tries < 100 && !fake.calls.some((call) => call.startsWith("start ")); tries++) await Bun.sleep(20);
+    const stopped = await fetch(`${w.base}/api/inbox/launch/${launch.id}/stop`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json" }, body: "{}" });
+    expect(stopped.status).toBe(200);
+    const stateOf = async () => ((await (await fetch(`${w.base}/api/inbox/threads/${thread_id}`)).json()) as { run?: { state?: string } }).run?.state;
+    setSystemTime(new Date(Date.now() + 2 * 60_000));
+    try {
+      for (let tries = 0; tries < 100 && (await stateOf()) !== "stopped"; tries++) await Bun.sleep(20);
+      expect(await stateOf()).toBe("stopped");
+      expect(rowsOf(await w.reviews(), thread_id)).toEqual([]);
+    } finally {
+      setSystemTime();
+    }
+  });
+
   test("one still starting is Curating", async () => {
     const fake = fakeLaunchHost();
     let release = () => {};

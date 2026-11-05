@@ -6238,7 +6238,7 @@ function Inbox() {
           home={settings?.home ?? null}
           board={boardEnabled === true}
           reviewPulls={compose.review ? reviewPulls : undefined}
-          reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.every((host) => host.error) ? 'failed' : 'read'}
+          reviewPullsRead={!pulls.reviews ? (pulls.error ? 'failed' : 'reading') : pulls.reviews.hosts.length > 0 && pulls.reviews.hosts.some((host) => host.error) ? 'failed' : 'read'}
           onOpenReviewThread={(id) => writeRoute({ page: 'inbox', reviews: reviewsScope(), project: null, thread: id })}
           onSent={(sent) => {
             rememberSent(sent.session);

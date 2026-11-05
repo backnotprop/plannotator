@@ -21,7 +21,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
-import { forgetUnsentReview } from '../compose/reviewBox';
+import { forgetUnsentReview, keepUnsentReview } from '../compose/reviewBox';
 import type { ComposeSent } from '../compose/ComposeDialog';
 import type { ReviewBoxPull } from '../compose/reviewBox';
 import type { StartThreadInput } from '../api';
@@ -847,6 +847,28 @@ test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with
   await settle();
   expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
   expect(sent).toHaveLength(0);
+});
+
+test.skipIf(!hasDom)('the box: a kept pick that has gone into review since is dropped, and its words stay; one that has not stays picked', async () => {
+  const started: StartThreadInput[] = [];
+  const open = (pull: ReviewBoxPull) => mount(<ComposeDialog request={{ review: {} }} reviewPulls={[pull]} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  open(boxPick());
+  await settle();
+  expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe(boxPick().id);
+  act(() => root!.unmount());
+  root = null;
+  keepUnsentReview({ body: 'only the sidebar', threadName: null, kind: 'pr', pick: boxPick() });
+  open({ ...boxPick(), thread: { id: 'msg_elsewhere', agent: 'Claude Code' } });
+  await settle();
+  expect(el('[data-review-pick]').getAttribute('data-review-pick')).toBe('choose');
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('only the sidebar');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toHaveLength(0);
+  act(() => root!.unmount());
+  root = null;
+  forgetUnsentReview();
 });
 
 test.skipIf(!hasDom)('the box: words typed and left come back when it opens again, with no prompt, and a started review leaves nothing behind', async () => {

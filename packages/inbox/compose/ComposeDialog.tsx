@@ -218,6 +218,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
+  // A pick kept or opened earlier that has since gone into review (handed elsewhere, say): its thread answers for it now. The words stay.
+  useEffect(() => {
+    if (box && reviewPick && props.reviewPulls?.find((pull) => pull.id === reviewPick.id)?.thread) setReviewPick(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!box, reviewPick?.id, props.reviewPulls]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
   // A link: the picker's own way when the list has that PR, else a PR the Inbox knows only from this link.
   const linkFound = box && reviewKind === 'pr' && linkChosen && linkRead?.ok ? linkRead : null;

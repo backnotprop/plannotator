@@ -640,13 +640,14 @@ test('an old #pulls link opened fresh, in a new window, becomes #reviews', async
   }
 });
 
-test("#reviews&new with Code review off: the off page, and no box", async () => {
+test("#reviews&new with Code review off: the off page, no box, and the address forgets it", async () => {
   const { page } = world;
   await setCodeReview(false);
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-reviews-off]')).toBeVisible();
   await page.waitForTimeout(400);
   await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/&new/);
 });
 
 test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
@@ -1567,8 +1568,8 @@ test('New review: the picker says what it knows, and the summary never shows the
 
 test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
   const { page } = world;
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
-  await page.reload();
   const box = page.locator('[data-review-box]');
   await expect(box).toBeVisible();
   await expect(page).toHaveURL(/#reviews$/);
@@ -1602,8 +1603,8 @@ test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR a
 test('New review, a pull request link: what was found and how it was read, a repository that is no project, one read only, and a second link opens the same thread', async () => {
   const { page, claude } = world;
   await setCodeReview(true);
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
-  await page.reload();
   const box = page.locator('[data-review-box]');
   await expect(box).toBeVisible();
   // One Pull request row: its picker's search takes the link.

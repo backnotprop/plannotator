@@ -1128,12 +1128,12 @@ export function createInboxLaunch(options: {
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },
 
-    /** The launch died before its agent wrote: what the thread's own line says ("didn't start"). */
+    /** The launch ended before its agent wrote: it failed, its CLI is gone, or it was stopped or went away (the thread's own line says which). */
     didNotStart(threadId: string): boolean {
       const root = store.message(threadId);
       if (!enabled() || !root?.launch || root.thread_id !== root.id) return false;
       const state = runOfRoot(root)?.state;
-      return state === "failed" || state === "missing";
+      return state === "failed" || state === "missing" || state === "stopped";
     },
 
     /** A launched thread's attach command (the ⋯ menu's Copy, also while the agent rests and has no line), or null. */
