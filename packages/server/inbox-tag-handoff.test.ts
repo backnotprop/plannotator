@@ -29,6 +29,7 @@ import {
 } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { wordsMessage } from "../inbox/sendTargets";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -333,6 +334,92 @@ describe("Hand off", () => {
     const self = await reply(server, asked.message_id, { idempotency_key: "c", words: "x", tags: [{ session: OWNER, mode: "handoff" }] });
     expect(self.status).toBe(409);
     expect((await thread(server, asked.thread_id)).messages).toHaveLength(1);
+  });
+});
+
+describe("a later reply moved when the hand-off's new owner has ended", () => {
+  const C = "cc-third";
+  /** The owner handed the thread to `HERDR`, which took it; the person wrote more, and `HERDR` ended. */
+  async function handedThenEnded(herdrWrites: boolean) {
+    let now = 1_000_000;
+    const w = await world(100, () => now);
+    const handed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(w.server, HERDR, w.herdr)).length > 0, "the hand-off to settle");
+    await fetch(`${base(w.server)}${INBOX_BRIDGE_EVENT_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+      body: JSON.stringify({ session: HERDR, host: "claude-code", type: "delivered", id: handed.id }),
+    });
+    const wrote = herdrWrites ? await agentSends(w.client, w.herdr, HERDR, "Looking at it.", { reply_to: handed.id }) : null;
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(w.server, OWNER, w.project);
+    await poll(w.server, C, w.project);
+    /** What the window does with the person's next words: answers `wordsMessage`, as it is addressed. */
+    const nextReply = async (key: string) => {
+      const at = wordsMessage(await thread(w.server, w.asked.thread_id));
+      return (await reply(w.server, at.id, { idempotency_key: key, words: `Next, ${key}.` })).json.reply as InboxMessageWire;
+    };
+    const handedTo = async (session: string, project: string, id: string) => (await poll(w.server, session, project)).some((c) => c.id === id);
+    return { ...w, handed, wrote, nextReply, handedTo, age: () => (now += INBOX_ASKER_RESTART_GRACE_MS + 1) };
+  }
+
+  test("it took the thread and never wrote; words moved back to the former owner, who answers: the next reply is the former owner's", async () => {
+    const w = await handedThenEnded(false);
+    const more = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    const moved = await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: OWNER } });
+    expect(moved.status).toBe(200);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(OWNER);
+    await agentSends(w.client, w.project, OWNER, "Y is done.", { reply_to: more.id });
+    expect(await owner(w.server, w.asked.thread_id)).toBe(OWNER);
+    const next = await w.nextReply("k3");
+    expect(await w.handedTo(OWNER, w.project, next.id)).toBe(true);
+    expect(await w.handedTo(HERDR, w.herdr, next.id)).toBe(false);
+  });
+
+  test("it took the thread and never wrote; words moved to a third session: that session has it, for the next reply too", async () => {
+    const w = await handedThenEnded(false);
+    const more = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    const moved = await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } });
+    expect(moved.status).toBe(200);
+    expect((moved.json.message as InboxMessageWire).took_over).toBe(true);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    const next = await w.nextReply("k3");
+    expect(await w.handedTo(C, w.project, next.id)).toBe(true);
+    expect(await w.handedTo(HERDR, w.herdr, next.id)).toBe(false);
+  });
+
+  test("it wrote, then ended; a reply aimed at a third session: server and window agree it is that session's, before and after it writes", async () => {
+    const w = await handedThenEnded(true);
+    const aimed = (await reply(w.server, w.wrote!.message_id, { idempotency_key: "k2", words: "Yours, third.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBe(true);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    expect(wordsMessage(await thread(w.server, w.asked.thread_id)).id).toBe(aimed.id);
+    const wrote = await agentSends(w.client, w.project, C, "On it.", { reply_to: aimed.id });
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    expect(wordsMessage(await thread(w.server, w.asked.thread_id)).id).toBe(wrote.message_id);
+    const next = await w.nextReply("k3");
+    expect(await w.handedTo(C, w.project, next.id)).toBe(true);
+    expect(await w.handedTo(HERDR, w.herdr, next.id)).toBe(false);
+  });
+
+  test("a reply aimed at another session from the hand-off itself, its owner ended: it takes over too", async () => {
+    const w = await handedThenEnded(false);
+    const aimed = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Yours, third.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBe(true);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+  });
+
+  test("a move while the hand-off's owner is still there stays refused, and the owner does not change", async () => {
+    let now = 1_000_000;
+    const w = await world(100, () => now);
+    const handed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(w.server, HERDR, w.herdr)).length > 0, "the hand-off to settle");
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(w.server, HERDR, w.herdr);
+    await poll(w.server, C, w.project);
+    const more = (await reply(w.server, handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    expect((await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } })).status).toBe(422);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(HERDR);
   });
 });
 

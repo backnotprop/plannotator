@@ -14,7 +14,7 @@
  * stops too, and a reply with nothing live is saved for the next agent.
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
- * PNGs, light and dark at 1440 by 900, land in .local/proof/ended-session/.
+ * PNGs, light and dark at 1440 and 390, land in .local/proof/ended-session/.
  */
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -98,6 +98,7 @@ class Connection {
     while (!this.stopped) {
       const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
         waitMs: 1_000,
+        tags: true,
         project_path: world.ledger,
         started_at: this.startedAt,
         busy: false,
@@ -123,11 +124,15 @@ class Connection {
 
 async function shot(name: string): Promise<void> {
   const page = world.page;
-  for (const scheme of ['light', 'dark'] as const) {
-    await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
-    await page.waitForTimeout(300);
-    await page.screenshot({ path: join(proofDir, `${name}-${scheme}.png`) });
+  for (const width of [1440, 390]) {
+    await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    for (const scheme of ['light', 'dark'] as const) {
+      await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
+      await page.waitForTimeout(300);
+      await page.screenshot({ path: join(proofDir, `${name}-${width}-${scheme}.png`) });
+    }
   }
+  await page.setViewportSize({ width: 1440, height: 900 });
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
 }
 
@@ -358,5 +363,53 @@ test('a saved reply moves to a session that started later, which then keeps the 
   const next = await waitFor('the next reply handed to the later session', () => late.commands[1]);
   expect((await threadMessages()).at(-1)).toMatchObject({ id: next.id, to: { host: 'pi', session: 'pi-session-late' } });
   await shot('6-after-move');
+  expect(world.errors).toEqual([]);
+});
+
+test('handed on, the new owner took it and ended without writing: a later reply moved to another session keeps the thread there', async () => {
+  test.setTimeout(240_000);
+  const { page } = world;
+  const pane = page.locator('section.ib-pane');
+  const late = world.connections.find((c) => c.session === 'pi-session-late')!;
+  const gone = new Connection('pi-session-gone', Date.now() - 30_000, 'Ledger retry follow-up');
+  world.connections.push(gone);
+  await page.waitForTimeout(1_500);
+  const { port } = registry();
+  const { serverSession } = (await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as { serverSession: string };
+  const handOff = await fetch(`http://127.0.0.1:${port}/api/inbox/messages/${(await threadMessages()).at(-1)!.id}/reply`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverSession, idempotency_key: 'hand-on', words: 'Yours now.', tags: [{ host: 'pi', session: 'pi-session-gone', mode: 'handoff' }] }),
+  });
+  expect(handOff.status, await handOff.clone().text()).toBe(200);
+  const handed = (await handOff.json()) as { reply: { id: string } };
+  const taken = await waitFor('the hand-off to reach the new owner', () => gone.commands.find((c) => c.id === handed.reply.id), 30_000);
+  await gone.deliver(taken.id);
+  await gone.stop();
+
+  // Words for the new owner, saved once it has ended (60 s with no poll).
+  await page.reload();
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await pane.locator('textarea').first().fill('Also cap the retries at five.');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await expect(pane.locator('[data-readdress-open]')).toBeVisible({ timeout: 100_000 });
+  const moving = (await threadMessages()).at(-1)!;
+  await pane.locator('[data-readdress-open]').click();
+  await pane.locator('[data-readdress-session="pi-session-late"]').click();
+  await shot('7-later-reply-move');
+  await pane.locator('[data-readdress-send]').click();
+  const moved = await waitFor('the moved reply handed to the other session', () => late.commands.find((c) => c.id === moving.id));
+  await late.deliver(moved.id);
+
+  // Its answer does not hand the thread back to the session that ended, and the header no longer says it did.
+  await world.pi.send({ project_path: world.ledger, reply_to: moved.id, agent_session: 'pi-session-late', body: 'Capped at five.' } as never, { wakes: true });
+  await expect(pane.locator('[data-thread-owner]')).toHaveCount(0);
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await expect(pane.locator('[data-recipient]')).not.toHaveAttribute('aria-label', /Ledger retry follow-up/);
+  await pane.locator('textarea').first().fill('Thanks, ship it.');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  const next = await waitFor('the next reply handed to the other session', () => late.commands.find((c) => c.body.includes('Thanks, ship it.')));
+  expect(gone.commands.some((c) => c.id === next.id)).toBe(false);
+  await shot('8-next-reply-after-move');
   expect(world.errors).toEqual([]);
 });

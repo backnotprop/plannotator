@@ -2902,8 +2902,9 @@ export class InboxStore {
 
   /**
    * The session that owns a thread now (the one the person's plain reply
-   * goes to): the new owner of its latest hand-off that was not taken back,
-   * else today's rule (the latest agent writer, or a session that took over
+   * goes to): the new owner of its latest hand-off that was not taken back
+   * and that no later reply took over from (window: `activeHandoff`), else
+   * today's rule (the latest agent writer, or a session that took over
    * from an ended one since, else the session a thread the person started is
    * addressed to). Null when there is none.
    */
@@ -2912,6 +2913,7 @@ export class InboxStore {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       if (handoffActive(message)) return { host: message.to!.host, session: message.to!.session };
+      if (message.took_over) break;
     }
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;

@@ -267,7 +267,7 @@ describe('moved back to the session with the notice not taken yet', () => {
   }, 40_000)
 })
 
-test('read_thread by the id a stop notice shows reads its thread', async () => {
+test('the id a stop notice shows reads as its reply wherever an agent can pass it', async () => {
   const w = await world('pi')
   await w.pollFormer()
   await w.handOffBusy()
@@ -276,6 +276,21 @@ test('read_thread by the id a stop notice shows reads its thread', async () => {
   const read = (await w.client.callTool({ name: 'read_thread', arguments: { message_id: notice!.id, agent_session: FORMER } })) as { isError?: boolean; content: { text: string }[] }
   expect(read.isError ?? false).toBe(false)
   expect(read.content[0]!.text).toContain(w.asked.thread_id)
+  const call = async (name: string, args: Record<string, unknown>) =>
+    (await w.client.callTool({ name, arguments: { agent_session: FORMER, ...args } })) as { isError?: boolean; content: { text: string }[]; structuredContent?: { thread_id?: string } }
+  for (const args of [{ expand: [notice!.id] }, { before: notice!.id }, { after: notice!.id }]) {
+    const windowed = await call('read_thread', { thread_id: w.asked.thread_id, ...args })
+    expect(windowed.isError ?? false).toBe(false)
+  }
+  const answered = await call('send_message', { body: 'Understood.', reply_to: notice!.id, agent_host: 'pi', agent_name: 'The agent' })
+  expect(answered.isError ?? false).toBe(false)
+  expect(answered.structuredContent?.thread_id).toBe(w.asked.thread_id)
+  // An id that is no notice's is named as it was written.
+  for (const id of ['-stop', 'msg_x-stop']) {
+    const bad = await call('read_thread', { message_id: id })
+    expect(bad.isError).toBe(true)
+    expect(bad.content[0]!.text).toContain(`No message ${id}.`)
+  }
 }, 40_000)
 
 describe('tagged, not taken, then moved to that session', () => {

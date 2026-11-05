@@ -3,6 +3,7 @@
  * answers, and which reply each waiting annotation rides.
  */
 import { inboxActionInDraft, type InboxAnnotationRecord, type InboxMessageWire, type InboxThread } from '@plannotator/core/inbox-types';
+import { activeHandoff } from './tags';
 
 /**
  * One reply of a Send: the message it answers, its picks and the questions it
@@ -141,18 +142,10 @@ export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
 export function wordsMessage(thread: InboxThread): InboxMessageWire {
   const tookOver = tookOverReply(thread);
   if (tookOver) return tookOver;
-  let handedAt = -1;
-  for (let index = thread.messages.length - 1; index >= 0; index--) {
-    const m = thread.messages[index]!;
-    if (m.author.kind === 'person' && m.handoff && !m.handoff.undone_at && m.to) {
-      handedAt = index;
-      break;
-    }
-  }
-  if (handedAt >= 0) {
-    const handoff = thread.messages[handedAt]!;
+  const handoff = activeHandoff(thread);
+  if (handoff) {
     const owner = handoff.to!.session;
-    const after = thread.messages.slice(handedAt + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
+    const after = thread.messages.slice(thread.messages.indexOf(handoff) + 1).filter((m) => m.author.kind === 'agent' && m.author.session === owner);
     return after.at(-1) ?? handoff;
   }
   return thread.messages.filter((m) => m.author.kind === 'agent').at(-1) ?? thread.messages[0]!;

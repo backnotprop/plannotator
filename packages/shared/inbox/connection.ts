@@ -46,7 +46,7 @@ export function inboxStopNoticeId(replyId: string): string {
 
 /** The reply a stop notice's id belongs to; null for any other id. */
 export function inboxStopNoticeReply(id: string): string | null {
-  return id.endsWith('-stop') ? id.slice(0, -'-stop'.length) : null;
+  return id.length > '-stop'.length && id.endsWith('-stop') ? id.slice(0, -'-stop'.length) : null;
 }
 
 // --- CONTRACT (copied byte for byte into apps/hook/hooks/mod/inbox-contract.ts; edit packages/shared/inbox/connection.ts, then paste) ---

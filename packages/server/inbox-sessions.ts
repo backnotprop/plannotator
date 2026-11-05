@@ -209,6 +209,11 @@ export function replacesEndedAsker(asked: InboxMessage | null | undefined, live:
   return !live.askerLive(asked.author.session);
 }
 
+/** `session`, which a reply leaves, owned the thread (a hand-off made it the owner) and has ended: the reply takes its place too. */
+export function replacesEndedOwner(session: string | null | undefined, owner: { session: string } | null, live: { askerLive(session: string): boolean }): boolean {
+  return !!session && owner?.session === session && !live.askerLive(session);
+}
+
 /**
  * How long a session the Inbox wakes itself (Codex) is listed as live after
  * its last Inbox tool call: New message, compose and tags offer it that long.
