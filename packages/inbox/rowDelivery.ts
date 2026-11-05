@@ -23,6 +23,7 @@ export function rowDeliveryLine(d: InboxRowDelivery, time: (iso: string) => stri
   const text = deliveryText(d.reason, {
     name,
     at: d.at,
+    readBy: d.read_by ? inboxAgentName({ kind: 'agent', host: d.read_by, name: null }) : null,
     time,
     undeliveredHost: name,
     endedName,

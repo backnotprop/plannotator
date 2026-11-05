@@ -245,6 +245,7 @@ import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command
 // @ts-expect-error a text import of the optional helper file
 import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
@@ -342,6 +343,26 @@ const rawArgs = process.argv.slice(2);
         cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
         env: process.env,
         ensureRunning: () => ensureInboxRunning(cardDataDir),
+      }),
+    );
+  }
+}
+// `plannotator review draw …` / `plannotator review drawings <msg_id>`: an agent's side of
+// Show me (review-draw-command.ts; approval "shape-in-code-review"). Before the
+// review parse, which would take `draw` for a ref. Only while the person has Code
+// review on, and only arguments of the command's own shape: otherwise (off
+// included) the review parse takes them, exactly as before Show me.
+{
+  const args = rawArgs;
+  // Read quietly: a broken config.json is Code review off, and the review parse that then takes the words
+  // warns about it once, as it always did.
+  if (isReviewDrawCommand(args, () => loadConfig({ quiet: true }).inboxCodeReview === true)) {
+    const drawDataDir = getPlannotatorDataDir();
+    process.exit(
+      await runReviewDrawCommand(args.slice(1), {
+        cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
+        env: process.env,
+        ensureRunning: () => ensureInboxRunning(drawDataDir),
       }),
     );
   }
