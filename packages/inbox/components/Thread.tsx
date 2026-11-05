@@ -1002,7 +1002,7 @@ export interface ThreadPaneProps {
    * store's seq, so a reply the agent was not given still reads as unread),
    * or null.
    */
-  sent: { at: string; checked_at: string | null; recipients?: InboxSentRecipient[] } | null;
+  sent: { at: string; checked_at: string | null; read_by?: string; recipients?: InboxSentRecipient[] } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
   onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
   /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
@@ -4407,6 +4407,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             name: recipientName(repliedTo),
             // A reply that tags agents: the owner's own delivery, never another recipient's.
             deliveredAt: lastTags.length > 0 ? (last.delivery?.at ?? sent?.recipients?.find((r) => r.owner)?.delivered_at ?? null) : (sent?.checked_at ?? null),
+            readBy: sent?.read_by ? hostName(sent.read_by) : null,
             time: whenTime,
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,
