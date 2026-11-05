@@ -297,9 +297,7 @@ export function codexWakeText(command: InboxReplyCommand): string {
 }
 
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
-export function codexQueueMessage(input: InboxReplyCommand): string {
-  // What the wake says of the body, once: the cut below counts only that.
-  const command = inboxWakeCommand(input);
+export function codexQueueMessage(command: InboxReplyCommand): string {
   const clean = (text: string) => text.replace(/\u0000/g, "");
   const whole = clean(command.body);
   const full = codexWakeText({ ...command, body: whole });
