@@ -585,8 +585,10 @@ export function useGuideFileWindow(id: string, pinned = false): {
   const requestMount = useCallback(() => manager.requestMount(id), [manager, id]);
   const jumpTo = useCallback(() => manager.jumpTo(id), [manager, id]);
 
-  // The guide has one focus arbiter. Keeping that file pinned preserves any
-  // portaled annotation composer and its draft-owning CodeView during scrolling.
+  // The guide has one focus arbiter. The focused file is pinned: it stays mounted
+  // (with any open annotation composer) while it scrolls out of the window. Focus
+  // follows the pointer and keyboard focus, so once either enters another file this
+  // one unpins and may unmount when it is off screen, its composer with it.
   useEffect(() => {
     manager.setPinned(id, pinned);
     return () => manager.setPinned(id, false);
