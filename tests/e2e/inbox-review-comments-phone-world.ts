@@ -210,9 +210,12 @@ export async function openPull(world: PhoneWorld, page: Page): Promise<void> {
 
 /** The guided review's comments, as the window saves them; the ones of an earlier call are removed first. */
 export async function seedReview(world: PhoneWorld, page: Page, comments: readonly Comment[]): Promise<void> {
-  const annotations = await page.request.get(`${world.url}api/inbox/threads/${world.thread}/annotations`);
-  const model = annotations.ok() ? ((await annotations.json()) as { annotations?: { id: string }[] }) : {};
-  for (const old of model.annotations ?? []) await page.request.delete(`${world.url}api/inbox/annotations/${old.id}`);
+  const read = await page.request.get(`${world.url}api/inbox/threads/${world.thread}/attachments`);
+  expect(read.status(), await read.text()).toBe(200);
+  for (const old of ((await read.json()) as { annotations: { id: string }[] }).annotations) {
+    const removed = await page.request.post(`${world.url}api/inbox/annotations/${old.id}/remove`, { data: {} });
+    expect(removed.status(), await removed.text()).toBe(200);
+  }
   for (const [i, c] of comments.entries()) {
     const saved = await page.request.post(`${world.url}api/inbox/messages/${world.message}/guide/annotations`, { data: { annotation: annotation(c, i) } });
     expect(saved.status(), await saved.text()).toBe(200);
