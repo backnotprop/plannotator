@@ -1,16 +1,18 @@
 /**
  * A test's Inbox or review server never runs on the runner's real home. A temp
- * PLANNOTATOR_DATA_DIR and the sandbox flag do not cover it: `~/.agents/skills`
- * and `~/.env` are still read through HOME. No HOME, or an empty one, counts as
- * real, because `os.homedir()` then falls back to the account's home.
+ * PLANNOTATOR_DATA_DIR and the sandbox flag do not move `~/.agents/skills` or the
+ * `inbox mcp` shim's read of `~/.env` (the server's own Qwen reads are sandboxed).
+ * No HOME, or an empty one, counts as real: `os.homedir()` then falls back to the
+ * account's home.
  *
  * Nothing here starts a server on a real home: the refusal is the first thing
  * each start does, and it is proved on its own before the starts are tried.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import os, { homedir } from "node:os";
-import { resolve } from "node:path";
+import { existsSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
+import os, { homedir, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { startInboxServer } from "../packages/server/inbox";
 import { startReviewServer } from "../packages/server/review";
 import { resolveGlobalSkillRoots } from "../packages/server/review-skill-loader";
@@ -21,6 +23,11 @@ import { accountHome, isScratchDataDir } from "./helpers/real-data-dir";
 
 const account = accountHome()!;
 const flag = { PLANNOTATOR_TEST_SANDBOX: "1" };
+
+/** These tests empty HOME and call a real start: without the preload's flag nothing would refuse it. */
+function requireSandbox(): void {
+  if (!process.env.PLANNOTATOR_TEST_SANDBOX) throw new Error("run this from a folder with the bunfig preload: it needs PLANNOTATOR_TEST_SANDBOX");
+}
 
 describe("the preload's home", () => {
   test("HOME and homedir() are a scratch folder, here and in a child that inherits it", () => {
@@ -49,6 +56,17 @@ describe("the refusal under the sandbox flag", () => {
     expect(refusal({ ...flag, HOME: "/Users/someone" }, "win32")).toBeNull();
   });
 
+  test("sees through a symlink to the account's home", () => {
+    const dir = mkdtempSync(join(tmpdir(), "plannotator-home-link-"));
+    try {
+      const link = join(dir, "link");
+      symlinkSync(dir, link);
+      expect(testHomeRefusal({ ...flag, HOME: link }, "darwin", () => dir)).toContain("HOME");
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   describe("an in-process start", () => {
     const saved = process.env.HOME;
     afterEach(() => {
@@ -56,9 +74,35 @@ describe("the refusal under the sandbox flag", () => {
     });
 
     test("refuses before it writes anything", async () => {
+      requireSandbox();
+      const dataDir = resolve(process.env.PLANNOTATOR_DATA_DIR!, "refused");
       process.env.HOME = "";
-      await expect(startInboxServer({ dataDir: resolve(process.env.PLANNOTATOR_DATA_DIR!, "refused") })).rejects.toThrow("HOME");
+      await expect(startInboxServer({ dataDir })).rejects.toThrow("HOME");
+      expect(existsSync(dataDir)).toBe(false);
       await expect(startReviewServer({} as never)).rejects.toThrow("HOME");
+    });
+
+    test("inbox mcp refuses before the shim runs", async () => {
+      requireSandbox();
+      // No child and no real shim: without the guard this reaches the stub and then "exit 0".
+      const shimPath = "../apps/hook/server/inbox-mcp-shim";
+      const realShim = { ...(await import(shimPath)) };
+      let shimCalls = 0;
+      mock.module(shimPath, () => ({ ...realShim, runInboxMcpShim: async () => void shimCalls++ }));
+      const realExit = process.exit;
+      process.exit = ((code?: number) => {
+        throw new Error(`exit ${code}`);
+      }) as typeof process.exit;
+      try {
+        const { runInboxCommand } = await import("../apps/hook/server/inbox-command");
+        process.env.HOME = "";
+        await expect(runInboxCommand(["mcp"])).rejects.toThrow("HOME");
+        expect(shimCalls).toBe(0);
+      } finally {
+        process.exit = realExit;
+        // Bun runs every test file in one process: the next file gets the real shim back.
+        mock.module(shimPath, () => realShim);
+      }
     });
   });
 });
