@@ -231,7 +231,7 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 100 });
     try {
       const place = async (obstacles: { rect: DOMRect; number: boolean }[]) => {
-        await act(async () => root!.render(<RefPeek key={Math.random()} reference={ref} anchor={rect(500, 400, 20, 20)} bounds={rect(0, 0, 1000, 800)} obstacles={obstacles} onClose={() => {}} />));
+        await act(async () => root!.render(<RefPeek key={Math.random()} reference={ref} anchor={rect(500, 400, 20, 20)} bounds={rect(0, 0, 1000, 800)} obstacles={obstacles} {...peekProps} />));
         return document.querySelector('.shp-peek')!.getAttribute('data-side');
       };
       expect(await place([])).toBe('right');
