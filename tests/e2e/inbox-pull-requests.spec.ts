@@ -1330,12 +1330,14 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
   renameSync(join(dir, recorded!), join(proofDir, 'walkthrough.webm'));
 });
 
-test('Reviews: a review from an ordinary thread is a local row, opens at its card with the earlier messages folded, and is the same thread', async () => {
+test('Reviews: a review from an ordinary thread is a local row, opens at its card with what was read left out, and is the same thread', async () => {
   const { page, claude } = world;
   await setCodeReview(true);
-  // An ordinary thread: the person and the agent talk first, then the agent sends a review of local changes.
+  // An ordinary thread the person has read: the agent then sends a review of local changes.
   const first = await claude.send({ project_path: world.projects.web, thread: 'jitter', subject: 'Add jitter to the retries', body: 'I looked at the retries.' });
-  await claude.send({ project_path: world.projects.web, thread: 'jitter', body: 'Thundering herd confirmed; I will add jitter.' });
+  const herd = await claude.send({ project_path: world.projects.web, thread: 'jitter', body: 'Thundering herd confirmed; I will add jitter.' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
   await page.goto(`${world.url}#reviews`);
   await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
   const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
@@ -1357,42 +1359,89 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
   const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
   await expect(row).toContainText('Add jitter to retries');
-  await expect(row).not.toHaveAttribute('data-pulls-row');
   await expect(row).toContainText('Review ready');
+  await expect(row).not.toHaveAttribute('data-pulls-row');
+  await page.reload();
+  await expect(row).toBeVisible();
   await shot(page, 'r-page');
 
-  // Opened from Reviews: the list stays, the thread opens at its review, and what came before is one chip.
+  // Opened from Reviews: the list stays, the thread opens at its review, and what was read before it is left out.
   await row.click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await expect(page.locator('[data-pulls-nav]')).toHaveAttribute('aria-current', 'page');
   await expect(page.locator('h2.ib-subject')).toHaveText('Add jitter to retries');
   await expect(page.locator('[data-review-context]')).toContainText('Local changes');
-  const earlier = page.locator('[data-review-earlier]');
-  await expect(earlier).toHaveText('2 earlier messages in the thread');
+  await expect(page.locator('[data-review-from]')).toHaveText('Review from thread jitter');
   await expect(page.getByText('Thundering herd confirmed')).toHaveCount(0);
+  const card = page.locator('[data-review-card]');
+  await expect(card.locator('.ib-rvc-kind')).toHaveText('Review');
+  await expect(card.locator('.ib-rvc-meta')).toHaveText('1 file +1 -0 · 1 chapter');
   await shot(page, 'r-thread');
-  // In place, with no change of address; a new thread opens folded again.
-  await earlier.click();
-  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
-  await expect(earlier).toHaveCount(0);
-  // Its other view is the same thread: the Inbox, whole, whose card links back.
-  await page.reload();
-  await page.locator('[data-review-from-link]').click();
-  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#thread=${first.thread_id}`);
-  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
-  await expect(page.locator('[data-inbox-list], [data-row]').first()).toBeVisible();
-  await page.locator('[data-review-in-reviews]').click();
-  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
-  await expect(page.locator('[data-pulls-list]')).toBeVisible();
-  // Back from a phone or a list: the page.
   await page.setViewportSize({ width: 390, height: 844 });
   await shot(page, 'r-thread-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
+  // The link is the same thread, in the Inbox, with everything in it; its card links back.
+  await page.locator('[data-review-from-link]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#thread=${first.thread_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await expect(page.getByText('I looked at the retries.')).toBeVisible();
+  await page.locator('[data-review-in-reviews]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  // A link to a message left out shows it here: nothing is out of reach.
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}&msg=${herd.id ?? herd.message_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
   await page.goto(`${world.url}#reviews`);
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await shot(page, 'r-page-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {
+  const { page, claude } = world;
+  const first = await claude.send({ project_path: world.projects.web, thread: 'asking', subject: 'Which retry cap?', body: 'A plain note from earlier.' });
+  await claude.send({ project_path: world.projects.web, thread: 'asking', body: 'Before I go on.\n\n:::question\nWhich retry cap do you want?\n- [ ] Three\n- [ ] Five\n:::' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('Which retry cap do you want?').first()).toBeVisible();
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    thread: 'asking',
+    patch: world.patches.locale,
+    body: 'Three parts.',
+    guide: {
+      title: 'The retry cap',
+      intent: 'Cap the retries.',
+      sections: [
+        { title: 'The fallback', overview: 'Read this first.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] },
+        { title: 'Why it stays small', overview: 'Nothing else moves.', diffs: [] },
+        { title: 'What to check', overview: 'Check the strings.', diffs: [] },
+      ],
+      review: { gitRef: 'working-tree', base: 'main', branch: 'retry-cap' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator('[data-review-card] .ib-rvc-meta')).toHaveText('1 file +1 -0 · 3 chapters');
+  await expect(page.locator('[data-review-card] ol, [data-review-card] li')).toHaveCount(0);
+  await expect(page.getByText('Which retry cap do you want?').first()).toBeVisible();
+  await expect(page.getByText('A plain note from earlier.')).toHaveCount(0);
+  // The person answers it here, like anywhere: the first option is a pick away.
+  await expect(page.getByText('Three', { exact: true }).first()).toBeVisible();
+  await shot(page, 'r-card-chapters');
+  // A review read long ago, with messages after it: the view still opens with the card open.
+  await claude.send({ project_path: world.projects.web, thread: 'asking', body: 'One more thing after the review.' });
+  await page.goto(`${world.url}#thread=${first.thread_id}`);
+  await expect(page.getByText('One more thing after the review.')).toBeVisible();
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.reload();
+  await expect(page.locator('[data-review-card] [data-review-start]')).toBeVisible();
+  await page.goto(`${world.url}#reviews&thread=${first.thread_id}`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'r-card-chapters-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
 });
 

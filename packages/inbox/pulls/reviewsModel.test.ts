@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer, type InboxReviewThread } from '@plannotator/core/inbox-types';
-import { readReviewFolds, reviewContextLine, reviewRowLine, reviewRowsIn, reviewViewOf, saveReviewFolds } from './reviewsModel';
+import { readReviewFolds, reviewContextLine, reviewEarlierHidden, reviewRowLine, reviewRowsIn, reviewViewOf, saveReviewFolds } from './reviewsModel';
 
 function pull(number: number, fields: Partial<InboxPull> = {}): InboxPull {
   const repo = fields.repo ?? 'northwind/web-app';
@@ -126,6 +126,25 @@ test('a thread started for the review opens whole: its first message is the requ
 test('a first message that is the review folds nothing; so does a review the thread no longer has', () => {
   expect(reviewViewOf(row(), { messages: [{ id: 'm_r' }], subject: 'x' }, options).firstReviewId).toBeNull();
   expect(reviewViewOf(row(), { messages: [{ id: 'm_1' }], subject: 'x' }, options).firstReviewId).toBeNull();
+});
+
+test('before the first review: what was read and needs nothing is left out; a new message or anything open never is', () => {
+  const msg = (id: string, fields = {}) => ({ id, author: { kind: 'agent' }, ...fields }) as never;
+  const question = (state: string) => ({ questions: [{ key: 'q', state }] });
+  const thread = [
+    msg('read'),
+    msg('new'),
+    msg('asks', question('open')),
+    msg('picked', question('picked')),
+    msg('answered', question('sent')),
+    msg('todo', { actions: [{ state: 'open' }] }),
+    msg('todo-done', { actions: [{ state: 'done' }] }),
+    msg('m_r'),
+    msg('after'),
+  ];
+  expect(reviewEarlierHidden(thread, 'm_r', new Set(['new']))).toEqual(['read', 'answered', 'todo-done']);
+  expect(reviewEarlierHidden(thread, 'gone', new Set())).toEqual([]);
+  expect(reviewEarlierHidden([msg('m_r')], 'm_r', new Set())).toEqual([]);
 });
 
 test('the groups start folded, are remembered, and a bad stored value is the default', () => {

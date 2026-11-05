@@ -5,12 +5,14 @@
 import {
   inboxPullIsOpen,
   inboxPullRepoKey,
+  type InboxMessageWire,
   type InboxPull,
   type InboxPullStack,
   type InboxReviewRow,
   type InboxReviewsAnswer,
 } from '@plannotator/core/inbox-types';
 import { plural } from '@plannotator/core/inbox-format';
+import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, type PullFilter } from './model';
 import { startLayer } from './topology';
@@ -150,8 +152,10 @@ export interface ReviewView {
   kind: 'local' | 'pr';
   /** The review's title, once one arrived. */
   title: string | null;
-  /** The first review: the messages before it are folded behind one chip. Null when the thread was started for the review. */
+  /** The first review: the messages before it stay out of this view (`reviewEarlierHidden`). Null when the thread was started for the review. */
   firstReviewId: string | null;
+  /** The latest review: open in this view however long ago it was read. */
+  latestReviewId: string | null;
   /** The thread the review came from, when it was an ordinary one. */
   fromThread: string | null;
   onWholeThread: () => void;
@@ -162,7 +166,19 @@ export interface ReviewView {
 }
 
 /**
- * A review from an ordinary thread opens at its card with what came before folded (the owner: the same thread, a
+ * The messages before the first review that a thread opened from Reviews leaves out: what has been read and needs
+ * nothing. A message new since the last look, or holding an open question, a pick not sent or an open action item,
+ * always shows.
+ */
+export function reviewEarlierHidden(messages: readonly InboxMessageWire[], firstReviewId: string, fresh: ReadonlySet<string>): string[] {
+  const at = messages.findIndex((message) => message.id === firstReviewId);
+  if (at <= 0) return [];
+  const waits = (message: InboxMessageWire) => holdingsOf(message, { delivered: false }).some((holding) => holding.kind === 'open' || holding.kind === 'picks' || holding.kind === 'todo');
+  return messages.slice(0, at).filter((message) => !fresh.has(message.id) && !waits(message)).map((message) => message.id);
+}
+
+/**
+ * A review from an ordinary thread opens at its card with what came before left out (the owner: the same thread, a
  * different view of it). A thread started for the review (a hand-off) opens whole: its one message is the request.
  */
 export function reviewViewOf(
@@ -181,6 +197,7 @@ export function reviewViewOf(
     kind: line.kind === 'local' ? 'local' : 'pr',
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
+    latestReviewId: row.review?.latest_review_id ?? null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

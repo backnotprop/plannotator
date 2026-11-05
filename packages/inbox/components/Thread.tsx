@@ -48,7 +48,7 @@ import { AuthorMark, Icon } from '../icons';
 import { PILL_BAND_PX, atEnd, followBy, lookThrough, measureFirstLines, unseenArrivals, useSeenOnSight } from '../seenOnSight';
 import { GuideCard } from './GuideCard';
 import { ReviewCard, type ReviewOutcome } from './ReviewCard';
-import type { ReviewView } from '../pulls/reviewsModel';
+import { reviewEarlierHidden, type ReviewView } from '../pulls/reviewsModel';
 import { inboxThreadHadReview } from '@plannotator/core/inbox-review';
 import { MessageMenu, ThreadMore, ThreadSnooze, type CopyMenuHost, type ThreadMoreLaunch } from './CopyMenus';
 import { RunLine } from './RunLine';
@@ -1798,14 +1798,27 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
     fold = { threadId: thread.thread_id, folded: plan.folded, hidden: plan.hidden, revealed: new Set() };
     setFoldState(fold);
   }
+  // Opened from Reviews: the review is open whatever was read, and so is what shows before it because it waits on the person.
+  const reviewOpened = useRef<string | null>(null);
+  if (reviewView && reviewOpened.current !== thread.thread_id) {
+    reviewOpened.current = thread.thread_id;
+    const left = new Set(reviewView.firstReviewId ? reviewEarlierHidden(thread.messages, reviewView.firstReviewId, fresh) : []);
+    const firstAt = thread.messages.findIndex((m) => m.id === reviewView.firstReviewId);
+    const open = new Set(thread.messages.slice(0, Math.max(firstAt, 0)).map((m) => m.id).filter((id) => !left.has(id)));
+    if (reviewView.latestReviewId) open.add(reviewView.latestReviewId);
+    if ([...open].some((id) => fold!.folded.has(id))) {
+      fold = { ...fold, folded: new Set([...fold.folded].filter((id) => !open.has(id))) };
+      setFoldState(fold);
+    }
+  }
   const foldRef = useRef(fold);
   foldRef.current = fold;
-  // Opened from Reviews: what came before the first review stays behind one chip until it is unfolded in place.
+  // Opened from Reviews: what came before the first review stays out of this view (the link over the messages opens the
+  // thread whole; expand-all and a link to one of those messages show them here).
   const [earlierShownIn, setEarlierShownIn] = useState<string | null>(null);
-  const reviewFirstAt = reviewView?.firstReviewId && earlierShownIn !== thread.thread_id ? thread.messages.findIndex((m) => m.id === reviewView.firstReviewId) : -1;
-  const beforeReview = reviewFirstAt > 0 ? thread.messages.slice(0, reviewFirstAt) : [];
-  const beforeReviewIds = new Set(beforeReview.map((m) => m.id));
-  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...beforeReviewIds]);
+  const hiddenEarlier = reviewView?.firstReviewId && earlierShownIn !== thread.thread_id ? reviewEarlierHidden(thread.messages, reviewView.firstReviewId, fresh) : [];
+  if (landing && hiddenEarlier.includes(landing.messageId)) setEarlierShownIn(thread.thread_id);
+  const hiddenNow = new Set([...fold.hidden.flatMap((ids, index) => (fold.revealed.has(index) ? [] : ids)), ...hiddenEarlier]);
   const allOpen = thread.messages.every((m) => !fold.folded.has(m.id)) && hiddenNow.size === 0;
   const sectionRef = useRef<HTMLElement>(null);
   const replyKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'reply' });
@@ -5386,18 +5399,11 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? thread.subject ?? '(no subject)'}</h2>
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
-            <Icon name="contents" size={14} />
-            Review from the thread{' '}
+            Review from thread{' '}
             <button type="button" className="ib-rvctx-link" dir="auto" onClick={reviewView.onWholeThread} data-review-from-link="">
               {reviewView.fromThread}
             </button>
           </p>
-        )}
-        {beforeReview.length > 0 && (
-          <button type="button" className="ib-rvearlier" onClick={() => setEarlierShownIn(thread.thread_id)} data-review-earlier={beforeReview.length}>
-            <Icon name="contents" size={14} />
-            {plural(beforeReview.length, 'earlier message')} in the thread
-          </button>
         )}
         {/* The bar's title is aria-hidden, so a screen reader hears the name here (a one-message thread has no meta line). */}
         {nameChip && <span className="ib-sr" data-thread-name-sr="">Thread name: {nameChip}</span>}
@@ -5933,7 +5939,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
                 )}
                 {message.guide &&
                   (codeReview && message.guide.review ? (
-                    <ReviewCard guide={message.guide} round={thread.messages.filter((m, at) => at <= index && m.author.kind === 'agent' && m.guide?.review).length} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
+                    <ReviewCard guide={message.guide} outcome={reviewOutcomes.get(message.id) ?? null} verdict={!thread.pull_theirs} onInReviews={onInReviews} onOpen={() => onOpenGuide(message.id)} />
                   ) : (
                     <GuideCard guide={message.guide} onOpen={() => onOpenGuide(message.id)} />
                   ))}
