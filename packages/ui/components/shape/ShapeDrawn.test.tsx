@@ -307,7 +307,7 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
       html:
         '<svg viewBox="0 0 400 200"><g data-mark="queue"><rect class="ink" x="10" y="10" width="100" height="40"/><text x="20" y="35">Queue</text><span data-ref="1"></span></g>' +
         '<g data-mark="diff"><rect class="ink" x="200" y="10" width="100" height="40"/><text x="210" y="35">Diff <span data-ref="2"></span></text></g>' +
-        '<div>a note</div><circle id="last" cx="50" cy="150" r="9"/><text x="1" y="1">x</text><circle data-ref="3" r="4"/></svg>',
+        '<div></div><circle id="last" cx="50" cy="150" r="9"/><text x="1" y="1">x</text><circle data-ref="3" r="4"/></svg>',
       refs: REFS,
     });
     const svg = shadow.querySelector('svg')!;
@@ -327,6 +327,25 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     }
     // A shape that is a number stays that shape.
     expect(shadow.querySelector('[data-ref="3"]')?.localName).toBe('circle');
+  });
+
+  test('an empty number in an SVG with no words before it goes to the nearest drawn words, else just after the SVG; never a hidden one', async () => {
+    const { shadow } = await draw({
+      html:
+        '<svg><g><span data-ref="1"></span><rect width="9" height="9"/><text x="1" y="9">Label</text></g></svg>' +
+        '<svg id="bare"><defs><text id="tucked">tucked</text></defs><span data-ref="2"></span><rect width="9" height="9"/></svg>',
+      refs: REFS,
+    });
+    const one = shadow.querySelectorAll('[data-ref="1"]');
+    expect(one.length).toBe(1);
+    expect(one[0]!.closest('text')?.textContent).toBe('Label1');
+    // No drawn words: a bubble just after the SVG, not one inside <defs>.
+    const two = shadow.querySelectorAll('[data-ref="2"]');
+    expect(two.length).toBe(1);
+    expect(shadow.querySelector('#tucked')?.textContent).toBe('tucked');
+    expect(two[0]!.localName).toBe('span');
+    expect(two[0]!.previousElementSibling?.id).toBe('bare');
+    expect(two[0]!.textContent).toBe('2');
   });
 
   test('kept pictures reach the host, in HTML and in SVG, and nothing else is rewritten', async () => {

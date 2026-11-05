@@ -200,24 +200,45 @@ export function sanitizeShapeHtml(html: string): string {
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 
+// Parts of an SVG that are never drawn where they stand.
+const UNDRAWN = new Set(['defs', 'symbol', 'clippath', 'mask', 'marker', 'pattern', 'lineargradient', 'radialgradient', 'filter']);
+const drawnWords = (root: Element): Element[] =>
+  [root, ...root.querySelectorAll('text')].filter((t) => {
+    if (t.localName !== 'text') return false;
+    for (let at: Element | null = t; at && at.namespaceURI === SVG_NS; at = at.parentElement) if (UNDRAWN.has(at.localName.toLowerCase())) return false;
+    return true;
+  });
+
 /**
  * In SVG only a `<text>` shows words, so an empty number among the shapes
- * (`<g data-ref="1"/>`) goes at the end of the words drawn just before it, as
- * a `tspan`. Null when no words come before it. A shape (`<circle data-ref>`)
- * stays where it is: it is the number.
+ * (`<g data-ref="1"/>`) is drawn at the end of the nearest words: those just
+ * before it, else just after it, in its own group first, then in the groups
+ * around it. With no words in the drawing, it goes just after the SVG, as a
+ * bubble. A shape (`<circle data-ref>`) stays where it is: it is the number.
  */
-function numberInWords(el: Element): Element | null {
-  for (let at = el.previousElementSibling; at; at = at.previousElementSibling) {
-    const words = at.localName === 'text' ? at : [...at.querySelectorAll('text')].pop();
-    if (!words) continue;
-    const spot = el.ownerDocument.createElementNS(SVG_NS, 'tspan');
+function placeNumber(el: Element): Element {
+  const doc = el.ownerDocument;
+  const copy = (spot: Element) => {
     for (const a of el.attributes) if (a.name === 'class' || a.name.startsWith('data-')) spot.setAttribute(a.name, a.value);
-    spot.setAttribute('dx', '5');
-    words.append(spot);
     el.remove();
     return spot;
+  };
+  for (let node: Element | null = el; node && node.parentElement?.namespaceURI === SVG_NS; node = node.parentElement) {
+    let words: Element | undefined;
+    for (let at = node.previousElementSibling; at && !words; at = at.previousElementSibling) words = drawnWords(at).pop();
+    for (let at = node.nextElementSibling; at && !words; at = at.nextElementSibling) words = drawnWords(at)[0];
+    if (!words) continue;
+    const spot = copy(doc.createElementNS(SVG_NS, 'tspan'));
+    spot.setAttribute('dx', '5');
+    words.append(spot);
+    return spot;
   }
-  return null;
+  let svg = el.closest('svg');
+  while (svg?.parentElement?.namespaceURI === SVG_NS) svg = svg.parentElement.closest('svg');
+  if (!svg) return el;
+  const spot = copy(doc.createElement('span'));
+  svg.after(spot);
+  return spot;
 }
 
 const markOf = (path: EventTarget[]) => path.find((t): t is HTMLElement => t instanceof Element && (t as Element).hasAttribute('data-mark')) as HTMLElement | undefined;
@@ -337,7 +358,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
       if (!el.children.length && !el.textContent?.trim()) {
-        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = numberInWords(el) ?? el;
+        if (el.namespaceURI === SVG_NS && (el.localName === 'g' || el.localName === 'tspan') && !el.closest('text')) el = placeNumber(el);
         el.textContent = String(n);
       } else el.classList.add('own');
       el.classList.add('shp-rb');
