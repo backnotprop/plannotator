@@ -50,19 +50,17 @@ export function DiffStyleSwitch({
   icons = false,
   name = 'ib-diff-style',
   label = 'Diff layout',
-  tipSide,
 }: {
   icons?: boolean;
   name?: string;
   /** The group's name, told apart when the page has several. */
   label?: string;
-  tipSide?: 'top' | 'bottom';
 }) {
   const style = useConfigValue('diffStyle');
   return (
     <span className={`ib-seg ib-gtab${icons ? ' ib-gtab-marks' : ''}`} role="radiogroup" aria-label={label} data-diff-style-switch={style}>
       {CHOICES.map((choice) => (
-        <Tip key={choice.id} content={choice.tip} side={tipSide}>
+        <Tip key={choice.id} content={choice.tip}>
           <label className="ib-seg-o" data-on={style === choice.id ? '' : undefined} data-diff-style={choice.id}>
             <input
               type="radio"

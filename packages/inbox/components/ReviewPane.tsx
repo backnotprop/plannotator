@@ -618,7 +618,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
         <span className="ib-sp" />
         {docked && !phone && (
           <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
-            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" tipSide="bottom" />
+            <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
           </span>
         )}
         {folded && (
