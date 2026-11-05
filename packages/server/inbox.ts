@@ -1160,6 +1160,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         stepsOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
+        // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
+        snoozeOnMachine: async (threadId, until) => (machines ? machines.snoozeThread(threadId, until) : null),
+        snoozeMade: () => markSnoozeUsed(),
         ...(options.mcpNow ? { now: options.mcpNow } : {}),
       }),
     { legacy: "stateless", maxRequestBodySize: INBOX_MAX_REQUEST_BYTES },
