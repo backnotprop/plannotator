@@ -6,7 +6,7 @@ import { useGuideHost } from './host';
 import { renderInlineMarkdown } from './renderInlineMarkdown';
 import { useGuideFileWindow } from './GuideViewportManager';
 
-/** The tallest a file's box grows, unless a host sets `--guide-file-fit-max`: a longer diff scrolls inside it. */
+/** The tallest a file's box grows: a longer diff scrolls inside it. */
 const MAX_DIFF_HEIGHT = 620;
 /** A folded file's box: its header alone. */
 const COLLAPSED_HEIGHT = 49;
@@ -66,7 +66,7 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return 2 + 16 + 33 + 8 + rows * 20 + separatorHeight;
+  return Math.min(2 + 16 + 33 + 8 + rows * 20 + separatorHeight, MAX_DIFF_HEIGHT);
 }
 
 interface GuideFileCardProps {
@@ -79,8 +79,7 @@ interface GuideFileCardProps {
   onActivate: (filePath: string) => void;
   /**
    * Size the box to the diff's content (GuideView `fitFileHeights`: the Inbox): an estimate from the hunks' rows,
-   * then the height the renderer reports, both capped by `--guide-file-fit-max` (default the usual maximum; the
-   * Inbox's PR page sets its pane's height). Off: the fixed estimate, as before.
+   * then the height the renderer reports, both capped at the usual maximum. Off: the fixed estimate, as before.
    */
   fitContent?: boolean;
 }
@@ -159,7 +158,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const renderedHeight = collapsed
     ? COLLAPSED_HEIGHT
     : fitContent && measuredHeight !== null
-      ? Math.max(COLLAPSED_HEIGHT, measuredHeight)
+      ? Math.max(COLLAPSED_HEIGHT, Math.min(measuredHeight, MAX_DIFF_HEIGHT))
       : diffHeight;
 
   // A navigation target can live far outside the current outer window or in a
@@ -217,7 +216,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       )}
 
       <div
-        style={{ height: renderedHeight, ...(fitContent ? { maxHeight: `var(--guide-file-fit-max, ${MAX_DIFF_HEIGHT}px)` } : {}) }}
+        style={{ height: renderedHeight }}
         className="overflow-hidden rounded-lg border border-border/40 bg-background"
         data-guide-code-view-mounted={mounted ? 'true' : 'false'}
       >

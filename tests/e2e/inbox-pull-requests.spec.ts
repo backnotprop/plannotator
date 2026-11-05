@@ -49,8 +49,8 @@
  * 11. The flat PR view (parity with the code review app's layering of
  *     background colours): no card around a file, a hairline between files,
  *     one row for Global comment and Split | Unified from 800 wide, quiet
- *     words on it, a long file's box as tall as the pane, and its scrollbar
- *     only under the pointer.
+ *     words on it, the comments column's fill, and a file's scrollbar only
+ *     under the pointer.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -1039,14 +1039,12 @@ test('Reply at the stack\'s foot goes into the agent\'s thread', async () => {
   expect(world.outside).toEqual([]);
 });
 
-test('the flat PR view: quiet words on the controls\' row, a long file\'s box as tall as the pane, its scrollbar under the pointer only', async ({ browser }) => {
+test('the flat PR view: quiet words on the controls\' row, the comments column\'s fill, a file\'s scrollbar under the pointer only', async ({ browser }) => {
   // A window of its own: the stubbed diff stays out of the shared window's cache of the diffs it read.
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
-  // A long file with one line past the column's width, added to a layer's real diff.
-  const rows = Array.from({ length: 300 }, (_, i) => `+export const ROW_${i + 1} = ${i + 1};`);
-  rows[0] = `+export const ROW_1 = '${'a very long line '.repeat(40)}';`;
-  const long = `diff --git a/src/long.ts b/src/long.ts\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/long.ts\n@@ -0,0 +1,300 @@\n${rows.join('\n')}\n`;
+  // A file with one line past the column's width, in place of a layer's real diff.
+  const long = `diff --git a/src/long.ts b/src/long.ts\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/long.ts\n@@ -0,0 +1,2 @@\n+export const ROW_1 = '${'a very long line '.repeat(40)}';\n+export const ROW_2 = 2;\n`;
   await page.route('**/api/inbox/pulls/diff*', async (route) => {
     const answer = await route.fetch();
     await route.fulfill({ response: answer, json: { ...(await answer.json()), patch: long } });
@@ -1084,18 +1082,33 @@ test('the flat PR view: quiet words on the controls\' row, a long file\'s box as
     for (const width of [800, 1440]) await onRow(width);
     await note.evaluate((node, text) => (node.textContent = text), words);
 
-    // The box is as tall as the pane, here taller than the 620 px a guide's box stops at, and follows the pane.
-    const fits = async () => {
-      const pane = (await review.locator('.ib-gbody').boundingBox())!;
-      const height = (await box.boundingBox())!.height;
-      expect(Math.abs(height - pane.height)).toBeLessThan(2);
-      return height;
-    };
-    await expect.poll(async () => (await box.boundingBox())!.height).toBeGreaterThan(620);
-    await fits();
-    await page.setViewportSize({ width: 1440, height: 700 });
-    expect(await fits()).toBeLessThan(620);
+    // From 1500 wide the comments are a column beside the diff, with neither the card's fill nor the diff's; folded, a card.
+    const fill = () =>
+      review.evaluate((root) => {
+        const token = (name: string) => {
+          const probe = root.appendChild(document.createElement('div'));
+          probe.style.background = `var(${name})`;
+          const value = getComputedStyle(probe).backgroundColor;
+          probe.remove();
+          return value;
+        };
+        const panel = getComputedStyle(root.querySelector('.ib-gpanel')!);
+        const inner = getComputedStyle(root.querySelector('.ib-gpanel > [data-annotation-panel]')!);
+        return { display: panel.display, panel: panel.backgroundColor, inner: inner.backgroundColor, card: token('--card'), ground: token('--background') };
+      });
+    await page.setViewportSize({ width: 1800, height: 900 });
+    await expect.poll(async () => (await fill()).display).toBe('flex');
+    const column = await fill();
+    expect(column.inner).toBe(column.panel);
+    expect([column.card, column.ground]).not.toContain(column.panel);
     await page.setViewportSize({ width: 1440, height: 900 });
+    await expect.poll(async () => (await fill()).display).toBe('none');
+    await review.locator('.ib-vhead .ib-vcomments').click();
+    await expect.poll(async () => (await fill()).display).toBe('flex');
+    const sheet = await fill();
+    expect(sheet.panel).toBe(sheet.card);
+    expect(sheet.inner).toBe(sheet.card);
+    await review.getByRole('button', { name: 'Close the comments' }).click();
 
     // The file's scrollbar stays off its header until the pointer is on the file, and the header keeps its 33 px.
     const thumb = shell.locator('[data-diff-hscrollbar] > div');

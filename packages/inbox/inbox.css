@@ -7687,8 +7687,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview [data-guide-file-shell] { scroll-margin-top: 0; border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
 .ib-prreview [data-guide-file-shell]:last-child { border-bottom: 0; }
 .ib-prreview [data-guide-code-view-mounted] { border: 0; border-radius: 0; background: transparent; }
-/* A long file's box is as tall as the pane (GuideFileCard's `--guide-file-fit-max`), past which it scrolls inside. */
-.ib-prreview .ib-gbody { container-type: size; --guide-file-fit-max: 100cqh; }
+/* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
+.ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
 /* The tab that rose out of the section card goes with the card: its controls stay, on a plain row. */
 .ib-prreview [data-guide-section-tab] { margin-inline: 12px; }
 .ib-prreview [data-guide-section-tab] > svg { display: none; }
@@ -7697,8 +7697,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
 .ib-prreview .ib-prr-posted { margin-inline: 16px; }
 .ib-prreview .ib-gerror { padding-inline: 16px; }
-/* No band: quiet words, on the controls' row when one follows and there is room (34 px: the tab's height; 14 px: the
-   reader's top padding; the controls' width kept clear), else on their own line. */
+/* No band: quiet words, on the controls' row when one follows and the pane has room (34 px: the tab's height; 14 px:
+   the reader's top padding; the controls' width kept clear), else on their own line. */
+.ib-prreview .ib-gbody { container-type: inline-size; }
 .ib-prreview .ib-prr-note { margin: 10px 16px 0; padding: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
 @container (min-width: 520px) {
   .ib-prreview .ib-prr-note[data-pull-review-readonly]:has(+ .w-full [data-guide-section-tab]):not(:has(+ .w-full [data-guide-global-comments])) { position: relative; z-index: 1; width: fit-content; max-width: calc(100% - 340px); height: 34px; margin: 14px 0 -48px 16px; line-height: 34px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
