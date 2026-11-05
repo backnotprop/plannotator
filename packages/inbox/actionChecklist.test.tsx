@@ -555,6 +555,32 @@ test.skipIf(!hasDom)("Done from the open row's button moves focus to the next ro
   expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
 });
 
+test.skipIf(!hasDom)('a field the person went to while Done saved keeps focus; the toggle does not take it', async () => {
+  let release: (ok: boolean) => void = () => {};
+  const onMark = () => new Promise<boolean>((resolve) => (release = resolve));
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={onMark} />);
+  const note = document.createElement('textarea');
+  el.appendChild(note);
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  act(() => note.focus());
+  await act(async () => {
+    release(true);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+  expect(document.activeElement).toBe(note);
+});
+
+test.skipIf(!hasDom)('what held focus at the press still holds it after Done (WebKit: the message, on a click): focus still moves to the toggle', async () => {
+  const el = mount(<ActionChecklist actions={[record(0), record(1)]} agent="Claude Code" onMark={async () => true} />);
+  const message = document.createElement('div');
+  message.tabIndex = -1;
+  el.appendChild(message);
+  act(() => message.focus());
+  click(panelOf(rowOf(el, 0)).querySelector('[data-action-done]')!);
+  await settle();
+  expect(document.activeElement).toBe(toggleOf(rowOf(el, 1)));
+});
+
 test.skipIf(!hasDom)("Can't do it asks for the reason; nothing goes without one", async () => {
   const marks: unknown[] = [];
   const el = mount(<ActionChecklist actions={[record(0)]} agent="Claude Code" onMark={async (_a, mark) => (marks.push(mark), true)} />);

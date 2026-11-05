@@ -1222,6 +1222,17 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     return { root, ledger, inbox, base, token, door, poll };
   };
 
+  test("a phone's snooze with a time gone by is refused and changes nothing: only a linked machine's write may have waited", async () => {
+    const { ledger, inbox, door } = await world();
+    const project = inbox.store.ensureProject({ name: "ledger", root: ledger });
+    const asked = inbox.store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-z", name: null }, body: "The build is green." }).message;
+    const running = inbox.store.setSnooze(asked.id, new Date(Date.now() + 86_400_000).toISOString());
+    const refused = await door(`threads/${asked.id}/snooze`, { body: { idempotency_key: "phone-past", until: new Date(Date.now() - 60_000).toISOString() } });
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as Json).code).toBe("snooze_past");
+    expect(inbox.store.snoozes()).toEqual([running]);
+  });
+
   test("7.62: a thread's reply draft, read only; the row's unsent rides the list", async () => {
     const { ledger, inbox, base, door } = await world();
     const project = inbox.store.ensureProject({ name: "ledger", root: ledger });

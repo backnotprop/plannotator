@@ -102,7 +102,7 @@ describe("the Code review switch", () => {
   test("off by default; on and off are saved in config.json; a malformed switch is refused", async () => {
     const w = await world();
     const read = async () => ((await (await fetch(`${w.base}/api/inbox/settings`)).json()) as { code_review?: { on: boolean } }).code_review;
-    // Held for 0.28.50 (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
+    // Held until the next big release (inbox.ts heldSwitch): off, the settings read leaves Code review out, so Settings draws no row.
     expect(await read()).toBeUndefined();
 
     const on = await w.setCodeReview(true);

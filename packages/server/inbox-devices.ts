@@ -64,6 +64,7 @@ import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
 import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
+import { INBOX_SNOOZE_HELD } from "./inbox-snooze";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
   PAIRING_CHECKS_DEADLINE_MS,
@@ -148,6 +149,8 @@ interface DoorRoute {
   raw?: { max: number; code: string; what: string };
   /** Body fields the door refuses (`422`): what the window takes and the phone may not use. */
   refuse?: readonly { field: string; message: string }[];
+  /** The window route's query when a linked machine asks: its write may have waited in that machine's outbox. */
+  fromMachine?: string;
 }
 
 const ALLOWLIST: readonly DoorRoute[] = [
@@ -161,7 +164,7 @@ const ALLOWLIST: readonly DoorRoute[] = [
   // Mark read, its Undo (`unread`: Move back) and Mark unread (`mark-unread`).
   { method: "POST", route: /^threads\/([^/]+)\/(read|unread|mark-unread)$/, window: (m) => `/api/inbox/threads/${m[1]}/${m[2]}` },
   // Snooze and Unsnooze (approval "inbox-snooze"): a snooze lives on the thread's home machine.
-  { method: "POST", route: /^threads\/([^/]+)\/snooze$/, window: (m) => `/api/inbox/threads/${m[1]}/snooze` },
+  { method: "POST", route: /^threads\/([^/]+)\/snooze$/, window: (m) => `/api/inbox/threads/${m[1]}/snooze`, fromMachine: `?${INBOX_SNOOZE_HELD}` },
   { method: "GET", route: /^events$/, window: () => "/api/inbox/events" },
   // `to`: Send to another session (7.41), a person message no session took yet. `ack`: 👍 Looks good and its Undo (7.56).
   // `reask`: Re-ask, the agent asks its open questions again in one message (7.61).
@@ -771,7 +774,7 @@ export function createInboxDevices(context: InboxDevicesContext) {
       if (fields[refused.field] !== undefined) throw new InboxError("validation_error", refused.message, { field: refused.field });
     }
     return claim(req, device, doorPath, key, async (response) => response, async () => {
-      const response = await toWindow(req, windowPath, "", text, req.signal);
+      const response = await toWindow(req, windowPath, device.platform === MACHINE_PLATFORM ? (entry.fromMachine ?? "") : "", text, req.signal);
       const answer = await response.text();
       return { response: new Response(answer, { status: response.status, headers: response.headers }), answer, status: response.status, record: true };
     });
