@@ -319,7 +319,7 @@ export const INBOX_SESSION_THREADS_CHANNEL = "Their decisions stay in these thre
 
 /** When to use the Inbox. Fixed text: the agent tool's lead and the Inbox's server instructions carry it whole. */
 export const INBOX_USE_RULE =
-  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary with its pictures inline, files in `attachments`), or when they ask."
+  "Use it for a decision only they can make (a :::question block; go on with other work), finished long work (a short summary with its pictures inline, files in `attachments`; videos work too, when you think one helps), or when they ask."
 
 /**
  * Separate work, separate threads (the owner, 2026-10-29: an agent given new
