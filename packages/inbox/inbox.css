@@ -2901,6 +2901,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
    file (.ib-view.ib-full is z-index 40). Its words always show whole: a long detail wraps to a second line. */
 .ib-toast { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 41; box-sizing: border-box; display: flex; align-items: center; gap: 10px; width: max-content; max-width: min(520px, calc(100vw - 32px)); min-height: 40px; padding: 6px 6px 6px 12px; border-radius: 8px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1), 0 1px 2px rgba(0, 0, 0, 0.04); font-size: var(--ib-fs-13, 13px); line-height: 20px; animation: ib-toast-in 180ms cubic-bezier(0.23, 1, 0.32, 1); }
 :root:not(.light) .ib-toast { box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.6); }
+/* An open Shape's bar (and the pill over it) hold the window's foot: the toast sits above them, never over their buttons. */
+body:has([data-shape-layer] .shp-dock) .ib-toast:not(.ib-toast-phone) { bottom: 72px; }
+body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 124px; }
 @keyframes ib-toast-in { from { opacity: 0; transform: translate(-50%, 8px); } to { opacity: 1; transform: translate(-50%, 0); } }
 .ib-toast > .ib-ic { color: var(--muted-foreground); flex: none; }
 .ib-toast.ib-toast-warn > .ib-ic { color: var(--warning, oklch(0.75 0.15 85)); }

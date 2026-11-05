@@ -276,10 +276,13 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
 
     const w = box.right - box.left;
     const h = box.bottom - box.top;
-    const scale = Math.min(Math.max(window.devicePixelRatio || 1, 2), PICTURE_MAX_SIDE / Math.max(w, h));
+    let scale = Math.min(Math.max(window.devicePixelRatio || 1, 2), PICTURE_MAX_SIDE / Math.max(w, h));
     const canvas = document.createElement('canvas');
-    canvas.width = Math.max(1, Math.round(w * scale));
-    canvas.height = Math.max(1, Math.round(h * scale));
+    const size = () => {
+      canvas.width = Math.max(1, Math.round(w * scale));
+      canvas.height = Math.max(1, Math.round(h * scale));
+    };
+    size();
     const g = canvas.getContext('2d');
     if (!g) return null;
     // The drawing's ground: a colour-mix of the theme's resolves only on an element.
@@ -310,7 +313,14 @@ export async function captureBox(scope: HTMLElement, box: Rect, read?: ShapeRead
       await new Promise((ok) => setTimeout(ok, 220));
       draw();
     }
-    const png = canvas.toDataURL('image/png');
+    // A busy picture over the limit comes smaller rather than not at all: the size it would fit, a little under.
+    let png = canvas.toDataURL('image/png');
+    for (let tries = 0; png.length > SHAPE_LIMITS.notePicture && tries < 4; tries++) {
+      scale *= Math.sqrt(SHAPE_LIMITS.notePicture / png.length) * 0.9;
+      size();
+      draw();
+      png = canvas.toDataURL('image/png');
+    }
     return png.length <= SHAPE_LIMITS.notePicture ? png : null;
   } catch {
     return null;

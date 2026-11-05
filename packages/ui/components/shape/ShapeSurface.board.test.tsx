@@ -121,6 +121,53 @@ describe.if(hasDom)('a dragged box is opt-in', () => {
   });
 });
 
+describe.if(hasDom)('a part’s composer: a host without boxSelect keeps it as it was', () => {
+  const header = () => popover()?.querySelector('span.truncate')?.textContent;
+  const LONG = 'A whistle that sings louder than the kettle under it, every morning';
+
+  test('its header is the quoted label', async () => {
+    await mount({ picture: PICTURE });
+    await click(dock('Annotate')!);
+    await click(inDrawing('[data-mark="whistle"]')!);
+    expect(header()).toBe('"Picture · “One whistle”"');
+  });
+
+  test('a long part’s is cut where it was', async () => {
+    await mount({ picture: { html: `<p data-mark="long">${LONG}</p>` } });
+    await click(dock('Annotate')!);
+    await click(inDrawing('[data-mark="long"]')!);
+    expect(header()).toBe(`"${`Picture · “${LONG.slice(0, 46)}…”`.slice(0, 50)}..."`);
+  });
+
+  test('with it, the header is the label as written', async () => {
+    await mount({ picture: PICTURE }, { boxSelect: {} });
+    await click(document.querySelector('.shp-tstrip button[aria-label="Comment"]')!);
+    await click(inDrawing('[data-mark="whistle"]')!);
+    expect(header()).toBe('Picture · “One whistle”');
+  });
+
+  test('with it, the composer’s own buttons work with a panel open beside it (its clicks come through a portal)', async () => {
+    const sent: unknown[] = [];
+    const h = host({ picture: PICTURE });
+    h.note = (async (_id: string, note: unknown) => { sent.push(note); throw new Error('stop here'); }) as ShapeHost['note'];
+    await mount({ picture: PICTURE }, { boxSelect: {}, host: h });
+    await click(document.querySelector('.shp-tstrip button[aria-label="Comment"]')!);
+    await click(inDrawing('[data-mark="whistle"]')!);
+    await click(dock('References')!);
+    expect(dock('References')?.getAttribute('aria-pressed')).toBe('true');
+    const box = popover()!.querySelector<HTMLTextAreaElement>('textarea')!;
+    const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!;
+    await act(async () => {
+      setter.call(box, 'louder');
+      box.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    const change = [...popover()!.querySelectorAll('button')].find((b) => b.textContent?.trim() === 'Change it')!;
+    await click(change);
+    await wait();
+    expect(sent.length).toBe(1);
+  });
+});
+
 describe.if(hasDom)('a host that does not ask for readFirst keeps its board', () => {
   const asHost = { readFirst: undefined };
 

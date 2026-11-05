@@ -15,6 +15,8 @@ export interface ShapeBoardProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the board's title (the Inbox's sidebar toggle). */
   headStart?: ReactNode;
+  /** The crosshair in Annotate's place (a click marks a part, a drag draws a box). The Inbox's board only. */
+  crosshair?: boolean;
   /** A dragged box's Add to reply: into the reply to the board's thread. Absent (no thread): no Add to reply. */
   onAddToReply?: (selection: ShapeBoxSelection, text: string) => void;
 }

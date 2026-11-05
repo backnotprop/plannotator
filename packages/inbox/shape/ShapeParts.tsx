@@ -92,6 +92,7 @@ export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: 
           onClose={onClose}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
           headStart={isMobile ? undefined : <SidebarTrigger />}
+          crosshair
           onAddToReply={thread ? onAddToReply : undefined}
         />
       </PanePart>

@@ -17,12 +17,15 @@ const clip = (text: string, max: number) => {
   return one.length > max ? `${one.slice(0, max - 1).trimEnd()}…` : one;
 };
 
+// The board's words read as words in the reply: a backtick or a [..](..) of theirs makes no code or link.
+const plain = (text: string) => text.replace(/[\\`[\]]/g, (c) => `\\${c}`);
+
 /** The reply's words for a box: "> Picture · 3 parts · “Google DuckDuckGo Bing”", a blank line, what was typed. */
 export function shapeReplyWords(selection: Pick<ShapeBoxSelection, 'label' | 'parts' | 'words'>, text: string): string {
   const label = selection.label?.trim() ?? '';
   // One part's label already quotes its words; several parts' says only how many.
-  const quoted = selection.parts.length > 1 && selection.words.trim() ? ` · “${clip(selection.words, 80)}”` : '';
-  const head = label ? `> ${label}${quoted}` : '';
+  const quoted = selection.parts.length > 1 && selection.words.trim() ? ` · “${plain(clip(selection.words, 80))}”` : '';
+  const head = label ? `> ${plain(label)}${quoted}` : '';
   const typed = text.trim();
   return head && typed ? `${head}\n\n${typed}` : head || typed;
 }
@@ -45,12 +48,41 @@ export async function shapeReplyPart(selection: ShapeBoxSelection, text: string)
   return { words, file: new File([bytes], shapeReplyFileName(selection), { type: 'image/png' }) };
 }
 
-/** The reply's words with an added part's words taken out again (its Undo), wherever the person left them. */
-export function withoutReplyWords(reply: string, words: string): string {
+/** How many times the words already stand in the reply: the next press's are the next of them. */
+export function replyWordsCount(reply: string, words: string): number {
+  if (!words) return 0;
+  let n = 0;
+  for (let at = reply.indexOf(words); at >= 0; at = reply.indexOf(words, at + words.length)) n++;
+  return n;
+}
+
+/**
+ * The reply's words with an added part's words taken out again (its Undo): the `nth` time they stand there (0 the
+ * first), which is that press's even when another press added the same words. Gone or changed: the reply as it is.
+ */
+export function withoutReplyWords(reply: string, words: string, nth = 0): string {
   if (!words) return reply;
-  const at = reply.lastIndexOf(words);
+  let at = reply.indexOf(words);
+  for (let i = 0; i < nth && at >= 0; i++) at = reply.indexOf(words, at + words.length);
   if (at < 0) return reply;
   const before = reply.slice(0, at).trimEnd();
   const after = reply.slice(at + words.length).trimStart();
   return before && after ? `${before}\n\n${after}` : before || after;
+}
+
+/** A file's name, made "name-2.png", "name-3.png"… when the reply already holds one of that name. */
+export function freeName(name: string, taken: readonly string[]): string {
+  if (!taken.includes(name)) return name;
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  let n = 2;
+  while (taken.includes(`${stem}-${n}${ext}`)) n++;
+  return `${stem}-${n}${ext}`;
+}
+
+/** The file under a name the reply doesn't hold yet, so a second press's picture sits beside the first. */
+export function withFreeName(file: File, taken: readonly string[]): File {
+  const name = freeName(file.name, taken);
+  return name === file.name ? file : new File([file], name, { type: file.type });
 }

@@ -55,8 +55,9 @@ const BOX_SELECT: ShapeBoxOptions = {
   },
 };
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, onAddToReply }: ShapeBoardProps) {
-  const boxSelect = useMemo<ShapeBoxOptions>(() => (onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [onAddToReply]);
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, crosshair = false, onAddToReply }: ShapeBoardProps) {
+  // The crosshair is the Inbox's (its ShapeLayer asks for it): the standalone page keeps Annotate.
+  const boxSelect = useMemo<ShapeBoxOptions | undefined>(() => (!crosshair ? undefined : onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [crosshair, onAddToReply]);
   return (
     <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
