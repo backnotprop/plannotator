@@ -64,7 +64,7 @@ import { layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The file rail's width: dragged and kept. */
-const RAIL_WIDTH = { key: 'plannotator-inbox-pull-rail-width', initial: 232, min: 180, max: 480 };
+const RAIL_WIDTH = { key: 'plannotator-inbox-pull-rail-width', initial: 280, min: 180, max: 480 };
 const GuideReader = GuideReaderPart.Part;
 
 export interface PullReviewProps {

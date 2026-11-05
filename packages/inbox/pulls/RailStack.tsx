@@ -79,13 +79,16 @@ export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer 
   );
   return (
     <div className="ib-prp-stack">
-      <Tip content={wholeTip}>
-        <button type="button" className={`ib-prp-row ib-prp-all${onWhole ? ' ib-on' : ''}`} aria-pressed={onWhole} onClick={() => tip && onLayer(tip.key, 'stack')} disabled={whole.length < 2} data-pull-layer-all="">
-          <Icon name="layers" size={15} />
-          <span className="ib-prp-rowtitle">All {whole.length} layers</span>
-          <Counts add={onWhole && wholeCounts ? wholeCounts.add : whole.reduce((sum, l) => sum + l.additions, 0)} del={onWhole && wholeCounts ? wholeCounts.del : whole.reduce((sum, l) => sum + l.deletions, 0)} />
-        </button>
-      </Tip>
+      {/* One open layer is its own whole stack: no row that would say "All 1 layers". */}
+      {whole.length > 1 && (
+        <Tip content={wholeTip}>
+          <button type="button" className={`ib-prp-row ib-prp-all${onWhole ? ' ib-on' : ''}`} aria-pressed={onWhole} onClick={() => tip && onLayer(tip.key, 'stack')} data-pull-layer-all="">
+            <Icon name="layers" size={15} />
+            <span className="ib-prp-rowtitle">All {whole.length} layers</span>
+            <Counts add={onWhole && wholeCounts ? wholeCounts.add : whole.reduce((sum, l) => sum + l.additions, 0)} del={onWhole && wholeCounts ? wholeCounts.del : whole.reduce((sum, l) => sum + l.deletions, 0)} />
+          </button>
+        </Tip>
+      )}
       <div className="ib-prp-layers" ref={list} role="list" aria-label="Layers, bottom first">
         {start > 0 && fold(foldWords(start, 'earlier', layers.slice(0, start)), () => setShowEarlier(true), 'earlier')}
         {foldable && showEarlier && at - NEAR > 1 && fold('Fold earlier', () => setShowEarlier(false), 'fold-earlier')}
