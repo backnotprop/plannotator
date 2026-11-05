@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { forgeFileUrl, isLiveLink, withoutLoneBreaks } from './descriptionLinks';
+import { forgeBody, forgeFileUrl, isLiveLink } from './descriptionLinks';
 
 const github = { url: 'https://github.com/acme/app/pull/12', platform: 'github' as const, repo: 'acme/app', head: 'kim/retry', head_repo: 'acme/app', head_sha: 'a'.repeat(40) };
 const gitlab = { url: 'https://gitlab.example/group/app/-/merge_requests/9', platform: 'gitlab' as const, repo: 'group/app', head: 'kim/retry', head_repo: 'group/app', head_sha: null };
@@ -36,10 +36,19 @@ describe('which links stay live', () => {
   });
 });
 
-describe('withoutLoneBreaks', () => {
+describe('forgeBody', () => {
   test("a line of only <br> goes, as dependabot writes it; one among words or in a code fence stays", () => {
-    expect(withoutLoneBreaks('Bumps it.\n\n<br />\n\nCommits')).toBe('Bumps it.\n\n\nCommits');
-    expect(withoutLoneBreaks('one<br>two')).toBe('one<br>two');
-    expect(withoutLoneBreaks('```html\n<br />\n```')).toBe('```html\n<br />\n```');
+    expect(forgeBody('Bumps it.\n\n<br />\n\nCommits')).toBe('Bumps it.\n\n\nCommits');
+    expect(forgeBody('one<br>two')).toBe('one<br>two');
+    expect(forgeBody('```html\n<br />\n```')).toBe('```html\n<br />\n```');
+  });
+  test("HTML comments go, on a line, across lines and left open, as the forge hides them; in code they stay", () => {
+    expect(forgeBody('<!-- Please describe -->\n\nReal words')).toBe('\nReal words');
+    expect(forgeBody('before <!-- hidden --> after')).toBe('before  after');
+    expect(forgeBody('a\n<!-- one\ntwo\nthree -->\nb')).toBe('a\nb');
+    expect(forgeBody('a\n<!-- never closed\nb')).toBe('a');
+    expect(forgeBody('use `<!-- x -->` here')).toBe('use `<!-- x -->` here');
+    expect(forgeBody('```\n<!-- x -->\n```')).toBe('```\n<!-- x -->\n```');
+    expect(forgeBody('<!-- only a template -->').trim()).toBe('');
   });
 });

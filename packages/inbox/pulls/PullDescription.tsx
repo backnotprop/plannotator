@@ -13,7 +13,7 @@ import { ImageResolverContext, type ImageResolver } from '@plannotator/ui/compon
 import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import type { InboxPull } from '@plannotator/core/inbox-types';
 import { ContextMarkdown } from '../components/ContextMarkdown';
-import { forgeFileUrl, isLiveLink, withoutLoneBreaks } from './descriptionLinks';
+import { forgeBody, forgeFileUrl, isLiveLink } from './descriptionLinks';
 
 const resolveImage: ImageResolver = (src) => (src.startsWith('data:image/') ? { kind: 'src', src } : { kind: 'unavailable', title: 'Images in a description open on the forge' });
 
@@ -64,7 +64,7 @@ export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; 
   return (
     <div onClickCapture={keepInPage} onAuxClickCapture={keepInPage}>
       <ImageResolverContext.Provider value={resolveImage}>
-        <ContextMarkdown markdown={withoutLoneBreaks(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
+        <ContextMarkdown markdown={forgeBody(markdown)} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
       </ImageResolverContext.Provider>
     </div>
   );

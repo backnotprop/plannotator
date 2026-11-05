@@ -1,8 +1,8 @@
 /**
- * A PR's description. Its raw HTML keeps `data-*`, and a diagram's label keeps classes too, so what it draws can copy
- * the marks the window's own overlays carry. Nothing in it ever stands for one of them.
+ * A PR's description and the comments in its details. Their raw HTML keeps `data-*`, and a diagram's label keeps classes
+ * too, so what they draw can copy the marks the window's own overlays carry. Nothing in them ever stands for one of them.
  */
-export const STRANGERS_MARKUP = '.ib-prr-desc';
+export const STRANGERS_MARKUP = '.ib-prr-desc, .ib-prd';
 
 /**
  * Words selected in an agent's message open ui's selection toolbar (approval

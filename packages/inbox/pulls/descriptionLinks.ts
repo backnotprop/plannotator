@@ -17,23 +17,56 @@ function fileRef(layer: Layer, headSha: string | null | undefined): string | nul
 
 /** The forge's address for a path in this layer's description, or null when it has none (it climbs out of the repo). */
 /**
- * A line holding nothing but `<br>` draws as those words in the Inbox's Markdown (dependabot's bodies have one). Inside
- * a code fence it is code, and stays.
+ * A forge's body as the Inbox's Markdown should read it: HTML comments gone (a PR template's, which the forge hides too)
+ * and a line holding nothing but `<br>` (dependabot's), which would draw as those words. In code, each stays.
  */
-export function withoutLoneBreaks(markdown: string): string {
+export function forgeBody(markdown: string): string {
+  const out: string[] = [];
   let fence: string | null = null;
-  return markdown
-    .split('\n')
-    .filter((line) => {
+  let inComment = false;
+  for (const line of markdown.split('\n')) {
+    if (!inComment) {
       const mark = /^\s{0,3}(`{3,}|~{3,})/.exec(line)?.[1];
-      if (mark) {
-        if (!fence) fence = mark[0]!;
-        else if (mark[0] === fence) fence = null;
-        return true;
+      if (mark && (!fence || mark[0] === fence)) {
+        fence = fence ? null : mark[0]!;
+        out.push(line);
+        continue;
       }
-      return fence !== null || !/^\s*<br\s*\/?>\s*$/i.test(line);
-    })
-    .join('\n');
+      if (fence) {
+        out.push(line);
+        continue;
+      }
+    }
+    let kept = '';
+    let rest = line;
+    let cut = inComment;
+    while (rest) {
+      if (inComment) {
+        const end = rest.indexOf('-->');
+        if (end < 0) break;
+        rest = rest.slice(end + 3);
+        inComment = false;
+        continue;
+      }
+      const next = /(`+).*?\1|<!--/.exec(rest);
+      if (!next) {
+        kept += rest;
+        break;
+      }
+      kept += rest.slice(0, next.index);
+      rest = rest.slice(next.index + next[0].length);
+      if (next[0] === '<!--') {
+        inComment = true;
+        cut = true;
+      } else {
+        kept += next[0];
+      }
+    }
+    if (cut && !kept.trim()) continue;
+    if (/^\s*<br\s*\/?>\s*$/i.test(kept)) continue;
+    out.push(kept);
+  }
+  return out.join('\n');
 }
 
 export function forgeFileUrl(layer: Layer, headSha: string | null | undefined, href: string): string | null {

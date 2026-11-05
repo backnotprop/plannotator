@@ -7,10 +7,10 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxPullCheck } from '@plannotator/core/inbox-types';
+import type { InboxPullCheck, InboxPullDetailsAnswer } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { CheckRows } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
+const { CheckRows, DetailsStatus } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
 
 let host: HTMLDivElement;
 let root: Root;
@@ -51,4 +51,10 @@ test.if(hasDom)('what needs eyes stays on the column, whatever else folds, and i
   expect(line()!.textContent).toBe('120 passed');
   act(() => line()!.click());
   expect(host.querySelectorAll('[data-pull-details-check]')[0]!.getAttribute('data-pull-details-check')).toBe('fail');
+});
+
+test.if(hasDom)("an answer with no comments list, from an older server, leaves the bar's control standing", () => {
+  const partial = { key: 'k', description: null, labels: [], reviewers: [], checks: [] } as unknown as InboxPullDetailsAnswer;
+  act(() => root.render(<DetailsStatus data={partial} />));
+  expect(host.querySelector('[data-pull-details-comments]')).toBeNull();
 });

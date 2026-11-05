@@ -4,21 +4,27 @@
  * line each that opens in place. Everything comes from the forge through `GET /api/inbox/pulls/details` (the diff's
  * description first, as it is already read); pictures through the Inbox's own avatar route.
  */
-import { useEffect, useId, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { InboxPull, InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { relativeTime, relativeWords } from '../relativeTime';
+import { forgeBody } from './descriptionLinks';
 import { ForgeMarkdown, PullDescription } from './PullDescription';
 
-/** The details of one PR, read once a page (the server keeps them a minute); a failure says so and can ask again. */
-export function usePullDetails(key: string | null): { data: InboxPullDetailsAnswer | null; failed: boolean; retry: () => void } {
+/** The details of one PR, read again when `stamp` moves or `retry` asks (the server keeps them a minute); a failure says so and can ask again. */
+export function usePullDetails(key: string | null, stamp: string = ''): { data: InboxPullDetailsAnswer | null; failed: boolean; retry: () => void } {
   const [data, setData] = useState<InboxPullDetailsAnswer | null>(null);
   const [failed, setFailed] = useState(false);
   const [asked, setAsked] = useState(0);
+  const shownKey = useRef(key);
   useEffect(() => {
-    setData(null);
+    // Another PR clears the panel; a new read of this one leaves it until the answer.
+    if (shownKey.current !== key) {
+      shownKey.current = key;
+      setData(null);
+    }
     setFailed(false);
     if (!key) return;
     const ask = new AbortController();
@@ -26,8 +32,8 @@ export function usePullDetails(key: string | null): { data: InboxPullDetailsAnsw
       if (!ask.signal.aborted) setFailed(true);
     });
     return () => ask.abort();
-  }, [key, asked]);
-  return { data, failed, retry: () => setAsked((n) => n + 1) };
+  }, [key, stamp, asked]);
+  return { data, failed: failed && !data, retry: () => setAsked((n) => n + 1) };
 }
 
 const REVIEW_WORDS: Record<InboxPullReviewState, string> = { approved: 'Approved', changes: 'Changes requested', commented: 'Commented', waiting: 'Waiting' };
@@ -98,7 +104,7 @@ const CheckMark = ({ state, quiet }: { state: InboxPullCheckState; quiet?: boole
 /** The bar's control's status: how the checks stand and how many people's comments, nothing while it is unknown. */
 export function DetailsStatus({ data }: { data: InboxPullDetailsAnswer | null }) {
   const checks = data?.checks ?? [];
-  const comments = data?.comments.filter((c) => !c.bot).length ?? 0;
+  const comments = data?.comments?.filter((c) => !c.bot).length ?? 0;
   return (
     <>
       {checks.length > 0 && <span className="ib-prp-dot" data-state={worst(checks)} data-pull-details-checks={worst(checks)} aria-hidden="true" />}
@@ -252,7 +258,7 @@ export function PullDetails({ layer, description, headSha, data, failed, onRetry
   const labels = data?.labels ?? [];
   const people = comments.filter((c) => !c.bot);
   const botComments = comments.filter((c) => c.bot);
-  const words = description ?? data?.description;
+  const words = [description, data?.description].map((body) => (body ? forgeBody(body) : '')).find((body) => body.trim());
   const card = (comment: InboxPullDetailComment) => (
     <CommentCard
       key={`${comment.id}:${comment.at}`}
@@ -273,6 +279,12 @@ export function PullDetails({ layer, description, headSha, data, failed, onRetry
         ))}
       </div>
     </>
+  );
+  const threadsMissing = data?.threads_incomplete && (
+    <p className="ib-prd-none" role="status" data-pull-details-threads-missing="">
+      {forge} did not answer for all the comments on lines.{' '}
+      <button type="button" className="ib-prd-more" onClick={onRetry}>Try again</button>
+    </p>
   );
   const reading = words ? <PullDescription markdown={words} layer={layer} headSha={headSha} /> : data || failed ? <p className="ib-prd-none">No description.</p> : null;
   const failedNote = failed && (
@@ -342,12 +354,14 @@ export function PullDetails({ layer, description, headSha, data, failed, onRetry
             {failedNote}
             {reading}
             {conversation}
+            {threadsMissing}
           </>
         ) : (
           <div className="ib-prd-cols">
             <div className="ib-prd-main">
               {reading}
               {conversation}
+              {threadsMissing}
             </div>
             {(!data || reviewers.length > 0 || checks.length > 0 || labels.length > 0) && (
               <div className="ib-prd-side" aria-busy={!data && !failed}>
