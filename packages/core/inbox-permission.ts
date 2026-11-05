@@ -29,6 +29,21 @@ export function isInboxPermissionSession(session: string | null | undefined): bo
   return typeof session === "string" && session.startsWith(INBOX_PERMISSION_SESSION_PREFIX);
 }
 
+/**
+ * The author session of a launched agent's own question (Codex's `requestUserInput` or an MCP elicitation):
+ * `perm:ask:<thread id>`. A `perm:` session, so everything the Inbox does for a permission prompt's identity
+ * holds (only the Inbox writes it, no poll claims the answer, the person's words go to the agent itself, it is
+ * never asked again, its answer is the owner's), but the window draws it as an ordinary question card.
+ */
+export const INBOX_ASK_SESSION_PREFIX = `${INBOX_PERMISSION_SESSION_PREFIX}ask:`;
+
+export const inboxAskSession = (sessionId: string): string => `${INBOX_ASK_SESSION_PREFIX}${sessionId}`;
+
+/** Whether an author session is a launched agent's own question's (`perm:ask:…`), drawn as a question card. */
+export function isInboxAskSession(session: string | null | undefined): boolean {
+  return typeof session === "string" && session.startsWith(INBOX_ASK_SESSION_PREFIX);
+}
+
 /** The follow-ups that withdraw a question no hook waits on any more. */
 export const INBOX_PERMISSION_ANSWERED_IN_TERMINAL = "Answered in Terminal.";
 export const INBOX_PERMISSION_NO_LONGER_WAITING = "No longer waiting.";

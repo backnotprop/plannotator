@@ -19,7 +19,17 @@ const SCRIPT = resolve(__dirname, "fake-codex.cjs");
 export type FakeCodexPrompt =
   | { kind: "command"; command: string; reason?: string; approvalId?: string }
   | { kind: "fileChange"; changes: { path: string; kind: { type: "add" | "delete" | "update"; move_path?: string | null }; diff: string }[]; reason?: string }
-  | { kind: "permissions"; permissions: Record<string, unknown>; reason?: string };
+  | { kind: "permissions"; permissions: Record<string, unknown>; reason?: string }
+  /** `item/tool/requestUserInput` (Codex's ToolRequestUserInputQuestion each); blocking unless `isBlocking: false`. */
+  | { kind: "userInput"; questions: { id: string; header: string; question: string; isOther?: boolean; isSecret?: boolean; options: { label: string; description: string }[] | null }[]; isBlocking?: boolean }
+  /** `mcpServer/elicitation/request` from `serverName` (default "docs"): `request` is Codex's flattened McpServerElicitationRequest. */
+  | { kind: "elicitation"; serverName?: string; request: { mode: string; message?: string; requestedSchema?: unknown; _meta?: unknown; [key: string]: unknown } }
+  /**
+   * An MCP tool call needing approval, as Codex core asks it: `item/started` for the `mcpToolCall` item (unless
+   * `started: false`), then a message-only form elicitation with `_meta.codex_approval_kind: "mcp_tool_call"`
+   * and `tool_params` (the arguments); `meta` adds to that `_meta`.
+   */
+  | { kind: "mcpToolCall"; serverName?: string; tool: string; arguments?: unknown; started?: boolean; meta?: Record<string, unknown> };
 
 export interface FakeCodexConfig {
   /** `codex --version` (default 0.165.0). */
@@ -52,6 +62,7 @@ export interface FakeCodexRpc {
   at: number;
 }
 
+/** One server request settled (an approval, a requestUserInput, an elicitation). */
 export interface FakeCodexApproval {
   threadId: string;
   method: string;

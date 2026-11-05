@@ -9,6 +9,8 @@
  *   item/commandExecution/requestApproval  a command (the card: "run a command")
  *   item/fileChange/requestApproval        a patch; its change is in the item's `item/started`
  *   item/permissions/requestApproval       more sandbox access (network, folders)
+ *   mcpServer/elicitation/request          an MCP tool call (`_meta.codex_approval_kind: "mcp_tool_call"`, no
+ *                                          fields); the call is the `mcpToolCall` item its `item/started` named
  *
  * Each becomes one question from `{ codex, perm:<thread id>, "Codex" }`, keyed by
  * the thread, item and approval id, so a request Codex sends again (after a
@@ -25,6 +27,16 @@
  * still open, as no longer waiting. A request the card cannot show in full and
  * exactly (a patch of several files, a delete or a move, an unknown request)
  * is not asked: the run line says Codex waits on Terminal.
+ *
+ * An MCP tool call's card is the one Claude Code's MCP prompts get (`mcp__<server>__<tool>` with the call's
+ * arguments), matched to exactly one in-progress `mcpToolCall` item of the thread with the request's server
+ * and arguments: a call is held from its `item/started` until its `item/completed`, its turn's end or a
+ * dropped connection (a start missed across a drop never lets an earlier call name the card). Each request is
+ * its own card, keyed by its JSON-RPC id (Codex sends a pending request again with the same id), so one Allow
+ * once never answers another call, however alike. Allow once is `accept`, Deny `decline` (Codex: the tool call
+ * is rejected and the turn goes on). No session choice (Codex's "remember" is not offered). Any other approval
+ * riding elicitation (a tool suggestion, browser sign-in) or a call the card cannot match exactly waits on
+ * Terminal.
  */
 
 import { createHash } from "node:crypto";
@@ -32,6 +44,7 @@ import {
   INBOX_PERMISSION_ANSWERED_IN_TERMINAL,
   INBOX_PERMISSION_ASK_IN_TERMINAL,
   INBOX_PERMISSION_NO_LONGER_WAITING,
+  isInboxAskSession,
   isInboxPermissionSession,
   type InboxPermissionChoice,
   type InboxPermissionEvent,
@@ -47,6 +60,65 @@ export const CODEX_COMMAND_APPROVAL = "item/commandExecution/requestApproval";
 export const CODEX_FILE_APPROVAL = "item/fileChange/requestApproval";
 export const CODEX_PERMISSIONS_APPROVAL = "item/permissions/requestApproval";
 const APPROVALS = new Set([CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSIONS_APPROVAL]);
+/** An MCP server's form; Codex's own approvals ride it (`_meta.codex_approval_kind`). */
+export const CODEX_ELICITATION_APPROVAL = "mcpServer/elicitation/request";
+
+/**
+ * An MCP tool call's approval as Codex 0.165 core asks it (`build_mcp_tool_approval_elicitation_request`): a
+ * form elicitation marked `codex_approval_kind: "mcp_tool_call"` with no fields. This transport's; every other
+ * elicitation is inbox-launch-codex-questions.ts's (which leaves the other approval kinds to Terminal).
+ */
+export function isCodexToolApproval(method: string, params: any): boolean {
+  if (method !== CODEX_ELICITATION_APPROVAL || !params || params.mode !== "form") return false;
+  const meta = params._meta;
+  if (!meta || typeof meta !== "object" || meta.codex_approval_kind !== "mcp_tool_call") return false;
+  const schema = params.requestedSchema;
+  return schema === null || schema === undefined || (typeof schema === "object" && schema.type === "object" && (!schema.properties || Object.keys(schema.properties).length === 0));
+}
+
+/** One MCP tool call Codex started (`item/started`, `mcpToolCall`). */
+export interface CodexMcpCall {
+  id: string;
+  threadId: string;
+  turnId: string | null;
+  server: string;
+  tool: string;
+  arguments: unknown;
+}
+
+/** Two JSON values equal (object keys in any order). */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== typeof b || a === null || b === null || typeof a !== "object") return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a)) return a.length === (b as unknown[]).length && a.every((v, i) => sameJson(v, (b as unknown[])[i]));
+  const ka = Object.keys(a as object);
+  const kb = Object.keys(b as object);
+  return ka.length === kb.length && ka.every((k) => Object.hasOwn(b as object, k) && sameJson((a as Record<string, unknown>)[k], (b as Record<string, unknown>)[k]));
+}
+
+/**
+ * The MCP tool call a tool approval is for: the one call of the thread (and turn) on the request's server whose
+ * arguments are the request's `tool_params` (absent: none). Null unless exactly one tool matches: the card never
+ * guesses which call it allows.
+ */
+export function codexMcpCallOf(params: Record<string, any>, calls: readonly CodexMcpCall[]): CodexMcpCall | null {
+  const meta = (params._meta ?? {}) as Record<string, unknown>;
+  const asked = Object.hasOwn(meta, "tool_params") ? meta.tool_params : null;
+  const found = calls.filter(
+    (c) => c.threadId === params.threadId && (typeof params.turnId !== "string" || c.turnId === null || c.turnId === params.turnId) && c.server === params.serverName && sameJson(c.arguments ?? null, asked ?? null),
+  );
+  if (found.length === 0 || new Set(found.map((c) => c.tool)).size !== 1) return null;
+  return found.at(-1)!;
+}
+
+/**
+ * The key of a tool approval: its JSON-RPC id with what it asks. Codex sends a pending request again with the
+ * same id (on `thread/resume`), so that is the same card; another request, an identical call included, never is.
+ */
+export function codexToolApprovalKey(params: Record<string, any>, rpcId: number | string): string {
+  return codexApprovalKey(params.threadId, params.turnId ?? null, JSON.stringify(["mcp_tool_call", rpcId, params.serverName ?? null, params.message ?? null, params._meta?.tool_params ?? null]));
+}
 
 /** The record's line after Approve in Terminal. */
 export const CODEX_HANDOFF = "Approve it in Codex, in Terminal.";
@@ -125,10 +197,20 @@ export function codexPermissionEvent(method: string, params: Record<string, any>
   return null;
 }
 
+/** An MCP tool call's approval as the card's event: Claude Code's MCP tool vocabulary, the call's own arguments. */
+export function codexToolApprovalEvent(params: Record<string, any>, call: CodexMcpCall | null): InboxPermissionEvent | null {
+  if (!call || !call.server || !call.tool || call.server.includes("__") || call.tool.includes("__")) return null;
+  const input = call.arguments && typeof call.arguments === "object" && !Array.isArray(call.arguments) ? (call.arguments as Record<string, unknown>) : {};
+  if (call.arguments !== null && call.arguments !== undefined && input !== call.arguments) return null;
+  return { session_id: String(params.threadId), cwd: null, permission_mode: null, tool_name: `mcp__${call.server}__${call.tool}`, tool_input: input, permission_suggestions: [] };
+}
+
 /** The request's result for the person's choice; null for Approve in Terminal (no answer: Codex's own prompt decides). */
 export function codexDecision(method: string, params: Record<string, any>, choice: InboxPermissionChoice): unknown | null {
   if (choice === "terminal") return null;
   const allow = choice === "once" || choice === "session" || choice === "auto" || choice === "full";
+  // An MCP tool call: accept runs it once, decline rejects it and the turn goes on (Codex core's mapping).
+  if (method === CODEX_ELICITATION_APPROVAL) return { action: allow ? "accept" : "decline", content: null, _meta: null };
   if (method === CODEX_PERMISSIONS_APPROVAL) {
     const asked = (params.permissions ?? {}) as Record<string, unknown>;
     const granted = Object.fromEntries(Object.entries(asked).filter(([, value]) => value !== null && value !== undefined));
@@ -167,6 +249,8 @@ export function createCodexPermissions(
   resolved(requestId: unknown): void;
   turnEnded(threadId: string): void;
   fileChange(itemId: unknown, changes: unknown): void;
+  mcpCall(threadId: unknown, turnId: unknown, item: unknown): void;
+  mcpCallEnded(itemId: unknown): void;
   connectionLost(): void;
 } {
   const { store } = options;
@@ -175,6 +259,7 @@ export function createCodexPermissions(
   const pending = new Map<string, Pending>();
   const byRpc = new Map<string, string>();
   const changesByItem = new Map<string, CodexFileChange[]>();
+  const mcpCalls: CodexMcpCall[] = [];
   const questions = createLaunchQuestions({ store, name: INBOX_CODEX_NAME, displayFolder: options.displayFolder, onChange: options.onChange, log });
   const terms: InboxPermissionOptions = { ...CODEX_PERMISSION_TERMS, shownPath: options.displayFolder };
 
@@ -193,11 +278,12 @@ export function createCodexPermissions(
 
   return {
     asked(id, method, params) {
-      if (!APPROVALS.has(method) || !params || typeof params.threadId !== "string") return;
+      const tool = isCodexToolApproval(method, params);
+      if ((!APPROVALS.has(method) && !tool) || !params || typeof params.threadId !== "string") return;
       const root = rootOfThread(params.threadId);
       // Not a launched thread of this Inbox: another client of the daemon answers it.
       if (!root) return;
-      const key = codexApprovalKey(params.threadId, params.itemId, params.approvalId);
+      const key = tool ? codexToolApprovalKey(params, id) : codexApprovalKey(params.threadId, params.itemId, params.approvalId);
       const known = pending.get(key);
       if (known) {
         // Sent again (a dropped connection, `thread/resume`): the same question, answered on this request's id. An
@@ -209,7 +295,7 @@ export function createCodexPermissions(
         options.onChange();
         return;
       }
-      const event = codexPermissionEvent(method, params, changesByItem.get(String(params.itemId)));
+      const event = tool ? codexToolApprovalEvent(params, codexMcpCallOf(params, mcpCalls)) : codexPermissionEvent(method, params, changesByItem.get(String(params.itemId)));
       const entry: Pending = { key, threadId: params.threadId, rpcId: id, method, params, event, messageId: null, question: null, answered: false };
       if (event) {
         const question = questions.questionFor(root, event, terms);
@@ -217,7 +303,7 @@ export function createCodexPermissions(
         entry.messageId = questions.ask(root, event, key, question);
       } else {
         log(`Inbox launch ${root.launch!.id}: a Codex ${method} the card cannot show whole; left to Terminal`);
-        // Its card from an earlier Inbox run (a patch's change is seen only in its `item/started`, never sent again):
+        // Its card from an earlier Inbox run (a patch's change, an MCP call, is seen only in its `item/started`, never sent again):
         // it cannot be answered from here any more.
         const earlier = earlierCard(root, key);
         if (earlier) questions.withdraw(earlier, INBOX_PERMISSION_ASK_IN_TERMINAL);
@@ -238,6 +324,8 @@ export function createCodexPermissions(
     },
 
     turnEnded(threadId) {
+      // Its calls are over.
+      for (let i = mcpCalls.length - 1; i >= 0; i--) if (mcpCalls[i]!.threadId === threadId) mcpCalls.splice(i, 1);
       for (const p of [...pending.values()]) {
         if (p.threadId !== threadId) continue;
         drop(p);
@@ -252,7 +340,23 @@ export function createCodexPermissions(
       if (changesByItem.size > 50) changesByItem.delete(changesByItem.keys().next().value!);
     },
 
+    mcpCall(threadId, turnId, item) {
+      const call = item as Record<string, unknown> | null;
+      if (typeof threadId !== "string" || !call || typeof call.id !== "string" || typeof call.server !== "string" || typeof call.tool !== "string") return;
+      mcpCalls.push({ id: call.id, threadId, turnId: typeof turnId === "string" ? turnId : null, server: call.server, tool: call.tool, arguments: call.arguments ?? null });
+      // Kept for the approval that may follow; only the latest few.
+      if (mcpCalls.length > 50) mcpCalls.shift();
+    },
+
+    /** `item/completed` for an MCP tool call: no approval of it can follow, so it can never name a card. */
+    mcpCallEnded(itemId) {
+      for (let i = mcpCalls.length - 1; i >= 0; i--) if (mcpCalls[i]!.id === itemId) mcpCalls.splice(i, 1);
+    },
+
     connectionLost() {
+      // A start missed while the connection was down must never leave an earlier call to name a card: only
+      // calls started on the next connection count (a request sent again with none goes to Terminal).
+      mcpCalls.length = 0;
       for (const p of pending.values()) p.rpcId = null;
       byRpc.clear();
     },
@@ -288,7 +392,10 @@ export function createCodexPermissions(
         const status = options.status(ref);
         // Not read since connecting (nothing known), or waiting on an approval: its request may still come again.
         if (!status || (status.type === "active" && status.activeFlags?.includes("waitingOnApproval"))) continue;
-        for (const { message } of openPermissionQuestions(store, root.thread_id)) if (!held.has(message.id)) questions.withdraw(message.id, INBOX_PERMISSION_NO_LONGER_WAITING);
+        // Codex's own questions (`perm:ask:…`) are inbox-launch-codex-questions.ts's to withdraw.
+        for (const { message } of openPermissionQuestions(store, root.thread_id)) {
+          if (!held.has(message.id) && !(message.author.kind === "agent" && isInboxAskSession(message.author.session))) questions.withdraw(message.id, INBOX_PERMISSION_NO_LONGER_WAITING);
+        }
       }
     },
 

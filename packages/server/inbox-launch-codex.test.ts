@@ -14,14 +14,28 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync,
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
-import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices } from "@plannotator/core/inbox-permission";
+import { INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_ANSWERED_IN_TERMINAL, INBOX_PERMISSION_ASK_IN_TERMINAL, INBOX_PERMISSION_AUTO, INBOX_PERMISSION_DENY, INBOX_PERMISSION_FULL, INBOX_PERMISSION_NO_LONGER_WAITING, INBOX_PERMISSION_TERMINAL, inboxPermissionAnswer, inboxPermissionChoices, inboxPermissionQuestion } from "@plannotator/core/inbox-permission";
 import type { InboxMessage } from "@plannotator/core/inbox-types";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { installFakeCodex, type FakeCodex, type FakeCodexConfig } from "../../tests/helpers/fake-codex";
 import { createInboxLaunch } from "./inbox-launch";
 import { codexHostState, codexTrustOverride, codexTrustRoot, codexTurnErrorNote, codexWritesTrust, parseDaemonStart } from "./inbox-launch-codex";
-import { CODEX_COMMAND_APPROVAL, CODEX_FILE_APPROVAL, CODEX_PERMISSION_TERMS, CODEX_PERMISSIONS_APPROVAL, codexApprovalKey, codexDecision, codexDiffEdits, codexPermissionEvent, createCodexPermissions } from "./inbox-launch-codex-permission";
+import {
+  CODEX_COMMAND_APPROVAL,
+  CODEX_ELICITATION_APPROVAL,
+  CODEX_FILE_APPROVAL,
+  CODEX_PERMISSION_TERMS,
+  CODEX_PERMISSIONS_APPROVAL,
+  codexApprovalKey,
+  codexDecision,
+  codexDiffEdits,
+  codexMcpCallOf,
+  codexPermissionEvent,
+  codexToolApprovalEvent,
+  createCodexPermissions,
+  isCodexToolApproval,
+} from "./inbox-launch-codex-permission";
 
 const restore: (() => void)[] = [];
 afterEach(() => {
@@ -162,6 +176,46 @@ describe("the pure parts", () => {
     expect(codexDecision(CODEX_PERMISSIONS_APPROVAL, asked, "once")).toEqual({ permissions: { network: { enabled: true } }, scope: "turn" });
     expect(codexDecision(CODEX_PERMISSIONS_APPROVAL, asked, "deny")).toEqual({ permissions: {}, scope: "turn" });
   });
+
+  test("an MCP tool call's approval is the permission card's, matched to exactly one call; every other approval riding elicitation stays in Terminal", () => {
+    const approval = (meta: Record<string, unknown>, extra: Record<string, unknown> = {}) => ({
+      threadId: THREAD,
+      turnId: "t1",
+      serverName: "docs",
+      mode: "form",
+      _meta: { codex_approval_kind: "mcp_tool_call", tool_params: { query: "refunds", limit: 5 }, ...meta },
+      message: 'Allow the docs MCP server to run tool "search"?',
+      requestedSchema: { type: "object", properties: {} },
+      ...extra,
+    });
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}))).toBe(true);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({ codex_approval_kind: "tool_suggestion" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({ codex_approval_kind: "browser_auth" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}, { requestedSchema: { type: "object", properties: { why: { type: "string" } } } }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, approval({}, { mode: "url" }))).toBe(false);
+    expect(isCodexToolApproval(CODEX_ELICITATION_APPROVAL, { ...approval({}), _meta: null })).toBe(false);
+
+    const call = { id: "c1", threadId: THREAD, turnId: "t1", server: "docs", tool: "search", arguments: { limit: 5, query: "refunds" } };
+    expect(codexMcpCallOf(approval({}), [call])).toEqual(call);
+    // Not the same arguments, another server, or another thread: no call, so no card.
+    expect(codexMcpCallOf(approval({}), [{ ...call, arguments: { query: "refunds" } }])).toBeNull();
+    expect(codexMcpCallOf(approval({}), [{ ...call, server: "files" }])).toBeNull();
+    expect(codexMcpCallOf(approval({}), [{ ...call, threadId: "other" }])).toBeNull();
+    // Two tools that would both match: the card never guesses which call it allows.
+    expect(codexMcpCallOf(approval({}), [call, { ...call, id: "c2", tool: "delete" }])).toBeNull();
+
+    const event = codexToolApprovalEvent(approval({}), call)!;
+    expect(event).toMatchObject({ tool_name: "mcp__docs__search", tool_input: { query: "refunds", limit: 5 }, permission_suggestions: [] });
+    // The permission card's own words: no session choice (Codex's "remember" is not offered).
+    expect(inboxPermissionChoices(event, CODEX_PERMISSION_TERMS)).toEqual([INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL]);
+    expect(inboxPermissionQuestion(event, { agent: "Codex", folder: "/p", ...CODEX_PERMISSION_TERMS }).prompt).toContain("`search` from docs");
+    expect(codexToolApprovalEvent(approval({}), null)).toBeNull();
+    expect(codexToolApprovalEvent(approval({}), { ...call, arguments: ["a"] })).toBeNull();
+
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "once")).toEqual({ action: "accept", content: null, _meta: null });
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "deny")).toEqual({ action: "decline", content: null, _meta: null });
+    expect(codexDecision(CODEX_ELICITATION_APPROVAL, {}, "terminal")).toBeNull();
+  });
 });
 
 describe("the approval transport", () => {
@@ -174,6 +228,7 @@ describe("the approval transport", () => {
     const root = store.startPersonThread({ project_id: project.id, body: "Build it.", to: { host: "codex", session: THREAD }, idempotency_key: "send-1", launch }).message;
     const answers: [number | string, unknown][] = [];
     const link = { up: true };
+    const state: { status: { type: string; activeFlags?: string[] } | null; connectedAt: number | null } = { status: null, connectedAt: null };
     const permissions = createCodexPermissions({
       store,
       roots: () => [store.message(root.id)!],
@@ -183,19 +238,115 @@ describe("the approval transport", () => {
       onChange: () => {},
       respond: (id, result) => link.up && answers.push([id, result]) > 0,
       steer: () => {},
-      status: () => null,
-      connectedAt: () => null,
+      status: () => state.status,
+      connectedAt: () => state.connectedAt,
       rejoin: () => {},
     } as never);
-    const cards = () => messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}`);
-    const answer = (cardId: string) => {
+    const cards = () => messagesOf(store, root.thread_id).filter((m: InboxMessage) => m.author.session === `perm:${THREAD}` && store.questionsOf(m.id).length > 0);
+    const answer = (cardId: string, label: string = INBOX_PERMISSION_ALLOW_ONCE) => {
       const question = store.questionsOf(cardId)[0]!;
-      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [INBOX_PERMISSION_ALLOW_ONCE] };
+      const picked = { v: 1 as const, key: question.key, kind: "single" as const, prompt: question.prompt, selected: [label] };
       const saved = store.savePicks(cardId, [{ key: question.key, revision: question.revision, answer: picked }], { unsentOnly: true });
       store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: [{ key: question.key, revision: saved[0]!.revision }] });
     };
-    return { store, root, dir, answers, link, permissions, cards, answer };
+    return { store, root, dir, answers, link, state, permissions, cards, answer };
   }
+
+  /** An MCP tool call's approval as Codex core asks it (`build_mcp_tool_approval_elicitation_request`). */
+  const toolApproval = (server: string, tool: string, args: Record<string, unknown>) => ({
+    threadId: THREAD,
+    turnId: "t1",
+    serverName: server,
+    mode: "form",
+    _meta: { codex_approval_kind: "mcp_tool_call", tool_params: args },
+    message: `Allow the ${server} MCP server to run tool "${tool}"?`,
+    requestedSchema: { type: "object", properties: {} },
+  });
+  const started = (t: ReturnType<typeof transport>, id: string, server: string, tool: string, args: Record<string, unknown>) =>
+    t.permissions.mcpCall(THREAD, "t1", { type: "mcpToolCall", id, server, tool, arguments: args, status: "inProgress" });
+
+  test("each MCP tool approval request is its own card: one Allow once never answers another call, a repeated or a concurrent identical one included", () => {
+    const t = transport();
+    const send = { to: "bob", amount: 100 };
+    started(t, "c1", "pay", "send", send);
+    t.permissions.asked(1, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(1);
+    t.answer(t.cards()[0]!.id);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([[1, { action: "accept", content: null, _meta: null }]]);
+    t.permissions.resolved(1);
+    t.permissions.mcpCallEnded("c1");
+    // The model calls it again, the same arguments, the same turn: a new card, nothing answered for it.
+    started(t, "c2", "pay", "send", send);
+    t.permissions.asked(2, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(2);
+    t.permissions.sweep();
+    expect(t.answers).toHaveLength(1);
+    expect(t.store.questionsOf(t.cards()[1]!.id)[0]!.state).toBe("open");
+    t.answer(t.cards()[1]!.id, INBOX_PERMISSION_DENY);
+    t.permissions.sweep();
+    expect(t.answers[1]).toEqual([2, { action: "decline", content: null, _meta: null }]);
+
+    // Two identical calls at once: two cards, each answered on its own request.
+    started(t, "c3", "pay", "send", send);
+    started(t, "c4", "pay", "send", send);
+    t.permissions.asked(3, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    t.permissions.asked(4, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(4);
+    t.answer(t.cards()[3]!.id, INBOX_PERMISSION_DENY);
+    t.permissions.sweep();
+    expect(t.answers[2]).toEqual([4, { action: "decline", content: null, _meta: null }]);
+    expect(t.answers).toHaveLength(3);
+    // A request Codex sends again (a dropped connection; the same id): the same card, and its answer goes on it.
+    t.permissions.connectionLost();
+    t.permissions.asked(3, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", send));
+    expect(t.cards()).toHaveLength(4);
+    t.answer(t.cards()[2]!.id);
+    t.permissions.sweep();
+    expect(t.answers[3]).toEqual([3, { action: "accept", content: null, _meta: null }]);
+  });
+
+  test("a card never names a call that is over or one seen before a dropped connection: an approval no call in progress matches waits on Terminal", () => {
+    const t = transport();
+    const to = { to: "bob" };
+    // An earlier `preview` of the same arguments; the connection drops, so the start of `send` is missed.
+    started(t, "c1", "pay", "preview", to);
+    t.permissions.connectionLost();
+    t.permissions.asked(5, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    // A call that completed: no later request can name it.
+    started(t, "c2", "pay", "preview", to);
+    t.permissions.mcpCallEnded("c2");
+    t.permissions.asked(6, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    // Nor one of a turn that ended.
+    started(t, "c3", "pay", "preview", to);
+    t.permissions.turnEnded(THREAD);
+    t.permissions.asked(7, CODEX_ELICITATION_APPROVAL, toolApproval("pay", "send", to));
+    expect(t.cards()).toEqual([]);
+    t.permissions.sweep();
+    expect(t.answers).toEqual([]);
+  });
+
+  test("after a restart the approval sweep withdraws an open permission card no request is behind, never Codex's own question (`perm:ask:`)", () => {
+    const t = transport();
+    const card = (session: string, key: string) =>
+      t.store.sendMessage({
+        project_id: t.root.project_id,
+        author: { kind: "agent", host: "codex", session, name: "Codex" },
+        permission: true,
+        body: ":::question\nRound refunds how?\n\n- [ ] Banker's\n- [ ] Half up\n:::",
+        reply_to: t.root.id,
+        idempotency_key: key,
+      }).message;
+    const orphan = card(`perm:${THREAD}`, "perm-orphan");
+    const ask = card(`perm:ask:${THREAD}`, "perm-ask");
+    t.state.connectedAt = Date.now() - 60_000;
+    t.state.status = { type: "idle" };
+    t.permissions.sweep();
+    expect(t.store.questionsOf(orphan.id)[0]!.state).toBe("superseded");
+    expect(t.store.questionsOf(ask.id)[0]!.state).toBe("open");
+  });
 
   test("a request Codex sends again (a new id, the same item) is the same card, and the answer goes to the latest id", () => {
     const t = transport();
@@ -532,6 +683,82 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     await until(() => w.codex.turns().some((t) => t.steer?.includes("Not the build folder.")));
   });
 
+  test("an MCP tool call's approval is the permission card; Allow once goes back as accept, Deny as decline; a call the card cannot match, or another approval kind, waits on Terminal", async () => {
+    const w = world({ config: { prompts: [{ kind: "mcpToolCall", tool: "search", arguments: { query: "refunds" } }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    const first = cardsOf(w.store, root, threadId)[0]!;
+    // The permission card's identity (`perm:<thread>`), never a question card's (`perm:ask:`).
+    expect(first.author).toMatchObject({ kind: "agent", host: "codex", name: "Codex", session: `perm:${threadId}` });
+    const question = w.store.questionsOf(first.id)[0]!;
+    expect(question.prompt).toContain("`search` from docs");
+    expect(question.choices.map((c) => c.label)).toEqual([INBOX_PERMISSION_ALLOW_ONCE, INBOX_PERMISSION_DENY, INBOX_PERMISSION_TERMINAL]);
+    answerCard(w.store, first.id, INBOX_PERMISSION_ALLOW_ONCE);
+    for (let i = 0; i < 50 && w.codex.approvals().length === 0; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()[0]).toMatchObject({ threadId, method: CODEX_ELICITATION_APPROVAL, result: { action: "accept", content: null, _meta: null }, how: "answered" });
+    await until(() => w.codex.turns().some((t) => t.ended === "completed"));
+
+    // Deny: decline (Codex rejects the call and the turn goes on).
+    w.codex.configure({ prompts: [{ kind: "mcpToolCall", tool: "delete", arguments: { path: "/docs" } }] });
+    expect(await deliverWhenIdle(w, threadId, wake(root.id, "Clean up."))).toBe("delivered");
+    await until(() => cardsOf(w.store, root, threadId).length === 2);
+    answerCard(w.store, cardsOf(w.store, root, threadId)[1]!.id, INBOX_PERMISSION_DENY);
+    for (let i = 0; i < 50 && w.codex.approvals().length < 2; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()[1]).toMatchObject({ method: CODEX_ELICITATION_APPROVAL, result: { action: "decline", content: null, _meta: null }, how: "answered" });
+    await until(() => w.codex.turns().filter((t) => t.ended === "completed").length === 2);
+
+  });
+
+  test("a call that is over (`item/completed`) names no card: the same tool and arguments asked again in the turn with no call in progress waits on Terminal", async () => {
+    const preview = { kind: "mcpToolCall" as const, tool: "preview", arguments: { path: "/docs" } };
+    const w = world({ config: { prompts: [preview, { ...preview, started: false }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    await until(() => cardsOf(w.store, root, threadId).length === 1);
+    answerCard(w.store, cardsOf(w.store, root, threadId)[0]!.id, INBOX_PERMISSION_ALLOW_ONCE);
+    let state: string | undefined;
+    for (let i = 0; i < 100 && state !== "waiting_terminal"; i++) {
+      w.launch.sweep(true);
+      state = (await w.launch.runOf(root.id))?.state;
+      if (state !== "waiting_terminal") await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()).toHaveLength(1);
+    expect(state).toBe("waiting_terminal");
+    expect(cardsOf(w.store, root, threadId)).toHaveLength(1);
+  });
+
+  test("an MCP tool call the card cannot match (no `item/started` for it) or another approval kind riding elicitation gets no card: Codex waits on Terminal", async () => {
+    for (const prompt of [
+      { kind: "mcpToolCall" as const, tool: "search", arguments: { query: "x" }, started: false },
+      { kind: "elicitation" as const, request: { mode: "form", message: "Install the docs plugin?", requestedSchema: { type: "object", properties: {} }, _meta: { codex_approval_kind: "tool_suggestion" } } },
+    ]) {
+      const w = world({ config: { prompts: [prompt] } });
+      const root = await w.send("Fix it.", "send-1");
+      const threadId = root.launch!.session_ref!;
+      await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+      w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+      let state: string | undefined;
+      for (let i = 0; i < 100 && state !== "waiting_terminal"; i++) {
+        w.launch.sweep(true);
+        state = (await w.launch.runOf(root.id))?.state;
+        if (state !== "waiting_terminal") await Bun.sleep(40);
+      }
+      expect(state).toBe("waiting_terminal");
+      expect(messagesOf(w.store, root.thread_id).filter((m) => m.author.kind === "agent")).toEqual([]);
+      expect(w.codex.approvals()).toEqual([]);
+    }
+  });
+
   test("a request the person answers in Terminal (codex resume) is withdrawn as answered there", async () => {
     const w = world({ config: { prompts: [{ kind: "command", command: "make" }] } });
     const root = await w.send("Fix it.", "send-1");
@@ -773,5 +1000,149 @@ describe.skipIf(process.platform === "win32")("Codex behind LaunchHost", () => {
     again.store.sendReply(root.id, { words: "Three.", idempotency_key: "reply-3" });
     await until(() => starts().length === before + 2);
     expect(fromLogin()).toBe(true);
+  });
+});
+
+// ── Codex's own questions (inbox-launch-codex-questions.ts), round trips with the fake app-server ──
+
+describe.skipIf(process.platform === "win32")("Codex's own questions behind LaunchHost", () => {
+  const ROUNDING = { id: "rounding", header: "Rounding", question: "Round refunds how?", isOther: true, options: [{ label: "Banker's rounding (Recommended)", description: "Matches the ledger" }, { label: "Half up", description: "Simpler" }] };
+  const asks = (store: InboxStore, root: InboxMessage, threadId: string) =>
+    messagesOf(store, root.thread_id).filter((m) => m.author.session === `perm:ask:${threadId}` && store.questionsOf(m.id).length > 0);
+  const notes = (store: InboxStore, cardId: string) => messagesOf(store, store.message(cardId)!.thread_id).filter((m) => m.reply_to === cardId && m.author.kind === "agent" && !m.body.includes(":::")).map((m) => m.body);
+  /** The window's way: each question's pick (a label, Other… words, or a free text), then one Send. */
+  const answerAsk = (store: InboxStore, cardId: string, picks: ({ label: string } | { other: string } | { text: string })[]) => {
+    const qs = store.questionsOf(cardId);
+    const entries = qs.map((q, i) => {
+      const p = picks[i]!;
+      return { key: q.key, revision: q.revision, answer: { v: 1 as const, key: q.key, kind: q.kind as "single" | "text", prompt: q.prompt, selected: "label" in p ? [p.label] : [], ...("other" in p ? { other: p.other } : {}), ...("text" in p ? { text: p.text } : {}) } };
+    });
+    const saved = store.savePicks(cardId, entries, { unsentOnly: true });
+    store.sendReply(cardId, { idempotency_key: `answer-${cardId}`, questions: saved.map((q) => ({ key: q.key, revision: q.revision })) });
+  };
+  const sweepUntil = async (launch: World["launch"], check: () => boolean) => {
+    for (let i = 0; i < 100 && !check(); i++) {
+      launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(check()).toBe(true);
+  };
+  const settled = (w: World, method: string) => w.codex.approvals().filter((a) => a.method === method);
+
+  test("a single-choice requestUserInput is a question card in the thread; the pick goes back as Codex's own label, and Codex's turn goes on with it", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(card.author).toMatchObject({ kind: "agent", host: "codex", name: "Codex" });
+    const q = w.store.questionsOf(card.id)[0]!;
+    expect(q.prompt).toBe("Round refunds how?");
+    expect(q.choices.map((c) => [c.label, c.recommended])).toEqual([["Banker's rounding", true], ["Half up", false]]);
+    // The run line: Codex waits on the person's answer.
+    w.store.recordDelivery(root.id, { host: "codex", session: threadId });
+    expect(await w.launch.runOf(root.id)).toMatchObject({ state: "waiting_answer", agent: "codex" });
+    answerAsk(w.store, card.id, [{ label: "Half up" }]);
+    await sweepUntil(w.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]).toMatchObject({ threadId, result: { answers: { rounding: { answers: ["Half up"] } } }, how: "answered" });
+    await until(() => w.codex.turns().some((t) => t.ended === "completed"));
+    // Delivered to the card, never handed to Codex again as a turn.
+    expect(w.store.message(w.store.questionsOf(card.id)[0]!.sent_reply_id!)!.delivery).toMatchObject({ session: `perm:ask:${threadId}` });
+    expect(w.codex.turns().filter((t) => t.how)).toHaveLength(1);
+  });
+
+  test("free text: a question with no options is answered in the card's text box, and a choice's Other… is the person's own words", async () => {
+    const free = { id: "flag", header: "Name", question: "What should the flag be called?", isOther: false, options: null };
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [free, ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(w.store.questionsOf(card.id).map((q) => q.kind)).toEqual(["text", "single"]);
+    answerAsk(w.store, card.id, [{ text: "refund_cents" }, { other: "Round at the end of the month" }]);
+    await sweepUntil(w.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]!.result).toEqual({ answers: { flag: { answers: ["refund_cents"] }, rounding: { answers: ["Round at the end of the month"] } } });
+  });
+
+  test("an MCP elicitation form is a card of its fields; the answer goes back as accept with their values", async () => {
+    const request = {
+      mode: "form",
+      _meta: null,
+      message: "Where should the release notes go?",
+      requestedSchema: { type: "object", properties: { folder: { type: "string", title: "Folder" }, format: { type: "string", title: "Format", oneOf: [{ const: "md", title: "Markdown" }, { const: "html", title: "HTML" }] } }, required: ["folder"] },
+    };
+    const w = world({ config: { prompts: [{ kind: "elicitation", serverName: "docs", request }] } });
+    const root = await w.send("Write the notes.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Write the notes."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    expect(card.body.startsWith("Where should the release notes go?")).toBe(true);
+    expect(w.store.questionsOf(card.id).map((q) => q.prompt)).toEqual(["Folder", "Format"]);
+    answerAsk(w.store, card.id, [{ text: "docs/releases" }, { label: "Markdown" }]);
+    await sweepUntil(w.launch, () => settled(w, "mcpServer/elicitation/request").length === 1);
+    expect(settled(w, "mcpServer/elicitation/request")[0]!.result).toEqual({ action: "accept", content: { folder: "docs/releases", format: "md" }, _meta: null });
+  });
+
+  test("unanswered: Codex keeps waiting (its question blocks, as in its own TUI); the card stays open", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    for (let i = 0; i < 20; i++) {
+      w.launch.sweep(true);
+      await Bun.sleep(40);
+    }
+    expect(w.codex.approvals()).toEqual([]);
+    expect(w.store.questionsOf(asks(w.store, root, threadId)[0]!.id)[0]!.state).toBe("open");
+    expect(w.codex.threads()[threadId]!.turns.at(-1)!.status).toBe("inProgress");
+  });
+
+  test("the session goes away: Stop interrupts the turn and the card is withdrawn (no longer answerable), never answered", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    await w.post(root.launch!.id, "stop");
+    await until(() => w.codex.turns().some((t) => t.ended === "interrupted"));
+    expect(w.store.questionsOf(card.id)[0]!.state).toBe("superseded");
+    expect(notes(w.store, card.id)).toEqual([INBOX_PERMISSION_NO_LONGER_WAITING]);
+    expect(w.codex.approvals()[0]!.how).toBe("interrupted");
+  });
+
+  test("the Inbox restarts mid-question: the open card stays; Codex sends the request again (the same id) and the answer reaches it", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const again = w.restart();
+    // The window reads the thread first: that read opens the new connection, which rejoins the thread (the request comes again).
+    await again.launch.runOf(root.id);
+    await until(() => w.codex.rpc("thread/resume").length > 0);
+    answerAsk(again.store, asks(again.store, root, threadId)[0]!.id, [{ label: "Banker's rounding" }]);
+    await sweepUntil(again.launch, () => settled(w, "item/tool/requestUserInput").length === 1);
+    expect(settled(w, "item/tool/requestUserInput")[0]).toMatchObject({ result: { answers: { rounding: { answers: ["Banker's rounding (Recommended)"] } } }, how: "answered" });
+    expect(asks(again.store, root, threadId)).toHaveLength(1);
+  });
+
+  test("the request is gone while the Inbox is down (Codex's daemon stopped): the card is withdrawn, no longer answerable", async () => {
+    const w = world({ config: { prompts: [{ kind: "userInput", questions: [ROUNDING] }] } });
+    const root = await w.send("Fix it.", "send-1");
+    const threadId = root.launch!.session_ref!;
+    await w.launch.deliver("codex", threadId, wake(root.id, "Fix it."));
+    await until(() => asks(w.store, root, threadId).length === 1);
+    const card = asks(w.store, root, threadId)[0]!;
+    await w.daemonDown();
+    const again = w.restart();
+    await again.launch.runOf(root.id);
+    await sweepUntil(again.launch, () => again.store.questionsOf(card.id)[0]!.state === "superseded");
+    expect(notes(again.store, card.id)).toEqual([INBOX_PERMISSION_NO_LONGER_WAITING]);
+    expect(w.codex.approvals()).toEqual([]);
   });
 });

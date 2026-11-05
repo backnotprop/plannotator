@@ -109,8 +109,8 @@ import {
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
-import type { QuestionAnswer } from "@plannotator/core/question-block";
-import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
+import { QUESTION_ANSWERS_HEADING, formatQuestionAnswerLines, type QuestionAnswer } from "@plannotator/core/question-block";
+import { INBOX_ASK_SESSION_PREFIX, INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxAskSession, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
@@ -1608,7 +1608,11 @@ export class InboxStore {
    */
   redirectedFrom(reply: InboxMessage) {
     const asked = reply.to && reply.reply_to ? this.messages.get(reply.reply_to) : null;
-    return asked && asked.author.kind === "agent" && asked.author.session !== reply.to!.session ? asked.author : null;
+    if (!asked || asked.author.kind !== "agent" || asked.author.session === reply.to!.session) return null;
+    // A launched Codex thread's own question (`perm:ask:<thread>`) answered, the reply gone on to that thread
+    // (`forwardAskReply`): the same session that asked, never another that ended.
+    if (asked.author.session === `${INBOX_ASK_SESSION_PREFIX}${reply.to!.session}`) return null;
+    return asked.author;
   }
 
   /**
@@ -2241,7 +2245,8 @@ export class InboxStore {
    * that Mark read closed (not an earlier one's) exactly as they were, a
    * saved pick included (its revision goes up by one, so a pick in flight is
    * refused rather than lost). No write when nothing changes. An archived
-   * thread refuses.
+   * thread refuses. A launched Codex thread's own question (`perm:ask:`) is
+   * left open: Codex waits on it, and Mark read never answers for the person.
    */
   markRead(threadId: string, read: boolean): InboxListRow {
     const root = this.messages.get(threadId);
@@ -2253,7 +2258,9 @@ export class InboxStore {
       throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     }
     const members = this.threadMessages(threadId);
-    const records = members.filter((m) => m.author.kind === "agent" && !this.closedByArchive(m)).flatMap((m) => this.questionRecords(m.id));
+    const records = members
+      .filter((m) => m.author.kind === "agent" && !isInboxAskSession(m.author.session) && !this.closedByArchive(m))
+      .flatMap((m) => this.questionRecords(m.id));
     if (read) {
       const waiting = records.filter((r) => {
         const state = inboxQuestionState(r, false);
@@ -4267,9 +4274,15 @@ export class InboxStore {
       words,
       stillOpen,
     });
-    const body = [withInboxActionsSection(replyBody, this.stagedActionsSection(message, actionsSent, stillOpen)), feedback]
+    const askCard = message.author.kind === "agent" && isInboxAskSession(message.author.session);
+    const composed = [withInboxActionsSection(replyBody, this.stagedActionsSection(message, actionsSent, stillOpen)), feedback]
       .filter((part) => part !== "")
       .join("\n\n");
+    // A launched Codex thread's own question: its card keeps a dashed label whole with a word joiner (U+2060),
+    // which never goes into the person's reply. What the reply carries besides its answers is kept apart, so
+    // it can go on to Codex (forwardAskReply) without the answers Codex already took.
+    const body = askCard ? composed.replace(/\u2060/g, "") : composed;
+    const askWords = askCard ? [words.trim(), feedback].filter((part) => part !== "").join("\n\n").replace(/\u2060/g, "") : "";
 
     // The questions first, so whoever reads the reply finds them already sent.
     // If any of these writes fails, the questions written so far are put back
@@ -4309,6 +4322,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       ...(input.by_guest ? { by_guest: true as const } : {}),
+      ...(askWords ? { ask_words: askWords } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
@@ -6084,6 +6098,70 @@ export class InboxStore {
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    this.appendMessage(next, at);
+    return next;
+  }
+
+  /** A person's reply, not delivered, that answers or replies to a launched Codex thread's own question (a `perm:ask:` card). */
+  private askReply(replyId: string): InboxMessage {
+    const message = this.messages.get(replyId);
+    if (!message) throw new InboxError("message_not_found", `No message ${replyId}.`);
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (message.author.kind !== "person" || isInboxNote(message) || asked?.author.kind !== "agent" || !isInboxAskSession(asked.author.session)) {
+      throw new InboxError("not_addressed", `${replyId} is not a reply to a launched session's own question.`);
+    }
+    if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
+    return message;
+  }
+
+  /**
+   * Launch: the answer to a launched Codex thread's own question (`cardId`)
+   * went to Codex with this reply's answers on it. `forwardKeys`: that
+   * card's questions whose words the answer had no place for. Both kept on
+   * the reply (`ask_taken`, `ask_forward`), since one Send can answer
+   * several cards that Codex takes one at a time. Nothing changes when
+   * already recorded.
+   */
+  recordAskAnswer(replyId: string, cardId: string, forwardKeys: readonly string[]): InboxMessage {
+    const message = this.askReply(replyId);
+    const taken = [...new Set([...(message.ask_taken ?? []), cardId])];
+    const known = message.ask_forward ?? [];
+    const added = forwardKeys.filter((key) => !known.some((f) => f.message_id === cardId && f.key === key)).map((key) => ({ message_id: cardId, key }));
+    if (taken.length === (message.ask_taken ?? []).length && added.length === 0) return message;
+    const next: InboxMessage = { ...message, ask_taken: taken, ...(known.length + added.length > 0 ? { ask_forward: [...known, ...added] } : {}) };
+    this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /**
+   * Launch: the person's reply to a launched Codex thread's own question (a
+   * `perm:ask:` card) held words Codex's answer had no place for. The same
+   * reply goes on to the thread itself (`to`), so the Inbox's wake delivers
+   * it as the thread's next turn, like any reply; that turn carries only
+   * what the answer could not (`forward_body`): the reply's own words
+   * (`ask_words`), then the `ask_forward` answers of every card the reply
+   * answered, each under Codex's own question text. Only such a reply, and only while not delivered. The
+   * same address writes nothing.
+   */
+  forwardAskReply(replyId: string, to: InboxAddressee): InboxMessage {
+    const message = this.askReply(replyId);
+    if (message.to?.session === to.session && message.to.host === to.host) return message;
+    // Each answer under Codex's own question text, never the Inbox's message ids or card lines (Codex saw neither),
+    // in thread order and card order.
+    const order = this.threadMessageIds(message.thread_id);
+    const records = (message.ask_forward ?? [])
+      .map(({ message_id, key }) => this.questionRecords(message_id).find((r) => r.key === key && r.sent_reply_id === replyId && r.answer))
+      .filter((r): r is InboxQuestionRecord => !!r)
+      .sort((a, b) => order.indexOf(a.message_id) - order.indexOf(b.message_id) || a.position - b.position);
+    const parts: string[] = [];
+    if (message.ask_words?.trim()) parts.push(message.ask_words.trim());
+    if (records.length > 0) {
+      parts.push([`## ${QUESTION_ANSWERS_HEADING}`, ...records.map((r) => `### ${r.prompt.replace(/\s+/g, " ").trim()}\n${formatQuestionAnswerLines(r.answer!).trimEnd()}`)].join("\n\n"));
+    }
+    // The card's word joiner (a dashed label kept whole) never goes to Codex.
+    const forwardBody = parts.join("\n\n").replace(/\u2060/g, "");
+    const at = this.stamp();
+    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, forward_body: forwardBody, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);
     return next;
   }

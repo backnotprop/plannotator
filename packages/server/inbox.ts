@@ -2796,7 +2796,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       thread_id: reply.thread_id,
       reply_to: reply.reply_to,
       subject,
-      body: inboxBodyForAgent(reply),
+      // A reply to a launched Codex thread's own question gone on to the thread: only what Codex's answer could not carry.
+      body: inboxBodyForAgent(typeof reply.forward_body === "string" ? { ...reply, body: reply.forward_body } : reply),
       url: threadPageUrl(baseUrl, reply.thread_id),
       ...(redirected ? { redirected_from: redirected } : {}),
       // A thread the person started: the wake says so (INBOX_NEW_THREAD_INSTRUCTION).
