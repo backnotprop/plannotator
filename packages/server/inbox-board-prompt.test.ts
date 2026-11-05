@@ -10,6 +10,7 @@
 import { expect, test } from 'bun:test';
 import { INBOX_CARD_COLUMNS } from '@plannotator/core/inbox-types';
 import { INBOX_CARD_OP_FIELDS, INBOX_CARD_OPS } from './inbox-mcp-cards';
+import { INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_RULE } from '@plannotator/core/inbox-types';
 import { boardPrompt } from '../inbox/board/boardPrompt';
 
 const BIN = ['/Users/ada/.local/bin/plannotator', 'inbox', 'mcp'];
@@ -53,4 +54,11 @@ test('it asks for 2–5 word titles with status in `say`, and the thread where t
 test('it names this computer’s plannotator for the CLI, and a plain one before the settings load', () => {
   expect(boardPrompt(BIN)).toContain('`/Users/ada/.local/bin/plannotator card --help`');
   expect(boardPrompt(null)).toContain('`plannotator card --help`');
+});
+
+test('it carries the initiative rule but not the sentence on clearing initiatives out (card --help and the nudge only)', () => {
+  const prompt = boardPrompt(BIN);
+  expect(prompt).toContain(INBOX_CARD_INITIATIVE_RULE);
+  expect(prompt).not.toContain(INBOX_CARD_INITIATIVE_CLEAR_OUT);
+  expect(prompt).not.toMatch(/delete it/);
 });

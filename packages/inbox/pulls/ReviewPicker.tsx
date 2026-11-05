@@ -139,7 +139,8 @@ export function ReviewPicker({ stack, projects, threadName, exclude, labelId, id
   const [words, setWords] = useState('');
   const ask: PullHandoffAsk = askKind === 'custom' ? { kind: 'custom', words } : { kind: 'guide' };
   const sessions = targets?.sessions ?? [];
-  const launch = targets?.launch ?? null;
+  // A new agent starts in the PR's project: with no project for its repository, compose would have nowhere to start it.
+  const launch = projects.length > 0 ? (targets?.launch ?? null) : null;
   const [pickedId, setPickedId] = useState<string | null>(null);
   // The person's pick, else the last one used, else the first running one that is not working, else a new agent.
   const picked: ReviewSession | 'new' | null =

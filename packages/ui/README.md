@@ -357,6 +357,13 @@ the composer (0.44.0)" covers the chips, the metric rule, the merged-range
 refactor behind them, and the three inherited limits (duplicate labels,
 restored drafts, and a label that is a prefix of another label).
 
+### Timeline foot seams (`AnnotationPanel`)
+
+Both opt-in and defaulting to today's behavior.
+
+- **`timelineFooter?: ReactNode`**: the host's own section after the timeline, inside its scroll area, so the cards and the section scroll as one. Absent: no wrapper element.
+- **`hideEmptyMessage?: boolean`**: an empty timeline without "No annotations yet" and its hint, for a host that shows something else there. The way to other files' comments stays.
+
 ### Annotation card seams (`AnnotationPanel`; 0.45.0)
 
 Two more opt-in props, both on the panel and both defaulting to today's
@@ -686,7 +693,7 @@ npm install @plannotator/ui @plannotator/core
 - `@plannotator/core` — pure utils + types, zero deps, browser-safe (CI enforces no `node:` imports). Published.
 - `@plannotator/ui` — React components/hooks + theme + `configure()`. Depends on an exact published `@plannotator/core` version. Published.
 - `@plannotator/shared`, `@plannotator/ai` — stay private to the monorepo; `shared` re-exports `core`'s modules via shims so Plannotator's internals are untouched.
-- Currently `@plannotator/ui` 0.62.0 (unreleased; 0.61.0 is published) depends exactly on `@plannotator/core` 0.25.20 (unreleased). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
+- Currently `@plannotator/ui` 0.62.0 (unreleased; 0.61.0 is published) depends exactly on `@plannotator/core` 0.25.20 (unreleased); the launch-agents stack pins 0.25.21 (unpublished: its three new subpaths, HANDOFF.md). `core` is bumped only when something under `packages/core` changes, so `ui` can advance alone. Keep the published core version exact in `packages/ui/package.json`; do not use a `workspace:` protocol there, because a directly published manifest must remain installable outside this monorepo. Bun still links the matching local workspace during development. When both packages change, publish `core` first, then build and publish the UI tarball. `bun run check:sibling-deps @plannotator/ui` (from the repo root; it reads npm) fails while the pinned core isn't on npm. See HANDOFF.md "Publishing & versioning" for the verification command.
 
 ## The one rule
 

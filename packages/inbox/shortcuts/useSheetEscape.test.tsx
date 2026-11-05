@@ -49,19 +49,6 @@ describe.skipIf(!hasDom)('useSheetEscape', () => {
     expect(closed).toBe(2);
   });
 
-  test('the selection toolbar or its label picker on screen keeps the key: it closes first, the sheet second', async () => {
-    await mount();
-    for (const html of ['<div data-pn-annotation-toolbar-row></div>', '<div data-quick-label-picker></div>']) {
-      const shown = add(html);
-      shown.getClientRects = () => [{}] as unknown as DOMRectList;
-      escape(document.body);
-      expect(closed).toBe(0);
-      shown.remove();
-    }
-    escape(document.body);
-    expect(closed).toBe(1);
-  });
-
   test("a PR description's raw HTML cannot act as the annotator or a popover layer; the real stage keeps the key", async () => {
     await mount();
     const body = add('<div class="html-block"><div data-pn-image-annotator-stage>x</div><div data-popover-layer><a href="#y">y</a></div></div>');

@@ -238,6 +238,8 @@ export interface InboxRowDelivery {
   send_now: boolean;
   /** The person's message (a reply or message), or the agent message the 👍 is on. */
   message_id: string;
+  /** Settled by a read of another agent than the one it was for: that agent's host. */
+  read_by?: string;
   /** Delivered at (`delivered`), else null. */
   at: string | null;
   /** Whom it goes to: the host of the session (null for an agent without one). */

@@ -93,6 +93,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
 }) => {
   const fit = fitFileHeights ?? bare;
   const host = useGuideHost();
+  const overviewFigure = host.renderOverviewFigure?.() ?? null;
   const addGlobalComment = host.globalComments?.onAdd;
   const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
   // Only the guide's own files register shells; in-app the review may hold many more.
@@ -268,6 +269,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
       {host.globalComments && <GuideGlobalCommentList globalComments={host.globalComments} />}
 
       {guide.overview && <GuideOverview overview={guide.overview} renderLink={renderLink} />}
+      {!guide.overview?.diagram && overviewFigure}
 
       <div ref={viewRef} className={bare ? 'space-y-4' : 'mt-6 space-y-4'}>
         {guide.sections.map((section, index) => (

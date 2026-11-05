@@ -322,6 +322,11 @@ export function cardMenuToast(card: InboxCardWire, moved: InboxCardWire): { lead
   return null;
 }
 
+/** The toast after one click on an initiative's Delete: every one deleted while it is up, undone together. */
+export function initiativeDeletedToast(deleted: readonly Pick<InboxInitiative, 'name'>[]): { lead: string; detail: string } {
+  return { lead: 'Deleted', detail: deleted.length === 1 ? `“${deleted[0]!.name}”` : `${deleted.length} initiatives` };
+}
+
 /**
  * Whether a menu move's Undo may still run: the card is still where that
  * move put it (its column, and no move since: `moved_at`). An agent or the
