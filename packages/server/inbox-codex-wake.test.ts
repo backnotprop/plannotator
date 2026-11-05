@@ -22,6 +22,7 @@ import {
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 
 const THREAD = "019a2b3c-4d5e-7f00-8a9b-0c1d2e3f4a5b";
@@ -47,7 +48,7 @@ interface World {
   start: () => Promise<InboxServer>;
 }
 
-async function world(options: { codex?: boolean; env?: Record<string, string> | ((root: string) => Record<string, string>); storeNow?: () => Date; queueTimeoutMs?: number; now?: () => number } = {}): Promise<World> {
+async function world(options: { codex?: boolean; env?: Record<string, string> | ((root: string) => Record<string, string>); storeNow?: () => Date; queueTimeoutMs?: number; now?: () => number; sessionsNow?: () => number } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-codex-wake-");
   fakes.push(fake);
   if (options.codex !== false) fake.install("codex");
@@ -62,6 +63,7 @@ async function world(options: { codex?: boolean; env?: Record<string, string> | 
       agentEnvironment: environment,
       codexWake: { extraClis: [], ...(options.queueTimeoutMs ? { queueTimeoutMs: options.queueTimeoutMs } : {}), ...(options.now ? { now: options.now } : {}) },
       ...(options.storeNow ? { storeNow: options.storeNow } : {}),
+      ...(options.sessionsNow ? { sessionsNow: options.sessionsNow, setAsideDelayMs: 50 } : {}),
     });
     servers.push(server);
     return server;
@@ -829,4 +831,78 @@ test("a wake Codex holds in its queue never says nothing open, since the agent m
   expect(text.split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages. Your last message was just now]`);
   expect(text.split("nothing open")).toHaveLength(2);
   expect(text).toContain("Keep going, nothing open on my side.");
+});
+
+describe("a reply moved back to the Codex thread told to stop", () => {
+  const WORDS = "Yours again: use the ARM runner.";
+  const OTHER_SESSION = "session-new-owner";
+  const until = async (check: () => boolean | Promise<boolean>) => {
+    for (let waited = 0; waited < 3_000; waited += 25) {
+      if (await check()) return;
+      await Bun.sleep(25);
+    }
+    throw new Error("timed out");
+  };
+
+  /** A Codex thread asks, the person hands the thread to another session, and the notice is queued. */
+  async function handedOff() {
+    const clock = { now: Date.now() };
+    const w = await world({ sessionsNow: () => clock.now });
+    const turn = Date.now() - 5_000;
+    const toolCall = (body: string, at: number) =>
+      w.client.callTool({ name: "send_message", arguments: { body, project_path: w.project, agent_session: THREAD, agent_host: "codex", agent_name: "Codex" }, _meta: codexMeta(THREAD, at) });
+    const sent = (await toolCall("Which runner?", turn)).structuredContent as { message_id: string; thread_id: string };
+    const poll = await fetch(`${base(w.server)}/api/inbox/bridge/poll`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+      body: JSON.stringify({ session: OTHER_SESSION, host: "pi", waitMs: 0, tags: true }),
+    });
+    expect(poll.status).toBe(200);
+    const id = ((await (await reply(w.server, sent.message_id, { idempotency_key: "k1", words: WORDS, tags: [{ host: "pi", session: OTHER_SESSION, mode: "handoff" }] })).json()) as { reply: { id: string } }).reply.id;
+    await until(async () => {
+      await w.server.codexWake.sweep();
+      return queues(w.fake).length > 0;
+    });
+    // Its notice goes once, however many sweeps pass.
+    await w.server.codexWake.sweep();
+    await w.server.codexWake.sweep();
+    expect(queues(w.fake)).toHaveLength(1);
+    const words = () => queues(w.fake).filter((call) => argOf(call.args, "message")!.includes(WORDS));
+    const message = async () => (await thread(w.server, sent.thread_id)).messages.find((m) => m.id === id)!;
+    const moveBack = async () => {
+      clock.now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+      await toolCall("Still here.", turn);
+      const moved = await fetch(`${base(w.server)}/api/inbox/messages/${id}/to`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: w.server.serverSession, to: { host: "codex", session: THREAD } }),
+      });
+      expect(moved.status).toBe(200);
+      await w.server.codexWake.sweep();
+      await w.server.codexWake.sweep();
+    };
+    return { ...w, toolCall, turn, words, message, moveBack };
+  }
+
+  test("its notice still queued: the words are queued too, and only a later turn's tool call delivers them", async () => {
+    const w = await handedOff();
+    await w.moveBack();
+    expect(w.words()).toHaveLength(1);
+    expect((await w.message()).delivery ?? null).toBeNull();
+    await w.toolCall("The next turn.", Date.now() + 1_000);
+    await until(async () => !!(await w.message()).delivery);
+    expect((await w.message()).delivery).toMatchObject({ session: THREAD });
+    await w.server.codexWake.sweep();
+    expect(w.words()).toHaveLength(1);
+  }, 30_000);
+
+  test("its notice taken by a turn: the words are queued once", async () => {
+    const w = await handedOff();
+    await w.toolCall("The next turn took the notice.", Date.now() + 1_000);
+    await until(async () => !!(await w.message()).tags?.[0]?.delivery);
+    expect((await w.message()).delivery ?? null).toBeNull();
+    await w.moveBack();
+    expect(w.words()).toHaveLength(1);
+    expect((await w.message()).delivery ?? null).toBeNull();
+  }, 30_000);
 });

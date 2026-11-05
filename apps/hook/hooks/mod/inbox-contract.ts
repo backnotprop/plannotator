@@ -1089,6 +1089,13 @@ function wakeName(value: unknown): string {
 export const INBOX_SEND_NOW_POLL_FIELD = 'send_now'
 
 /**
+ * On a poll, the connection's tick goes on polling while a steer waits for the running turn. A connection without it
+ * (from before that) stops polling until the steer goes in, so the Inbox counts a session it handed one as there.
+ * An older Inbox ignores it.
+ */
+export const INBOX_STEER_POLLS_POLL_FIELD = 'steer_polls'
+
+/**
  * The poll field (`true`) by which a connection says it can answer Ask AI
  * live. An older connection never sends it, so a question never waits for it.
  */

@@ -18,6 +18,7 @@ import { INBOX_WAKE_INSTRUCTION } from "@plannotator/shared/inbox/connection";
 import { createFakeAgents, type FakeAgents } from "../../tests/helpers/fake-agents";
 import { createAgentEnvironmentFor } from "./inbox-agents";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_LOOK_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import { ensureQwenTrust, qwenWakeToken, readQwenTrust, setQwenTrust } from "./inbox-qwen-trust";
 import { qwenRecordLive, qwenSettingsKeepOut, type QwenAgentsSettings } from "./inbox-qwen-wake";
@@ -152,7 +153,7 @@ async function fakeSession(fake: FakeAgents, qwenHome: string, project: string):
   return session;
 }
 
-async function world(options: { trust?: boolean; env?: Record<string, string>; knobs?: Record<string, unknown>; storeNow?: () => Date } = {}): Promise<World> {
+async function world(options: { trust?: boolean; env?: Record<string, string>; knobs?: Record<string, unknown>; storeNow?: () => Date; sessionsNow?: () => number } = {}): Promise<World> {
   const fake = createFakeAgents("plannotator-qwen-wake-");
   fakes.push(fake);
   fake.install("qwen");
@@ -164,7 +165,7 @@ async function world(options: { trust?: boolean; env?: Record<string, string>; k
   if (options.trust !== false) expect((await ensureQwenTrust(dataDir, environment)).kind).toBe("added");
   const session = await fakeSession(fake, qwenHome, project);
   const start = async (knobs: Record<string, unknown> = {}) => {
-    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, qwenWake: { receiptTimeoutMs: 1_000, ...options.knobs, ...knobs }, ...(options.storeNow ? { storeNow: options.storeNow } : {}) });
+    const server = await startInboxServer({ dataDir, agentEnvironment: environment, codexWake: { extraClis: [] }, qwenWake: { receiptTimeoutMs: 1_000, ...options.knobs, ...knobs }, ...(options.storeNow ? { storeNow: options.storeNow } : {}), ...(options.sessionsNow ? { sessionsNow: options.sessionsNow, setAsideDelayMs: 50 } : {}) });
     servers.push(server);
     return server;
   };
@@ -675,3 +676,41 @@ test("a wake Qwen holds never says nothing open, since the agent may ask first; 
   expect(text.split("nothing open")).toHaveLength(2);
   expect(text).toContain("Keep going, nothing open on my side.");
 });
+
+test("a reply moved back to the Qwen session told to stop goes in as its own send, and a later tool call delivers it", async () => {
+  const WORDS = "Yours again: use the ARM runner.";
+  const clock = { now: Date.now() };
+  const w = await world({ sessionsNow: () => clock.now });
+  const sent = await qwenSends(w.client, w.project, "Which runner?");
+  await fetch(`${base(w.server)}/api/inbox/bridge/poll`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+    body: JSON.stringify({ session: "session-new-owner", host: "pi", waitMs: 0, tags: true }),
+  });
+  const post = (path: string, body: Record<string, unknown>) =>
+    fetch(`${base(w.server)}/api/inbox/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, ...body }) });
+  const id = ((await (await post(`messages/${sent.message_id}/reply`, { idempotency_key: "k1", words: WORDS, tags: [{ host: "pi", session: "session-new-owner", mode: "handoff" }] })).json()) as { reply: { id: string } }).reply.id;
+  const message = async () => (await thread(w.server, sent.thread_id)).messages.find((m) => m.id === id)!;
+  await until(async () => {
+    await w.server.qwenWake.sweep();
+    return w.session.received.length > 0;
+  });
+  // Its notice goes once, however many sweeps pass.
+  await w.server.qwenWake.sweep();
+  await w.server.qwenWake.sweep();
+  expect(w.session.received).toHaveLength(1);
+
+  clock.now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+  await qwenSends(w.client, w.project, "Still here.");
+  expect((await post(`messages/${id}/to`, { to: { host: "qwen", session: SESSION } })).status).toBe(200);
+  await until(async () => {
+    await w.server.qwenWake.sweep();
+    return w.session.received.length > 1;
+  });
+  expect((w.session.received[1]!.frame.message as { content: string }).content).toContain(WORDS);
+  expect((await message()).delivery ?? null).toBeNull();
+  await until(() => w.session.received.length === 2);
+  await qwenSends(w.client, w.project, "On it.");
+  await until(async () => !!(await message()).delivery);
+  expect((await message()).delivery).toMatchObject({ session: SESSION });
+}, 30_000);

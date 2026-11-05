@@ -53,7 +53,7 @@ import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, r
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
-import { hasMovingDelivery } from './rowDelivery';
+import { deliveriesReadList } from './rowDelivery';
 import {
   captureSettle,
   COVERED_LIST_SETTLES,
@@ -109,7 +109,8 @@ import { threadBoardCard } from './steps/model';
 import { ArchivedBlock } from './components/Archived';
 import { NotificationAsk, TabSleptLine } from './components/NotificationAsk';
 import { useInboxNotifications } from './notify';
-import { useInboxSound } from './sound';
+import { snoozeBackAfter, type SnoozeBack } from './snoozeBack';
+import { pageInFront, useInboxSound } from './sound';
 import { notificationLine, SoundIntroDialog } from './components/SoundIntro';
 import { ListLookIntro, type ListIntroGroup } from './components/ListLookIntro';
 import { LIST_INTRO_SETTLED_MS, listIntroMayAsk, listIntroPageClear, listIntroWanted, type ListIntroLoad } from './listIntro';
@@ -155,10 +156,11 @@ import { parseSettingsHash, settingsHash, type SettingsSection } from './setting
 import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
-import { PullsPage } from './pulls/PullsPage';
+import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
+import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
@@ -295,15 +297,17 @@ interface ThreadLoad {
 }
 
 interface Route {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'pulls' | 'shapes';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'tour' | 'board' | 'reviews' | 'shapes';
   /**
-   * Pull requests (`#pulls`, Code review on): the stack open beside the list (`&stack=`, its top layer's key),
+   * Reviews (`#reviews`, Code review on; `#pulls` is its permanent alias): the stack open beside the list (`&stack=`, its top layer's key),
    * and the layer under review (`&layer=`, with `&scope=stack` for the whole stack up to it).
    */
   stack?: string | null;
   layer?: string | null;
   scope?: 'layer' | 'stack';
-  /** Pull requests' view (`&view=mine|review|others`; absent: All), beside `project`. */
+  /** `#reviews&new`: open the New review box (a link from outside, Workspaces among them). Taken off the address as it opens. */
+  new?: boolean;
+  /** Reviews' view (`&view=mine|review|others`; absent: All), beside `project`. */
   view?: PullFilter;
   /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
@@ -379,10 +383,11 @@ function routeOf(fullHash: string): Route {
   if (params.has('drafts')) return { page: 'drafts', project: null, thread: null };
   if (params.has('shapes')) return { page: 'shapes', project: null, thread: null, shape: params.get('shape') };
   // The Board's project filter rides the list's own key (`#board&project=prj_…`).
-  if (params.has('pulls')) {
+  // `#pulls…` is rewritten to this address on arrival (reviewsAlias): it may still be read here in the same breath.
+  if (params.has('reviews') || params.has('pulls')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'pulls', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+    return { page: 'reviews', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer', new: params.has('new') };
   }
   if (params.has('board'))
     return {
@@ -425,13 +430,14 @@ function hashOf(route: Route): string {
       (route.board && route.board !== 'lanes' ? `board=${route.board}` : 'board') +
       boardFilterHash({ project: route.project, initiative: route.initiative }) +
       (route.card ? `&card=${encodeURIComponent(route.card)}` : '');
-  else if (route.page === 'pulls')
+  else if (route.page === 'reviews')
     hash =
-      'pulls' +
+      'reviews' +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
       (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
-      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
+      (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '') +
+      (route.new ? '&new' : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
   else {
     const params = new URLSearchParams();
@@ -549,6 +555,12 @@ function stripStrayMsg(): void {
 function stripClickSignal(): void {
   const clean = withoutClickSignal(window.location.hash);
   if (clean !== window.location.hash) window.history.replaceState(window.history.state, '', clean || window.location.pathname + window.location.search);
+}
+
+/** `#pulls…` becomes `#reviews…` in place: the entry is kept, and every old link goes on working (reviewsRoute.ts). */
+function settleReviewsAlias(): void {
+  const hash = reviewsAlias(window.location.hash);
+  if (hash) window.history.replaceState(window.history.state, '', hash);
 }
 
 /**
@@ -1045,6 +1057,7 @@ function Inbox() {
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
   const threadOnScreenRef = useRef<{ threadId: string; covered: boolean } | null>(null);
+  const [openThreadCovered, setOpenThreadCovered] = useState(false);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
     // New questions ring the doorbell on their own rules (sound.ts), whatever notifications say.
@@ -1135,6 +1148,7 @@ function Inbox() {
       // A Back this window started: its rewrite of the entry it landed on comes first (history.ts settleLanding).
       settleLanding();
       stripClickSignal();
+      settleReviewsAlias();
       stripStrayMsg();
       settleTourEntry();
       const oldExperimental = settleOldExperimental();
@@ -1174,6 +1188,7 @@ function Inbox() {
       setTimeout(() => place(false), 1000);
     };
     stripClickSignal();
+    settleReviewsAlias();
     stripStrayMsg();
     settleOldExperimental();
     window.addEventListener('hashchange', onHash);
@@ -1993,8 +2008,8 @@ function Inbox() {
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
           // again only where a list shows.
           stepsBus.emit('presence');
-          // A session's label changed (issue #2450): the list carries the labels, so it is read again.
-          if (!change?.labels && !hasMovingDelivery(latestSectionsRef.current)) return;
+          // A session's label changed (issue #2450), or one ended or came back: the list carries both, so it is read again.
+          if (!deliveriesReadList(change, latestSectionsRef.current)) return;
           listAfterEvents(80);
         },
         // Every (re)connect: the permission now, since a reconnect's URL may be stale.
@@ -4135,6 +4150,40 @@ function Inbox() {
     : null;
   // Its opening look on its way: read as looked at, as its row on the list is (`listShown`).
   const openThreadRow = listedOpenRow && looking.has(listedOpenRow.thread_id) ? lookedRow(listedOpenRow) : listedOpenRow;
+  // "Back from snooze" (snoozeBack.ts): set while rendering, so the thread's first draw has the line and can open at it.
+  const openThreadId = thread && thread.thread_id === route.thread ? thread.thread_id : null;
+  const [keptBack, setKeptBack] = useState<SnoozeBack | null>(null);
+  const snoozeBack = snoozeBackAfter(keptBack, openThreadId, listedOpenRow);
+  if (snoozeBack !== keptBack) setKeptBack(snoozeBack);
+  // The return under a thread already open (the opening look is on its way otherwise): the look comes once the window
+  // is in front and nothing covers the thread (seen on sight's rule), so until then the row keeps its clock.
+  const backUnderOpen = openThreadId && listedOpenRow?.snooze_back && !looking.has(openThreadId) && !openThreadCovered ? openThreadId : null;
+  useEffect(() => {
+    if (!backUnderOpen) return;
+    let taken = false;
+    const take = () => {
+      if (taken || !pageInFront()) return;
+      taken = true;
+      // Up to what this window has looked at: a message waiting below the view stays unseen (seenOnSight.ts).
+      const through = lookRef.current?.threadId === backUnderOpen ? lookRef.current.through : null;
+      trackLook(
+        backUnderOpen,
+        inboxApi
+          .seen(backUnderOpen, through)
+          .then(() => refreshList(false))
+          .catch(() => {
+            taken = false;
+          }),
+      );
+    };
+    take();
+    window.addEventListener('focus', take);
+    document.addEventListener('visibilitychange', take);
+    return () => {
+      window.removeEventListener('focus', take);
+      document.removeEventListener('visibilitychange', take);
+    };
+  }, [backUnderOpen, refreshList, trackLook]);
   /** The list on screen as drawn: the held list, the row whose look is on its way read as looked at. */
   const listShown = useMemo(() => (shown && looking.size > 0 ? markHeldRowLooked(shown, looking) : shown), [shown, looking]);
   // Snoozes: an older Inbox sends no `snoozed`, so no Snooze anywhere. Pins' rule for another machine does not apply:
@@ -4427,12 +4476,20 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown, route.page === 'pulls' && route.view === 'others');
-  // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
+  const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown, route.page === 'reviews' && route.view === 'others');
+  // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
-    if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
+    // In place: Back from the Inbox must not land on #reviews and be sent back again.
+    if (route.page === 'reviews' && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [route.page, settings !== null, pullsShown]);
+  }, [route.page, guestPage]);
+  // `#reviews&new`: the box opens once, over the page, and the address goes back to the page (Back and a reload do not reopen it).
+  useEffect(() => {
+    if (route.page !== 'reviews' || !route.new || !pullsShown) return;
+    writeRoute({ ...route, new: false }, { replace: true });
+    openCompose({});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [route.page, route.new, pullsShown]);
   useEffect(() => {
     if (!firstRun || guestPage) return;
     let last = Date.now();
@@ -5363,7 +5420,7 @@ function Inbox() {
         marks={settings !== null && !guestPage}
       />
     );
-  } else if (route.page === 'pulls' && pullsShown && route.stack && route.layer) {
+  } else if (route.page === 'reviews' && pullsShown && route.stack && route.layer) {
     main = (
       <PullReview
         model={pulls.model}
@@ -5379,7 +5436,7 @@ function Inbox() {
         }}
       />
     );
-  } else if (route.page === 'pulls' && pullsShown) {
+  } else if (route.page === 'reviews' && pullsShown) {
     main = (
       <PullsPage
         state={pulls}
@@ -5390,7 +5447,7 @@ function Inbox() {
         projectNames={projectNames}
         phone={phone}
         onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
-        onScope={({ filter, project }) => go({ page: 'pulls', project, view: filter, thread: null, stack: null })}
+        onScope={({ filter, project }) => go({ page: 'reviews', project, view: filter, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
@@ -5401,7 +5458,9 @@ function Inbox() {
         }}
       />
     );
-  } else if (route.page === 'pulls') {
+  } else if (route.page === 'reviews' && settings !== null && !guestPage) {
+    main = <ReviewsOff phone={phone} onSettings={() => go({ page: 'settings', project: null, thread: null, section: 'capabilities' })} />;
+  } else if (route.page === 'reviews') {
     main = <div className="ib-listcol" aria-busy="true" />;
   } else if (route.page === 'shapes') {
     // The grid (the sidebar's Shape row). A board with a thread opens over its thread; one with none, over the grid.
@@ -5609,6 +5668,7 @@ function Inbox() {
             }
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
+            snoozeBack={snoozeBack?.until ?? null}
             run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
             attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
             onRunChanged={() => void refreshThread(thread.thread_id)}
@@ -5720,6 +5780,7 @@ function Inbox() {
             covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null}
             onScreenChange={(state) => {
               threadOnScreenRef.current = state;
+              setOpenThreadCovered(state?.covered ?? false);
             }}
             backLabel={fromCard ? 'Board' : listTitle}
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}
@@ -5838,8 +5899,8 @@ function Inbox() {
             onDrafts={() => leave({ page: 'drafts', project: null, thread: null })}
             // The Board (approval "inbox-board"): a row only while the person has it on; no count (the header has it).
             onBoard={boardEnabled ? () => leave({ page: 'board', project: null, thread: null }) : undefined}
-            // Pull requests: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
-            onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
+            // Reviews: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
+            onPulls={pullsShown ? () => leave({ page: 'reviews', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
             onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
@@ -6250,7 +6311,7 @@ export function InboxApp() {
   );
 }
 
-/** The sidebar's Pull requests count: the rows on the person in the last read. */
+/** The sidebar's Reviews count: the rows on the person in the last read. */
 function pullsOnYou(model: import('@plannotator/core/inbox-types').InboxPullsAnswer): number {
   return pullGroups(model, null).on_you.length;
 }

@@ -13,6 +13,7 @@ import { T3Credentials } from "@plannotator/t3-code/auth";
 import type { T3Rpc } from "@plannotator/t3-code/t3-client";
 import type { InboxThread } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { INBOX_REPLY_ARRIVES_TEXT, INBOX_REPLY_READ_LATER_TEXT } from "./inbox-mcp";
 import { t3CeilingOfScope, t3GrantModeOf } from "./inbox-t3-wake";
 import { type FakeT3, startFakeT3, type T3Access, type T3RuntimeMode, t3ScopeOf } from "../../tests/helpers/fake-t3";
@@ -55,13 +56,13 @@ function fakeT3(threads: string[]) {
   return { rpc, sends, attempts, state, threads };
 }
 
-async function world(options: { grant?: boolean; threads?: string[]; now?: () => number } = {}) {
+async function world(options: { grant?: boolean; threads?: string[]; now?: () => number; sessionsNow?: () => number } = {}) {
   const root = mkdtempSync(join(tmpdir(), "plannotator-t3-wake-"));
   roots.push(root);
   const dataDir = join(root, "data");
   if (options.grant !== false) new T3Credentials(dataDir, ENDPOINT).save({ endpoint: ENDPOINT.href, epoch: "e1", tokens: { access_token: "tok", token_type: "Bearer" } });
   const t3 = fakeT3(options.threads ?? [THREAD]);
-  const server = await startInboxServer({ dataDir, t3Wake: { connect: async () => t3.rpc, ...(options.now ? { now: options.now } : {}) } });
+  const server = await startInboxServer({ dataDir, t3Wake: { connect: async () => t3.rpc, ...(options.now ? { now: options.now } : {}) }, ...(options.sessionsNow ? { sessionsNow: options.sessionsNow, setAsideDelayMs: 50 } : {}) });
   servers.push(server);
   const client = new Client({ name: "claude-code", version: "2.1.316" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -440,3 +441,38 @@ test("a wake T3 Code holds in its queue never says nothing open, since the agent
   expect(text.split("nothing open")).toHaveLength(2);
   expect(text).toContain("Keep going, nothing open on my side.");
 });
+
+test("a reply moved back to the T3 thread that took its stop notice goes in as its own request, and only that delivers it", async () => {
+  const WORDS = "Yours again: use the ARM runner.";
+  const clock = { now: Date.now() };
+  const w = await world({ sessionsNow: () => clock.now });
+  const sent = await w.send("Which runner?");
+  const base = `http://127.0.0.1:${w.server.port}`;
+  const post = (path: string, body: Record<string, unknown>) =>
+    fetch(`${base}/api/inbox/${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: w.server.serverSession, ...body }) });
+  await fetch(`${base}/api/inbox/bridge/poll`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${w.server.token}` },
+    body: JSON.stringify({ session: "session-new-owner", host: "pi", waitMs: 0, tags: true }),
+  });
+  const id = ((await (await post(`messages/${sent.message_id}/reply`, { idempotency_key: "k1", words: WORDS, tags: [{ host: "pi", session: "session-new-owner", mode: "handoff" }] })).json()) as { reply: { id: string } }).reply.id;
+  const message = async () => (await w.thread(sent.thread_id)).messages.find((m) => m.id === id)!;
+  for (let waited = 0; w.t3.sends.length === 0 && waited < 3_000; waited += 25) {
+    await w.server.t3Wake.sweep();
+    await Bun.sleep(25);
+  }
+  expect(w.t3.sends).toHaveLength(1);
+  expect((await message()).tags?.[0]?.delivery).toBeTruthy();
+
+  clock.now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+  await w.send("Still here.");
+  expect((await post(`messages/${id}/to`, { to: { host: "t3", session: THREAD } })).status).toBe(200);
+  await w.server.t3Wake.sweep();
+  await w.server.t3Wake.sweep();
+
+  // T3 took it: that send is what says Delivered, so it is the words.
+  expect(w.t3.sends).toHaveLength(2);
+  expect(String(w.t3.sends[1]!.message)).toContain(WORDS);
+  expect(w.t3.sends[1]!.clientRequestId).not.toBe(w.t3.sends[0]!.clientRequestId);
+  expect((await message()).delivery).toMatchObject({ session: THREAD });
+}, 30_000);
