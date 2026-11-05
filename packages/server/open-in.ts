@@ -199,14 +199,23 @@ export function revealFile(absPath: string): Promise<OpenInLaunchResult> {
   return runArgv("xdg-open", [path.dirname(absPath)], "file manager");
 }
 
+/** The catalog binary's argv for a file, at `line` when the app's launcher takes one. */
+function fileArgv(app: OpenInApp, target: string, line?: number): string[] {
+  if (!line || app.kind !== "editor") return [target];
+  if (app.line?.cli === "goto") return ["--goto", `${target}:${line}`];
+  if (app.line?.cli === "suffix") return [`${target}:${line}`];
+  return [target];
+}
+
 /**
  * Launch an editor/terminal app from the catalog.
- *   - editor   -> open the file itself
+ *   - editor   -> open the file itself, at `line` when its launcher can (the catalog's `line`)
  *   - terminal -> open the file's parent directory
  */
 export function openWithApp(
   app: OpenInApp,
   absPath: string,
+  line?: number,
 ): Promise<OpenInLaunchResult> {
   const platform = currentPlatform();
   const target = app.kind === "terminal" ? path.dirname(absPath) : absPath;
@@ -219,7 +228,10 @@ export function openWithApp(
         error: `${app.label} is not available on macOS`,
       });
     }
-    return runArgv("open", ["-a", appName, target], app.label);
+    // `open -a` takes no line: an app with a URL scheme takes it in the URL.
+    const scheme = line && app.kind === "editor" ? app.line?.mac : undefined;
+    const opened = scheme ? `${scheme}://file${target.split("/").map(encodeURIComponent).join("/")}:${line}` : target;
+    return runArgv("open", ["-a", appName, opened], app.label);
   }
 
   if (platform === "win") {
@@ -236,7 +248,7 @@ export function openWithApp(
       // parser; `start` inherits that cwd. bin is a trusted catalog value.
       return runArgv("cmd", ["/c", "start", "", bin], app.label, { cwd: target });
     }
-    return runArgv(bin, [target], app.label);
+    return runArgv(bin, fileArgv(app, target, line), app.label);
   }
 
   const bin = app.linux?.bin;
@@ -246,7 +258,7 @@ export function openWithApp(
       error: `${app.label} is not available on Linux`,
     });
   }
-  return runArgv(bin, [target], app.label);
+  return runArgv(bin, fileArgv(app, target, line), app.label);
 }
 
 /**

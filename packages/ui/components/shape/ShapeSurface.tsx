@@ -46,6 +46,7 @@ import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeKnow } from './ShapeKnow';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
+import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
 
@@ -197,6 +198,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   // With readFirst a board is for looking at: the pointer is a normal pointer and nothing lights up,
   // until the Annotate button in the dock turns on pointing (Pinpoint) and selecting words (Select).
   const [annotating, setAnnotating] = useState(!readFirst);
+  const codeSpan = React.useContext(CodeSpanContext);
   const [hoverRect, setHoverRect] = useState<DOMRect | null>(null);
   const hoverEl = useRef<HTMLElement | null>(null);
   const [more, setMore] = useState(false);
@@ -414,6 +416,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
+      // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
+      if (document.querySelector('[role="menu"]')) return;
       // An open bubble goes first.
       if (peekRef.current) {
         e.preventDefault();
@@ -526,6 +530,13 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       if (url) window.open(url, '_blank', 'noreferrer');
     }
   }, [refs, renderThread, openPanel, later, reduce, readProjectFile]);
+
+  // The host's control beside a file the board names: a file reference, or the file a diff reference shows.
+  const fileAction = useCallback((file: { path: string; line?: number }) => host.fileAction?.(id, file) ?? null, [host, id]);
+  const refFileAction = useCallback(
+    (r: ShapeRef) => (r.kind === 'file' || r.kind === 'diff' ? fileAction({ path: r.target, line: r.line }) : null),
+    [fileAction],
+  );
 
   const canOpen = useCallback((r: ShapeRef) => {
     if (r.kind === 'message') return !!renderThread;
@@ -803,6 +814,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         onAsk={codeInput('ask')}
         generalComment={phase === 'leaving' ? null : generalButton('code')}
         phone={phone}
+        fileAction={host.fileAction ? fileAction : undefined}
       />
     );
   };
@@ -826,6 +838,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
 
   return (
     <RefsCtx.Provider value={refsState}>
+    {/* While annotating, a click on the board's words picks them: a code span is only words. */}
+    <CodeSpanContext.Provider value={annotating ? null : codeSpan}>
       <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
@@ -1083,7 +1097,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               />
             )}
             {panel === 'thread' && renderThread && <div className="shp-thread-in">{renderThread({ flash: msgFlash })}</div>}
-            {panel === 'refs' && <RefList onShow={flashRef} canOpen={canOpen} />}
+            {panel === 'refs' && <RefList onShow={flashRef} canOpen={canOpen} fileAction={refFileAction} />}
           </div>
         </aside>
 
@@ -1108,6 +1122,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
             }}
             onEnter={holdPeek}
             onLeave={leavePeek}
+            fileAction={refFileAction(peekRefData)}
           />
         )}
 
@@ -1121,14 +1136,18 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           />
         )}
         {viewer?.kind === 'file' && (
-          <CodeFilePopout open onClose={() => setViewer(null)} filepath={viewer.path} contents={viewer.contents} line={viewer.line} revealKey={viewer.token} />
+          <CodeFilePopout open onClose={() => setViewer(null)} filepath={viewer.path} contents={viewer.contents} line={viewer.line} revealKey={viewer.token} headerAction={fileAction({ path: viewer.path, line: viewer.line })} />
         )}
         {viewer?.kind === 'diff' && (
           <PopoutDialog open onClose={() => setViewer(null)} title={viewer.path}>
-            <div className="shp-diff-pop"><ShapePatch patch={viewer.patch} /></div>
+            <div className="shp-diff-pop">
+              {host.fileAction && <div className="shp-diff-pop-acts">{fileAction({ path: viewer.path })}</div>}
+              <ShapePatch patch={viewer.patch} />
+            </div>
           </PopoutDialog>
         )}
       </div>
+    </CodeSpanContext.Provider>
     </RefsCtx.Provider>
   );
 }

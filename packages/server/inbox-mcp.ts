@@ -538,7 +538,7 @@ function listScopedRows(store: InboxStore, projectIds: ReadonlySet<string> | nul
  * or when it is the folder the connection says the agent works in (`working`,
  * `callerWorkingFolder`).
  */
-async function sendBasePath(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject, working = false): Promise<string | null> {
+async function sendBasePath(context: InboxMcpContext, projectPath: string | undefined, project: InboxProject, working = false, senderRoot?: string): Promise<string | null> {
   if (!projectPath || !isAbsolute(projectPath)) return null;
   let real: string;
   try {
@@ -551,7 +551,8 @@ async function sendBasePath(context: InboxMcpContext, projectPath: string | unde
   // stopped following a shell `cd`, that folder was the project_path, so its paths resolved there.
   if (working || isInsideFolder(real, project.root)) return real;
   const resolved = await context.projectRootOf?.(projectPath).catch(() => null);
-  if (resolved && resolved.worktree !== null && resolved.root === project.root) return real;
+  // A linked worktree, of this project or of the sender's own when it replies from another: that copy is the agent's.
+  if (resolved && resolved.worktree !== null && (resolved.root === project.root || resolved.root === senderRoot)) return real;
   const found = await context.findProjects?.(projectPath).catch(() => null);
   return found?.projects.some((other) => context.store.sameProject(other.id, project.id)) ? real : null;
 }
@@ -718,8 +719,8 @@ export async function sendAgentMessage(
     const base = here && isAbsolute(here) ? here : project.root;
     attachments = await context.recordAttachments(input.attachments, project, base);
   }
-  const basePath = await sendBasePath(context, here, project, working);
   const fromProject = await senderProject(context, input.project_path, project);
+  const basePath = await sendBasePath(context, here, project, working, fromProject?.root);
   // The images the body shows, copied now under the message-image route's rules (inline-images.ts):
   // files of the thread, with a sent version. One that cannot be read is captured on a later read.
   // Asynchronous and yielding; the blobs stay staged until the store accepts the message.
