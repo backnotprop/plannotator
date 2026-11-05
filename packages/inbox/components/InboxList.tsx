@@ -799,7 +799,7 @@ function RowWithAction({
         </RowTip>
       )}
       {offer && (
-        <RowTip armed={actionTip} content={withShortcut(`Mark read: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
+        <RowTip armed={actionTip} content={withShortcut(`Mark read / quiet: out of the top until ${agentName(rowAgent(row))} writes again`, { scope: inboxThreadShortcuts, action: 'markRead' })}>
           <button
             type="button"
             className="ib-ract"
