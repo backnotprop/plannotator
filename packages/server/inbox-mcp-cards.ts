@@ -213,10 +213,9 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null, tagDecided = false) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);
     const inName = wire.initiative ? initiativeName(wire.initiative) : null;
-    const others = () => store.initiatives().filter((i) => i.deleted_at === null && i.id !== wire.initiative).map((i) => i.name);
     const nudge =
       inName === null ? null
-      : !knownInitiatives.has(wire.initiative!) ? inboxCardInitiativeMadeNudge(inName, others())
+      : !knownInitiatives.has(wire.initiative!) ? inboxCardInitiativeMadeNudge(inName)
       : tagDecided ? inboxCardInitiativeTaggedNote(inName)
       : null;
     return {

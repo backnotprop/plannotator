@@ -139,12 +139,9 @@ export const INBOX_CARD_INITIATIVE_RULE =
  */
 export const INBOX_CARD_INITIATIVE_CLEAR_OUT = "When an initiative's work is done, delete it (`initiative_delete`); its cards stay.";
 
-/**
- * The line an agent's call gets when it just made an initiative, naming the other live ones, however many, so
- * one that fits can still be reused; joining one gets none (the owner's "A · Add both", 2026-11-05).
- */
-export function inboxCardInitiativeMadeNudge(name: string, others: readonly string[]): string {
-  return `Made initiative ${JSON.stringify(name)}.${others.length > 0 ? ` Others: ${others.join(", ")}.` : ""} When its work is done, delete it (initiative_delete); its cards stay.`;
+/** The line an agent's call gets when it just made an initiative; joining one gets none. */
+export function inboxCardInitiativeMadeNudge(name: string): string {
+  return `Made initiative ${JSON.stringify(name)}. When its work is done, delete it (initiative_delete); its cards stay.`;
 }
 
 /** The line an agent's call gets when the person's tag on the thread is what put the card in this initiative. */

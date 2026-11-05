@@ -531,7 +531,6 @@ describe("the Board page's routes: New card and the look", () => {
   // join (noise), a retry that made nothing claiming it did, or the sentence creeping back into what every request carries.
   test("the answer nudges only when this call made the initiative; every request's text carries no such sentence", async () => {
     const { card, server } = await world();
-    // None other live: no "Others:" sentence.
     const nudge = 'Made initiative "Billing". When its work is done, delete it (initiative_delete); its cards stay.';
     const made = await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" });
     expect(made.content[0]!.text.split("\n").at(-1)).toBe(nudge);
@@ -550,7 +549,7 @@ describe("the Board page's routes: New card and the look", () => {
     await quiet(await card({ op: "say", card_id: id, initiative: "" }));
     await quiet(await card({ op: "say", card_id: id, initiative: "Billing" }));
     const moved = await card({ op: "say", card_id: id, initiative: "Refunds" });
-    expect(moved.content[0]!.text.split("\n").at(-1)).toBe('Made initiative "Refunds". Others: Billing. When its work is done, delete it (initiative_delete); its cards stay.');
+    expect(moved.content[0]!.text.split("\n").at(-1)).toBe(nudge.replace("Billing", "Refunds"));
 
     const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
       method: "POST",
@@ -560,29 +559,10 @@ describe("the Board page's routes: New card and the look", () => {
     const text = await response.text();
     const data = text.split("\n").find((line) => line.startsWith("data:"));
     const tools = parseInboxToolList(JSON.parse(data ? data.slice(5) : text).result);
-    const sentence = /work is done|delete it|Others:|tagged this thread/;
+    const sentence = /work is done|delete it|tagged this thread/;
     expect(JSON.stringify(tools)).not.toMatch(sentence);
     expect(JSON.stringify(inboxAgentTool(tools))).not.toMatch(sentence);
     expect(inboxBoardRequestBlock("msg_x")).not.toMatch(sentence);
-  });
-
-  // The owner's "A · Add both", from the clean room: agents made "Billing integer cents" beside a live "Billing"
-  // because they never saw the list. The failures guarded: a capped list, a deleted one named, the new one naming itself.
-  test("the nudge on a new initiative names every other live one, in the approved words", async () => {
-    const { card } = await world();
-    await card({ op: "create", title: "A", initiative: "Billing" });
-    await card({ op: "create", title: "B", initiative: "Code review" });
-    await card({ op: "create", title: "C", initiative: "Old work" });
-    await card({ op: "initiative_delete", initiative: "Old work" });
-    const made = await card({ op: "create", title: "D", initiative: "Billing integer cents" });
-    const line = 'Made initiative "Billing integer cents". Others: Billing, Code review. When its work is done, delete it (initiative_delete); its cards stay.';
-    expect(made.content[0]!.text.split("\n").at(-1)).toBe(line);
-    expect(made.structuredContent.initiative_hint).toBe(line);
-
-    for (let i = 0; i < 30; i++) await card({ op: "create", title: `Many ${i}`, initiative: `Lane ${i}` });
-    const hint = (await card({ op: "create", title: "Last", initiative: "Last one" })).structuredContent.initiative_hint as string;
-    for (let i = 0; i < 30; i++) expect(hint).toContain(`Lane ${i}`);
-    expect(hint).not.toContain("Others: Last one");
   });
 
   // The owner, 2026-11-04: agents "clear initiatives out". The failures guarded: a delete that takes cards with it, or
