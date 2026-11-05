@@ -320,8 +320,7 @@ test("5. an older machine: by hand this once; Snooze says why and opens it; the 
   await dialog.getByRole('button', { name: 'Close' }).click();
 
   // That line, exactly as drawn, where `plannotator` is not on PATH: what `ssh host 'command'` runs on a stock shell.
-  const { PATH: _path, ...rest } = old.env;
-  const shellEnv = { ...rest, PATH: '/usr/bin:/bin' };
+  const shellEnv = { ...old.env, PATH: '/usr/bin:/bin', PLANNOTATOR_TEST_SANDBOX: old.root };
   expect(spawnSync('/bin/bash', ['-c', 'command -v plannotator'], { env: shellEnv }).status).not.toBe(0);
   // Not spawnSync: the stand-in for GitHub answers from this process.
   const ran = await new Promise<{ status: number | null; out: string }>((done) => {
