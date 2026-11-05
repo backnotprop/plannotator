@@ -172,6 +172,7 @@ import { askArrivalFocus, listOrder as drawnOrder, threadStep } from './threadSt
 import { LIST_STOPS, listMoveIndex, listStops } from './listKeys';
 import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
+import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
 import { useInboxShapes } from './shape/useInboxShapes';
@@ -1258,6 +1259,8 @@ function Inbox() {
       // Before the render: what waits on this read (Mark read after a look, markRead) reads the rows it brought.
       latestRef.current = next;
       setLatest(next);
+      // The sessions' labels (issue #2450): every row's agents and the open thread's authors read them.
+      setSessionLabels(next.session_labels);
       if (!firstList.current!.done) {
         firstList.current!.done = true;
         firstList.current!.resolve();
@@ -1891,13 +1894,14 @@ function Inbox() {
         onReach: setNotifyReach,
         // The live sessions moved (approval "inbox-row-delivery"): read the list again while a row's
         // delivery can still change (queued, sending, saved, not delivered), so its glyph follows.
-        onDeliveries: () => {
+        onDeliveries: (change) => {
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
           // again only where a list shows.
           stepsBus.emit('presence');
-          if (!hasMovingDelivery(latestSectionsRef.current)) return;
+          // A session's label changed (issue #2450): the list carries the labels, so it is read again.
+          if (!change?.labels && !hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },
@@ -5277,10 +5281,9 @@ function Inbox() {
         onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
-        onOpenGuide={(threadId, messageId) => go({ page: 'inbox', project: null, thread: threadId, guide: messageId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
         onLaunch={(keys, projectIds, body, askLine, opener, threadName) => openCompose({ body, threadName, pulls: { keys: [...keys], projects: [...projectIds], ask_line: askLine } }, opener)}
-        onHanded={(session) => {
+        onStarted={(session) => {
           rememberSent(session);
           pulls.reload();
         }}
