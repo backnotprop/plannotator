@@ -1565,8 +1565,8 @@ test('New review: the picker says what it knows, and the summary never shows the
 
 test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
   const { page } = world;
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&new`);
-  await page.reload();
   const box = page.locator('[data-review-box]');
   await expect(box).toBeVisible();
   await expect(page).toHaveURL(/#reviews$/);
