@@ -4,6 +4,7 @@
  * the session started from. Sessions read it from /api/plan's `repoInfo`; with
  * no `host` the document's refs are plain text.
  */
+import "../setup/sandbox-data-dir";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -83,6 +84,8 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 			process.env.PLANNOTATOR_REMOTE = "0";
 
 			world = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-annotate-repo-identity-")));
+			// For git's global config only. os.homedir() ignores this, so it does not
+			// protect the data folder: the sandbox-data-dir import above does that.
 			process.env.HOME = join(world, "home");
 			mkdirSync(process.env.HOME);
 			launchRepo = makeRepo(join(world, "launch"), "https://github.com/acme/launch.git");
