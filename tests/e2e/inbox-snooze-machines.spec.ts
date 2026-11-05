@@ -216,6 +216,8 @@ test('1. Snooze from the viewer: the thread leaves its section, and the snooze i
   await snoozeTomorrow(thread);
   await expect(bandButton()).toContainText('Snoozed 1');
   await expect(page.locator(`.ib-lbody [data-section-id]:not([data-section-id="snoozed"]) [data-thread-id="${thread}"]`)).toHaveCount(0);
+  // The row's fade over, so the picture shows the list as it settled.
+  await page.evaluate(() => Promise.all(document.getAnimations().filter((motion) => motion.effect?.getTiming().iterations !== Infinity).map((motion) => motion.finished.catch(() => {}))));
   await page.screenshot({ path: join(shots, 'snoozed-from-viewer.png') });
   expect(snoozesOn(macbook).map((s) => s.thread_id)).toEqual([thread]);
   expect(snoozesOn(studio)).toEqual([]);
@@ -288,6 +290,9 @@ test('5. The home machine away: a Snooze and an Unsnooze wait, say so, and apply
   await snoozeTomorrow(waits);
   await expect(page.locator('.ib-tlead').filter({ hasText: 'Waiting for MacBook: this applies when MacBook is back.' })).toBeVisible();
   await page.screenshot({ path: join(shots, 'snooze-held-home-machine-asleep.png') });
+  // The Snooze's toast goes first, so what follows can only be the Unsnooze's own.
+  await page.locator('[data-inbox-toast] [data-toast-dismiss]').click();
+  await expect(page.locator('[data-inbox-toast]')).toHaveCount(0);
   await openBand();
   await inBand(undone).click({ button: 'right' });
   await page.locator(`[data-row-menu="${undone}"] [data-row-action="unsnooze"]`).click();
