@@ -146,7 +146,13 @@ describe("the far machine, when a linked machine presses Update", () => {
 
   test("a terminal's update that takes the lock while this press asks GitHub is joined, and its ending counts as this press's", async () => {
     let lock = () => {};
-    const far = farMachine({ duringCheck: () => lock() });
+    // Once: with update checks on, the release notes ask again, and a terminal does not take the lock twice.
+    const far = farMachine({
+      duringCheck: () => {
+        lock();
+        lock = () => {};
+      },
+    });
     lock = () => far.takeLock();
     expect(await far.updates.machineStart()).toEqual({ outcome: "joined" });
     expect(far.facts.launches).toEqual([]);
