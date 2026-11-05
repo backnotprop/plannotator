@@ -52,6 +52,7 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
+import { OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -117,6 +118,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
+  // This pane is Code review's own, so its diff headers offer Open in (the thread's project; nothing when the file is not there).
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
@@ -559,6 +562,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent }: ReviewP
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                fileOpenIn={fileOpenIn}
               />
             </ReaderPart>
           ) : null}

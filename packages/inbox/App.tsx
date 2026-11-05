@@ -1584,8 +1584,8 @@ function Inbox() {
   const shapeOn = settings?.shape?.on === true && settings.guest !== true;
   const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
   const shapeHost = useMemo(
-    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
-    [shapes.subscribe, settings?.mcp_command],
+    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null), openIn: settings?.code_review?.on === true }),
+    [shapes.subscribe, settings?.mcp_command, settings?.code_review?.on],
   );
   // A `#shapes` link while Shape is off (or never on): the list, in its place.
   useEffect(() => {
@@ -6174,6 +6174,7 @@ function Inbox() {
           <GuidePane
             thread={thread}
             message={guideMessage}
+            codeReview={settings?.code_review?.on === true}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
           />

@@ -4276,12 +4276,17 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-openin { position: relative; display: inline-flex; align-items: center; flex: none; }
 .ib-split { display: inline-flex; align-items: stretch; height: 28px; border-radius: 7px; flex: none; }
 .ib-split:hover, .ib-split.ib-on { box-shadow: inset 0 0 0 1px var(--border); }
-.pn-inbox .ib-split .ib-sa { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 7px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--foreground); border-radius: 7px 0 0 7px; text-decoration: none; }
-.pn-inbox .ib-split .ib-sa:disabled { opacity: 0.5; cursor: default; }
-.pn-inbox .ib-split .ib-st { width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); border-radius: 0 7px 7px 0; }
+.pn-inbox .ib-split .ib-sa, [data-popout] .ib-split .ib-sa { display: inline-flex; align-items: center; gap: 6px; padding: 0 8px 0 7px; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 500; color: var(--foreground); border-radius: 7px 0 0 7px; text-decoration: none; }
+.pn-inbox .ib-split .ib-sa:disabled, [data-popout] .ib-split .ib-sa:disabled { opacity: 0.5; cursor: default; }
+.pn-inbox .ib-split .ib-st, [data-popout] .ib-split .ib-st { width: 20px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); border-radius: 0 7px 7px 0; }
 .ib-split.ib-on .ib-st { background: var(--muted); color: var(--foreground); }
 .ib-split .ib-sa:hover:not(:disabled), .ib-split .ib-st:hover { background: color-mix(in oklch, var(--muted) 60%, transparent); }
 .ib-appi { width: 16px; height: 16px; flex: none; display: block; }
+/* Shape's file popout portals out of .pn-inbox, as a menu does: the caret keeps its stroke there too. */
+[data-popout] .ib-split svg.ib-ic { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* A referenced file's Open in, in a message's line of text: it stays within the line. */
+.ib-body .ib-openin { vertical-align: middle; margin-left: 4px; }
+.ib-body .ib-split { height: 20px; }
 /* A menu portals out of .pn-inbox (Open in, full screen's ⋯): its line glyphs keep their stroke there too, never a filled shape. */
 svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted-foreground); }
 /* The menu portals to the body, outside .pn-inbox: its glyphs carry their own stroke. */

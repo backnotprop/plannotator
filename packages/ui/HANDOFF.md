@@ -2748,6 +2748,14 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
 
+## Shape and links: a slot for a file's action (unreleased; additive)
+
+Three optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
+
+- `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head and the file popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
+- `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
+- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+
 ## Shape: the board header (ui 0.62.0; not additive)
 
 `ShapeSurface`'s header no longer has the eyebrow row above the title (owner feedback 2026-11-04, approval `shape-board-look`, q-a9a1bf61). The title comes first; the group at its right holds, in order: "<agent> is drawing v<n>…" with a small reshaping Pebble while the agent draws (`.shp-drawing`, `role="status"`; the Pebble only on a phone, the words for screen readers), "Finished" (`.shp-finished`), the global comment button, Bring it up to date (a host with `refresh`) and, only when the host passes `onClose`, a × button (`.shp-close`, `aria-label` "Close Shape").

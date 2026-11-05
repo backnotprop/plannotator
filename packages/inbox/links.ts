@@ -101,6 +101,22 @@ export function attachmentForLink<T extends LinkableAttachment>(
 }
 
 /**
+ * The project file a link that names no attachment may mean, for "Open in": its path relative to the project root
+ * (the message's own folder first, as for an attachment) and the line it names (`#L12`, `:12`), or null for a path
+ * outside the project. The server checks it again.
+ */
+export function projectFileOfLink(href: string, options: { root: string; base?: string | null }): { path: string; line?: number } | null {
+  const candidate = linkCandidates(href).at(-1);
+  if (!candidate) return null;
+  const line = /^#L(\d+)/.exec(href.trim().replace(/^[^#]*/, ''))?.[1] ?? /:(\d+)(?::\d+)?$/.exec(candidate)?.[1];
+  const named = candidate.replace(/:\d+(?::\d+)?$/, '');
+  const root = normalizeLinkPath(options.root).replace(/\/$/, '');
+  const absolute = normalizeLinkPath(isAbsolutePath(named) ? named : `${options.base || options.root}/${named}`);
+  if (!root || !absolute.startsWith(`${root}/`)) return null;
+  return { path: absolute.slice(root.length + 1), ...(line ? { line: Number(line) } : {}) };
+}
+
+/**
  * Where an attachment is, as the person knows it: the path the agent named
  * (else its realpath), relative to the project root when it lies inside it.
  */

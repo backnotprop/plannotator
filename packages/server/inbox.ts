@@ -214,7 +214,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
+import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullRepoKey, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
 import { createInboxReviewIndex } from "./inbox-reviews";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -3251,6 +3251,17 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    codeReviewOn,
+    shapeRoot: (id) => (shapeOn() ? (shapes.store.get(id)?.project.root ?? null) : null),
+    // The PR page read the pull list first, which read each project's origin.
+    repoRoots: (repo) =>
+      store
+        .allProjects()
+        .filter((project) => {
+          const origin = repos.get(project.root);
+          return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
+        })
+        .map((project) => project.root),
   });
 
   /**

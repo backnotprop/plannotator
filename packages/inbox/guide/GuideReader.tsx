@@ -20,7 +20,7 @@
  * review-editor's index.css; its pinned manifest follows the viewer build).
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type FC, type ReactNode } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type {
@@ -91,8 +91,9 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    fileOpenIn?: (filePath: string) => ReactNode;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -108,6 +109,7 @@ export const GuideDiff: FC<
       {...props}
       readOnly={!comments}
       commentOnly={!!comments}
+      fileOpenIn={fileOpenIn}
       contextExpansionAvailable={false}
       diffStyle={diffStyle}
       diffOverflow={diffOverflow}
@@ -155,7 +157,7 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false }: GuideReaderProps) {
+export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false, fileOpenIn }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
@@ -299,8 +301,10 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -319,7 +323,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).

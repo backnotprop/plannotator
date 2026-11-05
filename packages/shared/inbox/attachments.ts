@@ -28,7 +28,8 @@
 import { createHash } from "node:crypto";
 import { constants, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { open, type FileHandle } from "node:fs/promises";
-import { basename, isAbsolute, join, resolve } from "node:path";
+import { basename, isAbsolute, join, resolve, sep } from "node:path";
+import { isShapeProjectPath } from "@plannotator/core/shape";
 import {
   INBOX_VIEW_MAX_BYTES,
   inboxAttachmentId,
@@ -443,6 +444,64 @@ export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attach
   if (!opened.ok) return { ok: false, unavailable: { code: opened.code, message: opened.message } };
   await opened.handle.close().catch(() => {});
   return check;
+}
+
+/** What a file in a project is, for "Open in" on a reference to it. */
+export type InboxProjectFile = { ok: true; path: string; kind: InboxAttachmentKind } | { ok: false; code: "missing" | "refused" };
+
+/**
+ * A file a reference names, relative to a project (Shape's references, a review's diff headers), for "Open in":
+ * the attachment rules with the project in place of a record. The name is a plain project path, the file's realpath
+ * stays inside the root (a symlink out of it is refused), it is a regular file, and neither its own name nor its
+ * target's is of the dotenv family. The kind comes from its name and first bytes, as a send decides it, so the same
+ * per-kind policy applies. The first root holding the file wins (two clones of one repository).
+ */
+export async function checkInboxProjectFile(roots: readonly string[], relative: string): Promise<InboxProjectFile> {
+  if (!isShapeProjectPath(relative)) return { ok: false, code: "refused" };
+  let refused = false;
+  for (const root of roots) {
+    let real: string;
+    let realRoot: string;
+    try {
+      realRoot = realpathSync(root);
+      real = realpathSync(join(realRoot, relative));
+    } catch {
+      continue;
+    }
+    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep) || inboxAttachmentNameRefusal(relative) || inboxAttachmentNameRefusal(real)) {
+      refused = true;
+      continue;
+    }
+    let handle: FileHandle;
+    try {
+      handle = await open(real, OPEN_FLAGS);
+    } catch {
+      continue;
+    }
+    try {
+      const stat = await handle.stat();
+      if (!stat.isFile()) continue;
+      const head = await readHead(handle);
+      const decision = decideInboxAttachmentKind(basename(real), head, isTextHead(head), stat.size);
+      return { ok: true, path: real, kind: decision.kind };
+    } catch {
+      continue;
+    } finally {
+      await handle.close().catch(() => {});
+    }
+  }
+  return { ok: false, code: refused ? "refused" : "missing" };
+}
+
+/** Whether a file's first bytes read as text: no NUL, and UTF-8 (a character cut at the end of the head is fine). */
+function isTextHead(head: Uint8Array): boolean {
+  if (head.includes(0)) return false;
+  try {
+    new TextDecoder("utf-8", { fatal: true }).decode(head, { stream: true });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Whether a file's first bytes still read as the kind it was sent as (an image stays an image, a PDF a PDF). */

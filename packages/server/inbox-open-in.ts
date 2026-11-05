@@ -6,6 +6,8 @@
  *
  *   GET  /api/inbox/open-in/apps  the editors and the file manager this host has
  *   POST /api/inbox/open-in       { attachment_id, app_id, serverSession }
+ *   GET  /api/inbox/open-in/file  ?path=&<scope>  a referenced file: is it here, and what kind
+ *   POST /api/inbox/open-in/file  { path, line?, <scope>, app_id, serverSession }
  *
  * The launch takes an attachment id, never a path: the path is the record's
  * realpath, re-checked at launch (`checkInboxAttachmentForLaunch`: still that
@@ -16,6 +18,13 @@
  * the policy allows, never as a fallback. Same-origin is the Inbox's global
  * POST guard; the stale-tab guard is checked here.
  *
+ * A referenced file (Shape's references, a review's diff headers; while Code
+ * review is on) is not a record, so its route takes a project-relative path and
+ * a scope, never a root: `thread` (with `message`, the message's own project
+ * first), `shape`, or `repo` (a PR page: `host/owner/repo`, every clone here).
+ * The server finds the roots and `checkInboxProjectFile` holds the path to them.
+ * A path out of the project is refused at launch and reads as not found.
+ *
  * The launcher is a seam (`InboxOpenInLauncher`): tests pass a recording one
  * and never start a real app.
  */
@@ -23,7 +32,7 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInAllows, inboxOpenInPolicy } from "@plannotator/core/inbox-types";
 import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
-import { checkInboxAttachmentForLaunch } from "@plannotator/shared/inbox/attachments";
+import { checkInboxAttachmentForLaunch, checkInboxProjectFile } from "@plannotator/shared/inbox/attachments";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
@@ -38,6 +47,7 @@ import {
 
 export const INBOX_OPEN_IN_PATH = "/api/inbox/open-in";
 export const INBOX_OPEN_IN_APPS_PATH = "/api/inbox/open-in/apps";
+export const INBOX_OPEN_IN_FILE_PATH = "/api/inbox/open-in/file";
 
 /** How the Inbox launches: the host's real launcher, or a test's stub. */
 export interface InboxOpenInLauncher {
@@ -45,7 +55,7 @@ export interface InboxOpenInLauncher {
   /** The catalog apps installed here (always the file manager). */
   apps: () => AvailableOpenInApp[];
   reveal: (path: string) => Promise<OpenInLaunchResult>;
-  openWithApp: (app: OpenInApp, path: string) => Promise<OpenInLaunchResult>;
+  openWithApp: (app: OpenInApp, path: string, line?: number) => Promise<OpenInLaunchResult>;
   openWithSystemDefault: (path: string) => Promise<OpenInLaunchResult>;
 }
 
@@ -73,15 +83,91 @@ export interface InboxOpenInRouteContext {
   json: (body: unknown, status?: number) => Response;
   localOnly: () => Response;
   launcher: InboxOpenInLauncher;
+  /** The Settings → Capabilities switch a referenced file's route sits behind. */
+  codeReviewOn: () => boolean;
+  /** A shape's project folder, or null when there is no such shape (or Shape is off). */
+  shapeRoot: (id: string) => string | null;
+  /** The folders of every project on a repository (`host/owner/repo`, lowercased). */
+  repoRoots: (repo: string) => string[];
+}
+
+/** The scope of a referenced file: where its path starts. */
+interface FileScope {
+  thread?: unknown;
+  message?: unknown;
+  shape?: unknown;
+  repo?: unknown;
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots } = context;
+
+  /** The folders a scope's paths start in: the message's project, then the thread's own and the one it shows under. */
+  const rootsOf = (scope: FileScope): string[] => {
+    if (typeof scope.shape === "string") {
+      const root = shapeRoot(scope.shape);
+      return root ? [root] : [];
+    }
+    if (typeof scope.repo === "string") return repoRoots(scope.repo.toLowerCase());
+    if (typeof scope.thread !== "string") return [];
+    const first = store.message(scope.thread);
+    if (!first || first.thread_id !== scope.thread) return [];
+    const message = typeof scope.message === "string" ? store.message(scope.message) : null;
+    const from = message?.thread_id === scope.thread ? message.from_project?.root : null;
+    const roots = [from, store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
+    return [...new Set(roots.filter((root): root is string => typeof root === "string"))];
+  };
+
+  /** Open in for a file a reference names: its project-relative path, in a scope; never a root from the request. */
+  const fileRoute = async (req: Request): Promise<Response> => {
+    if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+    if (req.method === "GET") {
+      const params = new URL(req.url).searchParams;
+      const scope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo") };
+      const file = await checkInboxProjectFile(rootsOf(scope), params.get("path") ?? "");
+      return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
+    }
+    if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+    const body = await readBody(req);
+    if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+    if (typeof body.path !== "string" || body.path === "") throw new InboxError("validation_error", "path: a path in the project.", { field: "path" });
+    if (typeof body.app_id !== "string" || body.app_id === "") throw new InboxError("validation_error", "app_id: an app id.", { field: "app_id" });
+    const file = await checkInboxProjectFile(rootsOf(body), body.path);
+    if (!file.ok) {
+      if (file.code === "refused") throw new InboxError("open_not_allowed", `${body.path} is not a file of this project.`);
+      throw new InboxError("attachment_missing", `${body.path} is not on this computer.`);
+    }
+    const line = typeof body.line === "number" && Number.isInteger(body.line) && body.line > 0 ? body.line : undefined;
+    return launch(body.app_id, { name: body.path, kind: file.kind, path: file.path }, line);
+  };
+
+  /** Launch what the per-kind policy allows and this computer has: the app first, nothing is opened for a refusal. */
+  const launch = async (appId: string, target: { name: string; kind: unknown; path: string }, line?: number, check?: () => Promise<void>): Promise<Response> => {
+    const policy = inboxOpenInPolicy(target, launcher.platform);
+    const app = appId === INBOX_OPEN_IN_DEFAULT_APP ? null : getOpenInApp(appId);
+    if (appId !== INBOX_OPEN_IN_DEFAULT_APP && !app) throw new InboxError("open_not_allowed", `${appId} is not an app the Inbox opens files in.`);
+    if (!inboxOpenInAllows(policy, { id: appId, kind: app?.kind })) {
+      throw new InboxError("open_not_allowed", `${target.name} does not open in ${app?.label ?? "its default app"}.`);
+    }
+    if (app && app.kind === "editor" && !inboxApps(launcher).some((available) => available.id === app.id)) {
+      throw new InboxError("app_not_available", `${app.label} is not installed on this computer.`);
+    }
+    await check?.();
+    const result = !app
+      ? await launcher.openWithSystemDefault(target.path)
+      : app.kind === "file-manager"
+        ? await launcher.reveal(target.path)
+        : await launcher.openWithApp(app, target.path, line);
+    // A failed launch is a valid request with the reason in the body, as /api/open-in answers.
+    return json(result);
+  };
 
   return async function handle(req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> {
-    if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH) return null;
+    if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();
+
+    if (path === INBOX_OPEN_IN_FILE_PATH) return fileRoute(req);
 
     if (path === INBOX_OPEN_IN_APPS_PATH) {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -101,28 +187,11 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const hit = store.attachment(attachmentId);
     if (!hit) throw new InboxError("attachment_not_found", `No attachment ${attachmentId}.`);
     const { attachment } = hit;
-    const policy = inboxOpenInPolicy(attachment, launcher.platform);
-
-    // The app first (nothing is read for a refusal), then the file.
-    const app = appId === INBOX_OPEN_IN_DEFAULT_APP ? null : getOpenInApp(appId);
-    if (appId !== INBOX_OPEN_IN_DEFAULT_APP && !app) throw new InboxError("open_not_allowed", `${appId} is not an app the Inbox opens files in.`);
-    if (!inboxOpenInAllows(policy, { id: appId, kind: app?.kind })) {
-      throw new InboxError("open_not_allowed", `${attachment.name} does not open in ${app?.label ?? "its default app"}.`);
-    }
-    if (app && app.kind === "editor" && !inboxApps(launcher).some((available) => available.id === app.id)) {
-      throw new InboxError("app_not_available", `${app.label} is not installed on this computer.`);
-    }
-
-    const check = await checkInboxAttachmentForLaunch(store.dir, attachment);
-    if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
 
     // The record's realpath, checked just now: never a path from the request.
-    const result = !app
-      ? await launcher.openWithSystemDefault(attachment.path)
-      : app.kind === "file-manager"
-        ? await launcher.reveal(attachment.path)
-        : await launcher.openWithApp(app, attachment.path);
-    // A failed launch is a valid request with the reason in the body, as /api/open-in answers.
-    return json(result);
+    return launch(appId, attachment, undefined, async () => {
+      const check = await checkInboxAttachmentForLaunch(store.dir, attachment);
+      if (!check.ok) throw new InboxError(check.unavailable.code, check.unavailable.message);
+    });
   };
 }

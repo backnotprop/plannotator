@@ -1,4 +1,4 @@
-import { createContext, useContext } from "react";
+import { createContext, useContext, type ReactNode } from "react";
 
 /**
  * What a host makes of a link to a local path (`[the mock](mock.html)`):
@@ -10,12 +10,13 @@ import { createContext, useContext } from "react";
  *   own address for the same thing. Without it, a modified click also calls
  *   `open` and the middle button does nothing.
  * - `unavailable`: draw the link text as inert text with `title` as its
- *   tooltip: no href, so nothing is fetched or navigated.
+ *   tooltip: no href, so nothing is fetched or navigated. `after`, when
+ *   given, is drawn right after it (a host's own control for that path).
  * - `null` from the resolver: the renderer's default for that link.
  */
 export type LocalLinkResolution =
   | { kind: "open"; open: () => void; title?: string; href?: string }
-  | { kind: "unavailable"; title: string };
+  | { kind: "unavailable"; title: string; after?: ReactNode };
 
 /** Called with the link target as written (fragment and query included). */
 export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;

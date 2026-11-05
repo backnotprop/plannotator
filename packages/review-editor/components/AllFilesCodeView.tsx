@@ -422,6 +422,8 @@ export interface AllFilesCodeViewProps {
    * `readOnly` is set.
    */
   commentOnly?: boolean;
+  /** A host's own "Open in" for a file's header (the Inbox's). Absent: none beyond the app's own. */
+  fileOpenIn?: (filePath: string) => React.ReactNode;
   /**
    * Selected lines can only be asked about (the VS Code Guide tab, where
    * there are no comments): with `commentOnly` and `aiAvailable`, the
@@ -730,6 +732,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   isActive = true,
   readOnly = false,
   commentOnly = false,
+  fileOpenIn,
   askOnly = false,
   aiAvailable = false,
   onAskAIForFile,
@@ -3018,6 +3021,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         <FileHeader
         compactTouchLayout={compactTouchLayout}
         readOnly={readOnly || commentOnly}
+        openIn={fileOpenIn?.(filePath)}
         filePath={filePath}
         patch={file.patch}
         status={file.status}

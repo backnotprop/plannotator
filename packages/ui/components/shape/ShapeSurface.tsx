@@ -513,6 +513,13 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     }
   }, [refs, renderThread, openPanel, later, reduce, readProjectFile]);
 
+  // The host's control beside a file the board names: a file reference, or the file a diff reference shows.
+  const fileAction = useCallback((file: { path: string; line?: number }) => host.fileAction?.(id, file) ?? null, [host, id]);
+  const refFileAction = useCallback(
+    (r: ShapeRef) => (r.kind === 'file' || r.kind === 'diff' ? fileAction({ path: r.target, line: r.line }) : null),
+    [fileAction],
+  );
+
   const canOpen = useCallback((r: ShapeRef) => {
     if (r.kind === 'message') return !!renderThread;
     if (r.kind === 'file') return !!host.readFile;
@@ -788,6 +795,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         onAsk={codeInput('ask')}
         generalComment={phase === 'leaving' ? null : generalButton('code')}
         phone={phone}
+        fileAction={host.fileAction ? fileAction : undefined}
       />
     );
   };
@@ -1051,7 +1059,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               />
             )}
             {panel === 'thread' && renderThread && <div className="shp-thread-in">{renderThread({ flash: msgFlash })}</div>}
-            {panel === 'refs' && <RefList onShow={flashRef} canOpen={canOpen} />}
+            {panel === 'refs' && <RefList onShow={flashRef} canOpen={canOpen} fileAction={refFileAction} />}
           </div>
         </aside>
 
@@ -1076,6 +1084,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
             }}
             onEnter={holdPeek}
             onLeave={leavePeek}
+            fileAction={refFileAction(peekRefData)}
           />
         )}
 
@@ -1089,7 +1098,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           />
         )}
         {viewer?.kind === 'file' && (
-          <CodeFilePopout open onClose={() => setViewer(null)} filepath={viewer.path} contents={viewer.contents} line={viewer.line} revealKey={viewer.token} />
+          <CodeFilePopout open onClose={() => setViewer(null)} filepath={viewer.path} contents={viewer.contents} line={viewer.line} revealKey={viewer.token} headerAction={fileAction({ path: viewer.path, line: viewer.line })} />
         )}
         {viewer?.kind === 'diff' && (
           <PopoutDialog open onClose={() => setViewer(null)} title={viewer.path}>

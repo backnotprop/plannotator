@@ -5,11 +5,12 @@ import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi } from '../api';
+import { InboxApiError, inboxApi, type OpenInFileScope } from '../api';
 import { Icon } from '../icons';
-import { newTabUrl, openInMenu, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
+import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl } from '../attachments';
 import { useInboxFileSource } from '../fileSource';
+import { usePhone } from '../phone';
 import { Tip } from './Tip';
 
 /**
@@ -29,11 +30,8 @@ export const INBOX_OPEN_IN_APPS_URL = inboxUrl('/open-in/apps');
 
 const ERROR_MS = 4000;
 
-/** Everything a control needs: the menu, and picking from it. */
-function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
-  // A read that did not answer (a restarting Inbox) is asked again for the next file.
-  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
-  const [remembered, remember] = useRememberedOpenInApp();
+/** Picking from a menu: the launch, what it says while it runs, and Copy path. */
+function useOpenInActions(path: string | null, open: (id: string) => Promise<{ ok: boolean; error?: string }>, remember: (id: string) => void) {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<{ text: string; error: boolean } | null>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -47,15 +45,13 @@ function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent'
     timer.current = setTimeout(() => setStatus(null), ERROR_MS);
   };
 
-  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
-
   const launch = async (item: OpenInItem) => {
     if (item.kind === 'browser' || busy) return;
     if (remembersOpenInItem(item)) remember(item.id);
     setBusy(true);
     setStatus(null);
     try {
-      const result = await inboxApi.openIn(attachment.id, item.id);
+      const result = await open(item.id);
       if (!result.ok) flash(result.error || `Could not open ${item.label}`, true);
     } catch (cause) {
       flash(cause instanceof InboxApiError ? cause.message : `Could not open ${item.label}`, true);
@@ -65,16 +61,26 @@ function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent'
   };
 
   const copyPath = async () => {
-    const ok = await copyTextToClipboard(attachment.path);
+    const ok = path !== null && (await copyTextToClipboard(path));
     flash(ok ? 'Path copied' : 'Could not copy the path', !ok);
   };
 
-  return { answer, menu, busy, status, launch, copyPath };
+  return { busy, status, launch, copyPath };
 }
 
-function ItemIcon({ item, attachment }: { item: OpenInItem; attachment: InboxAttachmentState }) {
+/** Everything an attachment's control needs: the menu, and picking from it. */
+function useOpenIn(attachment: InboxAttachmentState, version: 'current' | 'sent') {
+  // A read that did not answer (a restarting Inbox) is asked again for the next file.
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, attachment.id);
+  const [remembered, remember] = useRememberedOpenInApp();
+  const menu: OpenInMenu | null = answer?.available ? openInMenu(attachment, answer.apps, answer.platform ?? 'linux', remembered, version) : null;
+  const actions = useOpenInActions(attachment.path, (id) => inboxApi.openIn(attachment.id, id), remember);
+  return { answer, menu, ...actions };
+}
+
+function ItemIcon({ item, kind }: { item: OpenInItem; kind: unknown }) {
   if (item.kind === 'browser') return <Icon name="globe" size={15} className="ib-appi ib-glyph" />;
-  if (item.kind === 'default') return <Icon name={readInboxAttachmentKind(attachment.kind) === 'image' ? 'photo' : 'doc'} size={15} className="ib-appi ib-glyph" />;
+  if (item.kind === 'default') return <Icon name={readInboxAttachmentKind(kind) === 'image' ? 'photo' : 'doc'} size={15} className="ib-appi ib-glyph" />;
   return <AppIcon id={item.icon} className="ib-appi" />;
 }
 
@@ -83,7 +89,7 @@ function missingLabel(attachment: InboxAttachmentState): string {
 }
 
 /** The list both menus show: the apps, then Copy path. */
-function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachment: InboxAttachmentState; menu: OpenInMenu; onLaunch: (item: OpenInItem) => void; onCopyPath: () => void }) {
+function OpenInMenuItems({ kind, missingWord, menu, onLaunch, onCopyPath }: { kind: unknown; missingWord: string; menu: OpenInMenu; onLaunch: (item: OpenInItem) => void; onCopyPath: () => void }) {
   return (
     <>
       {menu.items.map((item) =>
@@ -94,7 +100,7 @@ function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachmen
             render={<a href={item.href} target="_blank" rel="noopener noreferrer" />}
             data-open-in-item={item.id}
           >
-            <ItemIcon item={item} attachment={attachment} />
+            <ItemIcon item={item} kind={kind} />
             <span className="flex-1 truncate">{item.label}</span>
             {item === menu.primary && <Icon name="check" size={14} className="ib-openin-check" />}
           </DropdownMenuItem>
@@ -106,10 +112,10 @@ function OpenInMenuItems({ attachment, menu, onLaunch, onCopyPath }: { attachmen
             onClick={() => onLaunch(item)}
             data-open-in-item={item.id}
           >
-            <ItemIcon item={item} attachment={attachment} />
+            <ItemIcon item={item} kind={kind} />
             <span className="flex-1 truncate">{item.label}</span>
             {/* The file is gone or changed type: the apps are disabled and say so. */}
-            {menu.missing && <span className="ib-openin-miss">{missingLabel(attachment)}</span>}
+            {menu.missing && <span className="ib-openin-miss">{missingWord}</span>}
             {item === menu.primary && <Icon name="check" size={14} className="ib-openin-check" />}
           </DropdownMenuItem>
         ),
@@ -169,21 +175,46 @@ function NewTabButton({ attachment, version, big }: { attachment: InboxAttachmen
 
 function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachmentState; version: 'current' | 'sent'; label: boolean }) {
   const { answer, menu, busy, status, launch, copyPath } = useOpenIn(attachment, version);
-  const [open, setOpen] = useState(false);
   if (!answer) return null;
   // A server without the local app list (an older Inbox): a new tab is all there is.
   if (!menu) return <NewTabButton attachment={attachment} version={version} big={false} />;
+  return <SplitButton id={attachment.id} kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+}
+
+/** The split button: the app's icon (and "Open"), and a caret for the list. */
+function SplitButton({
+  id,
+  kind,
+  missingWord,
+  menu,
+  label,
+  busy,
+  status,
+  launch,
+  copyPath,
+}: {
+  id: string;
+  kind: unknown;
+  missingWord: string;
+  menu: OpenInMenu;
+  label: boolean;
+  busy: boolean;
+  status: { text: string; error: boolean } | null;
+  launch: (item: OpenInItem) => Promise<void>;
+  copyPath: () => Promise<void>;
+}) {
+  const [open, setOpen] = useState(false);
   const primary = menu.primary;
   const disabled = !primary || busy || (menu.missing && primary.kind !== 'browser');
-  const title = !primary ? 'Open in…' : menu.missing && primary.kind !== 'browser' ? missingLabel(attachment) : primary.label;
+  const title = !primary ? 'Open in…' : menu.missing && primary.kind !== 'browser' ? missingWord : primary.label;
   const face = (
     <>
-      {primary && <ItemIcon item={primary} attachment={attachment} />}
+      {primary && <ItemIcon item={primary} kind={kind} />}
       {label && <span>Open</span>}
     </>
   );
   return (
-    <span className="ib-openin" data-open-in={attachment.id}>
+    <span className="ib-openin" data-open-in={id}>
       <span className={`ib-split${open ? ' ib-on' : ''}${menu.missing ? ' ib-dis' : ''}`}>
         {primary?.kind === 'browser' ? (
           <Tip content={title}>
@@ -211,14 +242,63 @@ function OpenInSplit({ attachment, version, label }: { attachment: InboxAttachme
               <Icon name="chevD" size={12} />
             </DropdownMenuTrigger>
           </Tip>
-          <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={attachment.id}>
-            <OpenInMenuItems attachment={attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          <DropdownMenuContent align="end" sideOffset={6} className="min-w-[12rem]" finalFocus={false} data-open-in-menu={id}>
+            <OpenInMenuItems kind={kind} missingWord={missingWord} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
           </DropdownMenuContent>
         </DropdownMenu>
       </span>
       <Status status={status} />
     </span>
   );
+}
+
+/** The last answer for each referenced file: a header drawn again (a diff scrolled back) shows its control at once while it asks again. */
+const knownFiles = new Map<string, { path: string; kind: string } | null>();
+
+/**
+ * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
+ * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
+ * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
+ * when the app's launcher takes one.
+ */
+export function OpenInFile({ scope, path, line }: { scope: OpenInFileScope; path: string; line?: number }) {
+  const phone = usePhone();
+  const { writes } = useInboxFileSource();
+  if (phone || !writes) return null;
+  return <OpenInFileSplit scope={scope} path={path} line={line} />;
+}
+
+function OpenInFileSplit({ scope, path, line }: { scope: OpenInFileScope; path: string; line?: number }) {
+  const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, path);
+  const [remembered, remember] = useRememberedOpenInApp();
+  const key = JSON.stringify([scope, path]);
+  const [file, setFile] = useState(() => knownFiles.get(key) ?? null);
+  const available = answer?.available === true;
+  useEffect(() => {
+    setFile(knownFiles.get(key) ?? null);
+    if (!available) return;
+    let live = true;
+    inboxApi.openInFileCheck(scope, path).then(
+      (found) => {
+        const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
+        knownFiles.set(key, next);
+        if (live) setFile(next);
+      },
+      () => {
+        knownFiles.delete(key);
+        if (live) setFile(null);
+      },
+    );
+    return () => {
+      live = false;
+    };
+    // `key` names the scope and the path.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, available]);
+  const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
+  if (!answer?.available || !file) return null;
+  const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
+  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={false} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
 }
 
 /**
@@ -252,7 +332,7 @@ export function OpenInTileMenu({ attachment, version, onOpenAs }: { attachment: 
               <DropdownMenuSeparator />
             </>
           )}
-          <OpenInMenuItems attachment={attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          <OpenInMenuItems kind={attachment.kind} missingWord={missingLabel(attachment)} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
         </DropdownMenuContent>
       </DropdownMenu>
       <Status status={status} />
@@ -296,7 +376,7 @@ function FullScreenMoreApps(props: FullScreenMoreProps) {
           menu ? (
             <DropdownMenuGroup>
               <DropdownMenuLabel className="text-[11px] text-muted-foreground">Open in</DropdownMenuLabel>
-              <OpenInMenuItems attachment={props.attachment} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+              <OpenInMenuItems kind={props.attachment.kind} missingWord={missingLabel(props.attachment)} menu={menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
             </DropdownMenuGroup>
           ) : null
         }

@@ -11,12 +11,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { OpenInApp, OpenInPlatform } from "@plannotator/core/open-in-apps";
+import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
 import { recordInboxAttachments } from "@plannotator/shared/inbox/attachments";
+import { createShapeStore } from "@plannotator/shared/shape/store";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
-import type { AvailableOpenInApp } from "./open-in";
+import { openWithApp, type AvailableOpenInApp } from "./open-in";
 
 type Json = Record<string, any>;
 
@@ -68,7 +69,7 @@ function world() {
   return { root, dataDir, project };
 }
 
-type Launch = { how: "reveal" | "app" | "default"; path: string; app?: string };
+type Launch = { how: "reveal" | "app" | "default"; path: string; app?: string; line?: number };
 
 /** A launcher that records instead of starting anything. */
 function recordingLauncher(platform: OpenInPlatform, apps: string[] = ["reveal", "vscode", "cursor", "terminal"], answer: { ok: true } | { ok: false; error: string } = { ok: true }) {
@@ -83,7 +84,7 @@ function recordingLauncher(platform: OpenInPlatform, apps: string[] = ["reveal",
     platform,
     apps: () => apps.map((id) => catalog[id]!),
     reveal: async (path) => (launches.push({ how: "reveal", path }), answer),
-    openWithApp: async (app: OpenInApp, path) => (launches.push({ how: "app", path, app: app.id }), answer),
+    openWithApp: async (app: OpenInApp, path, line) => (launches.push({ how: "app", path, app: app.id, ...(line ? { line } : {}) }), answer),
     openWithSystemDefault: async (path) => (launches.push({ how: "default", path }), answer),
   };
   return { launcher, launches };
@@ -239,6 +240,109 @@ describe("Inbox Open in: the launch route", () => {
   });
 });
 
+describe("Inbox Open in: a file a reference names", () => {
+  const FILE = "/api/inbox/open-in/file";
+  const REPO = "github.com/acme/billing";
+
+  /** An Inbox with Code review and Shape on, a thread in the project, a shape on it, and the project on a repository. */
+  async function referenced(extra: Parameters<typeof startInboxServer>[0] = {}) {
+    const w = world();
+    const made = createShapeStore({ dataDir: w.dataDir }).update({
+      board: { title: "Kettle", claim: "Built.", views: { picture: { html: '<p data-mark="k">One whistle</p>' } } },
+      project: { root: w.project, name: "billing" },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    const recording = recordingLauncher("mac");
+    const server = await start(w.dataDir, {
+      openInLauncher: recording.launcher,
+      codeReview: true,
+      shape: true,
+      readProjectRepo: async () => ({ display: "acme/billing", host: "github.com" }),
+      ...extra,
+    });
+    const prj = server.store.ensureProject({ name: "billing", root: w.project });
+    const sent = server.store.sendMessage({ project_id: prj.id, author: { kind: "agent", host: "claude-code", session: "ses_a", name: "Claude Code" }, body: "A review." });
+    const base = `http://127.0.0.1:${server.port}`;
+    const check = async (query: Record<string, string>) => (await (await fetch(`${base}${FILE}?${new URLSearchParams(query)}`)).json()) as Json;
+    const open = (body: Json) => fetch(`${base}${FILE}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    return { ...w, server, ...recording, thread: sent.message.thread_id, shape: made.id, base, check, open };
+  }
+
+  test("opens the file at its real path and line, from a thread, a shape or a PR's repository", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "export {};\n");
+    const path = join(r.project, "src/app.ts");
+
+    for (const scope of [{ thread: r.thread }, { shape: r.shape }]) {
+      expect(await r.check({ ...scope, path: "src/app.ts" })).toEqual({ found: true, path, kind: "code" });
+      expect(await (await r.open({ ...scope, path: "src/app.ts", app_id: "vscode", line: 12 })).json()).toEqual({ ok: true });
+    }
+    expect(r.launches).toEqual([
+      { how: "app", path, app: "vscode", line: 12 },
+      { how: "app", path, app: "vscode", line: 12 },
+    ]);
+    r.launches.length = 0;
+    // A project's origin is read behind the first ask for it (the PR page's list has asked by then).
+    await r.check({ repo: REPO, path: "src/app.ts" });
+    await Bun.sleep(30);
+    expect(await r.check({ repo: REPO, path: "src/app.ts" })).toEqual({ found: true, path, kind: "code" });
+    await r.open({ repo: REPO, path: "src/app.ts", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path }]);
+  });
+
+  test("a file that is not here: found is false, and a launch answers missing", async () => {
+    const r = await referenced();
+    expect(await r.check({ thread: r.thread, path: "src/gone.ts" })).toEqual({ found: false });
+    expect(await answerOf(await r.open({ thread: r.thread, path: "src/gone.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+    // A repository no project here is on, and a thread or shape that does not exist: nothing to find it in.
+    expect(await r.check({ repo: "github.com/acme/elsewhere", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ thread: "msg_nope", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ shape: "shp_nope", path: "plan.md" })).toEqual({ found: false });
+    expect(await r.check({ path: "plan.md" })).toEqual({ found: false });
+    expect(r.launches).toEqual([]);
+  });
+
+  test("a path outside the project is refused, however it is written, and so is a secret", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.root, "secret.txt"), "outside\n");
+    writeFileSync(join(r.project, ".env"), "KEY=1\n");
+    symlinkSync(join(r.root, "secret.txt"), join(r.project, "out.txt"));
+    symlinkSync(r.root, join(r.project, "up"));
+    symlinkSync(join(r.project, ".env"), join(r.project, "config.txt"));
+    for (const path of ["../secret.txt", "src/../../secret.txt", join(r.root, "secret.txt"), "~/secret.txt", "out.txt", "up/secret.txt", ".env", "config.txt", "..%2fsecret.txt"]) {
+      expect([path, await r.check({ thread: r.thread, path })]).toEqual([path, { found: false }]);
+      expect([path, ...(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" })))]).toEqual([path, 422, "open_not_allowed"]);
+    }
+    expect(r.launches).toEqual([]);
+    // A root in the request means nothing.
+    expect(await r.check({ thread: r.thread, root: r.root, path: "secret.txt" })).toEqual({ found: false });
+  });
+
+  test("the per-kind policy holds: a script opens in an editor, never its default app; an unknown file only in Finder", async () => {
+    const r = await referenced();
+    expect(await answerOf(await r.open({ thread: r.thread, path: "deploy.sh", app_id: "default" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "build.zip", app_id: "vscode" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "plan.md", app_id: "terminal" }))).toEqual([422, "open_not_allowed"]);
+    expect(await answerOf(await r.open({ thread: r.thread, path: "run.command", app_id: "default" }))).toEqual([422, "open_not_allowed"]);
+    expect(r.launches).toEqual([]);
+    await r.open({ thread: r.thread, path: "deploy.sh", app_id: "cursor" });
+    await r.open({ thread: r.thread, path: "shot.png", app_id: "default" });
+    expect(r.launches.map((l) => l.how)).toEqual(["app", "default"]);
+  });
+
+  test("a stale tab is turned away, and with Code review off the route answers nothing", async () => {
+    const r = await referenced();
+    expect(await answerOf(await r.open({ thread: r.thread, path: "plan.md", app_id: "vscode", serverSession: "stale" }))).toEqual([409, "session_mismatch"]);
+    expect(r.launches).toEqual([]);
+    const off = await referenced({ codeReview: false });
+    expect(await answerOf(await fetch(`${off.base}${FILE}?thread=${off.thread}&path=plan.md`))).toEqual([409, "code_review_off"]);
+    expect(await answerOf(await off.open({ thread: off.thread, path: "plan.md", app_id: "vscode" }))).toEqual([409, "code_review_off"]);
+    expect(off.launches).toEqual([]);
+  });
+});
+
 describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
   const launchTest = process.platform === "win32" ? test.skip : test;
   launchTest("reveal and the default app run the platform's own launcher with the realpath, nothing else", async () => {
@@ -260,6 +364,41 @@ describe("Inbox Open in: the real launcher, with stubs on PATH", () => {
       expect(lines).toEqual([`open ${join(project, "shot.png")}`, `open -R ${join(project, "build.zip")}`]);
     } else {
       expect(lines).toEqual([`xdg-open ${join(project, "shot.png")}`, `xdg-open ${project}`]);
+    }
+  });
+
+  launchTest("a line goes in the URL of an app that has a scheme on macOS, to the CLI of one that takes it elsewhere; a path's spaces stay one argument", async () => {
+    const { root } = world();
+    const stubs = join(root, "stubs");
+    mkdirSync(stubs);
+    const log = join(stubs, "launches.log");
+    for (const name of ["open", "code", "subl"]) {
+      writeFileSync(join(stubs, name), `#!/bin/sh\nfor a in "$@"; do echo "${name}|$a" >> "${log}"; done\nexit 0\n`);
+      chmodSync(join(stubs, name), 0o755);
+    }
+    setEnv("PATH", stubs);
+    const code = getOpenInApp("vscode")!;
+    const sublime = getOpenInApp("sublime-text")!;
+    const file = "/work/my app/src/a#b.ts";
+    expect(await openWithApp(code, file, 12)).toEqual({ ok: true });
+    expect(await openWithApp(sublime, file, 12)).toEqual({ ok: true });
+    expect(await openWithApp(code, file)).toEqual({ ok: true });
+    const lines = readFileSync(log, "utf8").trim().split("\n");
+    if (process.platform === "darwin") {
+      expect(lines).toEqual([
+        "open|-a",
+        "open|Visual Studio Code",
+        "open|vscode://file/work/my%20app/src/a%23b.ts:12",
+        // `open -a` takes no line: this one opens at the top.
+        "open|-a",
+        "open|Sublime Text",
+        `open|${file}`,
+        "open|-a",
+        "open|Visual Studio Code",
+        `open|${file}`,
+      ]);
+    } else {
+      expect(lines).toEqual([`code|--goto`, `code|${file}:12`, `subl|${file}:12`, `code|${file}`]);
     }
   });
 });
@@ -362,7 +501,7 @@ describe("Inbox Open in: over the tailnet", () => {
   test("the launch and the app list answer local_only; the owner opens the new-tab page", async () => {
     const { dataDir, project } = world();
     const { launcher, launches } = recordingLauncher("mac");
-    const server = await start(dataDir, { openInLauncher: launcher, tailscale, publishTailnet: true });
+    const server = await start(dataDir, { openInLauncher: launcher, tailscale, publishTailnet: true, codeReview: true });
     const ids = await attach(server, project, ["plan.md", "page.html"]);
     const listener = server.tailscale.listenerPort()!;
     expect(listener).not.toBeNull();
@@ -375,6 +514,10 @@ describe("Inbox Open in: over the tailnet", () => {
       });
     expect(await answerOf(await through("/api/inbox/open-in/apps"))).toEqual([403, "local_only"]);
     expect(await answerOf(await through("/api/inbox/open-in", { method: "POST", body: JSON.stringify({ attachment_id: ids["plan.md"], app_id: "vscode" }) }))).toEqual([403, "local_only"]);
+    // A file a reference names: the same, before anything else about it is read.
+    const thread = "msg_any";
+    expect(await answerOf(await through(`/api/inbox/open-in/file?thread=${thread}&path=plan.md`))).toEqual([403, "local_only"]);
+    expect(await answerOf(await through("/api/inbox/open-in/file", { method: "POST", body: JSON.stringify({ thread, path: "plan.md", app_id: "vscode" }) }))).toEqual([403, "local_only"]);
     expect(launches).toEqual([]);
     const page = await through(`/api/inbox/attachments/${ids["page.html"]}/page`);
     expect(page.status).toBe(303);

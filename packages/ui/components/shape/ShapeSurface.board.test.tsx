@@ -246,3 +246,35 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     expect(document.querySelector('.shp-surface')).not.toBeNull();
   });
 });
+
+describe.if(hasDom)('a host\'s control beside a file (fileAction)', () => {
+  const MIXED: ShapeRef[] = [
+    { n: 1, kind: 'file', title: 'The loop', target: 'src/a.ts', line: 7 },
+    { n: 2, kind: 'diff', title: 'The change', target: 'src/b.ts' },
+    { n: 3, kind: 'image', title: 'A picture', target: 'files/a.png' },
+    { n: 4, kind: 'link', title: 'A link', target: 'https://example.com/' },
+  ];
+
+  async function mountRefs(withAction: ((id: string, file: { path: string; line?: number }) => React.ReactNode) | undefined) {
+    const el = document.createElement('div');
+    document.body.appendChild(el);
+    root = createRoot(el);
+    const h = { ...host({ picture: PICTURE }, MIXED), ...(withAction ? { fileAction: withAction } : {}) };
+    act(() => root!.render(<ShapeSurface host={h} id={ID} initialPanel="refs" />));
+    for (let i = 0; i < 50 && !document.querySelector('.shp-ref-list'); i++) await wait();
+    return [...document.querySelectorAll('.shp-ref-list li')];
+  }
+
+  test('the References list draws it for a file and a diff, with the board, the path and the line; never for anything else', async () => {
+    const seen: unknown[] = [];
+    const rows = await mountRefs((id, file) => (seen.push([id, file]), <i data-host-action={file.path} />));
+    expect(rows.map((row) => row.querySelector('[data-host-action]')?.getAttribute('data-host-action') ?? null)).toEqual(['src/a.ts', 'src/b.ts', null, null]);
+    expect(seen).toContainEqual([ID, { path: 'src/a.ts', line: 7 }]);
+  });
+
+  test('a host without one gets the list as it was', async () => {
+    const rows = await mountRefs(undefined);
+    expect(rows).toHaveLength(4);
+    expect(document.querySelector('[data-host-action]')).toBeNull();
+  });
+});
