@@ -122,6 +122,7 @@ import { normalizeStableVersion, readUpdateState } from "@plannotator/shared/upd
 import { scheduleDailyPing } from "@plannotator/shared/daily-ping";
 import { isLoopbackHostHeader, isLoopbackForwardedFor } from "@plannotator/shared/loopback-host";
 import { prepareAppHtml, prewarmAppHtml } from "@plannotator/shared/app-html";
+import { openPackedApp, packedAppResponse, PACKED_ASSET_ROUTE_PREFIX } from "@plannotator/shared/packed-app";
 import type { InboxSearchIndex, InboxSearchIndexOptions } from "@plannotator/shared/inbox/search";
 import { createInboxSearchRoutes } from "./inbox-search";
 import { inboxSkillsRoute } from "./inbox-skills";
@@ -361,9 +362,11 @@ export interface InboxServerOptions {
     "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
   >;
   /**
-   * The window: the built single-file app (`apps/hook/dist/inbox.html`, which
-   * the binary embeds). Absent (a source run before `build:hook`, the server
-   * tests): `/` answers a one-line page saying so.
+   * The window: the built app (`apps/hook/dist/inbox.html`, which the binary
+   * embeds): one file, the page with its scripts packed behind it
+   * (build/pack-inbox.ts), served as `/` and `/assets/<name>`. Absent (a source
+   * run before `build:hook`, the server tests): `/` answers a one-line page
+   * saying so.
    */
   htmlContent?: string;
   /**
@@ -703,9 +706,10 @@ const ERROR_STATUS: Record<string, number> = {
 };
 
 /**
- * The window is a single-file build: its script and styles are inline, so the
- * policy allows inline code from this page only and no other origin. Nothing
- * may frame it, and it may only talk to this server.
+ * The window is one built file: its styles are inline and its scripts are
+ * packed behind the page and served by this server (`/assets/`, #2593), so the
+ * policy allows inline code and code from this origin only. Nothing may frame
+ * it, and it may only talk to this server.
  */
 const WINDOW_CSP = [
   "default-src 'self'",
@@ -3330,6 +3334,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const debugLog = (options.debug ?? resolveInboxDebug(loadConfig(), process.env)) ? createInboxDebugLog(join(dataDir, "inbox")) : null;
   const debugOwner = (req: Request, via: RequestVia) => via === "local" || tailscale.isOwnerRequest(req.headers);
 
+  /**
+   * The window: its page, with its scripts packed behind it (build/pack-inbox.ts, #2593) and answered under
+   * `/assets/`, so the page loads its entry script up front and the rest (the guided and code review, the
+   * diagram runtimes, the syntax grammars) on first use. An unpacked page (the not-built line) serves whole.
+   */
+  const windowApp = openPackedApp(options.htmlContent ?? NOT_BUILT_PAGE);
+  const windowEntryScripts = [...windowApp.html.matchAll(/<script type="module"[^>]*\ssrc="(\/assets\/[^"]+)"/g)].map((m) => m[1]!);
+
   const handle = async (req: Request, via: RequestVia): Promise<Response> => {
     // The tailnet listener checked its own Host (the served MagicDNS name)
     // and the owner's Tailscale login before handing the request here.
@@ -4654,7 +4666,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // One origin: notification permission is per origin (inbox-canonical.ts).
         const canonical = inboxCanonicalRedirect(req, url, baseUrl, via);
         if (canonical) return canonical;
-        const page = options.htmlContent ?? NOT_BUILT_PAGE;
+        const page = windowApp.html;
         // A page load (or a refresh) asks for a new release when the answer is
         // over a minute old: fire-and-forget, the button follows on the event stream.
         if (req.method === "GET") updates.nudge();
@@ -4663,6 +4675,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           headers: { ...WINDOW_PAGE_HEADERS, "Content-Type": "text/html; charset=utf-8", "Cache-Control": "no-store" },
         });
       }
+      // The window's scripts, by exact name from the pack (404 for any other), compressed over the tailnet as the page is.
+      if (path.startsWith(PACKED_ASSET_ROUTE_PREFIX)) return packedAppResponse(windowApp, req, path, via === "tailnet");
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
       // Step 8: the live sessions of a thread's project, and New message.
@@ -4794,8 +4808,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     port: () => port,
     registry: () => registry,
     dispatch: async (req) => markPlannotatorResponse(await served(req, "tailnet")),
-    // Compress the page for the tailnet before the first phone asks (#2032).
-    onListen: () => prewarmAppHtml(options.htmlContent ?? NOT_BUILT_PAGE, "br"),
+    // Compress the page, and the entry script it asks for next, for the tailnet before the first phone asks (#2032).
+    onListen: () => {
+      prewarmAppHtml(windowApp.html, "br");
+      for (const entry of windowEntryScripts) windowApp.answer(entry, "GET", "br", true).catch(() => {});
+    },
     tailscale: options.tailscale,
     flag: options.publishTailnet === true,
     maxRequestBodySize: INBOX_MAX_REQUEST_BYTES,
