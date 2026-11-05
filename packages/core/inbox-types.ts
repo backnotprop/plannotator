@@ -368,6 +368,23 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
   return "An agent";
 }
 
+/**
+ * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
+ * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
+ */
+export interface InboxReplyViewing {
+  /** The open file's name. */
+  name: string;
+  /** The message that carries the file. */
+  message_id: string;
+  /** That message's time, in the person's own time zone. */
+  time?: string;
+  /** A page the attached HTML page links to, when that page is the one on screen. */
+  page?: string;
+  /** They had the version sent open, and the file has changed since. */
+  as_sent?: true;
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -453,6 +470,12 @@ export interface InboxMessage {
    */
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
+  /**
+   * The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was
+   * for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a
+   * thread from before this was recorded: those keep "Delivered".
+   */
+  agent_checked_by?: string | null;
   /**
    * The files an agent attached (send_message's `attachments`), recorded at
    * send time and read only by their ids (see inbox-attachments.ts). Added in
@@ -610,6 +633,8 @@ export interface InboxMessage {
    * other message.
    */
   board_request?: true;
+  /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
+  viewing?: InboxReplyViewing;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -876,6 +901,8 @@ export interface InboxAddressee {
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
+  /** Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`). */
+  read_by?: string | null;
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
@@ -1390,6 +1417,11 @@ export interface InboxListRow extends InboxThreadSummary {
      * Absent from an older Inbox.
      */
     wakes?: boolean;
+    /**
+     * Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM").
+     * Absent otherwise, and on a thread from before this was recorded.
+     */
+    read_by?: string;
     /**
      * When the reply tags agents (`InboxMessage.tags`): every session it goes
      * to, the owner first, each with its own delivery ("1 of 3 delivered").
@@ -2260,10 +2292,16 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
  * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
  * inbox-board-switch.test.ts).
+ * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
+ * its `until` field; no line in the description): 10,095 → 10,248 bytes with
+ * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11779, tokens: 3224 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

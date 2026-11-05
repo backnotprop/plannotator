@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path'
 import { inboxAckLine, inboxAgentTool, inboxSentNowFollowUpText, INBOX_MESSAGE_INSTRUCTION, INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, INBOX_TAGGED_INSTRUCTION, inboxAlsoTaggedLine, inboxRedirectedLine, inboxTaggedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { CLAUDE_INBOX_TOOL_NAME, ClaudeSession } from './testing/claude-session'
 import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
+import { stubbedAgentClis } from '../../../../tests/helpers/agent-cli-guard'
 import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
@@ -41,6 +42,8 @@ afterEach(async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis()
 
 /** SIGKILL the world's Inbox, once proven to be the one it started, and wait for it to die. */
 async function killInbox(w: World): Promise<number> {
@@ -88,7 +91,8 @@ function world(name: string): World {
     browserMarker,
     store: new Map(),
     env: {
-      PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+      ...agents.env,
+      PATH: `${bin}:${agents.env.PATH}`,
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,

@@ -64,6 +64,7 @@ import {
   INBOX_RECORD_VERSION,
   type InboxAck,
   type InboxAddressee,
+  type InboxReplyViewing,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -132,13 +133,13 @@ import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSa
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
-import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
-import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
+import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
@@ -301,6 +302,11 @@ export interface InboxReplyInput {
   feedback?: string;
   /** The annotations that text carries: marked sent with the reply. */
   annotation_ids?: string[];
+  /**
+   * The file on screen when the person sent this from full screen's floating box (`planViewing`): the window's
+   * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
+   */
+  viewing?: unknown;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -570,6 +576,8 @@ function legacySeqFloor(path: string): number {
 export interface InboxDeliveryPresence {
   /** How a session is connected now (no grace), or null when it does not poll. */
   connection(session: string): InboxDeliveryConnection | null;
+  /** The host a live session said it is (its poll, or an MCP call that named one). Absent or null: not known. */
+  hostOf?(session: string): string | null;
   /** Whether the session that asked is still there, with the sessions route's grace (`askerLive`). */
   askerLive(session: string): boolean;
   /**
@@ -1240,9 +1248,7 @@ export class InboxStore {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
-    const refusal = inboxSnoozeRefusal(until, this.now());
-    if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
-    if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
+    refuseInboxSnoozeUntil(until, this.now());
     const now = this.now();
     // `at` (Undo's earlier snooze) is a real ISO time, not after now; stored normalized like `until`.
     if (at !== undefined && (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime())) {
@@ -1251,6 +1257,20 @@ export class InboxStore {
     const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: at === undefined ? now.toISOString() : new Date(at as string).toISOString() };
     this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
     return snooze;
+  }
+
+  /**
+   * A snooze write a linked machine held for this one. Its time can pass on the way, and then it is not refused: the
+   * person wanted the thread back by then. A snooze still running here returns now, as if the write had landed in
+   * time (its mark included). A return not read yet keeps its own mark. Null: the thread is not snoozed now.
+   */
+  setHeldSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze | null {
+    if (inboxSnoozeRefusal(until, this.now()) !== "past") return this.setSnooze(threadId, until, at);
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const running = this.snoozeList.find((entry) => entry.thread_id === threadId && inboxSnoozeRunning(entry.until, this.now()));
+    if (running) this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), { ...running, until: new Date(until as string).toISOString() }]);
+    return null;
   }
 
   /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */
@@ -1853,6 +1873,8 @@ export class InboxStore {
       if (awaited.some((r) => r.delivered_at === null)) return null;
       return awaited.reduce<string | null>((latest, r) => (latest === null || r.delivered_at! > latest ? r.delivered_at : latest), null) ?? lastReal.created_at;
     };
+    // Who settled it, when that was not the agent it was for: the mark's read, else its own delivery's.
+    const readBy = recipients ? null : (root.agent_checked_seq ?? 0) >= seqOf(lastReal) ? root.agent_checked_by : lastReal.delivery?.read_by;
     const sent =
       lastReal.author.kind === "person"
         ? {
@@ -1865,6 +1887,7 @@ export class InboxStore {
                   (lastReal.delivery?.at ?? null),
             wakes: this.wakesRecipient(lastReal),
             ...(recipients ? { recipients } : {}),
+            ...(readBy ? { read_by: readBy } : {}),
           }
         : null;
     const participants = this.participantsOf(messages);
@@ -1970,7 +1993,7 @@ export class InboxStore {
     lastReal: InboxMessage,
     /** The agent message whose session asked (`inboxAskingMessage`, the thread's rule), when a person's item is last. */
     asking: InboxMessage | null,
-    sent: { checked_at: string | null } | null,
+    sent: { checked_at: string | null; read_by?: string } | null,
     recipients: InboxSentRecipient[] | null,
     resolved: boolean,
   ): InboxRowDelivery | null {
@@ -2079,6 +2102,7 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
       };
@@ -3125,15 +3149,44 @@ export class InboxStore {
     let newcomer: boolean | undefined;
     const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader ?? null));
     let checked = 0;
+    let lastChecked: InboxMessage | null = null;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
       const message = this.messages.get(id);
       if (seq > upToSeq || message?.author.kind !== "person") continue;
       if (reader !== undefined && seq > from && this.owedToAnother(message, reader, isNewcomer)) break;
       checked = Math.max(checked, seq);
+      lastChecked = message;
     }
-    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
-    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
+    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) {
+      // The agent it was for read it after another did: it has it now, so the line goes back to Delivered.
+      const asked = lastChecked?.reply_to ? this.messages.get(lastChecked.reply_to) : undefined;
+      if (root.agent_checked_by && reader && asked?.author.kind === "agent" && asked.author.session === reader) {
+        this.appendMessage({ ...root, agent_checked_at: at, agent_checked_by: undefined }, at);
+      }
+      return;
+    }
+    // Undefined when no other agent read it: an earlier read's name goes with the mark it moved.
+    const by = (lastChecked && this.readByAnother(lastChecked, reader)) || undefined;
+    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at, agent_checked_by: by }, at);
+  }
+
+  /**
+   * The host of `reader`, when its read of this reply is known not to be the agent the reply was for: another host
+   * than the session it answers. Null when it may be that agent: its own session, the same host (a raw MCP client
+   * takes a new `ses_` id each time it restarts, `owedToAnother`), a host not known, or one the Inbox has no name for.
+   */
+  private readByAnother(message: InboxMessage, reader: string | null | undefined): string | null {
+    if (!reader || message.to || hasTags(message)) return null;
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (asked?.author.kind !== "agent" || !asked.author.host || asked.author.session === reader) return null;
+    // Both from the names the Inbox knows: an agent's host is free text, "Cursor" and "cursor" are one agent, and so
+    // are `claude` and `claude-code`, so the names are what differ.
+    if (!Object.hasOwn(INBOX_HOST_NAMES, asked.author.host)) return null;
+    const known = this.deliveryPresence?.hostOf?.(reader);
+    const wrote = known ? null : this.latestAgentMessages().get(reader)?.author;
+    const host = known ?? (wrote?.kind === "agent" ? wrote.host : null);
+    return host && Object.hasOwn(INBOX_HOST_NAMES, host) && INBOX_HOST_NAMES[host] !== INBOX_HOST_NAMES[asked.author.host] ? host : null;
   }
 
   /**
@@ -3198,7 +3251,8 @@ export class InboxStore {
       const at = this.stamp();
       // A session it answers when it had one; else the reader's (a message and a read that both name none: "").
       const session = asked.author.session ?? reader ?? "";
-      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at } }, at);
+      const readBy = this.readByAnother(message, reader);
+      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at, ...(readBy ? { read_by: readBy } : {}) } }, at);
     }
   }
 
@@ -4163,6 +4217,7 @@ export class InboxStore {
     }
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
+    const viewing = this.planViewing(message.thread_id, input.viewing, carried);
     // Skips only what the person listed ("Skip them"), and only while still open.
     const planned = new Set(plan.map((p) => p.record.id));
     const listed = this.planSkips(message, input.skip);
@@ -4305,6 +4360,7 @@ export class InboxStore {
         ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
+      ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
@@ -4326,6 +4382,28 @@ export class InboxStore {
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
     this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * What a reply says was on screen (`InboxReplyInput.viewing`): the name and the message read from the thread's own
+   * file, never from the window. Undefined for a file not of this thread, and for a file the reply carries a comment
+   * on: its "Feedback on the attached files" names it already.
+   */
+  private planViewing(threadId: string, raw: unknown, carried: readonly InboxAnnotationRecord[]): InboxReplyViewing | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const input = raw as { attachment_id?: unknown; time?: unknown; page?: unknown; as_sent?: unknown };
+    if (typeof input.attachment_id !== "string") return undefined;
+    const hit = this.attachment(input.attachment_id);
+    if (!hit || hit.message.thread_id !== threadId || carried.some((record) => record.attachment_id === hit.attachment.id)) return undefined;
+    const time = typeof input.time === "string" ? inboxViewingText(input.time) : "";
+    const page = typeof input.page === "string" ? inboxViewingText(input.page) : "";
+    return {
+      name: hit.attachment.name,
+      message_id: hit.message.id,
+      ...(INBOX_VIEWING_TIME.test(time) ? { time } : {}),
+      ...(page ? { page } : {}),
+      ...(input.as_sent === true ? { as_sent: true as const } : {}),
+    };
   }
 
   /**
