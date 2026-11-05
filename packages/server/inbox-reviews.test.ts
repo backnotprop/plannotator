@@ -88,14 +88,17 @@ const MERGED_URL = "https://github.com/northwind/billing-svc/pull/300";
 
 function forge() {
   const calls: { cli: string; args: string[] }[] = [];
+  /** What `gh api repos/…/pulls/N` answers; null: it fails. */
+  const prState: { answer: Record<string, unknown> | null } = { answer: null };
   const run: RefRunner = async (cli, args) => {
     calls.push({ cli, args });
     if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
     if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
     if (cli === "gh" && args.includes("graphql")) return { stdout: JSON.stringify(GH_ANSWER), stderr: "", exitCode: 0 };
+    if (cli === "gh" && args[0] === "api" && prState.answer) return { stdout: JSON.stringify(prState.answer), stderr: "", exitCode: 0 };
     return { stdout: "", stderr: "unexpected", exitCode: 1 };
   };
-  return { run, calls };
+  return { run, calls, prState };
 }
 
 async function world() {
@@ -273,6 +276,59 @@ describe("on", () => {
     expect(rowsOf(await w.reviews(), r1.thread_id)).toHaveLength(1);
     expect((await w.post(`/api/inbox/threads/${r1.thread_id}/delete`, {})).status).toBe(200);
     expect(rowsOf(await w.reviews(), r1.thread_id)).toHaveLength(0);
+  });
+});
+
+describe("a PR that left the list", () => {
+  const CLOSED_URL = "https://github.com/northwind/billing-svc/pull/500";
+  const answers = (state: string, merged: string | null) => ({
+    state,
+    merged_at: merged,
+    // Later than the review the test sends: the review is the one the PR left with.
+    closed_at: new Date(Date.now() + 3_600_000).toISOString(),
+    title: "A dropped idea",
+    html_url: CLOSED_URL,
+  });
+  /** A reviews read, then the background read's turn, then the read that shows it. */
+  const settled = async (w: Awaited<ReturnType<typeof world>>) => {
+    await w.reviews();
+    await new Promise((done) => setTimeout(done, 30));
+    return w.reviews();
+  };
+
+  test.each([
+    ["closed, which the list never carries", null],
+    ["merged long ago, past the list's window", new Date(Date.now() + 3_600_000).toISOString()],
+  ])("a PR %s: one read records it, and its review leaves instead of reading as local", async (_name, mergedAt) => {
+    const w = await world();
+    await w.setCodeReview(true);
+    w.forge.prState.answer = answers("closed", mergedAt);
+    const r1 = await w.sendReview("closed", "r1", undefined, w.prGuide(CLOSED_URL, 500));
+    expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(0);
+    expect(w.forge.calls.filter((c) => c.args.includes("repos/northwind/billing-svc/pulls/500"))).toHaveLength(1);
+    // The record stays: no second read, and a later review comes back with its link.
+    const r2 = await w.sendReview("closed", "r2", undefined, w.prGuide(CLOSED_URL, 500));
+    const rows = rowsOf(await settled(w), r2.thread_id);
+    expect(rows[0]).toMatchObject({ move: "on_you", landed: [{ state: mergedAt ? "merged" : "closed", url: CLOSED_URL, number: 500 }] });
+    expect(w.forge.calls.filter((c) => c.args.includes("repos/northwind/billing-svc/pulls/500"))).toHaveLength(1);
+  });
+
+  test("a PR still open, only gone from the person's list, stays a row and is not read again at once", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    w.forge.prState.answer = answers("open", null);
+    const r1 = await w.sendReview("open", "r1", undefined, w.prGuide(CLOSED_URL, 500));
+    expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(1);
+    expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(1);
+    expect(w.forge.calls.filter((c) => c.args.includes("repos/northwind/billing-svc/pulls/500"))).toHaveLength(1);
+  });
+
+  test("a read that fails leaves the row as it was", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    w.forge.prState.answer = null;
+    const r1 = await w.sendReview("failed", "r1", undefined, w.prGuide(CLOSED_URL, 500));
+    expect(rowsOf(await settled(w), r1.thread_id)).toHaveLength(1);
   });
 });
 
