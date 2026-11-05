@@ -76,7 +76,7 @@ import { FileSwipeCard } from './FileSwipeCard';
 import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
 import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { Notice } from './Markup';
 import { MarkupPicture } from './Markup';
 import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
@@ -916,6 +916,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const focusComposer = () => {
     const area = unsavedComposer(sectionRef.current, savedTextRef.current);
     if (!area) return;
+    // A phone's comments sheet hides the card (inbox.css): it closes first, so the words can take focus.
+    if (phone && sheet) flushSync(() => setSheet(false));
     const focusAt = (field: HTMLTextAreaElement) => {
       field.focus();
       field.setSelectionRange(field.value.length, field.value.length);
@@ -1658,8 +1660,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     barRef.current?.hide();
   }, []);
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', onGather: gatherFromComposer } : null),
-    [hasComposer, props.composer, shownToolbar, gatherFromComposer],
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer } : null),
+    [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer],
   );
   /** Back from the corner: focus where the person gathered from. The card's field, when it was the card's ⌄. */
   const restoreTarget = () => {
