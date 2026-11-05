@@ -1,65 +1,137 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { INBOX_INITIATIVE_NAME_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi } from '../api';
+import { inboxApi } from '../api';
+import { INITIATIVE_SAVE_FAILED, initiativeRefusal, restoreInitiatives, type InitiativesRestored } from './initiativeUndo';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
+import { InboxToast, type InboxToastModel } from '../components/Toast';
 import { Modal } from '../components/Updates';
+import { initiativeDeletedToast } from './model';
 
 /**
  * Initiatives (the filter's New initiative… and Edit initiatives…): every
  * live one as a name to edit in place (Enter or leaving the field renames it)
- * with Delete, which asks once ("Its 4 cards go to No initiative"); a field to
- * add one. Every change is its own write; the Board reads the cards again.
+ * with Delete, one click and no question (the owner, 2026-11-04: "delete
+ * initiatives very simply without friction"): the toast's Undo brings it and
+ * its cards back; a field to add one. Every change is its own write; the Board
+ * reads the cards again.
+ *
+ * The window's toast is under a modal dialog (showModal: the page behind is
+ * inert), so while this is open the same toast draws inside it; closed with
+ * the Undo still up, `onCloseWithUndo` hands it to the window's.
  */
-/** The refusals whose server text the dialog shows as is (409s): a name taken, the limit reached. */
-const INITIATIVE_REFUSALS: ReadonlySet<string> = new Set(['initiative_exists', 'initiative_limit']);
+/** As long as the window's toast stays up (MARK_READ_UNDO_MS). */
+const DELETED_TOAST_MS = 7_000;
 
 export function InitiativesDialog({
   initiatives,
-  cardCounts,
   start,
   phone,
   onClose,
   onChanged,
+  onCloseWithUndo,
   fallbackFocus,
 }: {
   initiatives: readonly InboxInitiative[];
-  /** Cards in each initiative, every column (what a delete leaves in none). */
-  cardCounts: ReadonlyMap<string, number>;
   start: 'new' | 'edit';
   phone: boolean;
   onClose: () => void;
   /** An initiative was made, renamed or deleted: read the cards again. `made` names a new one. */
   onChanged: (made?: InboxInitiative) => void;
+  /** Closed while the Undo was up: the window's toast takes it over, for these (deleted a moment ago). */
+  onCloseWithUndo?: (deleted: readonly InboxInitiative[]) => void;
   /** Where focus goes on close when what opened it is gone (the menu item): the filter button. */
   fallbackFocus?: () => HTMLElement | null;
 }) {
   const [adding, setAdding] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [asking, setAsking] = useState<string | null>(null);
-  // Where focus goes once the next render is drawn: the ask's Cancel, a row's Delete, or the name field.
-  const [focusTo, setFocusTo] = useState<{ kind: 'ask' | 'row'; id: string } | { kind: 'new' } | null>(null);
+  // Deleted while the toast is up: their rows are gone at once, before the Board reads the cards again, and Undo brings them all back.
+  const [deleted, setDeleted] = useState<readonly InboxInitiative[]>([]);
+  const [toastId, setToastId] = useState(0);
+  const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Where focus goes once the next render is drawn: a row's Delete, or the name field.
+  const [focusTo, setFocusTo] = useState<{ kind: 'row'; id: string } | { kind: 'new' } | null>(null);
   const newField = useRef<HTMLInputElement>(null);
   const inner = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!focusTo) return;
-    const at =
-      focusTo.kind === 'new'
-        ? newField.current
-        : inner.current?.querySelector<HTMLElement>(
-            focusTo.kind === 'ask' ? `[data-initiative-delete-ask="${focusTo.id}"] [data-initiative-delete-no]` : `[data-initiative-row="${focusTo.id}"] [data-initiative-delete]`,
-          );
-    at?.focus();
+    const at = focusTo.kind === 'new' ? newField.current : inner.current?.querySelector<HTMLElement>(`[data-initiative-row="${focusTo.id}"] [data-initiative-delete]`);
+    // An undone row comes back with the Board's next read: focus waits for it.
+    if (!at) return;
+    at.focus();
     setFocusTo(null);
-  }, [focusTo]);
-  const askDelete = (id: string) => {
-    setAsking(id);
-    setFocusTo({ kind: 'ask', id });
+  }, [focusTo, initiatives]);
+  const clearToast = useCallback(() => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+    setDeleted([]);
+  }, []);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+  }, []);
+  const armToast = () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => {
+      toastTimer.current = null;
+      setDeleted([]);
+    }, DELETED_TOAST_MS);
   };
-  const keepAsking = (id: string) => {
-    setAsking(null);
-    setFocusTo({ kind: 'row', id });
+  const holdToast = (held: boolean) => {
+    if (!held) return armToast();
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = null;
+  };
+  const visible = initiatives.filter((i) => !deleted.some((gone) => gone.id === i.id));
+  const remove = async (i: InboxInitiative) => {
+    const gone = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative);
+    if (!gone) return;
+    // Focus moves to the next row's Delete (the one before when it was the last), else the name field.
+    const at = visible.findIndex((other) => other.id === i.id);
+    const next = visible[at + 1] ?? visible[at - 1];
+    setFocusTo(next ? { kind: 'row', id: next.id } : { kind: 'new' });
+    setDeleted((now) => [...now, i]);
+    setToastId((id) => id + 1);
+    armToast();
+    onChanged();
+  };
+  // A restore under way: the second click of a double click waits on it, and Done hands over only what it leaves out.
+  const undoing = useRef<{ back: readonly InboxInitiative[]; run: Promise<InitiativesRestored> } | null>(null);
+  const undo = async () => {
+    if (undoing.current) return;
+    const back = deleted;
+    const run = restoreInitiatives(back);
+    undoing.current = { back, run };
+    setBusy(true);
+    setError(null);
+    const { restored, left, line } = await run;
+    undoing.current = null;
+    setBusy(false);
+    setError(line);
+    // What came back shows on the next read; a refusal's read shows who took the name.
+    onChanged();
+    // By id, so one deleted meanwhile keeps its Undo. A failed save keeps it too, to try again.
+    const settled = new Set(back.filter((i) => !left.some((still) => still.id === i.id)).map((i) => i.id));
+    setDeleted((now) => now.filter((i) => !settled.has(i.id)));
+    if (left.length > 0) {
+      armToast();
+      return;
+    }
+    // Undo's button is gone: focus never drops to the page.
+    const last = restored.at(-1);
+    setFocusTo(last ? { kind: 'row', id: last.id } : { kind: 'new' });
+  };
+  const close = () => {
+    const running = undoing.current;
+    if (running) {
+      const others = deleted.filter((i) => !running.back.includes(i));
+      void running.run.then(({ left }) => {
+        if (left.length + others.length > 0) onCloseWithUndo?.([...left, ...others]);
+      });
+    } else if (deleted.length > 0) {
+      onCloseWithUndo?.(deleted);
+    }
+    onClose();
   };
   // The dialog first focuses its primary button: New initiative… lands in the name field instead.
   useEffect(() => {
@@ -73,8 +145,7 @@ export function InitiativesDialog({
     try {
       return await work();
     } catch (cause) {
-      // Only a name taken or the limit reached say why (the server's words); anything else, a network failure too, the one line.
-      setError(cause instanceof InboxApiError && INITIATIVE_REFUSALS.has(cause.code) ? cause.message : 'That did not save. Try again.');
+      setError(initiativeRefusal(cause) ?? INITIATIVE_SAVE_FAILED);
       return null;
     } finally {
       setBusy(false);
@@ -93,61 +164,33 @@ export function InitiativesDialog({
     newField.current?.focus();
   };
   let body: ReactNode = null;
-  if (initiatives.length > 0) {
+  if (visible.length > 0) {
     body = (
       <ul className="ib-inid-list" aria-label="Initiatives">
-        {initiatives.map((i) =>
-          asking === i.id ? (
-            <li key={i.id} className="ib-inid-ask" data-initiative-delete-ask={i.id}>
-              <span className="ib-inid-askt">
-                Delete <b dir="auto">{i.name}</b>?{' '}
-                {(cardCounts.get(i.id) ?? 0) > 0 && `Its ${cardCounts.get(i.id) === 1 ? 'card goes' : `${cardCounts.get(i.id)} cards go`} to No initiative.`}
-              </span>
-              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => keepAsking(i.id)} data-initiative-delete-no="">
-                Cancel
-              </button>
-              <button
-                type="button"
-                className="ib-btn ib-sm ib-danger"
-                data-initiative-delete-yes=""
-                disabled={busy}
-                onClick={async () => {
-                  const gone = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'delete' })).initiative);
-                  if (!gone) return;
-                  // Focus moves to the next row's Delete (the one before when it was the last), else the name field.
-                  const at = initiatives.findIndex((other) => other.id === i.id);
-                  const next = initiatives[at + 1] ?? initiatives[at - 1];
-                  setAsking(null);
-                  setFocusTo(next ? { kind: 'row', id: next.id } : { kind: 'new' });
-                  onChanged();
-                }}
-              >
-                Delete
-              </button>
-            </li>
-          ) : (
-            <InitiativeRow
-              key={i.id}
-              initiative={i}
-              busy={busy}
-              onRename={async (name) => {
-                const renamed = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative);
-                if (renamed) onChanged();
-                return renamed !== null;
-              }}
-              onDelete={() => askDelete(i.id)}
-            />
-          ),
-        )}
+        {visible.map((i) => (
+          <InitiativeRow
+            key={i.id}
+            initiative={i}
+            busy={busy}
+            onRename={async (name) => {
+              const renamed = await run(async () => (await inboxApi.changeInitiative(i.id, { op: 'rename', name })).initiative);
+              if (renamed) onChanged();
+              return renamed !== null;
+            }}
+            onDelete={() => void remove(i)}
+          />
+        ))}
       </ul>
     );
   }
+  const words = deleted.length > 0 ? initiativeDeletedToast(deleted) : null;
+  const toast: InboxToastModel | null = words ? { id: toastId, icon: 'check', lead: words.lead, detail: words.detail, onUndo: () => void undo(), noKey: true } : null;
   return (
-    <Modal label="Initiatives" testId="initiatives" onClose={onClose} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
+    <Modal label="Initiatives" testId="initiatives" onClose={close} ownKeys fallbackFocus={fallbackFocus} className={`ib-inid${phone ? ' ib-inid-phone' : ''}`}>
       <div className="ib-dlg-in" ref={inner}>
         <div className="ib-dlg-head">
           <h2>Initiatives</h2>
-          <button type="button" className="ib-ncd-x" aria-label="Close" onClick={onClose}>
+          <button type="button" className="ib-ncd-x" aria-label="Close" onClick={close}>
             <Icon name="x" size={16} />
           </button>
         </div>
@@ -183,10 +226,15 @@ export function InitiativesDialog({
           </p>
         )}
         <div className="ib-acts-row">
-          <button type="button" className="ib-btn ib-pri" onClick={onClose} data-initiatives-done="">
+          <button type="button" className="ib-btn ib-pri" onClick={close} data-initiatives-done="">
             Done
           </button>
         </div>
+        {/* It never takes focus, as the window's; inside the dialog, so its Undo can be pressed and this live region heard. */}
+        <div className="ib-sr" aria-live="polite" data-initiative-live="">
+          {words ? `${words.lead} ${words.detail}. Undo is available.` : ''}
+        </div>
+        {toast && <InboxToast toast={toast} phone={phone} onDismiss={clearToast} onHold={holdToast} />}
       </div>
     </Modal>
   );
@@ -227,7 +275,17 @@ function InitiativeRow({ initiative, busy, onRename, onDelete }: { initiative: I
         data-initiative-name=""
       />
       <Tip content="Delete">
-        <button type="button" className="ib-iconbtn ib-inid-del" aria-label={`Delete ${initiative.name}`} disabled={busy} onClick={onDelete} data-initiative-delete="">
+        <button
+          type="button"
+          className="ib-iconbtn ib-inid-del"
+          aria-label={`Delete ${initiative.name}`}
+          disabled={busy}
+          // The second click of a double click would land on the row that moved up under the pointer.
+          onClick={(event) => {
+            if (event.detail <= 1) onDelete();
+          }}
+          data-initiative-delete=""
+        >
           <Icon name="trash" size={15} />
         </button>
       </Tip>

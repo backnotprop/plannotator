@@ -25,6 +25,9 @@ name: Inbox window e2e
 #
 # The specs run as 16 parallel shards of whole spec files, balanced by
 # measured time (scripts/ci-e2e-shard.ts, tests/e2e/shard-times.json).
+# One of them is the window's memory soak (inbox-memory-soak.spec.ts: a large
+# store, 300 agent messages, the JS heap sampled over raw CDP), so a memory
+# creep or a hung window fails the heavy tier before a merge.
 
 on:
   # Manual runs on a branch, e.g. a stacked PR whose base is not main.
@@ -85,6 +88,7 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'scripts/inbox-large-store.ts'
       - 'scripts/ci-e2e-shard.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'
@@ -143,6 +147,7 @@ on:
       - 'packages/shared/data-dir.ts'
       - 'tests/helpers/pinned-phone.ts'
       - 'scripts/inbox-sim.ts'
+      - 'scripts/inbox-large-store.ts'
       - 'scripts/ci-e2e-shard.ts'
       - 'apps/vscode-extension/src/guides/webview/**'
       - 'apps/vscode-extension/src/guides/core/**'

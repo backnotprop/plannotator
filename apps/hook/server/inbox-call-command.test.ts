@@ -170,6 +170,19 @@ describe("what a script gets", () => {
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
   });
 
+  test("snooze_thread from a script: it snoozes, says until when as JSON, and until: null ends it", async () => {
+    const box = await world();
+    const sent = JSON.parse((await cli(box, ["send_message", '{"body":"News.","subject":"Ledger"}'], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_call" } })).stdout);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const snoozed = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until })]);
+    expect(snoozed.code).toBe(0);
+    expect(JSON.parse(snoozed.stdout).snoozed.until).toBe(until);
+    expect(box.server.store.snoozes().map((s) => s.thread_id)).toEqual([sent.thread_id]);
+    const ended = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until: null })]);
+    expect(JSON.parse(ended.stdout)).toEqual({ thread_id: sent.thread_id, snoozed: null, ended: `Thread ${sent.thread_id}: snooze ended.` });
+    expect(box.server.store.snoozes()).toEqual([]);
+  });
+
   // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
   // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
   test("an unknown action's list never names steps; steps itself is an action", () => {
@@ -249,6 +262,19 @@ describe("what a script gets", () => {
     const read = await cli(box, ["read_thread", JSON.stringify({ thread_id, format: "full" })]);
     expect(read.code).toBe(0);
     expect(JSON.parse(read.stdout).thread.messages[0].body).toBe(body);
+  });
+
+  test("read_thread gives a script the line naming the file on screen when a reply went from the floating box", async () => {
+    const box = await world();
+    writeFileSync(join(box.project, "take.png"), "not really a png");
+    const sent = await tool(box.client, "send_message", { body: "A take.", subject: "Takes", thread: "Takes", attachments: ["take.png"], project_path: box.project, agent_session: "ses-a", agent_host: "claude-code" });
+    const posted = await post(box.server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "k1", words: "Good.", questions: [], viewing: { attachment_id: sent.attachments[0].id, time: "8:47 PM" } });
+    expect(posted.status).toBe(200);
+    const read = await cli(box, ["read_thread", JSON.stringify({ thread_id: sent.thread_id, format: "full" })]);
+    expect(read.code).toBe(0);
+    const reply = JSON.parse(read.stdout).thread.messages.at(-1);
+    expect(reply.body).toBe("Good.");
+    expect(reply.viewing).toContain(`while viewing \`take.png\`, from the 8:47 PM message ${sent.message_id}.`);
   });
 
   test("a relative project_path and relative attachments mean where the script runs, even in a reply", async () => {
