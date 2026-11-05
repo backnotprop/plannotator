@@ -658,11 +658,15 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
   details(key: string): Promise<InboxPullDetailsAnswer>;
-  /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
+  /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
+  hasCommit(key: string, sha: string): Promise<boolean | null>;
 }
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
+/** The most commits GitHub lists for a pull request. */
+const PULL_COMMITS_LISTED_MAX = 250;
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 /** Core's branch check for words (`inboxPullSafeBranch`): the hand-off names a branch only when it passes. */
 export const safeBranch = inboxPullSafeBranch;
@@ -1091,6 +1095,17 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
     },
     readHead: (key) => readHeads.get(key) ?? null,
+    async hasCommit(key, sha) {
+      const pull = known.get(key);
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !parts || pull.platform !== "github") return null;
+      const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
+      if (!read || read.exitCode !== 0) return null;
+      const commits = read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean);
+      if (commits.includes(sha.toLowerCase())) return true;
+      // GitHub lists at most 250: past that, not listed says nothing.
+      return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
+    },
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
@@ -1114,9 +1129,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         head = `${owner}:${pull.head}`;
         headRef = `${owner}:${compareRef(pull.head)}`;
       }
-      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.updated_at}`;
+      // By what makes the diff: a label or a comment moves `updated_at` and costs no read.
+      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.head_sha ?? pull.updated_at}`;
       const hit = diffs.get(cacheKey);
-      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
+      // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
+      // head the forge did not pin down.
+      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
       if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
@@ -1134,8 +1152,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // The PR as the forge has it now, one call: its head commit (read around a layer's patch: a push between the two
-      // reads leaves it unknown, no post) and its description.
+      // The PR as the forge has it now, one call: its head commit, read around the patch (a push between the two reads
+      // leaves it unknown; a layer posts nothing), and its description.
       // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
       const pullNow = async (): Promise<{ sha: string | null; description: string | null } | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
@@ -1149,9 +1167,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return null;
         }
       };
-      const before = scope === "layer" ? await pullNow() : null;
-      // A whole stack's compare names no PR: this layer's description comes from one read beside it.
-      const beside = scope === "stack" ? pullNow() : null;
+      const before = await pullNow();
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -1179,9 +1195,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const headBefore = before?.sha ?? null;
       const headAfter = headBefore ? ((await pullNow())?.sha ?? null) : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      const description = (before ?? (await beside))?.description ?? null;
+      const description = before?.description ?? null;
       if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, ...(scope === "layer" ? { head_sha } : {}) };
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, description, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);

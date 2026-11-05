@@ -276,10 +276,10 @@ test.skipIf(!hasDom)("a teammate's PR has no agent thread here: its diff reads w
 // --- Post to GitHub/GitLab (the owner's answer C on #2590: the person chooses at the end) ---
 
 const SHA = 'a'.repeat(40);
-/** A comment kept for a layer's review, as the review keeps them (per push). */
+/** A comment kept for a layer's review, as the review keeps them (per head commit). */
 function keepComment(p: InboxPull, text: string) {
   const comment = { id: `c-${p.number}`, type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text, createdAt: 1 };
-  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.updated_at}`, JSON.stringify({ comments: [comment], viewed: [] }));
+  window.localStorage.setItem(`plannotator-inbox-pull-review:${p.key}:layer:${p.head_sha ?? SHA}`, JSON.stringify({ comments: [comment], viewed: [] }));
 }
 const dialogButton = (words: string) => {
   const found = [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')].find((b) => b.textContent?.trim() === words);
@@ -343,10 +343,10 @@ test.skipIf(!hasDom)("a teammate's PR posts the full verdict: Approve goes on th
 });
 
 test.skipIf(!hasDom)("the post is pinned to the head of the patch read, not the list's older one", async () => {
-  const listed = 'a'.repeat(40);
+  // Its own head: the window keeps a patch read a moment ago per head.
+  const listed = 'd'.repeat(40);
   const read = 'c'.repeat(40);
   diffHead = read;
-  // Its own push time: the window keeps a patch read a moment ago per push.
   const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: listed, updated_at: '2026-11-03T12:00:00.000Z' };
   mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
   await settle();
@@ -359,7 +359,7 @@ test.skipIf(!hasDom)("the post is pinned to the head of the patch read, not the 
 
 test.skipIf(!hasDom)('a patch whose head the forge did not pin down posts nothing: Open on GitHub instead', async () => {
   diffHead = null;
-  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: 'a'.repeat(40), updated_at: '2026-11-03T12:30:00.000Z' };
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: 'e'.repeat(40) };
   mount(<Review stackId={theirs.key} from={theirs.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) }} />);
   await settle();
   expect(document.querySelector('[data-review-posts]')).toBeNull();
@@ -640,15 +640,20 @@ test.skipIf(!hasDom)("an unlinked layer of the person's stack falls back to the 
 });
 
 test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones of this push are kept', async () => {
-  const layer = stack[0]!;
+  // Its own head: a diff the window remembers is not a read and moves nothing stored; named by the list, so the read
+  // does not change the key.
+  const now = 'f'.repeat(40);
+  diffHead = now;
+  const layer = { ...stack[0]!, head_sha: now };
   const store = 'plannotator-inbox-pull-review:';
   const comment = { id: 'c1', type: 'comment', filePath: 'a.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'old line', createdAt: 1 };
-  window.localStorage.setItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`, JSON.stringify({ comments: [comment], viewed: [] }));
-  window.localStorage.setItem(`${store}${layer.key}:layer:${layer.updated_at}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
-  mount(<Review stackId={STACK_ID} from={layer.key} answer={model} />);
+  const before = 'b'.repeat(40);
+  window.localStorage.setItem(`${store}${layer.key}:layer:${before}`, JSON.stringify({ comments: [comment], viewed: [] }));
+  window.localStorage.setItem(`${store}${layer.key}:layer:${now}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
+  mount(<Review stackId={STACK_ID} from={layer.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? layer : p)) }} />);
   await settle();
-  expect(window.localStorage.getItem(`${store}${layer.key}:layer:2026-11-01T00:00:00.000Z`)).toBeNull();
-  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${layer.updated_at}`)).not.toBeNull();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${before}`)).toBeNull();
+  expect(window.localStorage.getItem(`${store}${layer.key}:layer:${now}`)).not.toBeNull();
 });
 
 // --- one review thread per PR or stack (approval "pr-page-review-with-agent"): Review with an agent, the picker ---

@@ -189,13 +189,15 @@ function writeForge(dir: string) {
     // A review posted (Post to GitHub): `gh api <endpoint> --method POST --input -`, the review on stdin, kept.
     'if [ "$1" = api ] && [ "$3" = --method ]; then',
     '  echo "gh post $2" >> "$calls"',
-    '  cat > "$dir/gh-posted.json"',
+    // `gh-posted.json` the last one, `gh-posts.jsonl` every one.
+    '  tee "$dir/gh-posted.json" >> "$dir/gh-posts.jsonl"',
+    '  echo >> "$dir/gh-posts.jsonl"',
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
     'fi',
     // A PR read around its patch (`--jq`): the list's `headRefOid` for that number, and its description.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); printf \'{"sha":"%040d","body":%s}\\n\' "$n" "$body"; exit 0',
+    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
@@ -2297,6 +2299,61 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
     rmSync(join(world.forge, 'gh-post-fail'), { force: true });
   }
   expect(world.errors).toEqual([]);
+});
+
+test('a saved line comment over a push: labelled, posted at the commit read, the typed words at the new head', async () => {
+  const { page } = world;
+  const endpoint = 'repos/northwind/web-app/pulls/880';
+  const named = (e: string) => join(world.forge, `gh-${e.replace(/[/.%?&=]/g, '_')}.patch`);
+  const read = '880'.padStart(40, '0');
+  const pushed = 'f'.repeat(40);
+  const list = readFileSync(join(world.forge, 'gh-pulls.json'), 'utf8');
+  const patch = readFileSync(named(endpoint), 'utf8');
+  const words = 'ms-6 flips with dir; check the sidebar in Hebrew too.';
+  rmSync(join(world.forge, 'gh-posts.jsonl'), { force: true });
+  try {
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+    const review = page.locator('[data-pull-review]');
+    await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"]')).toBeVisible({ timeout: 30_000 });
+    await commentOn(page, 'src/settings/Layout.tsx', 3, words);
+    await expect(review.locator('.ib-vcomments')).toHaveAttribute('aria-label', 'Comments, 1');
+
+    // Pushed: other code at that line, the old commit still on the PR.
+    writeFileSync(named(endpoint), patch.replace(/ms-6/g, 'ms-8'));
+    writeFileSync(join(world.forge, 'gh-head-880'), `${pushed}\n`);
+    writeFileSync(named(`${endpoint}/commits?per_page=100`), `${read}\n${pushed}\n`);
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/, `$1${new Date().toISOString()}`));
+    // The list reads again on focus, at most every 20 s.
+    await expect(async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(page.getByText('ms-8').first()).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 90_000, intervals: [3_000] });
+
+    await review.locator('.ib-vcomments').click();
+    await expect(page.locator('[data-code-annotation-note]')).toHaveText('Written on older code');
+    await page.locator('[data-pull-review] .ib-vcomments').click();
+
+    await review.locator('[data-review-posts] [data-decision-primary]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(`#880 — read at ${read.slice(0, 7)}`);
+    await dialog.locator('textarea').fill('Everything else reads well.');
+    await dialog.getByRole('button', { name: 'Post Comments', exact: true }).click();
+    await expect(review.locator('[data-pull-review-posted]')).toContainText('on GitHub');
+
+    const sent = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(sent).toEqual([
+      { commit_id: read, body: 'See inline comments.', event: 'COMMENT', comments: [{ path: 'src/settings/Layout.tsx', line: 3, side: 'RIGHT', body: words }] },
+      expect.objectContaining({ commit_id: pushed, body: 'Everything else reads well.', event: 'COMMENT' }),
+    ]);
+    expect((sent[1] as { comments?: unknown[] }).comments ?? []).toEqual([]);
+    await expect(review.locator('.ib-vcomments')).toHaveAttribute('aria-label', 'Comments, 0');
+    expect(world.errors).toEqual([]);
+  } finally {
+    writeFileSync(named(endpoint), patch);
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list);
+    rmSync(join(world.forge, 'gh-head-880'), { force: true });
+    rmSync(named(`${endpoint}/commits?per_page=100`), { force: true });
+  }
 });
 
 test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment, approved on GitHub; the choice on the person\'s own', async ({ browser }) => {
