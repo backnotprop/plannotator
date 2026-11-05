@@ -212,6 +212,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
+  // A pick kept or opened earlier that has since gone into review (handed elsewhere, say): its thread answers for it now. The words stay.
+  useEffect(() => {
+    if (box && reviewPick && props.reviewPulls?.find((pull) => pull.id === reviewPick.id)?.thread) setReviewPick(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!box, reviewPick?.id, props.reviewPulls]);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
   const boxPull = box && reviewKind === 'pr' ? reviewPick : null;
   const pulls = request.pulls ?? request.draft?.pulls ?? (boxPull ? { keys: handoffKeys(boxPull.stack), projects: [...boxPull.projects], ask_line: pullHandoffAskLine(boxPull.stack, { kind: 'guide' }) } : null);

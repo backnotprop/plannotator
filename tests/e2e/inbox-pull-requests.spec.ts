@@ -637,13 +637,14 @@ test('an old #pulls link opened fresh, in a new window, becomes #reviews', async
   }
 });
 
-test("#reviews&new with Code review off: the off page, and no box", async () => {
+test("#reviews&new with Code review off: the off page, no box, and the address forgets it", async () => {
   const { page } = world;
   await setCodeReview(false);
   await page.goto(`${world.url}#reviews&new`);
   await expect(page.locator('[data-reviews-off]')).toBeVisible();
   await page.waitForTimeout(400);
   await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await expect(page).not.toHaveURL(/&new/);
 });
 
 test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
