@@ -224,6 +224,7 @@ import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges, inboxReviewLinkOf, inboxReviewRows, inboxReviewStartOf, type InboxPullReason, type InboxReviewStart, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex, readInboxReviewLink } from "./inbox-reviews";
+import { inboxPullRefOfKey, type InboxPull } from "@plannotator/core/inbox-types";
 import { readInboxReviewChanges } from "./inbox-review-changes";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -1119,6 +1120,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
    * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
    */
+  /** One PR no list holds, from a host this computer's CLI is signed in to; nothing is asked of any other host. */
+  const readUnlistedPull = async (ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>>): Promise<InboxPull | null> => {
+    if (!(await pulls.signedInTo(ref.platform === "gitlab" ? "glab" : "gh", ref.host))) return null;
+    const login = lastReviewsRead?.listed.hosts.find((host) => host.host === ref.host)?.login ?? null;
+    return readInboxReviewLink(options.refRunner, { ref }, login);
+  };
+
   const findPulls = async (keys: readonly string[], wanted: InboxPullRepo[]): Promise<void> => {
     if (keys.every((key) => pulls.find(key))) return;
     await pulls.list(wanted, { refresh: false });
@@ -3857,8 +3865,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if ("unsupported" in link) return json({ serverSession, ok: false, reason: link.unsupported });
         const { ref } = link;
         const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
-        const login = lastReviewsRead?.listed.hosts.find((host) => host.host === ref.host)?.login ?? null;
-        const pull = pulls.find(ref.key) ?? (await readInboxReviewLink(options.refRunner, link, login));
+        const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
         if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
         const { projectsByRepo } = await pullProjects();
         const owner = pullOwners.get(ref.key);
@@ -3953,7 +3960,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
         const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
-        const pull = pulls.find(key);
+        // A PR reached by its link is on no list: its own read says what the list would.
+        const unlisted = pulls.find(key) ? null : inboxPullRefOfKey(key);
+        const pull = pulls.find(key) ?? (unlisted ? await readUnlistedPull(unlisted) : null);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.

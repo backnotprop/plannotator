@@ -30,7 +30,7 @@
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
-import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, inboxPullUrlOfKey, type InboxMessageWire, type InboxPull, type InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -119,9 +119,14 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     if (!postKey) return;
     const controller = new AbortController();
     inboxApi.pulls(reread > 0, controller.signal).then(
-      (answer) => {
+      async (answer) => {
         if (controller.signal.aborted) return;
-        setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? null);
+        // A PR reached by its link is on no list: its own read, while it's open.
+        const url = answer.pulls.some((pull) => pull.key === postKey) ? null : inboxPullUrlOfKey(postKey);
+        const linked = url ? await inboxApi.reviewLink(url, controller.signal).catch(() => null) : null;
+        if (controller.signal.aborted) return;
+        const unlisted = linked?.ok && inboxPullIsOpen(linked.pull) ? linked.pull : null;
+        setPostPull(answer.pulls.find((pull) => pull.key === postKey) ?? unlisted);
         if (reread > 0) setMoved('read');
       },
       () => {

@@ -97,15 +97,16 @@ export function reviewBoxPull(stack: InboxPullStack, row: Pick<InboxReviewRow, '
   };
 }
 
-/** A link's PR when the picker lists it too: it then goes the picker's way. */
+/** A link's PR when the picker lists it too: it then goes the picker's way. A stack's merged layer isn't what the stack hands off, so it's reviewed on its own. */
 export function reviewLinkListed(link: Extract<InboxReviewLinkAnswer, { ok: true }>, pulls: readonly ReviewBoxPull[]): ReviewBoxPull | null {
   const key = link.pull.key.toLowerCase();
-  return pulls.find((pull) => pull.stack.layers.some((layer) => layer.key.toLowerCase() === key)) ?? null;
+  return pulls.find((pull) => openLayers(pull.stack).some((layer) => layer.key.toLowerCase() === key)) ?? null;
 }
 
-/** A link's PR as the hand-off takes it. A merged or closed one can still be read, so it asks the same. */
+/** A link's PR as the hand-off takes it: alone, and as it is, merged or closed included. */
 export function reviewLinkStack(pull: InboxPull): InboxPullStack {
-  return inboxPullStacks([{ ...pull, state: 'open' }])[0]!;
+  const stack = inboxPullStacks([{ ...pull, state: 'open' }])[0]!;
+  return { ...stack, layers: stack.layers.map((layer) => ({ ...layer, state: pull.state })) };
 }
 
 /** The line under the Link field: how it was read, or why it wasn't. */
@@ -113,6 +114,7 @@ export function reviewLinkWords(link: InboxReviewLinkAnswer): string {
   if (link.ok) return `Read with ${link.cli}, signed in to ${link.pull.host}`;
   if (link.reason === 'unreadable') return `${link.cli} couldn't read it. Check the link, and that ${link.cli} is signed in to ${link.host}.`;
   if (link.reason === 'bitbucket') return "Bitbucket links aren't supported yet.";
+  if (link.reason === 'failed') return "Couldn't check that link. Try again.";
   return link.reason === 'host' ? "Plannotator can't read that host yet." : "That isn't a pull request link.";
 }
 

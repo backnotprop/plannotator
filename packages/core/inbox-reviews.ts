@@ -278,6 +278,8 @@ export function inboxReviewLinkOf(text: string): { url: string; ref: NonNullable
   const short = /^([A-Za-z0-9._-]+\/[A-Za-z0-9._-]+)#(\d+)$/.exec(typed);
   const url = short ? `https://github.com/${short[1]}/pull/${short[2]}` : typed;
   const ref = inboxPullRefOfUrl(url);
+  // A host or owner that reads as a flag never goes near a CLI.
+  if (ref?.host.startsWith("-") || ref?.repo.split("/").some((part) => part.startsWith("-"))) return null;
   if (ref) return { url: `https://${ref.host}/${ref.repo}/${ref.platform === "gitlab" ? "-/merge_requests" : "pull"}/${ref.number}`, ref };
   let address: URL;
   try {
@@ -302,6 +304,8 @@ export type InboxReviewLinkAnswer =
       thread_id: string | null;
     }
   | { ok: false; reason: "not_a_link" | "bitbucket" | "host" }
+  /** The Inbox itself didn't answer: nothing is known about the link. */
+  | { ok: false; reason: "failed" }
   | { ok: false; reason: "unreadable"; cli: "gh" | "glab"; host: string };
 
 /** `GET /api/inbox/reviews/changes`: the size of those changes. `git: false`: the project is not a repository. */

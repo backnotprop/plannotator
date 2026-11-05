@@ -434,14 +434,14 @@ describe("a pull request link", () => {
   };
   const payments = { state: "open", title: "Idempotent refunds", html_url: LINK, head: { ref: "refunds" }, base: { ref: "main" }, user: { login: "tomas" } };
 
-  test("reads that one PR with one call, and says what it found and where it could go", async () => {
+  test("reads that one PR, and who the person is when no list has said, and says what it found and where it could go", async () => {
     const w = await world();
     await w.setCodeReview(true);
     w.forge.prState.answer = payments;
     const before = w.forge.calls.length;
     const { body } = await read(w, "northwind/payments#231");
     expect(body).toMatchObject({ ok: true, cli: "gh", pull: { number: 231, title: "Idempotent refunds", repo: "northwind/payments", author: "tomas", mine: false, base: "main", head: "refunds", state: "open" }, projects: [], thread_id: null });
-    expect(w.forge.calls.slice(before).map((call) => call.args.join(" "))).toEqual(["api --hostname github.com repos/northwind/payments/pulls/231"]);
+    expect(w.forge.calls.slice(before).filter((call) => call.args[0] === "api").map((call) => call.args.join(" "))).toEqual(["api --hostname github.com repos/northwind/payments/pulls/231", "api --hostname github.com user"]);
   });
 
   test("Bitbucket and not-a-link make no call; a PR the forge won't answer for names the tool and the host", async () => {
