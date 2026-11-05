@@ -19,6 +19,8 @@
  * Build the binary first (see inbox.spec.ts). Shots land in
  * PLANNOTATOR_E2E_PROOF_DIR/open-in-refs (default .local/proof).
  */
+import { writeInboxAsk } from '../../packages/shared/inbox/ask';
+import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
 import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -65,6 +67,11 @@ interface World {
   hoverThread: string;
   pullThread: string;
   forgeLog: string;
+  marksThread: string;
+  prReviewThread: string;
+  prReviewMessage: string;
+  askAgent: ScriptedAskAgent;
+  handPull: (threadId: string) => Promise<void>;
   claude: SimAgent;
 }
 
@@ -142,7 +149,7 @@ function fakes(dir: string, launches: string, patch: string) {
       '#!/bin/sh',
       'if [ "$1" = auth ]; then echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'; exit 0; fi',
       'case "$1 $2" in',
-      `  "api repos/acme/payouts/contents/"*"?ref=${'8'.repeat(40)}") echo "$2" >> '${join(dir, 'forge.log')}'; f="\${2#repos/acme/payouts/contents/}"; f="\${f%%\\?*}"; f="$(printf %s "$f" | sed 's/%2F/\\//g')"; [ -f '${join(dir, 'forge')}'/"$f" ] || exit 1; base64 < '${join(dir, 'forge')}'/"$f"; exit 0;;`,
+      `  "api repos/acme/payouts/contents/"*"?ref=${'8'.repeat(40)}") echo "$2" >> '${join(dir, 'forge.log')}'; f="\${2#repos/acme/payouts/contents/}"; f="\${f%%\\?*}"; f="$(printf %s "$f" | sed 's/%2F/\\//g')"; [ -f '${join(dir, 'forge')}'/"$f" ] || { echo 'gh: Not Found (HTTP 404)' >&2; exit 1; }; base64 < '${join(dir, 'forge')}'/"$f"; exit 0;;`,
       '  "api repos/"*) exit 1;;',
       'esac',
       `if [ "$1" = api ] && [ "$2" = graphql ]; then cat '${join(dir, 'pulls.json')}'; exit 0; fi`,
@@ -218,7 +225,7 @@ test.beforeAll(async () => {
   rememberInboxOf(dataDir);
   const url = started.stdout.trim();
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
-  const shapeSent = await claude.send({ project_path: project, thread: 'shape', subject: 'Retries: the board', body: 'The board is up.' });
+  const shapeSent = await claude.send({ project_path: project, thread: 'shape', subject: 'Retries: the board', body: 'The board is up. It reads `src/ledger.ts:1`.' });
   const messageSent = await claude.send({ project_path: project, thread: 'links', subject: 'Retries: where to look', body: 'The wait is in [the retry loop](src/retry.ts#L3), and the rows in [the ledger](src/ledger.ts). I also meant [a file that is gone](src/gone.ts). The table is `src/ledger.ts:1`, and `react.js` is not one of ours.' });
   const treeLinks = await claude.send({ project_path: worktree, thread: 'tree links', subject: 'Retries: from my worktree', body: 'See [the new file](src/only-on-the-pr.ts), `src/only-on-the-pr.ts:1` and `src/retry.ts`.' });
   const treeReview = await claude.submitGuide({ project_path: worktree, thread: 'tree review', subject: 'Retries: worktree review', guide: REVIEW_GUIDE, patch, review: true } as never);
@@ -249,14 +256,32 @@ test.beforeAll(async () => {
   const treeUpdated = spawnSync(binary, ['shape', 'update', '--file', join(root, 'boards', 'board.json'), '--project', worktree, '--thread', treeLinks.thread_id as string], { env, encoding: 'utf8', timeout: 60_000 });
   expect(treeUpdated.status, treeUpdated.stderr).toBe(0);
   const { platform } = (await (await fetch(new URL('/api/inbox/open-in/apps', url))).json()) as { platform: string };
-  // Hand the PR to its thread, as the PR page's Hand to an agent does.
+  // Hand the PR to a thread, as the PR page's Hand to an agent does. A PR has one owner: the latest.
   const listed = (await (await fetch(new URL('/api/inbox/pulls', url))).json()) as { serverSession: string; pulls: { key: string }[] };
-  const owned = await fetch(new URL('/api/inbox/pulls/owner', url), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ serverSession: listed.serverSession, keys: [listed.pulls[0]!.key], thread_id: pullSent.thread_id }),
+  const handPull = async (threadId: string) => {
+    const owned = await fetch(new URL('/api/inbox/pulls/owner', url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ serverSession: listed.serverSession, keys: [listed.pulls[0]!.key], thread_id: threadId }),
+    });
+    expect(owned.status, await owned.clone().text()).toBe(200);
+  };
+  await handPull(pullSent.thread_id as string);
+  // A review of that PR, the agent's message after it, and Ask AI's window with an answer: a live session it can reach.
+  const prReview = await claude.submitGuide({ project_path: project, thread: 'pr review', subject: 'Backoff: the review', guide: REVIEW_GUIDE, patch, review: true, agent_session: 'ses-pr-review' } as never);
+  const marksThread = (await claude.send({ project_path: project, thread: 'marks', subject: 'Marks: where to look', body: 'The rows go through `src/ledger.ts:1` and the words after it go on for a while, past [env](.env) and on to the end of this line.' })).thread_id as string;
+  const prReviewThread = prReview.thread_id as string;
+  const prReviewMessage = prReview.message_id as string;
+  await claude.send({ project_path: project, reply_to: prReviewMessage, body: 'Start at `src/retry.ts:1-3`. The schedule is in [the new file](src/pr-only-schedule.ts:30-34).', agent_session: 'ses-pr-review' } as never);
+  const askedAt = new Date(Date.now() - 60_000).toISOString();
+  writeInboxAsk(join(dataDir, 'inbox'), {
+    v: 1,
+    thread_id: prReviewThread,
+    seen_at: askedAt,
+    turns: [{ id: 'saved-review', at: askedAt, session: 'ses-pr-review', host: 'claude-code', question: 'Where does it wait?', answer: 'In `src/retry.ts:1-3`, from the table in `src/pr-only-schedule.ts:30-34`. Not in `react.js`.', answered_at: askedAt }],
   });
-  expect(owned.status, await owned.clone().text()).toBe(200);
+  const registry = JSON.parse(readFileSync(join(dataDir, 'inbox', 'inbox.json'), 'utf8')) as { port: number; token: string };
+  const askAgent = startScriptedAskAgent({ port: registry.port, token: registry.token, session: 'ses-pr-review', project, host: 'claude-code', reply: () => 'Scripted answer.' });
   world = {
     platform,
     root,
@@ -278,12 +303,18 @@ test.beforeAll(async () => {
     hoverThread: hoverSent.thread_id as string,
     pullThread: pullSent.thread_id as string,
     forgeLog: join(stubs, 'forge.log'),
+    marksThread,
+    prReviewThread,
+    prReviewMessage,
+    askAgent,
+    handPull,
     claude,
   };
 });
 
 test.afterAll(async () => {
   try {
+    world?.askAgent.stop();
     await world?.claude.close().catch(() => {});
   } finally {
     await removeInboxScratch();
@@ -460,6 +491,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect.poll(() => launched().length).toBe(knowCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/ledger.ts')));
       await noCodeWindow(page, page.locator('.shp-know [data-code-hover="react.js"]'));
+      // The board's Chat tab is the thread: its messages' words too.
+      await page.locator('.shp-tbtn.chat').click();
+      await page.locator('.shp-tabs [role="tab"]', { hasText: 'Thread' }).click();
+      const chatWindow = await codeWindowOf(page, page.locator('.ib-shape-thread [data-code-hover="src/ledger.ts"]'));
+      await expect(chatWindow).toContainText('export const ledger');
+      await expect(chatWindow.locator('[data-open-in-caret]')).toBeVisible();
+      await page.mouse.move(1, 1);
+      await page.getByRole('button', { name: 'Close panel' }).click();
       // The number beside it is still the number.
       await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
       // The Code view's guide is the board's words too.
@@ -651,6 +690,178 @@ for (const colorScheme of ['light', 'dark'] as const) {
 }
 
 // An agent in a linked worktree, `main` checked out in the main repository: every place opens the agent's checkout.
+/** The PR's review: its thread, the review over it, and Ask AI's window floating over both. */
+for (const colorScheme of ['light', 'dark'] as const) {
+  test(`in a review, ${colorScheme}: the thread, the reader and Ask AI show the PR's code and Open, as a message does`, async ({ browser }) => {
+    await world.handPull(world.prReviewThread);
+    const { context, page } = await windowAt(browser, 1440, 900, colorScheme);
+    try {
+      // The review's thread: the agent's message after the review card.
+      await page.goto(`${world.url}#thread=${world.prReviewThread}`);
+      const message = page.locator('.ib-body', { hasText: 'Start at' });
+      const inThread = await codeWindowOf(page, message.locator('[data-code-hover="src/retry.ts"]'));
+      await expect(inThread).toContainText('src/retry.ts · #88');
+      await expect(inThread).toContainText('BACKOFF_MS');
+      await expect(inThread.locator('[data-open-in-caret]')).toBeVisible();
+      await inThread.locator('[data-open-in-primary]').hover();
+      await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toContainText("this computer's copy");
+      await shot(page, `30-review-thread-${colorScheme}`);
+      const linkOnlyInPr = await codeWindowOf(page, message.locator('[data-code-hover="src/pr-only-schedule.ts"]'));
+      await expect(linkOnlyInPr.locator('[data-target-line]').first()).toContainText('schedule30');
+      await expect(linkOnlyInPr.locator('[data-open-in-caret]')).toHaveCount(0);
+      await expect(linkOnlyInPr.locator('[data-code-hover-forge]')).toBeVisible();
+      await page.mouse.move(1, 1);
+
+      // Ask AI's window stays over the review, and its answer's words behave the same, over the window.
+      await page.locator('section.ib-pane [data-ask-open]').click();
+      const ask = page.locator('[data-chat-window]');
+      await expect(ask).toContainText('from the table in');
+      // Read once, the review's message is folded in the thread: the review opens by its address too.
+      await page.evaluate((guide) => {
+        location.hash += `&guide=${guide}`;
+      }, world.prReviewMessage);
+      const reader = page.locator('section[data-review-mode]');
+      await expect(reader).toBeVisible();
+      await expect(ask).toBeVisible();
+      const inAsk = await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
+      await expect(inAsk).toContainText('src/retry.ts · #88');
+      await expect(inAsk).toContainText('BACKOFF_MS');
+      await shot(page, `31-review-ask-window-${colorScheme}`);
+      await inAsk.locator('[data-open-in-caret]').click();
+      const menu = page.locator('[data-open-in-menu="src/retry.ts"]');
+      const count = launched().length;
+      await menu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(count + 1);
+      expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
+      // Escape takes the code window, and leaves Ask AI's and the review.
+      await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
+      await expect(ask).toBeVisible();
+      await expect(reader).toBeVisible();
+      const onlyInPr = await codeWindowOf(page, ask.locator('code', { hasText: 'src/pr-only-schedule.ts:30-34' }));
+      await expect(onlyInPr.locator('[data-open-in-caret]')).toHaveCount(0);
+      await noCodeWindow(page, ask.locator('code', { hasText: 'react.js' }));
+
+      // The review's own words read the same PR.
+      const inReader = await codeWindowOf(page, reader.locator('[data-code-hover="src/retry.ts"]'));
+      await expect(inReader).toContainText('src/retry.ts · #88');
+      await shot(page, `32-review-reader-${colorScheme}`);
+    } finally {
+      await context.close();
+    }
+  });
+
+  test(`in a review on a phone, ${colorScheme}: a tap shows the sheet in the thread and in Ask AI`, async ({ browser }) => {
+    await world.handPull(world.prReviewThread);
+    const { context, page } = await windowAt(browser, 390, 844, colorScheme);
+    try {
+      await page.goto(`${world.url}#thread=${world.prReviewThread}`);
+      const sheet = page.locator('[data-code-snippet-sheet]');
+      await page.locator('.ib-body', { hasText: 'Start at' }).locator('[data-code-hover="src/pr-only-schedule.ts"]').tap();
+      await expect(sheet.locator('[data-target-line]').first()).toContainText('schedule30');
+      await expect(sheet.locator('[data-code-hover-forge]')).toBeVisible();
+      await expect(sheet.locator('[data-open-in-caret]')).toHaveCount(0);
+      await page.waitForTimeout(250);
+      await shot(page, `33-phone-review-thread-${colorScheme}`);
+      await sheet.locator('[data-code-hover-close]').tap();
+      await expect(sheet).toHaveCount(0);
+      await page.locator('[data-ask-open]').first().tap();
+      const ask = page.locator('[data-chat-window]');
+      await ask.locator('code', { hasText: 'src/retry.ts:1-3' }).tap();
+      await expect(sheet).toContainText('BACKOFF_MS');
+      await page.waitForTimeout(250);
+      await shot(page, `34-phone-review-ask-${colorScheme}`);
+      await sheet.locator('[data-code-hover-close]').tap();
+      await expect(sheet).toHaveCount(0);
+      await expect(ask).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
+}
+
+/** Press in the text before `words`, and drag past them into the text after. */
+async function dragAcross(page: Page, words: Locator) {
+  const box = (await words.boundingBox())!;
+  const y = box.y + box.height / 2;
+  await page.mouse.move(box.x - 30, y);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width / 2, y, { steps: 6 });
+  await page.mouse.move(box.x + box.width + 60, y, { steps: 6 });
+  await page.mouse.up();
+}
+
+test('a selection or a saved comment across the words: resting on them still shows the code, and the page stands', async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1440, 900, 'dark');
+  const errors: string[] = [];
+  page.removeAllListeners('pageerror');
+  page.on('pageerror', (error) => errors.push(error.message));
+  const window = page.locator('[data-code-snippet-preview]');
+  try {
+    await page.goto(`${world.url}#thread=${world.marksThread}`);
+    const body = page.locator('.ib-body', { hasText: 'The rows go through' });
+    const span = body.locator('[data-code-hover="src/ledger.ts"]');
+    const missing = body.locator('[data-code-hover=".env"], [data-local-link="unavailable"]').first();
+    await expect(span).toBeVisible();
+
+    // A drag over the words opens nothing.
+    await dragAcross(page, span);
+    await page.waitForTimeout(400);
+    await expect(window).toHaveCount(0);
+    await expect(page.locator('.annotation-toolbar')).toBeVisible();
+
+    // The selection's marks are round them now.
+    await page.mouse.move(1, 1);
+    await span.hover();
+    await expect(window).toContainText('export const ledger');
+    await page.mouse.move(1, 1);
+    await expect(window).toHaveCount(0);
+    await missing.hover();
+    await page.waitForTimeout(500);
+    await expect(window).toHaveCount(0);
+    await page.mouse.move(1, 1);
+    await page.keyboard.press('Escape');
+
+    // Saved, and after a reload: the highlight is drawn before any hover.
+    await dragAcross(page, span);
+    await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
+    await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Check the rows.');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await expect(page.locator('.annotation-toolbar')).toHaveCount(0);
+    await page.reload();
+    await expect(span).toBeVisible();
+    await expect(body.locator('mark').first()).toBeVisible();
+    for (const attempt of [1, 2]) {
+      await page.mouse.move(1, 1);
+      await expect(window).toHaveCount(0);
+      await span.hover();
+      await expect(window, `hover ${attempt}`).toContainText('export const ledger');
+    }
+    await page.mouse.move(1, 1);
+    await missing.hover();
+    await page.waitForTimeout(500);
+    await page.mouse.move(1, 1);
+    await expect(body).toBeVisible();
+    await shot(page, '35-marks-after-hover-dark');
+
+    // A guide's words, the same.
+    await page.goto(`${world.url}#thread=${world.reviewThread}`);
+    await page.getByRole('button', { name: 'Start review' }).or(page.getByRole('button', { name: 'Open review' })).first().click();
+    const reader = page.locator('section[data-review-mode]');
+    const inReader = reader.locator('[data-code-hover="src/retry.ts"]').first();
+    await expect(inReader).toBeVisible();
+    await dragAcross(page, inReader);
+    await page.mouse.move(1, 1);
+    await inReader.hover();
+    await expect(window).toContainText('retryPayout');
+    await expect(reader).toBeVisible();
+    expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
 test('an agent in a linked worktree: its message, review and board open the worktree, not the main checkout', async ({ browser }) => {
   const { context, page } = await windowAt(browser, 1440, 900, 'light');
   const inTree = (file: string) => join(world.worktree, file);

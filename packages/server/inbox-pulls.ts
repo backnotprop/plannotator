@@ -64,6 +64,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRFileContent, reconstructGitlabPatch, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
+import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -581,7 +582,7 @@ export interface InboxPulls {
    * A file as this PR has it at its head commit, read from the forge with the person's own CLI, so it needs no checkout.
    * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
    */
-  file(key: string, path: string): Promise<InboxPullFile | null>;
+  file(key: string, path: string, repos?: InboxPullRepo[]): Promise<InboxPullFile | null>;
 }
 
 /** A file at a PR's head commit: its text, and its address on the forge. */
@@ -594,6 +595,8 @@ export interface InboxPullFile {
 
 /** The files read at a head commit, kept while the Inbox runs: a commit never changes, so nor do they. */
 const INBOX_PULL_FILES_KEPT = 64;
+/** A file's read stops here: the local limit, as the base64 GitHub answers with. */
+const INBOX_PULL_FILE_READ_BYTES = Math.ceil((MAX_REPO_FILE_BYTES * 4) / 3) + 1024 * 1024;
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -988,7 +991,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { ...(avatars.get(host.toLowerCase()) ?? {}) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
-    async file(key, path) {
+    async file(key, path, repos) {
+      // The PR may have moved since the last read of the list: its head is what the code is read at.
+      if (repos) await this.list(repos, { refresh: false }).catch(() => {});
       const pull = known.get(key);
       const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
       const parts = pull ? splitPath(pull.repo) : null;
@@ -1001,13 +1006,26 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           pull.platform === "github"
             ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
             : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+        // Only a real answer is kept: a read that failed says nothing about the file, and asks again next time.
+        let failed = false;
         // The host always named, as for every read here: neither GH_HOST nor a folder's remote picks it.
-        const runtime: PRRuntime = { runCommand: (cli, args, options) => run(cli as RefCli, args.includes("--hostname") ? args : [...args, "--hostname", pull.host], options?.env) };
-        const read = await fetchPRFileContent(runtime, ref, sha, path).catch(() => null);
-        // Text only: what is not, the preview cannot show.
-        contents = read === null || read.includes("\0") ? null : read;
-        headFiles.set(kept, contents);
-        while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
+        const runtime: PRRuntime = {
+          runCommand: async (cli, args) => {
+            const result = await diffRun(cli as RefCli, args.includes("--hostname") ? args : [...args, "--hostname", pull.host], INBOX_PULL_FILE_READ_BYTES);
+            if (result.exitCode !== 0 && !result.tooLarge && !/\b404\b/.test(`${result.stderr} ${result.stdout}`)) failed = true;
+            return result;
+          },
+        };
+        const read = await fetchPRFileContent(runtime, ref, sha, path).catch(() => {
+          failed = true;
+          return null;
+        });
+        // Text only, and no larger than a file on this computer: what is not, the preview cannot show.
+        contents = read === null || read.includes("\0") || Buffer.byteLength(read, "utf8") > MAX_REPO_FILE_BYTES ? null : read;
+        if (!failed) {
+          headFiles.set(kept, contents);
+          while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
+        }
       }
       if (contents === null) return null;
       const encoded = path.split("/").map(encodeURIComponent).join("/");

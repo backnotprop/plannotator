@@ -4325,9 +4325,9 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-code-hover { border-radius: 4px; }
 .ib-code-hover:focus { outline: none; }
 .ib-code-hover:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* The code window (ui's CodeSnippetPreview) sits over the window but under its own editor list, a z-50 popup in the body. */
-.pn-inbox .code-snippet-preview-window { z-index: 40; }
-.pn-inbox [data-code-snippet-scrim] { z-index: 39; }
+/* The code window (ui's CodeSnippetPreview) sits over Ask AI's (41) but under its own editor list, a z-50 popup in the body. */
+.pn-inbox .code-snippet-preview-window { z-index: 45; }
+.pn-inbox [data-code-snippet-scrim] { z-index: 44; }
 /* Its header's controls take a line of small text. */
 .code-snippet-preview-window .ib-split { height: 22px; font-family: var(--font-sans, inherit); }
 .pn-inbox .code-snippet-preview-window .ib-split .ib-sa { font-size: 11px; }

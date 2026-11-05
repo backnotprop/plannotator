@@ -151,6 +151,19 @@ interface FileScope {
   from?: unknown;
 }
 
+const CREDENTIAL_FOLDERS = new Set([".ssh", ".gnupg", ".aws", ".docker", ".kube", ".git"]);
+const CREDENTIAL_FILES = new Set([".netrc", ".npmrc", ".pypirc", ".git-credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]);
+
+/**
+ * A path a hover never shows, as if the file were missing: a thread sent from the home folder makes all of it a project.
+ * Other hidden folders (`.github`, `.claude`) are ordinary project files. NTFS names are cleaned as for a dotenv file.
+ */
+function holdsCredentials(path: string): boolean {
+  const parts = path.replace(/\\/g, "/").toLowerCase().split("/").map((part) => part.replace(/:.*$/s, "").replace(/[. ]+$/, ""));
+  const name = parts.at(-1) ?? "";
+  return parts.some((part) => CREDENTIAL_FOLDERS.has(part)) || CREDENTIAL_FILES.has(name) || /\.(pem|key)$/.test(name);
+}
+
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile, ownerOrLocal } = context;
   const givenHome = context.home ?? homedir();
@@ -240,7 +253,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
     if (pulls.length > 0) {
       const clean = posix.normalize(named.replace(/\\/g, "/"));
-      const paths = [...new Set([...places.map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path));
+      const paths = [...new Set([...places.map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path) && !holdsCredentials(path));
       for (const pull of pulls) {
         for (const path of paths) {
           const file = await pullFile(pull, path);
@@ -249,7 +262,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       }
     }
     const file = await checkInboxProjectFile(places);
-    if (!file.ok || !isInboxTextKind(file.kind)) return json({ found: false });
+    if (!file.ok || !isInboxTextKind(file.kind) || holdsCredentials(file.path)) return json({ found: false });
     const read = await readFileCapped(file.path);
     return json(read.ok && !read.content.includes("\0") ? { found: true, contents: read.content } : { found: false });
   };

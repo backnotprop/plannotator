@@ -1,5 +1,5 @@
 import { inboxUrl } from '../inboxUrl';
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
@@ -198,6 +198,7 @@ function SplitButton({
   launch,
   copyPath,
   onOpenChange,
+  note,
 }: {
   id: string;
   kind: unknown;
@@ -209,6 +210,8 @@ function SplitButton({
   launch: (item: OpenInItem) => Promise<void>;
   copyPath: () => Promise<void>;
   onOpenChange?: (open: boolean) => void;
+  /** Added to the button's hover words. */
+  note?: string;
 }) {
   const [open, setOpenState] = useState(false);
   const setOpen = (next: boolean) => {
@@ -234,7 +237,7 @@ function SplitButton({
             </a>
           </Tip>
         ) : (
-          <Tip content={title}>
+          <Tip content={note ? `${title}: ${note}` : title}>
             <button
               type="button"
               className="ib-sa"
@@ -270,13 +273,13 @@ const knownFiles = new Map<string, { path: string; kind: string } | null>();
  * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
  * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
  * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
- * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header).
+ * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header). `note`: added to the button's hover words.
  */
-export function OpenInFile({ scope, path, line, label = false, onListOpenChange }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void }) {
+export function OpenInFile({ scope, path, line, label = false, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
   const phone = usePhone();
   const { writes } = useInboxFileSource();
   if (phone || !writes) return null;
-  return <OpenInFileSplit scope={scope} path={path} line={line} label={label} onListOpenChange={onListOpenChange} />;
+  return <OpenInFileSplit scope={scope} path={path} line={line} label={label} onListOpenChange={onListOpenChange} note={note} />;
 }
 
 /** Whether a referenced file is here and what kind, remembered for the next control drawn for it. */
@@ -293,7 +296,7 @@ async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ 
   }
 }
 
-function OpenInFileSplit({ scope, path, line, label, onListOpenChange }: { scope: OpenInFileScope; path: string; line?: number; label: boolean; onListOpenChange?: (open: boolean) => void }) {
+function OpenInFileSplit({ scope, path, line, label, onListOpenChange, note }: { scope: OpenInFileScope; path: string; line?: number; label: boolean; onListOpenChange?: (open: boolean) => void; note?: string }) {
   const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, path);
   const [remembered, remember] = useRememberedOpenInApp();
   const key = JSON.stringify([scope, path]);
@@ -315,7 +318,7 @@ function OpenInFileSplit({ scope, path, line, label, onListOpenChange }: { scope
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
   if (!answer?.available || !file) return null;
   const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
-  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} />;
+  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} note={note} />;
 }
 
 /**
@@ -363,7 +366,15 @@ export function OpenInCodeHover({ scope, path, line, lineEnd, title, children }:
   return <CodeHoverWindow scope={scope} path={path} line={line} lineEnd={lineEnd} title={title}>{children}</CodeHoverWindow>;
 }
 
-function CodeHoverWindow({ scope, path, line, lineEnd, title, children }: { scope: OpenInFileScope; path: string; line?: number; lineEnd?: number; title?: string; children: ReactNode }) {
+interface CodeHoverWords {
+  scope: OpenInFileScope;
+  path: string;
+  line?: number;
+  lineEnd?: number;
+}
+
+/** What words that name a file do, wherever they are drawn: the file's read, the window, and how it stays and closes. */
+function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
   const phone = usePhone();
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
@@ -373,18 +384,18 @@ function CodeHoverWindow({ scope, path, line, lineEnd, title, children }: { scop
     setMissing(!answer?.found);
     return answer?.found ? answer : null;
   });
-  const { preview, anchorRef } = hover;
+  const { preview, anchorRef, dismiss: close } = hover;
   const windowEl = useRef<HTMLDivElement | null>(null);
   // The editor list portals away from the window: while it is open, leaving the window closes nothing.
   const listOpen = useRef(false);
   const pointerIn = useRef(false);
-  const { dismiss: close } = hover;
   const dismiss = useCallback(() => {
     if (!listOpen.current) close();
   }, [close]);
-  const enter = () => {
+  const enter = (event?: { buttons: number }) => {
     pointerIn.current = true;
-    hover.onEnter();
+    // Not during a drag: the person is selecting words.
+    if (!event?.buttons) hover.onEnter();
   };
   const leave = () => {
     pointerIn.current = false;
@@ -407,17 +418,89 @@ function CodeHoverWindow({ scope, path, line, lineEnd, title, children }: { scop
     return () => document.removeEventListener('keydown', onKey, true);
   }, [open, close, anchorRef]);
 
+  const element = (
+    // Always drawn: a comment's marks move the text beside the words, so nothing may be inserted among them later.
+    // A portal's events still reach the page's own handlers through React: not a click in here.
+    <span
+      style={{ display: 'contents' }}
+      onClick={(event) => event.stopPropagation()}
+      onBlur={(event) => {
+        const to = event.relatedTarget;
+        if (touch || pointerIn.current || (to instanceof Node && (windowEl.current?.contains(to) || anchorRef.current?.contains(to)))) return;
+        leave();
+      }}
+      onKeyDown={(event) => {
+        if (event.key !== 'Tab') return;
+        const list = controls();
+        const atEdge = document.activeElement === (event.shiftKey ? list[0] : list.at(-1));
+        if (!atEdge) return;
+        // Back to the words: from there, Tab goes on through the page.
+        if (event.shiftKey) event.preventDefault();
+        anchorRef.current?.focus();
+      }}
+    >
+      {preview && (
+        <CodeHoverPreview
+          anchorEl={anchorRef.current}
+          contents={preview.contents}
+          path={path}
+          line={line}
+          lineEnd={lineEnd}
+          pull={preview.pull}
+          sheet={touch}
+          windowRef={windowEl}
+          onDismiss={dismiss}
+          onMouseEnter={() => {
+            pointerIn.current = true;
+            hover.previewHandlers.onMouseEnter();
+          }}
+          onMouseLeave={leave}
+          actions={
+            <>
+              {preview.pull && (
+                <a className="ib-code-hover-forge" href={withLines(preview.pull, line, lineEnd)} target="_blank" rel="noopener noreferrer" data-code-hover-forge="">
+                  Open on {preview.pull.platform === 'gitlab' ? 'GitLab' : 'GitHub'}
+                </a>
+              )}
+              <OpenInFile
+                scope={scope}
+                path={path}
+                line={line}
+                label
+                note={preview.pull ? "opens this computer's copy" : undefined}
+                onListOpenChange={(next) => {
+                  listOpen.current = next;
+                  // Closed with the pointer gone: the window goes too.
+                  if (!next && !pointerIn.current && !touch) hover.onLeave();
+                }}
+              />
+              {touch && (
+                <button type="button" className="ib-code-hover-close" onClick={() => hover.dismiss()} data-code-hover-close="">
+                  Close
+                </button>
+              )}
+            </>
+          }
+        />
+      )}
+    </span>
+  );
+  return { hover, touch, open, missing, enter, leave, controls, windowEl, pointerIn, element };
+}
+
+function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title?: string; children: ReactNode }) {
+  const { hover, touch, open, missing, enter, leave, controls, windowEl, pointerIn, element } = useCodeHover(words);
   const anchor = (
     <span
-      ref={(element) => {
-        anchorRef.current = element;
+      ref={(el) => {
+        hover.anchorRef.current = el;
       }}
       className="ib-code-hover"
       role="button"
       tabIndex={0}
       aria-haspopup="dialog"
       aria-expanded={open}
-      data-code-hover={path}
+      data-code-hover={words.path}
       onMouseEnter={touch ? undefined : enter}
       onMouseLeave={touch ? undefined : leave}
       onFocus={(event) => {
@@ -452,71 +535,75 @@ function CodeHoverWindow({ scope, path, line, lineEnd, title, children }: { scop
 
   return (
     <>
-      {title && missing ? <HostTitle title={title}>{anchor}</HostTitle> : anchor}
-      {preview && (
-        // A portal's events still reach the page's own handlers through React: not a click in here.
-        <span
-          onClick={(event) => event.stopPropagation()}
-          onBlur={(event) => {
-            const to = event.relatedTarget;
-            if (touch || pointerIn.current || (to instanceof Node && (windowEl.current?.contains(to) || anchorRef.current?.contains(to)))) return;
-            leave();
-          }}
-          onKeyDown={(event) => {
-            if (event.key !== 'Tab') return;
-            const list = controls();
-            const atEdge = document.activeElement === (event.shiftKey ? list[0] : list.at(-1));
-            if (!atEdge) return;
-            // Back to the words: from there, Tab goes on through the page.
-            if (event.shiftKey) event.preventDefault();
-            anchorRef.current?.focus();
-          }}
-        >
-          <CodeHoverPreview
-            anchorEl={anchorRef.current}
-            contents={preview.contents}
-            path={path}
-            line={line}
-            lineEnd={lineEnd}
-            pull={preview.pull}
-            sheet={touch}
-            windowRef={windowEl}
-            onDismiss={dismiss}
-            onMouseEnter={() => {
-              pointerIn.current = true;
-              hover.previewHandlers.onMouseEnter();
-            }}
-            onMouseLeave={leave}
-            actions={
-              <>
-                {preview.pull && (
-                  <a className="ib-code-hover-forge" href={withLines(preview.pull, line, lineEnd)} target="_blank" rel="noopener noreferrer" data-code-hover-forge="">
-                    Open on {preview.pull.platform === 'gitlab' ? 'GitLab' : 'GitHub'}
-                  </a>
-                )}
-                <OpenInFile
-                  scope={scope}
-                  path={path}
-                  line={line}
-                  label
-                  onListOpenChange={(next) => {
-                    listOpen.current = next;
-                    // Closed with the pointer gone: the window goes too.
-                    if (!next && !pointerIn.current && !touch) hover.onLeave();
-                  }}
-                />
-                {touch && (
-                  <button type="button" className="ib-code-hover-close" onClick={() => hover.dismiss()} data-code-hover-close="">
-                    Close
-                  </button>
-                )}
-              </>
-            }
-          />
-        </span>
-      )}
+      {title ? <HostTitle title={missing ? title : undefined}>{anchor}</HostTitle> : anchor}
+      {element}
     </>
   );
+}
+
+/**
+ * The same window for code spans a host draws as HTML, which has no spans to wrap (Ask AI's answers, `ChatMarkdown`): it
+ * listens over the region, one window at a time. `on` is Code review.
+ */
+export function OpenInCodeRegion({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
+  const touch = useTouchScreen();
+  const { writes } = useInboxFileSource();
+  const [at, setAt] = useState<{ el: HTMLElement; turn: number; path: string; line?: number; lineEnd?: number } | null>(null);
+  const turns = useRef(0);
+  /** The file a code span or a link with no scheme names. */
+  const namedBy = (target: EventTarget) => {
+    const el = target instanceof Element ? target.closest<HTMLElement>('code, a') : null;
+    if (!el || el.closest('pre, [data-code-snippet-preview]')) return null;
+    const words = el.tagName === 'A' ? el.getAttribute('href') ?? '' : el.textContent ?? '';
+    if (el.tagName === 'A' && /^[a-z][a-z0-9+.-]*:|^\/\//i.test(words)) return null;
+    const named = projectFileOfLink(words);
+    return named && { el, ...named };
+  };
+  const show = (event: ReactMouseEvent<HTMLElement>) => {
+    // Not during a drag: the person is selecting words.
+    if (!on || !writes || event.buttons) return;
+    const named = namedBy(event.target);
+    if (!named) return;
+    // A tap on a link stays here: its address means nothing to a browser.
+    if (touch && named.el.tagName === 'A') event.preventDefault();
+    if (named.el === at?.el) return;
+    if (touch && window.getSelection()?.isCollapsed === false) return;
+    setAt({ ...named, turn: (turns.current += 1) });
+  };
+  return (
+    <div
+      style={{ display: 'contents' }}
+      data-code-hover-region=""
+      onMouseOver={touch ? undefined : show}
+      onClick={(event) => {
+        if (touch) show(event);
+        else if (on && writes && namedBy(event.target)?.el.tagName === 'A') event.preventDefault();
+      }}
+    >
+      {children}
+      {at && <CodeRegionWindow key={at.turn} scope={scope} anchor={at.el} path={at.path} line={at.line} lineEnd={at.lineEnd} />}
+    </div>
+  );
+}
+
+function CodeRegionWindow({ anchor, ...words }: CodeHoverWords & { anchor: HTMLElement }) {
+  const { hover, touch, enter, leave, element } = useCodeHover(words);
+  useEffect(() => {
+    hover.anchorRef.current = anchor;
+    const open = touch ? () => hover.onEnter() : enter;
+    // It came on the pointer's arrival or the tap, which started this.
+    open();
+    const type = touch ? 'click' : 'mouseenter';
+    anchor.addEventListener(type, open);
+    if (!touch) anchor.addEventListener('mouseleave', leave);
+    return () => {
+      anchor.removeEventListener(type, open);
+      anchor.removeEventListener('mouseleave', leave);
+    };
+    // One span for this window's life (`key` in OpenInCodeRegion); its handlers read only refs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [anchor]);
+  return <>{element}</>;
 }
 
 /** A file's address on its forge, at the lines the words name. */

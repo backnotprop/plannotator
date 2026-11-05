@@ -9,7 +9,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxOpenInRoute, INBOX_OPEN_IN_CODE_PATH, type InboxOpenInLauncher } from "./inbox-open-in";
-import { createInboxPulls, type InboxPullFile } from "./inbox-pulls";
+import { createInboxPulls, INBOX_PULLS_FRESH_MS, type InboxPullFile } from "./inbox-pulls";
+import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
 import type { RefRunner } from "@plannotator/shared/ref-cards";
 
 const HEAD = "a".repeat(40);
@@ -159,6 +160,46 @@ describe("a pull request's file", () => {
   });
 });
 
+describe("a path that holds credentials answers as a missing file", () => {
+  const file = (path: string) => {
+    mkdirSync(join(project, path, ".."), { recursive: true });
+    writeFileSync(join(project, path), "fake\n");
+  };
+
+  test("in a project at the home folder, by a segment or a name; the forge is never asked", async () => {
+    const secrets = [".ssh/id_ed25519", ".ssh/config", ".gnupg/pubring.kbx", ".aws/credentials", ".docker/config.json", ".kube/config", ".git/config", ".netrc", ".npmrc", ".pypirc", "id_rsa", "backup/id_ed25519", "certs/site.pem", "tls/server.key", "CERTS/SITE.PEM"];
+    for (const path of secrets) file(path);
+    const asked: string[] = [];
+    const ask = route({ threadPulls: ["key"], pullFile: async (_pull, path) => (asked.push(path), inPull(path)) });
+    for (const path of secrets) expect((await ask({ thread: "msg_1", path })).body).toEqual({ found: false });
+    expect((await ask({ thread: "msg_1", path: join(project, ".netrc") })).body).toEqual({ found: false });
+    expect(asked).toEqual([]);
+  });
+
+  test("a project that is one of these folders: its plain names too", async () => {
+    project = join(dir, "home", ".aws");
+    file("credentials");
+    file("notes.ts");
+    const ask = route({});
+    expect((await ask({ thread: "msg_1", path: "credentials" })).body).toEqual({ found: false });
+    expect((await ask({ thread: "msg_1", path: "notes.ts" })).body).toEqual({ found: false });
+  });
+
+  test("a link in the project to one: what it reaches is what counts", async () => {
+    file(".ssh/id_ed25519");
+    symlinkSync(join(project, ".ssh", "id_ed25519"), join(project, "src", "deploy.txt"));
+    expect((await route({})({ thread: "msg_1", path: "src/deploy.txt" })).body).toEqual({ found: false });
+  });
+
+  test("other hidden folders and ordinary names keep working", async () => {
+    const plain = [".github/ci.yml", ".claude/rules.md", ".agents/skills/x/SKILL.md", "src/a.ts", "src/keys.ts", "docs/docker.md", "src/git.ts"];
+    for (const path of plain) if (path !== "src/a.ts") file(path);
+    const ask = route({});
+    for (const path of plain) expect((await ask({ thread: "msg_1", path })).body).toMatchObject({ found: true });
+    expect((await route({ threadPulls: ["key"], pullFile: async (_pull, path) => inPull(path) })({ thread: "msg_1", path: ".github/ci.yml" })).body).toMatchObject({ found: true, pull: { label: "#412" } });
+  });
+});
+
 describe("who may read", () => {
   test("off with Code review", async () => {
     const { status, body } = await route({ codeReview: false })({ thread: "msg_1", path: "src/a.ts" });
@@ -218,5 +259,46 @@ describe("InboxPulls.file: the PR's head commit, from the forge", () => {
     expect(await pulls.file(KEY, "src/a.ts")).toBeNull();
     expect(f.contentReads()).toHaveLength(1);
     expect(await pulls.file(KEY, "bin/tool")).toBeNull();
+  });
+
+  test("a failed read is not a missing file: the next one asks again, and finds it", async () => {
+    const f = forge({ "src/a.ts": "in the PR\n" });
+    let down = true;
+    const run: RefRunner = async (cli, args) => (down && args.some((arg) => arg.includes("/contents/")) ? { stdout: "", stderr: "gh: connection refused", exitCode: 1 } : f.run(cli, args));
+    const pulls = createInboxPulls({ run });
+    await pulls.list(repos);
+    expect(await pulls.file(KEY, "src/a.ts")).toBeNull();
+    down = false;
+    expect((await pulls.file(KEY, "src/a.ts"))?.contents).toBe("in the PR\n");
+  });
+
+  test("a head that moved: given the repositories, the file is read at the new one once the list is due", async () => {
+    const f = forge({ "src/a.ts": "in the PR\n" });
+    const moved = "b".repeat(40);
+    let clock = 1_000_000;
+    let head = HEAD;
+    const run: RefRunner = async (cli, args) => {
+      const endpoint = args.find((arg) => arg.includes("/contents/"));
+      if (endpoint?.endsWith(`?ref=${moved}`)) return { stdout: `${Buffer.from("after the push\n").toString("base64")}\n`, stderr: "", exitCode: 0 };
+      const answer = await f.run(cli, args);
+      return args.includes("graphql") ? { ...answer, stdout: answer.stdout.replaceAll(HEAD, head) } : answer;
+    };
+    const pulls = createInboxPulls({ run, now: () => clock });
+    await pulls.list(repos);
+    expect((await pulls.file(KEY, "src/a.ts", repos))?.contents).toBe("in the PR\n");
+    head = moved;
+    clock += INBOX_PULLS_FRESH_MS + 1;
+    expect((await pulls.file(KEY, "src/a.ts", repos))?.url).toContain(moved);
+    expect((await pulls.file(KEY, "src/a.ts", repos))?.contents).toBe("after the push\n");
+  });
+
+  test("over the local limit: not shown, and kept; at it: shown", async () => {
+    const f = forge({ "big.txt": "x".repeat(MAX_REPO_FILE_BYTES + 1), "fits.txt": "x".repeat(MAX_REPO_FILE_BYTES) });
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list(repos);
+    expect(await pulls.file(KEY, "big.txt")).toBeNull();
+    expect(await pulls.file(KEY, "big.txt")).toBeNull();
+    expect(f.contentReads().filter((call) => call.some((arg) => arg.includes("big.txt")))).toHaveLength(1);
+    expect((await pulls.file(KEY, "fits.txt"))?.contents.length).toBe(MAX_REPO_FILE_BYTES);
   });
 });

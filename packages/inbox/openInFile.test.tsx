@@ -14,7 +14,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { HOVER_PREVIEW_HIDE_DELAY_MS, HOVER_PREVIEW_SHOW_DELAY_MS } from '@plannotator/ui/hooks/useHoverPreview';
 
 const hasDom = typeof document !== 'undefined';
-const { OpenInCodeHover, OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { OpenInCodeHover, OpenInCodeRegion, OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
 const { ShapeInline } = (hasDom ? await import('@plannotator/ui/components/shape/inline') : {}) as typeof import('@plannotator/ui/components/shape/inline');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
@@ -358,6 +358,145 @@ describe('words that name a file', () => {
     );
     expect(host!.querySelector('[data-code-hover]')).toBeNull();
     expect(host!.querySelector('code')).not.toBeNull();
+  });
+});
+
+describe('words with a comment\'s marks around them', () => {
+  const scope = { thread: 'msg_mark' };
+  const codeWindow = () => document.querySelector('[data-code-snippet-preview]') as HTMLElement | null;
+  /** What a selection or a saved comment does: the text beside the words moves into a mark. */
+  const markTheWordsAfter = () => {
+    const after = host!.querySelector('[data-after]')!.firstChild!;
+    const mark = document.createElement('mark');
+    after.parentNode!.insertBefore(mark, after);
+    mark.appendChild(after);
+  };
+  const draw = (title?: string) =>
+    act(async () =>
+      root!.render(
+        <p>
+          before <OpenInCodeHover scope={scope} path="src/a.ts" title={title}><code>src/a.ts</code></OpenInCodeHover>
+          <span style={{ display: 'contents' }} data-after="">after</span>
+        </p>,
+      ),
+    );
+  const rest = async (buttons = 0) => {
+    await act(async () => {
+      host!.querySelector('[data-code-hover]')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons }));
+    });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_SHOW_DELAY_MS + 40));
+    });
+    await settle();
+  };
+
+  test.skipIf(!hasDom)('resting on them shows the code and adds nothing among the words', async () => {
+    await draw();
+    const before = [...host!.querySelector('p')!.childNodes];
+    markTheWordsAfter();
+    await rest();
+    expect(codeWindow()).not.toBeNull();
+    expect([...host!.querySelector('p')!.childNodes]).toEqual(before);
+  });
+
+  test.skipIf(!hasDom)('a file that is missing keeps the words in place, and the words still there', async () => {
+    answers.code = { status: 200, body: { found: false } };
+    await draw('Not on this computer');
+    markTheWordsAfter();
+    await rest();
+    expect(codeWindow()).toBeNull();
+    expect(host!.querySelector('[data-code-hover]')!.textContent).toBe('src/a.ts');
+  });
+
+  test.skipIf(!hasDom)('a drag over them is a selection: nothing opens or is asked', async () => {
+    await draw();
+    await rest(1);
+    expect(asked.filter((a) => a.url.includes('/open-in/file/code'))).toEqual([]);
+    expect(codeWindow()).toBeNull();
+  });
+});
+
+describe('code spans drawn as HTML: Ask AI\'s answers', () => {
+  const scope = { thread: 'msg_ask' };
+  const codeWindow = () => document.querySelector('[data-code-snippet-preview]') as HTMLElement | null;
+  const draw = (on = true) =>
+    act(async () =>
+      root!.render(
+        <OpenInCodeRegion scope={scope} on={on}>
+          <div dangerouslySetInnerHTML={{ __html: '<p>See <code id="a">src/a.ts:12</code>, <code id="b">src/b.ts:2-3</code>, <a id="l" href="src/l.ts:4">the file</a> and <a id="x" href="https://example.com/x.ts">the site</a>.</p><pre><code id="p">src/c.ts</code></pre>' }} />
+        </OpenInCodeRegion>,
+      ),
+    );
+  const fire = async (id: string, type: string, wait = HOVER_PREVIEW_SHOW_DELAY_MS) => {
+    // The window mounts with the first act, and its timer runs in the next.
+    await act(async () => {
+      document.getElementById(id)!.dispatchEvent(new MouseEvent(type, { bubbles: type !== 'mouseenter' && type !== 'mouseleave', cancelable: true }));
+    });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, wait + 40));
+    });
+    await settle();
+  };
+  const over = (id: string) => fire(id, 'mouseover');
+  const reads = () => asked.filter((a) => a.url.includes('/open-in/file/code')).map((a) => a.url);
+
+  test.skipIf(!hasDom)('a span or a link names its file and shows its code; another replaces it; a code block and a web link ask nothing', async () => {
+    await draw();
+    await settle();
+    await over('x');
+    await over('p');
+    await act(async () => {
+      document.getElementById('a')!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, buttons: 1 }));
+    });
+    await act(async () => {
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_SHOW_DELAY_MS + 40));
+    });
+    await settle();
+    expect(reads()).toEqual([]);
+    await over('a');
+    expect(reads()[0]).toContain('thread=msg_ask');
+    expect(reads()[0]).toContain(encodeURIComponent('src/a.ts'));
+    expect(codeWindow()).not.toBeNull();
+    await over('b');
+    expect(document.querySelectorAll('[data-code-snippet-preview]')).toHaveLength(1);
+    expect(codeWindow()!.querySelectorAll('[data-target-line]')).toHaveLength(2);
+    await over('l');
+    expect(reads().at(-1)).toContain(encodeURIComponent('src/l.ts'));
+    const followed = new MouseEvent('click', { bubbles: true, cancelable: true });
+    await act(async () => {
+      document.getElementById('l')!.dispatchEvent(followed);
+    });
+    expect(followed.defaultPrevented).toBe(true);
+  });
+
+  test.skipIf(!hasDom)('leaving the span closes it, and coming back shows it again', async () => {
+    await draw();
+    await over('a');
+    await fire('a', 'mouseleave', HOVER_PREVIEW_HIDE_DELAY_MS);
+    expect(codeWindow()).toBeNull();
+    await fire('a', 'mouseenter');
+    expect(codeWindow()).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('off with Code review: nothing is asked, and a link is left alone', async () => {
+    await draw(false);
+    await over('a');
+    expect(reads()).toEqual([]);
+    expect(codeWindow()).toBeNull();
+    const followed = new MouseEvent('click', { bubbles: true, cancelable: true });
+    await act(async () => {
+      document.getElementById('l')!.dispatchEvent(followed);
+    });
+    expect(followed.defaultPrevented).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('on a touch screen a hover does nothing, and a tap shows the sheet', async () => {
+    window.matchMedia = ((query: string) => ({ matches: query.includes('coarse') || query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    await draw();
+    await over('a');
+    expect(codeWindow()).toBeNull();
+    await fire('a', 'click');
+    expect(codeWindow()!.hasAttribute('data-code-snippet-sheet')).toBe(true);
   });
 });
 

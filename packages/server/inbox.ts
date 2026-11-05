@@ -3396,8 +3396,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     threadPulls: (thread) => pullOwners.keys(thread).reverse(),
     // An Inbox just started has no list yet: read it for a PR it does not know.
     pullFile: async (pull, path) => {
-      if (!pulls.find(pull)) await findPulls([pull], (await pullProjects()).wanted);
-      return pulls.file(pull, path);
+      const { wanted } = await pullProjects();
+      if (!pulls.find(pull)) await findPulls([pull], wanted);
+      return pulls.file(pull, path, wanted);
     },
     ownerOrLocal,
   });
