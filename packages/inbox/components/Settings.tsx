@@ -536,7 +536,7 @@ function CapabilitiesSection({
                     Code review
                   </span>
                   <span className="ib-desc">
-                    Review your agents' code changes in the thread: type / in a reply to ask for a review, then approve it or send feedback from the review itself. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
+                    Review your agents' code changes and your pull requests from GitHub and GitLab: type / in a reply to ask for a review, then approve it, send feedback to the agent, or post it on the pull request. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
                   </span>
                 </span>
                 <span className="ib-ctl">
