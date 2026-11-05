@@ -3352,6 +3352,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableBackground,
       expandUnchanged,
       ...(opensWholeFiles && { loadDiffFiles: loadWholeFile }),
+      // Pierre turns its rows' pointer events off for 120 ms after each scroll of its root. With the page as the
+      // scroller every page scroll is one, and a stuck header's Viewed or fold button would miss the click that follows.
+      ...(scrollsWithPage && { pointerEventsOnScroll: true }),
       enableLineSelection: !readOnly,
       enableGutterUtility: !readOnly,
       hunkSeparators: 'line-info',
