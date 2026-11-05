@@ -2,7 +2,7 @@ import type { CodeAnnotation } from '@plannotator/ui/types';
 import type { DraftTransport } from '@plannotator/ui/hooks/useAnnotationDraft';
 import { DraftTargetChangedError } from '@plannotator/ui/hooks/useCodeAnnotationDraft';
 import type { DiffFile } from '../types';
-import { captureAnchor } from './codeAnnotationAnchor';
+import { captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 
 /** Older exact-patch drafts have no target stamp; adopt it once on restore. */
 export function withLocalReviewTarget(
