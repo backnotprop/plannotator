@@ -114,13 +114,30 @@ describe('issues and PRs', () => {
     expect(data.issues).toEqual([{ title: 'Real request', number: 9 }]);
   });
 
-  test('only number and title are asked of GitHub', () => {
+  test('an issue labelled security, invalid or fixed stays out, and the labels never reach the file', () => {
+    const data = buildRelatedData({
+      releases: [],
+      issues: [
+        { number: 1, title: 'A report', labels: [{ name: 'security' }] },
+        { number: 2, title: 'Not a problem', labels: [{ name: 'invalid' }] },
+        { number: 3, title: 'Already done', labels: [{ name: 'enhancement' }, { name: 'fixed' }] },
+        { number: 925, title: 'A question' },
+        { number: 4, title: 'Real request', labels: [{ name: 'enhancement' }] },
+      ],
+      pulls: [],
+    });
+    expect(data.issues).toEqual([{ title: 'Real request', number: 4 }]);
+  });
+
+  test('only number and title are asked of GitHub, and labels of an issue to leave it out', () => {
     const calls: string[][] = [];
     readRelatedInput((args) => {
       calls.push(args);
       return fakeGh()(args);
     }, null);
-    for (const call of calls.filter((args) => args[0] !== 'api')) expect(call[call.indexOf('--json') + 1]).toBe('number,title');
+    const asked = (kind: string) => calls.find((args) => args[0] === kind)!;
+    expect(asked('pr')[asked('pr').indexOf('--json') + 1]).toBe('number,title');
+    expect(asked('issue')[asked('issue').indexOf('--json') + 1]).toBe('number,title,labels');
     for (const call of calls) expect(call.join(' ')).toMatch(/plannotator/);
     // Read-only: no call that could write.
     for (const call of calls) expect(call.join(' ')).not.toMatch(/\b(create|edit|comment|close|delete|-X|--method|-f|-F)\b/);
@@ -198,6 +215,39 @@ describe('a bad read writes nothing', () => {
     writeFileSync(file, big);
     expect(() => writeRelatedIndex(root, fakeGh(), silent)).toThrow('Nothing written');
     expect(kept(root)).toBe(big);
+  });
+
+  describe('against a file of 900 lines and 70 issues', () => {
+    const lines = (count: number) => JSON.stringify({ tag: 'v0.28.1', draft: false, prerelease: false, body: notes(Array.from({ length: count }, (_, n) => `### Line ${n}`).join('\n\n')) });
+    const issues = (count: number) => Array.from({ length: count }, (_, n) => ({ number: n + 1, title: `Issue ${n}` }));
+    const fileOf900 = () => {
+      const root = fakeRoot();
+      const big = serializeRelatedData({
+        features: [],
+        releases: Array.from({ length: 900 }, (_, n) => ({ title: `Old line ${n}`, version: 'v0.28.1' })),
+        issues: Array.from({ length: 70 }, (_, n) => ({ title: `Old issue ${n}`, number: n + 1 })),
+      });
+      writeFileSync(join(root, 'packages/inbox/feedbackRelated.data.json'), big);
+      return { root, big };
+    };
+
+    test('810 lines and 35 issues write', () => {
+      const { root } = fileOf900();
+      const data = writeRelatedIndex(root, fakeGh({ releases: lines(810), issues: issues(35) }), silent);
+      expect([data.releases.length, data.issues.length]).toEqual([810, 35]);
+    });
+
+    test('809 lines refuse', () => {
+      const { root, big } = fileOf900();
+      expect(() => writeRelatedIndex(root, fakeGh({ releases: lines(809), issues: issues(35) }), silent)).toThrow('Nothing written');
+      expect(kept(root)).toBe(big);
+    });
+
+    test('34 issues refuse', () => {
+      const { root, big } = fileOf900();
+      expect(() => writeRelatedIndex(root, fakeGh({ releases: lines(810), issues: issues(34) }), silent)).toThrow('Nothing written');
+      expect(kept(root)).toBe(big);
+    });
   });
 
   test('a normal month against the file already there writes: a few lines fewer, open issues closed', () => {

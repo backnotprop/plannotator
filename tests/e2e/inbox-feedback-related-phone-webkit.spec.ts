@@ -133,6 +133,40 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     await showsInSheet(page, '[data-feedback-send]');
   });
 
+  test('a release note or issue over the keyboard: one row, whatever its title, with Send still showing', async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    await page.keyboard.type('quick labels please', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    await page.locator('[data-feedback-related] a').evaluate((a) => (a.textContent = 'A title far too long for any row of this form, '.repeat(6)));
+    expect((await page.locator('[data-feedback-related] li').boundingBox())!.height).toBe(44);
+    await showsInSheet(page, '[data-feedback-send]');
+  });
+
+  test('a tap on the old spot of Bug, in the instant the line lands there, opens no page', async ({ page, context }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    const opened: unknown[] = [];
+    context.on('page', (other) => opened.push(other));
+    const bug = (await page.locator('[data-feedback-category="bug"]').boundingBox())!;
+    await page.evaluate(
+      ([x, y]) => {
+        const slot = document.querySelector('[data-feedback-related]')!;
+        new MutationObserver((_, watch) => {
+          if (!slot.querySelector('a')) return;
+          watch.disconnect();
+          (document.elementFromPoint(x!, y!) as HTMLElement | null)?.closest('a')?.click();
+          slot.querySelector('a')!.click();
+        }).observe(slot, { childList: true, subtree: true });
+      },
+      [bug.x + bug.width / 2, bug.y + bug.height / 2],
+    );
+    await page.keyboard.type('need a done button', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    await page.waitForTimeout(200);
+    expect(opened).toEqual([]);
+  });
+
   test('from the email field the sheet stays where the person put it', async ({ page }) => {
     await openSheet(page);
     await page.locator('[data-feedback-contact]').focus();
@@ -152,6 +186,25 @@ test.describe('a 390 by 470 window', () => {
 
 test.describe('390 by 844, no keyboard', () => {
   test.use({ viewport: { width: 390, height: 844 } });
+
+  test('a row is a 44 px tap target, whole width: a long title changes neither', async ({ page }) => {
+    await openSheet(page);
+    await page.keyboard.type('quick labels please', { delay: 15 });
+    const links = page.locator('[data-feedback-related] a');
+    await expect(links.first()).toBeVisible();
+    const before = (await page.locator('dialog.ib-fbk-phone').boundingBox())!;
+    await links.evaluateAll((all) => all.forEach((a) => (a.textContent = 'A title far too long for any row of this form, '.repeat(6))));
+    expect((await page.locator('dialog.ib-fbk-phone').boundingBox())!).toEqual(before);
+    const hits = await page.locator('[data-feedback-related] li').evaluateAll((items) =>
+      items.map((li) => {
+        const row = li.getBoundingClientRect();
+        // The mark's end and the far end of the row both open the link.
+        const opens = (x: number) => !!document.elementFromPoint(x, row.top + row.height / 2)?.closest('a');
+        return { height: row.height, left: opens(row.left + 2), right: opens(row.right - 2) };
+      }),
+    );
+    for (const hit of hits) expect(hit).toEqual({ height: 44, left: true, right: true });
+  });
   test('the sheet grows upward from its foot: Send stays where it was', async ({ page }) => {
     await openSheet(page);
     const send = page.locator('[data-feedback-send]');

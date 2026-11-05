@@ -37,8 +37,8 @@ const OUT_FILE = 'packages/inbox/feedbackRelated.data.json';
 export const RELATED_FEATURES: RelatedFeature[] = [
   { title: 'Archive', phrases: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], reason: "Already there: the archive icon in a thread's header ends it. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
   { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], reason: "Already there: on a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'Pin a thread', phrases: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], reason: 'Already there: right-click a thread and choose Pin thread.', url: `${DOCS}#what-you-see` },
-  { title: 'Snooze a thread', phrases: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], reason: 'Already there: right-click a row and choose Snooze.', url: `${REPO_URL}/releases/tag/v0.28.46` },
+  { title: 'Pin a thread', phrases: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], reason: "Already there: Pin thread in a thread's ⋯ menu.", url: `${DOCS}#what-you-see` },
+  { title: 'Snooze a thread', phrases: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], reason: "Already there: Snooze in a thread's top bar; on a phone, in its ⋯ menu.", url: `${REPO_URL}/releases/tag/v0.28.46` },
   { title: 'Dictate your replies', phrases: ['by voice', 'voice input', 'voice reply', 'use voice', 'use microphone', 'microphone input', 'microphone button', 'dictate reply', 'dictate message', 'speech to text'], reason: 'Already there: press the mic to record.', url: `${REPO_URL}/releases/tag/v0.28.43` },
   { title: 'New message', phrases: ['compose message', 'compose new message', 'compose button', 'write first', 'write to agent first', 'start new message', 'write new message', 'send new message', 'new message button'], reason: 'Already there: the pencil beside Search writes to a running agent first.', url: `${DOCS}#what-you-see` },
   { title: 'Search', phrases: ['search message', 'search thread', 'find thread', 'find message', 'search across thread', 'search across message', 'search all message'], reason: 'Already there: Search at the top of the sidebar, grouped by threads and messages.', url: `${DOCS}#what-you-see` },
@@ -56,6 +56,7 @@ export interface ReleaseInput {
 export interface TitleInput {
   number: number;
   title: string;
+  labels?: { name: string }[];
 }
 
 /** Sections that are people, install steps or the raw PR list: never a feature. */
@@ -70,8 +71,9 @@ const HAS_EMAIL = /[\w.+-]+@[\w-]+\.[a-z]{2,}/i;
 const ONLY_THE_PRODUCT = /^plannotator( inbox)?$/i;
 /** Bots and trackers: nobody files feedback about these. */
 const NOT_A_REQUEST = /^(chore\(deps\)|bump |dependency dashboard|pre-release manual qa)/i;
-/** Open issues that must not be offered to everyone who types a word in their title. #956: a security report. */
-const SKIPPED_ISSUES = new Set([956]);
+/** Open issues that must not be offered to everyone who types a word in their title. #956: a security report. #925: a question, not a known problem. */
+const SKIPPED_ISSUES = new Set([925, 956]);
+const SKIPPED_LABELS = new Set(['security', 'invalid', 'fixed']);
 
 const plain = (text: string) =>
   text
@@ -137,7 +139,7 @@ export function buildRelatedData(input: { releases: ReleaseInput[]; issues: Titl
     }
   }
   const issues: RelatedIssue[] = input.issues
-    .filter((issue) => !SKIPPED_ISSUES.has(issue.number) && !NOT_A_REQUEST.test(issue.title) && !HAS_EMAIL.test(issue.title))
+    .filter((issue) => !SKIPPED_ISSUES.has(issue.number) && !issue.labels?.some((label) => SKIPPED_LABELS.has(label.name)) && !NOT_A_REQUEST.test(issue.title) && !HAS_EMAIL.test(issue.title))
     .sort((a, b) => b.number - a.number)
     .map((issue) => ({ title: plain(issue.title), number: issue.number }));
   const open = new Map(issues.map((issue) => [issue.number, issue]));
@@ -171,9 +173,9 @@ export function readRelatedInput(gh: GhRunner, draft: ReleaseInput | null) {
     .split('\n')
     .filter(Boolean)
     .map((line) => JSON.parse(line) as ReleaseInput);
-  const title = (kind: 'issue' | 'pr') => JSON.parse(gh([kind, 'list', '-R', REPO, '--state', 'open', '--limit', '1000', '--json', 'number,title'])) as TitleInput[];
+  const title = (kind: 'issue' | 'pr', fields: string) => JSON.parse(gh([kind, 'list', '-R', REPO, '--state', 'open', '--limit', '1000', '--json', fields])) as TitleInput[];
   const releases = draft && !published.some((release) => release.tag === draft.tag) ? [draft, ...published] : published;
-  return { releases, issues: title('issue'), pulls: title('pr') };
+  return { releases, issues: title('issue', 'number,title,labels'), pulls: title('pr', 'number,title') };
 }
 
 /** The new release's own notes, which GitHub has only after the tag: untracked in the checkout, by design. */

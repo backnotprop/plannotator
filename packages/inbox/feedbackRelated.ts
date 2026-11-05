@@ -35,9 +35,11 @@ export interface RelatedData {
 }
 
 export interface RelatedLink {
+  /** Whole: the row cuts it to one line, and the window offers the rest on hover. */
   title: string;
   reason: string;
   href: string;
+  kind: Kind;
 }
 
 const REPO_URL = 'https://github.com/backnotprop/plannotator';
@@ -47,7 +49,6 @@ const MIN_CHARS = 8;
 /** At most this much of the message is read; a line needs a short ask anyway. */
 const MAX_CHARS = 4000;
 const MAX_LINKS = 3;
-const MAX_TITLE = 90;
 const MIN_SCORE = 6;
 /** A second line must score this close to the best one. */
 const NEAR_BEST = 0.85;
@@ -96,16 +97,7 @@ export function isPublicRelatedUrl(url: string): boolean {
   }
 }
 
-/** A long title stops at its first clause or a word, so the reason after it always shows. */
-function shortTitle(title: string): string {
-  let text = title.replace(/\.$/, '');
-  const clause = text.indexOf('; ');
-  if (clause > 20) text = text.slice(0, clause);
-  if (text.length <= MAX_TITLE) return text;
-  return `${text.slice(0, MAX_TITLE).replace(/[\s,;:]+\S*$/, '')}…`;
-}
-
-type Kind = 'feature' | 'release' | 'issue';
+export type Kind = 'feature' | 'release' | 'issue';
 
 interface Entry {
   kind: Kind;
@@ -125,7 +117,7 @@ export function relatedIndex(data: RelatedData): RelatedIndex {
   const entries: Entry[] = [];
   const add = (kind: Kind, title: string, reason: string, href: string, extra = '', phrases: string[][] = []) => {
     if (!isPublicRelatedUrl(href)) return;
-    entries.push({ kind, link: { title: shortTitle(title), reason, href }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
+    entries.push({ kind, link: { title: title.replace(/\.$/, ''), reason, href, kind }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
   };
   for (const feature of data.features) add('feature', feature.title, feature.reason, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
   for (const release of data.releases) {
@@ -196,7 +188,7 @@ export function relatedLinks(index: RelatedIndex, text: string): RelatedLink[] {
     // The gate: a word in common is not enough.
     const realInTitle = real.filter((term) => entry.terms.includes(term)).length;
     const titleAsked = entry.terms.length ? entry.terms.filter((term) => query.includes(term)).length / entry.terms.length : 0;
-    const snug = entry.terms.length >= 2 && titleAsked >= 0.6 && realInTitle >= 1; // "Mark unread": the title is what they asked for.
+    const snug = new Set(entry.terms).size >= 2 && titleAsked >= 0.6 && realInTitle >= 1; // "Mark unread": the title is what they asked for.
     const covered = real.length >= 2 && realInTitle >= Math.max(2, Math.ceil(real.length * 0.67));
     const oneWord = real.length === 1 && inARow >= 1; // One real word needs its neighbour beside it: "blank page", not "blank lines".
     if ((snug || covered || oneWord) && score >= MIN_SCORE) found.push({ entry, score });

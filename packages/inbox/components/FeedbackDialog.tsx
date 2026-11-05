@@ -51,12 +51,12 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
   const [error, setError] = useState<string | null>(null);
   const boxRef = useRef<HTMLTextAreaElement>(null);
   const doneRef = useRef<HTMLButtonElement>(null);
-  const actionsRef = useRef<HTMLDivElement>(null);
+  const belowRef = useRef<HTMLDivElement>(null);
   const relatedRef = useRef<HTMLDivElement>(null);
   const closed = useRef(false);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
-  const related = useFeedbackRelated({ message, frozen: phase !== 'edit', phone, boxRef, actionsRef, listRef: relatedRef });
+  const related = useFeedbackRelated({ message, frozen: phase !== 'edit', phone, boxRef, belowRef, listRef: relatedRef });
 
   useEffect(() => {
     boxRef.current?.focus();
@@ -157,69 +157,72 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
             </p>
           )}
           <FeedbackRelated links={related} listRef={relatedRef} />
-          {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
-          <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
-            Category and email are optional
-          </p>
-          <div className="ib-fbk-row">
-            <div className="ib-fbk-cats" role="group" aria-label="Category (optional)">
-              {CATEGORIES.map((option) => (
-                <button
-                  key={option.value}
-                  type="button"
-                  className="ib-fbk-cat"
-                  aria-pressed={category === option.value}
-                  data-feedback-category={option.value}
-                  disabled={sending}
-                  // A second press clears it: the category is optional.
-                  onClick={() => setCategory((current) => (current === option.value ? null : option.value))}
-                >
-                  {option.label}
-                </button>
-              ))}
-            </div>
-            <input
-              className="ib-fbk-contact"
-              type="text"
-              inputMode="email"
-              autoComplete="email"
-              aria-label="Email (optional)"
-              placeholder="Email (optional)"
-              maxLength={FEEDBACK_CONTACT_MAX}
-              value={contact}
-              readOnly={sending}
-              data-feedback-contact=""
-              onChange={(event) => setContact(event.target.value)}
-              // Enter does not send (no new keys in the Inbox): only the Send button does.
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') event.preventDefault();
-              }}
-            />
-          </div>
-          <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
-            <Icon name="info" />
-            <span>
-              Sends your message (and the category and email, if you add them), Plannotator {version} and the name of your OS. Nothing from your
-              threads or files.
-            </span>
-          </p>
-          {error && (
-            <p className="ib-callout ib-err ib-fbk-err" id={`ib-fbk-err-${uid}`} role="alert" data-feedback-error="">
-              <Icon name="warn" />
-              <span>{error}</span>
+          {/* Everything the list moves: it waits while a pointer rests here, gaps included. */}
+          <div ref={belowRef}>
+            {/* Seen, not read twice: the group and the field already say "(optional)" to a screen reader. */}
+            <p className="ib-fbk-optional" aria-hidden="true" data-feedback-optional="">
+              Category and email are optional
             </p>
-          )}
-          <div className="ib-acts-row ib-fbk-acts" ref={actionsRef}>
-            <button type="button" className="ib-btn ib-ghost ib-left" data-feedback-copy-prompt="" disabled={sending} onClick={() => onCopyPrompt(message)}>
-              <Icon name="copy" />
-              Prompt your agent to send feedback
-            </button>
-            <button type="button" className="ib-btn" onClick={close} disabled={sending}>
-              Cancel
-            </button>
-            <button type="submit" className="ib-btn ib-pri" aria-disabled={sending || undefined} data-feedback-send="">
-              {sending ? 'Sending…' : 'Send'}
-            </button>
+            <div className="ib-fbk-row">
+              <div className="ib-fbk-cats" role="group" aria-label="Category (optional)">
+                {CATEGORIES.map((option) => (
+                  <button
+                    key={option.value}
+                    type="button"
+                    className="ib-fbk-cat"
+                    aria-pressed={category === option.value}
+                    data-feedback-category={option.value}
+                    disabled={sending}
+                    // A second press clears it: the category is optional.
+                    onClick={() => setCategory((current) => (current === option.value ? null : option.value))}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
+              <input
+                className="ib-fbk-contact"
+                type="text"
+                inputMode="email"
+                autoComplete="email"
+                aria-label="Email (optional)"
+                placeholder="Email (optional)"
+                maxLength={FEEDBACK_CONTACT_MAX}
+                value={contact}
+                readOnly={sending}
+                data-feedback-contact=""
+                onChange={(event) => setContact(event.target.value)}
+                // Enter does not send (no new keys in the Inbox): only the Send button does.
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') event.preventDefault();
+                }}
+              />
+            </div>
+            <p className="ib-fbk-what" id={`ib-fbk-what-${uid}`} data-feedback-what="">
+              <Icon name="info" />
+              <span>
+                Sends your message (and the category and email, if you add them), Plannotator {version} and the name of your OS. Nothing from your
+                threads or files.
+              </span>
+            </p>
+            {error && (
+              <p className="ib-callout ib-err ib-fbk-err" id={`ib-fbk-err-${uid}`} role="alert" data-feedback-error="">
+                <Icon name="warn" />
+                <span>{error}</span>
+              </p>
+            )}
+            <div className="ib-acts-row ib-fbk-acts">
+              <button type="button" className="ib-btn ib-ghost ib-left" data-feedback-copy-prompt="" disabled={sending} onClick={() => onCopyPrompt(message)}>
+                <Icon name="copy" />
+                Prompt your agent to send feedback
+              </button>
+              <button type="button" className="ib-btn" onClick={close} disabled={sending}>
+                Cancel
+              </button>
+              <button type="submit" className="ib-btn ib-pri" aria-disabled={sending || undefined} data-feedback-send="">
+                {sending ? 'Sending…' : 'Send'}
+              </button>
+            </div>
           </div>
         </form>
       )}

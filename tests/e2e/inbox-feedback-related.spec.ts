@@ -88,7 +88,7 @@ const layout = (page: Page) =>
       return { x, y, width, height };
     };
     const dialog = document.querySelector('dialog[open]')!;
-    return { dialog: rect(dialog), parts: [...dialog.querySelectorAll('form > *:not([data-feedback-related])')].map(rect) };
+    return { dialog: rect(dialog), parts: [...dialog.querySelectorAll('form > *:not([data-feedback-related]), form > div:not([data-feedback-related]) > *')].map(rect) };
   });
 
 test('nothing typed leaves the window, while typing or when a line shows', async ({ page }) => {
@@ -120,6 +120,89 @@ test('no match leaves the form laid out exactly as it was', async ({ page }) => 
   // The empty slot itself takes no room: the same form without it sits the same.
   await page.addStyleTag({ content: '[data-feedback-related] { display: none; }' });
   expect(await layout(page)).toEqual(typed);
+});
+
+const LONG = 'A title far too long for any row of this form, '.repeat(6);
+
+/** Every row, its link and its mark: what a long title could push out of shape. */
+const rows = (page: Page) =>
+  page.locator('[data-feedback-related] li').evaluateAll((items) =>
+    items.map((li) => {
+      const a = li.querySelector('a')!;
+      const mark = li.querySelector('svg')!.getBoundingClientRect();
+      const row = li.getBoundingClientRect();
+      return { height: row.height, markWidth: mark.width, inside: a.getBoundingClientRect().right <= row.right + 0.5, cut: a.scrollWidth > a.clientWidth };
+    }),
+  );
+
+test('a release note or issue is one line: a long title changes nothing but where it is cut', async ({ page }) => {
+  await openForm(page);
+  await page.keyboard.type('quick labels please', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  const before = await layout(page);
+  const shape = await rows(page);
+  await lines(page).evaluateAll((links, long) => links.forEach((a) => (a.textContent = long)), LONG);
+  const after = await rows(page);
+  expect(await layout(page)).toEqual(before);
+  expect(after.map((row) => row.height)).toEqual(shape.map((row) => row.height));
+  for (const row of after) expect(row).toMatchObject({ markWidth: 14, inside: true, cut: true });
+});
+
+test('a pointer resting on the chips holds the list: the chip stays under it and its click lands', async ({ page, context }) => {
+  await openForm(page);
+  const bug = page.locator('[data-feedback-category="bug"]');
+  const at = (await bug.boundingBox())!;
+  await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2);
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await page.waitForTimeout(PAST_THE_PAUSE);
+  await expect(lines(page)).toHaveCount(0);
+  expect(await bug.boundingBox()).toEqual(at);
+  const opened: unknown[] = [];
+  context.on('page', (other) => opened.push(other));
+  await page.mouse.down();
+  await page.mouse.up();
+  await expect(bug).toHaveAttribute('aria-pressed', 'true');
+  expect(opened).toEqual([]);
+  await page.mouse.move(at.x, at.y - 200);
+  await expect(lines(page)).toHaveCount(1);
+});
+
+test('a click in the instant the list appears opens no page', async ({ page, context }) => {
+  await openForm(page);
+  const opened: unknown[] = [];
+  context.on('page', (other) => opened.push(other));
+  // In the page, on the change itself: a click from out here would arrive at no fixed moment.
+  await page.evaluate(() => {
+    const slot = document.querySelector('[data-feedback-related]')!;
+    new MutationObserver((_, watch) => {
+      const link = slot.querySelector('a');
+      if (!link) return;
+      watch.disconnect();
+      link.click();
+    }).observe(slot, { childList: true, subtree: true });
+  });
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await expect(lines(page)).toHaveCount(1);
+  await page.waitForTimeout(200);
+  expect(opened).toEqual([]);
+});
+
+test('a screen reader hears the kind with the link', async ({ page }) => {
+  await openForm(page);
+  await page.keyboard.type('quick labels please', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  const related = page.locator('[data-feedback-related]');
+  await expect(related.getByRole('link', { name: /Release note, v\d|Open issue #\d/ })).toHaveCount(await lines(page).count());
+});
+
+test("a feature's sentence stays whole: longer words wrap and grow the row", async ({ page }) => {
+  await openForm(page);
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  const row = page.locator('[data-feedback-related] li');
+  const before = (await row.boundingBox())!.height;
+  await row.locator('span').evaluate((said, long) => said.append(long), LONG);
+  expect((await row.boundingBox())!.height).toBeGreaterThan(before);
 });
 
 test('a line shows under the box: the box stays put and the dialog grows down only', async ({ page }) => {
@@ -164,6 +247,8 @@ test('a link opens a public page in a new tab, with no way back to this window, 
   const link = lines(page).first();
   await expect(link).toHaveAttribute('rel', 'noopener noreferrer');
   await expect(link).toHaveAttribute('target', '_blank');
+  // Past the moment a click is taken for one aimed at what was there before.
+  await page.waitForTimeout(450);
   const [tab] = await Promise.all([context.waitForEvent('page'), link.click()]);
   await tab.waitForLoadState();
   expect(tab.url()).toMatch(/^https:\/\/plannotator\.ai\/docs\//);

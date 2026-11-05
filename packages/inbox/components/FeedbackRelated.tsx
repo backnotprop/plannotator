@@ -1,11 +1,14 @@
 /// <reference path="../assets.d.ts" />
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { Icon, type IconName } from '../icons';
 import { relatedIndex, relatedLinks, type RelatedData, type RelatedIndex, type RelatedLink } from '../feedbackRelated';
 
 /** How long after the last keystroke the list may change. */
 export const RELATED_PAUSE_MS = 500;
 /** Below the dialog's foot, when the pinned dialog is taller than what is left of the window. */
 const FOOT_ROOM = 16;
+/** A click this soon after the list changed was aimed at what used to be there, on any device: it opens nothing. */
+const LINK_SETTLE_MS = 400;
 /** Above the box in the sheet over a keyboard, once the title has scrolled away. */
 const BOX_HEAD = 4;
 
@@ -38,7 +41,7 @@ function unpin(dialog: HTMLElement): void {
   dialog.style.removeProperty('max-height');
 }
 
-/** A pointer resting on the buttons. A touch screen has none: its `:hover` sticks after a tap, and its sheet keeps the buttons in place anyway. */
+/** A pointer resting on what the list would move. A touch screen has none: its `:hover` sticks after a tap (a finger is `pressing` below). */
 function pointerRestsOn(element: HTMLElement | null): element is HTMLElement {
   return !!element && window.matchMedia('(hover: hover)').matches && element.matches(':hover');
 }
@@ -74,14 +77,32 @@ export function useFeedbackRelated(options: {
   frozen: boolean;
   phone: boolean;
   boxRef: RefObject<HTMLTextAreaElement | null>;
-  actionsRef: RefObject<HTMLElement | null>;
+  belowRef: RefObject<HTMLElement | null>;
   listRef: RefObject<HTMLElement | null>;
 }): RelatedLink[] {
-  const { message, frozen, phone, boxRef, actionsRef, listRef } = options;
+  const { message, frozen, phone, boxRef, belowRef, listRef } = options;
   const [index, setIndex] = useState<RelatedIndex | null>(null);
   const [links, setLinks] = useState<RelatedLink[]>([]);
   const pinned = useRef<HTMLElement | null>(null);
   const keyboardUp = useKeyboardUp(phone);
+  const pressing = useRef(false);
+
+  useEffect(() => {
+    const below = belowRef.current;
+    if (!below) return;
+    const press = () => {
+      pressing.current = true;
+    };
+    const release = () => {
+      pressing.current = false;
+    };
+    below.addEventListener('pointerdown', press);
+    below.addEventListener('pointerleave', release);
+    return () => {
+      below.removeEventListener('pointerdown', press);
+      below.removeEventListener('pointerleave', release);
+    };
+  }, [belowRef]);
 
   useEffect(() => {
     let current = true;
@@ -109,28 +130,29 @@ export function useFeedbackRelated(options: {
       setLinks(next);
     };
     const timer = setTimeout(() => {
-      const actions = actionsRef.current;
+      const below = belowRef.current;
       const list = listRef.current;
       if (list?.contains(document.activeElement)) {
-        // A focused link must not vanish: focus would fall to the page. Tabbing to the next link is still inside.
+        // A focused link must not vanish: focus would fall to the page.
         const left = (event: FocusEvent) => {
-          if (list.contains(event.relatedTarget as Node | null)) return;
+          // Still focused: the window lost focus, not the link. Tabbing to the next link is still inside.
+          if (document.activeElement === event.target || list.contains(event.relatedTarget as Node | null)) return;
           list.removeEventListener('focusout', left);
           show();
         };
         list.addEventListener('focusout', left);
         stopWaiting = () => list.removeEventListener('focusout', left);
-      } else if (pointerRestsOn(actions)) {
-        // Send must not move under a pointer about to press it.
-        actions.addEventListener('pointerleave', show, { once: true });
-        stopWaiting = () => actions.removeEventListener('pointerleave', show);
+      } else if (below && (pointerRestsOn(below) || pressing.current)) {
+        // The chips, the email and Send must not move under a pointer or a finger about to press them.
+        below.addEventListener('pointerleave', show, { once: true });
+        stopWaiting = () => below.removeEventListener('pointerleave', show);
       } else show();
     }, RELATED_PAUSE_MS);
     return () => {
       clearTimeout(timer);
       stopWaiting();
     };
-  }, [message, frozen, index, phone, boxRef, actionsRef, listRef]);
+  }, [message, frozen, index, phone, boxRef, belowRef, listRef]);
 
   // Over a keyboard the sheet has room for one line and Send, not three. The rest come back with the room.
   const shown = keyboardUp ? links.slice(0, 1) : links;
@@ -163,24 +185,51 @@ export function useFeedbackRelated(options: {
 }
 
 /** Always in the DOM so a screen reader hears the lines arrive; empty, it takes no room. */
+const MARKS: Record<RelatedLink['kind'], IconName> = { feature: 'check', release: 'tag', issue: 'issue' };
+
+/** The row's words in full: the link's name for a screen reader, and the row's hover. */
+const whole = (link: RelatedLink) => `${link.title}${/[…?!]$/.test(link.title) ? ' ' : '. '}${link.reason}`;
+
+const opens = (link: RelatedLink) => ({ href: link.href, target: '_blank', rel: 'noopener noreferrer' });
+
+/**
+ * A release note or an issue is one line, cut at its end, with a mark for its
+ * kind: the height never depends on the title. A feature's line is the answer
+ * itself ("Already there: ..."), so it stays whole and wraps.
+ */
 export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; listRef: RefObject<HTMLDivElement | null> }) {
+  const changedAt = useRef(0);
+  const lines = links.map((link) => link.href).join(' ');
+  useLayoutEffect(() => {
+    changedAt.current = performance.now();
+  }, [lines]);
   return (
     <div className="ib-fbk-rel" role="status" data-feedback-related="" ref={listRef}>
       {links.length > 0 && (
         <>
           <p className="ib-fbk-rel-h">Might be related</p>
-          <ul>
-            {links.map((link) => (
-              <li key={link.href + link.title}>
-                <span>
-                  <a href={link.href} target="_blank" rel="noopener noreferrer">
+          <ul
+            onClickCapture={(event) => {
+              if (performance.now() - changedAt.current < LINK_SETTLE_MS) event.preventDefault();
+            }}
+          >
+            {links.map((link) =>
+              link.kind === 'feature' ? (
+                <li key={link.href + link.title} className="ib-fbk-rel-said">
+                  <Icon name={MARKS.feature} className="ib-fbk-rel-mark" />
+                  <span>
+                    <a {...opens(link)}>{link.title}</a>. {link.reason}
+                  </span>
+                </li>
+              ) : (
+                <li key={link.href + link.title} className="ib-fbk-rel-row" title={whole(link)}>
+                  <Icon name={MARKS[link.kind]} className="ib-fbk-rel-mark" />
+                  <a {...opens(link)} aria-label={whole(link)}>
                     {link.title}
                   </a>
-                  {/[…?!]$/.test(link.title) ? ' ' : '. '}
-                  {link.reason}
-                </span>
-              </li>
-            ))}
+                </li>
+              ),
+            )}
           </ul>
         </>
       )}

@@ -86,6 +86,21 @@ describe('the gate stays quiet', () => {
     expect(titles('something quite different')).toEqual([]);
   });
 
+  test('a title that says one word twice is not "fully matched" by that word', () => {
+    const stopped = relatedIndex({ ...FROZEN, releases: [release('Stopped: no is not a stop.'), ...FROZEN.releases] });
+    const said = (text: string) => relatedLinks(stopped, text).map((link) => link.title);
+    expect(said('stop spying on me')).toEqual([]);
+    expect(said('way too many notifications, please stop')).toEqual([]);
+    expect(said('closing a browser tab should stop the session from running in the background')).toEqual([]);
+  });
+
+  test('two common words shared with a title score too low to draw it', () => {
+    // As in the shipped file, where titles say "open" and "inbox" often: common words weigh little.
+    const common = Array.from({ length: 150 }, (_, n) => release(`Open a thing number ${n} from the Inbox`));
+    const open = relatedIndex({ ...FROZEN, releases: [release('Open the Inbox over your tailnet'), ...common, ...FROZEN.releases] });
+    expect(relatedLinks(open, 'I want the inbox to open automatically when I log in').map((link) => link.title)).toEqual([]);
+  });
+
   test('a few letters are not worth a line', () => {
     expect(titles('unread')).toEqual([]);
   });
@@ -112,6 +127,20 @@ describe('it finds what it is for', () => {
     expect(relatedLinks(index, 'blank page after update').map((link) => link.reason)).toEqual(['Open issue #2594']);
   });
 
+  test('notes, issues and features each have their limit: two, one and one', () => {
+    const many: RelatedData = {
+      features: [
+        { title: 'One feature', phrases: ['snooze a thread'], reason: 'Already there.', url: DOC },
+        { title: 'Another feature', phrases: ['snooze a thread'], reason: 'Already there.', url: DOC },
+      ],
+      releases: [...Array.from({ length: 9 }, (_, n) => release(`Snooze a thread ${n + 10}`)), ...FROZEN.releases],
+      issues: Array.from({ length: 9 }, (_, n) => ({ title: `Snooze a thread ${n + 20}`, number: n + 20 })),
+    };
+    const kinds = (data: RelatedData) => relatedLinks(relatedIndex(data), 'snooze a thread please').map((link) => link.kind);
+    expect(kinds({ ...many, features: [] })).toEqual(['release', 'release', 'issue']);
+    expect(kinds(many)).toEqual(['feature', 'issue']);
+  });
+
   test('never more than three lines', () => {
     const many: RelatedData = {
       features: [],
@@ -121,10 +150,16 @@ describe('it finds what it is for', () => {
     expect(relatedLinks(relatedIndex(many), 'snooze a thread please').length).toBe(3);
   });
 
-  test('a long title is cut so the reason still reads', () => {
+  test('a long title stays whole, so the window can offer all of it', () => {
     const long = 'A notification for every new thread an agent starts, even with the Inbox in front; the "Click to turn on sound" nudge goes away on the first click';
     const [link] = relatedLinks(relatedIndex({ ...FROZEN, features: [], releases: [release(long), ...FROZEN.releases] }), 'a notification for every new thread an agent starts');
-    expect(link!.title).toBe('A notification for every new thread an agent starts, even with the Inbox in front');
+    expect(link!.title).toBe(long);
+  });
+
+  test('each line knows its kind, which picks its mark', () => {
+    expect(relatedLinks(index, 'need a done button')[0]!.kind).toBe('feature');
+    expect(relatedLinks(index, 'snooze a thread until tomorrow')[0]!.kind).toBe('release');
+    expect(relatedLinks(index, 'blank page after update')[0]!.kind).toBe('issue');
   });
 });
 

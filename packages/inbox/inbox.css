@@ -6672,6 +6672,12 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-fbk-rel li { margin: 0; padding: 2px 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 30%, transparent); text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
+.ib-fbk-rel-row, .ib-fbk-rel li.ib-fbk-rel-said { display: flex; gap: 8px; }
+.ib-fbk-rel-row { align-items: center; }
+.ib-fbk-rel li.ib-fbk-rel-said { align-items: flex-start; }
+.ib-fbk-rel-row a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-fbk-rel svg.ib-fbk-rel-mark { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); }
+.pn-inbox .ib-fbk-rel-said svg.ib-fbk-rel-mark { margin-top: 2px; }
 @media (hover: hover) { .ib-fbk-rel a:hover { color: var(--primary); text-decoration-color: currentColor; } }
 .ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }

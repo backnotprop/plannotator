@@ -2,8 +2,8 @@
   "features": [
     {"title":"Archive","phrases":["done button","mark done","mark as done","done state","finish thread","close thread","delete thread","remove thread","dismiss thread","trash thread","trash folder","trash button","trash can","move to trash"],"reason":"Already there: the archive icon in a thread's header ends it. Unarchive reopens it.","url":"https://plannotator.ai/docs/reference/inbox/#what-you-see"},
     {"title":"Mark unread","phrases":["mark unread","mark as unread","mark thread unread","thread as unread","keep unread"],"reason":"Already there: on a thread's row and in its header.","url":"https://github.com/backnotprop/plannotator/releases/tag/v0.28.43"},
-    {"title":"Pin a thread","phrases":["pin thread","pin message","star thread","favorite thread","favourite thread","bookmark thread"],"reason":"Already there: right-click a thread and choose Pin thread.","url":"https://plannotator.ai/docs/reference/inbox/#what-you-see"},
-    {"title":"Snooze a thread","phrases":["snooze thread","snooze message","snooze this","snooze button","remind me later","remind me tomorrow","postpone thread"],"reason":"Already there: right-click a row and choose Snooze.","url":"https://github.com/backnotprop/plannotator/releases/tag/v0.28.46"},
+    {"title":"Pin a thread","phrases":["pin thread","pin message","star thread","favorite thread","favourite thread","bookmark thread"],"reason":"Already there: Pin thread in a thread's ⋯ menu.","url":"https://plannotator.ai/docs/reference/inbox/#what-you-see"},
+    {"title":"Snooze a thread","phrases":["snooze thread","snooze message","snooze this","snooze button","remind me later","remind me tomorrow","postpone thread"],"reason":"Already there: Snooze in a thread's top bar; on a phone, in its ⋯ menu.","url":"https://github.com/backnotprop/plannotator/releases/tag/v0.28.46"},
     {"title":"Dictate your replies","phrases":["by voice","voice input","voice reply","use voice","use microphone","microphone input","microphone button","dictate reply","dictate message","speech to text"],"reason":"Already there: press the mic to record.","url":"https://github.com/backnotprop/plannotator/releases/tag/v0.28.43"},
     {"title":"New message","phrases":["compose message","compose new message","compose button","write first","write to agent first","start new message","write new message","send new message","new message button"],"reason":"Already there: the pencil beside Search writes to a running agent first.","url":"https://plannotator.ai/docs/reference/inbox/#what-you-see"},
     {"title":"Search","phrases":["search message","search thread","find thread","find message","search across thread","search across message","search all message"],"reason":"Already there: Search at the top of the sidebar, grouped by threads and messages.","url":"https://plannotator.ai/docs/reference/inbox/#what-you-see"},
@@ -909,6 +909,7 @@
     {"title":"Claude Fable 5 model option.","version":"v0.20.0"}
   ],
   "issues": [
+    {"title":"Guided Review: Single File mode or taller code blocks","number":2643},
     {"title":"Quick labels: inconsistent across newer features, and a highlight can't be both labelled and commented","number":2626},
     {"title":"Inbox: submitting a comment on an attachment blanks the entire page (0.28.48)","number":2594},
     {"title":"Inbox: the browser tab uses 1.6 GB, even right after a reload, with a large store","number":2593,"prWords":"Inbox: fetch only changed threads, coalesce refreshes (#2593) Inbox: ASCII bundle and load review parts on first use (#2593) Inbox: memory soak over a large store on the heavy tier (#2593)"},
@@ -943,7 +944,6 @@
     {"title":"Plan mode: adopt the unified decision control and retire the Add Feedback First dialog","number":1457},
     {"title":"Feature Request: Generate incremental change reports after feedback","number":1428},
     {"title":"Weird behavior in settings and predisposed loss of data.","number":1392},
-    {"title":"Entire chat being resent on every load","number":1349},
     {"title":"Add a host-prefs option to configurePlannotatorUI so embedded hosts can preset one-time UI state","number":1345},
     {"title":"Pi: make /plannotator-last message anchoring optional","number":1334},
     {"title":"[Feature Request] Allow direct edits in addition to suggestions.","number":1308},
@@ -960,11 +960,9 @@
     {"title":"Annotate documentation omits per-file version history and privacy controls","number":1086},
     {"title":"First-run dialogs repeat when using Glimpse","number":1052},
     {"title":"Mobile: in selection mode, the annotation toolbar commits before I can adjust the selection with Android's handles","number":1041},
-    {"title":"Suggested features","number":958},
     {"title":"Review: Server error: RangeError: Out of memory","number":940},
     {"title":"[Feature Request] Add Label Option to Comment dialog (combine)","number":932},
     {"title":"Plan HTML page takes around 5 seconds to load and shows a long loading state on macOS","number":926},
-    {"title":"Pi agent easily bypasses plan guardrails. [GPT 5.5 Codex]","number":925},
     {"title":"Visual plan and diagram workflows","number":911},
     {"title":"Conversation lifecycle tools: guided compaction and cache-aware sessions","number":910},
     {"title":"Review editor frontend debt: API-mode signal, clipboard reuse, context splitting, and safe formatting","number":909},
