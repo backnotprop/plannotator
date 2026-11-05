@@ -8,6 +8,7 @@
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
   InboxInitiative,
@@ -1217,6 +1218,8 @@ export const inboxApi = {
       questions: { message_id?: string; key: string; revision: number }[];
       feedback?: string;
       annotation_ids?: string[];
+      /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
+      viewing?: ReplyViewing;
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host?: string; session: string };
       /**

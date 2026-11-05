@@ -228,6 +228,19 @@ describe("what a script gets", () => {
     expect(JSON.parse(read.stdout).thread.messages[0].body).toBe(body);
   });
 
+  test("read_thread gives a script the line naming the file on screen when a reply went from the floating box", async () => {
+    const box = await world();
+    writeFileSync(join(box.project, "take.png"), "not really a png");
+    const sent = await tool(box.client, "send_message", { body: "A take.", subject: "Takes", thread: "Takes", attachments: ["take.png"], project_path: box.project, agent_session: "ses-a", agent_host: "claude-code" });
+    const posted = await post(box.server, `/api/inbox/messages/${sent.message_id}/reply`, { idempotency_key: "k1", words: "Good.", questions: [], viewing: { attachment_id: sent.attachments[0].id, time: "8:47 PM" } });
+    expect(posted.status).toBe(200);
+    const read = await cli(box, ["read_thread", JSON.stringify({ thread_id: sent.thread_id, format: "full" })]);
+    expect(read.code).toBe(0);
+    const reply = JSON.parse(read.stdout).thread.messages.at(-1);
+    expect(reply.body).toBe("Good.");
+    expect(reply.viewing).toContain(`while viewing \`take.png\`, from the 8:47 PM message ${sent.message_id}.`);
+  });
+
   test("a relative project_path and relative attachments mean where the script runs, even in a reply", async () => {
     const box = await world();
     const sub = join(box.project, "reports");
