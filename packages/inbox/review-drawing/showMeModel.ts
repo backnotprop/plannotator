@@ -120,6 +120,190 @@ export function changedMarks(before: readonly string[], after: readonly string[]
   return out;
 }
 
+/** A file's new-side lines the patch shows (its hunks' context and additions), by line number. */
+export function newSideLines(patch: string): Map<number, string> {
+  const out = new Map<number, string>();
+  let line = 0;
+  let inHunk = false;
+  for (const raw of patch.split('\n')) {
+    const hunk = /^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(raw);
+    if (hunk) {
+      line = Number(hunk[1]);
+      inHunk = true;
+      continue;
+    }
+    if (!inHunk || raw === '' || raw.startsWith('-') || raw.startsWith('\\')) continue;
+    if (raw.startsWith('+') || raw.startsWith(' ')) {
+      out.set(line, raw.slice(1));
+      line += 1;
+    } else {
+      inHunk = false;
+    }
+  }
+  return out;
+}
+
+/** What one earlier part opens now: its lines in this round, and whether they changed since it was drawn. */
+export interface PartAnchor {
+  now: ShapeCodeTarget;
+  changed: boolean;
+}
+
+/**
+ * A board drawn on an earlier review: each part that opens code is anchored
+ * again on this review's diff. Its lines, as the earlier
+ * round's diff showed them, are looked for in this round's: at the same
+ * place, else the nearest place in the file (the part follows them there).
+ * Lines no longer found changed since the picture was asked; the part keeps
+ * opening the same line numbers. Lines the earlier diff did not show are
+ * taken as they are.
+ */
+export function anchorPart(target: ShapeCodeTarget, before: ReadonlyMap<number, string> | undefined, after: ReadonlyMap<number, string> | undefined): PartAnchor {
+  const [start, end] = targetLines(target);
+  const block: string[] = [];
+  for (let n = start; n <= end; n++) {
+    const text = before?.get(n);
+    if (text === undefined) return { now: target, changed: false };
+    block.push(text);
+  }
+  const matchesAt = (at: number) => block.every((text, i) => after?.get(at + i) === text);
+  if (matchesAt(start)) return { now: target, changed: false };
+  const moved = [...(after?.keys() ?? [])].sort((a, b) => Math.abs(a - start) - Math.abs(b - start)).find(matchesAt);
+  if (moved !== undefined) return { now: { ...target, line: moved, ...(target.lineEnd !== undefined ? { lineEnd: moved + (end - start) } : {}) }, changed: false };
+  return { now: target, changed: true };
+}
+
+/**
+ * Lines an earlier round asked about, where they are in this round: the same
+ * text found at the same place or the nearest one (`anchorPart`). Null when
+ * the earlier diff did not show them all, or they changed since.
+ */
+export function anchorLines(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  for (let n = lines[0]; n <= lines[1]; n++) if (before?.get(n) === undefined) return null;
+  const anchor = anchorPart({ path: '', line: lines[0], ...(lines[1] > lines[0] ? { lineEnd: lines[1] } : {}) }, before, after);
+  return anchor.changed ? null : targetLines(anchor.now);
+}
+
+/**
+ * Lines an earlier round asked about whose text changed since, where they
+ * are in this round. Guides are lines both rounds' diffs show once, kept in
+ * the same order on both sides. Each end of the block is found by its own
+ * line when that is a guide, else by the nearest guide past it with the lines
+ * between unchanged. A guide is needed above and below the block. The block
+ * may change in size only when both its ends are guides: else lines were added
+ * or removed beside it, and it is not known where. Null whenever it is not
+ * known: a fresh Show me is always safe, an old picture on other code is not.
+ */
+export function shiftLines(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  if (!before || !after) return null;
+  const [first, last] = lines;
+  for (let n = first; n <= last; n++) if (before.get(n) === undefined) return null;
+  const kept = guideLines(before, after);
+  const guide = new Map(kept);
+  const above = kept.filter(([n]) => n < first).at(-1);
+  const below = kept.find(([n]) => n > last);
+  if (!above || !below) return null;
+  const unchanged = (from: number, to: number, count: number) => {
+    for (let i = 0; i < count; i++) {
+      const text = before.get(from + i);
+      if (text === undefined || after.get(to + i) !== text) return false;
+    }
+    return true;
+  };
+  const startFound = guide.get(first);
+  const start = startFound ?? above[1] + (first - above[0]);
+  if (startFound === undefined && !unchanged(above[0] + 1, above[1] + 1, first - above[0] - 1)) return null;
+  const endFound = guide.get(last);
+  const end = endFound ?? below[1] - (below[0] - last);
+  if (endFound === undefined && !unchanged(last + 1, end + 1, below[0] - last - 1)) return null;
+  if ((startFound === undefined || endFound === undefined) && end - start !== last - first) return null;
+  if (start <= above[1] || end >= below[1] || start > end) return null;
+  for (let n = start; n <= end; n++) if (after.get(n) === undefined) return null;
+  return [start, end];
+}
+
+/** Lines both diffs show once (not blank), as [earlier, now] pairs kept in the same order on both sides (the longest such run). */
+function guideLines(before: ReadonlyMap<number, string>, after: ReadonlyMap<number, string>): [number, number][] {
+  const once = (side: ReadonlyMap<number, string>) => {
+    const seen = new Map<string, number | null>();
+    for (const [n, text] of side) if (text.trim()) seen.set(text, seen.has(text) ? null : n);
+    return seen;
+  };
+  const now = once(after);
+  const pairs: [number, number][] = [];
+  for (const [text, n] of once(before)) {
+    const m = now.get(text);
+    if (n !== null && m !== undefined && m !== null) pairs.push([n, m]);
+  }
+  pairs.sort((a, b) => a[0] - b[0]);
+  // A line that moved past others is no guide.
+  const tails: number[] = [];
+  const prev: number[] = [];
+  for (let i = 0; i < pairs.length; i++) {
+    let lo = 0;
+    let hi = tails.length;
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1;
+      if (pairs[tails[mid]!]![1] < pairs[i]![1]) lo = mid + 1;
+      else hi = mid;
+    }
+    prev[i] = lo > 0 ? tails[lo - 1]! : -1;
+    tails[lo] = i;
+  }
+  const kept: [number, number][] = [];
+  for (let i = tails.length ? tails[tails.length - 1]! : -1; i >= 0; i = prev[i]!) kept.unshift(pairs[i]!);
+  return kept;
+}
+
+/**
+ * Where an earlier round's lines are in this round: the same text followed
+ * (`anchorLines`), else, changed since, shifted with the code around them
+ * (`shiftLines`). Null when neither can say: such a picture is not opened by
+ * its old numbers.
+ */
+export function earlierLinesNow(
+  lines: readonly [number, number],
+  before: ReadonlyMap<number, string> | undefined,
+  after: ReadonlyMap<number, string> | undefined,
+): [number, number] | null {
+  return anchorLines(lines, before, after) ?? shiftLines(lines, before, after);
+}
+
+/** A review's new-side lines by file (`newSideLines`). */
+export type ReviewLines = ReadonlyMap<string, ReadonlyMap<number, string>>;
+
+/** A review's files as `ReviewLines`. */
+export function reviewLines(files: readonly { path: string; patch: string }[]): ReviewLines {
+  return new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const));
+}
+
+/**
+ * Where a click on a board's part lands in this review's diff: the lines; null
+ * when the diff does not show them (the board's own viewer opens the code);
+ * 'changed' when the part was drawn on another review and these lines can't be
+ * found here (never its old numbers: they hold other code now). `earlier`: the
+ * review it was drawn on, when not this one; `lines` undefined until it is read.
+ */
+export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined }): [number, number] | 'changed' | null {
+  const after = now.get(target.path);
+  if (!after) return null;
+  const asked = targetLines(target);
+  const numbers = Array.from({ length: asked[1] - asked[0] + 1 }, (_, i) => asked[0] + i);
+  if (!earlier) return numbers.some((n) => after.has(n)) ? asked : null;
+  if (!earlier.lines) return 'changed';
+  const before = earlier.lines.get(target.path);
+  if (!numbers.every((n) => before?.has(n))) return null;
+  return earlierLinesNow(asked, before, after) ?? 'changed';
+}
+
 /**
  * A Show me that ended with no board and no answer: nothing is running or
  * waiting on a choice, and the person did not stop it. The box goes back to its words.

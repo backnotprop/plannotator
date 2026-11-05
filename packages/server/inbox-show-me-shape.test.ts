@@ -10,19 +10,20 @@
  *  - a Show me about a review of another thread, a file the review lacks, or
  *    with words other than the request the agent will read;
  *  - a turn not naming the board the agent stored for it, or naming one a later
- *    Show me or an earlier board made;
+ *    Show me, an earlier board or other work on the thread's boards made;
  *  - Show me again's retry from the Ask window being refused, or its board id
  *    not being a board id;
  *  - the old drawings routes coming back;
  *  - Show me reaching anyone with Code review off.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
+import { showMeShapes, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { createShapeStore } from "@plannotator/shared/shape/store";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -233,6 +234,36 @@ describe("Show me while Code review is on", () => {
     expect(await w.turnsOf(review.thread_id)).toEqual([]);
   });
 
+  test("another thread's board is no Show me again's", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    const review = await w.sendReview();
+    const target: InboxShowMeTarget = { review: review.message_id, file: "src/auth.ts", lines: [1, 1], round: 1 };
+    const other = w.drawBoard("msg_01M6N63CT5DREP6REKGQPAEXNT", review.message_id);
+    const refused = await w.showMe(review.thread_id, "turn-0001", target, review.guide.title, other);
+    expect(refused.status).toBe(422);
+    const mine = w.drawBoard(review.thread_id, review.message_id);
+    expect((await w.showMe(review.thread_id, "turn-0002", target, review.guide.title, mine)).status).toBe(200);
+  });
+
+  test("old drawings are gone from disk once the Inbox starts", async () => {
+    const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "plannotator-old-drawings-"))), "data");
+    const drawn = join(dir, "inbox", "review-drawings");
+    mkdirSync(drawn, { recursive: true });
+    writeFileSync(join(drawn, "msg_01M6N63CT5DREP6REKGQPAEXNA.json"), "{}");
+    const saved = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dir;
+    const server = await startInboxServer({ dataDir: dir, codeReview: false, phones: false });
+    try {
+      expect(existsSync(drawn)).toBe(false);
+    } finally {
+      server.stop();
+      if (saved === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = saved;
+      rmSync(join(dir, ".."), { recursive: true, force: true });
+    }
+  });
+
   test("the drawings routes are gone; an overview's drawing still rides a review", async () => {
     const w = await world();
     await w.setCodeReview(true);
@@ -246,6 +277,58 @@ describe("Show me while Code review is on", () => {
     const drawn = await w.sendReview({ guide, idempotency_key: "drawn-review" });
     const read = await json(await w.fromWindow(`/api/inbox/messages/${drawn.message_id}/guide`));
     expect(read.snapshot.guide.overview).toEqual({ text: "One guard.", diagram });
+  });
+});
+
+describe("which board a Show me made (other work on the thread's boards is never taken for it)", () => {
+  const REVIEW = "msg_review1";
+  const at = (s: number) => new Date(Date.UTC(2026, 10, 5, 0, 0, s)).toISOString();
+  const turn = (id: string, s: number, extra: Partial<InboxAskTurn> = {}): InboxAskTurn =>
+    ({ id, at: at(s), question: "q", kind: "show_me", show_me: { review: REVIEW, file: "a.ts", lines: [1, 2], round: 1 }, ...extra }) as InboxAskTurn;
+  const v = (n: number, s: number, through: string | null = REVIEW) => ({ n, at: at(s), through });
+  const link = (turns: InboxAskTurn[], boards: { id: string; versions: ReturnType<typeof v>[] }[]) => Object.fromEntries(showMeShapes(turns, boards));
+
+  test("an unrelated board moving during the Show me is not its answer; the board it asked for is", () => {
+    const older = { id: "older", versions: [v(1, 1), v(2, 11)] };
+    expect(link([turn("t", 10)], [older])).toEqual({});
+    expect(link([turn("t", 10)], [older, { id: "asked", versions: [v(1, 12)] }])).toEqual({ t: "asked" });
+  });
+
+  test("a board stored through another review is not a Show me's, even a new one", () => {
+    expect(link([turn("t", 10)], [{ id: "later", versions: [v(1, 11, "msg_review2")] }])).toEqual({});
+    expect(link([turn("t", 10, { answer: "done", answered_at: at(20) })], [{ id: "later", versions: [v(1, 11, "msg_review2")] }])).toEqual({});
+  });
+
+  test("Show me again counts only its own board, even if another moves first or is new", () => {
+    const boards = [{ id: "other", versions: [v(1, 11), v(2, 12)] }, { id: "mine", versions: [v(1, 1), v(2, 13)] }];
+    expect(link([turn("t", 10, { again_shape: "mine" })], boards)).toEqual({ t: "mine" });
+    expect(link([turn("t", 10, { again_shape: "gone" })], boards)).toEqual({});
+  });
+
+  test("the turn ended with no new board: it takes a board the agent updated through its review, and nothing written after its end", () => {
+    const updated = { id: "updated", versions: [v(1, 1), v(2, 12)] };
+    const elsewhere = { id: "elsewhere", versions: [v(1, 1, "msg_other"), v(2, 11, "msg_other")] };
+    expect(link([turn("t", 10)], [updated])).toEqual({});
+    expect(link([turn("t", 10, { answer: "done", answered_at: at(20) })], [elsewhere, updated])).toEqual({ t: "updated" });
+    expect(link([turn("t", 10, { answer: "words only", answered_at: at(11) })], [updated])).toEqual({});
+    expect(link([turn("t", 10, { answer: "words only", answered_at: at(11) })], [{ id: "late", versions: [v(1, 12)] }])).toEqual({});
+    // A new board the agent stored with no --through is still what it made.
+    expect(link([turn("t", 10, { answer: "done", answered_at: at(20) })], [{ id: "bare", versions: [v(1, 12, null)] }])).toEqual({ t: "bare" });
+  });
+
+  test("stopped or failed: no end kept means no board; a board made before the end stays; an update never counts", () => {
+    const fresh = { id: "fresh", versions: [v(1, 12)] };
+    const updated = { id: "updated", versions: [v(1, 1), v(2, 12)] };
+    expect(link([turn("t", 10, { stopped: true })], [fresh])).toEqual({});
+    expect(link([turn("t", 10, { failure: "gone" })], [fresh])).toEqual({});
+    expect(link([turn("t", 10, { stopped: true, answer: "part", answered_at: at(20) })], [fresh])).toEqual({ t: "fresh" });
+    expect(link([turn("t", 10, { failure: "gone", answer: "part", answered_at: at(20) })], [updated])).toEqual({});
+  });
+
+  test("two Show mes: each keeps to its own stretch", () => {
+    const first = { id: "first", versions: [v(1, 12)] };
+    const second = { id: "second", versions: [v(1, 22)] };
+    expect(link([turn("a", 10), turn("b", 20)], [second, first])).toEqual({ a: "first", b: "second" });
   });
 });
 

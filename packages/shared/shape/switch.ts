@@ -17,11 +17,11 @@ export function shapeSwitchOn(): boolean {
 
 /**
  * The boards work: Shape on, or Code review on, whose Show me makes a board
- * (approval "code-review-launch-build", item 1). Read quietly: a broken
- * config.json is off, and what runs next warns about it as it always did.
+ * (approval "code-review-launch-build", item 1). A broken config.json is off.
+ * Quiet for what reads it on every request; the `shape` command warns, as it did.
  */
-export function shapeBoardsOn(): boolean {
-  const config = loadConfig({ quiet: true });
+export function shapeBoardsOn(options: { quiet?: boolean } = { quiet: true }): boolean {
+  const config = loadConfig(options);
   return config.inboxShape === true || config.inboxCodeReview === true;
 }
 

@@ -14,11 +14,12 @@
  * - Files and hover: the shape's project folder, through code-nav.
  * - Copy prompt: the command any session runs to pick up what waits.
  */
-import type { ShapeNote, ShapeNoteInput, ShapeVersion } from '@plannotator/core/shape';
+import { shapeNoteWaits, type ShapeNote, type ShapeNoteInput, type ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { generateId } from '@plannotator/ui/utils/generateId';
-import { inboxApi, type ShapeLoadedWire } from '../api';
+import { InboxApiError, inboxApi, type ShapeLoadedWire } from '../api';
+import { onAskChange } from '../ask/askEvents';
 import { shapeEventsBetween } from './events';
 
 export { shapeEventsBetween };
@@ -89,7 +90,7 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
   };
 
   /** Through the thread's Ask to the live session; null when none can answer now. */
-  const askSession = async (loaded: ShapeLoadedWire, prompt: string, onText: (text: string) => void, busyPolicy?: 'wait'): Promise<{ text: string; provider: string } | null> => {
+  const askSession = async (loaded: ShapeLoadedWire, prompt: string, onText: (text: string) => void, busyPolicy?: 'wait', onBusy?: () => void): Promise<{ text: string; provider: string } | null> => {
     const thread = loaded.shape.thread;
     if (!thread || loaded.session.state === 'gone') return null;
     try {
@@ -109,14 +110,36 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
         onText,
       );
       return answer ? { text: answer, provider: posted.provider_id } : null;
-    } catch {
+    } catch (cause) {
+      if (cause instanceof InboxApiError && cause.code === 'ask_busy') onBusy?.();
       // The Ask is off in this Inbox (404), or the session went away mid-answer: the question waits instead.
       return null;
     }
   };
 
-  /** A Change it wakes the session once; one that comes while it is being woken wakes it once more, after. */
+  /**
+   * A Change it wakes the session once; one that comes while it is being woken wakes it once more, after, if the
+   * agent has not read it by then. Another turn holding the thread's Ask: it tries again once that turn is over.
+   */
   const waking = new Map<string, boolean>();
+  const untilFree = new Set<string>();
+  const wakeWhenFree = (id: string, thread: string) => {
+    if (untilFree.has(id)) return;
+    untilFree.add(id);
+    const look = () =>
+      inboxApi.askRead(thread).then(
+        (model) => {
+          if (model.running || !untilFree.delete(id)) return;
+          stop();
+          void wake(id);
+        },
+        () => {},
+      );
+    const stop = onAskChange((changed) => {
+      if (changed === null || changed === thread) void look();
+    });
+    void look();
+  };
   const wake = async (id: string): Promise<void> => {
     if (waking.has(id)) {
       waking.set(id, true);
@@ -124,8 +147,12 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     }
     waking.set(id, false);
     try {
-      const loaded = last.get(id) ?? (await load(id));
-      await askSession(loaded, shapeChangePrompt(loaded), () => {}, 'wait');
+      const loaded = await load(id);
+      if (loaded.notes.some(shapeNoteWaits)) {
+        await askSession(loaded, shapeChangePrompt(loaded), () => {}, 'wait', () => {
+          if (loaded.shape.thread) wakeWhenFree(id, loaded.shape.thread);
+        });
+      }
     } catch {
       // Not woken: the note waits for the agent's next turn, as it always may.
     } finally {

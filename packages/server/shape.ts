@@ -7,7 +7,7 @@
  * starts it, or reuses the one `shapes/server.json` names.
  *
  * Who may reach it:
- *  - Shape on only (config.json `inboxShape`, read on every request): off,
+ *  - Shape or Code review on (config.json, read on every request): both off,
  *    every `/api/shapes` path answers 404, as in the Inbox;
  *  - this computer only: it binds loopback, and the Host check refuses any
  *    other name (a DNS-rebinding page). There is no tailnet listener, so every
@@ -61,7 +61,7 @@ export interface ShapeServerInfo {
   shape_server: 1;
   version: string;
   serverSession: string;
-  /** Shape is on (config.json `inboxShape`). */
+  /** The boards work: Shape or Code review is on. */
   on: boolean;
   /** Pages open on this server now (each holds the event stream). Bare `plannotator shape` opens no second tab while one is. */
   pages: number;

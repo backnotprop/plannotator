@@ -367,7 +367,7 @@ if (isReviewDrawCommand(rawArgs, () => loadConfig({ quiet: true }).inboxCodeRevi
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
   }
-  if (args[0] === "shape" && !shapeBoardsOn()) {
+  if (args[0] === "shape" && !shapeBoardsOn({ quiet: false })) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
   }

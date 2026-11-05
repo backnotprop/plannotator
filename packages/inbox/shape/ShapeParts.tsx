@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
-import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
@@ -64,7 +64,6 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 }
 
 /**
-/**
  * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
  * toggle every full page's head has sits at its title's left: the board can take the window's width.
  */
@@ -92,7 +91,7 @@ export function ShapeBoardLayer({
   onClose: () => void;
   thread: InboxThread | null;
   hidden?: boolean;
-  onCode?: (target: ShapeCodeTarget, el: HTMLElement) => boolean;
+  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
   headStart?: ReactNode;
 }) {
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open

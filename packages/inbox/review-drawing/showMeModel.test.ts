@@ -1,14 +1,95 @@
 /**
  * Show me's pure parts. What regresses if these fail: a picture's part opens
  * the wrong chapter (or none, when one holds the file), or round 2's Overview
- * tags parts the agent did not change (or misses one it did).
+ * tags parts the agent did not change (or misses one it did), or a part of an
+ * older board lands on lines that hold other code now.
  */
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { overviewPicture, changedMarks, chapterOf, showMeEnded, showMeSamePlace, waitingShowMe } from './showMeModel';
+import { anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
+  test("a part drawn on this review lands on lines its diff shows; lines it does not show go to the board's own viewer", () => {
+    const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 17 }, now)).toEqual([16, 17]);
+    expect(partLanding({ path: 'w.ts', line: 9999 }, now)).toBeNull();
+    expect(partLanding({ path: 'other.ts', line: 16 }, now)).toBeNull();
+  });
+
+  test("a part drawn on an earlier review lands where its code is now, never on its old numbers", () => {
+    const earlier = new Map([['w.ts', new Map([[16, 'a'], [17, 'b'], [18, 'c']])]]);
+    const moved = new Map([['w.ts', new Map([[6, 'log'], [17, 'a'], [18, 'b'], [19, 'c']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 18 }, moved, { lines: earlier })).toEqual([17, 19]);
+    // Rewritten, with nothing around it to go by; the earlier review not read yet: its old numbers would be other code.
+    const rewritten = new Map([['w.ts', new Map([[16, 'x'], [17, 'y'], [18, 'z']])]]);
+    expect(partLanding({ path: 'w.ts', line: 16, lineEnd: 18 }, rewritten, { lines: earlier })).toBe('changed');
+    expect(partLanding({ path: 'w.ts', line: 16 }, moved, { lines: undefined })).toBe('changed');
+    // The earlier diff did not show that code, or the file is not in this one: the board's own viewer.
+    expect(partLanding({ path: 'w.ts', line: 400 }, moved, { lines: earlier })).toBeNull();
+    expect(partLanding({ path: 'gone.ts', line: 16 }, moved, { lines: earlier })).toBeNull();
+  });
+
+  test("round 2: a part follows its moved lines, keeps unchanged ones, and lines rewritten since are changed", () => {
+    const round1 = newSideLines(['@@ -1,3 +1,4 @@', ' a', '+pick()', '+wait()', ' b', ''].join('\n'));
+    // Round 2 adds two lines above pick() and rewrites wait().
+    const round2 = newSideLines(['@@ -1,3 +1,6 @@', ' a', '+log()', '+log2()', '+pick()', '+waitWithJitter()', ' b', ''].join('\n'));
+    expect(round1.get(2)).toBe('pick()');
+    expect(anchorPart({ path: 'w.ts', line: 2 }, round1, round2)).toEqual({ now: { path: 'w.ts', line: 4 }, changed: false });
+    expect(anchorPart({ path: 'w.ts', line: 3 }, round1, round2)).toEqual({ now: { path: 'w.ts', line: 3 }, changed: true });
+    expect(anchorPart({ path: 'w.ts', line: 1 }, round1, round2)).toEqual({ now: { path: 'w.ts', line: 1 }, changed: false });
+  });
+
+  test("Show me again asks about the lines where they are now: moved, they follow; changed or unseen, none", () => {
+    const before = new Map([[16, 'a'], [17, 'b'], [18, 'c']]);
+    expect(anchorLines([16, 18], before, new Map([[17, 'a'], [18, 'b'], [19, 'c']]))).toEqual([17, 19]);
+    expect(anchorLines([16, 18], before, new Map([[16, 'a'], [17, 'B'], [18, 'c']]))).toBeNull();
+    expect(anchorLines([15, 16], before, new Map([[15, 'z'], [16, 'a']]))).toBeNull();
+  });
+
+  test("an earlier round's changed lines are found where the code around them moved, never at their old numbers (the delta-5 repro)", () => {
+    // Round 1: lines 1–100. Round 2: 30 lines added above, and old line 51 edited.
+    const round1 = new Map(Array.from({ length: 100 }, (_, i) => [i + 1, `line ${i + 1}`] as const));
+    const round2 = new Map<number, string>();
+    for (let i = 1; i <= 30; i++) round2.set(i, `added ${i}`);
+    for (let i = 1; i <= 100; i++) round2.set(i + 30, i === 51 ? 'line 51, edited' : `line ${i}`);
+    expect(anchorLines([50, 52], round1, round2)).toBeNull();
+    expect(shiftLines([50, 52], round1, round2)).toEqual([80, 82]);
+    const now = earlierLinesNow([50, 52], round1, round2)!;
+    expect(now).toEqual([80, 82]);
+    // 50–52 now holds old lines 20–22: not the picture's place; 80–82 is.
+    expect(showMeSamePlace({ file: 'w.ts', lines: now }, { file: 'w.ts', lines: [50, 52] })).toBe(false);
+    expect(showMeSamePlace({ file: 'w.ts', lines: now }, { file: 'w.ts', lines: [80, 82] })).toBe(true);
+    // Unchanged lines that moved are followed as before; with nothing to go by (the earlier diff unread), no place.
+    expect(earlierLinesNow([10, 12], round1, round2)).toEqual([40, 42]);
+    expect(earlierLinesNow([50, 52], undefined, round2)).toBeNull();
+    // A line that moved past the others is no guide: the offset comes from the lines kept in order.
+    const swapped = new Map(round2);
+    swapped.set(1, 'line 49');
+    swapped.set(79, 'added 1');
+    expect(shiftLines([50, 52], round1, swapped)).toEqual([80, 82]);
+  });
+
+  test("an earlier round's lines are not placed on other code: a deleted block, a line added beside it, a repeated line (the delta-6 repros)", () => {
+    const round1 = new Map(Array.from({ length: 10 }, (_, i) => [i + 1, `line ${i + 1}`] as const));
+    const round2 = (...texts: string[]) => new Map(texts.map((text, i) => [i + 1, text] as const));
+    const rest = (from: number) => Array.from({ length: 11 - from }, (_, i) => `line ${from + i}`);
+    // (a) Lines 4–6 deleted, the line above kept: 4–6 is other code now.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', ...rest(7)))).toBeNull();
+    // (b) A line added between the guide and the block, line 5 edited: the block is at 5–7.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'added', 'line 4', 'line 5, edited', 'line 6', ...rest(7)))).toEqual([5, 7]);
+    // The same with every line of the block edited: the added line may be part of it or not, so no place.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'added', 'edited 4', 'edited 5', 'edited 6', ...rest(7)))).toBeNull();
+    // A line added inside the block, its ends kept (the fix inside what the picture showed): the block grew.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'line 4', 'added', 'line 5, edited', 'line 6', ...rest(7)))).toEqual([4, 7]);
+    // Edited in place, the lines around it kept: the same numbers.
+    expect(earlierLinesNow([4, 6], round1, round2('line 1', 'line 2', 'line 3', 'edited 4', 'edited 5', 'edited 6', ...rest(7)))).toEqual([4, 6]);
+    // (c) `return null;` and `}` are shown once in each diff, but in other functions: the block is gone, nothing below agrees.
+    const before = new Map([[197, 'function kept() {'], [198, '  return null;'], [199, '}'], [200, 'function gone() {'], [201, '  work();'], [202, '  done();'], [203, 'export default gone;']]);
+    const after = new Map([[196, 'const a = 1;'], [197, 'function other() {'], [198, '  if (x) foo();'], [199, '  return null;'], [200, '}'], [201, ''], [202, 'const b = 2;']]);
+    expect(earlierLinesNow([200, 202], before, after)).toBeNull();
+  });
+
   test("a part opens the chapter that holds its file, else All files (null)", () => {
     const chapters = [{ diffs: [{ file: 'a.ts' }] }, { diffs: [{ file: 'b.ts' }, { file: 'src/retry.ts' }] }];
     expect(chapterOf(chapters, 'src/retry.ts')).toBe(1);

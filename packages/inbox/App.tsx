@@ -6222,9 +6222,9 @@ function Inbox() {
             // From the route as it is now (a verdict lands after the person moved on): only while it still shows this review.
             onBack={() => {
               const now = routeRef.current;
-              if (now.guide === guideMessage.id) close({ ...now, guide: null });
+              if (now.guide === guideMessage.id) close({ ...now, guide: null, shape: null });
             }}
-            onClose={() => close({ ...route, thread: null, guide: null })}
+            onClose={() => close({ ...route, thread: null, guide: null, shape: null })}
             onSent={afterWrite}
             onAsk={ask.askWith}
             shapeHost={shapeHost}

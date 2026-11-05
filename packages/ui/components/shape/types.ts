@@ -120,7 +120,7 @@ export interface ShapeSurfaceProps {
    * A drawn part with `data-code` was clicked: a host that shows this code itself (code review's diff) takes it and
    * returns true. False, or absent: the board's own viewer opens it.
    */
-  onCode?: (target: ShapeCodeTarget, el: HTMLElement) => boolean;
+  onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
   /**

@@ -39,12 +39,12 @@ import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
-import type { ShapeCodeTarget } from '@plannotator/core/shape';
+import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
-import { overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
+import { partLanding, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import type { InboxShapes } from '../shape/useInboxShapes';
@@ -201,18 +201,22 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
     const at = thread.messages.findIndex((m) => m.id === message.id);
     return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
   }, [thread.messages, message.id]);
+  const otherReviews = useMemo(() => thread.messages.filter((m) => m.guide?.review && m.id !== message.id).map((m) => m.id), [thread.messages, message.id]);
   const showMe = useShowMe({
     threadId: thread.thread_id,
     reviewId: message.id,
     title: message.guide?.title ?? snapshot?.guide.title ?? '',
     round,
     agent: author,
+    others: otherReviews,
+    files,
+    boardOpen: !!board,
     enabled: !readOnly,
     subscribeBoards: shapes.subscribe,
     onBoard,
   });
   /** The part a click landed on: the board shrinks to the corner card, kept as it is underneath. */
-  const [landed, setLanded] = useState<{ name: string; mark: string | null; file: string; lines: [number, number] } | null>(null);
+  const [landed, setLanded] = useState<{ name: string; mark: string | null; file: string; lines: [number, number] | null } | null>(null);
   useEffect(() => setLanded(null), [board]);
   const threadBoard = shapes.byThread.get(thread.thread_id);
   const boardSummary = board ? (shapes.shapes ?? []).find((shape) => shape.id === board) : undefined;
@@ -236,25 +240,37 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
     [shapeHost, showMe.state.canAsk],
   );
   const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
-  /** A part of a picture opens its code: the chapter that holds the file (else All files), the lines painted. */
-  const openCode = (target: ShapeCodeTarget): boolean => {
-    if (!files.some((file) => file.path === target.path)) return false;
-    const index = chapterOf(chapters, target.path);
+  /** The chapter that holds the file (else All files), and the review moves to it. */
+  const showFile = (path: string) => {
+    const index = chapterOf(chapters, path);
     if (index === null) {
       if (mode !== 'files') setMode('files');
     } else {
       setCurrent(index);
       if (mode !== 'walkthrough') setMode('walkthrough');
     }
-    move(target.path);
+    move(path);
+  };
+  /** A part of a picture opens its code: its file, the lines painted. */
+  const openCode = (target: ShapeCodeTarget): boolean => {
+    if (!files.some((file) => file.path === target.path)) return false;
+    showFile(target.path);
     const [start, end] = targetLines(target);
     setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
     return true;
   };
-  /** A click on a part of the board: it lands on the line and the board shrinks. A file not in this review: the board's own viewer. */
-  const landOnCode = (target: ShapeCodeTarget, el: HTMLElement): boolean => {
-    if (!openCode(target)) return false;
-    setLanded({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });
+  /**
+   * A click on a part of the board: it lands on the code and the board shrinks. Drawn on another review, the lines
+   * where that code is now; found nowhere, the file, unpainted, with the corner's note. Lines this diff can't show:
+   * the board's own viewer.
+   */
+  const landOnCode = (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null): boolean => {
+    const drawnOn = version?.through;
+    const landing = partLanding(target, showMe.nowLines, drawnOn && otherReviews.includes(drawnOn) ? { lines: showMe.linesOf(drawnOn) } : undefined);
+    if (landing === null) return false;
+    if (landing === 'changed') showFile(target.path);
+    else openCode({ ...target, line: landing[0], lineEnd: landing[1] });
+    setLanded({ name: partName(el), mark: markOf(el), file: target.path, lines: landing === 'changed' ? null : landing });
     return true;
   };
   // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
@@ -306,7 +322,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
     [overviewHtml, earlierOverview],
   );
   const overviewMeta = overviewChanged
-    ? `redrawn by ${author} for round ${round} · ${plural(overviewChanged.size, 'part')} changed`
+    ? `redrawn by ${author} · ${plural(overviewChanged.size, 'part')} changed`
     : `drawn by ${author} with the guide`;
   const renderOverviewDiagram = useCallback(
     (diagram: GuideOverviewDiagram): ReactNode | null =>
@@ -777,7 +793,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
       />
       {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} />}
       {board && landed && (
-        <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} />
+        <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMe.state.canAsk ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}
     </section>
   );

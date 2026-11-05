@@ -2,8 +2,9 @@
  * Show me (approval "shape-in-code-review") gates every word it adds to an
  * agent on the Code review switch. With Code review off, no Show me word is in
  * what an agent can read: the Inbox's MCP tool list, the guide brief,
- * `plannotator inbox --help`, the top-level help (Board off and on) and
- * `plannotator review --help`; `plannotator review draw …` and `review drawings …`
+ * `plannotator inbox --help`, the top-level help (Board off and on),
+ * `plannotator review --help`, and Shape's own text (`shape --help`, `/shape`),
+ * which stays byte for byte; `plannotator review draw …` and `review drawings …`
  * are the review parse's (`review <DIRECTORY>`), and a version-3 guide snapshot is refused with the release's
  * own "Unsupported snapshot version" words.
  *
@@ -13,6 +14,7 @@
  * and not the texts; a control proves each word is real, with Code review on.
  */
 import { afterAll, expect, test } from "bun:test";
+import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -20,7 +22,8 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
-import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
+import { formatSubcommandHelp, formatTopLevelHelp, SHAPE_COMMAND_USAGE } from "./cli";
+import { SHAPE_SKILL } from "@plannotator/core/shape-skill";
 import { isReviewDrawCommand } from "./review-draw-command";
 import { INBOX_REVIEW_DRAW_GONE, INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
@@ -82,6 +85,18 @@ async function agentTexts(codeReview: boolean): Promise<Record<string, string>> 
     else process.env.PLANNOTATOR_DATA_DIR = saved;
   }
 }
+
+/**
+ * Shape's own agent text, as it is on main without Show me, by SHA-256: Show me's agent words go in its request,
+ * never here, because someone with Shape on and Code review off reads these. A change to Shape's text on purpose
+ * pins the new hash here; one that names the code review belongs in the request.
+ */
+const SHAPE_TEXT_SHA256 = { "shape --help": "6161ba580a3eba62c94dabfcf3fc21616bda5e1c41f9b19c85ae62c0081dd728", "/shape skill": "bcdc38662314e0de8927a283ca1588f0327f0a1712c11af7d36b602b4c3b7fbf" };
+
+test("Code review off: Shape's own agent text is byte for byte what it was", () => {
+  const sha = (text: string) => createHash("sha256").update(text).digest("hex");
+  expect({ "shape --help": sha(SHAPE_COMMAND_USAGE), "/shape skill": sha(JSON.stringify(SHAPE_SKILL)) }).toEqual(SHAPE_TEXT_SHA256);
+});
 
 test("Code review off: no agent text holds a Show me word", async () => {
   const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];

@@ -27,8 +27,11 @@
  *     own places (the row, the grid) stay on Shape's switch.
  *  9. The agent failing or gone: the box goes back to its words with the Ask
  *     window's note.
+ * 10. A board drawn on an earlier review lands where its code is now, says so when
+ *     it cannot, and never paints its old numbers; lines the diff can't show open in
+ *     the board's own viewer; leaving the review closes the board.
  *
- * HOME is never changed: the sandbox env keeps the binary off the person's agents.
+ * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents.
  * gh and glab are traps. Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-show-me.spec.ts`.
  * 2x PNGs land in PLANNOTATOR_E2E_SHOTS_DIR (default .local/proof/show-me).
@@ -370,7 +373,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg', 'opencode']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    // A scratch home: the skills route reads folders under it (`~/.agents/skills`).
+    HOME: join(root, 'home'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_INBOX_TAILSCALE: '0',
@@ -506,9 +510,11 @@ test('Show me on selected lines: the popover, the box, the agent makes a Shape, 
   expect(asked).toContain('`plannotator shape --help`');
   expect(asked).toContain(`--thread ${round1.thread_id} --through ${round1.message_id}`);
   // Turning Code review on is enough: the help the request names is there with Shape's own switch off.
+  // The request says how a part lands on its code; Shape's own help, which people with Code review off read too, does not.
+  expect(asked).toContain('data-code="path#L42"');
   const help = world.shape(['--help']);
   expect(help.status, help.stderr).toBe(0);
-  expect(help.stdout).toContain('data-code="path#L42"');
+  expect(help.stdout).not.toContain('data-code');
 
   // Reloaded while the agent draws: Show me on the same lines finds that request waiting, never a second one.
   await page.reload();
@@ -565,6 +571,7 @@ test('a part lands on its line and the board shrinks to the corner card; it grow
   }))).toBe(true);
   const dunning = page.locator(`[data-guide-file-shell="${DUNNING}"]`).first();
   await expect(dunning).toBeInViewport();
+  await expect(dunning.locator('[data-line][data-selected-line]')).toHaveCount(6);
   await shot(page, '05-landed', ['light', 'dark']);
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
   await expect(board(page)).toBeVisible();
@@ -767,6 +774,114 @@ test("an older agent's `review draw` is refused and pointed at Shape; Shape's ow
   await page.goto(`${world.url}#shapes`);
   await expect(page).not.toHaveURL(/#shapes/);
   await expect(page.locator('[data-shape-nav]')).toHaveCount(0);
+  // So are `/shape` and ⌘K's Shape group: Code review offers its own skills, and finds no board.
+  const skills = await page.evaluate(async () => ((await (await fetch('/api/inbox/skills')).json()) as { skills: { name: string }[] }).skills.map((skill) => skill.name));
+  expect(skills.length).toBeGreaterThan(0);
+  expect(skills).not.toContain('shape');
+  await page.keyboard.press(process.platform === 'darwin' ? 'Meta+k' : 'Control+k');
+  const palette = page.locator('dialog[data-search-palette]');
+  await expect(palette).toBeVisible();
+  await palette.getByRole('combobox').or(palette.locator('input')).first().fill('After the third failure');
+  await page.waitForTimeout(800);
+  await expect(palette.getByText('Shape', { exact: true })).toHaveCount(0);
+  await page.keyboard.press('Escape');
+});
+
+test('a board drawn on an earlier review lands where its code is now, or says it changed; never on its old numbers', async () => {
+  test.setTimeout(200_000);
+  const { page } = world;
+  const painted = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().locator('[data-line][data-selected-line]');
+  const first = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, thread: 'two-reviews', subject: 'Two reviews', body: 'Ready for review.' });
+  await openReview(page, first.thread_id);
+  const pane = page.locator('[data-review-message]');
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+
+  // A real Show me here, for the same-lines check below.
+  await selectLines(page, WORKER, 16, 18);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await page.locator('[data-show-me-box]').getByLabel('What the picture should show').fill('The else branch?');
+  await page.locator('[data-show-me-send]').click();
+  await expect(board(page)).toBeVisible({ timeout: 30_000 });
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
+
+  // A board with one part of each kind, stored through this review.
+  const file = join(world.boardDir, 'two-reviews.json');
+  const box = (mark: string, code: string) => `<div data-mark="${mark}" data-code="${code}" style="padding:16px">${mark}</div>`;
+  writeFileSync(file, JSON.stringify({ title: 'Two reviews', claim: 'One part of each kind.', views: { picture: { width: 800, height: 300, html: `<div>${box('moved', `${WORKER}#L16-L18`)}${box('rewritten', `${SCHEDULE}#L6`)}${box('beyond', `${WORKER}#L9999`)}${box('elsewhere', 'README.md#L1')}</div>` } } }));
+  const stored = world.shape(['update', '--file', file, '--thread', first.thread_id, '--through', first.message_id]);
+  expect(stored.status, stored.stderr).toBe(0);
+  const boardId = (JSON.parse(stored.stdout) as { id: string }).id;
+  const open = async () => {
+    await page.evaluate((id) => { location.hash = `${location.hash}&shape=${encodeURIComponent(id)}`; }, boardId);
+    await expect(board(page)).toContainText('One part of each kind.');
+  };
+
+  // Lines this diff can't show, and a file not in this review: the board stays, and its viewer opens the code.
+  await open();
+  await part(board(page), 'beyond').click();
+  await expect(page.getByRole('dialog').filter({ hasText: 'retry-worker.ts' })).toBeVisible();
+  await expect(corner(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await part(board(page), 'elsewhere').click();
+  await expect(page.getByRole('dialog').filter({ hasText: 'README.md' })).toBeVisible();
+  await expect(corner(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+
+  // Leaving the review from the corner card closes the board with it.
+  await part(board(page), 'moved').click();
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 16–18/);
+  await pane.getByRole('button', { name: 'Thread' }).click();
+  await expect(pane).toHaveCount(0);
+  await expect(page).not.toHaveURL(/shape=/);
+  await expect(board(page)).toHaveCount(0);
+  await expect(corner(page)).toHaveCount(0);
+
+  // The agent sends a later review: a line added above, the else branch rewritten.
+  const second = await call('submit_guide', { project_path: world.project, guide: guide(2, false), patch: world.round2, review: true, reply_to: first.message_id, body: 'The row is removed, one email, jitter.' });
+  expect(second.thread_id).toBe(first.thread_id);
+  await page.goto(`${world.url}#thread=${first.thread_id}&guide=${second.message_id}`);
+  await page.reload();
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  await open();
+  await part(board(page), 'moved').click();
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 17–20/);
+  await expect(painted(WORKER)).toHaveCount(4);
+  await expect(painted(WORKER).first()).toContainText('} else {');
+  await expect(corner(page).locator('[data-show-me-changed]')).toHaveCount(0);
+  await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+
+  // Code that changed: its file, nothing painted there, and the corner says so.
+  await part(board(page), 'rewritten').click();
+  await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
+  await expect(corner(page).locator('.ib-sm-pip-f')).not.toContainText('lines');
+  await expect(page.locator(`[data-guide-file-shell="${SCHEDULE}"]`).first()).toBeVisible();
+  await expect(painted(SCHEDULE)).toHaveCount(0);
+  await shot(page, '14-changed', ['light', 'dark']);
+  await corner(page).locator('[data-show-me-again]').click();
+  const again = page.locator('[data-show-me-box]');
+  await expect(again).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(again.locator('[data-show-me-place]')).toHaveText('The whole review');
+  await page.getByRole('button', { name: 'Close Show me' }).click();
+  await expect(again).toHaveCount(0);
+
+  // Show me here: the earlier review's lines where they are now reopen its board; its old numbers are other code, so they ask.
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  const asked = world.agent.asked.length;
+  await selectLines(page, WORKER, 17, 20);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(board(page)).toBeVisible();
+  await expect(page.locator('[data-show-me-box]')).toHaveCount(0);
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
+  await selectLines(page, WORKER, 14, 16);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await expect(page.locator('[data-show-me-box]')).toHaveAttribute('data-show-me-box', 'compose');
+  await expect(page.locator('[data-show-me-place]')).toHaveText('retry-worker.ts · lines 14–16');
+  await page.getByRole('button', { name: 'Close Show me' }).click();
+  expect(world.agent.asked.length).toBe(asked);
+  expect(world.errors).toEqual([]);
 });
 
 test("reloaded while it draws, and the agent ends with no words: the box goes back to its words with the Ask window's note", async () => {

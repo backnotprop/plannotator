@@ -248,6 +248,7 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
       ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
       : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
     `Store it with \`--thread ${threadId} --through ${target.review}\`: it opens over the review by itself, so don't open a page.`,
+    'On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.',
     'Then answer here in one or two sentences.',
   ].join('\n');
 }

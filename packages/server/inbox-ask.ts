@@ -47,7 +47,7 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import { inboxAgentName, type InboxThread } from "@plannotator/core/inbox-types";
 import { isAIEndpointPath } from "@plannotator/ai/endpoints";
 import { inboxReviewRound, inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
-import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, showMeShapes, updateInboxAskTurn, type InboxAskConversation, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
+import { addInboxAskTurn, checkInboxAskInput, checkInboxShowMeInput, findInboxAskTurn, inboxAskFiles, inboxAskSummary, markInboxAskSeen, readInboxAsk, removeInboxAsk, showMeShapes, type ShowMeBoardVersion, updateInboxAskTurn, type InboxAskConversation, type InboxAskSummary } from "@plannotator/shared/inbox/ask";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { createInboxAskLive, type InboxAskClaim, type InboxAskContext, type InboxAskTimes } from "./inbox-ask-live";
@@ -91,7 +91,7 @@ export function createInboxAsk(options: {
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
   reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
-  boardsOf?: (threadId: string) => { id: string; versions: string[] }[];
+  boardsOf?: (threadId: string) => { id: string; versions: ShowMeBoardVersion[] }[];
   store: InboxStore;
   serverSession: string;
   readBody: (req: Request) => Promise<Record<string, unknown>>;
@@ -232,6 +232,9 @@ export function createInboxAsk(options: {
       if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${showMe.target.review} is not a review in this thread.`, code: "not_a_review" }, 409);
       if (showMe.target.file !== null && !review.files.includes(showMe.target.file)) {
         throw new InboxError("validation_error", `show_me.file: ${showMe.target.file} is not a file of this review.`, { field: "show_me" });
+      }
+      if (showMe.againShape !== undefined && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === showMe.againShape)) {
+        throw new InboxError("validation_error", `again_shape: ${showMe.againShape} is not a board of this thread.`, { field: "again_shape" });
       }
       // The round is the Inbox's to say: the review's place among the thread's reviews.
       const target: InboxShowMeTarget = { ...showMe.target, round: inboxReviewRound(thread.messages, showMe.target.review) };

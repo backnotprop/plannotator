@@ -155,16 +155,20 @@ export function ShowMeCorner({
   resolveSrc,
   onGrow,
   onClose,
+  onAgain,
 }: {
   shape: string;
   title: string;
   /** The board's Picture, drawn small. */
   picture: ShapeDrawnView | null;
-  part: { name: string; mark: string | null; file: string; lines: [number, number] };
+  /** `lines` null: the code this part was drawn from changed, and the review shows its file. */
+  part: { name: string; mark: string | null; file: string; lines: [number, number] | null };
   /** Where the board's own pictures (its `files/`) are served from. */
   resolveSrc: (src: string) => string;
   onGrow: () => void;
   onClose: () => void;
+  /** Show me again, when the agent can take one. */
+  onAgain?: () => void;
 }) {
   const marks: MarkState = { fresh: EMPTY, erasing: EMPTY, noted: part.mark ? new Set([part.mark]) : EMPTY };
   // The whole picture, small: drawn at about the board's width, then scaled to fit the card.
@@ -214,7 +218,17 @@ export function ShowMeCorner({
         )}
       </div>
       <div className="ib-sm-pip-f">
-        <b>{part.name}</b> <span>· {baseName(part.file)} lines {inboxReviewLines(part.lines)}</span>
+        <b>{part.name}</b> <span>· {baseName(part.file)}{part.lines ? ` lines ${inboxReviewLines(part.lines)}` : ''}</span>
+        {!part.lines && (
+          <div className="ib-sm-pip-n" data-show-me-changed="">
+            This code changed after the picture was drawn.
+            {onAgain && (
+              <button type="button" className="ib-btn" onClick={onAgain} data-show-me-again="">
+                Show me again
+              </button>
+            )}
+          </div>
+        )}
       </div>
     </section>
   );

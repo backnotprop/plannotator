@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -3262,6 +3262,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of draftListeners) listener(threadId);
     },
   });
+  // Show me's old drawings: nothing reads them since Show me makes a Shape, so they go, deleted threads' too.
+  try {
+    rmSync(join(store.dir, "review-drawings"), { recursive: true, force: true });
+  } catch {
+    // Left for the next start.
+  }
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     on: askOnNow,
@@ -3271,7 +3277,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       shapes.store
         .list({ state: "all" })
         .filter((shape) => shape.thread === threadId)
-        .map((shape) => ({ id: shape.id, versions: shapes.store.versions(shape.id).map((version) => version.at) })),
+        .map((shape) => ({ id: shape.id, versions: shapes.store.versionStamps(shape.id) })),
     // Show me's review: its thread, title and the files of its diff (inbox-guides.ts reads the stored snapshot).
     reviewOf: (messageId) => {
       const message = store.message(messageId);

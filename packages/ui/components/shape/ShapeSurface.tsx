@@ -402,8 +402,8 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
   // A drawn part with `data-code`: the host's own view of the code when it has one, else the Code view's whole file
   // when the board has one, else the file viewer.
   const openCodeTarget = useCallback(async (at: ShapeCodeTarget, el: HTMLElement) => {
-    if (onCode?.(at, el)) return;
     const v = versionRef.current;
+    if (onCode?.(at, el, v)) return;
     if (v?.views.code && host.readFile && (v.views.code.files ?? []).some((f) => f.path === at.path)) {
       openCode(at.path, at.line);
       return;

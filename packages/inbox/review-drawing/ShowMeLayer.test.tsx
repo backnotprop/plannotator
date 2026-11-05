@@ -117,9 +117,9 @@ describe.skipIf(!hasDom)('Show me over the code review', () => {
     expect(el.querySelector('[data-show-me-corner]')!.matches('[data-popover-layer][data-chat-window]')).toBe(true);
   });
 
-  test("the Overview's picture hides, and in round 2 its changed parts carry the tag", () => {
+  test("the Overview's picture hides, and in a later review its changed parts carry the tag", () => {
     const el = mount(
-      <figure.OverviewFigure drawn={PICTURE} meta="redrawn by Claude Code for round 2 · 1 part changed" changed={new Set(['wait'])} onCode={() => {}} />,
+      <figure.OverviewFigure drawn={PICTURE} meta="redrawn by Claude Code · 1 part changed" changed={new Set(['wait'])} onCode={() => {}} />,
     );
     expect(board(el).querySelector('[data-mark="wait"]')!.getAttribute('data-shp-tag')).toBe('changed');
     expect(board(el).querySelector('[data-mark="pick"]')!.hasAttribute('data-shp-tag')).toBe(false);

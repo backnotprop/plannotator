@@ -9,7 +9,9 @@
  * conversation (`showMeShapes`), and the board opens over the review. Its short
  * answer streams here as an Ask answer does. No new keys.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxShowMeRequest, type InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import type { AIResponse } from '@plannotator/ui/types';
@@ -20,7 +22,7 @@ import { inboxApi, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
-import { showMeEnded, showMeSamePlace, waitingShowMe } from './showMeModel';
+import { earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
@@ -54,6 +56,9 @@ export function useShowMe({
   title,
   round,
   agent,
+  others,
+  files,
+  boardOpen,
   enabled,
   subscribeBoards,
   onBoard,
@@ -64,6 +69,12 @@ export function useShowMe({
   round: number;
   /** The agent's name, for the Ask window's notes ("Claude Code went away before it finished."). */
   agent: string;
+  /** The thread's other reviews: a board drawn on one is anchored again here. */
+  others: readonly string[];
+  /** This review's files, to find where another review's lines are now. */
+  files: readonly { path: string; patch: string }[];
+  /** A board is open over the review: its parts may need another review's lines. */
+  boardOpen: boolean;
   enabled: boolean;
   /** Boards changed: the window's `event: shapes`. Returns the unsubscribe. */
   subscribeBoards: (listener: () => void) => () => void;
@@ -104,6 +115,39 @@ export function useShowMe({
       stopBoards();
     };
   }, [reload, threadId, subscribeBoards]);
+
+  // Each other review's lines by file, read once a board or a Show me may need them. Read or not, it is known:
+  // one that cannot be read anchors nothing.
+  const [otherLines, setOtherLines] = useState<Record<string, ReviewLines>>({});
+  const nowLines = useMemo(() => reviewLines(files), [files]);
+  const askedElsewhere = turns.filter((turn) => turn.shape && turn.show_me && turn.show_me.review !== reviewId);
+  const toRead = boardOpen || askedElsewhere.length > 0 ? others.join(',') : '';
+  useEffect(() => {
+    if (!toRead) return;
+    let live = true;
+    for (const review of toRead.split(',')) {
+      if (otherLines[review]) continue;
+      const known = (lines: ReviewLines) => {
+        if (live) setOtherLines((current) => ({ ...current, [review]: lines }));
+      };
+      inboxApi.guide(review).then(
+        (answer) => {
+          const parsed = parseGuideSnapshot(answer.snapshot);
+          known(parsed.ok ? reviewLines(parseDiffToFiles(parsed.value.review.rawPatch)) : new Map());
+        },
+        () => known(new Map()),
+      );
+    }
+    return () => {
+      live = false;
+    };
+  }, [toRead]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Where another review's lines are in this one; null when that is not known. */
+  const placeNow = (asked: InboxShowMeTarget): ShowMePlace | null => {
+    if (!asked.file || !asked.lines) return null;
+    const now = earlierLinesNow(asked.lines, otherLines[asked.review]?.get(asked.file), nowLines.get(asked.file));
+    return now ? { file: asked.file, lines: now } : null;
+  };
 
   const turnOf = (id: string | null) => (id ? turns.find((turn) => turn.id === id) : undefined);
 
@@ -149,15 +193,22 @@ export function useShowMe({
     setProblem(boxFailed);
   }, [boxFailed]);
 
+  /** A Show me pressed while another review's lines for its file are still being read: it opens once they are. */
+  const openWhenRead = useRef<ShowMePlace | null>(null);
+  const stillReading = (place: ShowMePlace) => askedElsewhere.some((turn) => turn.show_me!.file === place.file && !otherLines[turn.show_me!.review]);
+
   /**
    * Show me on these lines (or the whole review). What was asked about the
    * same place opens again, never a second request: the board a Show me on it
-   * made (in this round or an earlier one), else the Show me the agent is
-   * drawing now (its box, waiting). Other lines open the box.
+   * made in this review, else the Show me the agent is drawing now (its box,
+   * waiting), else the board a Show me made in another review on the code
+   * these lines hold now (`placeNow`: its numbers may be other code here).
+   * Other lines open the box.
    */
   const open = (place: ShowMePlace) => {
     setProblem(null);
-    const made = turns.filter((turn) => turn.shape && turn.show_me && showMeSamePlace(turn.show_me, place)).at(-1);
+    openWhenRead.current = null;
+    const made = turns.filter((turn) => turn.shape && turn.show_me?.review === reviewId && showMeSamePlace(turn.show_me, place)).at(-1);
     if (made?.shape) {
       setBox(null);
       onBoard(made.shape);
@@ -173,14 +224,38 @@ export function useShowMe({
       });
       return;
     }
+    if (place.file && place.lines) {
+      if (stillReading(place)) {
+        openWhenRead.current = place;
+        return;
+      }
+      const elsewhere = askedElsewhere.filter((turn) => {
+        const now = placeNow(turn.show_me!);
+        return !!now && showMeSamePlace(now, place);
+      }).at(-1);
+      if (elsewhere?.shape) {
+        setBox(null);
+        onBoard(elsewhere.shape);
+        return;
+      }
+    }
     setBox({ place, words: '', turn: null });
   };
+  useEffect(() => {
+    const place = openWhenRead.current;
+    if (place && !stillReading(place)) open(place);
+  }, [otherLines]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /** Show me again: the box for what this board was made of, asked anew as a new version (other words). */
+  /**
+   * Show me again: the box for what this board was made of, asked anew as a new
+   * version (other words). Made in another review: its lines where they are here,
+   * else the whole review (this review's diff may not hold them at all).
+   */
   const again = (shape: string) => {
     setProblem(null);
     const made = turns.filter((turn) => turn.shape === shape && turn.show_me).at(-1)?.show_me;
-    setBox({ place: made ? { file: made.file, lines: made.lines } : { file: null, lines: null }, words: made?.words ?? '', turn: null, again: shape });
+    const place = made?.review === reviewId ? { file: made.file, lines: made.lines } : made ? placeNow(made) : null;
+    setBox({ place: place ?? { file: null, lines: null }, words: made?.words ?? '', turn: null, again: shape });
   };
 
   /** POST the turn (again, for a busy choice: the same turn) and start its answer, as the Ask window does. */
@@ -262,5 +337,8 @@ export function useShowMe({
     busyChoice,
     stop,
     closeBox: () => setBox(null),
+    /** This review's lines by file, and another review's (undefined until read). */
+    nowLines,
+    linesOf: (review: string): ReviewLines | undefined => otherLines[review],
   };
 }

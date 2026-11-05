@@ -225,28 +225,54 @@ export function pruneInboxAsks(inboxDirPath: string, threadExists: (threadId: st
   );
 }
 
+/** One stored version of a board, as `showMeShapes` reads it. */
+export interface ShowMeBoardVersion {
+  n: number;
+  at: string;
+  through: string | null;
+}
+
 /**
- * The board each Show me made: the first version written in any of the thread's
- * boards after the Show me was asked and before the next one. Read from the
- * boards themselves, so an agent stores a board the one way it always does and
- * nothing here can disagree with the store. By turn id; a Show me with no board
- * yet is absent.
+ * The board each Show me made, read from the boards themselves, so an agent
+ * stores a board the one way it always does and nothing here can disagree with
+ * the store. A turn looks at versions written between its asking and its end
+ * (its answer, or the next Show me), so other work on the thread's boards is
+ * never taken for it:
+ *  - Show me again: only the board it asked to bring up to date.
+ *  - A Show me: a new board through its review. Only when the turn has ended
+ *    with none does it take another board moved through that review (the agent
+ *    chose to update one), or a new one stored with no `--through`.
+ *  - Stopped or failed with no end kept: nothing.
+ * By turn id; a Show me with no board yet is absent.
  */
-export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly string[] }[]): Map<string, string> {
+export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly ShowMeBoardVersion[] }[]): Map<string, string> {
   const out = new Map<string, string>();
   const asked = turns.filter((turn) => turn.kind === "show_me");
   asked.forEach((turn, at) => {
     const from = Date.parse(turn.at);
+    const ended = Date.parse(turn.answered_at ?? "");
+    const hasEnd = Number.isFinite(ended);
+    const cut = turn.stopped === true || turn.failure !== undefined;
+    if (cut && !hasEnd) return;
     const next = asked[at + 1];
-    const until = next ? Date.parse(next.at) : Infinity;
-    let first: { id: string; when: number } | null = null;
-    for (const board of boards) {
-      for (const version of board.versions) {
-        const when = Date.parse(version);
-        if (when >= from && when < until && (!first || when < first.when)) first = { id: board.id, when };
+    const until = Math.min(hasEnd ? ended : Infinity, next ? Date.parse(next.at) : Infinity);
+    const firstOf = (fits: (board: string, version: ShowMeBoardVersion) => boolean): string | undefined => {
+      let first: { id: string; when: number } | null = null;
+      for (const board of boards) {
+        for (const version of board.versions) {
+          const when = Date.parse(version.at);
+          if (when >= from && when <= until && fits(board.id, version) && (!first || when < first.when)) first = { id: board.id, when };
+        }
       }
-    }
-    if (first) out.set(turn.id, first.id);
+      return first?.id;
+    };
+    const review = turn.show_me?.review;
+    const made =
+      turn.again_shape !== undefined
+        ? firstOf((board) => board === turn.again_shape)
+        : (firstOf((_, version) => version.n === 1 && version.through === review) ??
+          (hasEnd && !cut ? firstOf((_, version) => version.through === review || (version.n === 1 && version.through === null)) : undefined));
+    if (made) out.set(turn.id, made);
   });
   return out;
 }
