@@ -170,10 +170,19 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import {
+  inboxInitiativeNameKey,
+  INBOX_INITIATIVE_NAME_MAX,
+  INBOX_INITIATIVES_MAX,
+  isInboxInitiativeId,
+  isInboxInitiativeRecord,
+  type InboxInitiative,
+} from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
+  INITIATIVES_FILE,
   LEGACY_DECISIONS_FILE,
   INBOX_PROJECTS_DIR,
   SEQ_FLOOR_FILE,
@@ -572,6 +581,57 @@ export interface InboxDeliveryPresence {
   waitOf?(session: string, itemId: string): { since: string; autoSince: string | null } | null;
 }
 
+/** The review app's comment types a guided-review line comment can be. */
+const GUIDE_COMMENT_TYPES: ReadonlySet<unknown> = new Set(["comment", "suggestion", "concern"]);
+
+/**
+ * The fields of a comment on a guided review that are kept, checked: what the
+ * export and the windows read, and nothing else (a field the client adds is
+ * dropped; one of the wrong kind is refused, so a bad value can never break a
+ * Send). A global comment (`general`) is words only: no suggestion, no quoted
+ * lines, no token, no images. The caller sets the location fields.
+ */
+function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "general"): Record<string, unknown> {
+  const refuse = (field: string, what: string): never => {
+    throw new InboxError("validation_error", `annotation.${field}: ${what}`, { field: `annotation.${field}` });
+  };
+  const absent = (value: unknown) => value === undefined || value === null || (Array.isArray(value) && value.length === 0);
+  if (scope === "general") {
+    if (fields.type !== "comment") refuse("type", '"comment" (a global comment is words).');
+    for (const field of ["suggestedCode", "originalCode", "selectedText", "tokenText", "charStart", "charEnd", "images"]) {
+      if (!absent(fields[field])) refuse(field, "a global comment is on the whole review and takes none.");
+    }
+  } else {
+    if (!GUIDE_COMMENT_TYPES.has(fields.type)) refuse("type", '"comment", "suggestion" or "concern".');
+    if (!absent(fields.images)) refuse("images", "a comment on a guided review takes none.");
+  }
+  const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
+  if (fields.text !== undefined) kept.text = fields.text;
+  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText"];
+  for (const field of strings) {
+    const value = fields[field];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== "string") refuse(field, "a string.");
+    kept[field] = value;
+  }
+  if (scope === "line") {
+    for (const field of ["charStart", "charEnd"]) {
+      const value = fields[field];
+      if (value === undefined || value === null) continue;
+      if (!Number.isInteger(value) || (value as number) < 0) refuse(field, "a character offset.");
+      kept[field] = value;
+    }
+  }
+  const decorations = fields.decorations;
+  if (decorations !== undefined && decorations !== null) {
+    if (!Array.isArray(decorations) || !decorations.every((d) => typeof d === "string")) refuse("decorations", "a list of words.");
+    kept.decorations = decorations;
+  }
+  const createdAt = fields.createdAt;
+  kept.createdAt = typeof createdAt === "number" && Number.isFinite(createdAt) ? createdAt : Date.now();
+  return kept;
+}
+
 export class InboxStore {
   readonly dir: string;
   /** The live sessions, for the rows' delivery; null (tests, tools): not known, every session counts as there. */
@@ -664,6 +724,8 @@ export class InboxStore {
   private readonly stepsIdOf = new Map<string, string>();
   /** Each thread's steps record ids (a thread's read never scans every list). */
   private readonly stepsIdsByThread = new Map<string, Set<string>>();
+  /** The Board's initiatives, by id, deleted ones too (approval "board-initiatives"). Read by the Board only. */
+  private readonly initiativesById = new Map<string, InboxInitiative>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -700,38 +762,44 @@ export class InboxStore {
     this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
+    const lines: InboxLine[] = [];
+    // The Board's initiatives: one file for every project, on the same seq.
+    this.readLines(join(this.dir, INITIATIVES_FILE), lines);
     if (!existsSync(projectsDir)) {
+      lines.sort((a, b) => a.seq - b.seq);
+      for (const line of lines) this.apply(line);
       this.loadPins();
       this.loadSnoozes();
       return;
     }
-    const lines: InboxLine[] = [];
     for (const key of readdirSync(projectsDir)) {
       const folder = join(projectsDir, key);
       // Decisions were removed (2026-10): an older store's decisions.jsonl is
       // left on disk and never applied, but its seqs still count, so a seq is
       // never handed out twice.
       this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) {
-        const path = join(folder, name);
-        let text: string;
-        try {
-          text = readFileSync(path, "utf8");
-        } catch {
-          continue;
-        }
-        if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
-        for (const raw of text.split("\n")) {
-          const line = parseInboxLine(raw);
-          if (line) lines.push(line);
-        }
-      }
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) this.readLines(join(folder, name), lines);
     }
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
     this.loadSnoozes();
+  }
+
+  /** One store file's lines into `into` (none when it is missing); a torn last line is noted for the next append. */
+  private readLines(path: string, into: InboxLine[]): void {
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      return;
+    }
+    if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
+    for (const raw of text.split("\n")) {
+      const line = parseInboxLine(raw);
+      if (line) into.push(line);
+    }
   }
 
   /**
@@ -826,6 +894,9 @@ export class InboxStore {
           // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
           if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
           else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
+          // An Inbox from before initiatives writes a card without the field: the card keeps its initiative
+          // (only the person sets one, and that Inbox has no way to).
+          if (line.record.initiative === undefined && prev?.initiative) card = { ...card, initiative: prev.initiative };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -839,6 +910,10 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "initiative":
+        // The Board's initiatives (approval "board-initiatives"): read by the Board only.
+        if (isInboxInitiativeRecord(line.record)) this.initiativesById.set(line.record.id, line.record);
         break;
     }
   }
@@ -4684,7 +4759,9 @@ export class InboxStore {
    * (`CodeAnnotation`) on a file of the guide's patch, one side, a line range.
    * Its key is the message and the file; `version` is the guide snapshot's
    * sha256 and `attachment_id` is empty. Sent with the reply like an
-   * attachment's annotation, as the review app's export.
+   * attachment's annotation, as the review app's export. A global comment
+   * (`scope: "general"`, on the whole review) is the review app's general
+   * comment: no file, no lines (its "" / 0 / 0 sentinels), and words.
    */
   saveGuideAnnotation(messageId: string, annotation: unknown): InboxAnnotationRecord {
     const message = this.messages.get(messageId);
@@ -4696,6 +4773,7 @@ export class InboxStore {
     const fields = annotation as Record<string, unknown>;
     const id = fields.id;
     if (!isInboxAnnotationId(id)) throw new InboxError("validation_error", "annotation.id: a short id.", { field: "annotation.id" });
+    if (fields.scope === "general") return this.saveGuideGlobalComment(message, message.guide, id, fields);
     const file = fields.filePath;
     if (typeof file !== "string" || file === "") throw new InboxError("validation_error", "annotation.filePath: a file of the guide's patch.", { field: "annotation.filePath" });
     const diff = this.guideFiles(message.guide.sha256).get(file);
@@ -4714,9 +4792,10 @@ export class InboxStore {
       throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }
     if (fields.scope !== undefined && fields.scope !== "line") {
-      throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line").', { field: "annotation.scope" });
+      throw new InboxError("validation_error", 'annotation.scope: a guided-review comment is on lines ("line") or on the whole review ("general").', { field: "annotation.scope" });
     }
     if (fields.text !== undefined && typeof fields.text !== "string") throw new InboxError("validation_error", "annotation.text: a string.", { field: "annotation.text" });
+    const kept = guideCommentFields(fields, "line");
     if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
     const existing = this.annotations.get(id);
     if (existing && (!existing.guide || existing.message_id !== message.id || existing.path !== file)) {
@@ -4735,7 +4814,51 @@ export class InboxStore {
       path: file,
       version: message.guide.sha256,
       guide: { title: message.guide.title, file, side, line_start: start as number, line_end: end as number },
-      annotation: fields,
+      annotation: { ...kept, filePath: file, lineStart: start, lineEnd: end, side },
+      created_at: existing?.created_at ?? at,
+      updated_at: at,
+      removed_at: null,
+      sent_reply_id: null,
+    };
+    this.appendAnnotation(record, at);
+    return record;
+  }
+
+  /**
+   * A global comment on a guided review (saveGuideAnnotation with `scope:
+   * "general"`): words on the whole review, kept with the thread's other
+   * comments until a Send. It names no file and no lines; the record's
+   * `path` is "" and its `guide` carries the review app's sentinels.
+   */
+  private saveGuideGlobalComment(message: InboxMessage, guide: NonNullable<InboxMessage["guide"]>, id: string, fields: Record<string, unknown>): InboxAnnotationRecord {
+    if (fields.filePath !== undefined && fields.filePath !== "") {
+      throw new InboxError("validation_error", "annotation.filePath: a global comment is on the whole review, on no file.", { field: "annotation.filePath" });
+    }
+    const text = fields.text;
+    if (typeof text !== "string" || text.trim() === "" || text.length > INBOX_MESSAGE_COMMENT_TEXT_MAX) {
+      throw new InboxError("validation_error", `annotation.text: the comment (1 to ${INBOX_MESSAGE_COMMENT_TEXT_MAX} characters).`, { field: "annotation.text" });
+    }
+    const kept = guideCommentFields(fields, "general");
+    if (this.closedByArchive(message)) throw new InboxError("thread_resolved", "This thread is resolved; reopen it to annotate.");
+    const existing = this.annotations.get(id);
+    if (existing && (!existing.guide || existing.message_id !== message.id || existing.guide.scope !== "general")) {
+      throw new InboxError("validation_error", "annotation.id: already used on another file.", { field: "annotation.id" });
+    }
+    if (existing && (existing.sent_reply_id !== null || existing.removed_at !== null)) {
+      throw new InboxError("annotation_closed", "This annotation was already sent or removed.");
+    }
+    const at = this.stamp();
+    const record: InboxAnnotationRecord = {
+      id,
+      project_id: message.project_id,
+      thread_id: message.thread_id,
+      message_id: message.id,
+      attachment_id: "",
+      path: "",
+      version: guide.sha256,
+      guide: { title: guide.title, file: "", side: "new", line_start: 0, line_end: 0, scope: "general" },
+      // The review app's general comment: no file, no lines, whatever the client sent for them.
+      annotation: { ...kept, scope: "general", filePath: "", lineStart: 0, lineEnd: 0, side: "new" },
       created_at: existing?.created_at ?? at,
       updated_at: at,
       removed_at: null,
@@ -5202,6 +5325,7 @@ export class InboxStore {
     this.stepsById.clear();
     this.stepsIdOf.clear();
     this.stepsIdsByThread.clear();
+    this.initiativesById.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -6045,7 +6169,100 @@ export class InboxStore {
   cardWire(card: InboxCard): InboxCardWire {
     const threads = card.threads.filter((id) => this.messages.get(id)?.thread_id === id);
     // A combined project's cards read the project it went into, as its rows do. The record keeps its own.
-    return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
+    // A card whose initiative was deleted reads as in none (the record keeps the id, for its history).
+    // A raw line an older Inbox wrote has no field: it reads the initiative the store kept (apply carries it).
+    const held = card.initiative === undefined ? this.cards.get(card.id)?.initiative : card.initiative;
+    const initiative = held ? (this.initiativesById.get(held)?.deleted_at === null ? held : null) : null;
+    return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, initiative, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
+  }
+
+  // ─────────────────────────── initiatives ───────────────────────────
+  // The Board's initiatives (approval "board-initiatives"): named by the
+  // person, across projects; a card is in at most one. Only the person makes,
+  // renames, deletes and sets them. Deleting writes no card: a card whose
+  // initiative is deleted reads as in none (cardWire).
+
+  /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
+  initiatives(): InboxInitiative[] {
+    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  initiative(id: string): InboxInitiative | null {
+    return this.initiativesById.get(id) ?? null;
+  }
+
+  private liveInitiative(id: unknown): InboxInitiative {
+    const found = isInboxInitiativeId(id) ? this.initiativesById.get(id) : undefined;
+    if (!found || found.deleted_at !== null) throw new InboxError("initiative_not_found", `No initiative ${String(id)}.`, { field: "initiative" });
+    return found;
+  }
+
+  /** A name the person typed, one line; refused when a live initiative (not `self`) already has it, ignoring case. */
+  private initiativeName(value: unknown, self: string | null): string {
+    const name = this.cardText(value, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(name);
+    for (const other of this.initiativesById.values()) {
+      if (other.id !== self && other.deleted_at === null && inboxInitiativeNameKey(other.name) === key) {
+        throw new InboxError("initiative_exists", `There is already an initiative named ${other.name}.`, { field: "name", initiative_id: other.id });
+      }
+    }
+    return name;
+  }
+
+  private appendInitiative(record: InboxInitiative, at: string): void {
+    this.write(join(this.dir, INITIATIVES_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
+    // An older Inbox never reads initiatives.jsonl: the floor keeps it from handing out this seq again.
+    try {
+      this.keepSeqFloor();
+    } catch {
+      // Best effort: the line is written; only a downgrade would read the floor.
+    }
+  }
+
+  /** A new initiative, named `name` (the person's). */
+  createInitiative(input: { name: unknown; by: InboxAuthor }): InboxInitiative {
+    if (input.by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person makes an initiative.");
+    const name = this.initiativeName(input.name, null);
+    const live = [...this.initiativesById.values()].filter((i) => i.deleted_at === null).length;
+    if (live >= INBOX_INITIATIVES_MAX) throw new InboxError("initiative_limit", `At most ${INBOX_INITIATIVES_MAX} initiatives: delete one first.`);
+    const at = this.stamp();
+    const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: input.by, updated_at: at, deleted_at: null };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /** The person renamed an initiative: every card in it reads the new name (they name it by id). */
+  renameInitiative(id: string, name: unknown): InboxInitiative {
+    const current = this.liveInitiative(id);
+    const next = this.initiativeName(name, current.id);
+    if (next === current.name) return current;
+    const at = this.stamp();
+    const record: InboxInitiative = { ...current, name: next, updated_at: at };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /** The person deleted an initiative: its cards read as in none; no card line is written (their ages stay). */
+  deleteInitiative(id: string): InboxInitiative {
+    const current = this.liveInitiative(id);
+    const at = this.stamp();
+    const record: InboxInitiative = { ...current, updated_at: at, deleted_at: at };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /** The person put a card in an initiative, or took it out of one (null): one card line, a history entry. */
+  setCardInitiative(id: string, initiative: unknown, by: InboxAuthor): InboxCard {
+    if (by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.");
+    const card = this.cards.get(id);
+    if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
+    const next = initiative === null ? null : this.liveInitiative(initiative).id;
+    const now = this.cardWire(card).initiative ?? null;
+    if (next === now) return card;
+    const at = this.stamp();
+    const written: InboxCard = { ...card, initiative: next, heard_at: at, heard_by: by };
+    this.appendCard(written, at);
+    return this.cards.get(id) ?? written;
   }
 
   /**
@@ -6209,10 +6426,15 @@ export class InboxStore {
     notes?: unknown;
     /** The person's message that sends the new card to an agent: checked before the card is written, one line for both. */
     send_thread_id?: unknown;
+    /** The person's New card on a Board filtered to an initiative: it starts in that one (an `ini_` id; null or absent: none). */
+    initiative?: unknown;
   }): { card: InboxCard; replayed: boolean } {
     const project = this.projectsById.get(input.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     const byAgent = input.by.kind === "agent";
+    const givenInitiative = input.initiative !== undefined && input.initiative !== null;
+    if (givenInitiative && byAgent) throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.", { field: "initiative" });
+    const initiative = givenInitiative ? this.liveInitiative(input.initiative).id : null;
     const sending = input.send_thread_id !== undefined && input.send_thread_id !== null;
     if (sending && byAgent) throw new InboxError("validation_error", "thread_id: only the person sends a card to an agent.", { field: "thread_id" });
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
@@ -6281,6 +6503,7 @@ export class InboxStore {
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
       ...(column === "done" && !target ? { done_prs: inboxCardDonePrs({ refs, prs }) } : {}),
+      initiative,
     };
     this.appendCard(card, at);
     return { card, replayed: false };
@@ -6438,9 +6661,15 @@ export class InboxStore {
     const lines: { seq: number; card: InboxCard }[] = [];
     for (const raw of text.split("\n")) {
       const line = parseInboxLine(raw);
-      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: readInboxCard(line.record) });
+      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: line.record });
     }
     lines.sort((a, b) => a.seq - b.seq);
+    // A line an Inbox from before initiatives wrote has no `initiative`: the card kept its own (as apply reads it).
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i]!.card;
+      const kept = i > 0 && raw.initiative === undefined ? lines[i - 1]!.card.initiative : raw.initiative;
+      lines[i] = { seq: lines[i]!.seq, card: readInboxCard({ ...raw, initiative: kept }) };
+    }
     return inboxCardHistory(lines.length > 0 ? lines.map((line) => line.card) : [card]);
   }
 

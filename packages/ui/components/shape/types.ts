@@ -70,6 +70,12 @@ export interface ShapeHost {
    * no Ask AI fallback). Absent: a host whose Ask AI answers then, and the panel says so.
    */
   askWaitsWhenEnded?: boolean;
+  /**
+   * This host cannot tell whether the agent's session is live (the standalone Shape page: its server knows no
+   * sessions, so every board reads `gone`). The Ask panel then shows no session line at all, rather than claim the
+   * session ended. Absent: the line shows the session's state, as always.
+   */
+  sessionless?: boolean;
 }
 
 export interface ShapeCodeHoverRequest {
@@ -102,7 +108,7 @@ export type ShapePanelTab = 'ask' | 'thread' | 'refs';
 export interface ShapeSurfaceProps {
   host: ShapeHost;
   id: string;
-  /** The Pebble closes Shape (the Inbox: back to the thread). Absent: the Pebble is only the mark. */
+  /** The × at the title's right closes Shape (the Inbox: back to the thread). Absent: no close button. */
   onClose?: () => void;
   /** The Code view's Guided Review. Absent: the Code view lists the guide's steps without diffs. */
   CodeGuide?: ComponentType<ShapeCodeGuideProps>;

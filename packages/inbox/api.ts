@@ -10,6 +10,7 @@ import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import type {
   InboxCardMark,
+  InboxInitiative,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -119,6 +120,8 @@ export interface CardsModel {
   threads?: Record<string, InboxListRow | null>;
   /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
   steps?: Record<string, InboxStepsWire[]>;
+  /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
+  initiatives?: InboxInitiative[];
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -214,6 +217,11 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /**
+   * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
+   * an older Inbox and for a tailnet guest, which then read every session as before.
+   */
+  session_labels?: Record<string, string>;
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
@@ -472,6 +480,8 @@ export interface LiveSession {
   wrote_thread: boolean;
   /** Its connection can put a message into a running turn (Send now). Absent from an older Inbox. */
   send_now?: boolean;
+  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  label?: string;
 }
 
 export interface LiveSessionsModel {
@@ -510,6 +520,8 @@ export interface TaggableSession {
   /** `live`: its connection polls and wakes it; `mcp`: it reads the Inbox only. */
   kind: 'live' | 'mcp';
   name: string | null;
+  /** A live session's label (issue #2450). Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  label?: string;
   project: { id: string | null; name: string; root: string | null } | null;
   started_at: string | null;
   last_at: string;
@@ -1374,8 +1386,25 @@ export const inboxApi = {
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
-  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
-    post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  createCard: (input: {
+    project?: string | null;
+    title: string;
+    notes?: string | null;
+    column?: 'backlog' | 'todo';
+    refs?: string[];
+    thread_id?: string;
+    idempotency_key?: string;
+    /** The initiative the Board is filtered to: the new card starts in it. */
+    initiative?: string | null;
+  }) => post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  /** The card's initiative (an `ini_` id), or none (null). */
+  setCardInitiative: (id: string, initiative: string | null) =>
+    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
+  /** A new initiative, named. */
+  createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
+  /** An initiative renamed, or deleted (its cards read as in none). */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' }) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -1606,7 +1635,9 @@ export type InboxEvent =
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
   | { seq: number; kind: 'card'; id: string; card: InboxCardWire }
   /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
-  | { seq: number; kind: 'steps'; id: string; thread_id: string };
+  | { seq: number; kind: 'steps'; id: string; thread_id: string }
+  /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
+  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
@@ -1653,9 +1684,10 @@ export interface InboxEventHandlers {
   /**
    * A row's delivery may have moved with the live sessions (a turn started or
    * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox.
+   * Never called by an older Inbox. `labels`: a session's label changed too (issue #2450), so the rows' agents
+   * and the authors read the list again.
    */
-  onDeliveries?: () => void;
+  onDeliveries?: (change?: { labels: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -1779,9 +1811,16 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         // A malformed frame changes nothing.
       }
       return;
-    case 'deliveries':
-      handlers.onDeliveries?.();
+    case 'deliveries': {
+      let labels = false;
+      try {
+        labels = (JSON.parse(frame.data) as { labels?: unknown } | null)?.labels === true;
+      } catch {
+        // An empty or malformed frame is a delivery change alone.
+      }
+      handlers.onDeliveries?.({ labels });
       return;
+    }
     case 'pins':
       handlers.onPins?.();
       return;

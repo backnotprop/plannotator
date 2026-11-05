@@ -211,7 +211,10 @@ export function inboxPullRepoKey(host: string, repo: string): string {
   return `${host}/${repo}`.toLowerCase();
 }
 
-const isOpen = (pull: InboxPull) => pull.state === "open" || pull.state === "draft";
+/** Open or a draft: a PR still to land (a merged or closed one is done). The one open-PR rule: the server, the stacks, the window. */
+export function inboxPullIsOpen(pull: Pick<InboxPull, "state">): boolean {
+  return pull.state === "open" || pull.state === "draft";
+}
 /** A head branch in the repository itself (a fork's branch of the same name is another branch). */
 const ownHead = (pull: InboxPull) => pull.head_repo === null || pull.head_repo.toLowerCase() === pull.repo.toLowerCase();
 
@@ -266,7 +269,7 @@ export function inboxPullLongLived(branch: string): boolean {
 export function inboxPullStacks(pulls: readonly InboxPull[]): InboxPullStack[] {
   const seen = new Set<string>();
   const unique = pulls.filter((pull) => (seen.has(pull.key) ? false : (seen.add(pull.key), true)));
-  const open = unique.filter(isOpen);
+  const open = unique.filter(inboxPullIsOpen);
   const merged = unique.filter((pull) => pull.state === "merged");
   const headOf = new Map<string, InboxPull>();
   // The PR a branch's layers sit on, when two open PRs come from one branch (a backport: a second PR from the same
@@ -368,7 +371,7 @@ function loops(pull: InboxPull, parentOf: (pull: InboxPull) => InboxPull | null)
 
 /** The lowest layer still open: the next to land. Null when none is. */
 export function inboxPullLandsNext(stack: InboxPullStack): InboxPull | null {
-  return stack.layers.find(isOpen) ?? null;
+  return stack.layers.find(inboxPullIsOpen) ?? null;
 }
 
 /** The layer a layer sits on (`parents`), or null for the bottom one (or a key not in the stack). */
@@ -459,7 +462,7 @@ export function inboxPullItems(stacks: readonly InboxPullStack[], linked: (pull:
     const next = inboxPullLandsNext(stack) ?? stack.layers[stack.layers.length - 1]!;
     // A link on any layer of the stack is the stack's agent.
     const agent = stack.layers.some(linked);
-    const moves = stack.layers.filter(isOpen).map((pull) => ({ pull, ...inboxPullMove(pull, agent || linked(pull)) }));
+    const moves = stack.layers.filter(inboxPullIsOpen).map((pull) => ({ pull, ...inboxPullMove(pull, agent || linked(pull)) }));
     const onYou = moves.find((m) => m.move === "on_you");
     const lands = moves.find((m) => m.pull.key === next.key) ?? { pull: next, ...inboxPullMove(next, agent) };
     const pick = onYou ?? lands;

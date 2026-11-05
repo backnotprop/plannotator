@@ -212,7 +212,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_PULL_OWNER_KEYS_MAX } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -232,6 +232,7 @@ import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
+import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import {
   agentSpec,
   claudeCodeModOn,
@@ -681,6 +682,11 @@ const ERROR_STATUS: Record<string, number> = {
   card_backlog_person_only: 409,
   card_dropped_by_person: 409,
   card_person_only: 403,
+  // The Board's initiatives (approval "board-initiatives"): only the person's; one name each.
+  initiative_not_found: 404,
+  initiative_exists: 409,
+  initiative_limit: 409,
+  initiative_person_only: 403,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
   tailscale_env_decides: 409,
   // Settings → Capabilities → Experimental, while PLANNOTATOR_EXPERIMENTAL decides.
@@ -1344,7 +1350,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (lists.length > 0) steps[id] = lists;
       }
     }
-    return { serverSession, cursor: store.cursor(), cards, dropped_unseen: droppedUnseen, seen_seq: readInboxBoardSeen(store.dir), threads, ...(steps ? { steps } : {}) };
+    // `initiatives` (additive, approval "board-initiatives"): every one, deleted ones too (an opened card's
+    // history names them); the window offers only the live ones.
+    return {
+      serverSession,
+      cursor: store.cursor(),
+      cards,
+      dropped_unseen: droppedUnseen,
+      seen_seq: readInboxBoardSeen(store.dir),
+      threads,
+      ...(steps ? { steps } : {}),
+      initiatives: store.initiatives(),
+    };
   };
 
   /**
@@ -1376,8 +1393,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       case "send":
         // Sent to an agent: `thread_id` is the thread the window just started for it (compose's Send).
         return store.sendCard(id, { thread_id: body.thread_id });
+      case "initiative":
+        // The card's initiative (approval "board-initiatives"): an `ini_` id, or null for none.
+        if (body.initiative === undefined) throw new InboxError("validation_error", "initiative: an ini_ id, or null for none.", { field: "initiative" });
+        return store.setCardInitiative(id, body.initiative, by);
       default:
-        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link or send.", { field: "op" });
+        throw new InboxError("validation_error", "op: move, icebox, drop, restore, edit, link, send or initiative.", { field: "op" });
     }
   };
 
@@ -2154,7 +2175,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * answers (404, as if absent), the window shows no Pebble, row or search
    * group, and no agent text names it. Read on every request.
    */
-  const shapeOn = () => options.shape ?? loadConfig().inboxShape === true;
+  const shapeOn = () => options.shape ?? shapeSwitchOn();
   const saveShape = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "shape: { on: boolean }.", { field: "shape" });
@@ -2162,8 +2183,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const on = (input as { on: boolean }).on;
     if (validateOnly) return { on: shapeOn() };
     const was = shapeOn();
-    saveConfig({ inboxShape: on });
-    if ((loadConfig().inboxShape === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (!setShapeSwitch(on)) throw new InboxError("config_not_saved", SHAPE_SWITCH_NOT_SAVED);
     if (was !== shapeOn()) for (const listener of capabilityListeners) listener("shape");
     return { on: shapeOn() };
   };
@@ -2430,6 +2450,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // A session's steps in a thread (approval "inbox-thread-steps"): silent, never a notification or unread.
         // `thread_id` so a window reads the open thread's steps again only for its own. A reader that does not know the kind skips it.
         return { seq: line.seq, kind: line.kind, id: line.id, thread_id: line.record.thread_id };
+      case "initiative":
+        // A Board initiative (approval "board-initiatives"): silent. A reader that does not know the kind skips it.
+        return { seq: line.seq, kind: line.kind, id: line.id, initiative: line.record };
     }
   };
 
@@ -2533,7 +2556,13 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
         // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
-        const sendDeliveries = () => send(`event: deliveries\ndata: {}\n\n`);
+        // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
+        // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
+        const labelsHere = ownerOrLocal(req, via);
+        const sendDeliveries = (labels: boolean, moved: boolean) => {
+          if (!moved && !labelsHere) return;
+          send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+        };
         if (windowId) deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
         // the outbox, each in its own frame and never with an `id:`, so the local seq and Last-Event-ID stay this Inbox's.
@@ -3068,14 +3097,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // A session's turn starting or ending, its connection going away, or an asker grace running out moves a
   // row's delivery without writing a store line. The sessions' delivery signature is compared on a short
   // timer, only while a window listens, and `event: deliveries` tells the windows to read the list again.
-  const deliveryListeners = new Set<() => void>();
+  // A poll that changed a session's label (issue #2450) says `labels` on the same frame: the rows' agents and the
+  // open thread's authors read the list again.
+  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only).
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean) => void>();
   let lastDeliverySignature = "";
+  let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     if (deliveryListeners.size === 0) return;
     const signature = live.deliverySignature();
-    if (signature === lastDeliverySignature) return;
+    const moved = signature !== lastDeliverySignature;
+    const labels = live.labelVersion() !== lastLabelVersion;
+    if (!moved && !labels) return;
     lastDeliverySignature = signature;
-    for (const listener of deliveryListeners) listener();
+    lastLabelVersion = live.labelVersion();
+    for (const listener of deliveryListeners) listener(labels, moved);
   }, INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -3442,7 +3478,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (answer) return answer;
       }
       if (path === "/api/inbox/health" && req.method === "GET") return json(health());
-      if (path === "/api/inbox/threads" && req.method === "GET") return json(perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url))));
+      if (path === "/api/inbox/threads" && req.method === "GET") {
+        const rows = perfPhase("rows", () => listModel(projectFilterOf(url), archivedModeOf(url), url.searchParams.get("machines") === "1", snoozedModeOf(url)));
+        // `session_labels` (additive, issue #2450): each session's label by id, for the rows' agents and a message's
+        // author. Display only, never stored; this computer's owner only, so a tailnet guest reads the list as before.
+        return json(ownerOrLocal(req, via) ? { ...rows, session_labels: live.labels() } : rows);
+      }
       // Linked machines (inbox-machines.ts): the forward /api/inbox/m/<machine>/<route>, the machines and the outbox.
       if (path.startsWith("/api/inbox/m/") || path.startsWith("/api/inbox/machines") || path.startsWith("/api/inbox/outbox")) {
         const answer = await machines.route(req, url, via);
@@ -3616,7 +3657,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!pulls.find(key)) await findPulls([key], (await pullProjects()).wanted);
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
-        if (pull.state !== "open" && pull.state !== "draft") return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
+        if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
         // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
         // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
         // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
@@ -4042,8 +4083,29 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           refs,
           idempotency_key: body.idempotency_key,
           send_thread_id: body.thread_id ?? undefined,
+          // A New card on a Board filtered to an initiative starts in it (approval "board-initiatives").
+          initiative: body.initiative ?? undefined,
         });
         return json({ card: store.cardWire(made.card), replayed: made.replayed });
+      }
+      // The Board's initiatives (approval "board-initiatives"): the person makes one (`POST`, `name`).
+      if (path === "/api/inbox/initiatives") {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        return json({ initiative: store.createInitiative({ name: body.name, by: { kind: "person" } }) });
+      }
+      // One initiative: `op` rename (`name`) or delete (its cards read as in none; no card is written).
+      const initiativeAt = /^\/api\/inbox\/initiatives\/([^/]+)$/.exec(path);
+      if (initiativeAt) {
+        if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+        const id = decodeURIComponent(initiativeAt[1]!);
+        if (!isInboxId("ini", id)) throw new InboxError("validation_error", "An initiative id (ini_).", { field: "initiative" });
+        const body = await readBody(req);
+        if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+        if (body.op === "rename") return json({ initiative: store.renameInitiative(id, body.name) });
+        if (body.op === "delete") return json({ initiative: store.deleteInitiative(id) });
+        throw new InboxError("validation_error", "op: rename or delete.", { field: "op" });
       }
       // The person opened the Board: the look runs through the store's cursor when that Board was read (never back, never ahead).
       if (path === "/api/inbox/cards/seen") {
@@ -4560,10 +4622,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       if (path === "/favicon.png" && req.method === "GET") return handleFavicon();
 
       // Step 8: the live sessions of a thread's project, and New message.
-      const newMessage = await live.route(req, path);
+      // Session labels (issue #2450) ride these two for this computer's owner only: a tailnet guest reads them as before.
+      const newMessage = await live.route(req, path, ownerOrLocal(req, via));
       if (newMessage) return newMessage;
       // Tags (approval "inbox-tag-agents"): who the person can tag with `@` (packages/server/inbox-tags.ts).
-      const taggable = tagsRoute.route(req, path);
+      const taggable = tagsRoute.route(req, path, ownerOrLocal(req, via));
       if (taggable) return taggable;
       // Thread steps (approval "inbox-thread-steps"): a thread's lists with each session's presence (packages/server/inbox-steps.ts).
       const steps = stepsRoute.route(req, path);

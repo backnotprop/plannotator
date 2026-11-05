@@ -246,8 +246,12 @@ for (const phone of PHONES) {
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);
+      // Narrower, never shorter or taller: Linux WebKit fires `resize` with the new visual viewport height while
+      // documentElement.clientHeight still holds the old one, and sends nothing once it catches up. Back from 844 px
+      // to the phone's 659, the Inbox read that as a keyboard (phone.ts trackKeyboard) and kept
+      // `data-ib-keyboard-pin`, so the radio picked next hid the reply foot (inbox.css) and Reply never showed.
       for (const width of [390, 320]) {
-        await page.setViewportSize({ width, height: 844 });
+        await page.setViewportSize({ width, height: phone.device.viewport.height });
         await page.waitForTimeout(150);
         check(await footerProblems(page), `at ${width} px`).toEqual([]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);

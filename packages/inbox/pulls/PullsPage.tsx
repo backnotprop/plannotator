@@ -54,6 +54,9 @@ import {
   pullFilterEmptyWords,
   pullGroups,
   pullHandoffAskLine,
+  pullHandoffThreadName,
+  handoffStack,
+  openLayers,
   pullNounWord,
   pullRows,
   rowMeta,
@@ -65,7 +68,7 @@ import { PullFilterControl, PullScopeLine, useFilterTrigger } from './PullFilter
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
-import { chainMarks, isOpen, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
+import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
 export interface PullsPageProps {
@@ -86,8 +89,11 @@ export interface PullsPageProps {
   onOpenThread: (threadId: string) => void;
   /** Absent while the Board is off (no card chip shows then: the answer has no cards). */
   onOpenCard?: (cardId: string) => void;
-  /** Start a new agent: compose's New thread, with the review thread's first message and the PRs it is for. */
-  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement) => void;
+  /**
+   * Start a new agent: compose's New thread, with the review thread's first message and the PRs it is for.
+   * `threadName`: the new thread's name (`pullHandoffThreadName`), compose's chip as it opens.
+   */
+  onLaunch: (keys: readonly string[], projects: readonly string[], body: string, askLine: string, opener: HTMLElement, threadName: string) => void;
   /** A review thread started with `session`, the picked agent: the list reads it. */
   onStarted: (session: string) => void;
 }
@@ -509,8 +515,12 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   // An agent whose session ended stays named, marked ended; a new review thread can start (Reply gives way).
   const ended = link?.agent?.ended === true;
   const start = startLayer(stack);
-  const openLayers = stack.layers.filter(isOpen);
-  const top = openLayers[openLayers.length - 1] ?? stack.layers[stack.layers.length - 1]!;
+  const open = openLayers(stack);
+  // What a review thread is about (`handoffStack`): with none yet, the whole stack (a tree: the chain to its top); a new
+  // one after its agent ended, the layers that thread had. A tree's sibling left out of that chain shows nothing of
+  // its own here.
+  const handed = (link ? handoffStack(stack, model.links, link.thread_id) : null) ?? handoffStack(stack, model.links) ?? stack;
+  const top = open[open.length - 1] ?? stack.layers[stack.layers.length - 1]!;
   const titleId = useId();
   const pickerId = useId();
   const primaryId = useId();
@@ -520,9 +530,9 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     if (phone) heading.current?.focus({ preventScroll: true });
   }, [stack.id, phone]);
   const forge = forgeName(stack);
-  const many = openLayers.length > 1;
+  const many = open.length > 1;
   // One review thread at a time: the picker opens only while there is none, or its agent has ended.
-  const canStart = openLayers.length > 0 && (!link || ended);
+  const canStart = open.length > 0 && (!link || ended);
   const [picking, setPicking] = useState(false);
   // After a thread starts, focus moves to the line that names its agent (the picker that held it is gone).
   const said = useRef<HTMLDivElement>(null);
@@ -582,6 +592,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     </button>
   ) : null;
   const projects = stackProjects(model, stack);
+  const threadName = pullHandoffThreadName(handed, model.links, stack);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -636,13 +647,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           <ReviewPicker
             id={pickerId}
             labelId={primaryId}
-            stack={stack}
+            stack={handed}
             projects={projects}
+            threadName={threadName}
             exclude={link ? [link.agent?.session, link.handed_to].filter((s): s is string => !!s) : []}
             onLaunch={(body, opener) => {
               // Compose takes it from here: the picker closes, so it never comes back by itself (an agent ending later).
               setPicking(false);
-              props.onLaunch(handoffKeys(stack), projects, body, pullHandoffAskLine(stack, { kind: 'guide' }), opener);
+              props.onLaunch(handoffKeys(handed), projects, body, pullHandoffAskLine(handed, { kind: 'guide' }), opener, threadName);
             }}
             onSending={setPickerSending}
             onStarted={(session) => {

@@ -811,9 +811,10 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   const threadId = String(await line.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words).toContain('Own pull request #869: `Fall back to English for missing strings`');
-  expect(words).toContain('https://github.com/northwind/web-app/pull/869');
-  expect(words).toContain('\n/review-curate\n');
+  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
+  expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
+  expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
   // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
   await page.reload();
@@ -836,6 +837,13 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   expect(await stackPane.locator('.ib-pr-actions button').allTextContents()).toEqual(['Open review thread', 'Open the diff']);
   await shot(page, '6a-review-arrived');
   await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
+  // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
+  await page.goto(world.url);
+  await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
+  await shot(page, '6t-thread-name', ['light']);
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
   await page.goto(`${world.url}#pulls`);

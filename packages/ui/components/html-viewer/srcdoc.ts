@@ -4,8 +4,10 @@
  * Product rule: arbitrary HTML must render exactly as it would in a plain
  * browser tab. The viewer never writes into the document's namespace — no bare
  * CSS custom properties, no classes on the author's root, no `color-scheme`,
- * no styling of author elements. Host theme tokens are pushed under the
- * viewer-owned `--pn-*` prefix, which the annotation CSS reads.
+ * no screen styling of author elements. Print-only defaults keep a page from
+ * being cut off on paper (`injectPrintDefaults`); section page breaks are
+ * added only for a document with the host-theme marker. Host theme tokens
+ * are pushed under the viewer-owned `--pn-*` prefix, which the annotation CSS reads.
  *
  * Documents that WANT to follow the host theme (e.g. Plannotator-generated
  * artifacts) opt in with `<meta name="plannotator-theme" content="host">`,
@@ -158,6 +160,83 @@ export function buildBridgeScriptTag(bridgeScriptUrl?: string): string {
     );
   }
   return `<script>${BRIDGE_SCRIPT}</script>`;
+}
+
+// These defaults live inside the sandbox: host print.css cannot style a
+// child document. Every page gets only what keeps it from being cut off on
+// paper: no clipping by an app shell's `height: 100vh; overflow: hidden`, and
+// long code lines wrapped instead of running off the sheet. Otherwise an
+// arbitrary page prints exactly as it would from a browser tab.
+const DOCUMENT_PRINT_CSS = `
+@layer plannotator-print-defaults {
+@media print {
+  :where(pre) { white-space: pre-wrap; overflow-wrap: anywhere; }
+}
+}
+@media print {
+  html, body { height: auto !important; overflow: visible !important; }
+}
+`;
+
+// Only a document that opts in to the host's look
+// (`<meta name="plannotator-theme" content="host">`, which Plannotator's own
+// explainers carry) gets pagination: each sibling section on a new sheet,
+// headings kept with what follows, and figures, images, diagrams, code and
+// tables kept whole where they fit. Low specificity leaves authored print
+// layouts in control.
+const SECTION_BREAK_PRINT_CSS = `
+@layer plannotator-print-defaults {
+@media print {
+  :where(html, body) { min-height: 0; }
+  :where(section ~ section) { break-before: page; }
+  :where(h1, h2, h3, h4, h5, h6) { break-after: avoid; }
+  :where(figure, img, svg, pre, table) { break-inside: avoid; }
+}
+}
+`;
+
+/**
+ * Where a `<style>` goes so it comes before every author style: just inside
+ * the real `<head>`, or right after the doctype when there is no `<head>`
+ * (before it would put the page in quirks mode). A `<head` inside a comment or
+ * a script that precedes the real head is skipped.
+ */
+function printDefaultsPosition(rawHtml: string): number {
+  // Built from strings: Semgrep's TypeScript parser cannot read this pattern
+  // as a regex literal, and a file it cannot parse fails the security scan.
+  const tokens = new RegExp(
+    [
+      "<!--[\\s\\S]*?(?:-->|$)",
+      "<script\\b[\\s\\S]*?(?:</script\\s*>|$)",
+      "<!doctype\\b[^>]*>",
+      "<head\\b[^>]*>",
+      "<body\\b",
+    ].join("|"),
+    "gi",
+  );
+  let afterDoctype = 0;
+  for (let match = tokens.exec(rawHtml); match; match = tokens.exec(rawHtml)) {
+    const token = match[0].toLowerCase();
+    if (token.startsWith("<!--") || token.startsWith("<script")) continue;
+    const end = match.index + match[0].length;
+    if (token.startsWith("<!doctype")) afterDoctype = end;
+    else if (token.startsWith("<head")) return end;
+    else break;
+  }
+  return afterDoctype;
+}
+
+/**
+ * Splice the print defaults in ahead of author styles, declaring their layer
+ * before any authored one. Every document gets the no-clip rule (it wins over
+ * an app shell's `html, body { height: 100vh; overflow: hidden }`) and
+ * wrapped code lines; `sectionBreaks` adds the pagination (a new sheet per
+ * section and the keep-together hints).
+ */
+export function injectPrintDefaults(rawHtml: string, { sectionBreaks = false }: { sectionBreaks?: boolean } = {}): string {
+  const style = `<style>${DOCUMENT_PRINT_CSS}${sectionBreaks ? SECTION_BREAK_PRINT_CSS : ""}</style>`;
+  const position = printDefaultsPosition(rawHtml);
+  return rawHtml.slice(0, position) + style + rawHtml.slice(position);
 }
 
 /** The `<style>` + `<script>` block spliced into the document's head. */

@@ -438,7 +438,7 @@ describe("on", () => {
 
   test("a draft started from Launch an agent keeps its pull requests", async () => {
     const w = await world({ codeReview: true });
-    const pulls = { keys: ["github.com/northwind/billing-svc#412"], projects: ["prj_1"], ask_line: "/review-curate" };
+    const pulls = { keys: ["github.com/northwind/billing-svc#412"], projects: ["prj_1"], ask_line: "1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message)." };
     const saved = await fetch(`${w.base}/api/inbox/drafts/${inboxId("drf")}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ body: "Own it", to: null, project: null, files: [], base: null, pulls }) });
     expect(saved.status).toBe(200);
     expect(((await saved.json()) as { draft: { pulls?: unknown } }).draft.pulls).toEqual(pulls);

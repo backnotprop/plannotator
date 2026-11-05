@@ -1,0 +1,25 @@
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/geist-mono";
+@import "tailwindcss";
+
+@plugin "tailwindcss-animate";
+
+/* Tell Tailwind where to scan for classes: Plannotator's viewers, the board
+   and the guide chain its Code view draws with. */
+@source "../../packages/ui/components/**/*.tsx";
+@source "../../packages/ui/hooks/**/*.ts";
+/* The shared chat window has no host in this page, so its classes stay out of this stylesheet. */
+@source not "../../packages/ui/components/chat/**";
+@source "../../packages/guide-viewer/**/*.tsx";
+@source "../../packages/review-editor/components/**/*.tsx";
+/* Shape: the board (packages/ui/components/shape), its lazy wrapper and this page (packages/inbox/shape). */
+@source "../../packages/ui/components/shape/**/*.tsx";
+@source "../../packages/inbox/shape/**/*.tsx";
+
+@import "../../packages/ui/theme.css";
+/* The board's own sheet (shp- classes). */
+@import "../../packages/ui/components/shape/shape.css";
+/* The Code view's guide: the review app's comment cards. */
+@import "../../packages/review-editor/comments.css";
+/* The page around the board: the small header, the grid's frame. */
+@import "../../packages/inbox/shape/standalone/shape-page.css";
