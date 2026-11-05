@@ -23,6 +23,7 @@ import { INBOX_REPLY_ARRIVES_TEXT } from "@plannotator/server/inbox-mcp";
 import { readInboxRegistry } from "@plannotator/shared/inbox/registry";
 import { T3Credentials } from "@plannotator/t3-code/auth";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { type FakeT3, startFakeT3 } from "../../../tests/helpers/fake-t3";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
 import { fillInboxToolArguments, inboxHostSessionFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
@@ -52,6 +53,8 @@ afterEach(async () => {
   for (const fake of fakes.splice(0)) fake.stop();
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 function scratch(): { root: string; dataDir: string; project: string } {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-t3-shim-")));
@@ -62,11 +65,10 @@ function scratch(): { root: string; dataDir: string; project: string } {
 /** The shim's whole environment: the sandbox, and only the agent variables the test names. */
 function shimEnv(dataDir: string, agent: Record<string, string>): Record<string, string> {
   return {
-    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ...agents.env,
     ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
     TMPDIR: tmpdir(),
     PLANNOTATOR_DATA_DIR: dataDir,
-    PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX ?? dataDir,
     NO_BROWSER,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_ANON_PING: "1",
