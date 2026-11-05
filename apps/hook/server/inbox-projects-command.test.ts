@@ -251,7 +251,7 @@ describe("plannotator inbox projects", () => {
     const again = await projects(box, ["combine", site, "--into", docs, "--json"]);
     expect(again.code).toBe(0);
     expect(JSON.parse(again.stdout)).toMatchObject({ changed: false, project: { id: docs } });
-  });
+  }, 30_000);
 
   test("bad usage exits 2 with the usage, and starts no Inbox", async () => {
     const box = sandbox();

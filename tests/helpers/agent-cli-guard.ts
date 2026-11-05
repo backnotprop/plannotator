@@ -6,9 +6,9 @@
  *
  * Call `stubbedAgentClis()` once in a test file, below its cleanup hooks (a hook
  * that throws stops the ones registered after it, which would leave an Inbox
- * running), and spread its `env` where the child's PATH was. That PATH holds the stubs, `bun` and the system's
- * own folders, never the folder bun is installed in: on Homebrew that is
- * where the agents are too. The env also gives the child the test sandbox,
+ * running), and spread its `env` where the child's PATH was. That PATH holds the stubs, `bun`, the `gh` tripwire
+ * (it comes before a real /usr/bin/gh) and the system's own folders, never the folder bun is installed in: on
+ * Homebrew that is where the agents are too. The env also gives the child the test sandbox,
  * which empties an Inbox's agent PATH, even in a run the preload missed.
  *
  * The stubs are the second wall: a test fails when one was called, because
@@ -20,6 +20,7 @@ import { mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { agentCliCalls, writeAgentCliStubs } from "../e2e/agent-cli-stubs";
+import { GH_TRIPWIRE_BIN } from "../setup/gh-tripwire";
 
 export interface StubbedAgentClis {
   /** Spread into a child's env in place of `PATH: process.env.PATH`. */
@@ -58,7 +59,7 @@ export function stubbedAgentClis(): StubbedAgentClis {
     }
   });
   return {
-    env: { PATH: [bin, system].join(delimiter), PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX ?? root },
+    env: { PATH: [bin, GH_TRIPWIRE_BIN, system].join(delimiter), PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX ?? root },
     bin,
     takeCalls,
   };

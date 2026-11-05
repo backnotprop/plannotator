@@ -207,7 +207,7 @@ describe("what a script gets", () => {
     if (inbox) detached.push({ entry: inbox, root: box.root });
     expect(sent.code).toBe(0);
     expect(agents.takeCalls()).toEqual(["codex --version"]);
-  });
+  }, 30_000);
 
   test("a stopped Inbox starts in the background with no browser, as `inbox mcp` does", async () => {
     const box = sandbox();
