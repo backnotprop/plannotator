@@ -4,6 +4,8 @@ import { reviewsAlias } from './reviewsRoute';
 test('an old #pulls link becomes #reviews with everything it named', () => {
   expect(reviewsAlias('#pulls')).toBe('#reviews');
   expect(reviewsAlias('#pulls&project=prj_1&stack=github.com%2Fo%2Fr%23412&layer=x&scope=stack')).toBe('#reviews&project=prj_1&stack=github.com%2Fo%2Fr%23412&layer=x&scope=stack');
+  expect(reviewsAlias('#pulls=1')).toBe('#reviews');
+  expect(reviewsAlias('#pulls=1&project=prj_1')).toBe('#reviews&project=prj_1');
 });
 
 test('nothing else is touched: a thread, the new address, or a name that only starts alike', () => {

@@ -624,6 +624,53 @@ test('off (the default): no row, a #pulls link says Code review is off, and no g
   expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff '))).toEqual([]);
 });
 
+test('an old #pulls link opened fresh, in a new window, becomes #reviews', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#pulls&view=review`);
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews&view=review');
+  } finally {
+    await context.close();
+  }
+});
+
+test("#reviews&new with Code review off: the off page, and no box", async () => {
+  const { page } = world;
+  await setCodeReview(false);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-reviews-off]')).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+});
+
+test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await setCodeReview(true);
+  try {
+    await page.route('**/api/inbox/settings*', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const answer = await route.fetch();
+      await route.fulfill({ response: answer, json: { ...(await answer.json()), via: 'tailnet', guest: true } });
+    });
+    const thread = `#thread=${encodeURIComponent(world.threads.stack)}`;
+    await page.goto(`${world.url}${thread}`);
+    await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+    await page.evaluate(() => {
+      location.hash = '#reviews';
+    });
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+    await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(thread);
+  } finally {
+    await context.close();
+    await setCodeReview(false);
+  }
+});
+
 test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
   const { page } = world;
   await setCodeReview(true);
@@ -633,6 +680,20 @@ test('#reviews&new opens the box over the page once: the address goes back to #r
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
   await page.reload();
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  // The address was replaced, not pushed: Back from the box leaves the page, and does not open it again.
+  await page.goto(world.url);
+  await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+  await page.evaluate(() => {
+    location.hash = '#reviews&new';
+  });
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await page.goBack();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+  await page.waitForTimeout(400);
   await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
   await setCodeReview(false);
 });

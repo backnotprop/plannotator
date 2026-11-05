@@ -486,7 +486,7 @@ test.skipIf(!hasDom)('a partial post keeps the dialog open on what did not go, w
   expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones folded; a stack is one row with its chain', async () => {
+test.skipIf(!hasDom)('the list: On you, Ready to land, then the folded ones; a stack is one row with its chain', async () => {
   const opened: string[] = [];
   mount(
     <SidebarProvider>
@@ -511,18 +511,18 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   await settle();
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
   const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
-  expect(moves).toEqual(['on_you', 'on_you', 'ready']);
-  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('2');
-  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
-  expect(stackRow).toBeDefined();
-  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
-  expect(stackRow.textContent).toContain('start at #412');
-  // The waiting one is folded under its count, and opens on a click.
-  const fold = el('.ib-pr-foldbtn');
-  expect(fold.textContent).toContain('1 waiting on others');
-  await act(async () => fold.click());
+  expect(moves).toEqual(['on_you', 'ready']);
+  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('1');
+  // The folded groups: each opens on a click, under its name and count, and is remembered.
+  const fold = (name: string) => el(`[data-reviews-fold="${name}"]`);
+  expect(fold('waiting').textContent).toContain('Waiting on others');
+  expect(fold('not_reviewed').textContent).toContain('Open, not reviewed');
+  await act(async () => fold('waiting').click());
+  await act(async () => fold('not_reviewed').click());
   await settle();
-  expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'on_you', 'ready', 'waiting']);
+  expect(rows().map((r) => r.getAttribute('data-pulls-move'))).toEqual(['on_you', 'ready', 'waiting', 'not_reviewed']);
+  const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
+  expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
   await act(async () => stackRow.click());
   expect(opened).toEqual([STACK_ID]);
 });
@@ -557,10 +557,11 @@ test.skipIf(!hasDom)("top left is always the author's picture, from the Inbox's 
   expect(asked.every((u) => u.origin === 'http://inbox.test' && /\/api\/inbox\/pulls\/avatar$/.test(u.pathname))).toBe(true);
   expect(asked.map((u) => `${u.searchParams.get('host')} ${u.searchParams.get('login')}`)).toContain('github.com mara-lee');
   expect(lead.querySelector('.ib-atiles')).toBeNull();
-  // The agent: its mark and name on the third line.
+  // The agent: its mark on the third line, named for a reader, and what it is doing.
   const agent = stackRow.querySelector('.ib-pv [data-pulls-row-agent]')!;
   expect(agent.getAttribute('data-pulls-row-agent')).toBe('claude-code');
-  expect(agent.textContent).toBe('Review thread with Claude Code');
+  expect(agent.getAttribute('aria-label')).toBe('Claude Code');
+  expect(stackRow.querySelector('[data-reviews-status]')!.textContent).toBe('Curating…');
   expect(agent.querySelector('svg, img')).not.toBeNull();
   // The picture failed: the initials stay, no broken image.
   expect(av.querySelector('img')).toBeNull();
