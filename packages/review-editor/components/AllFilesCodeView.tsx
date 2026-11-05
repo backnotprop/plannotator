@@ -664,6 +664,15 @@ const COMPACT_PANEL_HEADER_HEIGHT = 44;
 // passing it is redundant today — kept explicit so the metric stays pinned to
 // OUR unsafeCSS rule rather than silently tracking a library default.
 const HUNK_SEPARATOR_HEIGHT = 32;
+// A file in a box as tall as its layout (`scrollsWithPage`). A trailing separator ends the layout, so no padding after
+// it. The line under a header shows only while the header is stuck (browsers without scroll-state queries draw none).
+const SCROLLS_WITH_PAGE_CSS = `
+  [data-code]:has([data-separator-last]) { padding-bottom: 0 !important; }
+  [data-diffs-header] { container-type: scroll-state; container-name: sticky-header; }
+  @container sticky-header scroll-state(stuck: top) {
+    [data-diffs-header]::after { content: ''; position: absolute; left: 0; bottom: -1px; width: 100%; height: 1px; background: var(--border); }
+  }
+`;
 
 // How long the scroller must be quiet before queued augmentation applies
 // (item growth + re-render) are allowed to land. Slightly above Pierre's own
@@ -3219,7 +3228,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const options = useMemo<CodeViewOptions<DiffAnnotationMetadata>>(
     () => ({
       themeType: pierreTheme.type,
-      unsafeCSS: pierreTheme.css,
+      unsafeCSS: scrollsWithPage ? `${pierreTheme.css}${SCROLLS_WITH_PAGE_CSS}` : pierreTheme.css,
       ...(pierreTheme.syntaxTheme && { theme: pierreTheme.syntaxTheme }),
       diffStyle,
       overflow: diffOverflow,

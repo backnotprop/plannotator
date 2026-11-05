@@ -682,6 +682,14 @@ test('a thread\'s guided review with Code review off: arrows open a long file in
   const height = async () => (await box.boundingBox())!.height;
   const closed = await height();
   const place = await scrollTop();
+  // A box is its content: no band of empty space under the last row or above the header (the box's 8 px and its border).
+  const slack = await box.evaluate((el) => {
+    const outer = el.getBoundingClientRect();
+    const code = el.querySelector('diffs-container')!.getBoundingClientRect();
+    return { above: code.top - outer.top, below: outer.bottom - code.bottom };
+  });
+  expect(slack.above).toBeLessThanOrEqual(9);
+  expect(slack.below).toBeLessThanOrEqual(9);
   await arrow.click();
   await expect.poll(height).toBeGreaterThan(closed);
   expect(await scrollTop()).toBe(place);
