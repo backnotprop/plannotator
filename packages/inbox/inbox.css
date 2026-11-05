@@ -3171,8 +3171,9 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   :root[data-ib-keyboard-pin="tight"] .ib-pane .ib-pbody { padding-top: 0; padding-bottom: 0; }
   :root[data-ib-keyboard-pin="tight"] .ib-pfoot :is(.ib-rtext, .ib-rmirror) { max-height: max(52px, calc(var(--ib-vvh, 100dvh) * 0.3)); }
   /* A field in the thread itself (an action item's note) takes the keyboard: the foot steps aside, so the field
-     has the room above the keyboard. The draft stays as it was and comes back with the foot. */
-  :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input, [contenteditable="true"]):focus) .ib-pfoot { display: none; }
+     has the room above the keyboard. The draft stays as it was and comes back with the foot. A radio or a checkbox
+     (a question card's options) opens no keyboard, so picking one never hides Reply. */
+  :root[data-ib-keyboard-pin] .ib-pane:has(.ib-pbody :is(textarea, input:not([type="checkbox"]):not([type="radio"]), [contenteditable="true"]):focus) .ib-pfoot { display: none; }
   /* The skill picker: full width directly above the reply box (its outer edges, 10 px above it), which sits on the
      keyboard; never a sheet (a sheet would close the keyboard and lose the caret). 44 px rows, at most 4½ showing and
      40% of the visible height (ComposerField, caretMenu.ts phoneSkillListHeight), the description under the name; a
@@ -6843,6 +6844,33 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
    the comment row, over the stage's foot). */
 .ib-view.ib-fullview .ib-vidview:has(> :is(.ib-fcomp, .ib-fcomp-pillwrap)) .ib-vidstage { padding-bottom: calc(var(--ib-fvfoot, 0px) + 24px); box-sizing: border-box; }
 .ib-view.ib-fullview[data-tools="tucked"] .ib-vidview .ib-vidstage { padding-bottom: 60px; box-sizing: border-box; }
+
+/* Earlier comments (EarlierSection.tsx): at the foot of the comments column's timeline, in its one scroll area. The row
+   stays in view while its list scrolls. A comment reads as a resolved one: a card's quote and words, dimmed, no actions. */
+/* The panel may shrink to the column's height, so its own scroll area scrolls. It grew past the column before, and a list
+   too long for the column was cut off with no way to reach the rest. A short list keeps its own height, and what the
+   column has under it (a guided review's foot) stays right under the list. */
+.pn-inbox .ib-apanel > [data-annotation-panel] { flex-shrink: 1; min-height: 0; }
+.ib-earlier { margin: 2px -8px -8px; padding: 0 8px 8px; }
+.ib-earlier[data-after] { padding-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
+.pn-inbox .ib-earlier-row { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% + 16px); margin: 0 -8px; padding: 7px 14px; border: 0; background: var(--card); font-size: var(--ib-fs-11, 11px); font-weight: 500; color: var(--muted-foreground); text-align: left; cursor: pointer; }
+.pn-inbox .ib-earlier-row:hover { color: var(--foreground); }
+.pn-inbox .ib-earlier-row:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-earlier-row .ib-ic { width: 10px; height: 10px; flex: none; opacity: .6; transition: transform 120ms ease; }
+.ib-earlier-row[aria-expanded="false"] .ib-ic { transform: rotate(-90deg); }
+@media (prefers-reduced-motion: reduce) { .ib-earlier-row .ib-ic { transition: none; } }
+.ib-earlier-n { font-weight: 400; font-variant-numeric: tabular-nums; color: color-mix(in oklch, var(--muted-foreground) 80%, transparent); }
+.ib-earlier-sub { padding: 6px 12px 2px; font-size: var(--ib-fs-11, 11px); color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-earlier-item { padding: 8px 12px 9px; }
+.ib-earlier-q { margin: 0 0 4px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11, 11px); line-height: 1.5; color: color-mix(in oklch, var(--muted-foreground) 75%, transparent); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.ib-earlier-t { margin: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; color: color-mix(in oklch, var(--foreground) 62%, transparent); }
+.pn-inbox .ib-phone .ib-earlier-row { min-height: 44px; font-size: var(--ib-fs-13, 13px); }
+.ib-phone .ib-earlier-t { font-size: var(--ib-fs-15, 15px); }
+.ib-phone :is(.ib-earlier-q, .ib-earlier-sub) { font-size: var(--ib-fs-12, 12px); }
+/* The count on the comments button: earlier comments are muted beside today's number. */
+.ib-earlier-cnt { font-weight: 500; color: var(--muted-foreground); }
+/* A phone's toolbar: a muted two-digit count takes no more room than today's single digit, clear of the reply pill. */
+.pn-inbox .ib-fvdock-phone .ib-fvb.ib-fvcount:has(.ib-earlier-cnt) { gap: 3px; padding: 0 5px; }
 
 /* Gathered (data-tools="tucked"): what floats with the toolbar flies into the corner control with it: the composer or
    its pill, the image's size bar and "Your marked-up copy" chip, a text file's toolstrip, its Contents button and the

@@ -278,6 +278,8 @@ export function createInboxAttachmentRoutes(context: InboxAttachmentRoutesContex
         // The images the messages show, captured as files (additive: a reader that does not know it draws nothing extra).
         inline_images: await Promise.all(store.threadInlineImages(threadId).map(({ attachment, message }) => inboxAttachmentState(attachment, message.id, { hash: "small" }))),
         annotations: store.pendingAnnotations(threadId),
+        // The comments a Send already carried, for the file view's earlier comments (additive: a reader that does not know it draws nothing extra).
+        earlier_annotations: store.earlierAnnotations(threadId),
       });
     }
 
