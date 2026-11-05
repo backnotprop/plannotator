@@ -17,7 +17,7 @@ import { FEEDBACK_HEREDOC_END, FEEDBACK_UNAVAILABLE } from '@plannotator/core/pr
 import { FEEDBACK_PROMPT_TEXT_LINE, feedbackCopiedToast, feedbackPrompt } from './feedbackPrompt';
 
 const hasDom = typeof document !== 'undefined';
-const { FeedbackDialog } = (hasDom ? await import('./components/FeedbackDialog') : {}) as typeof import('./components/FeedbackDialog');
+const { FeedbackDialog, forgetUnsentFeedback } = (hasDom ? await import('./components/FeedbackDialog') : {}) as typeof import('./components/FeedbackDialog');
 const { Sidebar } = (hasDom ? await import('./components/Sidebar') : {}) as typeof import('./components/Sidebar');
 const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 const { inboxApi } = (hasDom ? await import('./api') : {}) as typeof import('./api');
@@ -31,6 +31,7 @@ afterEach(() => {
   if (root) act(() => root?.unmount());
   root = null;
   if (hasDom) document.body.innerHTML = '';
+  forgetUnsentFeedback?.();
   while (restorers.length > 0) restorers.pop()!();
 });
 

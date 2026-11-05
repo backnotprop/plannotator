@@ -37,6 +37,11 @@ describe('searchFeedback', () => {
     for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden', 'beacon zebras']) expect(titles(text)).toEqual([]);
   });
 
+  test('only the first 4,000 characters are searched', () => {
+    expect(titles(`${'x '.repeat(1990)}harbor charts`)).toEqual(['Harbor charts']);
+    expect(titles(`${'x '.repeat(2000)}harbor charts`)).toEqual([]);
+  });
+
   test('the closest comes first, and only a handful show', () => {
     expect(titles('lighthouse lamp')).toEqual(['Lighthouse lamp', 'Lighthouse lamp flickers at dusk']);
     const many = { features: [], links: Array.from({ length: 40 }, (_, at) => ({ title: `Lighthouse ${at}`, path: `pull/${at}` })) };

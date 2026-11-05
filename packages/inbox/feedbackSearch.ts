@@ -5,10 +5,11 @@
  * Words of four letters or more count, so "the" finds nothing. A title or a
  * definition is similar when it shares most of the shorter side's words with
  * what is typed. A feature's other name ("done button") finds it when all its
- * words are typed.
+ * words are typed. Only the first 4,000 characters are searched, the send
+ * limit: a long paste stays quick.
  */
 /// <reference path="./assets.d.ts" />
-import shipped from './feedbackSearch.data.json?raw';
+import { FEEDBACK_MESSAGE_MAX } from '@plannotator/core/product-feedback';
 
 export interface SearchFeature {
   title: string;
@@ -48,9 +49,10 @@ function sameWord(a: string, b: string): boolean {
 }
 
 export function searchFeedback(data: SearchData, text: string): SearchHit[] {
-  const typed = wordsOf(text);
+  const searched = text.slice(0, FEEDBACK_MESSAGE_MAX);
+  const typed = wordsOf(searched);
   if (!typed.length) return [];
-  const typedAll = wordsOf(text, 1);
+  const typedAll = wordsOf(searched, 1);
   /** Common words over the entry's length, so of two titles sharing as much, the shorter is closer. */
   const closeness = (entry: string) => {
     const words = wordsOf(entry);
@@ -73,6 +75,14 @@ export function searchFeedback(data: SearchData, text: string): SearchHit[] {
     .map(({ score: _score, ...hit }) => hit);
 }
 
-/** Parsed at the first search: a window that never opens the form holds only the string (#2593). */
-let parsed: SearchData | null = null;
-export const searchShipped = (text: string) => searchFeedback((parsed ??= JSON.parse(shipped) as SearchData), text);
+/** Loaded and parsed at the first search, so a window that never opens the form holds none of it. A failed load shows no lines. */
+let shipped: Promise<SearchData> | null = null;
+export async function searchShipped(text: string): Promise<SearchHit[]> {
+  if (!text.trim()) return [];
+  shipped ??= import('./feedbackSearch.data.json?raw').then((file) => JSON.parse(file.default) as SearchData);
+  try {
+    return searchFeedback(await shipped, text);
+  } catch {
+    return [];
+  }
+}

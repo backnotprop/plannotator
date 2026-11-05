@@ -8,6 +8,13 @@ import { Modal } from './Updates';
 const COUNT_FROM = FEEDBACK_MESSAGE_MAX - 400;
 const SEARCH_PAUSE_MS = 250;
 
+const NOTHING_TYPED = { message: '', category: null as FeedbackCategory | null, contact: '' };
+/** What was typed and not sent, for the window's life: any close, even a stray press on the backdrop, loses nothing. */
+let unsent = NOTHING_TYPED;
+export function forgetUnsentFeedback() {
+  unsent = NOTHING_TYPED;
+}
+
 const CATEGORIES: { value: FeedbackCategory; label: string }[] = [
   { value: 'bug', label: 'Bug' },
   { value: 'idea', label: 'Idea' },
@@ -44,9 +51,9 @@ function lengthOf(value: string): number {
  */
 export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }: FeedbackDialogProps) {
   const uid = useId().replace(/[^A-Za-z0-9_-]/g, '');
-  const [message, setMessage] = useState('');
-  const [category, setCategory] = useState<FeedbackCategory | null>(null);
-  const [contact, setContact] = useState('');
+  const [message, setMessage] = useState(unsent.message);
+  const [category, setCategory] = useState(unsent.category);
+  const [contact, setContact] = useState(unsent.contact);
   const [phase, setPhase] = useState<'edit' | 'sending' | 'sent'>('edit');
   const [error, setError] = useState<string | null>(null);
   const [hits, setHits] = useState<SearchHit[]>([]);
@@ -54,14 +61,20 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
   const doneRef = useRef<HTMLButtonElement>(null);
   const closed = useRef(false);
   useEffect(() => {
-    const pause = setTimeout(() => setHits(searchShipped(message)), SEARCH_PAUSE_MS);
+    const pause = setTimeout(() => void searchShipped(message).then(setHits), SEARCH_PAUSE_MS);
     return () => clearTimeout(pause);
   }, [message]);
+  useEffect(() => {
+    unsent = { message, category, contact };
+  }, [message, category, contact]);
   const sending = phase === 'sending';
   const count = lengthOf(message.trim());
 
   useEffect(() => {
-    boxRef.current?.focus();
+    const box = boxRef.current;
+    box?.focus();
+    // Kept words go on from their end.
+    box?.setSelectionRange(box.value.length, box.value.length);
   }, []);
   useEffect(() => {
     if (phase === 'sent') doneRef.current?.focus();
@@ -86,6 +99,7 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
     setPhase('sending');
     try {
       await onSend({ ...input, message: message.trim() });
+      forgetUnsentFeedback();
       setPhase('sent');
     } catch (cause) {
       setPhase('edit');

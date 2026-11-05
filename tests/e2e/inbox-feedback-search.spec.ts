@@ -55,7 +55,17 @@ test('nothing typed leaves the window', async ({ page }) => {
   const before = seen.length;
   await page.keyboard.type('need a done button zebrafish', { delay: 15 });
   await expect(lines(page).first()).toHaveText('Archive');
-  expect(seen.slice(before).filter((request) => /zebrafish|button/i.test(request.url + request.body) || request.url.includes('/feedback'))).toEqual([]);
+  expect(seen.slice(before).filter((request) => /zebrafish|button/i.test(request.url + request.body) || request.url.includes('/api/inbox/feedback'))).toEqual([]);
+});
+
+test('the list loads at the first search, not with the page', async ({ page }) => {
+  const seen = await openForm(page);
+  await page.waitForLoadState('networkidle');
+  const loads = () => seen.filter((request) => request.url.includes('feedbackSearch'));
+  expect(loads()).toEqual([]);
+  await page.keyboard.type('jira links', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  expect(loads()).toHaveLength(1);
 });
 
 test('no match changes nothing on screen', async ({ page }) => {
@@ -86,4 +96,40 @@ test('a link opens in a new tab with no way back, and the words stay', async ({ 
   expect(await opened.evaluate(() => window.opener)).toBeNull();
   await opened.close();
   await expect(page.locator('[data-feedback-message]')).toHaveValue('need a done button');
+});
+
+test('in a short window, Tab brings Send into view with five lines showing', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 625 });
+  await openForm(page);
+  await page.keyboard.type('the diff view is slow', { delay: 15 });
+  await expect(lines(page)).toHaveCount(5);
+  await page.locator('[data-feedback-contact]').focus();
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await page.keyboard.press('Tab');
+  await expect(page.locator('[data-feedback-send]')).toBeFocused();
+  const at = (await page.locator('[data-feedback-send]').boundingBox())!;
+  const dialog = (await page.locator('dialog[open]').boundingBox())!;
+  expect(at.y + at.height).toBeLessThanOrEqual(Math.min(625, dialog.y + dialog.height));
+});
+
+test('words survive a press on the backdrop, and a sent message clears them', async ({ page }) => {
+  await page.route('**/api/inbox/feedback', (route) => route.fulfill({ status: 200, contentType: 'application/json', body: '{"ok":true}' }));
+  await openForm(page);
+  const words = 'zebras dancing on saturn';
+  await page.keyboard.type(words, { delay: 5 });
+  await page.mouse.click(5, 5);
+  await expect(page.locator('dialog[open]')).toHaveCount(0);
+
+  await page.locator('[data-feedback-nav]').click();
+  const box = page.locator('[data-feedback-message]');
+  await expect(box).toHaveValue(words);
+  await expect(box).toBeFocused();
+  await page.keyboard.type('!');
+  await expect(box).toHaveValue(`${words}!`);
+
+  await page.locator('[data-feedback-send]').click();
+  await page.locator('[data-feedback-done]').click();
+  await page.locator('[data-feedback-nav]').click();
+  await expect(box).toHaveValue('');
 });

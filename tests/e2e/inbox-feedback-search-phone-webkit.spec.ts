@@ -84,3 +84,13 @@ test('with the keyboard down, a few lines show and Send stays put', async ({ pag
   await expect(page.locator('[data-feedback-related] li:visible')).toHaveCount(3);
   expect(await rect(page, send)).toEqual(before);
 });
+
+test('words survive a tap outside the sheet', async ({ page }) => {
+  await openSheet(page);
+  await page.keyboard.type('zebras dancing on saturn', { delay: 5 });
+  await page.touchscreen.tap(195, 40);
+  await expect(page.locator('dialog.ib-fbk-phone')).toHaveCount(0);
+  await page.locator('.ib-lhead .ib-sb-trigger').tap();
+  await page.locator('[data-feedback-nav]').tap();
+  await expect(page.locator('[data-feedback-message]')).toHaveValue('zebras dancing on saturn');
+});
