@@ -77,6 +77,11 @@ const GEOMETRY = 'path, line, polyline';
 const EDGE = 8;
 /** How far the drawing's frame shows past itself (ShapeDrawn's `clip-path: inset(-24px)`). */
 const FRAME_BLEED = 24;
+/** What a tag keeps from words it steps aside from. */
+const CLEAR = 4;
+
+type Box = { left: number; top: number; right: number; bottom: number };
+const meets = (a: Box, b: Box) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
 
 /**
  * A bug beside the number: this number steps the example (the debugger). Bug02 from @hugeicons/core-free-icons 4.4.0
@@ -220,7 +225,11 @@ export class FollowPainter {
     const frame = host?.closest?.('.shp-drawn');
     const v = box && box.clientWidth ? box.getBoundingClientRect() : null;
     const f = frame ? frame.getBoundingClientRect() : null;
-    const view = v ? { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity) } : null;
+    const view = v
+      ? { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity), top: f ? f.top - FRAME_BLEED : -Infinity }
+      : null;
+    const words = view ? this.wordsOf() : [];
+    const placed: Box[] = [];
     this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
@@ -232,12 +241,18 @@ export class FollowPainter {
     for (const { tag, i, el, kind } of this.tags) {
       const s = this.ex.steps[i]!;
       const r = el.getBoundingClientRect();
+      let flip: (() => void) | undefined;
       tag.classList.remove('top', 'bottom', 'under', 'beside');
       if (kind === 'mark') {
         const bottom = s.tagAt === 'bottom';
         tag.classList.add(bottom ? 'bottom' : 'top');
         tag.style.left = `${x(r.right) - 12}px`;
         tag.style.top = `${y(bottom ? r.bottom : r.top)}px`;
+        // Its part's other edge, should this one have no room.
+        flip = () => {
+          tag.classList.replace(bottom ? 'bottom' : 'top', bottom ? 'top' : 'bottom');
+          tag.style.top = `${y(bottom ? r.top : r.bottom)}px`;
+        };
       } else if (el instanceof SVGElement) {
         tag.classList.add('under');
         tag.style.left = `${x(r.left + r.width / 2)}px`;
@@ -252,7 +267,52 @@ export class FollowPainter {
         const t = tag.getBoundingClientRect();
         const shift = t.left < view.left + EDGE ? view.left + EDGE - t.left : t.right > view.right - EDGE ? Math.max(view.left + EDGE - t.left, view.right - EDGE - t.right) : 0;
         if (shift) tag.style.left = `${parseFloat(tag.style.left) + shift / k}px`;
+        // Nor does it cover the drawing's own words (a frame's label) or a tag already placed: it steps right, up, or left of them.
+        this.clear(tag, k, view, [...words, ...placed], flip);
+        placed.push(tag.getBoundingClientRect());
       }
+    }
+  }
+
+  /** Where the drawing's own words are: every line of its text, outside the layer the tags are in. */
+  private wordsOf(): Box[] {
+    const doc = this.board.ownerDocument;
+    if (typeof doc.createRange !== 'function') return [];
+    const out: Box[] = [];
+    const walk = doc.createTreeWalker(this.board, 4 /* NodeFilter.SHOW_TEXT */);
+    const range = doc.createRange();
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+      if (!n.textContent?.trim() || this.layer.contains(n)) continue;
+      range.selectNodeContents(n);
+      for (const r of range.getClientRects?.() ?? []) if (r.width && r.height) out.push(r);
+    }
+    return out;
+  }
+
+  /** Moves a tag off what it covers: right of it, to its part's other edge, above it, or left of it; else leaves it. */
+  private clear(tag: HTMLElement, k: number, view: { left: number; right: number; top: number }, taken: Box[], flip?: () => void) {
+    const t = tag.getBoundingClientRect();
+    const on = taken.filter((w) => meets(t, w));
+    if (!on.length) return;
+    const { left, top } = tag.style;
+    const cls = tag.className;
+    const by = (dx: number, dy: number) => () => {
+      tag.style.left = `${parseFloat(left) + dx / k}px`;
+      tag.style.top = `${parseFloat(top) + dy / k}px`;
+    };
+    const tries = [
+      by(Math.max(...on.map((w) => w.right)) + CLEAR - t.left, 0),
+      ...(flip ? [flip] : []),
+      by(0, Math.min(...on.map((w) => w.top)) - CLEAR - t.bottom),
+      by(Math.min(...on.map((w) => w.left)) - CLEAR - t.right, 0),
+    ];
+    for (const go of tries) {
+      go();
+      const r = tag.getBoundingClientRect();
+      // Half a pixel's slack: a tag the edge just set at EDGE measures a hair inside it.
+      if (r.left > view.left + EDGE - 0.5 && r.right < view.right - EDGE + 0.5 && r.top >= view.top && !taken.some((w) => meets(r, w))) return;
+      Object.assign(tag.style, { left, top });
+      tag.className = cls;
     }
   }
 

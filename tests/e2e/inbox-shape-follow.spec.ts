@@ -537,3 +537,43 @@ test('the status slides with the dock when a panel opens, never ahead of it', as
   expect(Math.max(...frames.map(([, gap]) => gap))).toBeLessThan(4);
   await context.close();
 });
+
+test("a number never covers the drawing's own words, like a frame's label, or another number", async ({ browser }) => {
+  // A frame's label right where the second step's number would sit, on the top edge of its part.
+  const label = text(250, 52, 'How · all must hold', { size: 13, mono: true, tone: 'soft' });
+  const dir = join(w.root, 'boards', 'follow-label');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'board.json');
+  writeFileSync(file, JSON.stringify({ ...board, views: { ...board.views, how: { ...svg(920, 220, parts + label), examples: [{ name: 'A guest leaves', title: 'A guest leaves a thread', steps }] } } }));
+  const made = w.shape(['update', '--file', file, '--project', w.projects.plannotator!, '--thread', w.threads.snooze!]);
+  expect(made.status, made.stderr).toBe(0);
+  const viewport = { width: 390, height: 844 };
+  for (const options of [{}, { ...phone, viewport, screen: viewport }]) {
+    const { context, page } = await openBoard(browser, options, (JSON.parse(made.stdout) as { id: string }).id);
+    const covered = await page.evaluate(() => {
+      const root = [...document.querySelectorAll('*')].map((h) => h.shadowRoot).find((r) => r?.querySelector('.shp-ex-tag'))!;
+      const layer = root.querySelector('.shp-ex-layer')!;
+      const tags = [...root.querySelectorAll('.shp-ex-tag')].map((t) => t.getBoundingClientRect());
+      const named = [...root.querySelectorAll('.shp-ex-tag')].map((t) => t.textContent!.trim());
+      const words: { r: DOMRect; text: string }[] = [];
+      const walk = document.createTreeWalker(layer.parentElement!, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (!n.textContent?.trim() || layer.contains(n)) continue;
+        range.selectNodeContents(n);
+        words.push(...[...range.getClientRects()].filter((r) => r.width && r.height).map((r) => ({ r, text: n.textContent!.trim() })));
+      }
+      const meets = (a: DOMRect, b: DOMRect) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      return {
+        words: words.length,
+        onWords: tags.flatMap((t, i) => words.filter((w) => meets(t, w.r)).map((w) => `${named[i]} on ${w.text}`)),
+        onTags: tags.flatMap((t, i) => tags.filter((u, j) => i !== j && meets(t, u)).map(() => named[i])),
+      };
+    });
+    expect(covered.words).toBeGreaterThan(4);
+    expect(covered.onWords, `at ${page.viewportSize()!.width}`).toEqual([]);
+    // Four numbers in a row of 358 px have nowhere free to go: only the desk promises they never meet.
+    if (page.viewportSize()!.width > 390) expect(covered.onTags).toEqual([]);
+    await context.close();
+  }
+});
