@@ -490,7 +490,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const [filesSheet, setFilesSheet] = useState(false);
   // The PR's details over the code; what opened them takes focus back. One thing over the code at a time.
   const [detailsOpen, setDetailsOpen] = useState(false);
-  const details = usePullDetails(layerKey ?? null);
+  // Only once the list names it: on a fresh load the Inbox has no list yet, and would refuse a PR it has not listed.
+  const details = usePullDetails(layer ? layerKey : null);
   const detailsPanel = useRef<HTMLElement>(null);
   const detailsOpener = useRef<HTMLElement | null>(null);
   const toggleDetails = (event: React.MouseEvent<HTMLElement>) => {

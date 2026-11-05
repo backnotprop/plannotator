@@ -1157,6 +1157,34 @@ async function openDetails(review: Locator): Promise<Locator> {
   return panel;
 }
 
+test('the details wait for the list: on a fresh load the forge is not asked about a PR the Inbox has not listed yet', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route((url) => url.pathname === '/api/inbox/pulls', async (route) => {
+      await held;
+      await route.continue();
+    });
+    const asked: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/inbox/pulls/details') asked.push(request.url());
+    });
+    const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/pulls/details', { timeout: 30_000 });
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(STACK_ID)}&layer=${encodeURIComponent(LAYER_413)}&scope=layer`);
+    await page.waitForTimeout(1500);
+    expect(asked).toEqual([]);
+    release();
+    expect((await answered).status()).toBe(200);
+    await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await openDetails(page.locator('[data-pull-review]'));
+    await expect(page.locator('[data-pull-details-failed]')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
 test('the details, from the forge: who stands where, the checks, every comment; pictures through the Inbox; a failure says so', async ({ browser }) => {
   const number = TEAMMATE.split('#')[1]!;
   const pic = (login: string) => world.avatars.url(login);
