@@ -809,12 +809,12 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
   }
 }
 
-function detailOf(file: ComposeFile): string {
-  if (file.state === 'refused') return file.error ?? 'Not attached.';
-  if (file.state === 'uploading' && file.reuse) return `Adding… ${formatBytes(file.size)}`;
-  if (file.state === 'uploading') return `Uploading… ${Math.round(file.progress * 100)}% of ${formatBytes(file.size)}`;
+/** The line under a tile's name: words, then the size. The size is its own part, so only the words ever give way. */
+function detailOf(file: ComposeFile): { words: string; size: string } {
+  const size = formatBytes(file.state === 'uploading' ? file.size : file.upload!.size);
+  if (file.state === 'uploading') return { words: file.reuse ? 'Adding… ' : `Uploading… ${Math.round(file.progress * 100)}% of `, size };
   const upload = file.upload!;
-  return `${inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type)}, ${formatBytes(upload.size)}`;
+  return { words: `${inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type)}, `, size };
 }
 
 /** True for the first PASTED_UNDO_MS after `at`, then false (re-rendered when it turns). */
@@ -934,9 +934,16 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
           )}
           <span className="ib-att-text">
             <FileName name={file.name} className="ib-nm" />
-            <span className={file.state === 'refused' ? 'ib-cp-ferr' : 'ib-kd'} role={file.state === 'refused' ? 'alert' : undefined}>
-              {detailOf(file)}
-            </span>
+            {file.state === 'refused' ? (
+              <span className="ib-cp-ferr" role="alert">
+                {file.error ?? 'Not attached.'}
+              </span>
+            ) : (
+              <span className="ib-kd ib-cp-kd">
+                <span className="ib-cp-kd-w">{detailOf(file).words}</span>
+                <span className="ib-cp-kd-n">{detailOf(file).size}</span>
+              </span>
+            )}
             {file.state === 'uploading' && !file.reuse && (
               <span className="ib-cp-prog" aria-hidden="true">
                 <i style={{ width: `${Math.round(file.progress * 100)}%` }} />

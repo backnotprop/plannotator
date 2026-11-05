@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { INBOX_TEXT_COMPLETE_META_KEY, inboxAgentTool, inboxToolCall, inboxToolResultText, parseInboxToolList } from "@plannotator/shared/inbox/connection";
-import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_ACTION_ON, inboxBoardRequestBlock } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "./inbox";
 import { INBOX_MCP_TOOLS, INBOX_SERVED_TOOLS } from "./inbox-mcp";
 
@@ -68,7 +68,7 @@ describe.if(INBOX_CARD_ACTION_ON)("the card tool", () => {
     const tool = inboxAgentTool(tools)!;
     const props = tool.inputSchema.properties as Record<string, { enum?: string[] }>;
     expect(props.action!.enum).toContain("card");
-    expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list"]);
+    expect(props.op!.enum).toEqual(["create", "move", "say", "link", "ship", "drop", "list", "initiative_delete"]);
     // The schema lists the v2 columns only; the ids before v2 are still taken (the next test).
     expect(props.column!.enum).toEqual(["backlog", "todo", "in_progress", "in_review", "done", "dropped"]);
     // Claude Code passes a tool description up to 2,048 characters.
@@ -413,6 +413,191 @@ describe("the Board page's routes: New card and the look", () => {
     const again = (await (await post({ title: "Retry budget", thread_id: started.message.id, idempotency_key: "k-ok" })).json()) as { card: { id: string }; replayed: boolean };
     expect(again).toMatchObject({ card: { id: ok.card.id }, replayed: true });
     expect(server.store.listCards().filter((c) => c.title === "Retry budget")).toHaveLength(1);
+  });
+
+  // Approval "board-initiatives", "Agents and initiatives": through the real tool, an agent names an initiative; list
+  // shows each card's and the live ones with counts (what reuse depends on); rename and delete have no op.
+  test("an agent's initiative: joins by name, makes a new one, \"\" takes it out, and list shows them", async () => {
+    const { card, base } = await world();
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const billing = ((await (await post("/api/inbox/initiatives", { name: "Billing" })).json()) as { initiative: { id: string } }).initiative.id;
+
+    const joined = await card({ op: "create", title: "Invoices endpoint", initiative: "billing" });
+    expect(joined.structuredContent.card.initiative).toBe(billing);
+    expect(joined.content[0]!.text).toContain('initiative "Billing"');
+    const fresh = await card({ op: "create", title: "Schema step", initiative: "Code review" });
+    const review = fresh.structuredContent.card.initiative as string;
+    expect(review).toMatch(/^ini_/);
+    expect(review).not.toBe(billing);
+
+    const listed = await card({ op: "list" });
+    expect(listed.content[0]!.text).toContain("Initiatives: Billing (1 card), Code review (1 card).");
+    expect(listed.structuredContent.initiatives).toEqual([
+      { id: billing, name: "Billing", cards: 1 },
+      { id: review, name: "Code review", cards: 1 },
+    ]);
+
+    const id = joined.structuredContent.card.id as string;
+    const out = await card({ op: "say", card_id: id, initiative: "" });
+    expect(out.isError).toBeUndefined();
+    expect(out.structuredContent.card.initiative).toBeNull();
+    const opened = (await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { history: { kind: string; initiative?: string | null; by: { kind: string; name?: string } }[] };
+    expect(opened.history.filter((entry) => entry.kind === "initiative").map((entry) => [entry.initiative, entry.by.kind, entry.by.name])).toEqual([
+      [null, "agent", "Claude Code"],
+    ]);
+
+    // Only create, say and initiative_delete take it; there is no op to rename one.
+    expect((await card({ op: "move", card_id: id, column: "in_progress", initiative: "Billing" })).content[0]!.text).toContain("initiative: op move does not take it");
+    expect((await card({ op: "rename", initiative: "Billing" })).isError).toBe(true);
+    const model = (await (await fetch(`${base}/api/inbox/cards`)).json()) as { initiatives: { name: string; deleted_at: string | null }[] };
+    expect(model.initiatives.map((i) => [i.name, i.deleted_at])).toEqual([
+      ["Billing", null],
+      ["Code review", null],
+    ]);
+  });
+
+  // The clean room saw list say "Counted (1 card)" and the delete "Its 2 cards stay": a cancelled card counted by one only.
+  test("list and the delete count an initiative's cards the same: a cancelled one left out of both", async () => {
+    const { card } = await world();
+    const kept = await card({ op: "create", title: "Kept", initiative: "Counted" });
+    const cancelled = await card({ op: "create", title: "Cancelled", initiative: "Counted" });
+    await card({ op: "drop", card_id: cancelled.structuredContent.card.id, reason: "superseded" });
+    expect(kept.isError).toBeUndefined();
+    const listed = await card({ op: "list" });
+    expect(listed.content[0]!.text).toContain("Initiatives: Counted (1 card).");
+    const gone = await card({ op: "initiative_delete", initiative: "Counted" });
+    expect(gone.content[0]!.text).toContain("Its 1 card stays");
+    expect(gone.structuredContent.cards_kept).toBe(1);
+  });
+
+  // What the agent is told when the person's tag beats the name it gave (the owner's "A · Add both"): the card line
+  // names the real one, the line says why, and nothing claims a "Billing" that was never made.
+  test("an agent's create on a thread the person tagged: the answer names the tagged initiative and why; none made", async () => {
+    const { card, call, server, project } = await world();
+    const shape = server.store.createInitiative({ name: "Shape", by: { kind: "person" } });
+    const asked = await call("send_message", { project_path: project, agent_session: "ses_a", agent_host: "claude-code", agent_name: "Claude Code", body: "Take the empty states?" });
+    server.store.sendReply(asked.structuredContent.message_id, { words: "Yes, #Shape work.", idempotency_key: "k1" });
+
+    const made = await card({ op: "create", title: "Empty states", thread_id: asked.structuredContent.thread_id, initiative: "Billing" });
+    expect(made.isError).toBeUndefined();
+    expect(made.structuredContent.card.initiative).toBe(shape.id);
+    expect(made.content[0]!.text).toContain('initiative "Shape"');
+    expect(made.content[0]!.text).not.toContain("Billing");
+    const why = 'In "Shape": the person tagged this thread.';
+    expect(made.content[0]!.text.split("\n").at(-1)).toBe(why);
+    expect(made.structuredContent.initiative_hint).toBe(why);
+    expect(server.store.initiatives().map((i) => i.name)).toEqual(["Shape"]);
+
+    const thread = asked.structuredContent.thread_id;
+    // No name, or "": the tag decided that too, once; a retry says nothing new.
+    const unnamed = { op: "create", title: "Unnamed", thread_id: thread, idempotency_key: "k-unnamed" };
+    expect((await card(unnamed)).structuredContent.initiative_hint).toBe(why);
+    const replay = await card(unnamed);
+    expect(replay.structuredContent.replayed).toBe(true);
+    expect(replay.structuredContent.initiative_hint).toBeUndefined();
+    expect((await card({ op: "create", title: "Out", thread_id: thread, initiative: "" })).structuredContent.initiative_hint).toBe(why);
+    // The agent named that very one (however written): the tag decided nothing, and the line would be noise.
+    for (const named of ["Shape", "#shape"]) {
+      const same = await card({ op: "create", title: `Named ${named}`, thread_id: thread, initiative: named });
+      expect([named, same.structuredContent.card.initiative]).toEqual([named, shape.id]);
+      expect(same.structuredContent.initiative_hint).toBeUndefined();
+      expect(same.content[0]!.text).not.toContain("the person tagged");
+    }
+    // Linked later, to a card in none: the tag decides. To a card already in one, it does not.
+    const loose = await card({ op: "create", title: "Loose" });
+    const linked = await card({ op: "link", card_id: loose.structuredContent.card.id, thread_id: thread });
+    expect(linked.structuredContent.card.initiative).toBe(shape.id);
+    expect(linked.structuredContent.initiative_hint).toBe(why);
+    const moved0 = await card({ op: "say", card_id: loose.structuredContent.card.id, say: "still here" });
+    expect(moved0.structuredContent.initiative_hint).toBeUndefined();
+    const placed = await card({ op: "create", title: "Placed", initiative: "Elsewhere" });
+    const kept = await card({ op: "link", card_id: placed.structuredContent.card.id, thread_id: thread });
+    expect(kept.structuredContent.card.initiative).toBe(placed.structuredContent.card.initiative);
+    expect(kept.structuredContent.initiative_hint).toBeUndefined();
+    // A say that changes it is the agent's own doing, tagged thread or not.
+    const out = await card({ op: "say", card_id: made.structuredContent.card.id, initiative: "" });
+    expect(out.structuredContent.initiative_hint).toBeUndefined();
+    await card({ op: "initiative_delete", initiative: "Elsewhere" });
+
+    // Written another way, later, by say: it joins, and the last change holds.
+    const review = server.store.createInitiative({ name: "Code review", by: { kind: "person" } });
+    const moved = await card({ op: "say", card_id: made.structuredContent.card.id, initiative: "#CodeReview" });
+    expect(moved.structuredContent.card.initiative).toBe(review.id);
+  });
+
+  // The owner, 2026-11-04: on clearing out, "Only on like a board --help or a hook nudge when agents create
+  // initiatives ... Try not to bloat main instruction or main tool description." What regresses: the line on every
+  // join (noise), a retry that made nothing claiming it did, or the sentence creeping back into what every request carries.
+  test("the answer nudges only when this call made the initiative; every request's text carries no such sentence", async () => {
+    const { card, server } = await world();
+    const nudge = 'Made initiative "Billing". When its work is done, delete it (initiative_delete); its cards stay.';
+    const made = await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" });
+    expect(made.content[0]!.text.split("\n").at(-1)).toBe(nudge);
+    expect(made.structuredContent.initiative_hint).toBe(nudge);
+
+    const quiet = async (result: Result) => {
+      expect(result.isError).toBeUndefined();
+      expect(result.content[0]!.text).not.toContain("delete it");
+      expect(result.structuredContent.initiative_hint).toBeUndefined();
+    };
+    await quiet(await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" }));
+    const joined = await card({ op: "create", title: "Invoices", initiative: "billing" });
+    await quiet(joined);
+    const id = joined.structuredContent.card.id as string;
+    await quiet(await card({ op: "say", card_id: id, say: "started" }));
+    await quiet(await card({ op: "say", card_id: id, initiative: "" }));
+    await quiet(await card({ op: "say", card_id: id, initiative: "Billing" }));
+    const moved = await card({ op: "say", card_id: id, initiative: "Refunds" });
+    expect(moved.content[0]!.text.split("\n").at(-1)).toBe(nudge.replace("Billing", "Refunds"));
+
+    const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
+      method: "POST",
+      headers: { "content-type": "application/json", accept: "application/json, text/event-stream" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/list", params: {} }),
+    });
+    const text = await response.text();
+    const data = text.split("\n").find((line) => line.startsWith("data:"));
+    const tools = parseInboxToolList(JSON.parse(data ? data.slice(5) : text).result);
+    const sentence = /work is done|delete it|tagged this thread/;
+    expect(JSON.stringify(tools)).not.toMatch(sentence);
+    expect(JSON.stringify(inboxAgentTool(tools))).not.toMatch(sentence);
+    expect(inboxBoardRequestBlock("msg_x")).not.toMatch(sentence);
+  });
+
+  // The owner, 2026-11-04: agents "clear initiatives out". The failures guarded: a delete that takes cards with it, or
+  // that only works by name or only by id; the field refused on the op.
+  test("an agent deletes an initiative by name or by id; its cards stay, in none", async () => {
+    const { card, base } = await world();
+    const first = await card({ op: "create", title: "Schema step", initiative: "Billing" });
+    const id = first.structuredContent.card.id as string;
+    const billing = first.structuredContent.card.initiative as string;
+    const second = await card({ op: "create", title: "Hover cards", initiative: billing });
+    expect(second.structuredContent.card.initiative).toBe(billing);
+    const shape = (await card({ op: "create", title: "Popover", initiative: "Shape" })).structuredContent.card.initiative as string;
+
+    const gone = await card({ op: "initiative_delete", initiative: "  BILLING " });
+    expect(gone.isError).toBeUndefined();
+    expect(gone.content[0]!.text).toBe('Deleted the initiative "Billing". Its 2 cards stay on the Board, in no initiative.');
+    expect(gone.structuredContent.cards_kept).toBe(2);
+    expect((await card({ op: "initiative_delete", initiative: shape })).structuredContent.initiative.name).toBe("Shape");
+
+    const listed = await card({ op: "list" });
+    expect(listed.structuredContent.total).toBe(3);
+    expect(listed.structuredContent.cards.map((c: { initiative: string | null }) => c.initiative)).toEqual([null, null, null]);
+    expect(listed.content[0]!.text).not.toContain("Initiatives:");
+    expect(((await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { card: { id: string } }).card.id).toBe(id);
+
+    expect((await card({ op: "initiative_delete", initiative: "Billing" })).content[0]!.text).toContain("No initiative Billing.");
+    // Never a near name: the delete has no Undo for an agent.
+    const plus = (await card({ op: "create", title: "Bindings", initiative: "C++" })).structuredContent.card.initiative as string;
+    const near = await card({ op: "initiative_delete", initiative: "C#" });
+    expect(near.isError).toBe(true);
+    expect(near.content[0]!.text).toContain("No initiative C#.");
+    expect((await card({ op: "list" })).structuredContent.initiatives).toEqual([{ id: plus, name: "C++", cards: 1 }]);
+    // Written as a tag, it still names it.
+    expect((await card({ op: "initiative_delete", initiative: "#c++" })).structuredContent.initiative.name).toBe("C++");
+    expect((await card({ op: "initiative_delete" })).isError).toBe(true);
   });
 });
 
