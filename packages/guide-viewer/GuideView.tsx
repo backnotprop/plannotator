@@ -8,6 +8,7 @@ import { GuideSectionCard } from './GuideSectionCard';
 import { GuideOverview } from './GuideOverview';
 import { GUIDE_EAGER_MOUNT_MAX_FILES, GuideViewportProvider } from './GuideViewportManager';
 import { GuideGlobalCommentButton, GuideGlobalCommentList } from './GuideGlobalComments';
+import { GuideHeading } from './GuideHeading';
 
 interface GuideViewProps {
   guide: CodeGuideData;
@@ -28,6 +29,11 @@ interface GuideViewProps {
    * counts, source line) and the host's 16px page margins, so the width goes to the code.
    */
   bare?: boolean;
+  /**
+   * Drawn under a host's top bar that names the review and lists its chapters (the Inbox's review): the heading reads
+   * like a thread's (GuideHeading), with the review's actions on its title's line. Default off: the heading as before.
+   */
+  threadHeading?: boolean;
   /**
    * Each file's box as tall as its diff (an estimate from the hunks' rows, then the height the renderer reports;
    * capped as before). Opt-in for a host whose renderer reports it (the Inbox's AllFilesCodeView). Default: on in
@@ -85,11 +91,13 @@ export const GuideView: React.FC<GuideViewProps> = ({
   sourceLine,
   headerActions,
   bare = false,
+  threadHeading = false,
   fitFileHeights,
 }) => {
   const fit = fitFileHeights ?? bare;
   const host = useGuideHost();
   const overviewFigure = host.renderOverviewFigure?.() ?? null;
+  const headActions = threadHeading ? (host.renderHeadActions?.() ?? null) : null;
   const addGlobalComment = host.globalComments?.onAdd;
   const resolved = useMemo(() => resolveGuideSectionFiles(guide, host.files), [guide, host.files]);
   // Only the guide's own files register shells; in-app the review may hold many more.
@@ -197,7 +205,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
     [guide.unplacedFiles, hasUnplaced],
   );
 
-  const actions = headerActions || addGlobalComment ? (
+  // The thread's heading holds the actions itself, on its title's line.
+  const actions = !threadHeading && (headerActions || addGlobalComment) ? (
     <>
       {addGlobalComment && <GuideGlobalCommentButton onAdd={addGlobalComment} />}
       {headerActions}
@@ -205,11 +214,11 @@ export const GuideView: React.FC<GuideViewProps> = ({
   ) : null;
   // The first card drawn: the first section, or "Everything else" when the guide has none.
   const firstCardIndex = guide.sections.length > 0 ? 0 : unplacedSection ? guide.sections.length : -1;
-  const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex) : null;
+  const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex, { folded: false, diffs: 1, title: '' }) : null;
   const actionsOnTab = !!actions && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
 
   return (
-    <GuideViewportProvider className={bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
+    <GuideViewportProvider className={threadHeading ? 'gv-guide' : bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
       {/* Header actions sit in a row above the title on narrow screens and float beside it from md up (desktop unchanged). */}
       {/* The host's global comments add their button to the same row, ahead of the host's own controls. Bare (no title
           to float beside), the row stays above the content at every width. */}
@@ -219,7 +228,26 @@ export const GuideView: React.FC<GuideViewProps> = ({
           {actions}
         </div>
       )}
-      {!bare && <div className="max-w-[72ch]">
+      {threadHeading && (
+        <GuideHeading
+          title={guide.intent}
+          facts={[
+            ...(engineLabel ? `Written by ${engineLabel}`.split(' · ') : []),
+            ...(guide.moved ? ['Generated on a different version of this branch'] : []),
+            ...(typeof sourceLine === 'string' ? sourceLine.split(' · ').filter(Boolean) : sourceLine ? [sourceLine] : []),
+          ]}
+          actions={
+            (headActions || headerActions || addGlobalComment) && (
+              <>
+                {headActions}
+                {headerActions}
+                {addGlobalComment && <GuideGlobalCommentButton onAdd={addGlobalComment} />}
+              </>
+            )
+          }
+        />
+      )}
+      {!bare && !threadHeading && <div className="max-w-[72ch]">
         <h1 className="text-[22px] font-semibold tracking-tight text-foreground [text-wrap:balance]">{guide.title}</h1>
         {guide.intent && (
           <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{renderInlineMarkdown(guide.intent)}</p>
@@ -263,10 +291,10 @@ export const GuideView: React.FC<GuideViewProps> = ({
 
       {host.globalComments && <GuideGlobalCommentList globalComments={host.globalComments} />}
 
-      {guide.overview && <GuideOverview overview={guide.overview} renderLink={renderLink} />}
+      {guide.overview && <GuideOverview overview={guide.overview} renderLink={renderLink} plain={threadHeading} />}
       {!guide.overview?.diagram && overviewFigure}
 
-      <div ref={viewRef} className={bare ? 'space-y-4' : 'mt-6 space-y-4'}>
+      <div ref={viewRef} className={threadHeading ? 'gv-chapters' : bare ? 'space-y-4' : 'mt-6 space-y-4'}>
         {guide.sections.map((section, index) => (
           <GuideSectionCard
             key={`${section.title}:${index}`}
