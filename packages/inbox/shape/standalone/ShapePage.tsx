@@ -15,7 +15,7 @@
  * answer 404 and the page says Shape is off.
  */
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
-import type { ShapeViewId } from '@plannotator/core/shape';
+import { shapeViewNow, type ShapeViewId } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapePanelTab } from '@plannotator/ui/components/shape';
@@ -24,7 +24,7 @@ import { createStandaloneShapeHost } from './host';
 
 const ShapeBoard = lazy(() => import('#shape-board'));
 
-const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'reqs', 'code'];
+const VIEWS: readonly ShapeViewId[] = ['picture', 'how', 'know', 'code'];
 const PANELS: readonly ShapePanelTab[] = ['ask', 'refs'];
 
 export interface ShapeRoute {
@@ -37,7 +37,8 @@ export interface ShapeRoute {
 export function parseShapeHash(hash: string): ShapeRoute {
   const params = new URLSearchParams(hash.replace(/^#/, ''));
   const shape = params.get('shape');
-  const view = params.get('view') as ShapeViewId | null;
+  // A saved link to the old Requirements view opens What to know.
+  const view = shapeViewNow(params.get('view')) as ShapeViewId | null;
   const panel = params.get('panel') as ShapePanelTab | null;
   return {
     shape: shape && /^shp_[0-9A-Za-z]+$/.test(shape) ? shape : null,
@@ -260,6 +261,7 @@ export function ShapePage({ api, openEvents, win = window }: ShapePageProps) {
         items={items}
         query={query}
         onOpen={open}
+        assetUrl={host.assetUrl}
         empty={
           query ? undefined : shapes === null ? (
             <span aria-busy="true" />
