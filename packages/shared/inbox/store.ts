@@ -5569,6 +5569,7 @@ export class InboxStore {
       messages: [...this.messages.values()],
       byId: this.messages,
       closedByArchive: (message) => this.closedByArchive(message),
+      reaskListedIds: (threadId) => this.reaskListedIds(threadId),
       questions: [...this.questions.values()],
     };
   }

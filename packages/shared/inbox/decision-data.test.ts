@@ -165,6 +165,38 @@ describe("what counts as what", () => {
     expect(after.days.map((d) => d.own_words)).toEqual([1]);
   });
 
+  test("a Re-asked question waits on the agent, not the person, as the Inbox's own count reads it, until the agent writes again", async () => {
+    const w = world();
+    const agrees = async (waiting: number) => {
+      expect((await w.summary()).waiting).toBe(waiting);
+      expect(w.store.openDecisions().length).toBe(waiting);
+    };
+    const asked = w.ask();
+    await agrees(1);
+    w.store.sendReask(asked.id, { idempotency_key: w.key() });
+    await agrees(0);
+    // The agent wrote without asking again: the note no longer waits, so the question is the person's again.
+    w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: "Still looking.", reply_to: asked.id, idempotency_key: w.key() });
+    await agrees(1);
+  });
+
+  test("a Re-ask leaves the rest waiting: a pick made since, and another session's question in the thread", async () => {
+    const w = world();
+    const two = ":::question\nFirst?\n\n- [ ] A\n- [ ] B\n:::\n\n:::question\nSecond?\n\n- [ ] A\n- [ ] B\n:::";
+    const asked = w.store.sendMessage({ project_id: w.project.id, author: w.claude, body: two, thread: "two", idempotency_key: w.key() }).message;
+    const other = { kind: "agent" as const, host: "codex", session: "ses-o", name: null };
+    w.store.sendMessage({ project_id: w.project.id, author: other, body: ":::question\nAnother session's?\n\n- [ ] A\n- [ ] B\n:::", reply_to: asked.id, idempotency_key: w.key() });
+    w.store.sendReask(asked.id, { idempotency_key: w.key() });
+    expect((await w.summary()).waiting).toBe(1);
+    expect(w.store.openDecisions().length).toBe(1);
+
+    // One the note lists, picked since, waits for its Send.
+    const [first] = w.store.questionsOf(asked.id);
+    w.store.savePicks(asked.id, [{ key: first!.key, revision: first!.revision, answer: { v: 1, key: first!.key, kind: "single", prompt: first!.prompt, selected: ["A"] } }]);
+    expect((await w.summary()).waiting).toBe(2);
+    expect(w.store.openDecisions().length).toBe(2);
+  });
+
   test("a thread that came back: what the agent asked after the archive waits on the person as the Inbox says, and what the archive closed does not", async () => {
     const w = world();
     const closed = w.ask({ prompt: "Before the archive?" });

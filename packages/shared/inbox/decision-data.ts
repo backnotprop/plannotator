@@ -44,6 +44,8 @@ export interface DecisionDataInput {
   byId: ReadonlyMap<string, InboxMessage>;
   /** The Inbox's own rule: the archive closed this message's questions. One an agent sent after the archive line stays live. */
   closedByArchive: (message: InboxMessage) => boolean;
+  /** The Inbox's own rule: the questions (`<message id>/<key>`) of a thread that a still-waiting Re-ask note lists, about to be asked again. */
+  reaskListedIds: (threadId: string) => ReadonlySet<string>;
   questions: readonly InboxQuestionRecord[];
   /** `DECISION_LINES_FILE`'s text, read before the calculation. */
   deleted?: string;
@@ -350,12 +352,27 @@ function* summarySteps(input: DecisionDataInput, query: DecisionQuery): Generato
   // The whole history, whatever range is showing: enough to say "too early" and "nothing yet" with one request.
   const history = { asked: 0, answered: 0, earliest: null as number | null };
   let waiting = 0;
+  // Read once per thread, and only for a thread with an open question.
+  const reaskedByThread = new Map<string, ReadonlySet<string>>();
+  const reasked = (row: DecisionRow): boolean => {
+    let listed = reaskedByThread.get(row.thread_id);
+    if (!listed) {
+      try {
+        listed = input.reaskListedIds(row.thread_id);
+      } catch {
+        listed = new Set(); // A record that can't be read costs its own number.
+      }
+      reaskedByThread.set(row.thread_id, listed);
+    }
+    return listed.has(row.id);
+  };
   for (const row of rows) {
     if (++tick % EVERY === 0) yield;
     history.asked++;
     if (row.fate === "answered") history.answered++;
     if ((row.fate === "answered" || row.fate === "skipped") && row.answered_at !== null && (history.earliest === null || row.answered_at < history.earliest)) history.earliest = row.answered_at;
-    if (row.fate === "open" || row.fate === "picked_unsent") waiting++;
+    // As the Inbox reads it: one a waiting Re-ask lists is the agent's to ask again; one picked since still waits for its Send.
+    if (row.fate === "picked_unsent" || (row.fate === "open" && !reasked(row))) waiting++;
     if (inRange(row.asked_at) && (row.fate === "set_aside" || row.fate === "replaced")) counts[row.fate]++;
     if ((row.fate === "answered" || row.fate === "skipped") && inRange(row.answered_at)) {
       counts[row.fate]++;
