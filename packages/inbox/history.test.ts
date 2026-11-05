@@ -8,7 +8,7 @@
  * changes only once the traversal lands.
  */
 import { describe, expect, test } from 'bun:test';
-import { backBy, backLanded, backTo, pushScreen, settleLanding, whileWritingRoute, type HistoryLike } from './history';
+import { backBy, backLanded, backTo, pushScreen, settleLanding, signalNotificationClick, whileWritingRoute, withoutClickSignal, type HistoryLike } from './history';
 
 /** A history whose Back lands only when `land()` is called, as a browser's traversal does a task later. */
 function fakeHistory(): HistoryLike & { entries: { state: unknown; url: string }[]; index: number; backs: number; land: () => void; withoutGo: () => void } {
@@ -177,5 +177,87 @@ describe("full screen's way back (backBy, fullScreenOrigin.ts)", () => {
     h.land();
     settleLanding();
     expect(ran).toEqual(['landed']);
+  });
+});
+
+/**
+ * What a desktop app wrapping the page relies on (inbox-notifications-and-agents.md):
+ * the address changes on every click, even when the click routes nowhere, and
+ * rests where it was, on the same entry with the same state.
+ */
+describe('signalNotificationClick', () => {
+  function addressBar(start: string, state: unknown = null) {
+    const steps: string[] = [];
+    const states: unknown[] = [];
+    let at = new URL(start);
+    return {
+      steps,
+      states,
+      location: {
+        get href() {
+          return at.href;
+        },
+        get hash() {
+          return at.hash;
+        },
+      },
+      history: {
+        state,
+        replaceState(next: unknown, _title: string, url?: string | URL | null) {
+          at = new URL(String(url), at);
+          steps.push(at.href);
+          states.push(next);
+        },
+      },
+    };
+  }
+
+  test('the thread already showing: the address gains a value, then is exactly what it was', () => {
+    const bar = addressBar('http://localhost:1234/#thread=msg_a');
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps).toHaveLength(2);
+    expect(bar.steps[0]).toMatch(/^http:\/\/localhost:1234\/#thread=msg_a&click=\d+$/);
+    expect(bar.steps[1]).toBe('http://localhost:1234/#thread=msg_a');
+  });
+
+  test('two clicks carry two different values', () => {
+    const bar = addressBar('http://localhost:1234/#thread=msg_a');
+    signalNotificationClick(bar.history, bar.location);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps[0]).not.toBe(bar.steps[2]);
+  });
+
+  test('the list at rest, with no hash: it still changes, and the address ends with no hash again', () => {
+    const bar = addressBar('http://localhost:1234/?x=1');
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps[0]).toMatch(/^http:\/\/localhost:1234\/\?x=1#click=\d+$/);
+    expect(bar.steps[1]).toBe('http://localhost:1234/?x=1');
+  });
+
+  test('a file open in its view: view= rests where it was, spelled as it was', () => {
+    const start = 'http://localhost:1234/#thread=msg_a&file=att_1&view=full&set=msg_a%3Akey';
+    const bar = addressBar(start);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.steps.at(-1)).toBe(start);
+  });
+
+  test("the entry keeps its state at both steps: a phone's Back still knows where it was opened from", () => {
+    const state = { ibFrom: '#project=prj_1' };
+    const bar = addressBar('http://localhost:1234/#thread=msg_a', state);
+    signalNotificationClick(bar.history, bar.location);
+    expect(bar.states).toEqual([state, state]);
+  });
+});
+
+describe('withoutClickSignal', () => {
+  test('an address back from the browser history reads as the screen it was on', () => {
+    expect(withoutClickSignal('#thread=msg_a&click=3')).toBe('#thread=msg_a');
+    expect(withoutClickSignal('#thread=msg_a&click=3&file=att_1&view=full')).toBe('#thread=msg_a&file=att_1&view=full');
+    expect(withoutClickSignal('#settings/general&click=3')).toBe('#settings/general');
+    expect(withoutClickSignal('#click=3')).toBe('');
+  });
+
+  test("what only looks like it is someone else's", () => {
+    for (const hash of ['#thread=click=3', '#thread=msg_a&clicks=3', '#thread=msg_a&click=abc', '']) expect(withoutClickSignal(hash)).toBe(hash);
   });
 });
