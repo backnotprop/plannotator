@@ -12,11 +12,17 @@ export function InlinePicker({
   value,
   options,
   onChange,
+  escapeClosesOnlyList = false,
+  plainGroupLabels = false,
 }: {
   label: string;
   value: string;
   options: InlinePickerOption[];
   onChange: (v: string) => void;
+  /** For a picker inside a dialog: Escape on an open list closes the list and nothing behind it. */
+  escapeClosesOnlyList?: boolean;
+  /** Group headings as the ids write them, with no capitals or wide tracking. */
+  plainGroupLabels?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -42,8 +48,7 @@ export function InlinePicker({
     <div
       className="relative"
       onKeyDown={(e) => {
-        // Escape closes the open list and nothing behind it (a dialog it sits in, with its words).
-        if (e.key !== 'Escape' || !open) return;
+        if (!escapeClosesOnlyList || e.key !== 'Escape' || !open) return;
         e.preventDefault();
         e.stopPropagation();
         close();
@@ -75,7 +80,7 @@ export function InlinePicker({
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === 'Escape') {
-                      e.preventDefault();
+                      if (escapeClosesOnlyList) e.preventDefault();
                       close();
                     }
                     if (e.key === 'Enter' && filtered.length > 0) select(filtered[0].value);
@@ -92,7 +97,7 @@ export function InlinePicker({
               {grouped.map((group) => (
                 <React.Fragment key={group.label ?? '__flat'}>
                   {group.label && (
-                    <div className="px-2.5 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/40">
+                    <div className={plainGroupLabels ? 'px-2.5 pb-0.5 pt-1.5 text-[11px] text-muted-foreground' : 'px-2.5 pb-0.5 pt-1.5 font-mono text-[9px] uppercase tracking-wider text-muted-foreground/40'}>
                       {group.label}
                     </div>
                   )}

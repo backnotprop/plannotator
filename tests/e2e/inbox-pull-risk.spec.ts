@@ -152,10 +152,12 @@ const piLog = () =>
     : [];
 const prompts = () => piLog().filter((l) => l.prompt);
 
-async function shots(name: string, widths: readonly (1440 | 390)[] = [1440, 390]): Promise<void> {
+const VIEWPORTS = { 1440: { width: 1440, height: 900 }, 390: { width: 390, height: 844 }, 320: { width: 320, height: 568 } } as const;
+
+async function shots(name: string, widths: readonly (keyof typeof VIEWPORTS)[] = [1440, 390]): Promise<void> {
   await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
   for (const width of widths) {
-    await page.setViewportSize(width === 1440 ? { width: 1440, height: 900 } : { width: 390, height: 844 });
+    await page.setViewportSize(VIEWPORTS[width]);
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
       await page.waitForTimeout(350);
@@ -296,16 +298,30 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
     await agentList.getByRole('button').first().click();
     await agentList.getByRole('button', { name, exact: true }).click();
   };
-  await expect(dialog.getByRole('heading', { name: 'No slop rules' })).toBeVisible();
+  await expect(dialog.getByRole('heading', { name: 'No slop zone rules' })).toBeVisible();
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toBeFocused();
   await expect(agentList).toHaveAttribute('data-pull-risk-agent', 'claude-agent-sdk');
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'sonnet');
   await expect(modelList.getByRole('button').first()).toContainText('Sonnet');
   await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
-  await shots('dialog');
+  await shots('dialog', [1440, 390, 320]);
+  // A phone: the sheet takes the screen's width, the words only its inset, and every control a thumb's height.
+  for (const width of [390, 320] as const) {
+    await page.setViewportSize(VIEWPORTS[width]);
+    const box = await dialog.boundingBox();
+    expect(box!.width).toBe(width);
+    // 16 and the sheet's 1 px border. The padding drawn twice was 45.
+    expect((await dialog.locator('[data-pull-risk-rules-text]').boundingBox())!.x).toBeLessThanOrEqual(17);
+    expect((await modelList.getByRole('button').first().boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    expect((await dialog.locator('[data-pull-risk-save]').boundingBox())!.height).toBeGreaterThanOrEqual(44);
+    // Nothing to scroll for: Cancel, the last thing in the sheet, is on the screen.
+    const cancel = await dialog.getByRole('button', { name: 'Cancel', exact: true }).boundingBox();
+    expect(cancel!.y + cancel!.height).toBeLessThanOrEqual(VIEWPORTS[width].height);
+  }
+  await page.setViewportSize(VIEWPORTS[1440]);
   await modelList.getByRole('button').first().click();
   await expect(modelList.getByRole('button', { name: 'Haiku (latest)' })).toBeVisible();
-  await shots('dialog-dropdown');
+  await shots('dialog-dropdown', [1440, 390, 320]);
 
   // Escape closes the list and keeps the dialog and its words.
   await page.keyboard.press('Escape');
@@ -315,7 +331,7 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await pickAgent('Codex');
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'gpt-6-luna');
   await expect(modelList.getByRole('button').first()).toContainText('GPT-6-Luna');
-  await shots('dialog-codex');
+  await shots('dialog-codex', [1440, 390, 320]);
 
   await pickAgent('Pi');
   await expect(modelList.getByRole('button').first()).toContainText('Default');
@@ -324,7 +340,21 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   // A long list gets the guided review's filter box and its groups.
   await expect(modelList.getByPlaceholder('Type to filter…')).toBeVisible();
   await expect(modelList.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
-  await shots('dialog-dropdown-pi');
+  // Its group headings in plain case, not capitals.
+  await expect(modelList.getByText('anthropic', { exact: true })).toHaveCSS('text-transform', 'none');
+  await shots('dialog-dropdown-pi', [1440, 390, 320]);
+  // On the smallest phone the open list, its filter box included, stays on the screen.
+  await page.setViewportSize(VIEWPORTS[320]);
+  const openList = await modelList.locator('.absolute').boundingBox();
+  expect(openList!.y).toBeGreaterThanOrEqual(0);
+  expect(openList!.y + openList!.height).toBeLessThanOrEqual(VIEWPORTS[320].height);
+  expect(openList!.x + openList!.width).toBeLessThanOrEqual(VIEWPORTS[320].width);
+  await page.setViewportSize(VIEWPORTS[1440]);
+  // Escape in the filter box closes the list, and the dialog stays with its words.
+  await modelList.getByPlaceholder('Type to filter…').press('Escape');
+  await expect(modelList.getByPlaceholder('Type to filter…')).toHaveCount(0);
+  await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
+  await modelList.getByRole('button').first().click();
   await modelList.getByPlaceholder('Type to filter…').fill('Sonnet');
   await modelList.getByRole('button', { name: /Sonnet 5/ }).click();
   await expect(modelList).toHaveAttribute('data-pull-risk-model', 'anthropic/claude-sonnet-5');

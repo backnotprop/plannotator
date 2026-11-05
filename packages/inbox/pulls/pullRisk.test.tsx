@@ -19,6 +19,7 @@ const hasDom = typeof document !== 'undefined';
 const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+const { InlinePicker } = (hasDom ? await import('@plannotator/review-editor/components/guide/InlinePicker') : {}) as typeof import('@plannotator/review-editor/components/guide/InlinePicker');
 const { RiskRulesDialog } = (hasDom ? await import('./RiskRulesDialog') : {}) as typeof import('./RiskRulesDialog');
 
 const key = (n: number) => `github.com/n/b#${n}`;
@@ -346,6 +347,41 @@ test.skipIf(!hasDom)('Escape on an open list closes the list, not the dialog wit
   expect(closed).toBe(0);
   await act(async () => holder.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   expect(closed).toBe(1);
+});
+
+test.skipIf(!hasDom)('outside the Risk dialog the picker keeps its own ways: Escape passes through, and its group headings stay as they are', async () => {
+  const options = Array.from({ length: 14 }, (_, i) => ({ value: `anthropic/m${i}`, label: `M${i}` }));
+  const reached: string[] = [];
+  await mount(
+    <div onKeyDown={(event) => reached.push(event.key)}>
+      <InlinePicker label="Model" value="" options={options} onChange={() => {}} />
+    </div>,
+  );
+  const button = document.querySelector('button')!;
+  await act(async () => button.click());
+  const heading = () => [...document.querySelectorAll('div')].find((el) => el.textContent === 'anthropic')!;
+  expect(heading().className).toContain('uppercase');
+  await act(async () => button.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(reached).toEqual(['Escape']);
+  // Still open: on the button, Escape has never closed it.
+  expect(heading()).toBeDefined();
+});
+
+test.skipIf(!hasDom)('in the Risk dialog a long list has its groups in plain case, and Escape in its filter box closes only the list', async () => {
+  const models = Array.from({ length: 14 }, (_, i) => ({ id: `anthropic/m${i}`, label: `M${i}` }));
+  spy('pullRiskModels', async () => ({ models, default_model: null }));
+  let closed = 0;
+  await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => closed++} />);
+  const holder = document.querySelector('[data-pull-risk-model]')!;
+  await act(async () => holder.querySelector('button')!.click());
+  const heading = [...holder.querySelectorAll('div')].find((el) => el.textContent === 'anthropic')!;
+  expect(heading.className).not.toContain('uppercase');
+  expect(heading.className).not.toContain('tracking');
+  const key = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+  await act(async () => holder.querySelector('input')!.dispatchEvent(key));
+  expect(key.defaultPrevented).toBe(true);
+  expect(holder.querySelector('input')).toBeNull();
+  expect(closed).toBe(0);
 });
 
 test.skipIf(!hasDom)('a failed last run says why in the dialog', async () => {

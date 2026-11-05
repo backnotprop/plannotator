@@ -42,8 +42,8 @@ export function RiskFilter({ value, rulesSet, phone, onChange, onRules }: { valu
                   <Menu.Separator className="ib-pm-sep" />
                 </>
               )}
-              <Menu.Item className="ib-pmi" label="No slop rules" onClick={onRules} data-pulls-risk-rules="">
-                <span className="ib-pmi-l">No slop rules…</span>
+              <Menu.Item className="ib-pmi" label="No slop zone rules" onClick={onRules} data-pulls-risk-rules="">
+                <span className="ib-pmi-l">No slop zone rules…</span>
               </Menu.Item>
             </Menu.Popup>
           </Menu.Positioner>

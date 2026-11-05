@@ -11,7 +11,7 @@ const LOADING = [{ value: '', label: 'Loading models…' }];
 const AGENT_DEFAULT = { value: '', label: 'Default' };
 
 /**
- * "No slop rules": the person's words for what a high-risk pull request is, and the
+ * "No slop zone rules": the person's words for what a high-risk pull request is, and the
  * agent that ranks the open ones against them. Saved to the Inbox's config, never to a
  * repository. Empty rules turn the judging off.
  */
@@ -62,13 +62,12 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
   return (
     <Modal labelledBy={titleId} onClose={onClose} testId="pull-risk-rules" className="ib-riskd" ownKeys>
       <form
-        className="ib-dlg-in"
         onSubmit={(event) => {
           event.preventDefault();
           void save();
         }}
       >
-        <h2 id={titleId}>No slop rules</h2>
+        <h2 id={titleId}>No slop zone rules</h2>
         <label className="ib-sub ib-riskd-l" htmlFor={rulesId}>
           What makes a pull request high risk for you? Every open one is ranked against this: not touched is low, maybe is medium, definitely is high.
         </label>
@@ -82,6 +81,8 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
             <div className="ib-riskd-row">
               <div data-pull-risk-agent={provider ?? ''}>
                 <InlinePicker
+                  escapeClosesOnlyList
+                  plainGroupLabels
                   label="Risk agent"
                   value={provider ?? ''}
                   options={answer.agents.map((agent) => ({ value: agent.id, label: agent.label }))}
@@ -93,7 +94,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
                 />
               </div>
               <div data-pull-risk-model={model ?? ''}>
-                <InlinePicker label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
+                <InlinePicker escapeClosesOnlyList plainGroupLabels label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
               </div>
             </div>
             <p className="ib-quietline">A cheap model is plenty: Sonnet, Luna or similar. Diffs go only to the provider you choose here.</p>

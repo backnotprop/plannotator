@@ -1,6 +1,6 @@
 /**
  * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4). The
- * person writes what a high-risk pull request is for them (the "no slop rules")
+ * person writes what a high-risk pull request is for them (the "no slop zone rules")
  * and picks an agent and its model. Each PR head the list shows gets one judgment,
  * low, medium or high with one sentence why, in the background, a few at a time. The
  * agent reads the whole diff.

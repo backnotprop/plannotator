@@ -487,7 +487,7 @@ export interface PlannotatorConfig {
   inboxCodeReview?: boolean;
   /**
    * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4),
-   * under Code review: the person's "no slop rules" and the agent that judges
+   * under Code review: the person's "no slop zone rules" and the agent that judges
    * each new pull request against them. Empty or unset `rules`: nothing runs.
    * Written by the dialog (`POST /api/inbox/pulls/risk`), read on every request.
    * The rules are the person's own words: never logged, never sent in telemetry.
