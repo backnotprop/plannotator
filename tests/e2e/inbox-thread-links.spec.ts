@@ -550,6 +550,58 @@ test.describe('desktop', () => {
   });
 });
 
+test('the row in a full-screen thread and beside a file', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  const pane = page.locator('section.ib-pane');
+  /** The row sits inside the pane, its chevron's glyph over the left edge of what is under it. */
+  const rowFits = async (under: string) => {
+    // Polled: the pane animates its width on the way into full screen.
+    await expect
+      .poll(async () => {
+        const glyph = (await page.locator('[data-artifacts-back] svg').boundingBox())!;
+        const first = (await page.locator(under).first().boundingBox())!;
+        return Math.abs(glyph.x - first.x);
+      })
+      .toBeLessThanOrEqual(4);
+    const box = (await pane.boundingBox())!;
+    const row = (await page.locator('[data-artifacts-switch]').boundingBox())!;
+    expect(row.x + row.width).toBeLessThanOrEqual(box.x + box.width);
+  };
+
+  // The mouse rests in the pane: at the window's left edge a full-screen thread peeks the sidebar.
+  await open(page, world.mixed, '&artifacts');
+  await pane.locator('[data-full-in]').click();
+  await expect(pane).toHaveAttribute('data-full', /.*/);
+  await expect(page.locator('[data-artifact-tile]').first()).toBeVisible();
+  await page.mouse.move(900, 700);
+  await rowFits('[data-artifact-tile]');
+  await shot(page, '09-full-screen-artifacts');
+  await side(page, 'Links').click();
+  await expect(rows(page).first()).toBeVisible();
+  await page.mouse.move(900, 700);
+  await rowFits('[data-links-view] [data-link-repo]');
+  await shot(page, '09-full-screen-links');
+  await pane.locator('[data-full-back]').click();
+
+  await side(page, 'Artifacts').click();
+  await page.locator('[data-artifact-tile]', { hasText: 'checkout-spec.md' }).click();
+  await page.getByRole('button', { name: 'Side by side' }).click();
+  await expect(page.locator('section.ib-pane.ib-withfile')).toBeVisible();
+  await expect(page.locator('[data-artifacts-bar]')).toBeVisible();
+  await page.mouse.move(900, 700);
+  await rowFits('[data-artifact-tile]');
+  await shot(page, '10-side-by-side-artifacts');
+  await side(page, 'Links').click();
+  await expect(rows(page).first()).toBeVisible();
+  await expect(page.locator('section.ib-pane.ib-withfile')).toBeVisible();
+  await page.mouse.move(900, 700);
+  await rowFits('[data-links-view] [data-link-repo]');
+  await noOverflow(page);
+  await shot(page, '10-side-by-side-links');
+  await context.close();
+});
+
 test.describe('phone', () => {
   let own: Browser | undefined;
   let context: BrowserContext;

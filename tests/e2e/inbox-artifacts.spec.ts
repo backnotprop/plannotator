@@ -123,6 +123,10 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_INBOX_CONNECT: '0',
+    PLANNOTATOR_UPDATE_CHECK: '0',
+    PLANNOTATOR_INBOX_NOTES: '0',
+    PLANNOTATOR_TEST_SANDBOX: '1',
+    NO_ANON_PING: '1',
     NO_BROWSER,
     PLANNOTATOR_BROWSER: NO_BROWSER,
   };
