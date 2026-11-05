@@ -1053,6 +1053,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const reviewIndex = createInboxReviewIndex(store);
   let lastReviewsRead: { projectsByRepo: Awaited<ReturnType<typeof pullProjects>>["projectsByRepo"]; wanted: Awaited<ReturnType<typeof pullProjects>>["wanted"]; listed: Awaited<ReturnType<typeof pulls.list>> } | null = null;
   // A review thread's PR that left the list: one read of its state, so a closed PR, or one merged long ago, is recorded.
+  // A PR's owner as the lists use it. A thread archived before any review came is no one's to curate: its PR is
+  // listed again and a new review can start. Unarchived, it owns the PR again, unless the PR was handed on since.
+  const pullOwnersNow = () => {
+    const reviewed = new Set(reviewIndex.threads().map((thread) => thread.thread_id));
+    return new Map(
+      [...pullOwners.all()].filter(([, owner]) => {
+        if (reviewed.has(owner.thread_id)) return true;
+        const row = store.listRow(owner.thread_id);
+        return !row || !inboxRowArchived(row);
+      }),
+    );
+  };
   const pullStates = createInboxPullStates({ run: options.refRunner, onLand: (record, forget) => pullOwners.land(record, forget) });
   const pullLinkStore: InboxPullLinkStore = {
     threadsOf: (id) => store.threadsOf(id),
@@ -3770,7 +3782,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" });
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         // The Board is optional: a card that links a PR is a quiet extra, only while the Board is on.
         const cards = boardOn() ? pullCards(listed.pulls, store.listCards()) : {};
         return json({ serverSession, ...listed, links, projects: Object.fromEntries(projectsByRepo), cards });
@@ -3794,24 +3806,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { projectsByRepo, wanted } = last ?? (await pullProjects());
         const listed = last?.listed ?? (await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1", others: url.searchParams.get("others") === "1" }));
         lastReviewsRead = { projectsByRepo, wanted, listed };
-        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
+        const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwnersNow());
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));
         const threads = reviewIndex.threads();
         const changes = inboxReviewLandingChanges({ threads, pulls: listed.pulls, links, landed: pullOwners.landings() });
         pullOwners.land(changes.record, changes.forget);
         if (!cached) pullStates.look({ threads, pulls: listed.pulls, hosts: listed.hosts, owners: pullOwners.all(), landed: pullOwners.landings() });
-        const closed = (threadId: string) => {
-          const row = store.listRow(threadId);
-          return !row || inboxRowArchived(row);
-        };
         // A New review's row shows until its thread is archived or gone.
         const started = new Map<string, InboxReviewStart>();
         for (const [threadId, start] of pullOwners.started()) {
           const row = store.listRow(threadId);
           if (row && !inboxRowArchived(row)) started.set(threadId, { ...start, name: row.thread_name ?? row.subject });
         }
-        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), closed, started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
+        const rows = inboxReviewRows({ threads, stacks, links, pulls: listed.pulls, pullReasons, landed: pullOwners.landings(), owners: pullOwners.all(), posted: pullOwners.posted(), started, ended: (threadId) => threadAgent(pullLinkStore, threadId)?.ended === true });
         return json({ serverSession, fetched_at: listed.fetched_at, hosts: listed.hosts, rows, projects: Object.fromEntries(projectsByRepo) });
       }
       // New review's change summary: what `plannotator review` would show for a project's local changes. Same guards.
@@ -3927,6 +3935,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
           if (submission.status === "complete") {
             postedReviews.add(fingerprint);
+            pullOwners.markPosted(pull.key);
             while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
           }
           // The list reads the forge again on its next look: the review moved the PR's state there.

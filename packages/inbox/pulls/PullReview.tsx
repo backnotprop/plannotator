@@ -67,6 +67,8 @@ export interface PullReviewProps {
   onBack: () => void;
   /** The verdict went. */
   onSent: () => void;
+  /** A review went to the PR on the forge: Reviews reads its rows again. */
+  onPosted?: () => void;
 }
 
 const NO_BLOCKS: never[] = [];
@@ -134,7 +136,7 @@ function dropStale(layerKey: string, scope: string, keptId: string): void {
   }
 }
 
-function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
+function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent, onPosted }: PullReviewProps) {
   const phone = usePhone();
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
@@ -421,6 +423,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               keep(keptId, { comments: left, viewed });
               setComments(left);
               setPosted({ label: result.label, url: result.url, action: result.action });
+              onPosted?.();
             }}
           />
         ) : canDecide ? (

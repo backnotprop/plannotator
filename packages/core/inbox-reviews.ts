@@ -326,18 +326,17 @@ export interface InboxReviewsAnswer {
  * person's own PR (a reviewer asked for changes or its checks failed: On you;
  * checks running, a draft, or reviewers still to answer: Waiting on others).
  * An answer with no verdict (comments or words) is With your agents. A review
- * of only a teammate's PRs takes no verdict here: answered, it is On you
- * while their review of it is asked of the person, else Waiting on others.
+ * of only a teammate's PRs takes no verdict here: answered in the thread, or
+ * `posted` on the PR itself, the person did their part: On you only while the
+ * forge still asks their review, else Waiting on others (an assignment stays on
+ * the forge, so it can't be what holds it).
  */
-export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonly InboxPull[] = []): { move: InboxReviewMove; reason: InboxReviewReason } {
+export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonly InboxPull[] = [], posted = false): { move: InboxReviewMove; reason: InboxReviewReason } {
   if (!review) return { move: "agents", reason: "curating" };
-  if (!review.answered && !review.verdict) return { move: "on_you", reason: "review_ready" };
   const open = pulls.filter(inboxPullIsOpen);
-  if (open.length > 0 && open.every((pull) => !pull.mine)) {
-    if (open.some((pull) => pull.requested)) return { move: "on_you", reason: "requested" };
-    // Assigned stays on the person until they've given a verdict, like a request GitHub clears once they review.
-    return !review.verdict && open.some((pull) => pull.assigned) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
-  }
+  const theirs = open.length > 0 && open.every((pull) => !pull.mine);
+  if (!review.answered && !review.verdict && !(theirs && posted)) return { move: "on_you", reason: "review_ready" };
+  if (theirs) return open.some((pull) => pull.requested) ? { move: "on_you", reason: "requested" } : { move: "waiting", reason: "others" };
   if (review.verdict?.verdict !== "approved") return { move: "agents", reason: "feedback_sent" };
   const own = open.filter((pull) => pull.mine);
   if (own.some((pull) => pull.review === "changes_requested")) return { move: "on_you", reason: "changes" };
@@ -368,11 +367,16 @@ export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<Inb
   return repo === of || of.endsWith(`/${repo}`);
 }
 
-/** A PR row (no review thread): On you when a teammate asked for the person's review, else not reviewed. */
-export function inboxReviewPullMove(stack: InboxPullStack): { move: InboxReviewMove; reason: InboxReviewReason } {
+/**
+ * A PR row (no review thread): On you when a teammate asked for the person's review, else not reviewed. One assigned
+ * to them is On you until they've posted a review of it (`posted`: pull key → when), then Waiting on others.
+ */
+export function inboxReviewPullMove(stack: InboxPullStack, posted?: ReadonlyMap<string, string>): { move: InboxReviewMove; reason: InboxReviewReason } {
   const theirs = stack.layers.filter((pull) => inboxPullIsOpen(pull) && !pull.mine);
-  if (theirs.some((pull) => pull.assigned) && !theirs.some((pull) => pull.requested)) return { move: "on_you", reason: "assigned" };
-  return theirs.some((pull) => pull.requested) ? { move: "on_you", reason: "requested" } : { move: "not_reviewed", reason: "not_reviewed" };
+  if (theirs.some((pull) => pull.requested)) return { move: "on_you", reason: "requested" };
+  const assigned = theirs.filter((pull) => pull.assigned);
+  if (assigned.length === 0) return { move: "not_reviewed", reason: "not_reviewed" };
+  return assigned.some((pull) => !posted?.has(pull.key)) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
 }
 
 export interface InboxReviewGroups {
@@ -485,8 +489,8 @@ export function inboxReviewRows(input: {
   started?: ReadonlyMap<string, InboxReviewStart>;
   /** The thread's agent ended: a started review with no card is curated by no one, so it has no row. */
   ended?: (threadId: string) => boolean;
-  /** The thread is archived or gone. One that owns PRs and has no review stops curating: its PRs are listed again. */
-  closed?: (threadId: string) => boolean;
+  /** When the person last posted a review on a PR from here (pull key → time): their answer to any review before it. */
+  posted?: ReadonlyMap<string, string>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
@@ -522,7 +526,7 @@ export function inboxReviewRows(input: {
     rows.push({
       id: threadId,
       reviewed: true,
-      ...inboxReviewMove(review, open),
+      ...inboxReviewMove(review, open, !!review && open.some((pull) => (input.posted?.get(pull.key) ?? "") >= review.reviewed_at)),
       thread_id: threadId,
       review,
       stacks,
@@ -535,8 +539,9 @@ export function inboxReviewRows(input: {
     });
   };
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
-  // Curating only while someone can: with the agent ended or the thread closed, the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
-  for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true && !input.closed?.(threadId)) push(threadId, null, own);
+  // Curating only while someone can: with the agent ended the PR is back to not reviewed (its stack row, the stack view's Start a new review thread).
+  // A thread archived before its review drops out earlier, as the PR's owner (the server's `pullOwnersNow`).
+  for (const [threadId, own] of owned) if (!byThread.has(threadId) && own.link.agent?.ended !== true) push(threadId, null, own);
   for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId) && !input.ended?.(threadId)) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
@@ -548,7 +553,7 @@ export function inboxReviewRows(input: {
     rows.push({
       id: stack.id,
       reviewed: false,
-      ...inboxReviewPullMove(stack),
+      ...inboxReviewPullMove(stack, input.posted),
       thread_id: link?.thread_id ?? null,
       review: null,
       stacks: [stack],

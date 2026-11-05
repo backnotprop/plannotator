@@ -2,7 +2,7 @@
  * Pull requests in the Inbox: which agent thread owns a PR, as the person
  * chose it (Hand to an agent, Launch an agent). The one place that choice lives.
  *
- *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding } }
+ *   inbox/pull-links.json   { v: 1, links: { [pull key]: { thread_id, at, ask?, theirs? } }, landed?: { [thread and pull key]: InboxReviewLanding }, posted?: { [pull key]: time } }
  *
  * `ask`: what the hand-off asked the agent for first, a guided review (`guide`) or the person's own curation
  * (`custom`); the stack view says it until the review arrives. `theirs`: every PR of that hand-off was a teammate's
@@ -15,6 +15,9 @@
  *
  * `landed`: a review thread's PR once it merged or closed (core's `InboxReviewLanding`), so Reviews still knows after
  * the forge's list stopped carrying it.
+ *
+ * `posted`: when the person last posted a review on a PR from here. The forge's list doesn't say, and an assignment
+ * stays on the forge afterwards, so Reviews counts it as their answer.
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,6 +56,10 @@ export interface InboxPullLinks {
   /** New reviews on local changes, by thread. */
   started(): ReadonlyMap<string, InboxReviewStart>;
   start(threadId: string, start: InboxReviewStart): void;
+  /** Pull key → when the person last posted a review on it from here. */
+  posted(): ReadonlyMap<string, string>;
+  /** The review went: never fails the post that already happened (a read-only folder keeps it in memory). */
+  markPosted(key: string, at?: string): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -61,13 +68,14 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   let links: Map<string, InboxPullOwner> | null = null;
   const landed = new Map<string, InboxReviewLanding>();
   const started = new Map<string, InboxReviewStart>();
+  const posted = new Map<string, string>();
 
   const load = (): Map<string, InboxPullOwner> => {
     if (links) return links;
     links = new Map();
     if (!existsSync(file)) return links;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; started?: Record<string, InboxReviewStart>; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; started?: Record<string, InboxReviewStart>; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding>; posted?: Record<string, unknown> };
       if (parsed.v !== 1 || !parsed.links || typeof parsed.links !== "object") throw new Error("not a pull links file");
       for (const [key, value] of Object.entries(parsed.links)) {
         const owner = value as Partial<InboxPullOwner>;
@@ -86,6 +94,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
         if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
       }
+      for (const [key, at] of Object.entries(parsed.posted ?? {})) if (typeof at === "string") posted.set(key, at);
     } catch {
       try {
         renameSync(file, `${file}.unreadable-${Date.now()}`);
@@ -100,7 +109,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const save = (map: Map<string, InboxPullOwner>) => {
     mkdirSync(dir, { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(started.size > 0 ? { started: Object.fromEntries(started) } : {}), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}) })}\n`, { mode: 0o600 });
+    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(started.size > 0 ? { started: Object.fromEntries(started) } : {}), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}), ...(posted.size > 0 ? { posted: Object.fromEntries(posted) } : {}) })}\n`, { mode: 0o600 });
     renameSync(temp, file);
   };
 
@@ -150,6 +159,21 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       started.set(threadId, start);
       while (started.size > INBOX_PULL_LINKS_MAX) started.delete(started.keys().next().value!);
       save(map);
+    },
+    posted() {
+      load();
+      return posted;
+    },
+    markPosted(key, at = new Date().toISOString()) {
+      const map = load();
+      posted.delete(key);
+      posted.set(key, at);
+      while (posted.size > INBOX_PULL_LINKS_MAX) posted.delete(posted.keys().next().value!);
+      try {
+        save(map);
+      } catch (cause) {
+        console.error(`inbox: could not save the posted review: ${cause instanceof Error ? cause.message : String(cause)}`);
+      }
     },
     keys(threadId) {
       const out: string[] = [];

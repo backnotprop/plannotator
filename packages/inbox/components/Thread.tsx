@@ -58,7 +58,8 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { landInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
+import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -100,6 +101,8 @@ import { ReplyFootPhone } from './ReplyFootPhone';
 import { ReplyRecipient } from './ReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
+import { spaced } from '../voiceField';
+import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
@@ -975,9 +978,9 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
-  /** Opened from Reviews: the line and title over the messages, and what came before the review folded. */
   /** The thread is open in Reviews (the address), whatever its row says from one read to the next. */
   inReviews?: boolean;
+  /** Its row in Reviews: the line and title over the messages, and what came before the review folded. */
   reviewView?: ReviewView | null;
   /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
   onInReviews?: () => void;
@@ -1718,6 +1721,11 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   }, [sending]);
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
+  /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
+  const lateVoice = useRef<string[]>([]);
+  const [lateVoiceTick, setLateVoiceTick] = useState(0);
+  const paneMounted = useRef(true);
+  const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
   /**
@@ -1815,6 +1823,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setFoldState(fold);
     }
   }
+  // The row went while the person is here: the link to what was left out went with it, so nothing stays left out.
+  if (!reviewView && reviewPlan.current.left.size > 0) reviewPlan.current = { ...reviewPlan.current, left: NO_IDS };
   const foldRef = useRef(fold);
   foldRef.current = fold;
   // Opened from Reviews: what came before the first review stays out of this view (the link over the messages opens the
@@ -3092,7 +3102,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   /** The Reply button's path, from a key: from a file in full screen, back beside the thread first (the strip's Write a reply). */
   const replyByKey = () => {
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
-    if (file && full) writeReplyFromFile();
+    // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it is asked about first.
+    if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
     else if (box.open) textRef.current?.focus();
     else openBox();
   };
@@ -3646,7 +3657,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
   const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
     // On the device's own route (fileToThread): a phone or a stacked window has no room beside the thread, so the file closes.
-    if (phone || fileStacked) onOpenFile(null);
+    const closes = phone || fileStacked;
+    if (closes) onOpenFile(null);
     else setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
     // back to it where the caret was (as R did with the box open before the composer).
@@ -3655,7 +3667,9 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setNewMessage(null);
       setRoute((current) => ({ ...current, open: false, error: null }));
       setError(null);
-      requestAnimationFrame(() => textRef.current?.focus());
+      // The words came from the card, so this box has no caret of its own yet: focus lands at their end.
+      if (closes) focusReplyEnd();
+      else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
   const focusReplyEnd = () =>
@@ -3664,6 +3678,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       if (!text) return;
       text.focus();
       text.setSelectionRange(text.value.length, text.value.length);
+      text.scrollTop = text.scrollHeight;
     });
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
@@ -3708,6 +3723,51 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     filesSaved.current = pastedSignature(files);
     replyDraft.save(text, files);
   };
+
+  /** A take that outlived the card's field: its words go to this thread's reply. The pane gone with it, to its draft. */
+  const onLateVoice = useCallback((outcome: VoiceLate) => {
+    const threadId = threadRef.current.thread_id;
+    if ('failed' in outcome) {
+      noteLateVoiceMiss(threadId, outcome.retry && (() => {
+        clearLateVoiceMiss(threadId);
+        outcome.retry?.();
+      }));
+    } else if (paneMounted.current) {
+      lateVoice.current.push(outcome.text);
+      setLateVoiceTick((tick) => tick + 1);
+    } else void landWordsInReplyDraft(threadId, outcome.text);
+  }, []);
+  useEffect(() => {
+    // While a Send is on its way the box takes no words: these wait for it to end.
+    if (lateVoice.current.length === 0 || sending) return;
+    const waiting = lateVoice.current;
+    lateVoice.current = [];
+    if (!boxRef.current.open) {
+      // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
+      for (const words of waiting) void landWordsInReplyDraft(thread.thread_id, words);
+      return;
+    }
+    let text = boxRef.current.text;
+    for (const words of waiting) text += spaced(text.at(-1), undefined, words);
+    // They go after the words, so someone typing keeps their place: the field holds them first, and React finds nothing to set.
+    const field = textRef.current;
+    if (field && document.activeElement === field) {
+      const { selectionStart, selectionEnd } = field;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, text);
+      field.setSelectionRange(selectionStart, selectionEnd);
+    }
+    changeReply(text, true);
+    // changeReply reads this render's Send state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lateVoiceTick, sending]);
+  useEffect(() => {
+    paneMounted.current = true;
+    return () => {
+      paneMounted.current = false;
+      for (const words of lateVoice.current) void landWordsInReplyDraft(threadRef.current.thread_id, words);
+      lateVoice.current = [];
+    };
+  }, []);
 
   /** The reply box opens behind full screen, without taking focus (full screen's composer writes into it). */
   const openBehind = () => {
@@ -3974,6 +4034,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
+    const sendEnds = replySendStarts(thread.thread_id);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
     let went = 0;
@@ -4320,6 +4381,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       }
       releasePicks?.();
       setSending(false);
+      sendEnds();
       if (sendingFromComposer.current) {
         // Back in the card's field once it is drawn (a Send button that went disabled let focus go).
         requestAnimationFrame(() => {
@@ -4748,6 +4810,20 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
    * writes through `changeReply`, so typing in either is the one draft; Send is this thread's Send.
    */
   const composerShown = !!file && shownFull && !resolved;
+  const lineError = error ?? (lateMiss ? LATE_VOICE_MISSED : null);
+  const lateMissActions = lateMiss && (
+    <>
+      {' '}
+      {lateMiss.retry && (
+        <button type="button" className="ib-dtlink ib-vstrong" data-late-voice-retry="" onClick={lateMiss.retry}>
+          Retry
+        </button>
+      )}{' '}
+      <button type="button" className="ib-dtlink" data-late-voice-discard="" onClick={() => clearLateVoiceMiss(thread.thread_id)}>
+        Discard
+      </button>
+    </>
+  );
   // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
   const composerText = useReplyTextWhile(replyText, composerShown);
   const composer: FullScreenComposerValue | null =
@@ -4759,6 +4835,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             to: replyTo,
             value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
+            onLateVoice,
             onSend: () => void send({ stayFull: true }),
             sending,
             canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,
@@ -4786,7 +4863,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             openQuestions: unanswered.length,
             openActions: openActions.length,
             conflict: replyDraft.conflict !== null,
-            error,
+            error: lineError,
+            errorActions: error ? undefined : lateMissActions,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
             tags: composerTags,
@@ -4796,7 +4874,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       : null;
   const errorLine = (
     <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
-      {error}
+      {lineError}
+      {!error && lateMissActions}
     </div>
   );
   // The closed foot's status (draft note, skip chip) describes Send and Edit draft: read with them, though drawn at the row's end.
@@ -6312,7 +6391,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
               routeChoice
             ) : (
               <>
-              {error && errorLine}
+              {lineError && errorLine}
               {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
                   Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
                   the Draft line is above the box (the owner, 2026-11-03), so the first save grows the foot upward and
@@ -6342,7 +6421,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
           routeChoice
         ) : (
           <>
-          {error && errorLine}
+          {lineError && errorLine}
           {/* Buttons on the left in today's order, the draft status and the skip chip at the right end (approval
               "thread-foot-status-right", option A). Too narrow for one line, the status takes its own line ABOVE the
               buttons (wrap-reverse; one item per line aligns to the start), so it never wraps between them. */}
@@ -6476,7 +6555,7 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
             onClose={() => setNewMessage(null)}
           />
         )}
-        {error && !errorAbove && errorLine}
+        {lineError && !errorAbove && errorLine}
       </div>
     </section>
     {openAttachment && (
