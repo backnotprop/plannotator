@@ -367,7 +367,7 @@ export function holdingsOf(message: InboxMessageWire, options: { delivered: bool
     const n = message.sent_annotations!;
     out.push({ kind: 'annotations', text: String(n), say: `${plural(n, 'annotation')} sent`, count: n });
   }
-  if (message.guide) out.push({ kind: 'guide', text: 'Guided review', say: 'a guided review' });
+  if (message.guide) out.push(message.guide.walkthrough ? { kind: 'guide', text: 'Walkthrough', say: 'a walkthrough' } : { kind: 'guide', text: 'Guided review', say: 'a guided review' });
   if (options.delivered) out.push({ kind: 'delivered', text: 'Delivered', say: 'delivered' });
   return out;
 }

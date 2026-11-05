@@ -37,7 +37,7 @@ import { Tip } from './Tip';
 export function artifactDetail(artifact: Artifact): string {
   if (artifact.type === 'guide') {
     const { guide } = artifact;
-    return `Guided review, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}`;
+    return `${guide.walkthrough ? 'Walkthrough' : 'Guided review'}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}`;
   }
   const { attachment } = artifact;
   if (readInboxAttachmentKind(attachment.kind) === 'image') {
@@ -72,6 +72,7 @@ export function artifactLabel(artifact: Artifact, comments: number): string {
   const from = `from ${artifact.fromPerson ? 'you' : artifact.sender} at ${artifact.sentAt}`;
   if (artifact.type === 'guide') {
     const { guide } = artifact;
+    if (guide.walkthrough) return `Walkthrough: ${guide.title}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}, ${from}`;
     return `Guided review: ${guide.title}, ${plural(guide.sections, 'section')}, ${plural(guide.files, 'file')}, ${formatCount(guide.additions)} lines added, ${formatCount(guide.deletions)} removed, ${from}`;
   }
   const { attachment } = artifact;
@@ -302,15 +303,17 @@ function GuideFace({ artifact }: { artifact: GuideArtifact }) {
       <span className="ib-art-g-ic">
         <Icon name="book" size={20} />
       </span>
-      <span className="ib-art-g-t">Guided review</span>
+      <span className="ib-art-g-t">{guide.walkthrough ? 'Walkthrough' : 'Guided review'}</span>
       <span className="ib-art-g-bars" aria-hidden="true">
         <s style={{ width: '72%' }} />
         <s style={{ width: '48%' }} />
         <s style={{ width: '86%' }} />
       </span>
-      <span className="ib-art-g-n">
-        <span className="ib-add">+{formatCount(guide.additions)}</span> <span className="ib-del">-{formatCount(guide.deletions)}</span>
-      </span>
+      {!guide.walkthrough && (
+        <span className="ib-art-g-n">
+          <span className="ib-add">+{formatCount(guide.additions)}</span> <span className="ib-del">-{formatCount(guide.deletions)}</span>
+        </span>
+      )}
     </span>
   );
 }
