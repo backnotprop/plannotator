@@ -4,9 +4,8 @@
  * the binary runs `plannotator inbox --background` under a temp
  * PLANNOTATOR_DATA_DIR, a simulated agent writes through
  * `plannotator inbox mcp` (scripts/inbox-sim.ts), and Chromium drives the
- * window. HOME is never changed: the sandbox env (PLANNOTATOR_TEST_SANDBOX
- * and the rest below) keeps the binary off the person's agents, and the skill
- * roots point at scratch folders.
+ * window. HOME is the scratch folder, and the sandbox env (PLANNOTATOR_TEST_SANDBOX
+ * and the rest below) keeps the binary off the person's agents.
  *
  * What is proved, in order:
  *  1. Off (the default): Settings → Capabilities shows Code review off; a
@@ -215,7 +214,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',

@@ -24,6 +24,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { startInboxServer } from "../../packages/server/inbox";
+import { refuseRealHome } from "./inbox-process";
 import { startScriptedAskAgent } from "./inbox-ask-agent";
 
 const [dataDir, projectsDir, setting] = process.argv.slice(2);
@@ -32,6 +33,7 @@ if (!dataDir || !projectsDir) throw new Error("usage: inbox-ask-dom-server.ts <d
 const project = join(projectsDir, "api");
 mkdirSync(project, { recursive: true });
 process.env.PLANNOTATOR_DATA_DIR = dataDir;
+refuseRealHome(process.env.HOME, "inbox-ask-dom-server.ts");
 const server = await startInboxServer({ dataDir, askAi: setting === "on", binaryPath: null });
 
 const client = new Client({ name: "inbox-ask-dom", version: "1.0.0" });

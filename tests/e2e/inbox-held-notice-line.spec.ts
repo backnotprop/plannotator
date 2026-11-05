@@ -63,6 +63,7 @@ test.beforeAll(async () => {
   const dataDir = join(root, 'data');
   const env = {
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',

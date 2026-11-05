@@ -21,6 +21,7 @@ import { dirname, join, resolve } from 'node:path';
 import { Client } from '@modelcontextprotocol/client';
 import { StdioClientTransport } from '@modelcontextprotocol/client/stdio';
 import { INBOX_WAKES_META_KEY } from '../packages/shared/inbox/connection';
+import { refuseRealHome } from '../tests/helpers/inbox-process';
 import { refuseRealDataDir } from '../tests/helpers/real-data-dir';
 
 export interface SimAgentOptions {
@@ -48,6 +49,7 @@ export class SimAgent {
   static async connect(options: SimAgentOptions): Promise<SimAgent> {
     // The shim falls back to the default data dir without one: never let it reach the person's Inbox.
     refuseRealDataDir(options.env.PLANNOTATOR_DATA_DIR, 'SimAgent.connect');
+    refuseRealHome(options.env.HOME, 'SimAgent.connect');
     const client = new Client({ name: `inbox-sim-${options.host}`, version: '1.0.0' });
     const transport = new StdioClientTransport({
       command: options.binary,
@@ -217,7 +219,9 @@ async function main(): Promise<void> {
   const billing = scratchProject(src, 'billing-svc');
   const docs = scratchProject(src, 'docs-site');
   // The sandbox gives the Inbox these agents start an empty agent PATH: a window opened on it must not run the person's real `cswap`.
-  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir };
+  const home = join(dataDir, 'home');
+  mkdirSync(home, { recursive: true });
+  const env = { PATH: process.env.PATH ?? '', HOME: home, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const claude2 = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });

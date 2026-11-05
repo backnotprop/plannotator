@@ -28,7 +28,20 @@ import "../setup/sandbox-data-dir";
 import { spawnSync } from "node:child_process";
 import { readFileSync, readlinkSync, realpathSync } from "node:fs";
 import { join, resolve, sep } from "node:path";
-import { isScratchDataDir } from "./real-data-dir";
+import { accountHome, isScratchDataDir } from "./real-data-dir";
+
+/**
+ * Throw unless `home` is a scratch folder, before an Inbox starts with it. An
+ * env with no HOME, or an empty one, is the real home too: `os.homedir()` then
+ * falls back to the account's. Returns `home`.
+ */
+export function refuseRealHome(home: string | undefined, what: string): string {
+  const value = home?.trim();
+  if (!value || !isScratchDataDir(value) || resolve(value) === accountHome()) {
+    throw new Error(`${what}: HOME must be a scratch folder, got ${value || "none (os.homedir() falls back to the account's home)"}`);
+  }
+  return value;
+}
 
 /** What an Inbox wrote about itself: enough to recognise it again. */
 export interface InboxEntry {

@@ -69,7 +69,7 @@ async function world(): Promise<World> {
   const dataDir = join(root, 'data');
   const src = join(root, 'src');
   for (const dir of [dataDir, src, join(root, 'claude'), join(root, 'codex'), join(root, 'xdg-config'), join(root, 'xdg-data')]) mkdirSync(dir, { recursive: true });
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '4'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: dataDir } });
+  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-board-reveal-seed.ts'), dataDir, src, '4'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir } });
   expect(seeded.status, seeded.stderr).toBe(0);
   const ids = JSON.parse(seeded.stdout.trim()) as Record<string, string>;
   const past = '2026-10-01T10:00:00.000Z';
@@ -90,6 +90,7 @@ async function world(): Promise<World> {
   );
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',
