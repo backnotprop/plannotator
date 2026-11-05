@@ -715,6 +715,10 @@ test("New message over a thread offers that thread's files; the next thread's ag
   await thumb(SHEET).click();
   await expect(composeDialog(page).locator('[data-compose-file="done"]')).toHaveCount(2);
   await expect(thumb(REF_A)).toHaveAttribute('aria-pressed', 'true');
+  // A file with no picture: the check takes the icon's place, not one drawn over the other; a picture keeps showing under its check.
+  await expect(thumb(SHEET).locator('svg')).toHaveCount(1);
+  await expect(thumb(SHEET).locator('.ib-cp-from-c')).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+  await expect(thumb(REF_A).locator('img')).toBeVisible();
   // A second click takes it out.
   await thumb(SHEET).click();
   await expect(composeDialog(page).locator('[data-compose-file]')).toHaveCount(1);

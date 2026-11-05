@@ -35,7 +35,7 @@ export function ThreadFilesStrip({ threadFiles, files }: { threadFiles: readonly
         {shown.map((file) => {
           const source = sourceFor(file);
           const added = Boolean(files.holding(source.sha256));
-          const picture = readInboxAttachmentKind(file.kind) === 'image' && source.preview;
+          const picture = readInboxAttachmentKind(file.kind) === 'image' ? source.preview : null;
           return (
             <Tip key={file.id} content={added ? `${file.name} is in this message` : `Add ${file.name}`}>
               <button
@@ -47,7 +47,7 @@ export function ThreadFilesStrip({ threadFiles, files }: { threadFiles: readonly
                 data-compose-from-file={file.id}
                 onClick={() => (added ? files.removeHolding(source.sha256) : files.addExisting(source))}
               >
-                {picture ? <img src={source.preview} alt="" draggable={false} /> : !added && <Icon name={iconOf(file)} size={16} />}
+                {picture ? <img src={picture} alt="" draggable={false} /> : !added && <Icon name={iconOf(file)} size={16} />}
                 {added && (
                   <span className={`ib-cp-from-c${picture ? '' : ' ib-cp-from-c-file'}`} aria-hidden="true">
                     <Icon name="check" size={picture ? 12 : 16} />
