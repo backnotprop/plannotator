@@ -70,7 +70,7 @@ export interface FarUpdate {
 
 const FAR_VERSION = /^\d{1,6}\.\d{1,6}\.\d{1,6}$/;
 
-const farVersion = (value: unknown): string | null => (typeof value === "string" && FAR_VERSION.test(value) ? value : null);
+export const farVersion = (value: unknown): string | null => (typeof value === "string" && FAR_VERSION.test(value) ? value : null);
 
 export function parseFarUpdate(value: unknown): FarUpdate | null {
   if (!value || typeof value !== "object") return null;
@@ -143,6 +143,8 @@ export class PeerLink {
   noChange: string | null = null;
   /** This Inbox pressed Update there and is waiting for it to come back on a new version. In memory: that machine's own state is the truth. */
   asked: { from: string | null; at: number } | null = null;
+  /** That machine asked GitHub on a press and answered up to date: the newest version this Inbox knew of then. In memory, like `asked`. */
+  saidUpToDate: string | null = null;
   updated: { from: string; to: string; at: number } | null = null;
   private cursor: number | null = null;
   private running = false;
