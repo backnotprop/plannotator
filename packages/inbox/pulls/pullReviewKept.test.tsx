@@ -15,7 +15,11 @@
  *  - a review posting its lines at a head they are not on (a dialog left open, or a retry, over a new commit);
  *  - a read that failed or named no head taking the reader, Post or the words down, or never being tried again;
  *  - words hidden because a diff cannot be read;
- *  - Whole stack offering Approve again after a post, when the list catches up.
+ *  - Whole stack offering Approve again after a post, when the list catches up;
+ *  - the words of a patch naming no head following a list that moved, and landing on the wrong line at the new head;
+ *  - an old entry moving unlabelled when the forge is ahead of a list that has not moved;
+ *  - a remembered diff of an older head drawn after a newer one was read, hiding the work on it;
+ *  - a verdict or a post leaving words behind in another entry, to come back; a posted banner over new code.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -777,4 +781,151 @@ test.skipIf(!hasDom)('opened afresh while the list is still behind: work kept on
   window.localStorage.setItem(`${STORE}${top.key}:layer:${B}`, JSON.stringify({ comments: [GLOBAL, LINE], viewed: [PATH] }));
   await open([low, top], top);
   expect(onScreen()).toEqual(ALL_KEPT);
+});
+
+for (const fails of [true, false]) {
+  test.skipIf(!hasDom)(`a patch naming no head keeps its words while the list moves and the read ${fails ? 'fails' : 'waits'}; new words stay on it, and go with it when the read lands`, async () => {
+    const { low, top } = layers();
+    diffHead = null;
+    await open([low, top], top);
+    await act(async () => void reader!.comments!.onSave(LINE));
+    let land = () => {};
+    if (fails) diffFails = { code: 'pull_diff_failed', status: 502 };
+    else diffHold = new Promise((resolve) => (land = resolve));
+    await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+    await settle();
+    // The panel still shows the patch's comment, and one written now is on the same patch.
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 1');
+    await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', lineStart: 20, lineEnd: 20 }));
+    expect(stored(top, 'layer', A)?.comments).toEqual(['l1', 'l2']);
+    expect(stored(top, 'layer', B)).toBeNull();
+    // The new head lands: nothing written on the old patch posts at it.
+    diffFails = null;
+    diffHead = B;
+    diffCode = 'c';
+    await act(async () => land());
+    await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T10:00:00Z' })));
+    await settle();
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+    expect(stored(top, 'layer', A)).toBeNull();
+    expect(stored(top, 'layer', B)).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)('other code naming no head after the list moved comes up under the list, and the old words wait under theirs', async () => {
+  const { low, top } = layers();
+  diffHead = null;
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  expect(stored(top, 'layer', A)?.comments).toEqual(['l1']);
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2' }));
+  expect(stored(top, 'layer', B)?.comments).toEqual(['l2']);
+});
+
+for (const scope of ['layer', 'stack'] as const) {
+  test.skipIf(!hasDom)(`${scope}: an old entry, the list not moved but the forge ahead of it: labelled when it moves to the patch's head`, async () => {
+    const { low, top } = layers();
+    diffHead = B;
+    window.localStorage.setItem(`${STORE}${top.key}:${scope}:${top.updated_at}`, JSON.stringify({ comments: [LINE], viewed: [] }));
+    await open([low, top], top, scope);
+    expect(stored(top, scope, top.updated_at)).toBeNull();
+    expect(outdatedIn(top, scope, B)).toEqual(['l1']);
+  });
+}
+
+test.skipIf(!hasDom)("an old entry with the forge ahead of the list posts in the review body at the new head, never inline on today's line", async () => {
+  const { low, top } = layers({ mine: false, author: 'tomas' });
+  diffHead = B;
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${top.updated_at}`, JSON.stringify({ comments: [LINE], viewed: [] }));
+  await open([low, top], top);
+  await openPost();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews()).toHaveLength(1);
+  expect(reviews()[0]!.body.head_sha).toBe(B);
+  expect(reviews()[0]!.body.fileComments ?? []).toEqual([]);
+  expect(String(reviews()[0]!.body.body)).toContain('[Outdated');
+});
+
+test.skipIf(!hasDom)('a remembered diff of an older head is not drawn once a newer one was read: the work on the newer stays in view', async () => {
+  const { low, top } = layers();
+  await open([low, top], top);
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await work();
+  close();
+  // Whole stack and back, with the list gone back to the older head. The forge is still at the newer.
+  const reads = diffReads;
+  await open([low, { ...top, head_sha: A }], { ...top, head_sha: A });
+  expect(diffReads).toBe(reads + 1);
+  expect(onScreen()).toEqual(ALL_KEPT);
+  expect(stored(top, 'layer', B)).toEqual({ comments: ['g1', 'l1'], viewed: [PATH] });
+});
+
+test.skipIf(!hasDom)('the diff read last is drawn again at once, with no read', async () => {
+  const { low, top } = layers();
+  await open([low, top], top);
+  close();
+  const reads = diffReads;
+  await open([low, top], top);
+  expect(diffReads).toBe(reads);
+  expect(reader).toBeDefined();
+});
+
+/** Words of another head, in view on a patch remembered in the window (which moves nothing until the person writes). */
+async function openRemembered(fields: Partial<InboxPull> = {}) {
+  const { low, top } = layers(fields);
+  await open([low, top], top);
+  close();
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${B}`, JSON.stringify({ comments: [GLOBAL], viewed: [] }));
+  await open([low, top], top);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 1');
+  return { low, top };
+}
+
+test.skipIf(!hasDom)('a verdict takes the words it carried out of the entry they were kept in: they do not come back', async () => {
+  const { low, top } = await openRemembered();
+  await act(async () => document.querySelector<HTMLElement>('[data-review-decision] [data-decision-primary]')!.click());
+  await settle();
+  expect(posted.filter((p) => p.path === `/api/inbox/messages/${LAST}/reply`)).toHaveLength(1);
+  expect(stored(top, 'layer', B)).toBeNull();
+  close();
+  await open([low, top], top);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+});
+
+test.skipIf(!hasDom)('a post takes the words that went out of the entry they were kept in: they do not come back', async () => {
+  const { low, top } = await openRemembered({ mine: false, author: 'tomas' });
+  await openPost();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(String(reviews()[0]!.body.body)).toContain(GLOBAL.text);
+  expect(stored(top, 'layer', B)).toBeNull();
+  close();
+  await open([low, top], top);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+});
+
+test.skipIf(!hasDom)('the posted banner goes when a new head comes: it spoke of the code before', async () => {
+  const { low, top } = layers({ mine: false, author: 'tomas' });
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(GLOBAL));
+  await openPost();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(document.querySelector('[data-pull-review-posted]')).not.toBeNull();
+  await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T10:00:00Z' })));
+  await settle();
+  expect(document.querySelector('[data-pull-review-posted]')).not.toBeNull();
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  expect(document.querySelector('[data-pull-review-posted]')?.textContent ?? null).toBeNull();
 });

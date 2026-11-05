@@ -74,6 +74,13 @@ const STORE = 'plannotator-inbox-pull-review:';
 /** The diffs read in this window, by what makes a diff: layer, scope, head commit and base (a new commit reads again). */
 const SEEN = new Map<string, InboxPullDiffAnswer>();
 const SEEN_MAX = 12;
+/** The head each layer's last patch named here, either scope. */
+const NEWEST = new Map<string, string>();
+/** A diff read in this window, only if it is of the newest head read (as the server's cache): a list gone back reads the forge. */
+const seenDiff = (seenId: string, layerKey: string): InboxPullDiffAnswer | undefined => {
+  const seen = SEEN.get(seenId);
+  return seen && seen.head_sha === NEWEST.get(layerKey) ? seen : undefined;
+};
 /** A stored review's last part when it names a head commit (as `shaOf` in the server's inbox-pulls.ts takes one). */
 const HEAD_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 
@@ -110,18 +117,19 @@ export function PullReview(props: PullReviewProps) {
  * A review's words: this head's entry, with what the layer's other entries hold that must stay in view. One kept for
  * another head commit: its global comments, on no line (its line comments and Viewed may have moved). One that names no
  * commit (written before the head was known, or by an older Inbox, which named the PR's last update): all of it. Its line
- * comments are marked outdated, so they never post on whatever sits at those lines now, once a head is named and the PR
- * has changed since (`updatedAt`).
+ * comments are marked outdated, so they never post on whatever sits at those lines now, once a head is named and either
+ * the PR has updated since (`updatedAt`) or the list's head (`listHead`) is not the one named.
  *
  * `read` touches nothing, as an entry can be newer than what this window knows. `absorb` takes what is now in view out of
  * the other entries (the person wrote, so this entry speaks for them). `move`, once a patch read here names this head,
  * also removes the other heads' line comments and Viewed.
  */
-function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
+function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, listHead: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
   const now = readKept(keptId);
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
-    const named = HEAD_SHA.test(keptId.slice(keptId.lastIndexOf(':') + 1));
+    const head = keptId.slice(keptId.lastIndexOf(':') + 1);
+    const named = HEAD_SHA.test(head);
     const carried: CodeAnnotation[] = [];
     const ticks: string[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
@@ -130,7 +138,7 @@ function gather(layerKey: string, scope: string, keptId: string, updatedAt: stri
       const suffix = name.slice(prefix.length);
       const ofAHead = HEAD_SHA.test(suffix);
       const was = readKept(name.slice(STORE.length));
-      const stale = named && suffix !== updatedAt;
+      const stale = named && (suffix !== updatedAt || (!!listHead && listHead !== head));
       carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments.map((c) => (stale && (c.scope ?? 'line') === 'line' ? { ...c, outdated: true } : c))));
       if (!ofAHead) ticks.push(...was.viewed);
       if (mode === 'read') continue;
@@ -176,7 +184,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // which change nothing here (no read, no scroll lost); it only stands in while the list names no head.
   const diffBase = scope === 'stack' ? stack?.open_base : layer?.base;
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
-  const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => SEEN.get(seenId) ?? null);
+  const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => seenDiff(seenId, layerKey) ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
   // A patch this review read itself named its head. One remembered in `SEEN` can be older than what another window kept.
   const read = useRef(false);
@@ -189,10 +197,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }, [model]);
   useEffect(() => {
     if (!layer) return;
-    // Back to a diff read a moment ago (This layer → Whole stack → This layer): drawn at once, not read again. Never
-    // over a patch of another head: a list that flipped back reads the forge first.
-    const seen = SEEN.get(seenId);
-    if (seen && (!diff?.head_sha || seen.head_sha === diff.head_sha)) {
+    // Back to a diff read a moment ago (This layer → Whole stack → This layer): drawn at once, not read again.
+    const seen = seenDiff(seenId, layerKey);
+    if (seen) {
       setDiffError(null);
       setDiff(seen);
       return;
@@ -211,6 +218,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         setDiffError(null);
         again.current = !answer.head_sha;
         if (answer.head_sha) {
+          NEWEST.set(layerKey, answer.head_sha);
           SEEN.set(seenId, answer);
           while (SEEN.size > SEEN_MAX) SEEN.delete(SEEN.keys().next().value!);
           read.current = true;
@@ -229,13 +237,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   // Comments and Viewed are kept per head commit: a new commit starts clean, but for the global comments. The head is
   // the patch's when it says, in either scope (the list can be minutes behind it, and the comments are on the patch;
-  // another layer's commit changes nothing here), else the list's. Neither says: the name in use stays.
+  // another layer's commit changes nothing here), else the list's. A patch naming no head keeps the name it came up
+  // under, as the list moving says nothing about the code on screen; other code naming no head takes the list's again.
+  // Neither says: the name in use stays.
   const lastName = useRef<string | null>(null);
-  const keptName = diff?.head_sha ?? layer?.head_sha ?? lastName.current ?? layer?.updated_at ?? null;
+  const lastPatch = useRef<string | null>(null);
+  const keptName = diff?.head_sha ?? (diff && diff.patch === lastPatch.current ? lastName.current : null) ?? layer?.head_sha ?? lastName.current ?? layer?.updated_at ?? null;
   lastName.current = keptName;
+  lastPatch.current = diff?.patch ?? null;
   const keptId = `${layerKey}:${scope}:${keptName ?? ''}`;
   const sure = read.current;
-  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, mode);
+  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, layer?.head_sha ?? null, mode);
   const [comments, setComments] = useState<CodeAnnotation[]>(() => words('read').comments);
   const [viewed, setViewed] = useState<string[]>(() => words('read').viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
