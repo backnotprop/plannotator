@@ -286,68 +286,116 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   }
 
   const recordOf = (folder: string) => readJson<ShapeRecord>(join(folder, "shape.json"));
-  const versionsOf = (folder: string) => readLines<ShapeVersion>(join(folder, "versions.jsonl"));
+  // A version or note saved when What to know was Requirements says "reqs": read it as the view it is now. The file stays as written.
+  const nowKnow = <T extends { view: unknown }>(x: T): T => ((x.view as string) === "reqs" ? { ...x, view: "know" } : x);
+  const versionsOf = (folder: string) => readLines<ShapeVersion>(join(folder, "versions.jsonl")).map((v) => (v.parts ? { ...v, parts: v.parts.map(nowKnow) } : v));
 
   function notesOf(folder: string): ShapeNote[] {
     const byId = new Map<string, ShapeNote>();
     for (const note of readLines<ShapeNote>(join(folder, "chat.jsonl"))) {
-      if (note && typeof note.id === "string") byId.set(note.id, note);
+      if (note && typeof note.id === "string") byId.set(note.id, nowKnow(note));
     }
     return [...byId.values()];
   }
 
   const drawingNow = (record: ShapeRecord) => !!record.drawing && Date.parse(record.drawing.until) > now();
 
+  /** Where an image comes from and its name in files/. Null: it stays as written (a files/ name, a data:image) or an error was recorded. */
+  function imageFile(src: string, field: string, sourceDir: string | null | undefined, errors: string[]): { path: string; name: string } | null {
+    if (src.startsWith("files/")) {
+      if (!/^files\/[^/\\%?#.][^/\\%?#]*$/.test(src)) errors.push(`${field}: "${src.slice(0, 80)}" is not one file under files/`);
+      return null;
+    }
+    if (/^data:image\/(?:png|jpeg|gif|webp)[;,]/i.test(src)) return null;
+    // A board loads nothing from outside: an image is a file on this computer, copied in.
+    if (/^[a-z][a-z0-9+.-]+:|^\/\/|^\\\\/i.test(src)) {
+      errors.push(`${field}: "${src.slice(0, 80)}" is a URL; an image must be a file on this computer (it is copied into the board)`);
+      return null;
+    }
+    const path = isAbsolute(src) ? src : sourceDir ? resolve(sourceDir, src) : null;
+    if (!path) {
+      errors.push(`${field}: a relative image path needs the board file's folder`);
+      return null;
+    }
+    if (!IMAGE_EXT.has(extname(path).toLowerCase())) {
+      errors.push(`${field}: "${src}" is not a PNG, JPEG, GIF or WebP image`);
+      return null;
+    }
+    let size: number;
+    try {
+      const stat = statSync(path);
+      if (!stat.isFile()) throw new Error("not a file");
+      size = stat.size;
+    } catch {
+      errors.push(`${field}: "${src}" was not found`);
+      return null;
+    }
+    if (size > SHAPE_IMAGE_MAX_BYTES) {
+      errors.push(`${field}: "${src}" is ${size} bytes; at most ${SHAPE_IMAGE_MAX_BYTES}`);
+      return null;
+    }
+    return { path, name: `${createHash("sha256").update(readFileSync(path)).digest("hex").slice(0, 10)}-${basename(path).replace(/[^\w.-]+/g, "_")}` };
+  }
+
+  function copyImage(file: { path: string; name: string }, folder: string): void {
+    const files = join(folder, "files");
+    ensureDir(files);
+    const dest = join(files, file.name);
+    if (!existsSync(dest)) copyFileSync(file.path, dest);
+  }
+
+  /**
+   * A picture a drawing names by its path (`<img src>`, SVG `<image href>`) gets
+   * its files/ name before the board is checked; the file is copied once the
+   * board's folder is known. A URL stays as written, for the check to refuse.
+   */
+  function drawnImages(input: unknown, sourceDir: string | null | undefined): { board: unknown; files: { path: string; name: string }[]; errors: string[] } {
+    const errors: string[] = [];
+    const files: { path: string; name: string }[] = [];
+    const views = (input as { views?: unknown } | null)?.views;
+    if (!views || typeof views !== "object") return { board: input, files, errors };
+    const inHtml = (html: unknown, field: string): unknown =>
+      typeof html !== "string"
+        ? html
+        : html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=)(["'])([^"']+)\2/gi, (all, head: string, quote: string, src: string) => {
+            if (/^(?:#|[a-z][a-z0-9+.-]+:|\/\/|\\\\)/i.test(src)) return all;
+            const file = imageFile(src, field, sourceDir, errors);
+            if (!file) return all;
+            files.push(file);
+            return `${head}${quote}files/${file.name}${quote}`;
+          });
+    const next: Record<string, unknown> = {};
+    for (const [name, view] of Object.entries(views)) {
+      if (!view || typeof view !== "object") {
+        next[name] = view;
+        continue;
+      }
+      const v = view as { html?: unknown; tall?: { html?: unknown }; more?: { html?: unknown } };
+      next[name] = {
+        ...v,
+        ...("html" in v ? { html: inHtml(v.html, `views.${name}.html`) } : {}),
+        ...(v.tall ? { tall: { ...v.tall, html: inHtml(v.tall.html, `views.${name}.tall.html`) } } : {}),
+        ...(v.more ? { more: { ...v.more, html: inHtml(v.more.html, `views.${name}.more.html`) } } : {}),
+      };
+    }
+    return { board: { ...(input as object), views: next }, files, errors };
+  }
+
   /** Copy the images the refs cite into files/, and point the refs at the copies. */
   function keepImages(board: ShapeBoard, folder: string, sourceDir: string | null | undefined): { board: ShapeBoard; errors: string[] } {
     const errors: string[] = [];
     if (!board.refs?.length) return { board, errors };
-    const files = join(folder, "files");
     const keep = (src: string, field: string): string => {
-      if (src.startsWith("files/")) {
-        if (!/^files\/[^/\\%?#.][^/\\%?#]*$/.test(src)) errors.push(`${field}: "${src.slice(0, 80)}" is not one file under files/`);
-        return src;
-      }
-      if (/^data:image\/(?:png|jpeg|gif|webp)[;,]/i.test(src)) return src;
-      // A board loads nothing from outside: an image is a file on this computer, copied in.
-      if (/^[a-z][a-z0-9+.-]+:|^\/\/|^\\\\/i.test(src)) {
-        errors.push(`${field}: "${src.slice(0, 80)}" is a URL; an image must be a file on this computer (it is copied into the board)`);
-        return src;
-      }
-      const path = isAbsolute(src) ? src : sourceDir ? resolve(sourceDir, src) : null;
-      if (!path) {
-        errors.push(`${field}: a relative image path needs the board file's folder`);
-        return src;
-      }
-      if (!IMAGE_EXT.has(extname(path).toLowerCase())) {
-        errors.push(`${field}: "${src}" is not a PNG, JPEG, GIF or WebP image`);
-        return src;
-      }
-      let size: number;
-      try {
-        const stat = statSync(path);
-        if (!stat.isFile()) throw new Error("not a file");
-        size = stat.size;
-      } catch {
-        errors.push(`${field}: "${src}" was not found`);
-        return src;
-      }
-      if (size > SHAPE_IMAGE_MAX_BYTES) {
-        errors.push(`${field}: "${src}" is ${size} bytes; at most ${SHAPE_IMAGE_MAX_BYTES}`);
-        return src;
-      }
-      const bytes = readFileSync(path);
-      const name = `${createHash("sha256").update(bytes).digest("hex").slice(0, 10)}-${basename(path).replace(/[^\w.-]+/g, "_")}`;
-      ensureDir(files);
-      const dest = join(files, name);
-      if (!existsSync(dest)) copyFileSync(path, dest);
-      return `files/${name}`;
+      const file = imageFile(src, field, sourceDir, errors);
+      if (!file) return src;
+      copyImage(file, folder);
+      return `files/${file.name}`;
     };
     const refs = board.refs.map((ref, i) => {
-      if (ref.kind !== "image") return ref;
+      if (ref.kind !== "image" && !ref.images) return ref;
       return {
         ...ref,
-        target: keep(ref.target, `refs[${i}].target`),
+        ...(ref.kind === "image" ? { target: keep(ref.target, `refs[${i}].target`) } : {}),
         ...(ref.images ? { images: ref.images.map((im, j) => ({ ...im, src: keep(im.src, `refs[${i}].images[${j}].src`) })) } : {}),
       };
     });
@@ -355,7 +403,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
   }
 
   function update(input: ShapeUpdateInput): ShapeUpdateResult {
-    const checked = checkShapeBoard(input.board);
+    const drawn = drawnImages(input.board, input.sourceDir);
+    if (drawn.errors.length) return { ok: false, code: "invalid", errors: drawn.errors };
+    const checked = checkShapeBoard(drawn.board);
     if (!checked.ok) return { ok: false, code: "invalid", errors: checked.errors };
     const ids = (["thread", "through"] as const).filter((k) => input[k] != null && !MESSAGE_ID_RE.test(input[k]!));
     if (ids.length) return { ok: false, code: "invalid", errors: ids.map((k) => `${k}: must be an Inbox message id (msg_…)`) };
@@ -371,6 +421,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
           rmSync(folder, { recursive: true, force: true });
           return { ok: false, code: "invalid", errors: kept.errors };
         }
+        for (const file of drawn.files) copyImage(file, folder);
         const version: ShapeVersion = {
           ...kept.board,
           n: 1,
@@ -428,6 +479,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       }
       const kept = keepImages(checked.value, folder, input.sourceDir);
       if (kept.errors.length) return { ok: false, code: "invalid", errors: kept.errors };
+      for (const file of drawn.files) copyImage(file, folder);
       const n = latest.n + 1;
       const version: ShapeVersion = {
         ...kept.board,

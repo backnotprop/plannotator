@@ -49,7 +49,7 @@ const THUMB_H = 750;
 const ZOOM = 1.11111; // the mock's crop: a little past the picture's margins
 
 /** A board's Picture, small: drawn once at a desktop width, scaled to the card. */
-export function ShapeThumb({ picture, refs, className }: { picture?: ShapeDrawnView | null; refs?: readonly ShapeRef[]; className?: string }) {
+export function ShapeThumb({ picture, refs, className, resolveSrc }: { picture?: ShapeDrawnView | null; refs?: readonly ShapeRef[]; className?: string; resolveSrc?: (src: string) => string }) {
   const ref = useRef<HTMLDivElement>(null);
   const [w, setW] = useState(0);
   useLayoutEffect(() => {
@@ -62,12 +62,14 @@ export function ShapeThumb({ picture, refs, className }: { picture?: ShapeDrawnV
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
-  const k = (w * ZOOM) / THUMB_W;
+  // A canvas board fills its own canvas, up to the edge: show all of it.
+  const zoom = picture?.width ? 1 : ZOOM;
+  const k = (w * zoom) / THUMB_W;
   return (
     <div ref={ref} className={`shp-thumb${className ? ` ${className}` : ''}`} aria-hidden="true">
       {picture && w > 0 && (
-        <div className="shp-thumb-in" style={{ width: THUMB_W, height: THUMB_H, transform: `translateX(${(-(ZOOM - 1) / 2) * w}px) scale(${k})` }}>
-          <ShapeDrawn drawn={picture} refs={refs} phase="drawn" reduce />
+        <div className="shp-thumb-in" style={{ width: THUMB_W, height: THUMB_H, transform: `translateX(${(-(zoom - 1) / 2) * w}px) scale(${k})` }}>
+          <ShapeDrawn drawn={picture} refs={refs} phase="drawn" reduce resolveSrc={resolveSrc} />
         </div>
       )}
     </div>
@@ -80,6 +82,7 @@ export function ShapeGrid({
   query,
   now,
   empty,
+  assetUrl,
 }: {
   items: readonly ShapeGridItem[];
   onOpen: (id: string) => void;
@@ -88,6 +91,8 @@ export function ShapeGrid({
   now?: number;
   /** What to show with no boards (or none found). */
   empty?: React.ReactNode;
+  /** Where a board's kept pictures load from, so a thumbnail shows them. */
+  assetUrl?: (id: string, src: string) => string;
 }) {
   const shown = useMemo(
     () => filterShapeItems(items, query ?? '').sort((a, b) => Date.parse(b.updated) - Date.parse(a.updated)),
@@ -112,7 +117,7 @@ export function ShapeGrid({
             }
           }}
         >
-          <ShapeThumb picture={it.picture} refs={it.refs} className="shp-gprev" />
+          <ShapeThumb picture={it.picture} refs={it.refs} className="shp-gprev" resolveSrc={assetUrl ? (src) => assetUrl(it.id, src) : undefined} />
           <div className="shp-glab">
             <div className="shp-gt">
               {it.changed && <span className="shp-gdot" aria-hidden="true" />}
