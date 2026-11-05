@@ -4,7 +4,7 @@
  * and the feedback text a Send carries after the picks.
  */
 
-import { INBOX_GUIDE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE, inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { inboxUrl, machineOf } from './inboxUrl';
 import { shouldStripFrontmatter } from '@plannotator/core/annotatable';
 import { diagramAnchorLocationLine, parseDiagramAnchor } from '@plannotator/core/diagram-anchor';
@@ -560,7 +560,7 @@ export function isFileComment(record: InboxAnnotationRecord): boolean {
 }
 
 export const MESSAGE_FEEDBACK_HEADING = {
-  title: 'Feedback on your messages',
+  title: INBOX_MESSAGE_FEEDBACK_TITLE,
   intro: 'The following feedback is on the text of your messages in this thread, one section per message. Each quote is the words I selected (as shown on screen) in your message.',
   /** Added to the intro only when a comment is on a diagram part. */
   diagrams: 'A quote with a "Diagram" line under it is a part of a diagram in the message; its lines count from the top of the message.',
@@ -640,7 +640,7 @@ export function messageFeedback(records: readonly InboxAnnotationRecord[], time:
 }
 
 export const ATTACHMENT_FEEDBACK_HEADING = {
-  title: 'Feedback on the attached files',
+  title: INBOX_ATTACHMENT_FEEDBACK_TITLE,
   intro: 'The following feedback is on the files you attached, one section per file and version.',
 };
 

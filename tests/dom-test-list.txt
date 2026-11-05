@@ -111,6 +111,8 @@ packages/inbox/cardPanelLinks.test.tsx
 packages/inbox/boardProjectFilter.test.tsx
 packages/inbox/boardSend.test.tsx
 packages/inbox/boardOff.test.tsx
+packages/inbox/hashtagPicker.test.tsx
+packages/inbox/initiativePeekTap.test.tsx
 packages/inbox/soundIntro.test.tsx
 packages/inbox/soundSettings.test.tsx
 packages/inbox/notifyHook.test.tsx
