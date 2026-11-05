@@ -17,12 +17,12 @@ core/
   throttle.ts     # Per-caller throttle in isolate memory (never stored)
   storage.ts      # FeedbackStore: one method, insert
 stores/
-  d1.ts           # The one statement: a parameterised INSERT
+  d1.ts           # Parameterised INSERTs only: every column, or the same without agents on an unmigrated table
 targets/
   cloudflare.ts   # Worker entry point
 schema.sql        # The append-only `feedback` table (+ triggers)
 migrations/       # Additive changes for a database made before them (one ADD COLUMN each)
-test/             # Handler, source guard and limits tests (in-memory store)
+test/             # Handler, source guard and limits tests (in-memory store); the D1 store on real SQLite
 wrangler.toml
 ```
 
@@ -45,7 +45,7 @@ Body fields (any other field is refused with `400`):
 | `version` | no | the Plannotator version, a short label, at most 40 characters |
 | `os` | no | the OS name (`macOS`, `Linux`, `Windows`), at most 40 characters |
 | `surface` | no | `inbox`, `plan-review`, `code-review`, `annotate` or `cli` |
-| `agents` | no | a list of agent names (`["Claude Code", "Codex"]`). Each kept name is a short label (letters, digits, spaces, `. + _ ( ) / -`, at most 40 characters); any other entry is dropped, repeats too, and only the first 8 are kept. Stored as one text, `Claude Code, Codex`. Refused (`400`) only when it is not a list, or a list of more than 64. |
+| `agents` | no | a list of agent names (`["Claude Code", "Codex"]`). Each kept name is a short label: words of letters, digits and `+ _ ( ) -`, one space or ` / ` between them, at most 40 characters (so no dot, comma or bare slash: no path passes); any other entry is dropped, repeats too, and only the first 8 are kept. Stored as one text, `Claude Code, Codex`. Refused (`400`) only when it is not a list, or a list of more than 64. |
 
 Errors: `400` bad JSON or a bad field, `403` an Origin that is not allowed,
 `413` a body over 16 KB, `415` not `application/json`, `429` over a limit,
@@ -127,8 +127,11 @@ change to `schema.sql` with `bun run db:migrate` first.
 ### The `agents` column (once, on the existing database)
 
 The `agents` column came after the database was made. Add it before deploying
-the Worker that writes it (that Worker's INSERT names the column, so on a
-table without it every submission would fail):
+the Worker that writes it. If the Worker goes out first, nothing is lost: on a
+table without the column SQLite refuses the INSERT before writing anything, and
+the store writes the feedback again without the names
+(`stores/d1.ts`, `test/d1-store.test.ts`). The names are stored only once the
+migration has run:
 
 ```bash
 cd apps/feedback-service
@@ -206,5 +209,6 @@ bun test apps/feedback-service
 
 The handler runs against an in-memory store; no wrangler, no Cloudflare
 account and no network. `test/source-guard.test.ts` fails if the Worker's
-source gains any SQL but the one INSERT, any D1 read method, a second route
+source gains any SQL but its two INSERTs (every column, and the same without
+`agents`), any D1 read method, a second route
 or a cookie.

@@ -213,7 +213,7 @@ import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/c
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
 import { createInboxEmbeds } from "./inbox-embeds";
-import { createInboxFeedback, inboxFeedbackAgents, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
+import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
@@ -3320,20 +3320,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const embeds = createInboxEmbeds({ readBody: (req) => readBody(req), json });
   // The sidebar's Feedback dialog: forwards what the person typed to the feedback Worker (inbox-feedback.ts),
   // with the names of the agents that wrote here (names only, read at each Send).
-  const feedback = createInboxFeedback({
-    version,
-    json,
-    agents: () => inboxFeedbackAgents(feedbackAgentMessages()),
-    ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}),
-  });
-  function* feedbackAgentMessages() {
-    for (const threadId of store.threadIds()) {
-      for (const id of store.threadMessageIds(threadId)) {
-        const message = store.message(id);
-        if (message) yield message;
-      }
-    }
-  }
+  const feedback = createInboxFeedback({ version, json, store, ...(options.feedbackUrl ? { url: () => options.feedbackUrl! } : {}) });
   const stopPinEvents = store.onPinsChange(() => {
     for (const listener of pinListeners) listener();
   });

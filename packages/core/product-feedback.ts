@@ -71,8 +71,19 @@ export const FEEDBACK_UNAVAILABLE = "Couldn't send feedback right now; nothing w
  */
 export const FEEDBACK_HEREDOC_END = "PLANNOTATOR_FEEDBACK_END";
 
-/** How long one send waits for the Worker. Under 10 s, so the window (which goes through its Inbox) has its answer by then. */
+/**
+ * How long a send waits for the Worker, in all: the resend without agent names
+ * (`sendProductFeedback`) included. Under 10 s, so the window (which goes
+ * through its Inbox) has its answer by then.
+ */
 export const FEEDBACK_TIMEOUT_MS = 8_000;
+
+/**
+ * The resend without agent names goes only when at least this much of the
+ * deadline is left. With less, a slow Worker could store it after the wait has
+ * given up, and the person would read "nothing was saved" for feedback that was.
+ */
+export const FEEDBACK_RESEND_MIN_MS = 1_000;
 
 /** `unavailable`: the service could not take it (reason is FEEDBACK_UNAVAILABLE); otherwise the Worker refused it and `reason` is its words. */
 export type ProductFeedbackResult = { ok: true } | { ok: false; reason: string; status?: number; unavailable: boolean };
@@ -120,8 +131,10 @@ export function feedbackInputError(input: ProductFeedbackInput): string | null {
   return null;
 }
 
-// An agent name is a short label: letters, digits, spaces and a few separators (the Worker's rule too).
-const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z .+_()\/-]*$/;
+// An agent name is a short label: words of letters, digits and `+ _ ( ) -`, one space or " / " between them
+// ("Claude Code", "OpenCode 2", "Windsurf / Devin"). No dot, no comma and no bare slash, so no path of any kind
+// (absolute, relative or `~`) and no list can pass as a name. The Worker's rule too.
+const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z+_()-]*(?:(?: | \/ )[0-9A-Za-z+_()-]+)*$/;
 
 /**
  * The agent names a submission may carry: each one trimmed, a short label (at
@@ -177,11 +190,16 @@ export interface SendProductFeedbackOptions {
 
 /** POSTs one submission. No cookies, no credentials, no redirects; the answer's body is never read beyond its error. */
 export async function sendProductFeedback(payload: ProductFeedbackPayload, options: SendProductFeedbackOptions): Promise<ProductFeedbackResult> {
+  // One deadline for the whole exchange: the resend gets only the time the first try left.
+  const deadline = Date.now() + (options.timeoutMs ?? FEEDBACK_TIMEOUT_MS);
   const result = await sendOnce(payload, options);
   // Fails open: a Worker older than the agent names refuses them, and the feedback goes again without them.
   if ("reason" in result && payload.agents && refusedAgentsField(result.status ?? 0, result.reason)) {
+    const left = deadline - Date.now();
+    // Too little time to resend: nothing was saved (the refusal wrote nothing), and the person reads exactly that.
+    if (left < FEEDBACK_RESEND_MIN_MS) return { ok: false, reason: FEEDBACK_UNAVAILABLE, status: result.status, unavailable: true };
     const { agents: _agents, ...without } = payload;
-    return sendOnce(without, options);
+    return sendOnce(without, { ...options, timeoutMs: left });
   }
   return result;
 }

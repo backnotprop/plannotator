@@ -1378,7 +1378,7 @@ export const inboxApi = {
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**
    * The sidebar's Feedback dialog: the person's words go to the feedback Worker through this Inbox's server
-   * (packages/server/inbox-feedback.ts), which adds the version and the OS name and nothing else.
+   * (packages/server/inbox-feedback.ts), which adds the version, the OS name and the names of the agents used, and nothing else.
    */
   sendFeedback: (input: { message: string; category: 'bug' | 'idea' | 'other' | null; contact: string | null }) => sendFeedback(input),
   /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */

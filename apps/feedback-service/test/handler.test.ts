@@ -161,6 +161,9 @@ describe("agents", () => {
       "",
       "a, b",
       "/Users/ada/secret-project",
+      "Users/ada/secret-project",
+      "x/../../etc",
+      "notes.md",
       "<script>",
       "x".repeat(41),
     ]);

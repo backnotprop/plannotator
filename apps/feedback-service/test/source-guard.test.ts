@@ -89,13 +89,14 @@ describe("the Worker only ever inserts", () => {
     }
   });
 
-  test("the INSERT writes only columns the schema has, and a migration adds every column a fresh schema has beyond the first", () => {
+  test("the INSERT writes every column the schema has but id, and a migration adds every column a fresh schema has beyond the first", () => {
     const sql = sources.flatMap(({ text }) => [...text.matchAll(/\.prepare\(\s*`([^`]*)`/g)].map((m) => m[1]!))[0]!;
     const written = /INSERT INTO feedback \(([^)]*)\)/.exec(sql.replace(/\s+/g, " "))![1]!.split(",").map((c) => c.trim());
     const schema = sqlFiles.find((s) => s.file === "schema.sql")!.text.replace(/--[^\n]*/g, "");
     const table = /CREATE TABLE IF NOT EXISTS feedback \(([\s\S]*?)\n\);/.exec(schema)![1]!;
     const columns = table.split("\n").map((line) => /^\s*([a-z_]+)\s/.exec(line)?.[1]).filter((c): c is string => !!c);
-    for (const column of written) expect(columns, `the INSERT writes ${column}`).toContain(column);
+    // Every field the Worker validates is written: a column left out of the INSERT is a field silently dropped.
+    expect([...written].sort()).toEqual(columns.filter((c) => c !== "id").sort());
     // A database made before a column existed gets it from its migration, so the deployed one has it too.
     const added = sqlFiles.filter((s) => s.file.startsWith("migrations/")).map((s) => /ADD COLUMN ([a-z_]+)/.exec(s.text)![1]!);
     expect(added).toContain("agents");
@@ -118,16 +119,23 @@ describe("the Worker only ever inserts", () => {
     }
   });
 
-  test("exactly one prepared statement, a parameterised INSERT into feedback", () => {
+  test("two prepared statements, both parameterised INSERTs into feedback: every column, and the same without agents", () => {
     const prepared = sources.flatMap(({ file, text }) => [...text.matchAll(/\.prepare\(\s*`([^`]*)`/g)].map((m) => ({ file, sql: m[1]!.replace(/\s+/g, " ").trim() })));
-    expect(prepared).toHaveLength(1);
-    expect(prepared[0]!.file).toBe("stores/d1.ts");
-    expect(prepared[0]!.sql).toMatch(/^INSERT INTO feedback \([a-z_, ]+\) VALUES \((\?, )*\?\)$/);
-    // No `${...}` interpolation into SQL: values go through bind().
-    expect(prepared[0]!.sql).not.toContain("${");
-    // Every `.prepare(` call is the template one above (no string-built SQL).
+    expect(prepared).toHaveLength(2);
+    for (const { file, sql } of prepared) {
+      expect(file).toBe("stores/d1.ts");
+      expect(sql).toMatch(/^INSERT INTO feedback \([a-z_, ]+\) VALUES \((\?, )*\?\)$/);
+      // No `${...}` interpolation into SQL: values go through bind().
+      expect(sql).not.toContain("${");
+      // As many placeholders as columns.
+      const columns = /\(([^)]*)\)/.exec(sql)![1]!.split(",").length;
+      expect(sql.match(/\?/g)!.length).toBe(columns);
+    }
+    // The second is the first without `agents` (a table the migration has not reached), nothing else.
+    expect(prepared[1]!.sql).toBe(prepared[0]!.sql.replace("agents, ", "").replace("?, ?)", "?)"));
+    // Every `.prepare(` call is one of the template ones above (no string-built SQL).
     const calls = sources.reduce((n, { text }) => n + (text.match(/\.prepare\(/g)?.length ?? 0), 0);
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
   });
 
   test("the store interface exposes one method, insert", () => {

@@ -54,17 +54,37 @@ export function feedbackAgentNameOfHost(host: string | null | undefined): string
  * deduplicated and capped (`feedbackAgentNames`). Names only: an agent's own
  * display name, its session, the thread and the message are never read into it.
  */
-export function inboxFeedbackAgents(messages: Iterable<{ author: InboxAuthor; created_at: string }>): string[] {
+export function inboxFeedbackAgents(messages: Iterable<{ author: InboxAuthor; created_at?: string | null }>): string[] {
   const lastUsed = new Map<string, string>();
   for (const message of messages) {
-    if (message.author.kind !== "agent") continue;
+    if (message.author.kind !== "agent" || typeof message.created_at !== "string") continue;
     const name = feedbackAgentNameOfHost(message.author.host);
     if (!name) continue;
     const at = lastUsed.get(name);
-    if (at === undefined || message.created_at > at) lastUsed.set(name, message.created_at);
+    if (at === undefined || message.created_at > at) lastUsed.set(name, message.created_at!);
   }
   const newestFirst = [...lastUsed].sort((a, b) => b[1].localeCompare(a[1]) || a[0].localeCompare(b[0])).map(([name]) => name);
   return feedbackAgentNames(newestFirst);
+}
+
+/** What the Feedback send reads from the Inbox's store: its threads' messages (InboxStore has all three). */
+export interface InboxFeedbackStore {
+  threadIds(): readonly string[];
+  threadMessageIds(threadId: string): readonly string[];
+  message(id: string): { author: InboxAuthor; created_at?: string | null } | null;
+}
+
+/** The agent names for a Send, from every message in the store (`inboxFeedbackAgents`). */
+export function inboxStoreFeedbackAgents(store: InboxFeedbackStore): string[] {
+  function* messages() {
+    for (const threadId of store.threadIds()) {
+      for (const id of store.threadMessageIds(threadId)) {
+        const message = store.message(id);
+        if (message) yield message;
+      }
+    }
+  }
+  return inboxFeedbackAgents(messages());
 }
 
 export function createInboxFeedback(options: {
@@ -74,8 +94,8 @@ export function createInboxFeedback(options: {
   url?: () => string;
   send?: (payload: ProductFeedbackPayload, url: string) => Promise<ProductFeedbackResult>;
   platform?: string;
-  /** The agent names to send (`inboxFeedbackAgents` over the store), read at each Send. Default: none. */
-  agents?: () => Iterable<string>;
+  /** The Inbox's store: the agent names are read from it at each Send (`inboxStoreFeedbackAgents`). Required, so the wiring cannot be dropped. */
+  store: InboxFeedbackStore;
 }) {
   const { json } = options;
   const url = options.url ?? (() => productFeedbackUrl(process.env));
@@ -104,13 +124,14 @@ export function createInboxFeedback(options: {
     const invalid = feedbackInputError(input);
     if (invalid) return json({ error: invalid, code: "validation_error" }, 400);
     // The agent names never stop a Send: a failing read sends the feedback without them.
-    let agents: Iterable<string> = [];
+    let agents: string[] = [];
     try {
-      agents = options.agents?.() ?? [];
+      agents = inboxStoreFeedbackAgents(options.store);
     } catch {
       agents = [];
     }
-    // sendProductFeedback answers within FEEDBACK_TIMEOUT_MS (8 s) and never throws; the catch keeps a thrown seam plain too.
+    // sendProductFeedback answers within FEEDBACK_TIMEOUT_MS (8 s) in all, its resend without names included, and never
+    // throws; the catch keeps a thrown seam plain too.
     const result = await send(productFeedbackPayload(input, { version: options.version, os, surface: "inbox", agents }), url()).catch(
       (): ProductFeedbackResult => ({ ok: false, reason: FEEDBACK_UNAVAILABLE, unavailable: true }),
     );

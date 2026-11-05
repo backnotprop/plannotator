@@ -56,9 +56,10 @@ export class ValidationError extends Error {
 
 // A version or OS name is a short label: letters, digits and a few separators.
 const LABEL_RE = /^[0-9A-Za-z][0-9A-Za-z .+_()-]*$/;
-// An agent name ("Claude Code", "OpenCode 2", "Windsurf / Devin"): a label that may hold a slash. No comma, so the
-// stored list reads back as it was sent.
-const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z .+_()\/-]*$/;
+// An agent name ("Claude Code", "OpenCode 2", "Windsurf / Devin"): words of letters, digits and `+ _ ( ) -`, one
+// space or " / " between them. No dot, no comma and no bare slash: no path passes as a name, and the stored list
+// reads back as it was sent. The client's rule too (packages/core/product-feedback.ts).
+const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z+_()-]*(?:(?: | \/ )[0-9A-Za-z+_()-]+)*$/;
 // C0 controls except tab and newline, and DEL. Stripped from free text.
 const CONTROL_RE = /[\u0000-\u0008\u000B-\u001F\u007F]/g;
 
