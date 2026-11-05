@@ -1112,6 +1112,7 @@ export function createInboxLiveSessions(options: {
     waitOf,
     deliveredIntoTurn,
     deliverySignature,
+    hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
     restartCount,
     restartAgents,
