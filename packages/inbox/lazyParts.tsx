@@ -23,7 +23,7 @@ type Loaded<P> = { default: ComponentType<P> };
  * `preload` that brings it in. A failed load reaches the caller's
  * LazyBlockBoundary and is forgotten by `preload`. React.lazy keeps its
  * rejection for good, so a host that offers the part again after a failure
- * (the next ⌘K, the next Post) calls `retry()` first: the next mount then asks
+ * (the next ⌘K, the next Post, the next Shape board) calls `retry()` first: the next mount then asks
  * for the chunk again. Without it the part stays failed until Reload.
  */
 export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
@@ -56,13 +56,27 @@ export function lazyPart<P extends object>(load: () => Promise<Loaded<P>>) {
   return { Part, preload, retry, isLoaded: () => loaded !== null };
 }
 
+/** Runs `run` once the failure is on screen. */
+function Failed({ run }: { run: () => void }) {
+  useEffect(run, [run]);
+  return null;
+}
+
 /**
  * A part drawn in a pane (the review reader, the Shape board): one whose chunk cannot arrive says so in the
  * pane with ui's notice and Reload, and the window stays as it is. `loading`: what shows while it arrives.
+ * `onFailed`: runs once the notice shows (the host's part `retry()`, so its next open asks again).
  */
-export function PanePart({ children, loading = null }: { children: ReactNode; loading?: ReactNode }) {
+export function PanePart({ children, loading = null, onFailed }: { children: ReactNode; loading?: ReactNode; onFailed?: () => void }) {
   return (
-    <LazyBlockBoundary fallback={(notice) => <div className="ib-gerror">{notice}</div>}>
+    <LazyBlockBoundary
+      fallback={(notice) => (
+        <div className="ib-gerror">
+          {notice}
+          {onFailed && <Failed run={onFailed} />}
+        </div>
+      )}
+    >
       <Suspense fallback={loading}>{children}</Suspense>
     </LazyBlockBoundary>
   );

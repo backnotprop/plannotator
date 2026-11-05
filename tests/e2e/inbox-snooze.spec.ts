@@ -187,6 +187,19 @@ test('the row menu: Snooze swaps the menu for its times; Tomorrow moves the thre
   expect(world.errors).toEqual([]);
 });
 
+test('a home machine whose clock is ahead answers that nothing is snoozed: the toast says the time has passed, not Snoozed', async () => {
+  const { page, threads } = world;
+  await page.route('**/threads/*/snooze', (route) => route.fulfill({ json: { snoozed: null } }));
+  await row(page, threads.refund).click({ button: 'right' });
+  const menu = page.locator(`[data-row-menu="${threads.refund}"]`);
+  await menu.locator('[data-row-action="snooze"]').click();
+  await menu.locator('[data-snooze-choice="tomorrow"]').click();
+  await expect(toast(page)).toContainText('That time has passed.');
+  await expect(row(page, threads.refund)).toBeVisible();
+  await page.unroute('**/threads/*/snooze');
+  await toast(page).locator('[data-toast-dismiss]').click();
+});
+
 test("the header's clock: Pick a time, two lists by mouse, wheel and keys; the thread says until when, opening it keeps the snooze, Unsnooze ends it", async () => {
   const { page, threads } = world;
   await row(page, threads.release).click();

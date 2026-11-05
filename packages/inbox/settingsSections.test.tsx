@@ -420,7 +420,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-  // Code review and Shape are held for 0.28.50: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
+  // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
   expect(rows).toEqual(['Board', 'Checklist']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
@@ -438,10 +438,10 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   }
 });
 
-// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held for 0.28.50
-// (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
+// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held until the
+// next big release (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
 // one who has them on keeps the row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1
-// shows both. Each saves config.json `inboxCodeReview` / `inboxShape`. 0.28.50 restores "off by default, shown".
+// shows both. Each saves config.json `inboxCodeReview` / `inboxShape`. That release restores "off by default, shown".
 const HELD = [
   { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]' },
   { name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]' },
