@@ -610,6 +610,75 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await expect(replyTiles(page)).toHaveCount(0);
 });
 
+/**
+ * A big changed file. Once the add has read it the Inbox caches its hash, so only an Inbox started since lists it by
+ * its stat again: `listedByStat` draws that listing for this tab, the stat name the Inbox itself answered before the read.
+ */
+async function bigChanged(name: string, tint: [number, number, number]) {
+  const path = art(name, png(400, 300, [200, 200, 200]));
+  const { thread_id } = await threadWithFiles({ attachments: [path] });
+  writeFileSync(path, Buffer.concat([png(400, 300, tint), Buffer.alloc(9 * 1024 * 1024)]));
+  const listed = (await (await fetch(`${studio.url}/api/inbox/threads/${thread_id}/attachments`)).text());
+  const stat = /stat:\d+:[\d.]+/.exec(listed)![0];
+  const hash = sha(readFileSync(path));
+  return {
+    thread_id,
+    listedByStat: () =>
+      page.route(/\/api\/inbox\/threads\/[^/]+\/attachments/, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({ response, body: (await response.text()).replaceAll(`"sha256":"${hash}"`, `"sha256":"${stat}"`) });
+      }),
+    notListedByStat: () => page.unroute(/\/api\/inbox\/threads\/[^/]+\/attachments/),
+  };
+}
+
+test('a big changed file, listed by its stat after a reload: the check stays, and the button takes it out', async () => {
+  const name = 'big-after-reload.png';
+  const big = await bigChanged(name, [10, 80, 200]);
+  await big.listedByStat();
+  await open(page, big.thread_id);
+  await tile(page, name).hover();
+  await button(page, 'tile', name).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await page.reload();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await tile(page, name).hover();
+  const held = page.locator(`[data-reuse-surface="tile"][aria-label^="${name} is in your reply"]`).first();
+  await expect(held).toHaveAttribute('aria-pressed', 'true');
+  await held.click();
+  await expect(replyTiles(page)).toHaveCount(0);
+  await big.notListedByStat();
+});
+
+test('the draft already holds those bytes under another name: one tile, and the button knows it', async () => {
+  const name = 'big-held.png';
+  const big = await bigChanged(name, [90, 10, 200]);
+  await open(page, big.thread_id);
+  // A tile that knows only the bytes, as one pasted has.
+  const reuse = '**/api/inbox/uploads/reuse';
+  await page.route(reuse, async (route) => {
+    const { sha256: _shown, ...body } = route.request().postDataJSON() as Record<string, unknown>;
+    await route.continue({ postData: JSON.stringify(body) });
+  });
+  await tile(page, name).hover();
+  await button(page, 'tile', name).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await page.unroute(reuse);
+  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await big.listedByStat();
+  await page.reload();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await tile(page, name).hover();
+  const add = page.locator(`[data-reuse-surface="tile"][aria-label="Add ${name} to your reply"]`).first();
+  const asked = page.waitForResponse(reuse);
+  await add.click();
+  await asked;
+  await expect(page.locator(`[data-reuse-surface="tile"][aria-label^="${name} is in your reply"]`).first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(replyTiles(page)).toHaveCount(1);
+  await big.notListedByStat();
+});
+
 test('a very small picture in the text has no button; a big one has', async () => {
   art('tiny.png', png(40, 40, [120, 20, 20]));
   const { thread_id } = await threadWithFiles({ body: 'Small and big.\n\n![Tiny](art/tiny.png)\n\n![Big](art/inline-a.png)', attachments: [] });
@@ -746,6 +815,37 @@ test("New message over a thread offers that thread's files; the next thread's ag
   }
   expect(wake).not.toContain('harbor-web');
   expect(wake).not.toContain(thread_id);
+});
+
+test("a phone's keyboard hides the row, as it hides the tiles; down again, the row is back", async ({ browser, browserName }) => {
+  test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
+  const { thread_id } = await threadWithFiles();
+  expect((await post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const phone = await context.newPage();
+  try {
+    await open(phone, thread_id);
+    await preview(phone, REF_A).tap();
+    await phone.locator('[data-reuse-surface="bar"]').first().tap();
+    const row = composeDialog(phone).locator('[data-compose-from]');
+    await expect(row).toBeVisible();
+    // The keyboard as the phone-shell specs play it: the visual viewport loses its height.
+    const viewport = (height: number | null) =>
+      phone.evaluate((height) => {
+        const vv = window.visualViewport!;
+        if (height === null) delete (vv as unknown as Record<string, unknown>).height;
+        else Object.defineProperty(vv, 'height', { configurable: true, get: () => height });
+        vv.dispatchEvent(new Event('resize'));
+      }, height);
+    await viewport(844 - 336);
+    await expect(phone.locator('html')).toHaveAttribute('data-ib-keyboard', '');
+    await expect(row).toBeHidden();
+    await viewport(null);
+    await expect(phone.locator('html')).not.toHaveAttribute('data-ib-keyboard', /.*/);
+    await expect(row).toBeVisible();
+  } finally {
+    await context.close();
+  }
 });
 
 test('the row: each file\'s bytes once, newest first, at most 8; no thread open, no row', async () => {

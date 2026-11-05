@@ -4231,6 +4231,7 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
   :root[data-ib-keyboard] .ib-cp-none-to > svg { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] :is(.ib-cp-card, .ib-cp-note) { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-files:not(:has(.ib-refused)) { display: none; }
+  :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-from { display: none; }
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] .ib-cp-foot > .ib-cp-clipn { display: block; margin-left: -8px; pointer-events: none; font-size: var(--ib-fs-13, 13px); font-variant-numeric: tabular-nums; color: var(--muted-foreground); }
   /* The home bar is under the keyboard, and the foot must stay on screen in the little room left: what is over it gives way and scrolls. */
   :root[data-ib-keyboard] dialog.ib-cp[data-phone] { padding-bottom: 0; }

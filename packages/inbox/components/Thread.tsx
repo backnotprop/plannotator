@@ -5112,7 +5112,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // page knew and the bytes the Inbox gave, which is a stat for a big changed file until it is read.
   const reuseHeld = replyFiles.files
     .filter((f) => f.state !== 'refused')
-    .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256])
+    .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256, f.upload?.shown_sha256])
     .filter(Boolean)
     .join();
   const reuseOffered = newMessage?.kind !== 'compose' && replyFiles.canReuse && (!resolved || Boolean(onNewMessageWith));

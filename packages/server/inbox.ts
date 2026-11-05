@@ -178,7 +178,7 @@ import { createInboxImageCapture, inboxMessageImageRoute, type InboxImageCapture
 import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
-import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
+import { assertInboxUploadsPending, inboxBodyForAgent, inboxDiskFullError, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
 import { createInboxLiveSessions } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
@@ -790,6 +790,8 @@ function errorResponse(error: unknown): Response {
   if (error instanceof InboxError) {
     return json({ error: error.message, code: error.code, ...error.details }, ERROR_STATUS[error.code] ?? 400);
   }
+  const full = inboxDiskFullError(error);
+  if (full) return errorResponse(full);
   return json({ error: "Internal error.", code: "internal_error" }, 500);
 }
 
@@ -4566,6 +4568,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
             const attachments = fresh ? await inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            // The same Send while this one copied is a replay, below; another Send of these files already has them.
+            if (fresh && !store.replyByKey(messageId, replayKey)) assertInboxUploadsPending(store.dir, uploads, attachments);
             let result: ReturnType<typeof store.sendReply>;
             try {
               result = store.sendReply(messageId, {

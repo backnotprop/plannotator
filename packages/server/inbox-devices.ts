@@ -62,7 +62,7 @@ import {
 import { readInboxRegistry, updateOwnInboxRegistry, type InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
 import { INBOX_DEVICE_MARKUP_MAX_BYTES } from "@plannotator/shared/inbox/markups";
-import { INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
+import { inboxDiskFullError, INBOX_UPLOAD_MAX_BYTES } from "@plannotator/shared/inbox/uploads";
 import { describeTailscaleFailure, runTailscale, TAILSCALE_SERVE_TIMEOUT_MS, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { createInboxLan, LanUnavailableError } from "./inbox-lan";
 import {
@@ -827,6 +827,8 @@ export function createInboxDevices(context: InboxDevicesContext) {
 
   const caught = (error: unknown): Response => {
     if (error instanceof InboxError) return json({ error: error.message, code: error.code, ...error.details }, error.code === "validation_error" ? 422 : 400);
+    const full = inboxDiskFullError(error);
+    if (full) return json({ error: full.message, code: full.code }, 507);
     return refuse(500, "internal_error", "Internal error.");
   };
 

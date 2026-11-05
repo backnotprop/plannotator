@@ -41,6 +41,7 @@ import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
+  assertInboxUploadsPending,
   inboxUploadAttachments,
   inboxUploadFromAttachment,
   INBOX_UPLOAD_MAX_BYTES,
@@ -157,6 +158,8 @@ export function createInboxCompose(options: {
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
     const attachments = uploads.length > 0 ? await inboxUploadAttachments(store.dir, uploads, at) : [];
+    // The same Send while this one copied is a replay, below; another Send of these files already has them.
+    if (uploads.length > 0 && !store.personThreadByKey(key)) assertInboxUploadsPending(store.dir, uploads, attachments);
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
       result = store.startPersonThread({

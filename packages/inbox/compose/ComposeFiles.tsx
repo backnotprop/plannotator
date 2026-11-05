@@ -222,7 +222,7 @@ export function useComposeFiles(
   }, []);
 
   /** The tile holding these bytes, whichever way they came. */
-  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.state !== 'refused' && (file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256)), []);
+  const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.state !== 'refused' && (file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256 || file.upload?.shown_sha256 === sha256)), []);
 
   const flash = (key: string) => {
     patch(key, { flash: true });
@@ -257,6 +257,16 @@ export function useComposeFiles(
     aborts.current.set(key, controller);
     const settled = reuse(source.id, source.version, { signal: controller.signal, sha256: source.sha256 })
       .then((upload) => {
+        // The draft held these bytes under another name (a big changed file is listed by its stat): one tile, now known by both.
+        const here = filesRef.current.find((file) => file.key !== key && file.state !== 'refused' && file.upload?.sha256 === upload.sha256);
+        if (here) {
+          filesRef.current = filesRef.current.filter((file) => file.key !== key);
+          setFiles((current) => current.filter((file) => file.key !== key));
+          patch(here.key, { reuse: { sha256: source.sha256 }, flash: true });
+          setTimeout(() => patch(here.key, { flash: false }), 900);
+          onAlready.current?.(source.name);
+          return null;
+        }
         patch(key, { state: 'done', progress: 1, upload });
         return upload;
       })
