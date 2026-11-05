@@ -28,6 +28,12 @@ interface GuideViewProps {
    * counts, source line) and the host's 16px page margins, so the width goes to the code.
    */
   bare?: boolean;
+  /**
+   * Each file's box as tall as its diff (an estimate from the hunks' rows, then the height the renderer reports;
+   * capped as before). Opt-in for a host whose renderer reports it (the Inbox's AllFilesCodeView). Default: on in
+   * `bare`, off otherwise (the fixed estimate the review app, guides.show and VS Code use).
+   */
+  fitFileHeights?: boolean;
 }
 
 export interface ResolvedGuideSections {
@@ -79,7 +85,9 @@ export const GuideView: React.FC<GuideViewProps> = ({
   sourceLine,
   headerActions,
   bare = false,
+  fitFileHeights,
 }) => {
+  const fit = fitFileHeights ?? bare;
   const host = useGuideHost();
   const overviewFigure = host.renderOverviewFigure?.() ?? null;
   const addGlobalComment = host.globalComments?.onAdd;
@@ -189,15 +197,26 @@ export const GuideView: React.FC<GuideViewProps> = ({
     [guide.unplacedFiles, hasUnplaced],
   );
 
+  const actions = headerActions || addGlobalComment ? (
+    <>
+      {addGlobalComment && <GuideGlobalCommentButton onAdd={addGlobalComment} />}
+      {headerActions}
+    </>
+  ) : null;
+  // The first card drawn: the first section, or "Everything else" when the guide has none.
+  const firstCardIndex = guide.sections.length > 0 ? 0 : unplacedSection ? guide.sections.length : -1;
+  const firstCardTab = bare && firstCardIndex >= 0 ? host.renderSectionTab?.(firstCardIndex) : null;
+  const actionsOnTab = !!actions && firstCardTab !== null && firstCardTab !== undefined && firstCardTab !== false;
+
   return (
     <GuideViewportProvider className={bare ? 'w-full px-4 pt-3.5 pb-6' : 'w-full px-3 py-5 sm:px-6 sm:py-6 lg:px-10 lg:py-8'} eager={guideFileCount <= GUIDE_EAGER_MOUNT_MAX_FILES}>
       {/* Header actions sit in a row above the title on narrow screens and float beside it from md up (desktop unchanged). */}
       {/* The host's global comments add their button to the same row, ahead of the host's own controls. Bare (no title
           to float beside), the row stays above the content at every width. */}
-      {(headerActions || addGlobalComment) && (
+      {/* Bare, with a tab on the first card (the Inbox's Split | Unified), the actions sit on the tab's row instead. */}
+      {actions && !actionsOnTab && (
         <div className={bare ? 'mb-3 flex items-center justify-end gap-2' : 'mb-3 flex items-center justify-end gap-2 md:float-right md:mb-0 md:ml-6'}>
-          {addGlobalComment && <GuideGlobalCommentButton onAdd={addGlobalComment} />}
-          {headerActions}
+          {actions}
         </div>
       )}
       {!bare && <div className="max-w-[72ch]">
@@ -262,6 +281,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
             onActivate={onFocusFile}
             onRequestReveal={handleRequestReveal}
             renderLink={renderLink}
+            fitFileHeights={fit}
+            {...(actionsOnTab && index === 0 ? { tabLead: actions } : {})}
           />
         ))}
 
@@ -277,6 +298,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
             revealTarget={revealTarget}
             onActivate={onFocusFile}
             onRequestReveal={handleRequestReveal}
+            fitFileHeights={fit}
+            {...(actionsOnTab && firstCardIndex === guide.sections.length ? { tabLead: actions } : {})}
           />
         )}
       </div>

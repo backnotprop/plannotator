@@ -41,6 +41,11 @@ export interface GuideDiffRendererProps {
   /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
+  /**
+   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
+   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
+   */
+  onContentHeightChange?: (height: number) => void;
 }
 
 export interface GuideDiffRendererContext {
@@ -152,6 +157,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    * Absent (guides.show, the VS Code reader): no button and no list.
    */
   globalComments?: GuideGlobalComments;
+  /**
+   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
+   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
+   * which the renderer's measured height then corrects).
+   */
+  diffStyle?: 'split' | 'unified';
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

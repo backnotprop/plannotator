@@ -174,6 +174,7 @@ export default function GuideReader({
   highlight = null,
   bare = false,
 }: GuideReaderProps) {
+  const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
@@ -382,8 +383,10 @@ export default function GuideReader({
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(globalComments ? { globalComments } : {}),
+      // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
+      diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
   );
 
   return (
@@ -397,6 +400,8 @@ export default function GuideReader({
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
         bare={bare}
+        // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
+        fitFileHeights
       />
       {globalAnchor && globalDraftKey && (
         <CommentPopover
