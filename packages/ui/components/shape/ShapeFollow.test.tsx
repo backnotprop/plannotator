@@ -7,7 +7,10 @@
  *    on a view other than How it works;
  *  - rapid next, next, back leaving two parts lit, or a stray dot on the
  *    picture, or the card on a different step from the picture;
- *  - a click on a lit part opening Change it instead of jumping to its step;
+ *  - a click on a lit part opening Change it instead of jumping to its step, or
+ *    jumping once the person has turned Annotate on;
+ *  - a step still to come keeping an invisible tab stop on the picture;
+ *  - Esc closing the whole board while an example is followed;
  *  - the function's link not reaching the host's file;
  *  - reduced motion still running the dot, the slides or the flight;
  *  - the path missing a step or leaving the picture behind, and a long step's
@@ -160,12 +163,12 @@ function drawing(): ShadowRoot | null {
   return null;
 }
 
-async function mount(host: ShapeHost, view: 'how' | 'picture' = 'how'): Promise<HTMLElement> {
+async function mount(host: ShapeHost, view: 'how' | 'picture' = 'how', readFirst = false): Promise<HTMLElement> {
   const el = document.createElement('div');
   el.style.width = '1200px';
   document.body.appendChild(el);
   root = createRoot(el);
-  act(() => root!.render(<ShapeSurface host={host} id={ID} initialView={view} />));
+  act(() => root!.render(<ShapeSurface host={host} id={ID} initialView={view} readFirst={readFirst} />));
   const drawn = () => (view === 'how' ? drawing() : document.querySelector('*') && [...document.querySelectorAll('*')].some((h) => h.shadowRoot?.querySelector('[data-mark="whistle"]')));
   for (let i = 0; i < 50 && !drawn(); i++) await wait();
   if (!drawn()) throw new Error('board never drew');
@@ -248,6 +251,59 @@ describe.if(hasDom)('Follow an example', () => {
     expect(count()).toBe('3 of 3');
     expect(nowOnPicture().every((i) => i === '2')).toBe(true);
     expect(document.querySelector('[data-comment-popover]')).toBeNull();
+  });
+
+  test('with Annotate on, a click on the drawing annotates it, and the tags still step', async () => {
+    await mount(fakeHost(board([EXAMPLE])), 'how', true);
+    await press('Follow an example');
+    await press('Step through');
+    await act(async () => {
+      drawing()!.querySelector('[data-mark="how-c"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    });
+    // Annotate off: it jumps.
+    expect(count()).toBe('3 of 3');
+    await press('Previous step');
+    await press('Annotate: point at a part to change it or ask about it');
+    await act(async () => {
+      drawing()!.querySelector('[data-mark="how-c"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    });
+    expect(count()).toBe('2 of 3');
+    expect(document.querySelectorAll('[data-comment-popover]').length).toBe(1);
+    await act(async () => {
+      drawing()!.querySelector('.shp-ex-tag[data-ex-i="0"]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true }));
+    });
+    expect(count()).toBe('1 of 3');
+  });
+
+  test('a step still to come has no tag to land on with the keys', async () => {
+    await mount(fakeHost(board([EXAMPLE])));
+    await press('Follow an example');
+    const stops = () => [...drawing()!.querySelectorAll<HTMLButtonElement>('.shp-ex-tag')].map((t) => [t.tabIndex, t.getAttribute('aria-hidden')]);
+    expect(stops()).toEqual([[0, null], [0, null], [0, null]]);
+    await press('Step through');
+    expect(stops()).toEqual([[0, null], [-1, 'true'], [-1, 'true']]);
+    await press('Next step');
+    expect(stops()).toEqual([[0, null], [0, null], [-1, 'true']]);
+  });
+
+  test('Esc stops following and is marked used; a panel goes first', async () => {
+    reduceMotion = true;
+    await mount(fakeHost(board([EXAMPLE])));
+    await press('Follow an example');
+    await press('References');
+    expect(document.querySelectorAll('.shp-sidep.open').length).toBe(1);
+    const esc = async () => {
+      const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+      await act(async () => {
+        window.dispatchEvent(e);
+      });
+      return e.defaultPrevented;
+    };
+    expect(await esc()).toBe(true);
+    expect(document.querySelectorAll('.shp-sidep.open').length).toBe(0);
+    expect(document.querySelectorAll('[data-follow-card]:not(.leaving)').length).toBe(1);
+    expect(await esc()).toBe(true);
+    expect(document.querySelectorAll('[data-follow-card]:not(.leaving)').length).toBe(0);
   });
 
   test('the function opens its file in the host', async () => {

@@ -43,6 +43,8 @@ const NOTE = 'An example, read from the code. Nothing was run.';
 
 /** The width the dock needs with "Follow an example" in words. */
 const DOCK_ROOM = 920;
+/** The gap an open panel keeps from the board (`.shp-sidep`). */
+const PANEL_GAP = 12;
 /** A mono character, in the card's 12 px code. */
 const CH = 7.25;
 /** The card and the board: one duration. */
@@ -178,26 +180,57 @@ function strip(lines: Tok[][], n: number): Tok[][] {
   return [first, ...lines.slice(1)];
 }
 
+/** Code that may wrap where a camelCase name's words meet, never mid-word (and it copies clean). */
+const Humped = ({ text }: { text: string }) => (
+  <>
+    {text.split(/(?<=[a-z0-9])(?=[A-Z])/).map((part, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <wbr />}
+        {part}
+      </React.Fragment>
+    ))}
+  </>
+);
+
 /** TypeScript, highlighted like the Code view; plain until the highlighter is ready (same text, so nothing moves). */
-function Code({ code, pre = '', className }: { code: string; pre?: string; className?: string }) {
+function Code({ code, pre = '', className, humps }: { code: string; pre?: string; className?: string; humps?: boolean }) {
   const lines = useTokens(pre + code);
-  if (!lines) return <code className={className}>{code}</code>;
+  if (!lines)
+    return (
+      <code className={className}>
+        {humps
+          ? code.split('\n').map((line, i) => (
+              <span key={i} className="ln">
+                <Humped text={line} />
+              </span>
+            ))
+          : code}
+      </code>
+    );
   return (
     <code className={className}>
-      {strip(lines, pre.length).map((line, i) => (
-        <React.Fragment key={i}>
-          {i > 0 && '\n'}
-          {line.map((tk, j) => (
-            <React.Fragment key={j}>
-              <span className="tk" style={tk.s}>
-                {tk.t}
-              </span>
-              {/* A place to wrap after a dot, so a long name breaks at its parts, never mid-word (and copies clean). */}
-              {tk.t.endsWith('.') && <wbr />}
-            </React.Fragment>
-          ))}
-        </React.Fragment>
-      ))}
+      {strip(lines, pre.length).map((line, i) => {
+        const tokens = line.map((tk, j) => (
+          <React.Fragment key={j}>
+            <span className="tk" style={tk.s}>
+              {humps ? <Humped text={tk.t} /> : tk.t}
+            </span>
+            {/* A place to wrap after a dot, so a long name breaks at its parts, never mid-word (and copies clean). */}
+            {tk.t.endsWith('.') && <wbr />}
+          </React.Fragment>
+        ));
+        // A signature's line that wraps hangs under its own start.
+        return humps ? (
+          <span key={i} className="ln">
+            {tokens}
+          </span>
+        ) : (
+          <React.Fragment key={i}>
+            {i > 0 && '\n'}
+            {tokens}
+          </React.Fragment>
+        );
+      })}
     </code>
   );
 }
@@ -225,13 +258,13 @@ function Val({ v, hand, out, type }: { v: string; hand?: boolean; out?: boolean;
 
 // ───────────────────────── icons ─────────────────────────
 
-function RailIcon() {
+/** A route from a ring to a dot: the example's way through the picture. */
+function RouteIcon() {
   return (
     <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden="true">
-      <path d="M7 3.4v7.2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" opacity=".55" />
-      <circle cx="7" cy="2.4" r="1.7" fill="none" stroke="currentColor" strokeWidth="1.3" />
-      <circle cx="7" cy="7" r="1.4" fill="currentColor" opacity=".7" />
-      <circle cx="7" cy="11.6" r="1.7" fill="currentColor" />
+      <path d="M4.5 11.4h4.3a2.1 2.1 0 0 0 0-4.2H5.2a2.1 2.1 0 0 1 0-4.2h4.3" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle cx="3" cy="11.4" r="1.5" fill="none" stroke="currentColor" strokeWidth="1.3" />
+      <circle cx="11" cy="3" r="1.7" fill="currentColor" />
     </svg>
   );
 }
@@ -397,12 +430,12 @@ const Reveal = ({ label, n, open, onClick }: { label: string; n?: number; open: 
 /** Which of a phone's two sections show all they have. */
 type SheetMore = { fn: boolean; in: boolean };
 
-const Signature = ({ step, chars }: Pick<PartProps, 'step' | 'chars'>) => <Code className="shp-ex-sig" code={followSignatureFit(step.signature, chars)} pre="function " />;
+const Signature = ({ step, chars }: Pick<PartProps, 'step' | 'chars'>) => <Code className="shp-ex-sig" code={followSignatureFit(step.signature, chars)} pre="function " humps />;
 
-function Output({ step, label }: { step: ShapeExampleStep; label?: boolean }) {
+function Output({ step }: { step: ShapeExampleStep }) {
   return (
     <div className="shp-ex-ret shp-ex-row">
-      {label && <span className="shp-ex-cap">Comes out</span>}
+      <span className="shp-ex-cap">Comes out</span>
       <code className="nm" title={step.output.name}><Dotted name={step.output.name} /></code>
       {step.output.note && <span className="pl">{step.output.note}</span>}
       <span className="shp-ex-rr">
@@ -458,7 +491,7 @@ function StepPanes({ k, cur, withInputs, sheet, onMore, ...p }: PartProps & { k:
             </ul>
           </div>
         )}
-        <Output step={step} label />
+        <Output step={step} />
       </section>
     </div>
   );
@@ -484,11 +517,34 @@ function fitSurface(card: HTMLElement, phone: boolean) {
   card.style.setProperty('--ex-cut', `${cut}px`);
 }
 
+/**
+ * A long signature gives way (it scrolls) before the checks lose the line that
+ * decided it: their box never goes below that line, or all the checks when they
+ * are shorter, so a short step keeps its height. A deciding line taller than
+ * CHECKS_FLOOR scrolls in its box.
+ */
+function floorChecks(card: HTMLElement) {
+  const boxes = card.classList.contains('narrow') ? [] : [...card.querySelectorAll<HTMLElement>('.shp-ex-io .shp-ex-scroll')];
+  const floors = boxes.map((box) => {
+    const all = box.querySelector<HTMLElement>('.shp-ex-checks');
+    const row = box.querySelector<HTMLElement>('.decides') ?? all?.querySelector<HTMLElement>('li');
+    return all && row ? Math.min(all.offsetHeight + 4, row.offsetHeight + 8, CHECKS_FLOOR) : 0;
+  });
+  boxes.forEach((box, i) => {
+    box.style.minHeight = `${floors[i]}px`;
+  });
+}
+
 const SHEET_CALM: SheetMore = { fn: false, in: false };
 /** Less of the board than this above a phone's sheet is a slice, not context: it hides. */
 const BOARD_MIN = 140;
 /** What a phone's tallest sheet leaves under the title. */
 const SHEET_GAP = 12;
+/** The most the checks hold back from a long signature: four lines. */
+const CHECKS_FLOOR = 88;
+/** The status pill's own bottom, and what it keeps from the top of the surface. */
+const PILL_BOTTOM = { desk: 76, phone: 70 };
+const PILL_ROOM = 44;
 
 /** The card's width when open, read while it is folded too. */
 function openWidth(card: HTMLElement): number {
@@ -497,6 +553,23 @@ function openWidth(card: HTMLElement): number {
   const w = card.offsetWidth;
   if (folded) card.classList.remove('expanded');
   return w;
+}
+
+const nameOf = (el: Element) => el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '';
+/** Where the keys go when a press takes its own button away, best first. */
+const FOCUS_NEXT = ['Next step', 'Previous step', 'Step through', 'Stop following'];
+
+/**
+ * A press that hid, disabled or unmounted its own button leaves the keys where
+ * they were going, never on the page: the same button where it moved to, else
+ * the next thing to press, else (the card is gone) the dock's button.
+ */
+function landFocus(card: HTMLElement | null, surface: HTMLElement | null, name: string) {
+  const live = (el: Element | null): el is HTMLElement => !!el && el.isConnected && el !== el.ownerDocument.body && !(el as HTMLButtonElement).disabled && !el.closest('[aria-hidden="true"], [inert]');
+  if (live(document.activeElement)) return;
+  const buttons = card ? [...card.querySelectorAll<HTMLElement>('button')].filter(live) : [];
+  const to = [name, ...FOCUS_NEXT].map((n) => buttons.find((b) => nameOf(b) === n)).find(Boolean) ?? surface?.querySelector<HTMLElement>('[data-follow]');
+  to?.focus({ preventScroll: true });
 }
 
 /** Moves `box`'s scroll by as little as shows `el`. */
@@ -597,32 +670,38 @@ export interface ShapeFollowOptions {
   onCode: (at: At) => void;
   /** May this path be opened? A source that cannot is named only. */
   canOpen: (path: string) => boolean;
-  /** Where to start (a host's own shots). Default: closed. */
-  initial?: FollowPhase;
-  initialOpen?: boolean;
+  /** A panel is open over the board's right side: the dock has that much less room. */
+  panel: boolean;
+  /** The person turned Annotate on: a click on the drawing annotates it, as it does on the board. */
+  annotating: boolean;
 }
 
 /**
  * The dock's button and the card, for ShapeSurface to place: the button in
  * the dock after the views, the card in the surface (it sits above the dock).
  * `sheet`: the card is a phone's bottom sheet, and the dock steps aside.
+ * `stop`: stops following, while an example is followed (Esc).
  */
-export function useShapeFollow(options: ShapeFollowOptions): { button: React.ReactNode; card: React.ReactNode; sheet: boolean } {
-  const { board, active, phone, reduce, surface, onCode, canOpen } = options;
+export function useShapeFollow(options: ShapeFollowOptions): { button: React.ReactNode; card: React.ReactNode; sheet: boolean; stop: (() => void) | null } {
+  const { board, active, phone, reduce, surface, onCode, canOpen, panel } = options;
   const examples = options.examples ?? [];
   const examplesRef = useRef(examples);
   examplesRef.current = examples;
   const reduceRef = useRef(reduce);
   reduceRef.current = reduce;
-  const [phase, setPhaseRaw] = useState<FollowPhase>(options.initial ?? { open: false });
-  const [expanded, setExpandedRaw] = useState(options.initialOpen ?? false);
+  const annotatingRef = useRef(options.annotating);
+  annotatingRef.current = options.annotating;
+  const [phase, setPhaseRaw] = useState<FollowPhase>({ open: false });
+  const [expanded, setExpandedRaw] = useState(false);
   const [openW, setOpenW] = useState(0);
+  const [box, setBox] = useState('');
   const [sheetMore, setMore] = useState<SheetMore>(SHEET_CALM);
   const [dockTight, setDockTight] = useState(false);
   const how = active && !!board;
   const cardRef = useRef<HTMLElement | null>(null);
   const painter = useRef<FollowPainter | null>(null);
   const flip = useRef<Map<string, DOMRect> | null>(null);
+  const focusWas = useRef<string | null>(null);
   const flipping = useRef<Animation[]>([]);
   const stepping = useRef<{ anims: Animation[]; ghost: HTMLElement | null }>({ anims: [], ghost: null });
   const closing = useRef<Animation | null>(null);
@@ -634,6 +713,8 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const card = cardRef.current;
     if (!card) return;
     flip.current = snapshot(card);
+    const on = document.activeElement;
+    focusWas.current = on && card.contains(on) ? nameOf(on) : null;
     setOpenW(openWidth(card));
   }, []);
   const dispatch = useCallback(
@@ -677,24 +758,35 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     [prepare],
   );
 
-  // The open card's width sets how long a signature's line can be, and when the panes stack.
+  // The open card's width sets how long a signature's line can be, and when the panes stack. Its height and the
+  // surface's set the room everything else is laid out in, so a window made only shorter lays out again too.
   const cardOn = phase.open && how;
   const expandedNow = expanded;
   useEffect(() => {
     const card = cardRef.current;
     if (!cardOn || !card || typeof ResizeObserver !== 'function') return;
-    const ro = new ResizeObserver(() => setOpenW(openWidth(card)));
+    const ro = new ResizeObserver(() => {
+      setOpenW(openWidth(card));
+      setBox(`${card.offsetHeight}/${surface?.clientHeight ?? 0}`);
+    });
     ro.observe(card);
+    if (surface) ro.observe(surface);
     return () => ro.disconnect();
-  }, [cardOn, expandedNow]);
+  }, [cardOn, expandedNow, surface]);
 
-  // The dock's seven other buttons keep their words: where all eight would not fit, this one gives its up.
-  useEffect(() => {
-    if (!surface || typeof ResizeObserver !== 'function') return;
-    const ro = new ResizeObserver(() => setDockTight(surface.clientWidth < DOCK_ROOM));
+  // The dock's seven other buttons keep their words: where all eight would not fit beside an open panel, this one gives its up.
+  useLayoutEffect(() => {
+    if (!surface) return;
+    const measure = () => {
+      const side = panel ? surface.querySelector<HTMLElement>('.shp-sidep') : null;
+      setDockTight(surface.clientWidth - (side ? side.offsetWidth + PANEL_GAP : 0) < DOCK_ROOM);
+    };
+    measure();
+    if (typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(measure);
     ro.observe(surface);
     return () => ro.disconnect();
-  }, [surface]);
+  }, [surface, panel]);
 
   // A new version with fewer examples (or none): nothing to follow past its end.
   useEffect(() => {
@@ -715,15 +807,19 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     p.set(stepNow.current, 'jump', reduceRef.current);
     const root = board.getRootNode() as ShadowRoot | Document;
     // While an example is followed, a click on the picture jumps to the step of the lit part it lands on, and
-    // does nothing else (no Change it, no link): the picture is the example's now.
+    // does nothing else (no Change it, no link): the picture is the example's now. With Annotate on, the picture
+    // annotates as it does on the board; only the example's own tags still step.
     const onClick = (e: Event) => {
       const path = e.composedPath();
+      if (annotatingRef.current && !path.some((t) => t instanceof Element && t.classList.contains('shp-ex-tag'))) return;
       e.stopPropagation();
       e.preventDefault();
       const lit = path.find((t): t is Element => t instanceof Element && t.hasAttribute('data-ex-i'));
       if (lit) dispatch({ type: 'step', step: Number(lit.getAttribute('data-ex-i')) });
     };
-    const quiet = (e: Event) => e.stopPropagation();
+    const quiet = (e: Event) => {
+      if (!annotatingRef.current) e.stopPropagation();
+    };
     root.addEventListener('click', onClick, true);
     root.addEventListener('pointermove', quiet, true);
     root.addEventListener('mouseup', quiet, true);
@@ -742,7 +838,10 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const before = flip.current;
     flip.current = null;
     const red = reduceRef.current;
-    if (card) fitSurface(card, phone);
+    if (card) {
+      floorChecks(card);
+      fitSurface(card, phone);
+    }
     if (card && before && !red) {
       for (const a of flipping.current) a.cancel();
       flipping.current = [];
@@ -804,7 +903,16 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     if (card && phone && head) card.style.setProperty('--ex-room', `${Math.max(surface!.clientHeight - under - SHEET_GAP, surface!.clientHeight * 0.6)}px`);
     const covered = shown && phone && !!head && surface!.clientHeight - under - card!.offsetHeight < BOARD_MIN;
     view?.classList.toggle('shp-ex-covered', covered);
+    view?.toggleAttribute('inert', covered);
     card?.classList.toggle('over', covered);
+    // The board's status keeps its place above the card: never under it.
+    if (shown && surface) {
+      const lift = card!.offsetHeight + 8 + (phone ? -PILL_BOTTOM.phone : 0);
+      surface.style.setProperty('--ex-lift', `${Math.max(0, phone ? Math.min(lift, surface.clientHeight - PILL_BOTTOM.phone - PILL_ROOM) : lift)}px`);
+    } else surface?.style.removeProperty('--ex-lift');
+    const was = focusWas.current;
+    focusWas.current = null;
+    if (was !== null) landFocus(card, surface, was);
   });
 
   // Stepping: the board's light, the card's hand-off, and the way the new step comes in.
@@ -901,7 +1009,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const a = sc.getBoundingClientRect();
     const b = line.getBoundingClientRect();
     if (b.top < a.top || b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
-  }, [expanded, stepOn, phase, phone]);
+  }, [expanded, stepOn, phase, phone, box]);
 
   // The path keeps the step on now in view; a phone's sheet starts each step at its top, and lower only for the rule that decided it.
   useLayoutEffect(() => {
@@ -943,11 +1051,13 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const el = painter.current?.elementOf(phase.step) as HTMLElement | null | undefined;
     const view = viewOf();
     if (!el || !view || typeof view.scrollTo !== 'function') return;
-    const top = el.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - 56;
+    // Room above the part for its tag; a tag at the part's bottom needs that room below, clear of the sheet.
+    const above = example?.steps[phase.step]?.tagAt === 'bottom' ? 20 : 56;
+    const top = el.getBoundingClientRect().top - view.getBoundingClientRect().top + view.scrollTop - above;
     view.scrollTo({ top: Math.max(0, top), behavior: reduce ? 'auto' : 'smooth' });
   }, [board, phase, phone, expanded, reduce, viewOf]);
 
-  if (!examples.length) return { button: null, card: null, sheet: false };
+  if (!examples.length) return { button: null, card: null, sheet: false, stop: null };
 
   const ex = phase.open ? examples[phase.ex] ?? null : null;
   const step = phase.open && phase.step !== null && ex ? ex.steps[phase.step] ?? null : null;
@@ -1037,7 +1147,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       data-follow=""
       onClick={() => dispatch({ type: 'toggle' })}
     >
-      <RailIcon />
+      <RouteIcon />
       {!phone && !dockTight && <span className="tl">Follow an example</span>}
     </button>
   ) : null;
@@ -1144,5 +1254,5 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       </section>
     ) : null;
 
-  return { button, card, sheet: !!card && phone };
+  return { button, card, sheet: !!card && phone, stop: card ? () => dispatch({ type: 'close' }) : null };
 }

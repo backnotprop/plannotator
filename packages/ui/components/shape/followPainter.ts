@@ -226,8 +226,13 @@ export class FollowPainter {
       el.setAttribute('data-s', this.stateOf(i, step));
     }
     for (const { tag, i } of this.tags) {
+      const state = this.stateOf(i, step);
       tag.style.setProperty('--ex-d', `${delay(i)}ms`);
-      tag.setAttribute('data-s', this.stateOf(i, step));
+      tag.setAttribute('data-s', state);
+      // A step still to come has no tag yet: nothing to land on with the keys, or to read out.
+      tag.tabIndex = state === 'later' ? -1 : 0;
+      if (state === 'later') tag.setAttribute('aria-hidden', 'true');
+      else tag.removeAttribute('aria-hidden');
     }
     for (const { i, el } of this.lit) {
       // The arrow being taken lights up under the dot, over its whole run.

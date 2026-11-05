@@ -10,7 +10,12 @@
  *  - folded, the arrows and the picture still step;
  *  - a phone's open sheet: one row of controls that stays, the rule that decided it and what comes out; the rest opens on request, and a full sheet leaves no slice of the board;
  *  - one column beside a board: what decided it first, nothing on top of anything, the dock's every button on screen;
- *  - a path too long for its room keeps the stop on now in view, on the rail and on a phone.
+ *  - a path too long for its room keeps the stop on now in view, on the rail and on a phone;
+ *  - a signature too long for its room gives way before the line that decided it, and what comes out stays on the card;
+ *  - with a panel open the dock stays whole beside it, on a board with examples;
+ *  - a window made only shorter lays out again;
+ *  - the keys never fall to the page, and Esc stops following before it closes the board;
+ *  - the board's status stays in view and clickable above the card.
  *
  * Build first: see inbox.spec.ts.
  */
@@ -73,6 +78,14 @@ const LONG_STEP = {
 const steps = [SHORT, NORMAL, LONG_STEP, { ...SHORT, part: 'd', tag: 'nothing shows', text: 'Nothing shows for the guest', inputs: [{ name: 'decision.show', value: 'false', from: { step: 3 } }] }];
 const parts = ['a', 'b', 'c', 'd'].map((p, i) => part(p, i + 1, box(20 + i * 220, 60, 190, 90), text(40 + i * 220, 110, `Part ${p}`))).join('');
 const longWay = Array.from({ length: 12 }, (_, i) => ({ ...SHORT, part: 'abcd'[i % 4], tag: `stop ${i + 1}`, text: `Stop ${i + 1} on the long way` }));
+// A real long signature: ten parameters, and one at the format's limit of 600 characters.
+const TEN = 'decideEverything(request: AuthenticatedRequest<ClaimBody>, saved: Saved | undefined, now: Date, release: string, policy: GuestPolicy, node: NodeIdentity, session: SessionDescriptor, gate: Gate, rows: Row[], overlay: OverlayState): Promise<Decision>';
+const AT_LIMIT = `atTheLimit(${Array.from({ length: 35 }, (_, i) => `param${i}: Type${i}`).join(', ')}): boolean`;
+const threeChecks = [check('gate.open'), check('gate.rows.length > 0', { decides: true }), { code: 'rule(gate)', result: 'not-reached' }];
+const wideSteps = [
+  { ...SHORT, part: 'a', tag: 'ten', text: 'Ten parameters', signature: TEN, checks: threeChecks },
+  { ...SHORT, part: 'b', tag: 'limit', text: 'A signature at the limit', signature: AT_LIMIT, checks: threeChecks },
+];
 const board = {
   title: 'Follow one example',
   claim: 'Built. Nothing waits on you.',
@@ -85,17 +98,18 @@ const board = {
       examples: [
         { name: 'A guest leaves', title: 'A guest leaves a thread', steps },
         { name: 'The long way', title: 'The long way round', steps: longWay },
+        { name: 'Long signatures', title: 'Long signatures', steps: wideSteps },
       ],
     },
   },
   refs: [{ n: 1, kind: 'link', title: 'Reference 1', target: 'https://example.com/ref' }],
 };
 
-async function openBoard(browser: Browser, options: Parameters<Browser['newContext']>[0] = {}) {
+async function openBoard(browser: Browser, options: Parameters<Browser['newContext']>[0] = {}, shape = id) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...options });
   await context.route((url) => !['127.0.0.1', 'localhost'].includes(url.hostname), (route) => route.abort());
   const page = await context.newPage();
-  await page.goto(`${w.url}#thread=${w.threads.snooze}&shape=${id}&view=how`);
+  await page.goto(`${w.url}#thread=${w.threads.snooze}&shape=${shape}&view=how`);
   await page.locator('.shp-dock button[title="How it works"]').click();
   await page.locator('[data-follow]').click();
   await page.getByRole('button', { name: 'Step through' }).click();
@@ -240,11 +254,34 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
     await press(page, 'What happens');
     await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(12);
     await expect(cur.locator('.shp-ex-sig')).toHaveCount(1);
+    // A long function name breaks where its words meet, never mid-word.
+    const midWord = await cur.locator('.shp-ex-sig').evaluate((sig) => {
+      const walk = document.createTreeWalker(sig, NodeFilter.SHOW_TEXT);
+      const found: string[] = [];
+      let top = -1;
+      let prev = '';
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        const chars = n.textContent ?? '';
+        for (let i = 0; i < chars.length; i++) {
+          const range = document.createRange();
+          range.setStart(n, i);
+          range.setEnd(n, i + 1);
+          const at = range.getClientRects()[0]?.top;
+          if (at === undefined) continue;
+          if (top >= 0 && at > top + 4 && /[a-z]/.test(prev) && /[a-z]/.test(chars[i]!)) found.push(prev + chars[i]);
+          top = at;
+          prev = chars[i]!;
+        }
+      }
+      return found;
+    });
+    expect(midWord).toEqual([]);
     await press(page, 'Goes in');
     await expect(cur.locator('.shp-ex-vars > li')).toHaveCount(12);
 
     // Full, the sheet owns the screen under the title: no slice of the board, nothing over the title, nothing off the side.
     await expect(page.locator('.shp-view.v-how')).toHaveCSS('opacity', '0');
+    await expect(page.locator('.shp-view.v-how')).toHaveAttribute('inert', '');
     expect((await rect(page, '.shp-ex-card'))!.top).toBeGreaterThanOrEqual((await rect(page, '.shp-head'))!.bottom);
     expect(await page.locator('.shp-ex-in').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
     expect((await rect(page, '[aria-label="Stop following"]'))!.right).toBeLessThanOrEqual(viewport.width);
@@ -299,6 +336,7 @@ test('a path too long for its room keeps the stop on now in view, on the rail an
     if (await through.count()) await press(page, 'Step through');
     await press(page, options === phone ? 'Show more' : 'Inputs and outputs');
     await expect(page.locator(`${room} .shp-ex-stop`)).toHaveCount(longWay.length);
+    expect(await page.locator(room).evaluate((el) => el.scrollLeft + el.scrollTop)).toBe(0);
     for (let i = 1; i < longWay.length; i++) await press(page, 'Next step');
     await expect(page.locator('.shp-ex-stop.on')).toHaveAttribute('aria-label', 'Step 12: stop 12');
     // The room scrolls: the last stop is only in it because the path followed.
@@ -308,6 +346,137 @@ test('a path too long for its room keeps the stop on now in view, on the rail an
     expect(on.bottom).toBeLessThanOrEqual(box.bottom);
     expect(on.left).toBeGreaterThanOrEqual(box.left);
     expect(on.right).toBeLessThanOrEqual(box.right);
+    await context.close();
+  }
+});
+
+for (const height of [700, 900]) {
+  test(`a signature too long for its room gives way at ${height} tall: the line that decided it and what comes out stay`, async ({ browser }) => {
+    const { context, page } = await openBoard(browser, { viewport: { width: 1440, height } });
+    await page.locator('.shp-ex-tabs button').nth(2).click();
+    await settle(page);
+    await press(page, 'Step through');
+    await press(page, 'Inputs and outputs');
+    for (const [i] of wideSteps.entries()) {
+      if (i) await press(page, 'Next step');
+      const scroller = (await rect(page, '.shp-ex-io.cur .shp-ex-scroll'))!;
+      const deciding = (await rect(page, '.shp-ex-io.cur .decides'))!;
+      expect(scroller.height).toBeGreaterThanOrEqual(deciding.height);
+      expect(deciding.top).toBeGreaterThanOrEqual(scroller.top);
+      expect(deciding.bottom).toBeLessThanOrEqual(scroller.bottom);
+      const signature = page.locator('.shp-ex-io.cur .shp-ex-sig');
+      const sig = (await rect(page, '.shp-ex-io.cur .shp-ex-sig'))!;
+      expect(sig.height).toBeGreaterThanOrEqual(20);
+      expect(sig.top).toBeGreaterThanOrEqual((await rect(page, '.shp-ex-ios'))!.top);
+      expect(sig.bottom).toBeLessThanOrEqual(scroller.top + 1);
+      // What does not fit is a scroll away; ten parameters fit a tall window whole.
+      const hidden = await signature.evaluate((el) => el.scrollHeight - el.clientHeight);
+      if (i === 1 || height === 700) expect(hidden).toBeGreaterThan(0);
+      else expect(hidden).toBe(0);
+      expect((await rect(page, '.shp-ex-io.cur .shp-ex-ret'))!.bottom).toBeLessThanOrEqual((await rect(page, '.shp-ex-skin'))!.bottom);
+    }
+    await context.close();
+  });
+}
+
+test('with a panel open the dock stays whole beside it: this button gives up its words, and takes them back', async ({ browser }) => {
+  const { context, page } = await openBoard(browser);
+  const words = page.locator('[data-follow] .tl');
+  await expect(words).toHaveCount(1);
+  await page.locator('.shp-dock button[title="References"]').click();
+  await settle(page);
+  await expect(words).toHaveCount(0);
+  const dock = (await rect(page, '.shp-dock'))!;
+  expect(dock.left).toBeGreaterThanOrEqual((await rect(page, '.shp-root'))!.left);
+  expect(dock.right).toBeLessThanOrEqual((await rect(page, '.shp-sidep'))!.left);
+  await page.locator('.shp-dock button[title="References"]').click();
+  await settle(page);
+  await expect(words).toHaveCount(1);
+  await context.close();
+});
+
+test('a window made only shorter lays out again: the board clears the card, and a phone hides a slice of it', async ({ browser }) => {
+  const desk = await openBoard(browser, { viewport: { width: 1440, height: 1000 } });
+  await press(desk.page, 'Inputs and outputs');
+  await desk.page.setViewportSize({ width: 1440, height: 640 });
+  await settle(desk.page);
+  expect((await rect(desk.page, '.shp-view.v-how .shp-drawn-fit'))!.bottom).toBeLessThanOrEqual((await rect(desk.page, '.shp-ex-card'))!.top);
+  await desk.context.close();
+
+  const viewport = { width: 390, height: 844 };
+  const small = await openBoard(browser, { ...phone, viewport, screen: viewport });
+  await press(small.page, 'Show more');
+  await expect(small.page.locator('.shp-view.v-how')).toHaveCSS('opacity', '1');
+  await small.page.setViewportSize({ width: 390, height: 420 });
+  await settle(small.page);
+  await expect(small.page.locator('.shp-view.v-how')).toHaveCSS('opacity', '0');
+  await small.context.close();
+});
+
+test('the keys never fall to the page, and Esc stops following before it closes the board', async ({ browser }) => {
+  const { context, page } = await openBoard(browser);
+  const focused = () => page.evaluate(() => document.activeElement?.getAttribute('aria-label') ?? document.activeElement?.textContent?.trim() ?? '');
+  const enter = async () => {
+    await page.keyboard.press('Enter');
+    await settle(page);
+  };
+  await page.getByRole('button', { name: 'All steps' }).focus();
+  await enter();
+  expect(await focused()).toBe('Step through');
+  await enter();
+  expect(await focused()).toBe('Next step');
+  for (let i = 1; i < steps.length; i++) await enter();
+  await expect(page.locator('.shp-ex-text.cur .shp-ex-count')).toHaveText('4 of 4');
+  expect(await focused()).toBe('Previous step');
+
+  // From the rail, the tab moves with the card and keeps the keys.
+  await press(page, 'Inputs and outputs');
+  await page.locator('.shp-ex-rail .shp-ex-tabs button').nth(1).focus();
+  await enter();
+  await expect(page.locator('.shp-ex-rail')).toHaveCount(0);
+  expect(await focused()).toBe('The long way');
+
+  await page.getByRole('button', { name: 'Stop following' }).focus();
+  await enter();
+  await expect(page.locator('.shp-ex-card:not(.leaving)')).toHaveCount(0);
+  expect(await focused()).toBe('Follow an example');
+
+  // Esc: the example goes first, with the keys back on the dock; the next one closes the board.
+  await enter();
+  await expect(page.locator('.shp-ex-card:not(.leaving)')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await settle(page);
+  await expect(page.locator('.shp-ex-card:not(.leaving)')).toHaveCount(0);
+  await expect(page.locator('.shp-root')).toHaveCount(1);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.shp-root')).toHaveCount(0);
+  await context.close();
+});
+
+test("the board's status stays in view and clickable above the card, on a desk and on a phone", async ({ browser }) => {
+  const viewport = { width: 390, height: 844 };
+  for (const [name, options] of [['desk', {}], ['phone', { ...phone, viewport, screen: viewport }]] as const) {
+    const dir = join(w.root, 'boards', `follow-pill-${name}`);
+    mkdirSync(dir, { recursive: true });
+    const file = join(dir, 'board.json');
+    writeFileSync(file, JSON.stringify(board));
+    const made = w.shape(['update', '--file', file, '--project', w.projects.plannotator!, '--thread', w.threads.snooze!]);
+    expect(made.status, made.stderr).toBe(0);
+    const pillId = (JSON.parse(made.stdout) as { id: string }).id;
+
+    const { context, page } = await openBoard(browser, options, pillId);
+    await press(page, name === 'phone' ? 'Show more' : 'Inputs and outputs');
+    writeFileSync(file, JSON.stringify({ ...board, claim: 'Built, version two.' }));
+    const again = w.shape(['update', '--file', file, '--project', w.projects.plannotator!, '--thread', w.threads.snooze!, '--id', pillId, '--base', '1']);
+    expect(again.status, again.stderr).toBe(0);
+
+    const pill = page.locator('.shp-pill');
+    await expect(pill).toBeVisible();
+    await settle(page);
+    const at = (await rect(page, '.shp-pill'))!;
+    expect(at.bottom).toBeLessThanOrEqual((await rect(page, '.shp-ex-skin'))!.top);
+    const top = await page.evaluate(([x, y]) => !!document.elementFromPoint(x!, y!)?.closest('.shp-pill'), [at.left + at.width / 2, at.top + at.height / 2]);
+    expect(top).toBe(true);
     await context.close();
   }
 });

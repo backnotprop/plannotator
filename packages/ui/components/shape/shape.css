@@ -327,6 +327,9 @@
 @keyframes shp-ex-card-in { from { opacity: 0; transform: translateY(8px); } }
 .shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
 .shp-ex-card.leaving { pointer-events: none; }
+/* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
+.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: translate .26s cubic-bezier(.22, 1, .36, 1); }
+.shp-root.follow-sheet .shp-pill { z-index: 26; }
 .shp-ex-skin { position: absolute; inset: 0 0 var(--ex-cut, 0px); z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
   box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }
 .shp-ex-in { padding: 8px 12px 12px; }
@@ -383,7 +386,8 @@
 .shp-ex-card.phone .shp-ex-ios > .shp-ex-io { max-height: none; }
 .shp-ex-card.phone .shp-ex-ios > .shp-ex-io:not(.cur) { position: absolute; inset: 0 0 auto 0; }
 .shp-ex-io.panes { grid-template-rows: minmax(0, 1fr); }
-.shp-ex-scroll { position: relative; flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-inline: -8px; padding-inline: 8px; }
+/* Short of room, the checks give way first, as far as their floor (floorChecks); then the signature, down to a line. */
+.shp-ex-scroll { position: relative; flex: 0 1000000 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-inline: -8px; padding-inline: 8px; }
 .shp-ex-many { font-variant-numeric: tabular-nums; opacity: .8; margin-left: 2px; }
 .shp-ex-ios > .shp-ex-io.cur, .shp-ex-ios > .shp-ex-io.leaving { visibility: visible; }
 .shp-ex-io.cur { visibility: visible; }
@@ -406,8 +410,8 @@ html.light .shp-ex-card .tk { color: var(--shiki-light); }
 @property --shp-ex-t { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @property --shp-ex-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
 @supports (animation-timeline: scroll()) {
-  .shp-ex-scroll, .shp-ex-vars { mask-image: linear-gradient(#0000, #000 var(--shp-ex-t), #000 calc(100% - var(--shp-ex-b)), #0000); animation: shp-ex-edges linear both; animation-timeline: scroll(self); }
-  .shp-ex-card.narrow .shp-ex-scroll, .shp-ex-card.narrow .shp-ex-vars { mask-image: none; animation: none; }
+  .shp-ex-scroll, .shp-ex-vars, .shp-ex-sig { mask-image: linear-gradient(#0000, #000 var(--shp-ex-t), #000 calc(100% - var(--shp-ex-b)), #0000); animation: shp-ex-edges linear both; animation-timeline: scroll(self); }
+  .shp-ex-card.narrow .shp-ex-scroll, .shp-ex-card.narrow .shp-ex-vars, .shp-ex-card.narrow .shp-ex-sig { mask-image: none; animation: none; }
   @keyframes shp-ex-edges { 0% { --shp-ex-t: 0px; --shp-ex-b: 20px; } 8% { --shp-ex-t: 20px; } 92% { --shp-ex-b: 20px; } 100% { --shp-ex-t: 20px; --shp-ex-b: 0px; } }
 }
 
@@ -435,7 +439,8 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-oi { flex: none; opacity: .5; transition: opacity .15s ease, transform .15s ease; }
 
 /* What happens: the signature, then one line per check; the line that decided it is the band the eye lands on. */
-.shp-ex-sig { display: block; flex: none; margin-top: 4px; font: var(--ex-mono); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shp-ex-sig { display: block; flex: 0 1 auto; min-height: 20px; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; margin-top: 4px; font: var(--ex-mono); color: var(--foreground); white-space: pre-wrap; overflow-wrap: anywhere; }
+.shp-ex-sig .ln { display: block; padding-left: 4ch; text-indent: -4ch; }
 .shp-ex-checks { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: minmax(0, 1fr); }
 .shp-ex-checks > li { display: flex; flex-wrap: wrap; column-gap: 8px; align-items: baseline; margin-inline: -8px; padding: 2px 8px; border-radius: 6px; }
 .shp-ex-checks .mk { flex: none; align-self: start; margin-top: 3px; color: var(--muted-foreground); }
@@ -556,6 +561,7 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
   .shp-ex-stack > * { transition: opacity .15s linear, visibility 0s linear .15s; }
   .shp-ex-stack > .cur { transition: opacity .15s linear, visibility 0s; }
   .shp-root.follow-sheet .shp-dock { transition: opacity .15s linear; transform: translate(-50%, 0); }
+  .shp-pill { transition: none; }
   .shp-ex-icon, .shp-ex-quiet, .shp-ex-step, .shp-ex-more { transition: background-color .15s, color .15s; }
   .shp-ex-icon:active:not(:disabled), .shp-ex-quiet:active, .shp-ex-step:active, .shp-ex-more:active { transform: none; }
 }

@@ -8,8 +8,9 @@
  * Host-neutral: everything comes through `host` (ShapeHost, types.ts). Lifted
  * from the approved prototype; what changed and why is in the PR.
  *
- * Keys: Esc only (owner-approved): it closes the panel, or skips the drawing
- * while it plays. The composer, lightbox and popouts take their own Esc first.
+ * Keys: Esc only (owner-approved): it closes the panel, stops following an
+ * example, or skips the drawing while it plays. The composer, lightbox and
+ * popouts take their own Esc first.
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -416,6 +417,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   }, [readProjectFile, host, openCode]);
 
   // Esc: close the panel; otherwise skip the drawing while it plays.
+  const stopFollowRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
@@ -437,6 +439,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       if (moreRef.current) {
         e.preventDefault();
         toggleMoreRef.current();
+        return;
+      }
+      // Following an example is the same: Esc comes back to the board before it closes anything.
+      if (stopFollowRef.current) {
+        e.preventDefault();
+        stopFollowRef.current();
         return;
       }
       if (Date.now() > drawingUntil.current) return;
@@ -768,7 +776,11 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     surface: rootEl,
     onCode: (at) => void openCodeTarget(at),
     canOpen: (path) => !!host.readFile && isShapeProjectPath(path),
+    panel: !!panel,
+    // Only the Annotate button's choice: a host without it is always annotating, and its picture still steps.
+    annotating: readFirst && annotating,
   });
+  stopFollowRef.current = follow.stop;
 
   const copyPrompt = async () => {
     const text = host.resumePrompt?.(id);
