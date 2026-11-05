@@ -348,6 +348,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       failures.set(pull.key, { head: pull.head_sha, base: pull.base, rules, reason });
     };
     let patch: string;
+    let partial: boolean;
     try {
       const diff = await options.pulls.wholeDiff(pull.key, stopping.signal);
       // The diff read is the head judged: a push since the list waits for the next list's head.
@@ -356,6 +357,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         return;
       }
       patch = diff.patch;
+      partial = diff.partial;
     } catch (cause) {
       const { code, message } = cause as { code?: string; message?: string };
       waits.set(job, now() + RISK_RETRY_MS);
@@ -393,7 +395,9 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     lastFailure = null;
     failuresInARow = 0;
     waits.delete(job);
-    keep(pull.key, { ...judgment, head: pull.head_sha, base: pull.base, rules });
+    // Part of a diff can't show that nothing is touched: Low from it is the rules' "maybe".
+    const level = partial && judgment.level === "low" ? "medium" : judgment.level;
+    keep(pull.key, { ...judgment, level, head: pull.head_sha, base: pull.base, rules });
   };
 
   const pump = () => {

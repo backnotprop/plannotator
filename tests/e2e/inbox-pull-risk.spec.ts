@@ -205,7 +205,7 @@ test.beforeAll(async ({ browser }) => {
   writeGh(fakes);
   writeFileSync(
     join(fakes, 'files-503.json'),
-    `${JSON.stringify([{ filename: 'README.md', status: 'modified', patch: '@@ -1 +1 @@\n-teh\n+the paged page one\n' }])}${JSON.stringify([{ filename: 'vendor/huge.bin', status: 'modified' }])}`,
+    `${JSON.stringify([{ filename: 'README.md', status: 'modified', patch: '@@ -1 +1 @@\n-teh\n+the paged page one\n' }])}${JSON.stringify([{ filename: 'README-2.md', status: 'modified', patch: '@@ -1 +1 @@\n-a\n+the paged page two\n' }])}`,
   );
   writePi(fakes);
   writeFileSync(join(fakes, 'big.patch'), `diff --git a/api.ts b/api.ts\n--- a/api.ts\n+++ b/api.ts\n@@ -1 +1,${BIG_LINES} @@\n${'+export const line = 1;\n'.repeat(BIG_LINES)}`);
@@ -399,7 +399,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   // The forge refused #503 as one document: the agent read its per-file pages, and ranked it.
   const paged = prompts().find((l) => l.prompt!.includes('Title: Fix a typo in the README'))!.prompt!;
   expect(paged).toContain('+the paged page one');
-  expect(paged).toContain('diff --git a/vendor/huge.bin b/vendor/huge.bin');
+  expect(paged).toContain('+the paged page two');
 
   // The whole 9 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
   const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;

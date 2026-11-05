@@ -62,7 +62,7 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -576,9 +576,10 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /**
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
-   * document, whatever its per-file read gives. `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
+   * document, whatever its per-file read gives; `partial` when that is known to be less than the whole diff.
+   * `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
    */
-  wholeDiff(key: string, signal?: AbortSignal): Promise<{ patch: string; head_sha: string | null }>;
+  wholeDiff(key: string, signal?: AbortSignal): Promise<{ patch: string; head_sha: string | null; partial: boolean }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
@@ -606,6 +607,8 @@ export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number, rea
 export const INBOX_PULL_DIFF_TIMEOUT_MS = 30_000;
 /** An agent's read of a whole diff has the time the agent has. */
 export const INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS = 5 * 60_000;
+/** GitHub's files API stops listing here, whatever the PR holds. */
+const GITHUB_FILES_API_STOP = 3000;
 
 /**
  * gh / glab for a diff, read as a stream: the bytes are counted as they come and the CLI is stopped past
@@ -1109,13 +1112,19 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         ? await read(`repos/${parts.owner}/${parts.repo}/pulls/${pull.number}`, "-H", "Accept: application/vnd.github.v3.diff")
         : await read(`${project}/raw_diffs`);
       let patch = whole.exitCode === 0 ? whole.stdout : "";
+      let partial = false;
       if (!patch.trim()) {
         const stop = whole.exitCode === 0 ? null : stopFor(whole);
         if (stop) throw new InboxPullsError("pull_diff_failed", stop);
         // The forge's per-file read: a file it holds back still comes by name, and a page that failed leaves the ones before it.
         const paged = github ? await read(`repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/files?per_page=100`, "--paginate") : await read(`${project}/diffs?per_page=100`, "--paginate");
+        const gather = <Entry,>(entries: Entry[], rebuild: (all: Entry[]) => string, heldBack: (one: Entry) => boolean) => {
+          patch = rebuild(entries);
+          partial = paged.exitCode !== 0 || entries.length < pull.files || (github && entries.length >= GITHUB_FILES_API_STOP) || entries.some(heldBack);
+        };
         try {
-          patch = github ? reconstructGhPatch(parsePaginatedArray<GitHubFileEntry>(paged.stdout)) : reconstructGitlabPatch(parsePaginatedArray<GitLabDiffEntry>(paged.stdout));
+          if (github) gather(parsePaginatedArray<GitHubFileEntry>(paged.stdout), reconstructGhPatch, ghEntryMissingContent);
+          else gather(parsePaginatedArray<GitLabDiffEntry>(paged.stdout), reconstructGitlabPatch, glEntryMissingContent);
         } catch {
           patch = "";
         }
@@ -1125,7 +1134,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         }
       }
       const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
-      return { patch, head_sha: headBefore && headBefore === headAfter ? headBefore : null };
+      return { patch, partial, head_sha: headBefore && headBefore === headAfter ? headBefore : null };
     },
   };
 }

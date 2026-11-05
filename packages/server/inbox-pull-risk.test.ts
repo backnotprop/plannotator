@@ -54,7 +54,7 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
         await options.diffGate;
         if (options.diffFails) throw Object.assign(new Error("gh failed"), typeof options.diffFails === "string" ? { code: options.diffFails } : {});
         const number = key.split("#")[1];
-        return { patch: options.patch ?? "diff --git a/x b/x\n", head_sha: options.head ? options.head(key) : `head-${number}` };
+        return { patch: options.patch ?? "diff --git a/x b/x\n", partial: false, head_sha: options.head ? options.head(key) : `head-${number}` };
       },
     },
     run: async (run) => {
@@ -124,7 +124,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   type Answer = { stdout?: string; stderr?: string; exitCode?: number };
   const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
   /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
-  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number } = {}) {
+  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; files?: number } = {}) {
     const github = platform === "github";
     const endpoints: string[] = [];
     const run = async (cli: string, args: string[]) => {
@@ -135,8 +135,8 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       if (args.includes("graphql")) {
         if (args.some((a) => a.startsWith("query=query InboxPullsOthers"))) return answered({ stdout: JSON.stringify({ data: github ? { viewer: { login: "dana" } } : { currentUser: { username: "dana" } } }) });
         return answered({ stdout: JSON.stringify(github
-          ? { data: { viewer: { login: "dana" }, requested: { nodes: [ghNode] }, authored: { nodes: [] }, merged: { nodes: [] } } }
-          : { data: { currentUser: { username: "dana", requested: { nodes: [glNode] }, authored: { nodes: [] }, merged: { nodes: [] } } } }) });
+          ? { data: { viewer: { login: "dana" }, requested: { nodes: [{ ...ghNode, changedFiles: options.files ?? ghNode.changedFiles }] }, authored: { nodes: [] }, merged: { nodes: [] } } }
+          : { data: { currentUser: { username: "dana", requested: { nodes: [{ ...glNode, diffStatsSummary: { ...glNode.diffStatsSummary, fileCount: options.files ?? 1 } }] }, authored: { nodes: [] }, merged: { nodes: [] } } } }) });
       }
       const endpoint = args[3]!;
       endpoints.push(endpoint);
@@ -156,7 +156,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       pulls,
       run: async (one) => {
         runs.push(one);
-        return { text: HIGH };
+        return { text: options.answer ?? HIGH };
       },
     });
     const judge = async () => {
@@ -198,6 +198,56 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     expect(prompt).not.toMatch(/too large/i);
     expect(risk.answer().judgments[key]?.level).toBe("high");
     expect(risk.answer().failed).toEqual({});
+  });
+
+  describe("an answer of Low from a read known to be incomplete", () => {
+    const LOW = '{"risk":"low","why":"Only the README wording changes."}';
+    const MEDIUM = '{"risk":"medium","why":"It may touch billing."}';
+    const refused = { stderr: "gh: (HTTP 406)", exitCode: 1 };
+    const full = (n: number) => ({ filename: `src/f${n}.ts`, status: "modified", patch: "@@ -1 +1 @@\n-a\n+b\n" });
+    const glFile = (fields: Record<string, unknown>) => ({ diff: "", old_path: "l.ts", new_path: "l.ts", new_file: false, deleted_file: false, renamed_file: false, ...fields });
+    const levelOf = async (platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, answer: string, files?: number) => {
+      setRules();
+      const { risk, judge, key } = await reading(platform, script, { answer, files });
+      await judge();
+      return { level: risk.answer().judgments[key]?.level, why: risk.answer().judgments[key]?.why, failed: risk.answer().failed };
+    };
+
+    test.each([
+      ["a file held back, as a bare header", { stdout: JSON.stringify([full(1), { filename: "vendor/huge.bin", status: "modified" }]) }, undefined],
+      ["a page that failed", { stdout: JSON.stringify([full(1)]), stderr: "gh: Bad Gateway (HTTP 502)", exitCode: 1 }, undefined],
+      ["GitHub's 3000-file stop", { stdout: JSON.stringify(Array.from({ length: 3000 }, (_, n) => full(n))) }, undefined],
+      ["fewer files than the PR says it has", { stdout: JSON.stringify([full(1), full(2)]) }, 40],
+    ])("%s: shows Medium, with the agent's own sentence", async (_name, paged, files) => {
+      const { level, why, failed } = await levelOf("github", { whole: refused, paged }, LOW, files);
+      expect(level).toBe("medium");
+      expect(why).toBe("Only the README wording changes.");
+      expect(failed).toEqual({});
+    });
+
+    test.each([
+      ["too_large", glFile({ too_large: true })],
+      ["collapsed", glFile({ collapsed: true })],
+    ])("GitLab holding a file back (%s): shows Medium", async (_name, file) => {
+      const { level } = await levelOf("gitlab", { whole: { stdout: "" }, paged: { stdout: JSON.stringify([glFile({ diff: "@@ -1 +1 @@\n+x\n" }), file]) } }, LOW);
+      expect(level).toBe("medium");
+    });
+
+    test.each([
+      ["High", HIGH, "high"],
+      ["Medium", MEDIUM, "medium"],
+    ])("%s stays as it is", async (_name, answer, expected) => {
+      const paged = { stdout: JSON.stringify([full(1), { filename: "vendor/huge.bin", status: "modified" }]) };
+      expect((await levelOf("github", { whole: refused, paged }, answer)).level).toBe(expected);
+    });
+
+    test.each([
+      ["the whole document", { whole: { stdout: "diff --git a/x b/x\n" } }],
+      ["every file by pages", { whole: refused, paged: { stdout: `${JSON.stringify([full(1)])}${JSON.stringify([full(2)])}` } }],
+      ["a pure rename, which has no patch to hold back", { whole: refused, paged: { stdout: JSON.stringify([{ filename: "b.ts", previous_filename: "a.ts", status: "renamed" }]) } }],
+    ])("a complete read keeps Low: %s", async (_name, script) => {
+      expect((await levelOf("github", script, LOW)).level).toBe("low");
+    });
   });
 
   test("a page failing partway: the agent decides from the pages before it", async () => {
@@ -908,7 +958,7 @@ require("readline").createInterface({input:process.stdin}).on("line",(l)=>{const
       dataDir,
       isOn: () => true,
       agents: () => AGENTS,
-      pulls: { wholeDiff: async () => ({ patch: diff, head_sha: "head-1" }) },
+      pulls: { wholeDiff: async () => ({ patch: diff, partial: false, head_sha: "head-1" }) },
       run: (run) => runRiskAgent(provider, run),
     });
     risk.assess([pull(1)]);
@@ -988,7 +1038,7 @@ describe("the model it starts on", () => {
     expect(startingRiskModel("codex-sdk", [])).toBeNull();
   });
   test("what the dialog is told to start on is the same pick, from the agent's list", async () => {
-    const risk = createPullRisk({ dataDir, isOn: () => true, pulls: { wholeDiff: async () => ({ patch: "", head_sha: null }) }, listModels: async () => [{ id: "gpt-6-sol", label: "Sol", default: true }, { id: "gpt-6-luna", label: "Luna" }] });
+    const risk = createPullRisk({ dataDir, isOn: () => true, pulls: { wholeDiff: async () => ({ patch: "", partial: false, head_sha: null }) }, listModels: async () => [{ id: "gpt-6-sol", label: "Sol", default: true }, { id: "gpt-6-luna", label: "Luna" }] });
     expect(await risk.models("codex-sdk")).toEqual({ models: [{ id: "gpt-6-sol", label: "Sol" }, { id: "gpt-6-luna", label: "Luna" }], default_model: "gpt-6-luna" });
     expect((await risk.models("pi-sdk")).default_model).toBeNull();
   });
