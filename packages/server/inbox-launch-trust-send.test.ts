@@ -8,11 +8,13 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
 import { INBOX_SCRATCH_PICK } from "@plannotator/core/inbox-scratch";
 import type { InboxComposeLaunch } from "@plannotator/core/inbox-types";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
 import { scriptedTailscale, TAILNET_MAGIC, TAILNET_OWNER } from "../../tests/helpers/scripted-tailscale";
 import { startInboxServer, type InboxServer } from "./inbox";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import type { LaunchTrustReading } from "./inbox-launch-host";
 
 const GUEST = "guest@example.com";
@@ -34,7 +36,7 @@ function setEnv(name: string, value: string | undefined) {
   });
 }
 
-async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled: true } }) {
+async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled: true } }, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-trust-send-")));
   restore.push(() => rmSync(root, { recursive: true, force: true }));
   const dataDir = join(root, "data");
@@ -61,6 +63,7 @@ async function setup(config: Record<string, unknown> = { inboxLaunch: { enabled:
     publishTailnet: true,
     phones: true,
     launchHosts: () => [fake.host],
+    ...(sessionsNow ? { sessionsNow } : {}),
   });
   restore.push(() => server.stop());
   const store = server.store;
@@ -458,5 +461,136 @@ describe("what `GET /api/inbox/sessions` offers", () => {
     const world = await setup({ inboxLaunch: { enabled: false } });
     expect(await world.sessions(`?trust_agent=${FAKE}&trust_project=${world.project.id}`)).toBeUndefined();
     expect(world.offer.reads).toBe(0);
+  });
+});
+
+describe("a launched session and a reply going elsewhere", () => {
+  /** A launch through the server, the sessions' clock in hand; `C` polls. */
+  async function launched(start?: { ok: false; code: string; text: string }) {
+    const clock = { now: Date.now() };
+    const world = await setup({ inboxLaunch: { enabled: true } }, () => clock.now);
+    world.fake.faults.trusted = () => true;
+    if (start) world.fake.host.start = (async () => start) as typeof world.fake.host.start;
+    expect((await world.press({ to: { launch: { agent: FAKE, project_id: world.project.id } } })).status).toBe(200);
+    const rootId = world.store.listRows()[0]!.thread_id;
+    const until = async (check: () => boolean) => {
+      for (let tries = 0; tries < 200 && !check(); tries++) await Bun.sleep(10);
+      expect(check()).toBe(true);
+    };
+    await until(() => (start ? !!world.store.message(rootId)!.launch!.error : !!world.store.message(rootId)!.launch!.session_ref));
+    const base = world.base;
+    const poll = (session: string) =>
+      fetch(`${base}${INBOX_BRIDGE_POLL_PATH}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${world.server.token}` },
+        body: JSON.stringify({ session, host: "claude-code", waitMs: 0, project_path: world.folder, started_at: clock.now }),
+      });
+    const post = (path: string, body: Record<string, unknown>) =>
+      fetch(`${base}${path}`, { method: "POST", headers: { Origin: base, "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: world.server.serverSession, ...body }) });
+    const to = (session: string) => ({ to: { host: "claude-code", session } });
+    const reply = async (id: string, key: string, extra: Record<string, unknown> = {}) => {
+      const response = await post(`/api/inbox/messages/${id}/reply`, { idempotency_key: key, words: "Words.", ...extra });
+      expect(response.status).toBe(200);
+      return ((await response.json()) as { reply: { id: string; took_over?: boolean } }).reply;
+    };
+    const move = async (id: string, session: string) => {
+      const response = await post(`/api/inbox/messages/${id}/to`, to(session));
+      const body = (await response.json()) as { message?: { took_over?: boolean }; code?: string };
+      return { status: response.status, tookOver: body.message?.took_over, code: body.code };
+    };
+    const L = world.store.message(rootId)!.to!.session;
+    const says = (body: string, session: string, replyTo: string, key: string) =>
+      world.store.sendMessage({ project_id: world.project.id, author: { kind: "agent", host: session === L ? FAKE : "claude-code", session, name: "Agent" }, body, reply_to: replyTo, wakes: true, idempotency_key: key }).message;
+    const pastGrace = () => (clock.now += INBOX_ASKER_RESTART_GRACE_MS + 1);
+    const gone = () => world.store.settleLaunch(rootId, { error: { code: "missing", text: "Not installed.", at: new Date(clock.now).toISOString() } });
+    return { ...world, rootId, L, poll, to, reply, move, says, pastGrace, gone, owner: () => world.store.threadOwner(rootId)?.session };
+  }
+
+  test("stopped: a reply aimed elsewhere leaves it the thread, a reply waiting on it stays; once its launch is deleted, the reply takes the thread", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    // Addressed to it while it still polled; it stops after.
+    await w.poll(w.L);
+    const addressed = await w.reply(asked.id, "k0", w.to(w.L));
+    await w.fake.host.stop("f1");
+    w.pastGrace();
+    await w.poll("ses_c");
+    expect((await w.reply(asked.id, "k1", w.to("ses_c"))).took_over).toBeUndefined();
+    expect(w.owner()).toBe(w.L);
+    // The stopped launched session is there: a reply addressed to it is not moved off it.
+    expect(await w.move(addressed.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
+
+    const saved = await w.reply(asked.id, "k3");
+    expect(await w.move(saved.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
+
+    const launchId = w.store.message(w.rootId)!.launch!.id;
+    await fetch(`${w.base}/api/inbox/launch/${launchId}/delete`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json" }, body: "{}" });
+    for (let tries = 0; tries < 200 && !w.store.message(w.rootId)!.launch!.deleted_at; tries++) await Bun.sleep(10);
+    expect((await w.reply(asked.id, "k4", w.to("ses_c"))).took_over).toBe(true);
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("gone: a plain reply moves at once, before the 60 s, and the thread goes with it", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    await w.poll("ses_c");
+    const saved = await w.reply(asked.id, "k1");
+    w.gone();
+    expect(await w.move(saved.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("gone: a reply addressed to it moves at once too", async () => {
+    const w = await launched();
+    const asked = w.says("Done.", w.L, w.rootId, "a1");
+    await w.poll(w.L);
+    await w.poll("ses_c");
+    const addressed = await w.reply(asked.id, "k1", w.to(w.L));
+    w.gone();
+    expect(await w.move(addressed.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("the row on a real server: a stopped launched session has not ended, until its launch is deleted", async () => {
+    const w = await launched();
+    w.says("Done.", w.L, w.rootId, "a1");
+    await w.fake.host.stop("f1");
+    w.pastGrace();
+    const mark = async () => {
+      const list = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; session_ended?: boolean }[] }[] };
+      return list.sections.flatMap((section) => section.threads).find((row) => row.thread_id === w.rootId)!.session_ended;
+    };
+    expect(await mark()).toBeUndefined();
+    await fetch(`${w.base}/api/inbox/launch/${w.store.message(w.rootId)!.launch!.id}/delete`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json" }, body: "{}" });
+    for (let tries = 0; tries < 200 && !w.store.message(w.rootId)!.launch!.deleted_at; tries++) await Bun.sleep(10);
+    expect(await mark()).toBe(true);
+  });
+
+  test("a start that failed, the root moved to a live session: that session keeps the thread, and a reply to it stays on it", async () => {
+    const w = await launched({ ok: false, code: "missing", text: "Not installed." });
+    await w.poll("ses_c");
+    await w.poll("ses_d");
+    expect(await w.move(w.rootId, "ses_c")).toMatchObject({ status: 200 });
+    const answer = w.says("On it.", "ses_c", w.rootId, "a1");
+    await w.poll("ses_c");
+    await w.poll("ses_d");
+    expect((await w.reply(answer.id, "k1", w.to("ses_d"))).took_over).toBeUndefined();
+    expect(w.owner()).toBe("ses_c");
+    const stamped = await w.reply(answer.id, "k2", w.to("ses_c"));
+    expect(await w.move(stamped.id, "ses_d")).toMatchObject({ status: 422, code: "session_still_live" });
+  });
+
+  test("a root moved to a session that then ended: that session reads as ended, whatever the launch's line says", async () => {
+    const w = await launched();
+    w.store.settleLaunch(w.rootId, { error: { code: "failed", text: "It failed.", at: new Date().toISOString() } });
+    w.pastGrace();
+    await w.poll("ses_c");
+    expect(await w.move(w.rootId, "ses_c")).toMatchObject({ status: 200 });
+    w.store.settleLaunch(w.rootId, { error: null });
+    const answer = w.says("On it.", "ses_c", w.rootId, "a1");
+    w.pastGrace();
+    await w.poll("ses_d");
+    expect((await w.reply(answer.id, "k1", w.to("ses_d"))).took_over).toBe(true);
+    expect(w.owner()).toBe("ses_d");
   });
 });
