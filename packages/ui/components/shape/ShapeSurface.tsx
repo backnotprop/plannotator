@@ -510,7 +510,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     } else if (r.kind === 'image') {
       // Only an image the board keeps (files/…) or carries (data:image); nothing from outside.
       if (shapeUrlAllowed(r.target)) setViewer({ kind: 'image', ref: { ...r, images: r.images?.filter((im) => shapeUrlAllowed(im.src)) } });
-    } else if (readFirst && (r.kind === 'pr' || r.kind === 'link') && shapeRefPicture(r)) {
+    } else if ((r.kind === 'pr' || r.kind === 'link') && shapeRefPicture(r)) {
       // A PR or link with a picture: the number shows the picture; its own page is one more click, in the bubble.
       const images = r.images!.filter((im) => shapeUrlAllowed(im.src));
       setViewer({ kind: 'image', ref: { ...r, target: images[0]!.src, images } });
