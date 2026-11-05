@@ -3603,10 +3603,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
 
   /** A take that outlived the card's field: its words go to the reply of the thread it was said in, open or not. */
   const onLateVoice = useCallback((threadId: string, outcome: VoiceLate) => {
-    const here = paneMounted.current && threadRef.current.thread_id === threadId;
     if ('failed' in outcome) {
-      if (here) setError('Dictation failed, so those words are not in the reply.');
-    } else if (here) {
+      if (paneMounted.current && threadRef.current.thread_id === threadId) setError('Dictation failed, so those words are not in the reply.');
+    } else if (paneMounted.current) {
       lateVoice.current.push({ threadId, text: outcome.text });
       setLateVoiceTick((tick) => tick + 1);
     } else void landWordsInReplyDraft(threadId, outcome.text);

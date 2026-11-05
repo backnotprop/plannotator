@@ -799,10 +799,13 @@ describe('the field goes while the words are on their way', () => {
     const { w, late, answer } = await taken();
     w.detach();
     const again = w.session.attach(w.field);
+    // It reads this field as the first one was read: the wash and the caret follow what is typed here.
+    w.type('more ');
+    expect(w.session.view().caret).toBe(w.value().length);
     answer({ text: 'words' });
     await settle();
     expect(late).toEqual([]);
-    expect(w.value()).toBe('Draft words');
+    expect(w.value()).toBe('Draft more words');
     again();
   });
 

@@ -523,6 +523,19 @@ for (const width of [500, 768, 900]) {
     await left();
     await page.keyboard.press('Escape');
 
+    // The address may say beside the thread; this window still shows the file alone, so R asks all the same.
+    await page.goto('about:blank');
+    await page.goto(fileUrl(thread, 'shot.png').replace('view=full', 'view=side'));
+    await card(page).waitFor();
+    await page.locator('[data-fcomp-mode="comment"]').click();
+    await field.fill('Not saved yet.');
+    await field.blur();
+    await page.keyboard.press('r');
+    await page.locator('[data-step-guard]').waitFor();
+    await page.locator('[data-guard-discard]').click();
+    await left();
+    await page.keyboard.press('Escape');
+
     await onCard();
     await page.locator('[data-fcomp-mode="reply"]').click();
     await card(page).locator('[data-fcomp-field] textarea').fill('Going left.');

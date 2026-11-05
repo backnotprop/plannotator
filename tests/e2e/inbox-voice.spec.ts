@@ -48,6 +48,7 @@ interface World {
   url: string;
   threads: string[];
   filed: { thread: string; attachment: string | null };
+  filedToo: { thread: string; attachment: string | null };
   send(command: Record<string, unknown>): void;
   upstreamCalls(): { path: string; bytes: number; riff: string; rate: number; model: string | null; userAgent: string }[];
   codexStarts(): number;
@@ -114,7 +115,7 @@ async function startWorld(options: { version?: string; config?: Record<string, u
     createInterface({ input: child.stdout }).once('line', done);
     child.once('exit', () => fail(new Error(`voice-inbox.ts exited: ${stderr}`)));
   });
-  const started = JSON.parse(first) as { url: string; threads: string[]; filed: World['filed'] };
+  const started = JSON.parse(first) as { url: string; threads: string[]; filed: World['filed']; filedToo: World['filedToo'] };
   const read = (name: string) => {
     const path = join(root, name);
     return existsSync(path) ? readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line)) : [];
@@ -1018,6 +1019,46 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
           await finish(page, context);
         });
       }
+
+      test('moved on to a file in another thread, the same pane: its card stays empty and the words go to the first thread’s draft', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card, field } = await transcribing(page, w);
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+        await page.evaluate((hash) => (location.hash = hash), `#thread=${w.filedToo.thread}&file=${w.filedToo.attachment}&view=full`);
+        await expect.poll(() => page.evaluate(() => location.hash)).toContain(w.filedToo.thread);
+        await expect(card).toBeVisible();
+        await page.locator('[data-fcomp-mode="reply"]').click();
+        await expect(field).toHaveValue('');
+        w.send({ release: true });
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
+        await expect(field).toHaveValue('');
+        expect(await draftOf(w, w.filedToo.thread)).toBeNull();
+        await finish(page, context);
+      });
+
+      test('a Send from the box while the take is on its way: the words wait for it, and stay as a new draft', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await listening(page, w);
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(box(page)).toHaveValue('Before.');
+        let letGo = () => {};
+        const held = new Promise<void>((done) => (letGo = done));
+        await page.route('**/reply**', async (route) => {
+          await held;
+          await route.continue();
+        });
+        await sendButton(page).click();
+        w.send({ release: true });
+        await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+        await page.waitForTimeout(300);
+        letGo();
+        await expect(box(page)).toHaveValue('Landed.');
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Landed.');
+        await finish(page, context);
+      });
 
       test('the answer fails with nothing left to show it: the thread says so', async () => {
         const { w, context, page } = await start();
