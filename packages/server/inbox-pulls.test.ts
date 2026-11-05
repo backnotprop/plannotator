@@ -807,6 +807,8 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
         ["~~~\n```\n<!-- kept -->\n~~~", "~~~\n```\n<!-- kept -->\n~~~"],
         ["Text.\n\n    <!-- indented code -->", "Text.\n\n    <!-- indented code -->"],
         ["A stray <!-- mid-line, never closed.", "A stray <!-- mid-line, never closed."],
+        ["<!-->\n\nThe schedule.", "The schedule."],
+        ["<!--->\n\nThe schedule.", "The schedule."],
       ];
       for (const [body, shown] of cases) {
         const f = forge();

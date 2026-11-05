@@ -125,7 +125,8 @@ function withoutHtmlComments(text: string): string {
         kept += line.slice(at, end);
         at = end;
       } else if (line.startsWith("<!--", at)) {
-        const close = line.indexOf("-->", at + 4);
+        // From the opening's own dashes: `<!-->` and `<!--->` are whole comments.
+        const close = line.indexOf("-->", at + 2);
         if (close >= 0) {
           at = close + 3;
         } else if (!kept.trim() || index < lastClose) {

@@ -7988,6 +7988,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-desc[data-pull-description="folded"] { cursor: pointer; }
 .ib-prr-desc[data-pull-description="folded"] .ib-prr-desc-body { max-height: var(--ib-desc-fold); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
 .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: min(55vh, 560px); overflow-y: auto; overscroll-behavior: auto; }
+/* A list row's bleed (ui's `-mx-2 px-2`) would scroll the body sideways by 8 px. */
+.ib-prr-desc-body .-mx-2 { margin-right: 0; padding-right: 0; }
 .ib-prr-desc-body .ib-body { font-size: 13px; line-height: 1.55; overflow-wrap: anywhere; }
 .ib-prr-desc-body article > :empty { display: none; }
 .ib-prr-desc-body article > :not(:empty):not(:not(:empty) ~ *) { margin-top: 0; }

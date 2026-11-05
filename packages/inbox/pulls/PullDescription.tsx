@@ -20,15 +20,31 @@ const resolveImage: ImageResolver = (src) => (src.startsWith('data:image/') ? { 
 /** How much of a body is parsed while folded: far past what the fold shows. */
 const FOLDED_CHARS = 4000;
 
+/** The start of a long body. A `<details>` the cut leaves open is closed, or the folded lines would draw outside its box. */
 function foldedStart(markdown: string): string {
   const line = markdown.lastIndexOf('\n', FOLDED_CHARS);
-  return markdown.slice(0, line > FOLDED_CHARS / 2 ? line : FOLDED_CHARS);
+  const start = markdown.slice(0, line > FOLDED_CHARS / 2 ? line : FOLDED_CHARS);
+  const unclosed = (start.match(/<details(?:\s|>|\/|$)/gi)?.length ?? 0) - (start.match(/<\/details\s*>/gi)?.length ?? 0);
+  return unclosed > 0 ? `${start}\n${'</details>'.repeat(unclosed)}` : start;
 }
 
-/** A link's click: what is not the web's stays in the page, and an anchor never moves the window's route (its hash). */
+/**
+ * A link's click: what is not the web's stays in the page, an anchor or an empty address never moves the window (its
+ * route is its hash), and the web's links never replace it. ui takes `//host/a.md` or `HTTPS://host/a.md` for a local
+ * document by its extension and draws it with no target, so such a link opens its new tab here, as any other does.
+ */
 function keepInPage(event: MouseEvent) {
   const link = (event.target as Element).closest?.('a[href]') as HTMLAnchorElement | null;
-  if (link && (!isLiveLink(link) || link.getAttribute('href')?.startsWith('#'))) event.preventDefault();
+  if (!link) return;
+  const href = link.getAttribute('href')?.trim();
+  if (!isLiveLink(link) || !href || href.startsWith('#')) {
+    event.preventDefault();
+    return;
+  }
+  if (link.protocol !== 'mailto:' && link.target !== '_blank' && !link.hasAttribute('data-local-link')) {
+    event.preventDefault();
+    window.open(link.href, '_blank', 'noopener,noreferrer');
+  }
 }
 
 export function PullDescription({ markdown, layer, headSha }: { markdown: string | null | undefined; layer: InboxPull; headSha?: string | null }) {
@@ -39,6 +55,7 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
   // They opened a <details> in it: it grew under their click, so it stays open rather than folding away.
   const summaryUsed = useRef(false);
   useLayoutEffect(() => {
+    summaryUsed.current = false;
     const box = body.current;
     if (!box) return;
     const inner = box.firstElementChild;
@@ -91,6 +108,8 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
           aria-expanded={open}
           onClick={(event) => {
             event.stopPropagation();
+            // Show less is their word: a <details> they opened no longer holds it open.
+            if (open) summaryUsed.current = false;
             setOpen(!open);
           }}
         >

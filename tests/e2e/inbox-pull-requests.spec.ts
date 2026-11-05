@@ -1281,8 +1281,113 @@ test("a stranger's description: paths open on the forge, only the web's links ar
     await expect(section).toHaveAttribute('data-pull-description', 'open');
     await expect(section.locator('details')).toHaveAttribute('open', '');
     await expect(section.getByText('Line 39.', { exact: true })).toBeAttached();
+    // Show less is the last word: a change of size does not open it again.
+    await section.getByRole('button', { name: 'Show less' }).click();
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+    await details.page.setViewportSize({ width: 1280, height: 900 });
+    await details.page.waitForTimeout(250);
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
   } finally {
     await details.context.close();
+  }
+});
+
+test("a description's web links never replace the window, however they are spelled; an empty address goes nowhere", async ({ browser }) => {
+  const body = [
+    '[one](//evil.example/a.md) [two](//evil.example/a.html) [three](HTTPS://evil.example/a.md) [four](Http://evil.example/a.html)',
+    '',
+    '<div><a href="" target="_top">empty</a> <a href=" " target="_top">space</a> <a href="mailto:a@example.com">rawmail</a></div>',
+  ].join('\n');
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: body });
+  try {
+    await context.route(/evil\.example/, (route) => route.fulfill({ contentType: 'text/html', body: 'elsewhere' }));
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
+    const address = page.url();
+    for (const name of ['one', 'two', 'three', 'four']) {
+      const opened = context.waitForEvent('page');
+      await section.getByRole('link', { name, exact: true }).click();
+      const tab = await opened;
+      await tab.waitForURL(/evil\.example\/a\./);
+      await tab.close();
+      expect(page.url()).toBe(address);
+      await expect(review).toHaveCount(1);
+    }
+    // A raw mailto has no target either: it stays the mail app's, with no empty tab.
+    const opens = await section.locator('a', { hasText: /^rawmail$/ }).evaluate((el) => {
+      let count = 0;
+      const open = window.open;
+      window.open = () => (count++, null);
+      document.addEventListener('click', (event) => event.preventDefault(), { once: true });
+      (el as HTMLElement).click();
+      window.open = open;
+      return count;
+    });
+    expect(opens).toBe(0);
+    for (const name of ['empty', 'space']) {
+      await section.locator('a', { hasText: new RegExp(`^${name}$`) }).focus();
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
+      expect(page.url()).toBe(address);
+      await expect(review).toHaveCount(1);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the sheet", async ({ browser }) => {
+  const label = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
+  for (const description of ['<div data-pn-annotation-toolbar-row>x</div>', '<div data-quick-label-picker>x</div>', `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``]) {
+    const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
+    try {
+      const section = page.locator('[data-pull-review] [data-pull-description]');
+      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
+      await expect(posing.first()).toBeAttached({ timeout: 15_000 });
+      await page.locator('.ib-vhead .ib-vcomments').click();
+      await expect(page.locator('.ib-panel-open')).toHaveCount(1);
+      await page.keyboard.press('Escape');
+      await expect(page.locator('.ib-panel-open')).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a description with a list never scrolls sideways', async ({ browser }) => {
+  for (const width of [1440, 390]) {
+    const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: '- one\n- two\n\n1. three\n2. four' });
+    try {
+      const box = page.locator('[data-pull-review] .ib-prr-desc-body');
+      await expect(box).toContainText('four');
+      expect(await box.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a <details> cut by the fold keeps its lines inside; Show more draws the whole body', async ({ browser }) => {
+  const lines = Array.from({ length: 300 }, (_, i) => `log line ${i} of the failing worker`);
+  for (const inside of [lines.join('\n\n'), `\`\`\`\n${lines.join('\n')}\n\`\`\``]) {
+    const description = `<details><summary>Logs</summary>\n\n${inside}\n\n</details>\n\nAFTER-THE-LOGS`;
+    const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
+    try {
+      const section = page.locator('[data-pull-review] [data-pull-description]');
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      await expect(section.locator('details')).toHaveCount(1);
+      await expect(section.locator('details')).not.toHaveAttribute('open', '');
+      // No line of the log anywhere outside its box.
+      const outside = await section.locator('.ib-prr-desc-body').evaluate((el) =>
+        [...el.querySelectorAll('*')].filter((node) => !node.children.length && !node.closest('details') && /log line \d/.test(node.textContent ?? '')).length,
+      );
+      expect(outside).toBe(0);
+      expect(await section.locator('.ib-prr-desc-body').evaluate((el) => /<\/?details/.test(el.textContent ?? ''))).toBe(false);
+      await section.getByRole('button', { name: 'Show more' }).click();
+      await expect(section).toContainText('AFTER-THE-LOGS');
+    } finally {
+      await context.close();
+    }
   }
 });
 

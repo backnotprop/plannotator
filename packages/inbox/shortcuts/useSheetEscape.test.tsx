@@ -5,7 +5,8 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { modalOpen } from './guards';
+import { selectionToolbarShowing } from '../selectionToolbar';
+import { inOverlay, modalOpen } from './guards';
 import { useSheetEscape } from './useSheetEscape';
 
 const hasDom = typeof document !== 'undefined';
@@ -59,6 +60,23 @@ describe.skipIf(!hasDom)('useSheetEscape', () => {
     expect(modalOpen()).toBe(true);
     escape(document.body);
     expect(closed).toBe(1);
+  });
+
+  test("a PR description's own markup stands for nothing, wherever it sits; the same marks outside it do", async () => {
+    await mount();
+    const marks = '<div data-pn-annotation-toolbar-row></div><div data-quick-label-picker></div><div class="pn-visible-viewport-overlay"><div data-pn-image-annotator-stage><a href="#y">y</a></div></div>';
+    const body = add(`<section class="ib-prr-desc">${marks}</section>`);
+    for (const el of body.querySelectorAll('div')) el.getClientRects = () => [{}] as unknown as DOMRectList;
+    expect(modalOpen()).toBe(false);
+    expect(selectionToolbarShowing()).toBe(false);
+    expect(inOverlay(body.querySelector('a'))).toBe(false);
+    escape(body.querySelector('a')!);
+    expect(closed).toBe(1);
+    const own = add(`<section>${marks}</section>`);
+    for (const el of own.querySelectorAll('div')) el.getClientRects = () => [{}] as unknown as DOMRectList;
+    expect(modalOpen()).toBe(true);
+    expect(selectionToolbarShowing()).toBe(true);
+    expect(inOverlay(own.querySelector('a'))).toBe(true);
   });
 
   test('another key, or a sheet that is closed, does nothing', async () => {
