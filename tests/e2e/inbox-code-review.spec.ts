@@ -337,11 +337,10 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
-  // The PR page's quiet scrollbar and 33 px file head are its own: this window keeps its shorter head and its bar.
+  // The PR page's quiet scrollbar is its own: this window keeps its bar.
   const scrollbar = retry.locator('[data-diff-hscrollbar]');
   await expect(scrollbar).toBeAttached();
   await expect(scrollbar.locator('> div')).toHaveCSS('opacity', '1');
-  expect(await scrollbar.evaluate((bar) => bar.parentElement!.getBoundingClientRect().height)).toBeLessThan(33);
 
   await retry.hover();
   await added(12).click();
@@ -1110,6 +1109,7 @@ test('the chapter menu after a key press: a quiet ring on its button, none round
 
 test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
   const { page, claude } = world;
+  await setCodeReview(true);
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
@@ -1120,6 +1120,11 @@ test('Code review off: the same review opens in the guide pane, with no top bar 
     await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
     await expect(page.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
     await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
+    // The PR page's flush files and quiet bars are its own: this reader keeps its spacing around a hunk's separator.
+    const shell = page.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+    // The fixture's lines at main's metrics; flush, the box would be smaller.
+    expect(Math.round((await shell.boundingBox())!.height)).toBe(446);
   } finally {
     await setCodeReview(true);
   }

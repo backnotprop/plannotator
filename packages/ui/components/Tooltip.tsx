@@ -47,6 +47,12 @@ export const TooltipProvider: React.FC<TooltipProviderProps> = ({
   );
 };
 
+/**
+ * True under a host where Escape belongs to the page: every Tooltip below acts as if it had `escapePassesThrough`,
+ * including those in shared rows a host does not draw itself. Unset: as before.
+ */
+export const TooltipEscapePassesThrough = React.createContext(false);
+
 interface TooltipProps {
   content: React.ReactNode;
   children: React.ReactElement;
@@ -98,10 +104,12 @@ export const Tooltip: React.FC<TooltipProps> = ({
   wide = false,
   shouldOpen,
   container,
-  escapePassesThrough = false,
+  escapePassesThrough: passesThroughProp = false,
   forceOpen,
 }) => {
   const provider = React.useContext(TooltipProviderContext);
+  const passesThroughHere = React.useContext(TooltipEscapePassesThrough);
+  const escapePassesThrough = passesThroughProp || passesThroughHere;
   const disableHoverablePopup = provider?.disableHoverablePopup ?? false;
   // Under a provider, an unset delay takes the provider's; alone, the shared default.
   const triggerDelay = delayDuration ?? (provider ? undefined : TOOLTIP_DELAY_MS);

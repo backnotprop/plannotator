@@ -17,7 +17,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
@@ -236,8 +236,9 @@ test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack
 
   await act(async () => el('[data-pull-layer-all]').click());
   await settle();
-  expect(asked.at(-1)).toEqual({ key: stack[0]!.key, scope: 'stack' });
-  expect(shown.at(-1)!.patch).toContain('stack-412.ts');
+  // All means all: the diff up to the top, from the bottom layer as from any.
+  expect(asked.at(-1)).toEqual({ key: stack[2]!.key, scope: 'stack' });
+  expect(shown.at(-1)!.patch).toContain('stack-414.ts');
 
   await act(async () => el(`[data-pull-layer-row="${stack[0]!.key}"]`).click());
   await settle();
@@ -582,6 +583,50 @@ test.skipIf(!hasDom)('a stack page has one "Open the diff"; the whole stack is t
   expect([...pane.querySelectorAll('button')].some((b) => b.textContent?.trim() === 'Whole stack')).toBe(false);
   await act(async () => el('[data-pulls-open-diff]').click());
   expect(reviewed).toEqual([`${stack[0]!.key}:layer`]);
+});
+
+describe('All N layers', () => {
+  const merged = pull(411, { head: 'retry/base', state: 'merged', additions: 500, deletions: 500 });
+  const bottom = { ...stack[0]!, base: 'retry/base', additions: 3, deletions: 1 };
+  const middle = { ...stack[1]!, additions: 5, deletions: 2 };
+  const top = { ...stack[2]!, additions: 7, deletions: 3 };
+  const whole = [merged, bottom, middle, top];
+  const moved: { key: string; scope: string }[] = [];
+  const draw = async (pulls: InboxPull[], key: string, scope: 'layer' | 'stack') => {
+    moved.length = 0;
+    mount(<PullReview model={{ ...model, pulls }} modelError={null} stackId={inboxPullStacks(pulls)[0]!.id} layerKey={key} scope={scope} onLayer={(k, s) => moved.push({ key: k, scope: s })} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    return el<HTMLButtonElement>('[data-pull-layer-all]');
+  };
+
+  test.skipIf(!hasDom)('from a layer in the middle: the open layers, not the merged one, and the row goes to the top', async () => {
+    const row = await draw(whole, middle.key, 'layer');
+    expect(row.textContent).toBe('All 3 layers+15 -6');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("an address naming a lower layer's whole stack is not all: the row is not lit, and goes to the top", async () => {
+    const row = await draw(whole, middle.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('false');
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: top.key, scope: 'stack' }]);
+  });
+
+  test.skipIf(!hasDom)("on the top, the row is lit and its counts are the diff's own", async () => {
+    const row = await draw(whole, top.key, 'stack');
+    expect(row.getAttribute('aria-pressed')).toBe('true');
+    expect(row.textContent).toBe('All 3 layers+1 -1');
+  });
+
+  test.skipIf(!hasDom)('two PRs on one branch: it counts the chain its diff reads, not the sibling', async () => {
+    const sibling = { ...top, number: 415, key: top.key.replace('#414', '#415'), head: 'retry/other', base: bottom.head };
+    const row = await draw([bottom, middle, sibling], middle.key, 'layer');
+    expect(row.textContent).toMatch(/^All 2 layers/);
+    await act(async () => row.click());
+    expect(moved).toEqual([{ key: sibling.key, scope: 'stack' }]);
+  });
 });
 
 test.skipIf(!hasDom)("a Whole stack goes to the stack's one review thread, its lowest linked layer's, though another agent linked a layer above", async () => {

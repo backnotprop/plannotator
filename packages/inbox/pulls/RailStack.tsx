@@ -7,6 +7,7 @@ import { inboxPullLabel, type InboxPull } from '@plannotator/core/inbox-types';
 import { RefMarkIcon } from '../board/RefMark';
 import { Tip } from '../components/Tip';
 import { Icon } from '../icons';
+import { chainTo } from './model';
 import { isOpen } from './topology';
 
 /** Layers this many or more fold what is far from you. */
@@ -27,12 +28,14 @@ const foldWords = (n: number, side: string, hidden: readonly InboxPull[]) => {
   return `${n} ${side}${merged ? ` · ${merged} merged` : ''}`;
 };
 
-export function RailStack({ layers, here, scope, wholeTip, onLayer }: {
+export function RailStack({ layers, here, scope, wholeTip, wholeCounts, onLayer }: {
   layers: InboxPull[];
   here: InboxPull;
   scope: 'layer' | 'stack';
   /** What the whole stack compares: its row's tip. */
   wholeTip: string;
+  /** The whole stack's own numbers, once its diff is on screen; layers' sums count a line changed twice twice. */
+  wholeCounts?: { add: number; del: number };
   onLayer: (key: string, scope: 'layer' | 'stack') => void;
 }) {
   const [showEarlier, setShowEarlier] = useState(false);
@@ -45,7 +48,12 @@ export function RailStack({ layers, here, scope, wholeTip, onLayer }: {
   // A fold never hides just one row.
   if (start === 1) start = 0;
   if (end === layers.length - 1) end = layers.length;
+  // "All": every open layer, from wherever you are. What it opens is the diff up to the topmost, so its number and its
+  // counts are that diff's: merged layers are not read again, and a sibling branch is not on its chain.
   const open = layers.filter(isOpen);
+  const tip = open.at(-1);
+  const whole = tip ? chainTo(open, tip) : [];
+  const onWhole = scope === 'stack' && here.key === tip?.key;
   useEffect(() => {
     const row = list.current?.querySelector<HTMLElement>('[aria-current="step"]');
     if (row && list.current) list.current.scrollTop = row.offsetTop - list.current.clientHeight / 2 + row.offsetHeight / 2;
@@ -72,10 +80,10 @@ export function RailStack({ layers, here, scope, wholeTip, onLayer }: {
   return (
     <div className="ib-prp-stack">
       <Tip content={wholeTip}>
-        <button type="button" className={`ib-prp-row ib-prp-all${scope === 'stack' ? ' ib-on' : ''}`} aria-pressed={scope === 'stack'} onClick={() => onLayer(here.key, 'stack')} disabled={open.length < 2} data-pull-layer-all="">
+        <button type="button" className={`ib-prp-row ib-prp-all${onWhole ? ' ib-on' : ''}`} aria-pressed={onWhole} onClick={() => tip && onLayer(tip.key, 'stack')} disabled={whole.length < 2} data-pull-layer-all="">
           <Icon name="layers" size={15} />
-          <span className="ib-prp-rowtitle">All {layers.length} layers</span>
-          <Counts add={open.reduce((sum, l) => sum + l.additions, 0)} del={open.reduce((sum, l) => sum + l.deletions, 0)} />
+          <span className="ib-prp-rowtitle">All {whole.length} layers</span>
+          <Counts add={onWhole && wholeCounts ? wholeCounts.add : whole.reduce((sum, l) => sum + l.additions, 0)} del={onWhole && wholeCounts ? wholeCounts.del : whole.reduce((sum, l) => sum + l.deletions, 0)} />
         </button>
       </Tip>
       <div className="ib-prp-layers" ref={list} role="list" aria-label="Layers, bottom first">

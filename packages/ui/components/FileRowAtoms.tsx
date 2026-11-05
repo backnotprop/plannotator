@@ -2,9 +2,9 @@ import React from 'react';
 import { Tooltip } from './Tooltip';
 
 /**
- * The file row atoms the review app and the Inbox's PR rail share. They live here so the Inbox window can draw a file
+ * The viewed circle the review app and the Inbox's PR rail share. It lives here so the Inbox window can draw a file
  * row without loading anything of review-editor's, whose reader is a chunk of its own. review-editor's `FileRowBits`
- * re-exports them.
+ * re-exports it.
  */
 
 /** Viewed checkbox — always visible: green check-circle when viewed, empty
@@ -52,52 +52,3 @@ export const ViewedControl: React.FC<{
     </span>
   </Tooltip>
 );
-
-/** Comment icon + annotation count, rendered directly after the file path. */
-export const AnnotationBadge: React.FC<{ count: number }> = ({ count }) => {
-  if (count <= 0) return null;
-  return (
-    <span className="flex items-center gap-0.5 text-[10px] text-primary flex-shrink-0" title={`${count} annotation${count === 1 ? '' : 's'}`}>
-      <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-        <path strokeLinecap="round" strokeLinejoin="round" d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z" />
-      </svg>
-      {count}
-    </span>
-  );
-};
-
-/**
- * The +/- counts as two right-aligned columns: each + ends on one edge and
- * each - on the next, on every row of the panel (All changes, group headings,
- * folders, files), so the size of each change reads down one column. The
- * column widths come from `--count-add-w` / `--count-del-w`, which the panel
- * sets from its widest numbers (`countColumnVars`); a number wider than that
- * grows its own row instead of overlapping. `tone="quiet"` draws both numbers
- * in the panel's tertiary grey (headings, folders); file rows keep the green
- * and red of `.file-tree-item .additions / .deletions`.
- */
-export const CountColumns: React.FC<{
-  additions: number;
-  deletions: number;
-  tone?: 'color' | 'quiet';
-  addStyle?: React.CSSProperties;
-  delStyle?: React.CSSProperties;
-}> = ({ additions, deletions, tone = 'color', addStyle, delStyle }) => (
-  <span data-count-columns={tone} className="review-count-columns">
-    <span className={additions > 0 ? 'additions' : undefined} style={addStyle}>
-      {additions > 0 ? `+${additions}` : ''}
-    </span>
-    <span className={deletions > 0 ? 'deletions' : undefined} style={delStyle}>
-      {deletions > 0 ? `-${deletions}` : ''}
-    </span>
-  </span>
-);
-
-/** The column widths for a panel whose largest numbers are `additions` and
- *  `deletions` (the whole change's totals: every row's count is part of
- *  them). At least 3 characters, so a panel of small changes keeps its edge;
- *  2 px over, because a sign is a little wider than a tabular digit. */
-export function countColumnVars(additions: number, deletions: number): React.CSSProperties {
-  const width = (n: number) => `calc(${Math.max(3, String(n).length + 1)}ch + 2px)`;
-  return { '--count-add-w': width(additions), '--count-del-w': width(deletions) } as React.CSSProperties;
-}

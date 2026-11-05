@@ -340,7 +340,9 @@ export default function GuideReader({
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fileOpenIn?: (filePath: string) => ReactNode;
+      flushFiles?: boolean;
     } => ({
+      ...(bare && { flushFiles: true }),
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
@@ -362,7 +364,7 @@ export default function GuideReader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
+    [bare, phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -404,8 +406,9 @@ export default function GuideReader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      flushFiles: bare,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, bare, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
