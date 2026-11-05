@@ -35,6 +35,8 @@ if (hasDom) {
 const { PullReview } = (hasDom ? await import('./PullReview') : {}) as typeof import('./PullReview');
 
 const SHA = 'a'.repeat(40);
+/** The head the diff door answers with. */
+let diffHead = SHA;
 const PUSHED = '2026-11-03T09:00:00.000Z';
 const STORE = 'plannotator-inbox-pull-review:';
 
@@ -96,7 +98,7 @@ const model: InboxPullsAnswer = {
 
 const GLOBAL = { id: 'g1', type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: 'Split the retry policy out of this PR.', createdAt: 1 };
 const LINE = { id: 'l1', type: 'comment', scope: 'line', filePath: 'src/retry.ts', lineStart: 12, lineEnd: 12, side: 'new', text: 'Cap the backoff.', createdAt: 2 };
-const storeKey = (p: InboxPull, scope: 'layer' | 'stack', at = p.updated_at) => `${STORE}${p.key}:${scope}:${at}`;
+const storeKey = (p: InboxPull, scope: 'layer' | 'stack', at = p.head_sha ?? SHA) => `${STORE}${p.key}:${scope}:${at}`;
 const keepBoth = (p: InboxPull, scope: 'layer' | 'stack', at?: string) => window.localStorage.setItem(storeKey(p, scope, at), JSON.stringify({ comments: [GLOBAL, LINE], viewed: [] }));
 const kept = (key: string) => (JSON.parse(window.localStorage.getItem(key) ?? 'null') as { comments: { id: string }[] } | null)?.comments.map((c) => c.id) ?? null;
 
@@ -109,6 +111,7 @@ beforeEach(() => {
   if (!hasDom) return;
   savedFetch = globalThis.fetch;
   posted = [];
+  diffHead = SHA;
   reader = undefined;
   window.localStorage.clear();
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -122,7 +125,7 @@ beforeEach(() => {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
       const patch = 'diff --git a/src/retry.ts b/src/retry.ts\n--- a/src/retry.ts\n+++ b/src/retry.ts\n@@ -12 +12 @@\n-a\n+b\n';
-      return Response.json({ serverSession: 's', key, scope, base: 'main', head: 'y', patch, ...(scope === 'layer' ? { head_sha: SHA } : {}) });
+      return Response.json({ serverSession: 's', key, scope, base: 'main', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -154,11 +157,14 @@ function mount(node: React.ReactNode) {
   });
 }
 
-/** The review of one layer; `push` moves the layer to a new push (`updated_at`), as the list reads it again. */
-let push: (at: string) => void = () => {};
+/** The review of one layer; `push` moves the layer to a new head commit, as the list and the diff read it again. */
+let push: (head: string) => void = () => {};
 function Review({ layer, scope }: { layer: InboxPull; scope: 'layer' | 'stack' }) {
   const [answer, setAnswer] = useState(model);
-  push = (at) => setAnswer({ ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? { ...p, updated_at: at } : p)) });
+  push = (head) => {
+    diffHead = head;
+    setAnswer({ ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? { ...p, head_sha: head } : p)) });
+  };
   const stackId = (own.some((p) => p.key === layer.key) ? own : theirs).at(-1)!.key;
   return <PullReview model={answer} modelError={null} stackId={stackId} layerKey={layer.key} scope={scope} onLayer={() => {}} onBack={() => {}} onSent={() => {}} />;
 }
@@ -230,18 +236,18 @@ test.skipIf(!hasDom)('post from Whole stack: the global comment goes in the body
   expect(commentCount()).toBe('Comments, 1');
 });
 
-test.skipIf(!hasDom)('a new push keeps the global comments; the line comments go, as before', async () => {
+test.skipIf(!hasDom)('a new push keeps the global comments and the line comments', async () => {
   keepBoth(own[0]!, 'layer');
   mount(<Review layer={own[0]!} scope="layer" />);
   await settle();
   expect(commentCount()).toBe('Comments, 2');
   const draftScope = reader!.draftScope;
-  const later = '2026-11-03T11:00:00.000Z';
+  const later = 'b'.repeat(40);
   act(() => push(later));
   await settle();
   expect(kept(storeKey(own[0]!, 'layer'))).toBeNull();
-  expect(kept(storeKey(own[0]!, 'layer', later))).toEqual([GLOBAL.id]);
-  expect(commentCount()).toBe('Comments, 1');
+  expect(kept(storeKey(own[0]!, 'layer', later))).toHaveLength(2);
+  expect(commentCount()).toBe('Comments, 2');
   expect(el('[data-review-decision] [data-decision-primary]').textContent).toContain('Send Feedback');
   // The unsaved words of a global comment are kept under the same name across the push.
   expect(reader!.draftScope).toBe(draftScope);
