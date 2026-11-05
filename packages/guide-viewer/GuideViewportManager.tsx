@@ -23,6 +23,8 @@ const FORCE_MOUNT_MS = 1_500;
  * scrollbar throw. Nothing mounts until it slows. A hard trackpad flick peaks near 600 px a frame and stays under it.
  */
 const PASSING_SPEED = 45;
+/** A frame longer than this while scrolling (ms): the page is falling behind, so on-screen files come first. */
+const FALLING_BEHIND_MS = 40;
 /** How long End or Home may take to start moving the view before it counts as having done nothing (a text field has the key). */
 const KEY_SCROLL_START_FRAMES = 6;
 /** A jump further than this many views goes at once: a smooth scroll would mount everything it passes. */
@@ -40,10 +42,13 @@ interface RegisteredShell {
 
 type Subscriber = () => void;
 
-/** A jump on its way to its file: see `jumpTo`. */
+/** A file kept in place while the files around it settle: a jump's target (`jumpTo`) or what a fast scroll stopped on. */
 interface Landing {
   element: HTMLElement;
   root: HTMLElement | null;
+  /** Where to keep it, on screen. A jump: null, its own place at the top of the view. */
+  heldTop: number | null;
+  lastScrollTop: number;
   /** A smooth scroll is still running: leave it alone until it stops. */
   smooth: boolean;
   lastTop: number;
@@ -117,6 +122,8 @@ class GuideViewportManager {
   private lastScrollTop = 0;
   private lastScrollAt = 0;
   private passedLastFrame = false;
+  private lastMotion: 'rest' | 'moving' | 'passing' = 'rest';
+  private fallingBehind = false;
   /** End or Home was pressed: the browser's animated scroll to the far end, if the key moves this view. */
   private keyScroll: { moved: boolean; frames: number } | null = null;
   private landing: Landing | null = null;
@@ -284,10 +291,30 @@ class GuideViewportManager {
       const onScreen = [...this.entries].filter(([, entry]) => isOnScreen(entry.element.getBoundingClientRect(), view));
       this.setMounted(new Set([...this.mounted, ...onScreen.map(([entryId]) => entryId)]));
     }
-    this.landing = { element, root, smooth, lastTop: Number.NaN, stillFrames: 0, startedAt: performance.now(), raf: 0 };
+    this.startLanding({ element, root, heldTop: null, smooth });
+  };
+
+  /** A fast scroll just stopped: the file at the top of the view stays put while the files above it draw and measure. */
+  private holdInPlace(): void {
+    if (this.landing) return;
+    const view = this.getRootRect();
+    let top = Infinity;
+    let element: HTMLElement | null = null;
+    for (const entry of this.entries.values()) {
+      const rect = entry.element.getBoundingClientRect();
+      if (rect.bottom > view.top && rect.top < top) {
+        top = rect.top;
+        element = entry.element;
+      }
+    }
+    if (element) this.startLanding({ element, root: this.scrollRoot, heldTop: top, smooth: false });
+  }
+
+  private startLanding(start: Pick<Landing, 'element' | 'root' | 'heldTop' | 'smooth'>): void {
+    this.landing = { ...start, lastTop: Number.NaN, lastScrollTop: start.root ? start.root.scrollTop : window.scrollY, stillFrames: 0, startedAt: performance.now(), raf: 0 };
     for (const type of TAKE_OVER_EVENTS) window.addEventListener(type, this.endLanding, { capture: true, passive: true });
     this.landing.raf = requestAnimationFrame(this.holdLanding);
-  };
+  }
 
   private holdLanding = (): void => {
     const landing = this.landing;
@@ -297,15 +324,27 @@ class GuideViewportManager {
       return;
     }
     const top = landing.element.getBoundingClientRect().top;
-    landing.stillFrames = Math.abs(top - landing.lastTop) < 0.5 ? landing.stillFrames + 1 : 0;
+    const scrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
+    const moved = Math.abs(top - landing.lastTop) >= 0.5;
+    // The file moved and so did the scroll, and not by this code: a scrollbar drag going on (it has no event of its own).
+    if (!landing.smooth && moved && Math.abs(scrollTop - landing.lastScrollTop) >= 1) {
+      this.endLanding();
+      return;
+    }
+    landing.stillFrames = moved ? 0 : landing.stillFrames + 1;
     landing.lastTop = top;
     if (landing.stillFrames >= SMOOTH_DONE_FRAMES) landing.smooth = false;
     if (!landing.smooth) {
       const viewTop = landing.root?.getBoundingClientRect().top ?? 0;
-      const wanted = viewTop + (parseFloat(getComputedStyle(landing.element).scrollMarginTop) || 0);
-      // At the very end of the scroll this does nothing, and the target holds still where it is.
-      if (Math.abs(top - wanted) >= 1) landing.element.scrollIntoView({ behavior: 'instant', block: 'start' });
+      const wanted = landing.heldTop ?? viewTop + (parseFloat(getComputedStyle(landing.element).scrollMarginTop) || 0);
+      if (Math.abs(top - wanted) >= 1) {
+        // At the very end of the scroll this does nothing, and the file holds still where it is.
+        if (landing.heldTop === null) landing.element.scrollIntoView({ behavior: 'instant', block: 'start' });
+        else if (landing.root) landing.root.scrollTop += top - wanted;
+        else window.scrollBy({ top: top - wanted, behavior: 'instant' });
+      }
     }
+    landing.lastScrollTop = landing.root ? landing.root.scrollTop : window.scrollY;
     if (landing.stillFrames >= LANDED_FRAMES && this.reconcileRaf == null) {
       this.endLanding();
       return;
@@ -354,10 +393,13 @@ class GuideViewportManager {
       return;
     }
     const motion = this.readMotion();
+    const arrived = motion === 'rest' && this.lastMotion === 'passing';
+    this.lastMotion = motion;
     if (motion === 'passing') {
       this.scheduleReconcile();
       return;
     }
+    if (arrived) this.holdInPlace();
 
     // With no IntersectionObserver (older embedded browsers) this reads the window itself on each scroll.
     const measuredRoot = typeof IntersectionObserver === 'undefined' ? this.getRootRect() : null;
@@ -371,7 +413,7 @@ class GuideViewportManager {
     // than flashing every CodeView off and back on.
     if (next.size === 0 && this.mounted.size > 0) return;
 
-    if (motion === 'moving') {
+    if (motion === 'moving' && !this.fallingBehind) {
       this.setMounted(next);
       // A scroll ends with no event of its own: the next frame finds out.
       this.scheduleReconcile();
@@ -379,7 +421,7 @@ class GuideViewportManager {
     }
     const step = this.settleStep(next);
     this.setMounted(step);
-    if (!setEquals(step, next)) this.scheduleReconcile();
+    if (motion === 'moving' || !setEquals(step, next)) this.scheduleReconcile();
   }
 
   /** How the view moved since the last look. A smooth jump's scroll counts as moving; a landing's small re-aims do not. */
@@ -389,9 +431,13 @@ class GuideViewportManager {
     const moved = Math.abs(top - this.lastScrollTop);
     // Capped: the first scroll after a pause is measured against a frame or two, not the whole pause.
     const elapsed = Math.max(1, Math.min(now - this.lastScrollAt, 50));
+    this.fallingBehind = this.lastMotion === 'moving' && now - this.lastScrollAt > FALLING_BEHIND_MS;
     this.lastScrollTop = top;
     this.lastScrollAt = now;
-    if (this.landing && !this.landing.smooth) return 'rest';
+    if (this.landing && !this.landing.smooth) {
+      this.passedLastFrame = false;
+      return 'rest';
+    }
     if (this.keyScroll) {
       if (moved >= 1) this.keyScroll.moved = true;
       else if (this.keyScroll.moved || ++this.keyScroll.frames > KEY_SCROLL_START_FRAMES) this.keyScroll = null;

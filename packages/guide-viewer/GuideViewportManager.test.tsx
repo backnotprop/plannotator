@@ -397,6 +397,74 @@ describe('GuideViewportProvider window', () => {
     expect(mountedIds()).toEqual(ids.slice(0, 6));
   });
 
+  test.skipIf(!hasDom)('when frames fall behind during a scroll, what is on screen still draws and the rest waits a frame', async () => {
+    const scroller = await renderInScroller();
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, index * 400, 1_000, 300);
+    }
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 2).includes(id));
+    await frame();
+
+    // Moving, at a good pace.
+    await new Promise((done) => setTimeout(done, 20));
+    await scrollTo(scroller, 100);
+    await frame();
+
+    // The next frame takes 60 ms: of the files it brings into the window, 0 to 2 are on screen, 3 is nearest, the rest wait.
+    await new Promise((done) => setTimeout(done, 60));
+    await scrollTo(scroller, 200);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 8).includes(id));
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 4));
+  });
+
+  test.skipIf(!hasDom)('what a fast scroll stops on stays put while the files above it settle', async () => {
+    const scroller = await renderInScroller();
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    let shift = 0;
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, (index - 20) * 400 + 120 + shift, 1_000, 300);
+    }
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 3).includes(id));
+    await frame();
+
+    await scrollTo(scroller, 5_000);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(18, 24).includes(id));
+    await frame();
+    await frame();
+    await frame();
+
+    // A file above swaps its estimate: everything below moves up with no scroll of its own, and the scroll takes it back.
+    shift = -99;
+    const before = scroller.scrollTop;
+    await frame();
+    expect(scroller.scrollTop).toBe(before - 99);
+  });
+
+  test.skipIf(!hasDom)('a scrollbar drag that pauses and moves on is not pulled back', async () => {
+    const scroller = await renderInScroller();
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    const shellTop = () => (20 * 400) - scroller.scrollTop + 120;
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, (index - 20) * 400 + shellTop(), 1_000, 300);
+    }
+    const frame = manualFrames();
+    await scrollTo(scroller, 8_000);
+    await frame();
+    await frame();
+    await frame();
+    await frame();
+
+    // The thumb moves again, with no pointer event: the view is the person's.
+    await scrollTo(scroller, 8_200);
+    await frame();
+    await frame();
+    expect(scroller.scrollTop).toBe(8_200);
+  });
+
   test.skipIf(!hasDom)('before the observer first reports, a scroll keeps the first files instead of flashing them away', async () => {
     const scroller = await renderInScroller();
     const seeded = mountedIds();
