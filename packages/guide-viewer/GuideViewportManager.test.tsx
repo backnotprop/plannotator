@@ -259,16 +259,35 @@ describe('GuideViewportProvider window', () => {
       for (let i = 0; i < count; i++) await new Promise((done) => setTimeout(done, 20));
     });
 
-  test.skipIf(!hasDom)('a flick draws the files it lands on at once, not when the scroll stops', async () => {
+  test.skipIf(!hasDom)('a flick draws the files it runs into at once, on screen or not yet, not when the scroll stops', async () => {
     const scroller = await renderInScroller();
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, index * 400, 1_000, 300);
+    }
     await deliver((id) => ids.slice(0, 5).includes(id));
-    await frames(2);
+    await frames(6);
 
-    const landed = ids.slice(4, 9);
-    await frames(1);
+    const frame = manualFrames();
+    const landed = ids.slice(4, 12);
+    await new Promise((done) => setTimeout(done, 20));
     await scrollTo(scroller, 400);
-    await deliver((id) => landed.includes(id));
+    DrivenIntersectionObserver.current!.deliver((id) => landed.includes(id));
+    await frame();
     expect(mountedIds()).toEqual(landed);
+  });
+
+  test.skipIf(!hasDom)('a step of more than a view passes files even on frames too slow to read as fast', async () => {
+    const scroller = await renderInScroller();
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+
+    await new Promise((done) => setTimeout(done, 60));
+    await scrollTo(scroller, 1_500);
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(10, 15).includes(id));
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 5));
   });
 
   test.skipIf(!hasDom)('a scroll passing a whole view each frame mounts nothing until it stops, then draws where it stopped', async () => {
@@ -305,6 +324,8 @@ describe('GuideViewportProvider window', () => {
 
     window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
     for (const [step, passing] of [[100, 5], [200, 10]] as const) {
+      // Slow enough that only the key says this is passing.
+      await new Promise((done) => setTimeout(done, 40));
       await scrollTo(scroller, step);
       DrivenIntersectionObserver.current!.deliver((id) => ids.slice(passing, passing + 5).includes(id));
       await frame();
