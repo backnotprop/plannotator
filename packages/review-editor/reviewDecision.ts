@@ -66,9 +66,7 @@ export function resolveReviewDecisionAction(id: DecisionActionId): ReviewDecisio
 
 /**
  * The mode the ReviewSubmissionDialog opens in: the review event it posts
- * (#1611: `request_changes` is a real GitHub REQUEST_CHANGES review; GitLab
- * posts it as a comment) and whether the dialog offers the Comment / Request
- * changes choice.
+ * (#1611) and whether the dialog offers the Comment / Request changes choice.
  */
 export interface PlatformDialogMode {
   action: PRReviewAction;

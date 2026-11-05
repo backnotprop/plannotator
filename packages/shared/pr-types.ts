@@ -252,9 +252,8 @@ export interface PRReviewFileComment {
 
 /**
  * The review event a platform submission carries (#1611). GitHub maps these
- * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab has no request-changes
- * review, so it posts `request_changes` exactly like `comment` (a note plus
- * discussions); only `approve` adds a mutation there.
+ * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab posts a note plus
+ * discussions, then `approve` or `request_changes` sets the decision separately.
  */
 export type PRReviewAction = "approve" | "comment" | "request_changes";
 
@@ -303,7 +302,7 @@ export interface PRReviewCommentFailure {
 export interface PRReviewRetry {
   /**
    * `approve` / `request_changes` when the decision mutation itself failed
-   * (GitLab approve, Bitbucket approve or request-changes); `comment` when only
+   * (GitLab or Bitbucket approve or request-changes); `comment` when only
    * inline comments (and possibly the unposted general comment) remain.
    */
   action: PRReviewAction;
@@ -397,8 +396,8 @@ export interface PRPlatformCapabilities {
   numberPrefix: "#" | "!";
   /**
    * The platform records a real request-changes decision (#1611). GitHub:
-   * REQUEST_CHANGES review; Bitbucket: `POST /request-changes`. GitLab has
-   * none, so `request_changes` posts exactly like `comment` there.
+   * REQUEST_CHANGES review; GitLab: `mergeRequestRequestChanges`; Bitbucket:
+   * `POST /request-changes`.
    */
   requestChanges: boolean;
   /** The platform refuses approve / request-changes from the PR author. */
@@ -442,7 +441,7 @@ const PLATFORM_CAPABILITIES: Record<Platform, PRPlatformCapabilities> = {
     label: "GitLab",
     changeLabel: "MR",
     numberPrefix: "!",
-    requestChanges: false,
+    requestChanges: true,
     selfReviewBlocked: true,
     fileLevelComments: false,
     viewedSync: false,

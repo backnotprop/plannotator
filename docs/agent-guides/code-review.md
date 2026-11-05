@@ -131,9 +131,11 @@ Request changes, while the primary `Post Comments` keeps the plain comment flow 
 else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
 single create-review call AND on the pending-review → `/events` submit path (#1600), with the
 same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
-body on both). GitLab has no request-changes review: `request_changes` posts exactly what
-`comment` posts, the menu subtitles say so (`requestChangesSupported: false` on the spec's
-platform input), and the dialog's Request changes option is disabled with that reason. GitHub
+body on both). GitLab posts the note and discussions first, then sets the reviewer state with
+the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
+`request_changes` alone). A platform without a request-changes decision sets
+`requestChangesSupported: false` on the spec's platform input: the menu subtitles say it posts as
+a comment and the dialog's Request changes option is disabled with that reason. GitHub
 refuses REQUEST_CHANGES on your own PR like APPROVE, so with `requestChangesSupported: true` and
 `selfAuthored` the empty-state `Request changes…` mutes with its own reason and a live
 `Comment…` row (`note-with-feedback`, compact id `comment`) keeps the state from being a dead

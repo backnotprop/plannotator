@@ -40,9 +40,9 @@ export function platformRules(pull: PlatformPostPull): PlatformRules {
   };
 }
 
-/** The posted confirmation's words (GitLab has no request-changes review: it went as a comment). */
+/** The posted confirmation's words. */
 export function postedWords(posted: { label: string; action: string }): string {
   if (posted.action === 'approve') return `Approved on ${posted.label}`;
-  if (posted.action === 'request_changes' && posted.label !== 'GitLab') return `Changes requested on ${posted.label}`;
+  if (posted.action === 'request_changes') return `Changes requested on ${posted.label}`;
   return `Review posted on ${posted.label}`;
 }

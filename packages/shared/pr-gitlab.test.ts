@@ -3,7 +3,7 @@ import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fetchGlMR, fetchGlMRContext, parsePaginatedArray, submitGlMRReview } from "./pr-gitlab";
-import type { PRReviewFileComment, PRRuntime } from "./pr-types";
+import type { CommandResult, PRReviewFileComment, PRRuntime } from "./pr-types";
 
 describe("fetchGlMR", () => {
   test("uses GitLab raw diffs so binary markers and collapsed files are preserved", async () => {
@@ -506,11 +506,14 @@ describe("submitGlMRReview", () => {
     options: {
       diffRefsReject?: boolean;
       approvalReject?: boolean;
+      graphql?: CommandResult;
     } = {},
-  ): { runtime: PRRuntime; postedBodies: string[] } {
+  ): { runtime: PRRuntime; postedBodies: string[]; graphqlInputs: unknown[] } {
     const postedBodies: string[] = [];
+    const graphqlInputs: unknown[] = [];
     return {
       postedBodies,
+      graphqlInputs,
       runtime: {
         async runCommand(_command, args) {
           const endpoint = args[1] ?? "";
@@ -543,6 +546,10 @@ describe("submitGlMRReview", () => {
             return discussionFailures.has(payload.body ?? "")
               ? { stdout: "", stderr: `rejected ${payload.body}`, exitCode: 1 }
               : { stdout: "{}", stderr: "", exitCode: 0 };
+          }
+          if (endpoint === "graphql" && options.graphql) {
+            graphqlInputs.push(payload);
+            return options.graphql;
           }
           if (endpoint.endsWith("/approve") && options.approvalReject) {
             throw new Error("spawn glab ENOENT");
@@ -747,5 +754,51 @@ describe("submitGlMRReview", () => {
     };
     expect(first).toEqual(expected);
     expect(retry).toEqual(expected);
+  });
+
+  test("request_changes posts the comments, then sets the reviewer state through GraphQL", async () => {
+    const { runtime, postedBodies, graphqlInputs } = makeSubmissionRuntime(new Set(), {
+      graphql: { stdout: JSON.stringify({ data: { mergeRequestRequestChanges: { errors: [] } } }), stderr: "", exitCode: 0 },
+    });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "Please fix", comments),
+    ).resolves.toEqual({ status: "complete" });
+    expect(postedBodies).toEqual(["Please fix", "First finding", "Second finding"]);
+    expect(graphqlInputs).toEqual([
+      { query: expect.stringContaining("mergeRequestRequestChanges"), variables: { projectPath: "g/p", iid: "1" } },
+    ]);
+  });
+
+  test.each<{ name: string; graphql: CommandResult; error: string }>([
+    {
+      name: "a mutation error",
+      graphql: { stdout: JSON.stringify({ data: { mergeRequestRequestChanges: { errors: ["Reviewer not found"] } } }), stderr: "", exitCode: 0 },
+      error: "Failed to request changes on MR: Reviewer not found",
+    },
+    {
+      name: "a top-level GraphQL error",
+      graphql: { stdout: JSON.stringify({ data: null, errors: [{ message: "Field doesn't exist" }] }), stderr: "", exitCode: 0 },
+      error: "Failed to request changes on MR: Field doesn't exist",
+    },
+    {
+      name: "a glab failure",
+      graphql: { stdout: "", stderr: "401 Unauthorized", exitCode: 1 },
+      error: "Failed to request changes on MR: 401 Unauthorized",
+    },
+  ])("request_changes reports $name as partial with a request_changes-only retry", async ({ graphql, error }) => {
+    const { runtime } = makeSubmissionRuntime(new Set(), { graphql });
+
+    await expect(
+      submitGlMRReview(runtime, REF, "head", "request_changes", "", comments),
+    ).resolves.toEqual({
+      status: "partial",
+      postedFileCommentCount: 2,
+      failedFileComments: [],
+      reviewBodyPosted: false,
+      approval: "failed",
+      approvalError: error,
+      retry: { action: "request_changes", fileComments: [] },
+    });
   });
 });

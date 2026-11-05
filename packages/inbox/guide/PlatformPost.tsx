@@ -3,7 +3,7 @@
  * goes). This is the review app's PR-mode posting, reused whole: `buildReviewSubmission` (inline comments, file-level
  * comments on GitHub, the review body's file-scoped and "Comments outside the diff" sections), `buildPlatformReviewBody`,
  * `submitPlatformReviewTargets` (retry-safe target states, the partial result and its narrowed retry) and
- * `ReviewSubmissionDialog` (the same dialog, its Comment / Request changes choice, GitLab's missing request-changes,
+ * `ReviewSubmissionDialog` (the same dialog, its Comment / Request changes choice,
  * the partial and blocked notices). Only the request goes elsewhere: to the Inbox's `POST /api/inbox/pulls/review`.
  *
  * Reached as `#platform-post` (package.json `imports`). It imports review-editor, which does not compile under the

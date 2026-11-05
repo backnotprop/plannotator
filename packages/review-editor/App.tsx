@@ -955,9 +955,7 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // #1611: GitHub has a REQUEST_CHANGES review (refused on your own PR, like
-  // approve) and Bitbucket a request-changes decision; GitLab has none, so
-  // Request changes posts as a comment there.
+  // #1611: GitHub refuses request changes on your own PR, like approve.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`

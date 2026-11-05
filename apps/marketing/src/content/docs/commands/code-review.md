@@ -112,7 +112,7 @@ Send Feedback → PR context included in feedback
 Approve → configured approval prompt sent to agent
 ```
 
-When you switch the review destination to the PR or MR itself, the header posts a platform review instead. **Post Comments** posts a neutral comment review. **Post comments, then…** opens the submission dialog with a choice between **Comment** and **Request changes**, and the empty-state **Request changes…** opens it with Request changes selected. On GitHub, Request changes posts a real "Changes requested" review. GitHub does not let you request changes on your own pull request, so that option is disabled there. GitLab has no request-changes review, so on GitLab the review posts as a comment. On Bitbucket Cloud, Approve and Request changes set your decision on the pull request (Bitbucket's Approve and Request changes buttons), after your comments are posted.
+When you switch the review destination to the PR or MR itself, the header posts a platform review instead. **Post Comments** posts a neutral comment review. **Post comments, then…** opens the submission dialog with a choice between **Comment** and **Request changes**, and the empty-state **Request changes…** opens it with Request changes selected. On GitHub, Request changes posts a real "Changes requested" review. GitHub does not let you request changes on your own pull request, so that option is disabled there. On GitLab, Request changes marks you as having requested changes on the merge request, after your comments are posted. On Bitbucket Cloud, Approve and Request changes set your decision on the pull request (Bitbucket's Approve and Request changes buttons), after your comments are posted.
 
 ## Stacked PRs and MRs
 
