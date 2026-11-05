@@ -49,11 +49,16 @@ export function textareaField(textarea: HTMLTextAreaElement, touch: () => boolea
       const onSelection = () => {
         if (document.activeElement === textarea) onCaret();
       };
+      // On the document, so after React's listener on its root. What this hears can change the session's view and draw
+      // the field at once; before React has heard of the key, that puts the old words back and the key is lost.
+      const onField = (event: Event) => {
+        if (event.target === textarea) onInput();
+      };
       document.addEventListener('selectionchange', onSelection);
-      textarea.addEventListener('input', onInput);
+      document.addEventListener('input', onField);
       return () => {
         document.removeEventListener('selectionchange', onSelection);
-        textarea.removeEventListener('input', onInput);
+        document.removeEventListener('input', onField);
       };
     },
   };
