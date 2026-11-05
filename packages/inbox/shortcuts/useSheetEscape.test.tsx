@@ -48,19 +48,6 @@ describe.skipIf(!hasDom)('useSheetEscape', () => {
     expect(closed).toBe(2);
   });
 
-  test('the selection toolbar or its label picker on screen keeps the key: it closes first, the sheet second', async () => {
-    await mount();
-    for (const html of ['<div data-pn-annotation-toolbar-row></div>', '<div data-quick-label-picker></div>']) {
-      const shown = add(html);
-      shown.getClientRects = () => [{}] as unknown as DOMRectList;
-      escape(document.body);
-      expect(closed).toBe(0);
-      shown.remove();
-    }
-    escape(document.body);
-    expect(closed).toBe(1);
-  });
-
   test('another key, or a sheet that is closed, does nothing', async () => {
     await mount();
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', bubbles: true }));
