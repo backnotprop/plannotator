@@ -86,6 +86,8 @@ export function createInboxCompose(options: {
   boardOn?: () => boolean;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
+  /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
+  onDraftsChange?: () => void;
 }) {
   const { store, serverSession, live, json } = options;
   const boardOn = options.boardOn ?? (() => false);
@@ -226,7 +228,7 @@ export function createInboxCompose(options: {
     else if (prepared) options.launch!.begin(result.message);
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
-    if (body.draft_id !== undefined) deleteInboxDraft(store.dir, body.draft_id);
+    if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();
     return json({
       thread_id: result.message.thread_id,
       message: result.message,
@@ -310,8 +312,13 @@ export function createInboxCompose(options: {
       const body = await options.readBody(req);
       const stale = staleTab(body);
       if (stale) return stale;
-      if (draftMatch[2]) return json({ ok: true, deleted: deleteInboxDraft(store.dir, draftMatch[1]) });
+      if (draftMatch[2]) {
+        const deleted = deleteInboxDraft(store.dir, draftMatch[1]);
+        if (deleted) options.onDraftsChange?.();
+        return json({ ok: true, deleted });
+      }
       const draft = saveInboxDraft(store.dir, draftMatch[1], body, now().toISOString());
+      options.onDraftsChange?.();
       return json({ draft: withStatus(draft) });
     }
     if (path === "/api/inbox/uploads") {

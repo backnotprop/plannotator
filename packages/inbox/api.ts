@@ -7,6 +7,7 @@
 
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
+import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
 import type {
   InboxCardMark,
@@ -126,6 +127,12 @@ export interface CardsModel {
   steps?: Record<string, InboxStepsWire[]>;
   /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
   initiatives?: InboxInitiative[];
+  /**
+   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
+   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
+   * Absent from an older Inbox: the preview lists no threads.
+   */
+  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -221,6 +228,8 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
+  list_version?: string;
   /**
    * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
    * an older Inbox and for a tailnet guest, which then read every session as before.
@@ -1083,6 +1092,16 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
   return post<{ recent_searches: string[] }>(inboxUrl('/search/recent'), input);
 }
 
+/** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
+const listReader = createListReader<ListModel>((since) =>
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+);
+
+/** Tests only: the next list read is a whole one. */
+export function resetListReads(): void {
+  listReader.reset();
+}
+
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
@@ -1096,8 +1115,9 @@ export const inboxApi = {
   // project naming this Inbox; an older Inbox ignores the parameter.
   // `snoozed=exclude` the same way: snoozed threads come apart from the sections, for the band under Quiet. The rule
   // runs here again with this window's clock, which is the one the person reads the time on.
+  // Only the rows changed since the list this window holds, and one read for calls close together (listRead.ts).
   list: () =>
-    get<ListModel>(inboxUrl('/threads?archived=exclude&snoozed=exclude&machines=1')).then((read) => {
+    listReader.read().then((read) => {
       const model = read.snoozed ? { ...read, ...inboxSectionsAsOf(read.sections, read.snoozed) } : read;
       learnMachines(model);
       return model;
@@ -1695,6 +1715,8 @@ export interface AttachmentsModel {
   /** The images the messages show, captured as files (additive; absent from an older Inbox). */
   inline_images?: InboxAttachmentState[];
   annotations: InboxAnnotationRecord[];
+  /** The person's comments on files that a Send already carried (additive; absent from an older Inbox or peer). */
+  earlier_annotations?: InboxAnnotationRecord[];
 }
 
 /** One version of a file: its text, and for HTML the page as annotate serves it. */
@@ -1745,8 +1767,11 @@ export interface InboxEventHandlers {
    * stream serves this one changes, so the report names it (`served_by`).
    */
   onConnect?: () => void;
-  /** A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"); never called by an older Inbox. */
-  onDrafts?: (threadId: string) => void;
+  /**
+   * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
+   * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
+   */
+  onDrafts?: (threadId: string | null) => void;
   /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
@@ -1846,8 +1871,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'drafts':
       try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown };
+        const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
         if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
+        else if (data.compose === true) handlers.onDrafts?.(null);
       } catch {
         // A malformed frame changes nothing.
       }
