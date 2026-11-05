@@ -7738,6 +7738,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-empty { padding: 18px 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.5; }
 .ib-pr-empty p { margin: 0 0 4px; }
 .ib-pr-empty-h { color: var(--foreground); font-weight: 600; }
+/* A centred word in the list column, with its one button: Code review off. */
+.ib-pr-off { display: flex; align-items: center; justify-content: center; text-align: center; }
+.ib-pr-off .ib-btn { margin-top: 14px; }
 .ib-prrow .ib-l3.ib-pr-l3 { justify-content: flex-start; gap: 7px; }
 .ib-prrow .ib-l3.ib-pr-l3 > .ib-pv { margin-right: 0; }
 .ib-mrow.ib-prrow { display: flex; flex-direction: column; gap: 3px; width: 100%; padding: 12px 14px; text-align: left; border-bottom: 1px solid var(--ib-hair); }
