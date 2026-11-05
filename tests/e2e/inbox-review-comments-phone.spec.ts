@@ -105,6 +105,11 @@ for (const [name, open] of Object.entries(opens)) {
         const actions = sheet.locator('[data-annotation-panel] .ml-auto button');
         expect(await actions.count()).toBe(COMMENTS.length * 2);
         for (const action of await actions.all()) await expectTarget(action);
+        await actions.first().tap();
+        await expectTarget(sheet.getByRole('button', { name: 'Save', exact: true }));
+        const cancel = sheet.getByRole('button', { name: 'Cancel', exact: true });
+        await expectTarget(cancel);
+        await cancel.tap();
 
         await close.tap();
         await expect(sheet).toBeHidden();

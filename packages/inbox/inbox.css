@@ -7674,11 +7674,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
      where it was (the list under an open thread's way). */
   .pn-inbox .ib-viewer.ib-review.ib-fold.ib-panel-open .ib-gpanel { position: fixed; top: 0; left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); width: auto; z-index: 8; border-left: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
   .ib-review.ib-fold.ib-panel-open > :not(.ib-rsplit), .ib-review.ib-fold.ib-panel-open > .ib-rsplit > :not(.ib-gpanel) { visibility: hidden; }
-  .ib-review.ib-fold .ib-sheet-h { height: 52px; padding: 0 4px 0 16px; font-size: var(--ib-fs-15, 15px); }
-  /* Each card's Edit and Delete: 44 px targets in a row no taller, the outer icon where it was. */
-  .ib-review .ib-gpanel [data-annotation-panel] .ml-auto { margin-right: -10px; }
+  .ib-review.ib-fold .ib-sheet-h { height: 52px; padding: 0 4px 0 20px; font-size: var(--ib-fs-15, 15px); }
+  /* Each card's Edit and Delete: 44 px targets in a row no taller, the outer icon under the sheet's close. */
+  .ib-review .ib-gpanel [data-annotation-panel] .ml-auto { margin-right: -16px; }
   .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button { display: grid; place-items: center; width: 44px; height: 44px; margin-block: -10px; }
   .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button::before { content: none; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] textarea + div button { height: 44px; min-width: 44px; padding-inline: 12px; }
   .ib-rvcard { padding: 12px 14px 14px; }
   .pn-inbox .ib-rvc-foot .ib-btn { min-height: 44px; }
 }
