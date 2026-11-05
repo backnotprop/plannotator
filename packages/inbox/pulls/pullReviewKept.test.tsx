@@ -2175,7 +2175,7 @@ const seedSplit = (top: InboxPull) => {
   window.localStorage.setItem(`${STORE}${top.key}:layer:${B}`, JSON.stringify({ comments: [{ ...LINE, text: 'Old words.', readHead: A, readBase: 'main' }], viewed: [] }));
   window.localStorage.setItem(`${STORE}${top.key}:layer:${A}`, JSON.stringify({ comments: [{ ...LINE, text: 'Edited there.', readHead: A, readBase: 'main' }], viewed: [] }));
 };
-const allWords = () => (reader!.comments!.annotations ?? []).length;
+const annotations = () => (reader!.comments!.annotations ?? []) as { id: string; text?: string }[];
 const listed = (top: InboxPull) => words(top, B);
 
 test.skipIf(!hasDom)('one comment in two entries in different words: a read moves both to the new head, as two comments, and reading again adds none', async () => {
@@ -2211,13 +2211,13 @@ for (const [what, stays] of [['the older', 'Edited there.'], ['the edit', 'Old w
     window.localStorage.setItem(key, JSON.stringify({ comments: [{ ...LINE, text: 'Edited there.', readHead: A, readBase: 'main' }], viewed: [] }));
     await act(async () => void window.dispatchEvent(new StorageEvent('storage', { key })));
     await settle();
-    const gone = (reader!.comments!.annotations ?? []).find((c) => c.text !== stays)!;
-    expect(allWords()).toBe(2);
+    const gone = annotations().find((c) => c.text !== stays)!;
+    expect(annotations().length).toBe(2);
     await act(async () => void reader!.comments!.onDelete?.(gone.id));
-    expect(allWords()).toBe(1);
+    expect(annotations().length).toBe(1);
     close();
     await open([low, top], top);
-    expect((reader!.comments!.annotations ?? []).map((c) => c.text)).toEqual([stays]);
+    expect(annotations().map((c) => c.text)).toEqual([stays]);
   });
 }
 
