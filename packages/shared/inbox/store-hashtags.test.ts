@@ -61,6 +61,56 @@ test("a card an agent makes later for a thread the person tagged starts in that 
   expect(store.cardWire(plain).initiative).toBeNull();
 });
 
+// HOW.md: "A card an agent makes later for that thread starts in Shape too", whatever the agent named. The failures
+// guarded: the agent's name beating the tag, or an initiative made for a name that lost.
+test("at create the person's tag wins over an agent's name or \"\", and no initiative is made for the name", () => {
+  const { store, project, shape, review } = world();
+  const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: "Take the empty states?" }).message;
+  store.sendReply(asked.id, { words: "Yes, #Shape work.", idempotency_key: "k1" });
+  const threads = [asked.thread_id];
+  for (const initiative_name of ["Billing", "Code review", ""]) {
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: `Named ${initiative_name}`, threads, initiative_name });
+    expect([initiative_name, store.cardWire(card).initiative]).toEqual([initiative_name, shape.id]);
+    expect(store.cardHistory(card.id).filter((entry) => entry.kind === "initiative").map((entry) => entry.by.kind)).toEqual(["person"]);
+  }
+  expect(store.initiatives().map((i) => i.name)).toEqual(["Shape", "Code review"]);
+  // A name the rules refuse is still refused, not hidden by the tag.
+  expect(() => store.createCard({ project_id: project.id, by: AGENT, title: "Long", threads, initiative_name: "x".repeat(41) })).toThrow();
+  // The person's own pick on New card holds.
+  const picked = store.createCard({ project_id: project.id, by: PERSON, title: "Mine", threads, initiative: review.id }).card;
+  expect(store.cardWire(picked).initiative).toBe(review.id);
+  // A tag whose initiative is gone is no tag: the name holds.
+  store.deleteInitiative(shape.id);
+  const after = store.createCard({ project_id: project.id, by: AGENT, title: "After", threads, initiative_name: "Billing" }).card;
+  expect(store.initiative(store.cardWire(after).initiative!)!.name).toBe("Billing");
+});
+
+test("after create the last change wins: an agent's say over the tag, the person's next tag over the say", () => {
+  const { store, project, shape, review } = world();
+  const asked = store.sendMessage({ project_id: project.id, author: AGENT, body: "Take it?" }).message;
+  store.sendReply(asked.id, { words: "Yes, #Shape work.", idempotency_key: "k1" });
+  const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Empty states", threads: [asked.thread_id] });
+  const initiativeOf = (id: string) => store.cardWire(store.card(id)!).initiative;
+  expect(initiativeOf(card.id)).toBe(shape.id);
+  store.updateCard(card.id, { by: AGENT, initiative_name: "Code review" });
+  expect(initiativeOf(card.id)).toBe(review.id);
+  store.updateCard(card.id, { by: AGENT, initiative_name: "" });
+  expect(initiativeOf(card.id)).toBeNull();
+  store.sendReply(asked.id, { words: "Back in #Shape please.", idempotency_key: "k2" });
+  expect(initiativeOf(card.id)).toBe(shape.id);
+
+  // A say that links a tagged thread: with no pick the tag places a card in none; a pick in the same call is the last change.
+  for (const [title, initiative_name, expected] of [
+    ["Plain", undefined, shape.id],
+    ["Named", "Code review", review.id],
+    ["Out", "", null],
+  ] as const) {
+    const later = store.createCard({ project_id: project.id, by: AGENT, title }).card;
+    store.updateCard(later.id, { by: AGENT, threads: [asked.thread_id], initiative_name });
+    expect([title, initiativeOf(later.id)]).toEqual([title, expected]);
+  }
+});
+
 test("initiativeThreads: every thread a message tags an initiative in, agent's or person's, latest first; code is no tag; it survives a reload", () => {
   const { dir, store, project, shape, review } = world();
   const a = store.sendMessage({ project_id: project.id, author: AGENT, body: "Takes are up for #Shape.", thread: "a" }).message;

@@ -173,10 +173,10 @@ describe("initiatives: the store", () => {
 
 // Approval "board-initiatives", "Agents and initiatives" (q-b3b9c89c): an agent puts its card in an initiative by
 // name (the card tool's `initiative`, here `initiative_name`), and makes one only that way. The failures guarded: a
-// near-duplicate made for a name that differs only in case or spaces; a refused card that leaves an initiative
+// near-duplicate made for a name that differs only in case, spaces or punctuation; a refused card that leaves an initiative
 // behind; the name rules skipped for agents; a cap back on how many there are; a deleted initiative taking its cards with it.
 describe("initiatives: an agent's card names one", () => {
-  test("an existing name joins it, ignoring case and spaces; an unknown one makes it; \"\" takes the card out", () => {
+  test("an existing name joins it; an unknown one makes it; \"\" takes the card out", () => {
     const { store, project } = world();
     const review = store.createInitiative({ name: "Code review", by: PERSON });
     const joined = store.createCard({ project_id: project.id, by: AGENT, title: "Diff wrap", initiative_name: "  CODE review " }).card;
@@ -289,6 +289,30 @@ describe("initiatives: an agent's card names one", () => {
     expect(refusal(() => store.createCard({ project_id: project.id, by: AGENT, title: "x", initiative: shape.id }))).toBe("initiative_person_only");
     // A name in other case joins the initiative; it never renames it.
     expect(store.initiative(shape.id)!.name).toBe("Shape");
+  });
+
+  // The tags' key, so what an agent writes and what the person tags name one initiative (near-duplicates are the failure).
+  test("a name joins by the tag key: punctuation, case and width fold; an exact name comes first; no key matches nothing", () => {
+    const { store, project } = world();
+    const review = store.createInitiative({ name: "Code review", by: PERSON });
+    for (const name of ["Code-Review", "Code Review", "#CodeReview", "code_review", "\uFF23ode review"]) {
+      expect([name, store.createCard({ project_id: project.id, by: AGENT, title: name, initiative_name: name }).card.initiative]).toEqual([name, review.id]);
+    }
+    expect(store.initiatives().length).toBe(1);
+
+    // Two live names with one key: the exact one, else the first made (what a tag resolves to).
+    const tight = store.createInitiative({ name: "CodeReview", by: PERSON });
+    expect(store.initiativeNamed("codereview")!.id).toBe(tight.id);
+    expect(store.initiativeNamed("Code review")!.id).toBe(review.id);
+    expect(store.initiativeNamed("code-review")!.id).toBe(review.id);
+
+    // No letters or digits: the exact name only, or "???" would join "!!!" (and delete it).
+    const marks = store.createInitiative({ name: "!!!", by: PERSON });
+    expect(store.initiativeNamed("!!!")!.id).toBe(marks.id);
+    expect(store.initiativeNamed("???")).toBeNull();
+    const other = store.createCard({ project_id: project.id, by: AGENT, title: "Other", initiative_name: "???" }).card;
+    expect(other.initiative).not.toBe(marks.id);
+    expect(store.initiatives().some((i) => i.name === "???")).toBe(true);
   });
 
   test("the last change wins, the person's or an agent's", () => {

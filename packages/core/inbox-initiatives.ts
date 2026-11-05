@@ -14,9 +14,11 @@
  *
  * The person names, renames and deletes them. An agent puts a card in one
  * through the card tool's `initiative`, a name or a live one's id (approval
- * "board-initiatives", "Agents and initiatives"): anything no live initiative
- * answers to makes a new one, the only way an agent makes one. An agent may
- * delete one too (op `initiative_delete`); only the person renames.
+ * "board-initiatives", "Agents and initiatives"): a name matches a live one
+ * exactly, ignoring case, or else by the tag key (`inboxInitiativeTagKey`), so
+ * "Code-Review", "Code Review" and "#CodeReview" are one; anything no live
+ * initiative answers to makes a new one, the only way an agent makes one. An
+ * agent may delete one too (op `initiative_delete`); only the person renames.
  */
 
 import { isInboxId, type InboxAuthor } from "./inbox-types";
@@ -62,17 +64,6 @@ export function isInboxInitiativeRecord(value: unknown): value is InboxInitiativ
 /** The key two names are the same by: case and surrounding space ignored. */
 export function inboxInitiativeNameKey(name: string): string {
   return name.trim().toLocaleLowerCase();
-}
-
-/**
- * The key an agent's name for an initiative (the card tool's `initiative`)
- * matches a live one by: case and every space ignored, so "code review",
- * "Code  Review" and "CodeReview" all reuse "Code review" rather than make a
- * near-duplicate. Wider than inboxInitiativeNameKey (what two names may not
- * share), so an exact match there is tried first.
- */
-export function inboxInitiativeMatchKey(name: string): string {
-  return inboxInitiativeNameKey(name).replace(/\s+/gu, "");
 }
 
 /**

@@ -457,6 +457,28 @@ describe("the Board page's routes: New card and the look", () => {
     ]);
   });
 
+  // What the agent is told when the person's tag beats the name it gave: the card line names the real one, and the
+  // nudge must not claim a "Billing" that was never made.
+  test("an agent's create on a thread the person tagged: the answer names the tagged initiative, no nudge, none made", async () => {
+    const { card, call, server, project } = await world();
+    const shape = server.store.createInitiative({ name: "Shape", by: { kind: "person" } });
+    const asked = await call("send_message", { project_path: project, agent_session: "ses_a", agent_host: "claude-code", agent_name: "Claude Code", body: "Take the empty states?" });
+    server.store.sendReply(asked.structuredContent.message_id, { words: "Yes, #Shape work.", idempotency_key: "k1" });
+
+    const made = await card({ op: "create", title: "Empty states", thread_id: asked.structuredContent.thread_id, initiative: "Billing" });
+    expect(made.isError).toBeUndefined();
+    expect(made.structuredContent.card.initiative).toBe(shape.id);
+    expect(made.content[0]!.text).toContain('initiative "Shape"');
+    expect(made.content[0]!.text).not.toContain("Billing");
+    expect(made.structuredContent.initiative_hint).toBeUndefined();
+    expect(server.store.initiatives().map((i) => i.name)).toEqual(["Shape"]);
+
+    // Named the punctuation-insensitive way, later, by say: it joins, and the last change holds.
+    const review = server.store.createInitiative({ name: "Code review", by: { kind: "person" } });
+    const moved = await card({ op: "say", card_id: made.structuredContent.card.id, initiative: "#CodeReview" });
+    expect(moved.structuredContent.card.initiative).toBe(review.id);
+  });
+
   // The owner, 2026-11-04: on clearing out, "Only on like a board --help or a hook nudge when agents create
   // initiatives ... Try not to bloat main instruction or main tool description." What regresses: the line on every
   // join (noise), a retry that made nothing claiming it did, or the sentence creeping back into what every request carries.
