@@ -32,7 +32,9 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { heldWords } from "../inbox/api";
 import { startInboxServer } from "./inbox";
+import { machineHeldWords } from "./inbox-machines";
 import { createInboxDevices, takeDownInboxTailnet, UNLINKED_REFUSAL_KEPT_MS } from "./inbox-devices";
 import { readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
 import {
@@ -1177,6 +1179,449 @@ describe("the tailnet door with Phones off, in process", () => {
       inbox.stop();
     }
   }, 60_000);
+});
+
+describe("an agent's snooze_thread of a linked machine's thread", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const mcp = async (port: number) => {
+    const client = new Client({ name: "inbox-machines-snooze", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+    return client;
+  };
+  type Snoozed = { isError?: boolean; content: { text: string }[]; structuredContent?: Json };
+  const call = async (client: Client, thread_id: string, until: string | null) => (await client.callTool({ name: "snooze_thread", arguments: { thread_id, until } })) as Snoozed;
+  const inSoon = () => new Date(Date.now() + 86_400_000).toISOString();
+  const list = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  const snoozedIds = async (port: number) => ((await list(port)).snoozed as Json[]).map((row) => row.thread_id);
+  const rowOn = async (port: number, id: string) => JSON.stringify(((await list(port)).sections as Json[]).flatMap((s) => s.threads)).includes(id);
+
+  test("the agent on A snoozes B's thread: it lives on B, leaves A's list, and ends; B away, the call says it waits, and it applies when B is back", async () => {
+    const dataA = scratch("plannotator-snooze-agent-a-");
+    const dataB = scratch("plannotator-snooze-agent-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    const clients: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) });
+      expect(linked.status).toBe(201);
+      const onB = await mcp(b.port);
+      const onA = await mcp(a.port);
+      clients.push(onA, onB);
+      const project = scratch("plannotator-snooze-agent-project-");
+      const sent = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
+      const thread = sent.structuredContent.thread_id;
+      await waitFor("B's thread on A", () => rowOn(a.port, thread));
+
+      const snoozed = await call(onA, thread, inSoon());
+      expect(snoozed.isError).toBeUndefined();
+      expect(snoozed.structuredContent!.snoozed.until).toEqual(expect.any(String));
+      expect(snoozed.content[0]!.text).toContain("is snoozed until");
+      // On B's store, not on A's, and out of A's sections.
+      expect(b.store.snoozes().map((s) => s.thread_id)).toEqual([thread]);
+      expect(a.store.snoozes()).toEqual([]);
+      await waitFor("the band on A", async () => (await snoozedIds(a.port)).includes(thread));
+      expect(await rowOn(a.port, thread)).toBe(false);
+
+      const ended = await call(onA, thread, null);
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+      expect(ended.structuredContent).toMatchObject({ snoozed: null, ended: ended.content[0]!.text });
+      expect(b.store.snoozes()).toEqual([]);
+      await waitFor("back in A's sections", () => rowOn(a.port, thread));
+      await waitFor("the band on A is empty", async () => !(await snoozedIds(a.port)).includes(thread));
+      // Nothing left to take off: not "ended".
+      const none = await call(onA, thread, null);
+      expect(none.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(none.structuredContent!.ended).toBeUndefined();
+
+      // B asleep: the words the window uses, nothing lost, and it lands when B is back.
+      await onB.close();
+      clients.pop();
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      // A time no snooze can take is refused now, with nothing held: never "this applies when it is back".
+      const bad = await call(onA, thread, new Date(Date.now() - 60_000).toISOString());
+      expect(bad.content[0]!.text).toStartWith("snooze_past: ");
+      expect(await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()).toMatchObject({ waiting: [], notices: [] });
+      const held = await call(onA, thread, inSoon());
+      expect(held.isError).toBeUndefined();
+      // Said in the structured result too: an MCP client may show the agent only that.
+      expect(held.structuredContent!.held).toBe(held.content[0]!.text);
+      expect(held.content[0]!.text).toMatch(/^Waiting for .+: this applies when .+ is back\.$/);
+      b = await start(dataB);
+      await waitFor("the held snooze on B", () => b.store.snoozes().some((s) => s.thread_id === thread), 45_000);
+    } finally {
+      for (const client of clients) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  /** A linked Inbox from before Snooze: its list says nothing of snoozes, its door has no such route. With `snoozes`, one that keeps them and answers `snooze`. */
+  const olderDoor = (id: string, thread: string, seen: string[], snoozes = false, options: { row?: Json; snooze?: () => Response; door?: () => Response | null; streams?: ReadableStreamDefaultController[] } = {}) =>
+    Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        seen.push(`${req.method} ${route}`);
+        const refused = options.door?.();
+        if (refused) return refused;
+        if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.45" });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => { options.streams?.push(c); c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)); } }), { headers: { "Content-Type": "text/event-stream" } });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [{ thread_id: thread, project: { id: "prj_x" }, resolved_at: null, ...options.row }] }], projects: [], ...(snoozes ? { snoozes: true } : {}) });
+        if (options.snooze && route.endsWith("/snooze")) return options.snooze();
+        return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+      },
+    });
+  const linkTo = (dataDir: string, peers: { id: string; port: number }[]) => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    const links = peers.map(({ id, port }, i) => ({ id, name: `Mini ${i + 1}`, token: `tok_${i}`, transport: { kind: "tailnet", url: `http://127.0.0.1:${port}` }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }));
+    writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links }), { mode: 0o600 });
+  };
+
+  test("an older peer: refused in plain words before anything is sent, no notice left, and the viewer keeps working", async () => {
+    const OLD = "ibx_01K00000000000000000000001";
+    const thread = "msg_01K00000000000000000000001";
+    const seen: string[] = [];
+    const door = olderDoor(OLD, thread, seen);
+    const dataDir = scratch("plannotator-snooze-agent-older-");
+    linkTo(dataDir, [{ id: OLD, port: door.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      const view = async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === OLD);
+      await waitFor("the older machine's list", async () => (await view()).list_cursor !== null);
+      expect((await view()).snoozes).toBe(false);
+      const refused = await call(client, thread, inSoon());
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toBe("machine_needs_update: Update Plannotator on Mini 1: it cannot snooze threads yet. Nothing changed.");
+      expect(seen.some((line) => line.includes("snooze"))).toBe(false);
+      const outbox = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/outbox`)).json()) as Json;
+      expect(outbox).toMatchObject({ waiting: [], notices: [] });
+      expect((await view()).state).toBe("online");
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      door.stop(true);
+    }
+  });
+
+  /** A viewer linked to one stand-in door whose list has been read. */
+  const withDoor = async (prefix: string, thread: string, snoozes: boolean, options: Parameters<typeof olderDoor>[4], run: (inbox: { port: number }, client: Client, seen: string[]) => Promise<void>) => {
+    const id = "ibx_01K00000000000000000000004";
+    const seen: string[] = [];
+    const door = olderDoor(id, thread, seen, snoozes, options);
+    const dataDir = scratch(prefix);
+    linkTo(dataDir, [{ id, port: door.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      await waitFor("that machine's list", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => m.id === id && m.list_cursor !== null));
+      await run(inbox, client, seen);
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      door.stop(true);
+    }
+  };
+  const outboxOf = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/inbox/outbox`)).json()) as Json;
+
+  test("an agent's mistake never leaves the machine or the person a word: a bad, past or too-far time and an archived row are refused here", async () => {
+    await withDoor("plannotator-snooze-agent-mistake-", "msg_01K00000000000000000000005", true, { row: { resolved_at: "2026-11-01T00:00:00Z" } }, async (inbox, client, seen) => {
+      const thread = "msg_01K00000000000000000000005";
+      const year = new Date().getUTCFullYear();
+      expect((await call(client, thread, new Date(Date.now() - 60_000).toISOString())).content[0]!.text).toStartWith("snooze_past: ");
+      expect((await call(client, thread, `${year + 5}-01-01T00:00:00Z`)).content[0]!.text).toStartWith("validation_error: until: a time within");
+      expect((await call(client, thread, "Nov 12")).content[0]!.text).toStartWith("validation_error: until: an ISO 8601 time");
+      expect((await call(client, thread, inSoon())).content[0]!.text).toStartWith("thread_resolved: ");
+      expect(seen.some((line) => line.endsWith("/snooze"))).toBe(false);
+      expect(await outboxOf(inbox.port)).toMatchObject({ waiting: [], notices: [] });
+    });
+  });
+
+  test("a machine's own refusal comes back as its code, and only a snooze that went through marks the person as having used Snooze", async () => {
+    const was = process.env.PLANNOTATOR_DATA_DIR;
+    const configDir = scratch("plannotator-snooze-agent-config-");
+    process.env.PLANNOTATOR_DATA_DIR = configDir;
+    const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+    try {
+      let answer = () => Response.json({ error: "A newer Plannotator wrote these.", code: "snoozes_newer" }, { status: 409 });
+      await withDoor("plannotator-snooze-agent-refused-", "msg_01K00000000000000000000006", true, { snooze: () => answer() }, async (_inbox, client) => {
+        const thread = "msg_01K00000000000000000000006";
+        const refused = await call(client, thread, inSoon());
+        expect(refused.isError).toBe(true);
+        expect(refused.content[0]!.text).toBe("snoozes_newer: A newer Plannotator wrote these.");
+        expect(mark()).toBeUndefined();
+        answer = () => Response.json({ snoozed: null });
+        expect((await call(client, thread, null)).structuredContent!.snoozed).toBeNull();
+        expect(mark()).toBeUndefined();
+        const at = new Date().toISOString();
+        answer = () => Response.json({ snoozed: { until: inSoon(), at } });
+        expect((await call(client, thread, inSoon())).structuredContent!.snoozed.at).toBe(at);
+        expect(mark()).toEqual(expect.any(String));
+      });
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = was;
+    }
+  });
+
+  test("the link is removed as the snooze arrives: the agent hears it was not delivered, not that it is waiting", async () => {
+    await withDoor("plannotator-snooze-agent-revoked-", "msg_01K00000000000000000000007", true, { snooze: () => Response.json({ code: "device_revoked", error: "Link removed." }, { status: 401 }) }, async (_inbox, client) => {
+      const refused = await call(client, "msg_01K00000000000000000000007", inSoon());
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toStartWith("not_delivered: ");
+    });
+  });
+
+  test("a link the other machine removed is no success: the thread is simply gone from here, and nothing waits for it", async () => {
+    let gone = false;
+    const revoked = () => Response.json({ code: "device_revoked", error: "Link removed." }, { status: 401 });
+    const streams: ReadableStreamDefaultController[] = [];
+    await withDoor("plannotator-snooze-agent-link-gone-", "msg_01K0000000000000000000000E", true, { door: () => (gone ? revoked() : null), streams }, async (inbox, client) => {
+      gone = true;
+      for (const stream of streams) stream.close();
+      await waitFor("the link is gone", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.every((m: Json) => m.id !== "ibx_01K00000000000000000000004"), 30_000);
+      const refused = await call(client, "msg_01K0000000000000000000000E", inSoon());
+      expect(refused.content[0]!.text).toBe("thread_not_found: No thread msg_01K0000000000000000000000E.");
+      expect((await outboxOf(inbox.port)).waiting).toEqual([]);
+    });
+  }, 45_000);
+
+  test("what the listed row says decides: a thread that came back from its archive snoozes, and ending a snooze is never refused as archived", async () => {
+    const seen: string[] = [];
+    await withDoor("plannotator-snooze-agent-came-back-", "msg_01K00000000000000000000008", true, { row: { resolved_at: "2026-11-01T00:00:00Z", back_from_archive: true }, snooze: () => { seen.push("snooze"); return Response.json({ snoozed: { until: inSoon(), at: new Date().toISOString() } }); } }, async (_inbox, client) => {
+      expect((await call(client, "msg_01K00000000000000000000008", inSoon())).isError).toBeUndefined();
+    });
+    expect(seen).toEqual(["snooze"]);
+    await withDoor("plannotator-snooze-agent-archived-end-", "msg_01K00000000000000000000009", true, { row: { resolved_at: "2026-11-01T00:00:00Z" }, snooze: () => { seen.push("end"); return Response.json({ snoozed: null }); } }, async (_inbox, client) => {
+      expect((await call(client, "msg_01K00000000000000000000009", null)).isError).toBeUndefined();
+    });
+    expect(seen).toEqual(["snooze", "end"]);
+  });
+
+  test("only an explicit null says ended: a time that did not apply on a machine whose clock is ahead stays not snoozed, though a snooze was running", async () => {
+    const thread = "msg_01K0000000000000000000000F";
+    const running = { until: new Date(Date.now() + 30 * 86_400_000).toISOString(), at: new Date().toISOString() };
+    await withDoor("plannotator-snooze-agent-clock-ahead-", thread, true, { row: { snoozed: running }, snooze: () => Response.json({ snoozed: null }) }, async (_inbox, client) => {
+      const missed = await call(client, thread, inSoon());
+      expect(missed.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(missed.structuredContent!.ended).toBeUndefined();
+      const ended = await call(client, thread, null);
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+    });
+  });
+
+  test("a machine still answering past its wait is on its way: said as held, not as refused", async () => {
+    let answered = () => {};
+    const slow = new Promise<Response>((resolve) => { answered = () => resolve(Response.json({ snoozed: null })); });
+    await withDoor("plannotator-snooze-agent-slow-", "msg_01K0000000000000000000000A", true, { snooze: () => slow as unknown as Response }, async (_inbox, client) => {
+      const answer = await call(client, "msg_01K0000000000000000000000A", inSoon());
+      answered();
+      expect(answer.isError).toBeUndefined();
+      expect(answer.structuredContent!.held).toBe(answer.content[0]!.text);
+      expect(answer.content[0]!.text).toStartWith("Sending to ");
+    });
+  }, 20_000);
+
+  test("an id that is no message id is not found, never maybe on a machine nothing is known of", async () => {
+    const dataDir = scratch("plannotator-snooze-agent-garbage-");
+    linkTo(dataDir, [{ id: "ibx_01K0000000000000000000000B", port: 9 }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      expect((await call(client, "not-an-id", inSoon())).content[0]!.text).toBe("thread_not_found: No thread not-an-id.");
+      expect((await call(client, "", inSoon())).content[0]!.text).toBe("validation_error: thread_id: required.");
+      expect((await call(client, "msg_01K0000000000000000000000C", inSoon())).content[0]!.text).toStartWith("machine_offline: ");
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+    }
+  });
+
+  test("a home machine that still refuses a lapsed time leaves its notice: the person hears, since it may still be hiding the thread", async () => {
+    await withDoor("plannotator-snooze-agent-older-home-", "msg_01K0000000000000000000000D", true, { snooze: () => Response.json({ error: "That time has passed.", code: "snooze_past" }, { status: 409 }) }, async (inbox, client) => {
+      expect((await call(client, "msg_01K0000000000000000000000D", inSoon())).content[0]!.text).toBe("snooze_past: That time has passed.");
+      expect((await outboxOf(inbox.port)).notices).toHaveLength(1);
+    });
+  });
+
+  test("the person moved a snooze earlier while its machine was away, and that time passed: it comes back, marked, not hidden for the old time", async () => {
+    const dataA = scratch("plannotator-snooze-lapse-a-");
+    const dataB = scratch("plannotator-snooze-lapse-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    const closing: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
+      const onB = await mcp(b.port);
+      const project = scratch("plannotator-snooze-lapse-project-");
+      const asked = async (session: string) => ((await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, body: "Plain news" } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const moved = await asked("ses_moved");
+      const undone = await asked("ses_undone");
+      const agents = await asked("ses_agents");
+      const quiet = await asked("ses_quiet");
+      await onB.close();
+      for (const thread of [moved, undone, agents, quiet]) await waitFor("B's thread on A", () => rowOn(a.port, thread));
+      const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
+      const onA = await mcp(a.port);
+      closing.push(onA);
+      let key = 0;
+      const person = (thread: string, until: string, at?: string, idempotency_key = `person-${key++}`) => fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key, until, at }) });
+      const inMonth = (days = 30) => new Date(Date.now() + days * 86_400_000).toISOString();
+      const firstAt: Record<string, string> = {};
+      for (const thread of [moved, undone, agents]) {
+        const placed = await person(thread, inMonth());
+        expect(placed.status).toBe(200);
+        firstAt[thread] = ((await placed.json()) as Json).snoozed.at;
+      }
+      // Already gone when asked: refused now, nothing held, as it always was.
+      expect((await person(moved, new Date(Date.now() - 60_000).toISOString())).status).toBe(409);
+      expect((await outboxOf(a.port)).waiting).toEqual([]);
+
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      // Room for every write below to land before this time, on a slow machine too; the test waits for the time itself.
+      const soon = new Date(Date.now() + 10_000).toISOString();
+      expect((await person(moved, soon, undefined, "person-moved")).status).toBe(202);
+      expect((await person(undone, inMonth(40))).status).toBe(202);
+      expect((await person(undone, soon, firstAt[undone])).status).toBe(202);
+      expect((await call(onA, agents, soon)).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
+      expect((await person(quiet, soon)).status).toBe(202);
+      await Bun.sleep(Date.parse(soon) - Date.now() + 100);
+
+      // The window retries a write it holds, past that time too: still the held one, never refused here.
+      const retry = await person(moved, soon, undefined, "person-moved");
+      expect(retry.status).toBe(202);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+
+      b = await start(dataB);
+      await waitFor("the held writes settled", async () => (await outboxOf(a.port)).waiting.length === 0, 45_000);
+      expect((await outboxOf(a.port)).notices).toEqual([]);
+      const home = b.store.snoozes();
+      for (const thread of [moved, undone, agents]) expect(home.find((s) => s.thread_id === thread)!.until).toBe(new Date(soon).toISOString());
+      expect(home.some((s) => s.thread_id === quiet)).toBe(false);
+      expect([...b.store.snoozedThreads()]).toEqual([]);
+      // Marked as back, as a return on time is.
+      const rows = ((await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/threads?snoozed=exclude`)).json()) as Json).sections.flatMap((section: Json) => section.threads) as Json[];
+      for (const thread of [moved, undone, agents]) expect(rows.find((row) => row.thread_id === thread)?.snooze_back).toBe(new Date(soon).toISOString());
+      expect(rows.find((row) => row.thread_id === quiet)?.snooze_back ?? null).toBeNull();
+    } finally {
+      for (const client of closing) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a held write says what the window's does, by the machine's state", () => {
+    for (const state of ["online", "connecting", "offline", "needs_update"] as const) {
+      expect([state, machineHeldWords("Mini", state)]).toEqual([state, heldWords({ name: "Mini", state })]);
+    }
+  });
+
+  test("this Inbox restarted with the home machine away: the agent hears the thread may be there, not that it does not exist; a time that lapses while it is away settles with no notice", async () => {
+    const dataA = scratch("plannotator-snooze-agent-restart-a-");
+    const dataB = scratch("plannotator-snooze-agent-restart-b-");
+    let a = await start(dataA);
+    let b = await start(dataB);
+    const clients: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
+      const onB = await mcp(b.port);
+      const project = scratch("plannotator-snooze-agent-restart-project-");
+      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
+      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const thread = asked.structuredContent.thread_id;
+      expect(reply.structuredContent.thread_id).toBe(thread);
+      await onB.close();
+      await waitFor("B's thread on A", () => rowOn(a.port, thread));
+      const name = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).name as string;
+      const onA = await mcp(a.port);
+      clients.push(onA);
+
+      // A message that is not the thread's own id, on another machine: the refusal says which id it needs.
+      expect((await call(onA, reply.structuredContent.message_id, inSoon())).content[0]!.text).toContain("use the thread's id, not a message's");
+
+      // Away, a time that runs out before it is back: the person's own snooze and the agent's both end quietly.
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      const soon = () => new Date(Date.now() + 5_000).toISOString();
+      const last = Date.now() + 5_000;
+      const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
+      expect((await call(onA, thread, soon())).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
+      const own = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key: "own-held", until: soon() }) });
+      expect(own.status).toBe(202);
+      expect((await outboxOf(a.port)).waiting).toHaveLength(2);
+      await Bun.sleep(Math.max(0, last - Date.now()) + 5_000);
+
+      // This Inbox restarts with B still away: B's rows are not known. Not "no such thread".
+      await onA.close();
+      clients.pop();
+      a.stop();
+      a = await start(dataA);
+      const onA2 = await mcp(a.port);
+      clients.push(onA2);
+      const unknown = await call(onA2, thread, inSoon());
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0]!.text).toBe(`machine_offline: This thread may be on ${name}, whose threads are not known yet (away or still connecting). Nothing changed.`);
+
+      // B is back: both held snoozes reach it past their time, are not applied, and leave no notice. The thread is found again.
+      b = await start(dataB);
+      await waitFor("the held snoozes settled", async () => (await outboxOf(a.port)).waiting.length === 0, 45_000);
+      expect((await outboxOf(a.port)).notices).toEqual([]);
+      expect(b.store.snoozes()).toEqual([]);
+      await waitFor("B's thread on A again", () => rowOn(a.port, thread));
+      expect((await call(onA2, thread, inSoon())).isError).toBeUndefined();
+    } finally {
+      for (const client of clients) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a thread two linked machines claim goes to neither, and an id no machine lists is not found", async () => {
+    const thread = "msg_01K00000000000000000000002";
+    const seen: string[] = [];
+    const first = olderDoor("ibx_01K00000000000000000000002", thread, seen, true);
+    const second = olderDoor("ibx_01K00000000000000000000003", thread, seen, true);
+    const dataDir = scratch("plannotator-snooze-agent-clash-");
+    linkTo(dataDir, [{ id: "ibx_01K00000000000000000000002", port: first.port as number }, { id: "ibx_01K00000000000000000000003", port: second.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      await waitFor("both machines' lists", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.filter((m: Json) => !m.self && m.snoozes === true).length === 2);
+      const clash = await call(client, thread, inSoon());
+      expect(clash.content[0]!.text).toStartWith("machine_conflict: ");
+      const none = await call(client, "msg_01K00000000000000000000099", inSoon());
+      expect(none.content[0]!.text).toStartWith("thread_not_found: ");
+      expect(none.content[0]!.text).toContain("use the thread's id, not a message's");
+      expect(seen.some((line) => line.includes("snooze"))).toBe(false);
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      first.stop(true);
+      second.stop(true);
+    }
+  });
 });
 
 describe("the forward takes no write from a tailnet guest", () => {
