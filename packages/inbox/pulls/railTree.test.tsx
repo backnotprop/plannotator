@@ -58,6 +58,8 @@ test.if(hasDom)('a row holds the whole path, cut only where it may give way: the
   expect(row.querySelector('.ib-prp-fname')!.textContent).toBe(path);
   expect(row.querySelector('.ib-prp-dir .ib-prp-keep')!.textContent).toBe('/turbopack-worker-self-reference/');
   expect(row.querySelector('.ib-prp-base .ib-prp-keep')!.textContent).toBe('.test.ts');
+  // A last folder too long for the row on its own keeps its end too: it gives way in its own middle.
+  expect(row.querySelector('.ib-prp-dir .ib-prp-end')!.textContent).toBe('-reference/');
   // Nothing on the row fades or reads right to left.
   expect(row.querySelector('[class*="ib-rv-name"]')).toBeNull();
 });

@@ -8515,6 +8515,10 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-dir { flex: 1 1 4.5em; max-width: max-content; color: var(--muted-foreground); }
 .ib-prp-cut { flex: 0 1000000 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
 .ib-prp-keep { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* A last folder longer than the row gives way in its own middle once the head is spent: its end stays. */
+.ib-prp-keep[data-split] { display: flex; }
+.ib-prp-cut2 { flex: 0 1 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
+.ib-prp-end { flex: 0 0 auto; }
 /* The review app's +/- columns (review-editor/index.css `.review-count-columns`), sized by the rail's widest row. */
 .ib-prp-files .review-count-columns { display: grid; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-prp-files .review-count-columns .additions { color: var(--success, #0a7f33); }
@@ -8522,11 +8526,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-files .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
 .ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
 .ib-prp-c { flex: none; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
-.ib-prp-slot { flex: none; width: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
-.ib-prp-view { display: none; }
-.ib-prp-file:hover .ib-prp-view, .ib-prp-file:focus-within .ib-prp-view, .ib-prp-file[data-seen] .ib-prp-view { display: inline-flex; }
-.ib-prp-file:hover .ib-prp-letter, .ib-prp-file:focus-within .ib-prp-letter, .ib-prp-file[data-seen] .ib-prp-letter { display: none; }
-@media (pointer: coarse) { .ib-prp-view { display: inline-flex; } .ib-prp-letter { display: none; } .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 40px; } }
+/* The review app's file row spacing (review-editor index.css `.review-sidebar .file-tree-item`, `.review-change-letter`):
+   6 px between the parts, 8 px at the row's end, the letter pulled 2 px in on each side. */
+.pn-inbox .ib-prp-files .ib-prp-file, .pn-inbox .ib-prp-files .ib-prp-folder { gap: 6px; padding-right: 8px; }
+.ib-prp-files .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-prp-files .ib-prp-fname ~ .ib-prp-c { margin-left: -2px; }
+@media (pointer: coarse) { .pn-inbox .ib-prp-file, .pn-inbox .ib-prp-folder { min-height: 40px; } }
 /* Files: no rule, a tinted head, space between. */
 .ib-prreview diffs-container { --diffs-bg-separator-override: transparent; }
 .pn-inbox .ib-prreview .ib-gbody > .w-full { padding-top: 4px; }

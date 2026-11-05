@@ -1791,7 +1791,8 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
   const short = 'ui.md';
   const long = 'guides-and-shared-ui.md';
-  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts')].join('');
+  const deep = 'test/e2e/app-dir/turbopack-worker-self-reference-and-its-fixtures';
+  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts'), file(`${deep}/a.ts`), file(`${deep}/b.ts`)].join('');
   const { context, page } = await stubbedReview(browser, 1440, patch);
   try {
     const rail = page.locator('[data-pull-review] [data-review-files]');
@@ -1817,6 +1818,14 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
     // A long name keeps the line: its folder leaves it whole, never a sliver.
     for (const part of await row(long).locator('.ib-prp-base > *').all()) expect(await cut(part)).toBe(false);
     expect(await shown(row(long).locator('.ib-prp-dir'))).toBe(false);
+    // A folder whose last folder is longer than the row keeps that folder's end in view, whole: it gives way in its
+    // own middle once the folders before it are spent, never at its end.
+    const folder = rail.locator(`[data-review-folder="${deep}"] .ib-prp-folder`);
+    await expect(folder.locator('.ib-prp-end')).toHaveText('-fixtures');
+    expect(await cut(folder.locator('.ib-prp-dirname > .ib-prp-cut'))).toBe(true);
+    expect(await cut(folder.locator('.ib-prp-cut2'))).toBe(true);
+    expect(await cut(folder.locator('.ib-prp-end'))).toBe(false);
+    expect(await folder.locator('.ib-prp-end').evaluate((el) => el.getBoundingClientRect().right <= el.closest('.ib-prp-fname')!.getBoundingClientRect().right + 0.5)).toBe(true);
     // Every row and folder is one line, and nothing is masked into a fade.
     const looks = await rail.evaluate((list) =>
       [...list.querySelectorAll('.ib-prp-file, .ib-prp-folder')].map((el) => ({
@@ -1828,6 +1837,19 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
     for (const look of looks) expect(look).toEqual({ lines: 1, masked: false });
     // Each row shows its numbers; the tip has the whole path.
     await expect(row(short).locator('.review-count-columns')).toHaveText('+1-1');
+    // The review app's row: [viewed][letter] name, 6 px apart, its numbers 8 px from the row's end, nothing between.
+    const anatomy = await row(short).evaluate((el) => {
+      const at = (sel: string) => el.querySelector(sel)!.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      const style = getComputedStyle(el);
+      return {
+        order: at('[role="checkbox"]').right <= at('.review-change-letter').left + 2 && at('.review-change-letter').right <= at('.ib-prp-fname').left + 2,
+        gap: style.columnGap,
+        end: Math.round(box.right - at('.review-count-columns').right),
+        letter: el.querySelector('.review-change-letter')!.textContent,
+      };
+    });
+    expect(anatomy).toEqual({ order: true, gap: '6px', end: 8, letter: 'M' });
     await row(long).hover();
     await expect(page.locator('[data-pn-tooltip]')).toContainText(`notes/agent-guides/with-a-long-folder-name/${long}`);
   } finally {
@@ -2044,9 +2066,8 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     await expect(circle).toHaveAttribute('aria-checked', 'false');
     const scroller = review.locator('.ib-gbody');
     const scrolled = await scroller.evaluate((el) => el.scrollTop);
-    // It shows under the pointer, not before.
-    await expect(circle).toBeHidden();
-    await review.locator('[data-review-file="src/app.ts"]').hover();
+    // It is always there, as in the review app's tree.
+    await expect(circle).toBeVisible();
     await circle.click();
     await expect(circle).toHaveAttribute('aria-checked', 'true');
     await expect(review.locator('.ib-prp-fileshead')).toHaveText('9 files1 viewed');
