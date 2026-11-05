@@ -42,8 +42,8 @@ const VERDICTS: Record<string, string> = {
   'Split the settings page': '{"risk":"low","why":"It only moves settings components."}',
   'Change who can open settings': '{"risk":"high","why":"It changes the permission check on the settings route."}',
 };
-/** About 3 MB: more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
-const BIG_LINES = 130_000;
+/** About 9 MB: past the review page's 8 MB, and more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
+const BIG_LINES = 400_000;
 const REFUSAL = 'prompt is too long: 900000 tokens > 200000 maximum';
 const RULES = 'Anything in billing or charges.\nAnything that changes permissions.';
 
@@ -84,6 +84,9 @@ function writeGh(dir: string) {
     'if [ "$1" = api ] && [ "$2" = graphql ]; then cat "$dir/gh-pulls.json"; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then printf "%040d\\n" "${4##*/}"; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 507 ]; then cat "$dir/big.patch"; exit 0; fi',
+    // #503: the forge won't serve it as one document, only file by file.
+    'case "$4" in */pulls/503/files*) cat "$dir/files-503.json"; exit 0;; esac',
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 503 ]; then echo "gh: Sorry, the diff exceeded the maximum number of lines (20000). (HTTP 406)" >&2; exit 1; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  printf "diff --git a/src/pr%s.ts b/src/pr%s.ts\\n--- a/src/pr%s.ts\\n+++ b/src/pr%s.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n" "${4##*/}" "${4##*/}" "${4##*/}" "${4##*/}"; exit 0',
     'fi',
@@ -200,6 +203,10 @@ test.beforeAll(async ({ browser }) => {
   fakes = join(root, 'fakes');
   mkdirSync(fakes, { recursive: true });
   writeGh(fakes);
+  writeFileSync(
+    join(fakes, 'files-503.json'),
+    `${JSON.stringify([{ filename: 'README.md', status: 'modified', patch: '@@ -1 +1 @@\n-teh\n+the paged page one\n' }])}${JSON.stringify([{ filename: 'vendor/huge.bin', status: 'modified' }])}`,
+  );
   writePi(fakes);
   writeFileSync(join(fakes, 'big.patch'), `diff --git a/api.ts b/api.ts\n--- a/api.ts\n+++ b/api.ts\n@@ -1 +1,${BIG_LINES} @@\n${'+export const line = 1;\n'.repeat(BIG_LINES)}`);
   // Installed, with no model list to give: they stay on the built-in catalog. They never run a judgment here.
@@ -354,6 +361,20 @@ test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna o
   await modelList.getByPlaceholder('Type to filter…').press('Escape');
   await expect(modelList.getByPlaceholder('Type to filter…')).toHaveCount(0);
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
+  // Enter in the filter box stays in the list: half-written rules aren't saved, and nothing runs. No match, then a match.
+  await dialog.locator('[data-pull-risk-rules-text]').fill('half-written ru');
+  await modelList.getByRole('button').first().click();
+  await modelList.getByPlaceholder('Type to filter…').fill('zzzzz');
+  await modelList.getByPlaceholder('Type to filter…').press('Enter');
+  await expect(dialog).toBeVisible();
+  await expect(modelList.getByPlaceholder('Type to filter…')).toBeVisible();
+  await modelList.getByPlaceholder('Type to filter…').fill('Opus');
+  await modelList.getByPlaceholder('Type to filter…').press('Enter');
+  await expect(modelList.getByPlaceholder('Type to filter…')).toHaveCount(0);
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue('half-written ru');
+  expect(((await (await page.request.get(`${url}api/inbox/pulls/risk`)).json()) as { rules: string }).rules).not.toContain('half-written');
+  await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
   await modelList.getByRole('button').first().click();
   await modelList.getByPlaceholder('Type to filter…').fill('Sonnet');
   await modelList.getByRole('button', { name: /Sonnet 5/ }).click();
@@ -375,7 +396,12 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
-  // The whole 3 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
+  // The forge refused #503 as one document: the agent read its per-file pages, and ranked it.
+  const paged = prompts().find((l) => l.prompt!.includes('Title: Fix a typo in the README'))!.prompt!;
+  expect(paged).toContain('+the paged page one');
+  expect(paged).toContain('diff --git a/vendor/huge.bin b/vendor/huge.bin');
+
+  // The whole 9 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
   const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;
   expect(big.match(/export const line = 1;/g)).toHaveLength(BIG_LINES);
   const refused = row(507).locator('[data-pull-risk]');

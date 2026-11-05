@@ -4,17 +4,18 @@
  * not (off, no rules, an agent the person didn't choose); a run allowed to act; a part of a big diff not reaching the agent; a refused or failed run reading as Low.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { chmodSync, writeFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AIMessage, AIProvider, CreateSessionOptions } from "@plannotator/ai/types";
-import type { InboxPull, InboxPullDiffAnswer } from "@plannotator/core/inbox-types";
+import type { InboxPull } from "@plannotator/core/inbox-types";
 import { ClaudeAgentSDKProvider } from "@plannotator/ai/providers/claude-agent-sdk";
 import { CodexAppServerProvider } from "@plannotator/ai/providers/codex-app-server";
 import { PiSDKProvider } from "@plannotator/ai/providers/pi-sdk";
 import { saveConfig } from "@plannotator/shared/config";
 import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, installedPath, runRiskAgent, startingRiskModel, type RiskRunResult, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
 import { buildRiskPrompt, parseRiskAnswer } from "./inbox-pull-risk-prompt";
+import { INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, pullDiffCliRunner } from "./inbox-pulls";
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
@@ -32,7 +33,7 @@ afterEach(() => {
 });
 
 const pull = (number: number, fields: Partial<InboxPull> = {}): InboxPull =>
-  ({ key: `github.com/n/b#${number}`, number, title: `PR ${number}`, state: "open", head_sha: `head-${number}`, host: "github.com", repo: "n/b", ...fields }) as InboxPull;
+  ({ key: `github.com/n/b#${number}`, number, title: `PR ${number}`, state: "open", head_sha: `head-${number}`, base: "main", host: "github.com", repo: "n/b", ...fields }) as InboxPull;
 
 const settled = async () => {
   for (let i = 0; i < 20; i++) await new Promise((resolve) => setTimeout(resolve, 0));
@@ -48,12 +49,12 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
     now: options.now,
     agents: () => options.agents ?? AGENTS,
     pulls: {
-      diff: async (key) => {
+      wholeDiff: async (key) => {
         reads.push(key);
         await options.diffGate;
         if (options.diffFails) throw Object.assign(new Error("gh failed"), typeof options.diffFails === "string" ? { code: options.diffFails } : {});
         const number = key.split("#")[1];
-        return { key, scope: "layer", base: "main", head: "x", patch: options.patch ?? "diff --git a/x b/x\n", head_sha: options.head ? options.head(key) : `head-${number}` } as InboxPullDiffAnswer;
+        return { patch: options.patch ?? "diff --git a/x b/x\n", head_sha: options.head ? options.head(key) : `head-${number}` };
       },
     },
     run: async (run) => {
@@ -105,6 +106,197 @@ describe("what the agent reads", () => {
     const prompt = buildRiskPrompt({ rules: "Billing.", title: "t", diff: "+DATA-guess\n", fence: "DATA-real" });
     expect(prompt.indexOf("Billing.")).toBeLessThan(prompt.indexOf("DATA-real\nTitle:"));
     expect(prompt.split("\n").filter((line) => line === "DATA-real")).toHaveLength(2);
+  });
+});
+
+describe("reading the whole diff, through the reader and a scripted forge", () => {
+  const ghNode = {
+    number: 880, title: "PR 880", url: "https://github.com/n/b/pull/880", state: "OPEN", isDraft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
+    baseRefName: "main", headRefName: "topic", headRefOid: "a".repeat(40), additions: 1, deletions: 1, changedFiles: 1, reviewDecision: "REVIEW_REQUIRED",
+    repository: { nameWithOwner: "n/b" }, headRepository: { nameWithOwner: "n/b" }, author: { login: "tomas" }, reviewRequests: { nodes: [] }, latestReviews: { nodes: [] },
+    commits: { nodes: [{ commit: { statusCheckRollup: { state: "SUCCESS" } } }] },
+  };
+  const glNode = {
+    iid: "61", title: "MR 61", webUrl: "https://gitlab.com/n/l/-/merge_requests/61", state: "opened", draft: false, updatedAt: "2026-11-03T10:00:00Z", mergedAt: null,
+    sourceBranch: "topic", targetBranch: "main", diffHeadSha: "b".repeat(40), approved: false, detailedMergeStatus: "NOT_APPROVED", diffStatsSummary: { additions: 1, deletions: 1, fileCount: 1 },
+    headPipeline: { status: "SUCCESS" }, project: { fullPath: "n/l" }, sourceProject: { fullPath: "n/l" }, author: { username: "jun" }, approvedBy: { nodes: [] }, reviewers: { nodes: [{ username: "dana" }] },
+  };
+  type Answer = { stdout?: string; stderr?: string; exitCode?: number };
+  const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
+  /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
+  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number } = {}) {
+    const github = platform === "github";
+    const endpoints: string[] = [];
+    const run = async (cli: string, args: string[]) => {
+      if (args[0] === "auth") {
+        if (github) return answered(cli === "gh" ? { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }) } : { stderr: "No hosts logged in", exitCode: 1 });
+        return answered(cli === "glab" ? { stdout: "gitlab.com\n  \u2713 Logged in to gitlab.com as dana (keyring)\n" } : { stderr: "not logged in", exitCode: 1 });
+      }
+      if (args.includes("graphql")) {
+        if (args.some((a) => a.startsWith("query=query InboxPullsOthers"))) return answered({ stdout: JSON.stringify({ data: github ? { viewer: { login: "dana" } } : { currentUser: { username: "dana" } } }) });
+        return answered({ stdout: JSON.stringify(github
+          ? { data: { viewer: { login: "dana" }, requested: { nodes: [ghNode] }, authored: { nodes: [] }, merged: { nodes: [] } } }
+          : { data: { currentUser: { username: "dana", requested: { nodes: [glNode] }, authored: { nodes: [] }, merged: { nodes: [] } } } }) });
+      }
+      const endpoint = args[3]!;
+      endpoints.push(endpoint);
+      if (/\/files\?|\/diffs\?/.test(endpoint)) return answered(script.paged ?? { stderr: "no paged read scripted", exitCode: 1 });
+      if (endpoint.endsWith("/raw_diffs") || args.includes("Accept: application/vnd.github.v3.diff")) return answered(script.whole);
+      return answered({ stdout: github ? `${ghNode.headRefOid}\n` : JSON.stringify({ sha: glNode.diffHeadSha }) });
+    };
+    const pulls = createInboxPulls({ run, now: options.now });
+    const listed = await pulls.list([github ? { host: "github.com", repo: "n/b", project_id: "p" } : { host: "gitlab.com", repo: "n/l", project_id: "p" }]);
+    expect(listed.pulls).toHaveLength(1);
+    const runs: RiskRun[] = [];
+    const risk = createPullRisk({
+      dataDir,
+      isOn: () => true,
+      now: options.now,
+      agents: () => AGENTS,
+      pulls,
+      run: async (one) => {
+        runs.push(one);
+        return { text: HIGH };
+      },
+    });
+    const judge = async () => {
+      risk.assess(listed.pulls);
+      for (let i = 0; i < 500 && risk.answer().pending > 0; i++) await Bun.sleep(2);
+    };
+    return { pulls, risk, runs, judge, endpoints, key: listed.pulls[0]!.key };
+  }
+
+  test("9 MB reaches the agent whole, while the review page's own read keeps its limit", async () => {
+    setRules();
+    const patch = `diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1,400000 @@\n${"+export const line = 1;\n".repeat(400_000)}`;
+    expect(patch.length).toBeGreaterThan(9_000_000);
+    const { pulls, risk, runs, judge, key } = await reading("github", { whole: { stdout: patch } });
+    await judge();
+    expect(runs).toHaveLength(1);
+    expect(runs[0]!.prompt).toContain(patch);
+    expect(risk.answer().judgments[key]?.level).toBe("high");
+    await expect(pulls.diff(key, "layer")).rejects.toMatchObject({ code: "pull_diff_too_large" });
+  });
+
+  const FILES_PAGE_1 = JSON.stringify([{ filename: "src/pay.ts", status: "modified", patch: "@@ -1 +1 @@\n-old\n+charge twice\n" }]);
+  const FILES_PAGE_2 = JSON.stringify([{ filename: "vendor/huge.bin", status: "modified" }, { filename: "src/new.ts", status: "added", patch: "@@ -0,0 +1 @@\n+fresh\n" }]);
+
+  test.each([
+    ["GitHub's line limit", "gh: Sorry, the diff exceeded the maximum number of lines (20000). (HTTP 406)"],
+    ["GitHub's file limit", "gh: Sorry, the diff exceeded the maximum number of files (300). (HTTP 422)"],
+    ["a slow render", "gh: diff is taking too long to generate (HTTP 500)"],
+    ["a refusal in words nobody has seen yet", "gh: this is too much for one document (HTTP 413)"],
+  ])("%s: the agent gets the forge's per-file read, every page, a held-back file by name", async (_name, stderr) => {
+    setRules();
+    const { risk, runs, judge, key } = await reading("github", { whole: { stderr, exitCode: 1 }, paged: { stdout: `${FILES_PAGE_1}${FILES_PAGE_2}` } });
+    await judge();
+    expect(runs).toHaveLength(1);
+    const { prompt } = runs[0]!;
+    expect(prompt).toContain("+charge twice");
+    expect(prompt).toContain("+fresh");
+    expect(prompt).toContain("diff --git a/vendor/huge.bin b/vendor/huge.bin");
+    expect(prompt).not.toMatch(/too large/i);
+    expect(risk.answer().judgments[key]?.level).toBe("high");
+    expect(risk.answer().failed).toEqual({});
+  });
+
+  test("a page failing partway: the agent decides from the pages before it", async () => {
+    setRules();
+    const { runs, judge } = await reading("github", { whole: { stderr: "gh: (HTTP 406)", exitCode: 1 }, paged: { stdout: FILES_PAGE_1, stderr: "gh: Bad Gateway (HTTP 502)", exitCode: 1 } });
+    await judge();
+    expect(runs[0]!.prompt).toContain("+charge twice");
+  });
+
+  test.each([
+    ["refused", { stderr: "glab: 406 Not Acceptable", exitCode: 1 }],
+    ["answering nothing, as raw_diffs does past its limit", { stdout: "" }],
+    ["missing on an older GitLab", { stderr: "glab: 404 Not Found", exitCode: 1 }],
+  ])("GitLab's raw_diffs %s: its paged diffs instead", async (_name, whole) => {
+    setRules();
+    const paged = JSON.stringify([{ diff: "@@ -1 +1 @@\n-old\n+ledger change\n", old_path: "l.ts", new_path: "l.ts", new_file: false, deleted_file: false, renamed_file: false }]);
+    const { runs, judge, endpoints } = await reading("gitlab", { whole, paged: { stdout: paged } });
+    await judge();
+    expect(runs[0]!.prompt).toContain("+ledger change");
+    expect(endpoints).toContain("projects/n%2Fl/merge_requests/61/diffs?per_page=100");
+  });
+
+  test.each([
+    ["an empty per-file read", { stdout: "[]" }, "The forge returned no diff for this pull request."],
+    ["a per-file read that fails too", { stderr: "gh: Bad Gateway (HTTP 502)", exitCode: 1 }, "gh could not read this diff. Try again, or open it on the forge."],
+    ["a per-file read that makes no sense", { stdout: "<html>" }, "The forge returned no diff for this pull request."],
+  ])("%s: no agent runs, the reason shows, never 'too large', and it is read again later", async (_name, paged, reason) => {
+    setRules();
+    let now = 1_000_000;
+    const { risk, runs, judge, endpoints, key } = await reading("github", { whole: { stderr: "gh: the diff exceeded the maximum number of lines (HTTP 406)", exitCode: 1 }, paged }, { now: () => now });
+    await judge();
+    expect(runs).toEqual([]);
+    expect(risk.answer().failed[key]).toBe(reason);
+    expect(risk.answer().failed[key]).not.toMatch(/too large/i);
+    const before = endpoints.length;
+    now += RISK_RETRY_MS;
+    await judge();
+    expect(endpoints.length).toBeGreaterThan(before);
+  });
+
+  test.each([
+    ["signed out", "gh: not logged in. Run gh auth login", "gh is not signed in to github.com."],
+    ["rate limited", "gh: API rate limit exceeded (HTTP 429)", "gh could not read this diff. Try again, or open it on the forge."],
+  ])("%s: asking per file wouldn't help, so it doesn't", async (_name, stderr, reason) => {
+    setRules();
+    const { risk, runs, judge, endpoints, key } = await reading("github", { whole: { stderr, exitCode: 1 }, paged: { stdout: FILES_PAGE_1 } });
+    await judge();
+    expect(runs).toEqual([]);
+    expect(risk.answer().failed[key]).toBe(reason);
+    expect(endpoints.some((e) => e.includes("/files"))).toBe(false);
+  });
+
+  test("each read has the agent's 5 minutes and no byte limit; the review page's read keeps its own", async () => {
+    setRules();
+    const seen: { endpoint: string; maxBytes: number; timeoutMs?: number }[] = [];
+    const run = async (_cli: string, args: string[]) => {
+      if (args[0] === "auth") return answered({ stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }) });
+      if (args.includes("graphql")) return answered({ stdout: JSON.stringify({ data: { viewer: { login: "dana" }, requested: { nodes: [ghNode] }, authored: { nodes: [] }, merged: { nodes: [] } } }) });
+      return answered({ stdout: `${ghNode.headRefOid}\n` });
+    };
+    const pulls = createInboxPulls({
+      run,
+      diffRun: async (_cli, args, maxBytes, read) => {
+        seen.push({ endpoint: args[3]!, maxBytes, timeoutMs: read?.timeoutMs });
+        return args[3]!.includes("/files") ? answered({ stdout: FILES_PAGE_1 }) : answered(seen.length > 1 ? { stdout: "diff --git a/x b/x\n" } : { stderr: "gh: (HTTP 406)", exitCode: 1 });
+      },
+    });
+    const { pulls: [one] } = await pulls.list([{ host: "github.com", repo: "n/b", project_id: "p" }]);
+    await pulls.wholeDiff(one!.key);
+    expect(seen).toHaveLength(2);
+    for (const read of seen) {
+      expect(read.maxBytes).toBe(Number.POSITIVE_INFINITY);
+      expect(read.timeoutMs).toBe(INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS);
+    }
+    expect(INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS).toBe(5 * 60_000);
+    seen.length = 0;
+    await pulls.diff(one!.key, "layer").catch(() => {});
+    expect(seen[0]!.maxBytes).toBe(8 * 1024 * 1024);
+    expect(seen[0]!.timeoutMs).toBeUndefined();
+  });
+
+  test.if(process.platform !== "win32")("the Inbox stopping stops a read in progress", async () => {
+    const fake = join(dataDir, "fake-bin");
+    mkdirSync(fake, { recursive: true });
+    writeFileSync(join(fake, "gh"), "#!/bin/sh\nexec sleep 30\n");
+    chmodSync(join(fake, "gh"), 0o755);
+    const savedPath = process.env.PATH;
+    process.env.PATH = `${fake}:${savedPath}`;
+    try {
+      const stop = new AbortController();
+      const started = Date.now();
+      const read = pullDiffCliRunner("gh", ["api"], Number.POSITIVE_INFINITY, { timeoutMs: 60_000, signal: stop.signal });
+      await Bun.sleep(50);
+      stop.abort();
+      expect((await read).exitCode).not.toBe(0);
+      expect(Date.now() - started).toBeLessThan(10_000);
+    } finally {
+      process.env.PATH = savedPath;
+    }
   });
 });
 
@@ -318,18 +510,9 @@ describe("no cost repeats", () => {
     expect(Object.keys(risk.answer().judgments)).toHaveLength(many.length);
   });
 
-  test("a diff too large to read isn't read again at this head; another failed read is, later", async () => {
+  test("a failed read is read again, later", async () => {
     setRules();
     let now = 1_000_000;
-    const large = engine({ now: () => now, diffFails: "pull_diff_too_large" });
-    large.risk.assess([pull(1)]);
-    await settled();
-    now += RISK_RETRY_MS * 100;
-    large.risk.assess([pull(1)]);
-    await settled();
-    expect(large.reads).toHaveLength(1);
-    expect(large.runs).toEqual([]);
-
     const flaky = engine({ now: () => now, diffFails: true });
     flaky.risk.assess([pull(2)]);
     await settled();
@@ -337,6 +520,34 @@ describe("no cost repeats", () => {
     flaky.risk.assess([pull(2)]);
     await settled();
     expect(flaky.reads).toHaveLength(2);
+  });
+
+  test("a PR retargeted to another base: its old mark goes, and it is judged again at the same head", async () => {
+    setRules();
+    const { risk, runs } = engine();
+    risk.assess([pull(1)]);
+    await settled();
+    expect(risk.answer().judgments["github.com/n/b#1"]?.level).toBe("high");
+    risk.assess([pull(1, { base: "release" })]);
+    expect(risk.answer().judgments).toEqual({});
+    await settled();
+    expect(runs).toHaveLength(2);
+    expect(risk.answer().judgments["github.com/n/b#1"]?.level).toBe("high");
+    // And that judgment stands across a restart, for that base.
+    const restarted = engine();
+    restarted.risk.assess([pull(1, { base: "release" })]);
+    await settled();
+    expect(restarted.runs).toEqual([]);
+  });
+
+  test("a failure on the old base isn't shown for the new one", async () => {
+    setRules();
+    const { risk } = engine({ diffFails: true });
+    risk.assess([pull(1)]);
+    await settled();
+    expect(Object.keys(risk.answer().failed)).toEqual(["github.com/n/b#1"]);
+    risk.assess([pull(1, { base: "release" })]);
+    expect(risk.answer().failed).toEqual({});
   });
 
   describe("a diff too big for the model, the CLI or the forge", () => {
@@ -369,9 +580,9 @@ describe("no cost repeats", () => {
       expect(risk.answer().failed).toEqual({ [key]: "opencode: spawn failed" });
     });
 
-    test("the forge refusing it: the reason shows, no agent runs, and nothing waits on it", async () => {
+    test("no diff to read: the reason shows, no agent runs, and nothing waits on it", async () => {
       setRules();
-      const { risk, runs } = engine({ diffFails: "pull_diff_too_large" });
+      const { risk, runs } = engine({ diffFails: "pull_diff_failed" });
       risk.assess([pull(1)]);
       await settled();
       expect(runs).toEqual([]);
@@ -658,6 +869,16 @@ describe("one run on a provider", () => {
 });
 
 describe("a very large diff through the real providers, with fake CLIs", () => {
+  // Codex's provider reads $CODEX_HOME/config.toml: a scratch one, never the person's.
+  const savedCodexHome = process.env.CODEX_HOME;
+  beforeEach(() => {
+    process.env.CODEX_HOME = join(dataDir, "codex-home");
+  });
+  afterEach(() => {
+    if (savedCodexHome === undefined) delete process.env.CODEX_HOME;
+    else process.env.CODEX_HOME = savedCodexHome;
+  });
+
   // Past Linux's 128 KB for one argument and macOS's 1 MB for all of them, and past the reader's own 8 MB.
   const diff = "+a changed line of a file\n".repeat(360_000);
   const key = "github.com/n/b#1";
@@ -687,7 +908,7 @@ require("readline").createInterface({input:process.stdin}).on("line",(l)=>{const
       dataDir,
       isOn: () => true,
       agents: () => AGENTS,
-      pulls: { diff: async (k) => ({ key: k, scope: "layer", base: "main", head: "x", patch: diff, head_sha: "head-1" }) as InboxPullDiffAnswer },
+      pulls: { wholeDiff: async () => ({ patch: diff, head_sha: "head-1" }) },
       run: (run) => runRiskAgent(provider, run),
     });
     risk.assess([pull(1)]);
@@ -767,7 +988,7 @@ describe("the model it starts on", () => {
     expect(startingRiskModel("codex-sdk", [])).toBeNull();
   });
   test("what the dialog is told to start on is the same pick, from the agent's list", async () => {
-    const risk = createPullRisk({ dataDir, isOn: () => true, pulls: { diff: async () => ({}) as InboxPullDiffAnswer }, listModels: async () => [{ id: "gpt-6-sol", label: "Sol", default: true }, { id: "gpt-6-luna", label: "Luna" }] });
+    const risk = createPullRisk({ dataDir, isOn: () => true, pulls: { wholeDiff: async () => ({ patch: "", head_sha: null }) }, listModels: async () => [{ id: "gpt-6-sol", label: "Sol", default: true }, { id: "gpt-6-luna", label: "Luna" }] });
     expect(await risk.models("codex-sdk")).toEqual({ models: [{ id: "gpt-6-sol", label: "Sol" }, { id: "gpt-6-luna", label: "Luna" }], default_model: "gpt-6-luna" });
     expect((await risk.models("pi-sdk")).default_model).toBeNull();
   });

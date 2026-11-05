@@ -62,7 +62,7 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -574,6 +574,11 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /**
+   * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
+   * document, whatever its per-file read gives. `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
+   */
+  wholeDiff(key: string, signal?: AbortSignal): Promise<{ patch: string; head_sha: string | null }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
@@ -595,16 +600,18 @@ function compareRef(name: string): string {
 }
 
 /** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
-export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number) => Promise<RefCommandResult & { tooLarge?: boolean }>;
+export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number, reading?: { timeoutMs: number; signal?: AbortSignal }) => Promise<RefCommandResult & { tooLarge?: boolean }>;
 
 /** A diff can take longer than a card's query. */
 export const INBOX_PULL_DIFF_TIMEOUT_MS = 30_000;
+/** An agent's read of a whole diff has the time the agent has. */
+export const INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS = 5 * 60_000;
 
 /**
  * gh / glab for a diff, read as a stream: the bytes are counted as they come and the CLI is stopped past
  * `maxBytes`, so a huge diff is never held whole in memory.
  */
-export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes) => {
+export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, reading) => {
   let proc: ReturnType<typeof Bun.spawn>;
   try {
     proc = Bun.spawn([cli, ...args], {
@@ -612,11 +619,12 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes) => 
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
+      ...(reading?.signal ? { signal: reading.signal } : {}),
     });
   } catch {
     return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
   }
-  const timer = setTimeout(() => proc.kill(), INBOX_PULL_DIFF_TIMEOUT_MS);
+  const timer = setTimeout(() => proc.kill(), reading?.timeoutMs ?? INBOX_PULL_DIFF_TIMEOUT_MS);
   try {
     const chunks: Uint8Array[] = [];
     let bytes = 0;
@@ -662,6 +670,19 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  const readHeadNow = async (pull: InboxPull, cli: RefCli): Promise<string | null> => {
+    const parts = splitPath(pull.repo)!;
+    const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+    const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
+    if (!read || read.exitCode !== 0) return null;
+    if (pull.platform === "github") return shaOf(read.stdout.trim());
+    try {
+      const mr = obj(JSON.parse(read.stdout));
+      return shaOf(mr.sha) ?? shaOf(obj(mr.diff_refs).head_sha);
+    } catch {
+      return null;
+    }
+  };
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -1032,18 +1053,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         return ["api", "--hostname", pull.host, endpoint];
       };
       // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer posts nothing).
-      const headNow = async (): Promise<string | null> => {
-        const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
-        if (!read || read.exitCode !== 0) return null;
-        if (pull.platform === "github") return shaOf(read.stdout.trim());
-        try {
-          const mr = obj(JSON.parse(read.stdout));
-          return shaOf(mr.sha) ?? shaOf(obj(mr.diff_refs).head_sha);
-        } catch {
-          return null;
-        }
-      };
+      const headNow = () => readHeadNow(pull, cli);
       const headBefore = await headNow();
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
@@ -1077,6 +1087,45 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
       return answer;
+    },
+    async wholeDiff(key, signal) {
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+      if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", `${pull.host} asked to slow down. Try again in a minute.`);
+      const github = pull.platform === "github";
+      const parts = splitPath(pull.repo)!;
+      const project = `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
+      const read = (endpoint: string, ...more: string[]) => diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...more], Number.POSITIVE_INFINITY, { timeoutMs: INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, signal });
+      /** Not the forge's limit on one document: asking it again some other way wouldn't help. */
+      const stopFor = (result: RefCommandResult) => {
+        const error = refErrorOf(cli, result);
+        if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+        if (error === "signed_out") return `${cli} is not signed in to ${pull.host}.`;
+        return error === "rate_limited" || error === "cli_missing" ? `${cli} could not read this diff. Try again, or open it on the forge.` : null;
+      };
+      const headBefore = await readHeadNow(pull, cli);
+      const whole = github
+        ? await read(`repos/${parts.owner}/${parts.repo}/pulls/${pull.number}`, "-H", "Accept: application/vnd.github.v3.diff")
+        : await read(`${project}/raw_diffs`);
+      let patch = whole.exitCode === 0 ? whole.stdout : "";
+      if (!patch.trim()) {
+        const stop = whole.exitCode === 0 ? null : stopFor(whole);
+        if (stop) throw new InboxPullsError("pull_diff_failed", stop);
+        // The forge's per-file read: a file it holds back still comes by name, and a page that failed leaves the ones before it.
+        const paged = github ? await read(`repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/files?per_page=100`, "--paginate") : await read(`${project}/diffs?per_page=100`, "--paginate");
+        try {
+          patch = github ? reconstructGhPatch(parsePaginatedArray<GitHubFileEntry>(paged.stdout)) : reconstructGitlabPatch(parsePaginatedArray<GitLabDiffEntry>(paged.stdout));
+        } catch {
+          patch = "";
+        }
+        if (!patch.trim()) {
+          if (paged.exitCode !== 0) throw new InboxPullsError("pull_diff_failed", stopFor(paged) ?? `${cli} could not read this diff. Try again, or open it on the forge.`);
+          throw new InboxPullsError("pull_diff_failed", "The forge returned no diff for this pull request.");
+        }
+      }
+      const headAfter = headBefore ? await readHeadNow(pull, cli) : null;
+      return { patch, head_sha: headBefore && headBefore === headAfter ? headBefore : null };
     },
   };
 }

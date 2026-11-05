@@ -217,6 +217,8 @@ export interface PullRiskSettings {
 
 interface Kept extends InboxPullRiskJudgment {
   head: string;
+  /** The branch it was judged against: a retargeted PR is another diff. */
+  base: string;
   /** A hash of the rules it was judged against. */
   rules: string;
 }
@@ -235,8 +237,8 @@ export interface PullRisk {
 
 export interface PullRiskOptions {
   dataDir: string;
-  /** Reads a layer's patch (the Pull requests page's own read). */
-  pulls: Pick<InboxPulls, "diff">;
+  /** Reads a layer's whole diff. */
+  pulls: Pick<InboxPulls, "wholeDiff">;
   /** Code review is on: checked again before each run. */
   isOn: () => boolean;
   /** Tests: stand-ins for the agent, the CLIs found and the clock. */
@@ -277,7 +279,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       if (parsed.v !== 1 || !parsed.judgments || typeof parsed.judgments !== "object") throw new Error("not a risk file");
       for (const [key, value] of Object.entries(parsed.judgments)) {
         const clean = parseRiskAnswer(JSON.stringify({ risk: value?.level, why: value?.why }));
-        if (typeof value?.head === "string" && typeof value.rules === "string" && clean) kept.set(key, { head: value.head, rules: value.rules, ...clean });
+        if (typeof value?.head === "string" && typeof value.base === "string" && typeof value.rules === "string" && clean) kept.set(key, { head: value.head, base: value.base, rules: value.rules, ...clean });
       }
     } catch {
       try {
@@ -304,7 +306,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   /** When a job that failed may run again. */
   const waits = new Map<string, number>();
   /** Why a PR has no judgment at that head and those rules. Kept for this run of the Inbox: a restart tries again. */
-  const failures = new Map<string, { head: string; rules: string; reason: string }>();
+  const failures = new Map<string, { head: string; base: string; rules: string; reason: string }>();
   const modelLists = new Map<string, Promise<CatalogModel[]>>();
   /** The providers running now, for `stop`. */
   const live = new Set<AIProvider>();
@@ -343,11 +345,11 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     const provider = current.provider;
     if (!provider || !agents().some((a) => a.id === provider)) return;
     const failed = (reason: string) => {
-      failures.set(pull.key, { head: pull.head_sha, rules, reason });
+      failures.set(pull.key, { head: pull.head_sha, base: pull.base, rules, reason });
     };
     let patch: string;
     try {
-      const diff = await options.pulls.diff(pull.key, "layer");
+      const diff = await options.pulls.wholeDiff(pull.key, stopping.signal);
       // The diff read is the head judged: a push since the list waits for the next list's head.
       if (diff.head_sha !== pull.head_sha) {
         waits.set(job, now() + RISK_RETRY_MS);
@@ -355,9 +357,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       }
       patch = diff.patch;
     } catch (cause) {
-      // Too large stays too large at this head: it isn't read again.
       const { code, message } = cause as { code?: string; message?: string };
-      waits.set(job, code === "pull_diff_too_large" ? Number.POSITIVE_INFINITY : now() + RISK_RETRY_MS);
+      waits.set(job, now() + RISK_RETRY_MS);
       // A forge's words only come with its code; anything else is no sentence for a person.
       failed((code && message) || "The diff could not be read.");
       return;
@@ -392,7 +393,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     lastFailure = null;
     failuresInARow = 0;
     waits.delete(job);
-    keep(pull.key, { ...judgment, head: pull.head_sha, rules });
+    keep(pull.key, { ...judgment, head: pull.head_sha, base: pull.base, rules });
   };
 
   const pump = () => {
@@ -420,12 +421,12 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         for (const pull of listed) {
           const one = all.get(pull.key);
           if (!inboxPullIsOpen(pull)) continue;
-          if (one && one.head === pull.head_sha && one.rules === hash) {
+          if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) {
             judgments[pull.key] = { level: one.level, why: one.why };
             continue;
           }
           const failure = failures.get(pull.key);
-          if (failure && failure.head === pull.head_sha && failure.rules === hash) failed[pull.key] = failure.reason;
+          if (failure && failure.head === pull.head_sha && failure.base === pull.base && failure.rules === hash) failed[pull.key] = failure.reason;
         }
       }
       return { ...current, agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure };
@@ -441,8 +442,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
         for (const pull of pulls) {
           if (!inboxPullIsOpen(pull) || !pull.head_sha) continue;
           const one = all.get(pull.key);
-          if (one && one.head === pull.head_sha && one.rules === hash) continue;
-          const job = `${pull.key}\u0000${pull.head_sha}\u0000${hash}`;
+          if (one && one.head === pull.head_sha && one.base === pull.base && one.rules === hash) continue;
+          const job = `${pull.key}\u0000${pull.head_sha}\u0000${pull.base}\u0000${hash}`;
           if (queued.has(job) || now() < (waits.get(job) ?? 0)) continue;
           queued.add(job);
           queue.push({ job, pull: pull as InboxPull & { head_sha: string }, rules: hash });

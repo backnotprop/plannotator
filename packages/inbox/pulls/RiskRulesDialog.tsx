@@ -81,7 +81,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
             <div className="ib-riskd-row">
               <div data-pull-risk-agent={provider ?? ''}>
                 <InlinePicker
-                  escapeClosesOnlyList
+                  keysStayInList
                   plainGroupLabels
                   label="Risk agent"
                   value={provider ?? ''}
@@ -94,7 +94,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
                 />
               </div>
               <div data-pull-risk-model={model ?? ''}>
-                <InlinePicker escapeClosesOnlyList plainGroupLabels label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
+                <InlinePicker keysStayInList plainGroupLabels label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
               </div>
             </div>
             <p className="ib-quietline">A cheap model is plenty: Sonnet, Luna or similar. Diffs go only to the provider you choose here.</p>

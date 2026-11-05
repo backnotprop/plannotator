@@ -365,6 +365,10 @@ test.skipIf(!hasDom)('outside the Risk dialog the picker keeps its own ways: Esc
   expect(reached).toEqual(['Escape']);
   // Still open: on the button, Escape has never closed it.
   expect(heading()).toBeDefined();
+  // In the filter box Enter is the page's to handle, as it always was.
+  const enter = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  await act(async () => document.querySelector('input')!.dispatchEvent(enter));
+  expect(enter.defaultPrevented).toBe(false);
 });
 
 test.skipIf(!hasDom)('in the Risk dialog a long list has its groups in plain case, and Escape in its filter box closes only the list', async () => {
@@ -382,6 +386,32 @@ test.skipIf(!hasDom)('in the Risk dialog a long list has its groups in plain cas
   expect(key.defaultPrevented).toBe(true);
   expect(holder.querySelector('input')).toBeNull();
   expect(closed).toBe(0);
+});
+
+test.skipIf(!hasDom)('in the Risk dialog Enter in the filter box never reaches the form, whether it matches or not', async () => {
+  const models = Array.from({ length: 14 }, (_, i) => ({ id: `anthropic/m${i}`, label: `M${i}` }));
+  spy('pullRiskModels', async () => ({ models, default_model: null }));
+  await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => {}} />);
+  const holder = document.querySelector('[data-pull-risk-model]')!;
+  await act(async () => holder.querySelector('button')!.click());
+  const press = async () => {
+    const key = new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+    await act(async () => holder.querySelector('input')!.dispatchEvent(key));
+    return key.defaultPrevented;
+  };
+  const input = holder.querySelector('input')!;
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'zzzzz');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(await press()).toBe(true);
+  expect(holder.querySelector('input')).not.toBeNull();
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, 'M1');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  expect(await press()).toBe(true);
+  expect(holder.querySelector('input')).toBeNull();
 });
 
 test.skipIf(!hasDom)('a failed last run says why in the dialog', async () => {

@@ -12,15 +12,15 @@ export function InlinePicker({
   value,
   options,
   onChange,
-  escapeClosesOnlyList = false,
+  keysStayInList = false,
   plainGroupLabels = false,
 }: {
   label: string;
   value: string;
   options: InlinePickerOption[];
   onChange: (v: string) => void;
-  /** For a picker inside a dialog: Escape on an open list closes the list and nothing behind it. */
-  escapeClosesOnlyList?: boolean;
+  /** For a picker inside a dialog's form: Escape and Enter act on the open list and nothing behind it. */
+  keysStayInList?: boolean;
   /** Group headings as the ids write them, with no capitals or wide tracking. */
   plainGroupLabels?: boolean;
 }) {
@@ -48,7 +48,7 @@ export function InlinePicker({
     <div
       className="relative"
       onKeyDown={(e) => {
-        if (!escapeClosesOnlyList || e.key !== 'Escape' || !open) return;
+        if (!keysStayInList || e.key !== 'Escape' || !open) return;
         e.preventDefault();
         e.stopPropagation();
         close();
@@ -80,9 +80,10 @@ export function InlinePicker({
                   onKeyDown={(e) => {
                     e.stopPropagation();
                     if (e.key === 'Escape') {
-                      if (escapeClosesOnlyList) e.preventDefault();
+                      if (keysStayInList) e.preventDefault();
                       close();
                     }
+                    if (e.key === 'Enter' && keysStayInList) e.preventDefault();
                     if (e.key === 'Enter' && filtered.length > 0) select(filtered[0].value);
                   }}
                   placeholder="Type to filter…"
