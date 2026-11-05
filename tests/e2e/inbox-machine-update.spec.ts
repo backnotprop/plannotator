@@ -7,7 +7,8 @@
  *  1. The word beside a machine that is behind, in the sidebar and in Settings: a press opens the dialog, not the filter.
  *  2. Asleep: the word stays, the dialog says so, and there is nothing to press.
  *  3. An install that exits 0 and changes nothing says so; a failed one says why, with the log as `~/…`.
- *  4. Try Again, end to end: Updating, Mini restarts itself on the new version, Updated, and the link and its threads survive.
+ *  4. Try Again, end to end, with an install script that runs on after it swaps the binary: Updating, Restarting, Updated,
+ *     never Restart, and the link and its threads survive.
  *  5. An older machine, when PLANNOTATOR_E2E_OLDER_BINARY names a real release from before the route: the by-hand
  *     dialog; Snooze says why and opens it; the dialog's full-path line works in a shell with no PATH to it, the way
  *     `ssh host 'command'` runs; then the word goes and Snooze works, with no reload.
@@ -42,6 +43,8 @@ case "$(cat "$HOME/installer-mode" 2>/dev/null || echo ok)" in
 esac
 cp "$(cat "$HOME/installer-binary")" "$HOME/.local/bin/plannotator.new"
 mv -f "$HOME/.local/bin/plannotator.new" "$HOME/.local/bin/plannotator"
+# What install.sh does after the swap: skills, plugins, downloads.
+sleep "$(cat "$HOME/installer-tail" 2>/dev/null || echo 0)"
 `;
 
 interface Machine {
@@ -251,16 +254,35 @@ test('3. an install that exits 0 and changes nothing says so; a failed one says 
   expect(await (await fetch(`${base(studio)}/api/inbox/machines/${mini.id}/update`)).text()).not.toContain(mini.root);
 });
 
-test('4. Try Again, end to end: Updating, it restarts itself on the new version, Updated; the link and its threads survive', async () => {
+test('4. Try Again, end to end, with an install that runs on after the swap: Updating, Restarting, Updated, never Restart; the link and its threads survive', async () => {
   const thread = await asked(mini, 'Which backup window');
   const pid = registry(mini).pid;
   installer(mini, 'ok', 3);
+  writeFileSync(join(mini.root, 'installer-tail'), '8');
+  // Everything the word and the dialog said from the press on, in order, by the frame.
+  await page.evaluate((id) => {
+    const seen: string[] = [];
+    (window as unknown as { machineFlow: string[] }).machineFlow = seen;
+    const look = () => {
+      const word = [...document.querySelectorAll('.ib-mside')].find((row) => row.querySelector(`[data-machine="${id}"]`))?.querySelector('.ib-mthing')?.textContent ?? '';
+      const open = document.querySelector('[data-dialog]');
+      const line = `${word} | ${open?.getAttribute('data-dialog') ?? ''} | ${open?.querySelector('h2')?.textContent?.trim() ?? ''}`;
+      if (seen[seen.length - 1] !== line) seen.push(line);
+      requestAnimationFrame(look);
+    };
+    look();
+  }, mini.id);
   await dlg('failed').getByRole('button', { name: 'Try Again' }).click();
   await expect(dlg('machine-update-progress')).toContainText('Updating Mini', { timeout: 15_000 });
   await expect(word(mini)).toHaveText('Updating');
   // It follows the machine, in the same dialog, to the end.
   await expect(dlg('machine-update-done')).toContainText(`Mini is on ${NEW}`, { timeout: 90_000 });
   await expect(word(mini)).toHaveText('Updated');
+  const flow = await page.evaluate(() => (window as unknown as { machineFlow: string[] }).machineFlow);
+  const words = flow.map((line) => line.split(' | ')[0]!).filter((said, i, all) => said !== all[i - 1]);
+  expect(words, flow.join('\n')).toEqual(['Failed', 'Updating', 'Restarting', 'Updated']);
+  expect(flow.filter((line) => line.includes('machine-update-ready') || line.includes('Restart the Inbox')), flow.join('\n')).toEqual([]);
+  expect(flow.some((line) => line.includes('machine-update-progress') && line.includes(`Mini is restarting on ${NEW}`)), flow.join('\n')).toBe(true);
   expect(registry(mini).pid).not.toBe(pid);
   expect((await read<{ version: string }>(mini, '/api/inbox/health')).version).toBe(NEW);
   expect(spawnSync(mini.installed, ['--version'], { env: mini.env, encoding: 'utf8' }).stdout).toContain(NEW);
@@ -295,7 +317,7 @@ test("5. an older machine: by hand this once; Snooze says why and opens it; the 
   await page.locator(`[data-row-menu="${thread}"] [data-snooze-blocked]`).click();
   await expect(dialog).toContainText('Snooze needs a newer Plannotator on Attic');
   const lines = await dialog.locator('.ib-cmd code').allTextContents();
-  expect(lines).toHaveLength(2);
+  expect(lines).toHaveLength(3);
   await dialog.getByRole('button', { name: 'Close' }).click();
 
   // That line, exactly as drawn, where `plannotator` is not on PATH: what `ssh host 'command'` runs on a stock shell.

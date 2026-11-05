@@ -11,7 +11,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { MachineUpdateDetails, MachineUpdateView, MachineView } from './api';
 
 const hasDom = typeof document !== 'undefined';
-const { MachineSidebarWord, MachineUpdateButton, MachineUpdateDialog, UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH } = (hasDom ? await import('./components/MachineUpdate') : {}) as typeof import('./components/MachineUpdate');
+const { MachineSidebarWord, MachineUpdateButton, MachineUpdateDialog, UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL } = (hasDom ? await import('./components/MachineUpdate') : {}) as typeof import('./components/MachineUpdate');
 const { MachinesSection } = (hasDom ? await import('./components/Machines') : {}) as typeof import('./components/Machines');
 const { ThreadSnooze } = (hasDom ? await import('./components/CopyMenus') : {}) as typeof import('./components/CopyMenus');
 const { machineNotice } = await import('./machines');
@@ -120,7 +120,11 @@ test('asleep sends nothing, not even a read: a machine that is not there gets no
 test('an install that finished with the binary unchanged tells the person and offers Try Again, never Update again', async () => {
   answer = { current: '0.28.46', log: '~/.plannotator/update.log', command: 'curl -fsSL https://plannotator.ai/install.sh | bash', failure: { exit_code: 0, unchanged: true } };
   await dialog(view('failed'));
-  expect(document.querySelector('[data-dialog="machine-update-unchanged"]')?.textContent).toContain('still on 0.28.46');
+  const unchanged = document.querySelector('[data-dialog="machine-update-unchanged"]')?.textContent;
+  expect(unchanged).toContain('still on 0.28.46');
+  // The row says Failed and "didn't install": the dialog says the same, never that the install finished.
+  expect(unchanged).toContain("The update didn't install on Studio");
+  expect(unchanged).not.toContain('finished');
   expect(button('Update now')).toBeNull();
   expect(commands()).toEqual(['~/.plannotator/update.log', 'curl -fsSL https://plannotator.ai/install.sh | bash']);
   await act(async () => button('Try Again')!.click());
@@ -139,7 +143,7 @@ test('a failed install keeps its reason from that machine, with the log as it ca
 
 test('a machine too old for this: the by-hand command, and the full path for a shell that skips PATH (ssh host cmd)', async () => {
   await dialog(view('behind', { can_update: false }));
-  expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH]);
+  expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
   // Both parts of the second line must not depend on PATH, or it fails the same way.
   expect(UPDATE_BY_HAND_FULL_PATH.match(/(^|&& )(\S+)/g)!.map((part) => part.replace('&& ', ''))).toEqual(['~/.local/bin/plannotator', '~/.local/bin/plannotator']);
   // Nothing on the row said so yet, but the door did: the same dialog.
@@ -147,13 +151,69 @@ test('a machine too old for this: the by-hand command, and the full path for a s
   host?.remove();
   answer = { too_old: true, current: '0.28.40' };
   await dialog(view('behind'));
-  expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH]);
+  expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
+});
+
+test('the PowerShell line takes no `&&` (a parse error in 5.1) and no path that only exists on macOS and Linux', () => {
+  expect(UPDATE_BY_HAND_POWERSHELL).not.toContain('&&');
+  expect(UPDATE_BY_HAND_POWERSHELL).not.toContain('~');
+  expect(UPDATE_BY_HAND_POWERSHELL.split(';').map((part) => part.trim())).toEqual(['plannotator update', 'plannotator inbox restart']);
+});
+
+test('an older door, in any state its own install left: never a press that gets machine_too_old, and never an empty Copy box', async () => {
+  answer = { too_old: true, current: '0.28.46' };
+  for (const phase of ['failed', 'ready', 'behind'] as const) {
+    await dialog(view(phase, { can_update: false }));
+    expect([phase, !!button('Try Again'), !!button('Restart'), !!button('Update now')]).toEqual([phase, false, false, false]);
+    expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
+    act(() => root?.unmount());
+    host?.remove();
+    root = null;
+  }
+  expect(starts()).toEqual([]);
+});
+
+test('updating says its Inbox restarts by itself only where it does: an older door waits for a person there', async () => {
+  await dialog(view('updating'));
+  expect(document.body.textContent).toContain('then its Inbox restarts');
+  act(() => root?.unmount());
+  host?.remove();
+  await dialog(view('updating', { can_update: false }));
+  expect(document.querySelector('[data-dialog="machine-update-progress"]')?.textContent).toContain('It runs 0.28.46 until the install is in.');
+  expect(document.body.textContent).not.toContain('restarts');
+});
+
+test('a log that did not read as a path shows no empty Copy box: only the install command stays', async () => {
+  answer = { current: '0.28.46', log: '', command: 'curl x', failure: { exit_code: 1 } };
+  await dialog(view('failed'));
+  expect(commands()).toEqual(['curl x']);
+  expect(document.body.textContent).not.toContain('the log says');
+});
+
+test('a press that machine answers up to date: the word has gone, the dialog says so, and nothing is left to press', async () => {
+  startAnswer = { status: 409, body: { error: 'Studio is up to date.', code: 'update_up_to_date' } };
+  await dialog(view('behind'));
+  await act(async () => button('Update now')!.click());
+  expect(document.querySelector('.ib-error')?.textContent).toBe('Studio is up to date.');
+  // The row's next frame: nothing to say about this machine.
+  await act(async () => root!.render(<MachineUpdateDialog machine={machine(null)} snooze={false} onClose={() => {}} />));
+  expect(document.querySelector('[data-dialog="machine-update-level"]')?.textContent).toContain('Studio is up to date');
+  expect(button('Update now')).toBeNull();
+  expect(button('Close')).not.toBeNull();
 });
 
 test('a copy the script does not own: the install command, from what that machine read', async () => {
   answer = { current: '0.28.46', command: 'irm https://plannotator.ai/install.ps1 | iex' };
   await dialog(view('behind', { self_update: false }));
   expect(commands()).toEqual(['irm https://plannotator.ai/install.ps1 | iex']);
+});
+
+test('a copy the script does not own, asleep: no terminal line with nothing under it, and no request', async () => {
+  await dialog(view('behind', { self_update: false }), { state: 'offline' });
+  expect(document.querySelector('[data-dialog="machine-update-by-hand"]')).not.toBeNull();
+  expect(document.body.textContent).not.toContain('in a terminal');
+  expect(commands()).toEqual([]);
+  expect(sent).toEqual([]);
 });
 
 test("Snooze's words show only when Snooze opened the dialog", async () => {

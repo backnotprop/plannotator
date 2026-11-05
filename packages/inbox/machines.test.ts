@@ -350,6 +350,10 @@ describe('Update on a linked machine', () => {
     const restarting = machine(MAC, 'MacBook', 'offline', { update: behind({ phase: 'restarting' }) });
     expect(awayLine(restarting)).not.toContain('asleep');
     expect(awayLine(machine(MAC, 'MacBook', 'offline'))).toContain('asleep');
+    // Not back: "asleep" would say to wait.
+    const notBack = machine(MAC, 'MacBook', 'offline', { update: { phase: 'not_back', target: '0.28.49', from: '0.28.46', can_update: true, self_update: true } });
+    expect(awayLine(notBack)).toBe('MacBook has not come back after restarting');
+    expect(threadAwayLine(notBack)).toBe('MacBook has not come back after restarting. This thread opens when it is back.');
   });
 
   test("Snooze says why on a machine whose list keeps none; a machine not read yet, or one that keeps them, isn't named", () => {

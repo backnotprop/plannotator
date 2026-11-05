@@ -441,8 +441,12 @@ export function FailedDialog({
       <p className="ib-sub">{sub}</p>
       {details && (
         <>
-          <p className="ib-sum">{machineName ? `On ${machineName}, ` : ''}{mismatch || couldNotDownload ? (machineName ? 'details are in the log:' : 'Details are in the log:') : machineName ? 'the log says what went wrong:' : 'The log says what went wrong:'}</p>
-          <CommandRow text={tildePath(details.log, home)} />
+          {details.log && (
+            <>
+              <p className="ib-sum">{machineName ? `On ${machineName}, ` : ''}{mismatch || couldNotDownload ? (machineName ? 'details are in the log:' : 'Details are in the log:') : machineName ? 'the log says what went wrong:' : 'The log says what went wrong:'}</p>
+              <CommandRow text={tildePath(details.log, home)} />
+            </>
+          )}
           {prepare && (
             <>
               <p className="ib-sum">Or update from a terminal with another temp folder:</p>

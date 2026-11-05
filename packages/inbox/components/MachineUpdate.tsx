@@ -14,6 +14,8 @@ import { Tip } from './Tip';
 /** Older machines can only update at the machine, once. The same line for a person and for a shell that skips their PATH. */
 export const UPDATE_BY_HAND = 'plannotator update && plannotator inbox restart';
 export const UPDATE_BY_HAND_FULL_PATH = '~/.local/bin/plannotator update && ~/.local/bin/plannotator inbox restart';
+/** Windows PowerShell 5.1 refuses `&&`, and the full path above does not exist there. Shown to everyone: an older machine does not say what it runs on. */
+export const UPDATE_BY_HAND_POWERSHELL = 'plannotator update; plannotator inbox restart';
 
 /** The word in the sidebar, beside the machine: its own target, while the row still filters. */
 export function MachineSidebarWord({ notice, name, onPress }: { notice: MachineNotice; name: string; onPress: () => void }) {
@@ -84,6 +86,7 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
   const [details, setDetails] = useState<MachineUpdateDetails | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [upToDate, setUpToDate] = useState(false);
   const name = machine.name;
   const notice = machineNotice(machine);
   const phase = machine.update?.phase;
@@ -107,6 +110,7 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
       await inboxApi.startMachineUpdate(machine.id);
     } catch (cause) {
       setError(cause instanceof InboxApiError || cause instanceof Error ? cause.message : 'The update could not start.');
+      setUpToDate(cause instanceof InboxApiError && cause.code === 'update_up_to_date');
     } finally {
       setBusy(false);
     }
@@ -120,6 +124,8 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
     </button>
   );
   const errorLine = error && <div className="ib-error">{error}</div>;
+  // Its door is older than the route: nothing here can start, restart or retry an update there.
+  const tooOld = machine.update?.can_update === false || details?.too_old === true;
 
   // A restart on the way or just done is said before anything else: the machine's own answer comes after it.
   if (notice?.kind === 'updated') {
@@ -144,7 +150,7 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
         <h2 className="ib-mh2">
           <span className="ib-spin" aria-hidden="true" /> {restarting ? `${name} is restarting on ${to}` : `Updating ${name} to ${to}`}
         </h2>
-        <p className="ib-sub">{restarting ? 'Its threads come back in a moment.' : `It runs ${from} until the install is in, then its Inbox restarts.`} You can close this; it carries on.</p>
+        <p className="ib-sub">{restarting ? 'Its threads come back in a moment.' : tooOld ? `It runs ${from} until the install is in.` : `It runs ${from} until the install is in, then its Inbox restarts.`} You can close this; it carries on.</p>
         <div className="ib-acts-row">{close}</div>
       </Modal>
     );
@@ -160,11 +166,28 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
       </Modal>
     );
   }
+  if (tooOld) {
+    return (
+      <Modal label={`Update ${name} by hand this once`} onClose={onClose} testId="machine-update-too-old">
+        <h2>Update {name} by hand, this once</h2>
+        <p className="ib-sub">It runs {from}, from before machines could update each other.</p>
+        {snooze && <SnoozeLine name={name} />}
+        <p className="ib-sum">On {name}, in a terminal:</p>
+        <Command text={UPDATE_BY_HAND} />
+        <p className="ib-sum ib-quietline">If that says command not found (SSH can skip your PATH), use the full path:</p>
+        <Command text={UPDATE_BY_HAND_FULL_PATH} />
+        <p className="ib-sum ib-quietline">In PowerShell on Windows:</p>
+        <Command text={UPDATE_BY_HAND_POWERSHELL} />
+        <p className="ib-sum ib-quietline">Or ask an agent on {name} to run it. After that, you can update it from here.</p>
+        <div className="ib-acts-row">{close}</div>
+      </Modal>
+    );
+  }
   if (notice?.kind === 'failed' && details?.failure?.unchanged) {
     return (
-      <Modal label={`${name} is still on ${from}`} onClose={onClose} testId="machine-update-unchanged">
-        <h2>The install finished, but {name} is still on {from}</h2>
-        <p className="ib-sub">The install script reported no error, and Plannotator on that machine did not change.</p>
+      <Modal label={`The update didn't install on ${name}`} onClose={onClose} testId="machine-update-unchanged">
+        <h2>The update didn&apos;t install on {name}</h2>
+        <p className="ib-sub">The install script reported no error, but {name} is still on {from}.</p>
         {details.log && (
           <>
             <p className="ib-sum">On {name}, the log says what it did:</p>
@@ -200,29 +223,18 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
       />
     );
   }
-  if (notice?.kind === 'too_old' || details?.too_old) {
-    return (
-      <Modal label={`Update ${name} by hand this once`} onClose={onClose} testId="machine-update-too-old">
-        <h2>Update {name} by hand, this once</h2>
-        <p className="ib-sub">It runs {from}, from before machines could update each other.</p>
-        {snooze && <SnoozeLine name={name} />}
-        <p className="ib-sum">On {name}, in a terminal:</p>
-        <Command text={UPDATE_BY_HAND} />
-        <p className="ib-sum ib-quietline">If that says command not found (SSH can skip your PATH), use the full path:</p>
-        <Command text={UPDATE_BY_HAND_FULL_PATH} />
-        <p className="ib-sum ib-quietline">Or ask an agent on {name} to run it. After that, you can update it from here.</p>
-        <div className="ib-acts-row">{close}</div>
-      </Modal>
-    );
-  }
   if (notice?.kind === 'by_hand') {
     return (
       <Modal label={`Update ${name} by hand`} onClose={onClose} testId="machine-update-by-hand">
         <h2>Update {name} by hand</h2>
         <p className="ib-sub">Its copy of Plannotator was not installed by the install script, so it can&apos;t update itself. It runs {from}.</p>
         {snooze && <SnoozeLine name={name} />}
-        <p className="ib-sum">On {name}, in a terminal:</p>
-        {details?.command && <Command text={details.command} />}
+        {details?.command && (
+          <>
+            <p className="ib-sum">On {name}, in a terminal:</p>
+            <Command text={details.command} />
+          </>
+        )}
         <div className="ib-acts-row">{close}</div>
       </Modal>
     );
@@ -252,6 +264,16 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
             Restart
           </button>
         </div>
+      </Modal>
+    );
+  }
+  // It asked GitHub and said so (this Inbox runs ahead of the release), and the word has gone from its row.
+  if (upToDate && !notice) {
+    return (
+      <Modal label={`${name} is up to date`} onClose={onClose} testId="machine-update-level">
+        <h2>{name} is up to date</h2>
+        <p className="ib-sub">It runs {from}.</p>
+        <div className="ib-acts-row">{close}</div>
       </Modal>
     );
   }

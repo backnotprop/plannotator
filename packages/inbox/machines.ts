@@ -67,7 +67,10 @@ export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
  */
 export function awayLine(machine: Pick<MachineView, 'name' | 'state' | 'since' | 'version'>, now: Date = new Date()): string | null {
   // A machine this Inbox just updated is restarting, not asleep.
-  if ((machine as Pick<MachineView, 'update'>).update?.phase === 'restarting') return `${machine.name} is restarting to finish its update`;
+  const phase = (machine as Pick<MachineView, 'update'>).update?.phase;
+  if (phase === 'restarting') return `${machine.name} is restarting to finish its update`;
+  // Nor is one that did not come back: "asleep" says to wait.
+  if (phase === 'not_back') return `${machine.name} has not come back after restarting`;
   if (machine.state === 'offline') return `${machine.name} asleep since ${shortTime(machine.since, now)}`;
   if (machine.state === 'needs_update') return `Update Plannotator on ${machine.name} to see its threads here`;
   return null;

@@ -29,10 +29,10 @@ function waitingText(waiting: number): string {
   return `${waiting} waiting to send`;
 }
 
-/** The line under a linked machine: its state, then the answers waiting for it. */
-function machineLine(machine: MachineView): string {
+/** The line under a linked machine: its state, what its update says when this page offers updates, then the answers waiting for it. */
+function machineLine(machine: MachineView, offersUpdates: boolean): string {
   const status = machineStatus(machine);
-  const notice = machineNotice(machine);
+  const notice = offersUpdates ? machineNotice(machine) : null;
   const withNotice = notice ? `${status} · ${notice.line}` : status;
   return machine.waiting > 0 ? `${withNotice} · ${waitingText(machine.waiting)}` : withNotice;
 }
@@ -110,7 +110,7 @@ export function MachinesSection({ machines, via, onChanged, onMachineUpdate }: M
             </span>
             <span className="ib-txt">
               <span className="ib-l">{machine.name}</span>
-              <span className="ib-desc">{machineLine(machine)}</span>
+              <span className="ib-desc">{machineLine(machine, !!onMachineUpdate)}</span>
             </span>
             <span className="ib-ctl">
               {onMachineUpdate && <MachineUpdateButton machine={machine} onPress={() => onMachineUpdate(machine.id)} />}
