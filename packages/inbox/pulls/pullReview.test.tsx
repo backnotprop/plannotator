@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import { forgetUnsentReview } from '../compose/reviewBox';
 import type { ComposeSent } from '../compose/ComposeDialog';
 import type { ReviewBoxPull } from '../compose/reviewBox';
 import type { StartThreadInput } from '../api';
@@ -191,6 +192,7 @@ beforeEach(() => {
 
 afterEach(() => {
   if (!hasDom) return;
+  forgetUnsentReview();
   act(() => root?.unmount());
   host?.remove();
   root = null;
@@ -818,6 +820,39 @@ test.skipIf(!hasDom)("the box: the person's words make it a custom curation, and
   await settle();
   expect(started[0]!.body).toContain('just the retries');
   expect(sent[0]!.pullAsk).toBe('custom');
+});
+
+test.skipIf(!hasDom)('the box: words typed and left come back when it opens again, with no prompt, and a started review leaves nothing behind', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const open = () => mount(<ComposeDialog request={{ review: { pick: boxPick() } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  const field = (selector: string, value: string) =>
+    act(async () => {
+      const input = el<HTMLTextAreaElement | HTMLInputElement>(selector);
+      Object.getOwnPropertyDescriptor(input instanceof HTMLTextAreaElement ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+  open();
+  await settle();
+  await field('[data-compose-text] textarea', 'just the retries');
+  await field('[data-compose-thread-name] input', 'Retries only');
+  // Closed without a word: the dialog goes at once, nothing asks.
+  act(() => root!.unmount());
+  root = null;
+  expect(document.querySelector('[role="alertdialog"]')).toBeNull();
+  open();
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
+  expect(el<HTMLInputElement>('[data-compose-thread-name] input').value).toBe('Retries only');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.body).toContain('just the retries');
+  expect(sent).toHaveLength(1);
+  act(() => root!.unmount());
+  root = null;
+  open();
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('');
 });
 
 test.skipIf(!hasDom)('the box: a stack past the limit of one review thread is refused before anything is sent or checked', async () => {

@@ -12,6 +12,20 @@ export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
 }
 
+/**
+ * The words in the box and a thread name typed there, kept in memory when it closes without starting, as the Feedback
+ * dialog keeps its own. Opened again, they are there. Cleared once a review starts.
+ */
+const NOTHING_TYPED = { body: '', threadName: null as string | null };
+let unsent = NOTHING_TYPED;
+export const unsentReview = () => unsent;
+export const keepUnsentReview = (typed: typeof NOTHING_TYPED) => {
+  unsent = typed;
+};
+export const forgetUnsentReview = () => {
+  unsent = NOTHING_TYPED;
+};
+
 /** A pull request the box offers. */
 export interface ReviewBoxPull {
   /** The stack's id. */

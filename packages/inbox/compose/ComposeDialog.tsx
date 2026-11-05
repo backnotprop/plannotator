@@ -77,7 +77,7 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { localReviewMessage, localReviewName, reviewDefaultTo, type ReviewBoxPull, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, unsentReview, type ReviewBoxPull, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows, type ReviewKind } from './ReviewRows';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
@@ -201,7 +201,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const statusId = `ib-cp-status-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
-  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : ''));
+  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : box ? unsentReview().body : ''));
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
@@ -218,7 +218,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const boardChip = props.board === true && !card && !box;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
-  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ? { thread_name: request.threadName } : null)));
+  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ?? (box && unsentReview().threadName) ? { thread_name: request.threadName ?? unsentReview().threadName! } : null)));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
@@ -360,6 +360,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // New review names its thread from what it reviews, not from the words.
   const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : reviewKind === 'pr' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
   const threadName = draftThreadName(nameState);
+  useEffect(() => {
+    if (box) keepUnsentReview({ body, threadName: threadName || null });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [!!box, body, nameState]);
   useEffect(() => {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
@@ -508,6 +512,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             projectName: start.project.name,
           }
         : { session: target!.session, host: target!.host, projectName: target!.project.name };
+      if (box) forgetUnsentReview();
       props.onSent({ threadId: result.thread_id, session: sentTo.session, host: sentTo.host, projectName: result.project?.name ?? sentTo.projectName, draftId: draft?.id ?? null, cardId: card?.id ?? null, pullKeys: pulls?.keys ?? null, pullAsk: boxPull ? (body.trim() ? 'custom' : 'guide') : pulls ? pullLaunchAsk(body, pulls.ask_line) : null, ...(start ? { launched: true } : {}) });
     } catch (cause) {
       if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
