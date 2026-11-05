@@ -356,7 +356,7 @@ export interface InboxServerOptions {
    */
   updates?: Pick<
     InboxUpdatesOptions,
-    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion"
+    "fetchReleasePage" | "fetchRelease" | "fetchReleaseTag" | "fetchImage" | "whatsNewWaitMs" | "launchInstaller" | "isManaged" | "listSessions" | "now" | "probeVersion" | "home"
   >;
   /**
    * The window: the built single-file app (`apps/hook/dist/inbox.html`, which
@@ -988,6 +988,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     onChange: () => {
       for (const listener of statusListeners) listener();
     },
+    onRestartWanted: () => requestRestart(),
   });
 
   // Each project's git `origin` (#1840), for the window's `#123` links:
@@ -1170,6 +1171,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (linked machines, inbox-machines.ts): this Inbox's stable id and the link protocol it speaks.
     inbox_id: machines.selfId,
     machine_links: 1,
+    // Additive: this Inbox's door takes `update` (a linked machine can update it), whether the install script owns
+    // this copy, and a linked machine's Update that ended with no error and no new binary.
+    machine_update: 1,
+    self_update: updates.selfUpdates(),
+    update_no_change: updates.noChange(),
   });
 
   /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */
@@ -2499,7 +2505,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // `restart_claude_code` (additive): the sidebar's "Reload Claude Code N" follows the sessions as they restart.
         const onStatus = () =>
           send(
-            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing() })}\n\n`,
+            `event: status\ndata: ${JSON.stringify({ update: updates.current(), updated: updates.updated(), restart_claude_code: live.restartCount(), restart_agents: live.restartAgents(), update_check_failing: updates.checkFailing(), update_no_change: updates.noChange() })}\n\n`,
           );
         statusListeners.add(onStatus);
         // An Inbox window (not the phone's door): counted while its stream is open, with what it reported.
@@ -3180,6 +3186,18 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   (uploadSweep as { unref?: () => void }).unref?.();
 
   let stopRequested = false;
+  /** Stop and start again on the binary on disk: the window's Restart, or a linked machine's Update once its install is in. False: this Inbox cannot. */
+  const requestRestart = (): boolean => {
+    if (!options.onRestartRequested) return false;
+    if (!stopRequested) {
+      stopRequested = true;
+      setTimeout(() => {
+        stop();
+        options.onRestartRequested?.();
+      }, 50);
+    }
+    return true;
+  };
   let server: ReturnType<typeof Bun.serve>;
   let attachmentRoutes: ReturnType<typeof createInboxAttachmentRoutes>;
   // The device door: always made (linked machines use it with Phones off); with Phones off it serves machines only,
@@ -3752,15 +3770,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
-        if (!options.onRestartRequested) {
+        if (!requestRestart()) {
           return json({ error: "This Inbox cannot restart itself; quit it and run plannotator inbox.", code: "restart_unavailable" }, 409);
-        }
-        if (!stopRequested) {
-          stopRequested = true;
-          setTimeout(() => {
-            stop();
-            options.onRestartRequested?.();
-          }, 50);
         }
         return json({ ok: true, restarting: true });
       }
@@ -4805,6 +4816,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       relay: { paired: async (device) => (relay ? relay.paired(device) : null), revoked: (device) => relay?.revoked(device) },
       phones: phonesOn,
       machines: () => machines ?? null,
+      machineUpdate: {
+        read: () => updates.machineRead(),
+        start: () => updates.machineStart(),
+      },
     });
     phones = devices;
     machines = createInboxMachines({
@@ -4817,6 +4832,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       holds: (kind, id) =>
         kind === "projects" ? store.project(id) !== null : kind === "attachments" ? store.attachment(id) !== null : kind === "annotations" ? store.annotation(id) !== null : store.message(id) !== null,
       isGuest: (req, via) => via === "tailnet" && !tailscale.isOwnerRequest(req.headers),
+      ownVersions: () => ({ current: version, latest: updates.knownLatest() }),
       timings: options.machineLinkTimings,
     });
     if (phonesOn) {

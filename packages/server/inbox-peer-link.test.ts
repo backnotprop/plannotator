@@ -32,6 +32,8 @@ interface DoorScript {
   eventsHang?: boolean;
   threads?: () => Promise<Response> | Response;
   post?: (route: string, body: any) => Response;
+  /** Status frames its windows would hear, sent after hello. */
+  statuses?: unknown[];
 }
 
 function door(script: DoorScript) {
@@ -62,6 +64,7 @@ function door(script: DoorScript) {
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
               controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
             }
+            for (const status of script.statuses ?? []) controller.enqueue(encoder.encode(`event: status\ndata: ${JSON.stringify(status)}\n\n`));
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -184,6 +187,75 @@ describe("the line", () => {
     await until("offline", () => peer.state === "offline");
     expect(peer.reason).toContain("different Inbox");
     expect(d.stats.events).toBe(0);
+  });
+});
+
+describe("an Update pressed there", () => {
+  const health = (version: string, more: Record<string, unknown> = {}) => () => Response.json({ ok: true, inbox_id: B, machine_links: 1, machine_update: 1, version, ...more });
+
+  test("it reads what that machine's own health says about its update and its door", async () => {
+    const d = door({ health: health("0.28.46", { self_update: false, update: { state: "available", version: "0.28.50", action: "copy", releaseUrl: "https://evil.example" } }) });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.canUpdate).toBe(true);
+    expect(peer.selfUpdate).toBe(false);
+    expect(peer.farUpdate).toEqual({ state: "available", version: "0.28.50", action: "copy" });
+  });
+
+  test("an older Inbox's health names no route: it cannot be updated from here", async () => {
+    const d = door({ health: () => Response.json({ ok: true, inbox_id: B, machine_links: 1, version: "0.28.44" }) });
+    const { peer } = link(d.url);
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.canUpdate).toBe(false);
+  });
+
+  test("back on a new version, the press ends as updated, from what to what", async () => {
+    const d = door({ health: health("0.28.50") });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).toBeNull();
+    expect(peer.updated).toMatchObject({ from: "0.28.46", to: "0.28.50" });
+  });
+
+  test("back on the same version with nothing running, the press is over: it never claims to be updating", async () => {
+    const d = door({ health: health("0.28.46") });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).toBeNull();
+    expect(peer.updated).toBeNull();
+  });
+
+  test("back on the same version while its install runs, the press goes on", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }) });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("online", () => peer.state === "online");
+    expect(peer.asked).not.toBeNull();
+  });
+
+  test("a status frame saying the install failed ends the press, so a later sleep is not read as restarting", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }), statuses: [{ update: { state: "failed", version: "0.28.50", action: "script" } }] });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("the failed frame", () => peer.farUpdate?.state === "failed");
+    expect(peer.asked).toBeNull();
+  });
+
+  test("a status frame saying nothing changed ends the press and is kept", async () => {
+    const d = door({ health: health("0.28.46", { update: { state: "updating", version: "0.28.50", action: "script" } }), statuses: [{ update: { state: "available", version: "0.28.50", action: "script" }, update_no_change: "0.28.50" }] });
+    const { peer } = link(d.url);
+    peer.asked = { from: "0.28.46", at: Date.now() };
+    peer.start();
+    await until("the frame", () => peer.noChange === "0.28.50");
+    expect(peer.asked).toBeNull();
   });
 });
 
