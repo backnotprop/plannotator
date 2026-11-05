@@ -268,7 +268,8 @@ function isCodeName(name: string): boolean {
  * window's routes and the phone's door alike. Null when the name passes.
  */
 export function inboxAttachmentNameRefusal(path: string): string | null {
-  const name = baseName(path);
+  // On NTFS `.env::$DATA`, `.env:x` and `.env .` all name the real `.env`.
+  const name = baseName(path).replace(/:.*$/s, "").replace(/[. ]+$/, "");
   if (isDotenvFileName(name)) return ".env files are never attached (they hold secrets).";
   return null;
 }

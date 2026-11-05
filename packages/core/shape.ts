@@ -197,12 +197,19 @@ export interface ShapeVersion extends ShapeBoard {
 
 export type ShapeState = 'active' | 'finished';
 
+export interface ShapeProject {
+  name: string;
+  root: string;
+  /** The linked worktree the board was written from, when that folds into the project at `root`. */
+  worktree?: string;
+}
+
 /** `shape.json`: the shape itself. */
 export interface ShapeRecord {
   v: typeof SHAPE_FORMAT_VERSION;
   id: string;
   title: string;
-  project: { name: string; root: string };
+  project: ShapeProject;
   session: ShapeSession | null;
   /** The Inbox thread it hangs off (`msg_…`), or null for a standalone shape. */
   thread: string | null;

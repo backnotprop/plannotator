@@ -30,6 +30,9 @@ describe('Inbox attachment names and kinds', () => {
 
   test('the dotenv family is the one name refused; any other name is taken', () => {
     expect(inboxAttachmentNameRefusal('/repo/.env')).toContain('.env');
+    // NTFS reads these as the real .env.
+    for (const name of ['.env::$DATA', '.env:x', 'config/.env .', '.env.', '.ENV.LOCAL::$DATA']) expect([name, inboxAttachmentNameRefusal(name)]).toEqual([name, expect.stringContaining('never attached')]);
+    expect(inboxAttachmentNameRefusal('notes.md')).toBeNull();
     // The dotenv family under any other name is refused too; the .env.example doc is not.
     expect(inboxAttachmentNameRefusal('/repo/.env.ts')).toContain('never attached');
     expect(inboxAttachmentNameRefusal('/repo/.env.local')).toContain('never attached');

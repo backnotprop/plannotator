@@ -222,7 +222,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges,
+import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullRepoKey, inboxPullItems, inboxPullStacks, inboxReviewLandingChanges,
   inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
 import { createInboxPullStates, createInboxReviewIndex } from "./inbox-reviews";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
@@ -242,6 +242,7 @@ import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
+import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
@@ -446,6 +447,8 @@ export interface InboxServerOptions {
    * Default: this host's launcher. Tests pass a recording one, so no real app starts.
    */
   openInLauncher?: InboxOpenInLauncher;
+  /** The person's home folder for Open in, by default this process's. */
+  openInHome?: string;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
@@ -3386,6 +3389,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    home: options.openInHome,
+    codeReviewOn,
+    shapeRoot: (id) => {
+      const shape = shapeOn() ? shapes.store.get(id) : null;
+      return shape ? shapeCodeRoot(shape.project) : null;
+    },
+    // The PR page read the pull list first, which read each project's origin.
+    repoRoots: (repo) =>
+      store
+        .allProjects()
+        .filter((project) => {
+          const origin = repos.get(project.root);
+          return origin?.host && inboxPullRepoKey(origin.host, origin.display) === repo;
+        })
+        .map((project) => project.root),
   });
 
   /**
