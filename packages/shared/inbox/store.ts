@@ -6581,7 +6581,7 @@ export class InboxStore {
     initiative?: unknown;
     /** The card tool's `initiative` (anyone, agents included): a name, matched or made (initiativePick); `""` is none. */
     initiative_name?: unknown;
-  }): { card: InboxCard; replayed: boolean } {
+  }): { card: InboxCard; replayed: boolean; tag_decided?: true } {
     const project = this.projectsById.get(input.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     const byAgent = input.by.kind === "agent";
@@ -6669,7 +6669,11 @@ export class InboxStore {
       initiative,
     };
     this.appendCard(card, at);
-    if (tagged) return { card: this.setCardInitiative(card.id, tagged, { kind: "person" }), replayed: false };
+    if (tagged) {
+      // The tag is what decided it, unless the agent named that very one.
+      const agreed = pick !== null && "id" in pick && pick.id === tagged;
+      return { card: this.setCardInitiative(card.id, tagged, { kind: "person" }), replayed: false, ...(agreed ? {} : { tag_decided: true as const }) };
+    }
     return { card, replayed: false };
   }
 

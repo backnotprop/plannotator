@@ -471,9 +471,9 @@ describe("the Board page's routes: New card and the look", () => {
     expect(gone.structuredContent.cards_kept).toBe(1);
   });
 
-  // What the agent is told when the person's tag beats the name it gave: the card line names the real one, and the
-  // nudge must not claim a "Billing" that was never made.
-  test("an agent's create on a thread the person tagged: the answer names the tagged initiative, no nudge, none made", async () => {
+  // What the agent is told when the person's tag beats the name it gave (the owner's "A · Add both"): the card line
+  // names the real one, the line says why, and nothing claims a "Billing" that was never made.
+  test("an agent's create on a thread the person tagged: the answer names the tagged initiative and why; none made", async () => {
     const { card, call, server, project } = await world();
     const shape = server.store.createInitiative({ name: "Shape", by: { kind: "person" } });
     const asked = await call("send_message", { project_path: project, agent_session: "ses_a", agent_host: "claude-code", agent_name: "Claude Code", body: "Take the empty states?" });
@@ -484,8 +484,41 @@ describe("the Board page's routes: New card and the look", () => {
     expect(made.structuredContent.card.initiative).toBe(shape.id);
     expect(made.content[0]!.text).toContain('initiative "Shape"');
     expect(made.content[0]!.text).not.toContain("Billing");
-    expect(made.structuredContent.initiative_hint).toBeUndefined();
+    const why = 'In "Shape": the person tagged this thread.';
+    expect(made.content[0]!.text.split("\n").at(-1)).toBe(why);
+    expect(made.structuredContent.initiative_hint).toBe(why);
     expect(server.store.initiatives().map((i) => i.name)).toEqual(["Shape"]);
+
+    const thread = asked.structuredContent.thread_id;
+    // No name, or "": the tag decided that too, once; a retry says nothing new.
+    const unnamed = { op: "create", title: "Unnamed", thread_id: thread, idempotency_key: "k-unnamed" };
+    expect((await card(unnamed)).structuredContent.initiative_hint).toBe(why);
+    const replay = await card(unnamed);
+    expect(replay.structuredContent.replayed).toBe(true);
+    expect(replay.structuredContent.initiative_hint).toBeUndefined();
+    expect((await card({ op: "create", title: "Out", thread_id: thread, initiative: "" })).structuredContent.initiative_hint).toBe(why);
+    // The agent named that very one (however written): the tag decided nothing, and the line would be noise.
+    for (const named of ["Shape", "#shape"]) {
+      const same = await card({ op: "create", title: `Named ${named}`, thread_id: thread, initiative: named });
+      expect([named, same.structuredContent.card.initiative]).toEqual([named, shape.id]);
+      expect(same.structuredContent.initiative_hint).toBeUndefined();
+      expect(same.content[0]!.text).not.toContain("the person tagged");
+    }
+    // Linked later, to a card in none: the tag decides. To a card already in one, it does not.
+    const loose = await card({ op: "create", title: "Loose" });
+    const linked = await card({ op: "link", card_id: loose.structuredContent.card.id, thread_id: thread });
+    expect(linked.structuredContent.card.initiative).toBe(shape.id);
+    expect(linked.structuredContent.initiative_hint).toBe(why);
+    const moved0 = await card({ op: "say", card_id: loose.structuredContent.card.id, say: "still here" });
+    expect(moved0.structuredContent.initiative_hint).toBeUndefined();
+    const placed = await card({ op: "create", title: "Placed", initiative: "Elsewhere" });
+    const kept = await card({ op: "link", card_id: placed.structuredContent.card.id, thread_id: thread });
+    expect(kept.structuredContent.card.initiative).toBe(placed.structuredContent.card.initiative);
+    expect(kept.structuredContent.initiative_hint).toBeUndefined();
+    // A say that changes it is the agent's own doing, tagged thread or not.
+    const out = await card({ op: "say", card_id: made.structuredContent.card.id, initiative: "" });
+    expect(out.structuredContent.initiative_hint).toBeUndefined();
+    await card({ op: "initiative_delete", initiative: "Elsewhere" });
 
     // Written another way, later, by say: it joins, and the last change holds.
     const review = server.store.createInitiative({ name: "Code review", by: { kind: "person" } });
@@ -498,6 +531,7 @@ describe("the Board page's routes: New card and the look", () => {
   // join (noise), a retry that made nothing claiming it did, or the sentence creeping back into what every request carries.
   test("the answer nudges only when this call made the initiative; every request's text carries no such sentence", async () => {
     const { card, server } = await world();
+    // None other live: no "Others:" sentence.
     const nudge = 'Made initiative "Billing". When its work is done, delete it (initiative_delete); its cards stay.';
     const made = await card({ op: "create", title: "Schema step", initiative: "Billing", idempotency_key: "k" });
     expect(made.content[0]!.text.split("\n").at(-1)).toBe(nudge);
@@ -516,7 +550,7 @@ describe("the Board page's routes: New card and the look", () => {
     await quiet(await card({ op: "say", card_id: id, initiative: "" }));
     await quiet(await card({ op: "say", card_id: id, initiative: "Billing" }));
     const moved = await card({ op: "say", card_id: id, initiative: "Refunds" });
-    expect(moved.content[0]!.text.split("\n").at(-1)).toBe(nudge.replace("Billing", "Refunds"));
+    expect(moved.content[0]!.text.split("\n").at(-1)).toBe('Made initiative "Refunds". Others: Billing. When its work is done, delete it (initiative_delete); its cards stay.');
 
     const response = await fetch(`http://127.0.0.1:${server.port}/mcp`, {
       method: "POST",
@@ -526,10 +560,29 @@ describe("the Board page's routes: New card and the look", () => {
     const text = await response.text();
     const data = text.split("\n").find((line) => line.startsWith("data:"));
     const tools = parseInboxToolList(JSON.parse(data ? data.slice(5) : text).result);
-    const sentence = /work is done|delete it/;
+    const sentence = /work is done|delete it|Others:|tagged this thread/;
     expect(JSON.stringify(tools)).not.toMatch(sentence);
     expect(JSON.stringify(inboxAgentTool(tools))).not.toMatch(sentence);
     expect(inboxBoardRequestBlock("msg_x")).not.toMatch(sentence);
+  });
+
+  // The owner's "A · Add both", from the clean room: agents made "Billing integer cents" beside a live "Billing"
+  // because they never saw the list. The failures guarded: a capped list, a deleted one named, the new one naming itself.
+  test("the nudge on a new initiative names every other live one, in the approved words", async () => {
+    const { card } = await world();
+    await card({ op: "create", title: "A", initiative: "Billing" });
+    await card({ op: "create", title: "B", initiative: "Code review" });
+    await card({ op: "create", title: "C", initiative: "Old work" });
+    await card({ op: "initiative_delete", initiative: "Old work" });
+    const made = await card({ op: "create", title: "D", initiative: "Billing integer cents" });
+    const line = 'Made initiative "Billing integer cents". Others: Billing, Code review. When its work is done, delete it (initiative_delete); its cards stay.';
+    expect(made.content[0]!.text.split("\n").at(-1)).toBe(line);
+    expect(made.structuredContent.initiative_hint).toBe(line);
+
+    for (let i = 0; i < 30; i++) await card({ op: "create", title: `Many ${i}`, initiative: `Lane ${i}` });
+    const hint = (await card({ op: "create", title: "Last", initiative: "Last one" })).structuredContent.initiative_hint as string;
+    for (let i = 0; i < 30; i++) expect(hint).toContain(`Lane ${i}`);
+    expect(hint).not.toContain("Others: Last one");
   });
 
   // The owner, 2026-11-04: agents "clear initiatives out". The failures guarded: a delete that takes cards with it, or

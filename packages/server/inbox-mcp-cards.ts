@@ -23,6 +23,7 @@ import {
   inboxCardRefsOf,
   inboxCardColumnOf,
   inboxCardInitiativeMadeNudge,
+  inboxCardInitiativeTaggedNote,
   inboxCardTitleHint,
   INBOX_CARD_INITIATIVE_FIELD,
   INBOX_CARD_INITIATIVE_RULE,
@@ -209,10 +210,15 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   const initiativeName = (id: string) => store.initiative(id)?.name ?? null;
   // Every initiative before this call, deleted ones too: one the answered card is in that is not among them, this call made.
   const knownInitiatives = new Set(store.initiatives().map((initiative) => initiative.id));
-  const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null) => {
+  const answer = (verb: string, wire: InboxCardWire, extra: Record<string, unknown> = {}, titled: string | null = null, tagDecided = false) => {
     const hint = titled === null ? null : inboxCardTitleHint(titled);
-    const madeName = wire.initiative && !knownInitiatives.has(wire.initiative) ? initiativeName(wire.initiative) : null;
-    const nudge = madeName === null ? null : inboxCardInitiativeMadeNudge(madeName);
+    const inName = wire.initiative ? initiativeName(wire.initiative) : null;
+    const others = () => store.initiatives().filter((i) => i.deleted_at === null && i.id !== wire.initiative).map((i) => i.name);
+    const nudge =
+      inName === null ? null
+      : !knownInitiatives.has(wire.initiative!) ? inboxCardInitiativeMadeNudge(inName, others())
+      : tagDecided ? inboxCardInitiativeTaggedNote(inName)
+      : null;
     return {
       text: `${verb}:\n${cardLineText(wire, initiativeName)}${hint ? `\n${hint}` : ""}${nudge ? `\n${nudge}` : ""}`,
       structured: { card: wire, ...extra, ...(hint ? { title_hint: hint } : {}), ...(nudge ? { initiative_hint: nudge } : {}) },
@@ -254,7 +260,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       }
       projectId = message.project_id;
     }
-    const { card, replayed } = store.createCard({
+    const { card, replayed, tag_decided } = store.createCard({
       project_id: projectId,
       by,
       title: input.title,
@@ -267,7 +273,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
       idempotency_key: input.idempotency_key,
       initiative_name: input.initiative,
     });
-    return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed }, card.title);
+    return answer(replayed ? "Already made (the same idempotency_key)" : "Made a card on the person's Board; keep it current with move or say as the work moves", store.cardWire(card), { replayed }, card.title, tag_decided === true);
   }
 
   const card = cardInScope(store, input.card_id, projectIds);
@@ -290,7 +296,10 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
     initiative_name: input.initiative,
   });
   const verb = next.column !== card.column ? `Moved to ${INBOX_CARD_COLUMN_LABELS[next.column]}` : "Updated";
-  return answer(verb, store.cardWire(next), {}, input.title ? next.title : null);
+  const wire = store.cardWire(next);
+  // With no `initiative` in the call, only a linked thread's tag can have moved it.
+  const tagDecided = input.initiative === undefined && wire.initiative !== store.cardWire(card).initiative;
+  return answer(verb, wire, {}, input.title ? next.title : null, tagDecided);
 }
 
 export function registerInboxCardTool(server: McpServer, context: InboxMcpContext): void {
