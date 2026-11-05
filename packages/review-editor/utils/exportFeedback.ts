@@ -328,8 +328,16 @@ function formatSuggestionBlocks(ann: CodeAnnotation): string {
   return output;
 }
 
+/**
+ * The heading review-level comments (`scope: 'general'`, the "Global comment"
+ * button, a decision's note) go under, ahead of the per-file sections. The
+ * Inbox's guided-review export writes the same (GUIDE_GLOBAL_COMMENTS_HEADING,
+ * kept equal by packages/inbox/guideFeedback.test.ts).
+ */
+export const GLOBAL_COMMENTS_HEADING = 'Global comments';
+
 function renderGeneralComments(annotations: CodeAnnotation[]): string {
-  let output = '## General\n\n';
+  let output = `## ${GLOBAL_COMMENTS_HEADING}\n\n`;
   for (const ann of annotations) {
     const prefix = formatConventionalPrefix(ann.conventionalLabel, ann.decorations);
     if (ann.text) {
@@ -399,8 +407,8 @@ export function exportReviewFeedback(
     return '# Code Review\n\nNo feedback provided.';
   }
 
-  // General (review-level) comments belong to no file — render them in their own
-  // section and group only the rest by file.
+  // Global (review-level) comments belong to no file — render them in their own
+  // section, first, and group only the rest by file.
   const general = annotations.filter(a => (a.scope ?? 'line') === 'general');
   const placed = annotations.filter(a => (a.scope ?? 'line') !== 'general');
   const generalSection = general.length > 0 ? renderGeneralComments(general) : '';
@@ -423,13 +431,14 @@ export function exportReviewFeedback(
         `${prMeta.url}\n\n`
       : `# Code Review Feedback\n\n${diffContext ? `**Diff:** ${describeDiff(diffContext)}\n\n` : ''}`;
 
-    output += renderScopedGroups(placed, '##', diffContext);
     output += generalSection;
+    output += renderScopedGroups(placed, '##', diffContext);
     return output;
   }
 
   // Multi-PR: group by prUrl, then by file within each
   let output = isMultiPR ? '# Multi-PR Review\n\n' : '# Code Review\n\n';
+  output += generalSection;
 
   const byPR = new Map<string, CodeAnnotation[]>();
   for (const ann of placed) {
@@ -458,7 +467,6 @@ export function exportReviewFeedback(
     output += renderScopedGroups(prAnnotations, '###');
   }
 
-  output += generalSection;
   return output;
 }
 

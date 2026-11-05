@@ -151,6 +151,8 @@ When adding or modifying server endpoints, both implementations must be updated.
 
 **Exception: the Plannotator Inbox.** The Inbox server (`packages/server/inbox.ts`, `plannotator inbox`) is Bun-only and lives in the compiled binary. Pi and OpenCode are its clients, never its hosts, so it has no `node:http` mirror; its routes change in one place. See "Plannotator Inbox".
 
+**Exception: the Shapes server.** The standalone Shape page's server (`packages/server/shape.ts`, started by `plannotator shape open`) is Bun-only for the same reason: it lives in the compiled binary, and Pi users reach it through the same `plannotator shape open`. It mounts the shared Shape routes (`packages/shared/shape/routes.ts`), which Pi also has (`apps/pi-extension/server/serverShape.ts`, not mounted), so a change to those routes still goes into both; only the server around them is in one place. See "Shape" in `guides-and-shared-ui.md`.
+
 ## Installation
 
 **Via plugin marketplace** (when repo is public):

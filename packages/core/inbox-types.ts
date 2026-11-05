@@ -19,7 +19,9 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
+import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
+import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
@@ -37,12 +39,16 @@ export * from "./inbox-t3";
 export * from "./inbox-cards";
 // Thread steps (approval "inbox-thread-steps"), the same way.
 export * from "./inbox-steps";
+// The Board's initiatives (approval "board-initiatives"), the same way.
+export * from "./inbox-initiatives";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
+// Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
+export * from "./inbox-reviews";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -53,8 +59,8 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx" | "stp";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative. */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx" | "stp" | "ini";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -77,6 +83,8 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A Board initiative (packages/core/inbox-initiatives.ts). */
+  ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -915,6 +923,13 @@ export interface InboxGuideRef {
   review?: true;
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
+  /**
+   * A review's source (Reviews, approval "inbox-reviews-page"): the
+   * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
+   * git ref), each one line. Only with `review`; absent on reviews sent
+   * before it (the Reviews index reads those from the snapshot once).
+   */
+  source?: InboxReviewSource;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -1554,10 +1569,11 @@ export interface InboxThread {
 
 /**
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
- * steps in a thread (approval "inbox-thread-steps"). A reader that does not
- * know a kind skips its lines.
+ * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
+ * initiative (approval "board-initiatives"). A reader that does not know a
+ * kind skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -1566,7 +1582,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord }
   | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord }
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
-  | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps };
+  | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
+  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative };
 
 // ─────────────────────────────── Health ───────────────────────────────
 

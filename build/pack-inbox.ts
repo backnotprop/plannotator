@@ -68,6 +68,34 @@ export function asciiRegExps(code: string, parse: (code: string) => unknown): st
 }
 
 /**
+ * A page whose entry script the Inbox no longer has reloads itself, once: without the script nothing else on the
+ * page runs, so it would stay blank, with no stale-page notice, until the person reloaded. It happens when a browser
+ * brings back the page from an older release (a restored tab, back and forward) and no longer holds that release's
+ * script. Only on a 404: a network failure may pass, and the Inbox being down is not fixed by reloading. Nothing has
+ * run, so nothing the person wrote is lost. `cache: "reload"` first, to refresh the browser's copy of the page, so the
+ * reload should not get the same old page; a refresh that fails still reloads. The mark in sessionStorage keeps one
+ * old page from reloading twice in a row: a store that keeps nothing never reloads, and an entry script that loads
+ * clears it, so the same old page coming back later (a rollback, then forward again) reloads again. `load` reaches
+ * the document's capture listeners but never the window's.
+ */
+export const INBOX_ENTRY_GONE_SCRIPT = `<script>(function(){
+var mark="plannotator-entry-gone";
+function entry(){return document.querySelector('script[type="module"][src^="/assets/"]')}
+document.addEventListener("load",function(e){if(e.target===entry())try{sessionStorage.removeItem(mark)}catch(_){}},true);
+addEventListener("error",function(e){
+var s=entry();
+if(!s||e.target!==s)return;
+fetch(s.src,{method:"HEAD",cache:"no-store"}).then(function(r){
+if(r.status!==404)return;
+var at=s.getAttribute("src");
+try{if(sessionStorage.getItem(mark)===at)return;sessionStorage.setItem(mark,at);if(sessionStorage.getItem(mark)!==at)return}catch(_){return}
+function go(){location.reload()}
+fetch(location.href,{cache:"reload"}).then(go,go);
+},function(){});
+},true);
+})()</script>`;
+
+/**
  * The Inbox window's build (apps/inbox/vite.config.ts, #2593): ONE file, as
  * before, which the binary embeds, but its scripts are code-split and packed
  * behind the page (packages/shared/packed-app.ts) instead of inlined. The
@@ -80,10 +108,12 @@ export function asciiRegExps(code: string, parse: (code: string) => unknown): st
  * Unlike the plan and review apps (build/pack-app.ts), the page keeps its
  * stylesheet inline, with its fonts and pictures as data URLs, exactly as the
  * single-file build had it, so the window paints as before; only `.js` is
- * packed. It has no head script and no "updated while open" line either: only
- * the binary that embeds this file serves it, so no older server ever serves
- * it raw, and the window's own stale-page notice covers an Inbox restarted
- * onto a new release under an open page.
+ * packed. It has no "updated while open" line and none of their head script's
+ * theme or load-failed work: only the binary that embeds this file serves it,
+ * so no older server ever serves it raw, and the window's own stale-page notice
+ * covers an Inbox restarted onto a new release under an open page. Its one script
+ * in the head is for an older page that cannot get its entry script, which has
+ * no notice to show, so it reloads (`INBOX_ENTRY_GONE_SCRIPT`).
  */
 export function packedInboxApp(): Plugin {
   return {
@@ -98,7 +128,8 @@ export function packedInboxApp(): Plugin {
         if (page?.type !== 'asset' || typeof page.source !== 'string') {
           throw new Error('packed-inbox: the build emitted no index.html');
         }
-        let html = page.source;
+        if (!page.source.includes('</head>')) throw new Error('packed-inbox: index.html has no </head>');
+        let html = page.source.replace('</head>', () => `${INBOX_ENTRY_GONE_SCRIPT}\n  </head>`);
         const assets: Record<string, PackedAsset> = {};
         let stylesheets = 0;
         for (const output of Object.values(bundle)) {

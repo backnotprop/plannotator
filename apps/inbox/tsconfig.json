@@ -22,5 +22,5 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["index.tsx", "surface.tsx"]
+  "include": ["index.tsx", "surface.tsx", "shape.tsx"]
 }

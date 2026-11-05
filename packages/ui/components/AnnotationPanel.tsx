@@ -243,6 +243,18 @@ interface PanelProps {
    * Absent: no crop.
    */
   imageRegionSrc?: (src: string) => string | null;
+  /**
+   * The host's own section at the foot of the timeline, inside its scroll area,
+   * so the cards and the section scroll as one (the Inbox's earlier comments).
+   * Absent: no wrapper element, exactly as before.
+   */
+  timelineFooter?: React.ReactNode;
+  /**
+   * An empty timeline without "No annotations yet" and its hint, for a host
+   * that has something else to show there (see `timelineFooter`). The way to
+   * other files' comments stays. Default false: exactly as before.
+   */
+  hideEmptyMessage?: boolean;
 }
 
 export const AnnotationPanel: React.FC<PanelProps> = ({
@@ -289,6 +301,8 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   renderCardBody,
   imageRegionSrc,
   onNavigateAnchor,
+  timelineFooter,
+  hideEmptyMessage = false,
 }) => {
   // `#Heading` links in comment text; nothing is parsed unless the host can navigate.
   const sectionRefs = useMemo(
@@ -635,21 +649,25 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
             Select text in the document to comment. Question and option text is selectable too.
           </p>
         ) : timelineCount === 0 ? (
-          (!directEdits || directEdits.length === 0) && (
-            <div className="flex flex-col items-center justify-center px-4 py-16 text-center">
-              <p className="text-xs text-muted-foreground/60">
-                No annotations yet
-              </p>
-              <p className="mt-1 text-[11px] text-muted-foreground/40">
-                {emptyHint}
-              </p>
+          (!directEdits || directEdits.length === 0) && (!hideEmptyMessage || (scopeEnabled && otherGroupCount > 0)) && (
+            <div className={`flex flex-col items-center justify-center px-4 ${hideEmptyMessage ? 'py-1' : 'py-16'} text-center`}>
+              {!hideEmptyMessage && (
+                <>
+                  <p className="text-xs text-muted-foreground/60">
+                    No annotations yet
+                  </p>
+                  <p className="mt-1 text-[11px] text-muted-foreground/40">
+                    {emptyHint}
+                  </p>
+                </>
+              )}
               {scopeEnabled && otherGroupCount > 0 && (
                 <button
                   type="button"
                   data-pn-touch-target="true"
                   data-annotation-view-all="true"
                   onClick={() => onAnnotationScopeChange!('all')}
-                  className="mt-3 cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary"
+                  className={`${hideEmptyMessage ? '' : 'mt-3 '}cursor-pointer rounded-md px-2 py-1 text-[11px] text-primary/80 transition-colors hover:bg-surface-1 hover:text-primary`}
                 >
                   View all {otherGroupCount} in {otherGroups.length} other file{otherGroups.length === 1 ? '' : 's'}
                 </button>
@@ -738,6 +756,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
 
           </>
         )}
+        {timelineFooter}
         </div>
       </OverlayScrollArea>
 
@@ -1344,6 +1363,8 @@ const CodeAnnotationCard: React.FC<{
     ? `line ${annotation.lineStart}`
     : `lines ${annotation.lineStart}-${annotation.lineEnd}`;
   const fileName = basenameFromPath(annotation.filePath);
+  // A comment on the whole review (a guided review's global comment): no file, no lines.
+  const isGlobal = annotation.scope === 'general';
 
   const handleCancelEdit = () => {
     setIsEditing(false);
@@ -1369,7 +1390,9 @@ const CodeAnnotationCard: React.FC<{
     >
       {/* Header: type word + author · time + actions */}
       <div className="mb-1.5 flex items-center gap-1.5">
-        <span className="text-[11px] font-medium text-primary">Code</span>
+        {isGlobal
+          ? <span className={cn('text-[11px] font-medium', TYPE_COLOR[AnnotationType.GLOBAL_COMMENT])}>{TYPE_LABEL[AnnotationType.GLOBAL_COMMENT]}</span>
+          : <span className="text-[11px] font-medium text-primary">Code</span>}
         <CardByline author={annotation.author} isMe={isMe} timestamp={annotation.createdAt} />
         {!readOnly && (
           <div className="ml-auto flex items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100 [@media(hover:none)]:opacity-100">
@@ -1397,12 +1420,14 @@ const CodeAnnotationCard: React.FC<{
         )}
       </div>
 
-      {/* File / line meta */}
-      <HostTitle title={annotation.filePath}>
-        <div className="rounded px-2 py-1 bg-surface-1 font-mono text-[11px] text-muted-foreground truncate">
-          {fileName} · {lineRange}
-        </div>
-      </HostTitle>
+      {/* File / line meta (a global comment has neither) */}
+      {!isGlobal && (
+        <HostTitle title={annotation.filePath}>
+          <div className="rounded px-2 py-1 bg-surface-1 font-mono text-[11px] text-muted-foreground truncate">
+            {fileName} · {lineRange}
+          </div>
+        </HostTitle>
+      )}
 
       {annotation.originalCode && (
         <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">

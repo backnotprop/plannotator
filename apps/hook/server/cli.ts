@@ -3,6 +3,7 @@ import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
 import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
+import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
@@ -209,6 +210,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
+    "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
@@ -281,40 +283,11 @@ export const CARD_COMMAND_USAGE = [
 
 /**
  * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
- * Unreleased (HIDDEN_SUBCOMMANDS). DRAFT: every word below needs the owner's
- * approval before Shape ships (approval "shape-living-board", "Still needs
- * its own approval").
+ * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
+ * text (packages/core/shape-skill.ts): the welcome and the commands, then the
+ * drawing guide the Inbox's `/shape` skill ends with too.
  */
-export const SHAPE_COMMAND_USAGE = [
-  "DRAFT: this text is not approved yet.",
-  "",
-  "Usage:",
-  "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
-  "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
-  "  plannotator shape drawing [<shp_id>]",
-  "  plannotator shape answer [<shp_id>] --re <shn_id> --text '<answer>'",
-  "  plannotator shape done [<shp_id>]",
-  "  plannotator shape list [--all] [--json]",
-  "",
-  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
-  "and Code, with numbered references. Each update stores a new version of the whole board.",
-  "",
-  "update   Stores the board in <board.json>. Without --id it makes a new shape and",
-  "         prints its id. With --id, --base is the version you drew from; if the shape",
-  "         changed since, the update is refused and the latest version is printed.",
-  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
-  "         board redraws only what changed.",
-  "read     Prints the latest version (or --version <n>). --notes also prints the notes",
-  "         that wait for you (Change it and Ask) and marks them as received.",
-  "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
-  "answer   Answers the person's Ask (its id is in read --notes). Change it notes need",
-  "         no answer: draw the change as a new version.",
-  "done     Finishes the shape. Do this only when the person says so.",
-  "list     Lists the active shapes, newest change first (--all: finished ones too).",
-  "",
-  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
-  "else this project's.",
-].join("\n");
+export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback

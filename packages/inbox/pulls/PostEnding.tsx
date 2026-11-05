@@ -88,8 +88,8 @@ export interface PostEndingProps {
   /** The person's pick (`useReviewDestination`), with its setter. */
   picked: ReviewDestination;
   onPick: (next: ReviewDestination) => void;
-  /** The review went on the PR: the host clears its comments and says so. */
-  onPosted: (result: { action: PlatformAction; url: string; label: string }) => void;
+  /** The review went on the PR: the host clears the comments that went (`posted`, their ids) and says so. */
+  onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly string[] }) => void;
   /**
    * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
    * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
@@ -247,7 +247,8 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
                 setOpen(null);
                 // A follow-up comment after an approval still reads as the approval.
                 const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-                setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.map(postedSignature)]) });
+                const went = new Set(result.posted);
+                setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
                 onPosted({ ...result, action, label: rules.label });
               }}
             />

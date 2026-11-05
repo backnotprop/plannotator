@@ -5,15 +5,21 @@
  * Viewed ticks, the comments panel, ui's DecisionControl in the header) on one
  * layer of a stack, or on the whole stack up to a layer.
  *
- * - The strip under the header names every layer bottom to top, the one on
+ * - One title, the header's (approval "pr-page-review-with-agent"): the
+ *   reader draws none of its own (`GuideReader` `bare`), and the strip under
+ *   the header names every layer by its number, bottom to top, the one on
  *   screen marked, with "This layer | Whole stack" (native radios).
+ * - Under 900 px of review the file rail folds into the "Files · N files"
+ *   picker over the diff (`RAIL_FOLD_BELOW`), so the diff keeps the width.
  * - "This layer" is the PR's own diff; "Whole stack" is the compare from the
  *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
  * - The foot says which layer this is, and "Next layer" moves up the stack.
- * - Approve / Send feedback go into the agent's thread as the person's reply
- *   (`pullVerdictReply`), when an agent's thread is tied to the stack; a
- *   teammate's PR has no agent here, so its diff reads without a verdict.
- *   No merge button, and nothing is posted to the forge.
+ * - Approve / Send feedback go into the review thread as the person's reply
+ *   (`pullVerdictReply`): This layer's to the layer's own agent thread
+ *   (`layerVerdictLink`), Whole stack's to the stack's one review thread
+ *   (`stackVerdictLink`); a teammate's PR has no agent here, so its diff
+ *   reads without a verdict. No merge button, and nothing is posted to the
+ *   forge unless the person chooses to post.
  *
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
@@ -39,9 +45,14 @@ import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
-import { findStack, forgeName, inboxPullLabel, layerVerdictLink, linkAgentName, nextLayer, pullGroups, pullVerdictReply } from './model';
+import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
+import { forgeName } from './labels';
+import { railRows } from './rail';
+import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
+/** The review's width (px) under which its file rail folds into the Files picker over the diff. */
+const RAIL_FOLD_BELOW = 900;
 const GuideReader = GuideReaderPart.Part;
 
 export interface PullReviewProps {
@@ -94,14 +105,30 @@ export function PullReview(props: PullReviewProps) {
   return <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />;
 }
 
-/** Stored comments of a layer from before its last push: their lines may have moved, so they go. */
+/**
+ * Stored comments of a layer from before its last push: their lines may have moved, so line comments go. Global
+ * comments are on no line: they move to this push's comments.
+ */
 function dropStale(layerKey: string, scope: string, keptId: string): void {
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
+    const carried: CodeAnnotation[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
-      if (name && name.startsWith(prefix) && name !== STORE + keptId) window.localStorage.removeItem(name);
+      if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
+      carried.push(...readKept(name.slice(STORE.length)).comments.filter((c) => c.scope === 'general'));
+      window.localStorage.removeItem(name);
     }
+    if (carried.length === 0) return;
+    const now = readKept(keptId);
+    const ids = new Set(now.comments.map((c) => c.id));
+    const comments = [...now.comments];
+    for (const c of carried) {
+      if (ids.has(c.id)) continue;
+      ids.add(c.id);
+      comments.push(c);
+    }
+    keep(keptId, { comments, viewed: now.viewed });
   } catch {
     // Storage off.
   }
@@ -112,12 +139,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const item = useMemo(() => (model ? findStack(pullGroups(model, null), stackId) : null), [model, stackId]);
   const stack = item?.stack ?? null;
   const layer = stack?.layers.find((l) => l.key === layerKey) ?? null;
-  // The verdict goes to this layer's own agent thread (its stack's only as a fallback), and only on the person's
-  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict.
-  const link = stack && model && layer ? layerVerdictLink(layer, stack, model.links) : null;
+  // The verdict goes to this layer's own review thread (its stack's only as a fallback), and only on the person's
+  // own PR: a teammate's layer, even in a stack with theirs, reads without a verdict. A Whole stack verdict goes to the
+  // stack's one review thread (its lowest linked layer's), as the stack view names it.
+  const link = useMemo(() => {
+    if (!stack || !model || !layer) return null;
+    return scope === 'stack' ? stackVerdictLink(layer, stack, model.links) : layerVerdictLink(layer, stack, model.links);
+  }, [stack, model, layer, scope]);
   const agent = linkAgentName(link);
-  const open = stack ? stack.layers.filter((l) => l.state === 'open' || l.state === 'draft') : [];
-  const at = layer ? open.findIndex((l) => l.key === layer.key) : -1;
+  const open = stack ? stack.layers.filter(isOpen) : [];
+  // Where this layer sits on its own line of the stack (a fork's sibling branch is not counted).
+  const position = stack && layer ? layerPosition(stack, layer.key) : null;
   const next = stack && layer ? nextLayer(stack, layer.key) : null;
 
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.updated_at}` : '';
@@ -150,7 +182,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [layer?.key, scope, layer?.updated_at]);
 
-  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean.
+  // Comments and Viewed are kept per push: a new push (`updated_at`) starts clean, but for the global comments.
   const keptId = `${layerKey}:${scope}:${layer?.updated_at ?? ''}`;
   useEffect(() => {
     if (layer) dropStale(layerKey, scope, keptId);
@@ -171,13 +203,15 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     if (next.viewed) setViewed(next.viewed);
     keep(keptId, value);
   };
-  const canDecide = !!link?.last;
+  // A diff that could not be read (too large, a refused compare) takes no verdict: there is nothing on screen to judge.
+  const canDecide = !!link?.last && !diffError;
   // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
   // teammate's, with or without an agent. The person chooses at the end where the review goes.
   // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
-  // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead).
+  // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead), and neither does a diff
+  // that could not be read (the header then offers Open on GitHub).
   const postHead = scope === 'layer' ? (diff?.head_sha ?? null) : (layer?.head_sha ?? null);
-  const canPost = !!postablePull(layer) && (!diff || !!postHead);
+  const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   const [picked, pick] = useReviewDestination();
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
@@ -188,9 +222,30 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setSelectedId(id);
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
-  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget } : undefined;
+  // Both measured once the review is drawn: while the list is read, a loading pane stands in its place.
+  const drawn = !!(model && stack && layer);
+  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
+  // Under RAIL_FOLD_BELOW of review width the file rail folds into the Files picker over the diff (as on a phone), so
+  // the diff keeps the room.
+  const [splitRef, railFolded] = useNarrowerThan<HTMLDivElement>(RAIL_FOLD_BELOW, false, drawn);
+  const filesPicker = phone || railFolded;
+  const [sheet, setSheet] = useState(false);
+  const sheetId = useId();
+  useEffect(() => {
+    if (!folded) setSheet(false);
+  }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
+  const showGlobalComment = (id: string) => {
+    setSelectedId(id);
+    if (folded) setSheet(true);
+  };
+  // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
+  // global comments do.
+  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
+  const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
+  const byPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const snapshot = useMemo(
     () =>
       diff && layer
@@ -262,13 +317,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     [sendVerdict],
   );
 
-  const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
-  const [sheet, setSheet] = useState(false);
-  const sheetId = useId();
-  const scopeName = useId();
+  // The strip scrolls sideways (a phone, a deep stack): the layer on screen is brought into it, never left off its edge.
+  const stripRef = useRef<HTMLElement>(null);
   useEffect(() => {
-    if (!folded) setSheet(false);
-  }, [folded]);
+    const strip = stripRef.current;
+    const here = strip?.querySelector<HTMLElement>('[aria-current="step"]');
+    if (!strip || !here || strip.scrollWidth <= strip.clientWidth) return;
+    const box = strip.getBoundingClientRect();
+    const at = here.getBoundingClientRect();
+    strip.scrollLeft += at.left + at.width / 2 - (box.left + box.width / 2);
+  }, [layerKey, phone, stack?.layers.length]);
+  const scopeName = useId();
 
   if (!model || !stack || !layer) {
     return (
@@ -287,6 +346,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }
 
   const label = inboxPullLabel(layer);
+  const noun = pullNounWord(layer.platform);
   const scopeSwitch = open.length > 1 && (
     <div className="ib-seg ib-prr-scope" role="radiogroup" aria-label="Diff">
       {(['layer', 'stack'] as const).map((value) => (
@@ -301,7 +361,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
@@ -312,12 +372,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           {phone ? <span className="ib-sr">Pull requests</span> : 'Pull requests'}
         </button>
         <span className="ib-vsep" />
-        <span className="ib-fn ib-prr-fn">
+        {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
+        <span className="ib-fn ib-prr-fn" title={`${label} ${layer.title}`} data-pull-review-title="">
           <RefMarkIcon kind="pr" state={layer.state} size={15} />
           <span className="ib-prr-num">{label}</span>
           <bdi>{layer.title}</bdi>
         </span>
-        <span className="ib-from">{stack.repo}</span>
         <span className="ib-sp" />
         {folded && readerComments && (
           <button
@@ -355,8 +415,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             picked={picked}
             onPick={pick}
             onPosted={(result) => {
-              keep(keptId, { comments: [], viewed });
-              setComments([]);
+              // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
+              const went = new Set(result.posted);
+              const left = comments.filter((c) => !went.has(c.id));
+              keep(keptId, { comments: left, viewed });
+              setComments(left);
               setPosted({ label: result.label, url: result.url, action: result.action });
             }}
           />
@@ -372,10 +435,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         )}
       </div>
       <div className="ib-prr-strip">
-        <nav className="ib-prr-layers" aria-label="Layers, bottom first">
+        <nav ref={stripRef} className="ib-prr-layers" aria-label="Layers, bottom first">
           {stack.layers.map((l, i) => {
             const here = l.key === layer.key;
-            const reviewable = l.state === 'open' || l.state === 'draft';
+            const reviewable = isOpen(l);
             return (
               <span key={l.key} className="ib-prr-lstep">
                 {i > 0 && <Icon name="chevR" size={12} />}
@@ -389,9 +452,6 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                 >
                   <RefMarkIcon kind="pr" state={l.state} size={13} />
                   <span>{inboxPullLabel(l)}</span>
-                  {here && !phone && (
-                    <bdi className="ib-prr-lt">{l.title}</bdi>
-                  )}
                 </button>
               </span>
             );
@@ -399,30 +459,38 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         </nav>
         {scopeSwitch}
       </div>
-      <div className="ib-rsplit">
+      <div className="ib-rsplit" ref={splitRef}>
         <nav className="ib-rrail" aria-label="Changed files">
+          {/* The files, then a folder heading over each group when names repeat in deep folders (`railRows`). */}
           <ul className="ib-rv-list" data-review-files="">
-            {files.map((file) => {
-              const seen = viewedSet.has(file.path);
-              const slash = file.path.lastIndexOf('/');
+            {rail.map((row) => {
+              if (row.kind === 'folder') {
+                return (
+                  <li key={`dir:${row.key}`} className="ib-rv-folder" aria-hidden="true" title={row.full} data-review-folder={row.full}>
+                    <bdi dir="ltr">{row.text}</bdi>
+                  </li>
+                );
+              }
+              const stats = byPath.get(row.path);
+              const seen = viewedSet.has(row.path);
               return (
-                <li key={file.path}>
-                  <button type="button" className="ib-rv-row ib-rv-file" onClick={() => move(file.path)} aria-label={`${file.path}${seen ? ', viewed' : ''}`}>
+                <li key={row.path}>
+                  <button type="button" className="ib-rv-row ib-rv-file" onClick={() => move(row.path)} aria-label={`${row.path}${seen ? ', viewed' : ''}`}>
                     <span className="ib-rv-mark" data-done={seen ? '' : undefined} aria-hidden="true">
                       {seen ? <Icon name="check" size={12} /> : null}
                     </span>
                     <span className="ib-rv-t">
-                      <Tip content={file.path} cut>
+                      <Tip content={row.path} cut>
                         <span className="ib-rv-path">
                           <bdi dir="ltr">
-                            {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
-                            {file.path.slice(slash + 1)}
+                            {row.dir && <span className="ib-rv-dir">{row.dir}</span>}
+                            {row.name}
                           </bdi>
                         </span>
                       </Tip>
                     </span>
                     <span className="ib-rv-n">
-                      <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
+                      <span className="ib-add">+{formatCount(stats?.additions ?? 0)}</span> <span className="ib-del">-{formatCount(stats?.deletions ?? 0)}</span>
                     </span>
                   </button>
                 </li>
@@ -434,7 +502,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </div>
         </nav>
         <div className="ib-gbody">
-          {phone && files.length > 0 && (
+          {filesPicker && files.length > 0 && (
             <div className="ib-rv-phonebar" data-review-phonebar="">
               <select className="ib-rv-jump" aria-label="Go to a file" value="" onChange={(event) => event.target.value && move(event.target.value)}>
                 <option value="" disabled>
@@ -460,9 +528,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {!canDecide && !posted && (
+          {!canDecide && !posted && !diffError && (
             <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
-              {layer.mine ? 'No agent yet' : `${layer.author ?? 'A teammate'}'s pull request`}
+              {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
             </p>
           )}
           {sendError && (
@@ -472,12 +540,19 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           )}
           {diffError ? (
             <div className="ib-error ib-gerror" role="alert" data-pull-diff-error="">
-              {diffError}
+              {diffError}{' '}
+              <a href={layer.url} target="_blank" rel="noreferrer noopener" data-pull-diff-error-forge="">
+                Open {label} on {forgeName(stack)}
+              </a>
             </div>
+          ) : diff && files.length === 0 ? (
+            <p className="ib-prr-note" data-pull-diff-empty="">
+              {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
+            </p>
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
             </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
@@ -521,9 +596,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <span className="ib-prr-where">
           {scope === 'stack'
             ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
-            : open.length > 1 && at >= 0
-              ? `Layer ${at + 1} of ${open.length} · only what this layer changes`
-              : 'Only what this pull request changes'}
+            : position && position.of > 1
+              ? `Layer ${position.at} of ${position.of} · only what this layer changes`
+              : `Only what this ${noun} changes`}
           {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
         </span>
         <span className="ib-sp" />

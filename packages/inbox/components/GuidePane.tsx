@@ -131,16 +131,20 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   const comments = useMemo(() => records.map(guideCommentOf).filter((c): c is CodeAnnotation => c !== null), [records]);
 
   const save = useCallback(
-    (annotation: CodeAnnotation) => {
+    (annotation: CodeAnnotation): Promise<boolean> => {
       setSaveError(null);
       localWrites.current += 1;
-      inboxApi.saveGuideAnnotation(message.id, annotation).then(
+      return inboxApi.saveGuideAnnotation(message.id, annotation).then(
         (saved) => {
           // Again on the answer: a read that started while the write was in flight may not hold it.
           localWrites.current += 1;
           setRecords((list) => [...list.filter((r) => r.id !== saved.annotation.id), saved.annotation]);
+          return true;
         },
-        (cause: unknown) => setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.'),
+        (cause: unknown) => {
+          setSaveError(cause instanceof InboxApiError ? cause.message : 'The comment was not saved.');
+          return false;
+        },
       );
     },
     [message.id],
@@ -166,21 +170,33 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   };
 
   const readerComments = useMemo(
-    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget }),
-    [readOnly, comments, selectedId, save, remove, scrollTarget],
+    () => (readOnly ? undefined : { annotations: comments, selectedId, onSelect: setSelectedId, onSave: save, onDelete: remove, scrollTarget, draftScope: message.id }),
+    [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
   return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
 }
 
 export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
-  const { snapshot, error, reviewed, saveError, comments, selectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments } = useGuideState(thread, message);
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
+  const readerComments = useMemo(
+    () =>
+      stateComments && {
+        ...stateComments,
+        onShowGlobalComment: (id: string) => {
+          setSelectedId(id);
+          if (folded) setSheet(true);
+        },
+      },
+    [stateComments, setSelectedId, folded],
+  );
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   /** Close the sheet from inside it (its close, Escape): focus goes back to the button that opened it. */

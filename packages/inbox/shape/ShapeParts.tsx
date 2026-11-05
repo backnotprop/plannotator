@@ -62,7 +62,7 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
   );
 }
 
-/** The board, over the thread (or over the grid): the Pebble in its header closes it. */
+/** The board, over the thread (or over the grid): its ×, Esc or Back closes it. */
 export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.

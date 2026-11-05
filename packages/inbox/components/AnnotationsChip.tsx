@@ -172,7 +172,9 @@ export function AnnotationsList({
     record.message
       ? (messageName?.(record) ?? 'Message')
       : record.guide
-        ? record.path
+        ? record.guide.scope === 'general'
+          ? record.guide.title
+          : record.path
         : (attachments.find((a) => a.id === record.attachment_id) ?? attachments.find((a) => a.path === record.path))?.name ?? record.path;
 
   const run = async (work: () => Promise<void>) => {
