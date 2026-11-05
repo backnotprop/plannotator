@@ -89,6 +89,8 @@ async function world(): Promise<World> {
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
+    // HOME stays the runner's: the sandbox keeps this Inbox out of its skill folders.
+    PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     XDG_CONFIG_HOME: join(root, 'xdg-config'),
