@@ -433,11 +433,15 @@ button.ib-mut { border-radius: 6px; }
 /* Floating (the peek, a phone's sheet), the sidebar keeps room on its right; docked, the panes' gutter is that room. */
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
 /* Workspaces' TaterSpriteSidebar: 24 frames of 77x88 at 2x shown 44 px high
-   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion. */
-.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; transform: scaleX(-1); animation: ib-tater-sidebar 3.5s steps(24) infinite; }
-@keyframes ib-tater-sidebar { to { background-position: -924px 0; } }
+   (a 924 px strip), mirrored, 3.5 s per loop; the first frame under reduced motion.
+   The strip slides inside a one-frame window by `transform`, so the compositor runs the loop:
+   no style or paint work on the page each frame (a `background-position` loop restyled 60 times a second).
+   The strip takes no margin: `.ib-brand span` below gives spans a -4 px one. */
+.ib-brand .ib-tater { width: 38.5px; height: 44px; flex: none; overflow: hidden; transform: scaleX(-1); }
+.ib-brand .ib-tater-strip { display: block; margin-left: 0; width: 924px; height: 44px; background-position: left center; background-size: 924px 44px; background-repeat: no-repeat; animation: ib-tater-sidebar 3.5s steps(24) infinite; }
+@keyframes ib-tater-sidebar { to { transform: translateX(-924px); } }
 @media (prefers-reduced-motion: reduce) {
-  .ib-brand .ib-tater { animation: none; }
+  .ib-brand .ib-tater-strip { animation: none; }
 }
 .ib-brand b { font-weight: 650; font-size: var(--ib-fs-15, 15px); letter-spacing: -0.005em; }
 .ib-brand span { color: var(--muted-foreground); font-weight: 500; font-size: var(--ib-fs-15, 15px); margin-left: -4px; }
@@ -2352,6 +2356,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-opt .ib-mk { margin-top: 2px; }
 .ib-opt .ib-t { display: block; font-size: var(--ib-fs-13-5, 13.5px); font-weight: 550; }
 .ib-opt .ib-d { display: block; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+/* A named session's option (Send to another session, issue #2450): the label on one line, cut with "…". */
+.ib-opt .ib-opt-txt { flex: 1; min-width: 0; }
+.ib-opt .ib-t[data-session-label] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-opt[data-ended] { cursor: default; opacity: 0.55; }
 .ib-opt[data-ended]:hover { background: none; }
 /* A linked machine that is away (asleep, or needing an update): its rows greyed as an ended session's option is, and one
@@ -2739,6 +2746,20 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 .ib-fline .ib-mk.ib-big { width: var(--ib-mark-24); height: var(--ib-mark-24); border-radius: var(--ib-mark-24-r); }
 .ib-fline .ib-mk.ib-big > svg, .ib-fline .ib-mk.ib-big > img { width: var(--ib-mark-24-g); height: var(--ib-mark-24-g); }
 .ib-fl-nm { font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* A named session's author (issue #2450): "Claude Code · Fix login redirect", the label quieter (the secondary colour,
+   the meta size, never bold, an unread head included). The agent's name never shrinks; the label gives way with "…"
+   (its own colour), and the whole of it is on hover. Flex, so the "…" is the label's; `pre` keeps the dot's spaces. */
+.pn-inbox .ib-fl-nm[data-session-label] { display: flex; align-items: baseline; min-width: 0; }
+.ib-fl-nm[data-session-label] > .ib-fl-agent { flex: none; }
+.ib-fl-nm[data-session-label] > .ib-fl-lbl { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 400; }
+.ib-fl-lbl > .ib-fl-lsep { white-space: pre; }
+/* Under an open head's fold button the name takes the pointer (its hover shows the whole label; a click folds, Thread.tsx). */
+.ib-fline > .ib-fl-hit ~ .ib-fl-nm[data-session-label] { pointer-events: auto; cursor: pointer; }
+/* A thread a named session wrote in: the name column takes a label's room, on every head alike so they line up
+   (34% of the thread's width, about 191 px in a 561 px thread, at most 288 px). The narrow thread below has no such column. */
+@container ib-thread (min-width: 561px) {
+  .pn-inbox .ib-pbody[data-session-labels] .ib-fline { grid-template-columns: 24px min(34cqi, 288px) minmax(0, 1fr) auto minmax(66px, auto); }
+}
 .ib-fl-sn { color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
 .ib-fl-sn b { font-weight: 600; color: var(--foreground); }
 .ib-fl-arr { opacity: 0.7; }
@@ -6143,6 +6164,59 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   .pn-inbox .ib-bpf[data-set] .ib-bpf-btn { height: 44px; }
   .pn-inbox .ib-bpf-x { width: 44px; height: 44px; margin-right: 0; }
 }
+/* The Board's one filter (board/BoardFilter.tsx, approval "board-initiatives"): an icon at the header's right,
+   the picks as tokens left of it ("# Shape ×"); its menu holds Initiative (with counts) and Project. */
+.ib-bflt { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; min-width: 0; }
+.pn-inbox .ib-bflt-btn { position: relative; flex: none; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 7px; background: transparent; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-bflt-btn:hover, .pn-inbox .ib-bflt-btn[data-popup-open] { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-bflt[data-set] .ib-bflt-btn { color: var(--foreground); }
+.ib-bflt-tok { display: inline-flex; align-items: center; gap: 6px; flex: 0 1 auto; height: 26px; min-width: 0; max-width: 200px; padding: 0 2px 0 9px; border-radius: 7px; background: color-mix(in oklch, var(--muted) 85%, var(--foreground) 6%); color: var(--foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; }
+.ib-bflt-tok > svg.ib-ic { flex: none; color: var(--muted-foreground); }
+.ib-bflt-tok-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.pn-inbox .ib-bflt-tok-x { flex: none; width: 22px; height: 22px; display: inline-flex; align-items: center; justify-content: center; border: 0; border-radius: 5px; background: none; color: var(--muted-foreground); cursor: pointer; }
+.pn-inbox .ib-bflt-tok-x:hover { color: var(--foreground); background: var(--ib-hover); }
+.ib-bflt-menu { min-width: 228px; max-width: 320px; max-height: min(460px, 70vh); overflow-y: auto; overscroll-behavior: contain; }
+.ib-bflt-menu .ib-pmi-l { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-bflt-ico { flex: none; width: 16px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted-foreground); }
+.ib-bflt-n { margin-left: auto; padding-left: 16px; color: var(--muted-foreground); font-family: var(--font-mono); font-size: var(--ib-fs-12, 12px); font-variant-numeric: tabular-nums; }
+.ib-bflt-slot { flex: none; width: 15px; margin-left: auto; }
+.ib-pmi .ib-bflt-n + .ib-bflt-check, .ib-pmi .ib-bflt-n + .ib-bflt-slot { margin-left: 8px; }
+.ib-bflt-act { color: var(--muted-foreground); }
+.ib-bflt-act[data-highlighted] { color: var(--foreground); }
+.ib-bfbar .ib-bflt-tok { max-width: 100%; }
+.ib-bfbar:has(.ib-bflt-tok) { gap: 8px; align-items: center; }
+/* The opened card's initiative: a quiet menu at the end of its who line. */
+.pn-inbox .ib-crdp-ini { display: inline-flex; align-items: center; gap: 5px; min-width: 0; max-width: 220px; height: 24px; margin-left: 2px; padding: 0 6px; border: 0; border-radius: 6px; background: none; color: var(--muted-foreground); font: inherit; cursor: pointer; }
+.pn-inbox .ib-crdp-ini > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pn-inbox .ib-crdp-ini svg.ib-ic { flex: none; }
+.pn-inbox .ib-crdp-ini:hover, .pn-inbox .ib-crdp-ini[data-popup-open] { color: var(--foreground); background: var(--ib-hover); }
+.pn-inbox .ib-crdp-ini[data-card-initiative]:not([data-card-initiative="none"]) { color: var(--foreground); }
+/* New card on a Board filtered to an initiative: the card starts in it, said at the row's end. */
+.ib-ncd-row .ib-ncd-ini { margin-left: auto; flex: 0 1 auto; max-width: 180px; }
+/* Initiatives (the filter's New initiative… and Edit initiatives…): names edited in place, Delete, a field to add. */
+.pn-inbox dialog.ib-inid { width: min(440px, calc(100vw - 32px)); }
+.ib-inid-list { list-style: none; margin: 14px 0 0; padding: 0; display: grid; gap: 2px; }
+.ib-inid-row, .ib-inid-add { display: flex; align-items: center; gap: 8px; min-height: 36px; }
+.ib-inid-add { margin-top: 10px; }
+.pn-inbox .ib-inid-in { flex: 1; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid transparent; border-radius: 7px; background: none; color: var(--foreground); font: inherit; font-size: var(--ib-fs-14, 14px); }
+.pn-inbox .ib-inid-row .ib-inid-in:hover { border-color: var(--ib-line); }
+.pn-inbox .ib-inid-in:focus { outline: none; border-color: var(--ring); background: var(--background); }
+.pn-inbox .ib-inid-add .ib-inid-in { border-color: var(--ib-line); }
+.ib-inid-del { flex: none; border: 0; background: none; cursor: pointer; }
+.pn-inbox .ib-inid-del:hover { color: var(--destructive); background: var(--ib-hover); }
+.ib-inid-ask { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; min-height: 36px; padding: 6px 8px; border-radius: 8px; background: color-mix(in oklab, var(--destructive) 8%, var(--card)); }
+.ib-inid-askt { flex: 1 1 200px; min-width: 0; font-size: var(--ib-fs-13, 13px); line-height: 1.45; overflow-wrap: anywhere; }
+.ib-inid-err { margin: 8px 0 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-bflt-btn { width: 44px; height: 44px; }
+  /* Each token's × a whole 44 px touch target: the token is 44 high, the × its full height. */
+  .ib-bfbar .ib-bflt-tok { height: 44px; padding: 0 0 0 12px; border-radius: 10px; font-size: var(--ib-fs-15, 15px); }
+  .pn-inbox .ib-bfbar .ib-bflt-tok-x { width: 44px; height: 44px; border-radius: 10px; }
+  .ib-pm-pos[data-phone] .ib-bflt-menu { max-width: none; max-height: 70vh; }
+  .ib-pm-pos[data-phone] .ib-pm-glabel { padding: 8px 12px 4px; font-size: var(--ib-fs-13, 13px); }
+  .pn-inbox .ib-inid-in { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .pn-inbox .ib-crdp-ini { height: 36px; }
+}
 /* The Board off (a #board link): what it is, and Turn it on. */
 .ib-boff { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 32px 24px 15vh; text-align: center; }
 .ib-boff-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px; border-radius: var(--ib-lr-md, 9px); background: var(--ib-lane-bg); color: var(--muted-foreground); }
@@ -7615,6 +7689,50 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Fixes from the worst-case stress test (break-ui on #2590). */
+/* A long title gives way in the review header (cut with "…", whole in its title and the diff's heading): the back
+   label, the comments button and the verdict never leave the window. The repository gives way first. */
+.ib-review .ib-vhead .ib-prr-fn { flex: 0 1 auto; min-width: 0; }
+.ib-prreview .ib-vhead .ib-from { flex: 0 100 auto; }
+.pn-inbox .ib-prreview .ib-vhead .ib-back, .ib-prreview .ib-vhead .ib-vsep, .ib-prreview .ib-vhead .ib-vcomments, .ib-prreview .ib-vhead [data-pull-review-forge] { flex: none; white-space: nowrap; }
+/* A narrow window short of the phone layout: the destination's names drop, as on a phone (each keeps its mark and
+   its words in the tooltip), so the verdict fits by 760. */
+@media (max-width: 959px) {
+  .ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
+}
+/* What the list could not read, or read only in part: a quiet line over the groups. */
+.ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
+.ib-pr-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; overflow-wrap: anywhere; }
+.ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
+.ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
+.ib-pr-notice a:hover { text-decoration: underline; }
+/* A long chain: the first two marks, "+N", the last two. */
+.ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
+/* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */
+.ib-pr-av { position: relative; overflow: hidden; }
+.ib-pr-av > img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; opacity: 0; }
+.ib-pr-av > img[data-shown] { opacity: 1; }
+/* A PR whose author's account is gone: a grey person in the same tile. */
+.ib-pr-av.ib-pr-av-ghost { background: var(--muted); color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+/* The agent that has a PR, on the row's third line: its mark, the scale's 16, before its name. Sat on the text's
+   bottom, it is centred on the name and the line keeps the height of a row with no agent. */
+.ib-pr-magent > .ib-mk { display: inline-flex; vertical-align: text-bottom; margin-right: 4px; width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); }
+.ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
+/* "Send to the agent" when a Whole stack covers several agents' layers: shown off, its tooltip says why. */
+.ib-rv-dest .ib-seg-o[data-off] { opacity: 0.45; cursor: not-allowed; }
+.ib-rv-dest .ib-seg-o[data-off] input { cursor: not-allowed; }
+/* A branch named in a layer's line can be long and unbroken. */
+.ib-pr-basew { min-width: 0; overflow-wrap: anywhere; }
+/* An agent whose session ended: named, its tile quieter. */
+[data-pulls-agent-ended] .ib-atile { opacity: 0.55; }
+/* An agent pill with a long session label is cut, never wider than its line. */
+.pn-inbox .ib-pr-agbtn { max-width: 100%; min-width: 0; }
+.ib-pr-agbtn > :not(.ib-pr-agbtn-t):not(input) { flex: none; }
+.ib-pr-agbtn-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The review rail grouped by folder (names repeat in deep folders): a quiet heading over each group. */
+.ib-rv-folder { padding: 8px 8px 2px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
+.ib-rv-folder:first-child { padding-top: 0; }
+
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }
   /* The band under the head says "On you 3"; the head keeps its title and the project filter. */
@@ -7636,6 +7754,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
   /* Review and Open the diff, each a full line, as the hand-off lines above them. */
   .ib-pr-handoff .ib-pr-actions > .ib-btn { flex: 1 1 100%; justify-content: center; }
+  /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
+  .ib-prr-layers { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
   .pn-inbox .ib-pr-replybtn { height: 44px; }
   .pn-inbox .ib-pr-replyin { font-size: var(--ib-fs-16-in, 16px); }

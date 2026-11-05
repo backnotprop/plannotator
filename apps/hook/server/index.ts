@@ -172,7 +172,7 @@ import {
 import { buildReviewOutput, supportsReviewApprovalNotes } from "./review-output";
 import { registerSession, unregisterSession, listSessions, listInProcessSessions, type SessionInfo } from "@plannotator/server/sessions";
 import { enableAutoUpdateNotice, isManagedBinary, scheduleAutoUpdateCheck } from "@plannotator/server/auto-update";
-import { openBrowser } from "@plannotator/server/browser";
+import { openBrowser, openBrowserDetached } from "@plannotator/server/browser";
 import { inlineHtmlLocalAssets } from "@plannotator/server/html-assets";
 import { installAgentTerminalRuntime } from "@plannotator/server/agent-terminal-runtime";
 import { installCallFlowRuntime } from "@plannotator/shared/call-flow";
@@ -241,7 +241,9 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, SHAPE_OFF_TEXT } from "./shape-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
@@ -280,6 +282,10 @@ import planHtmlPath from "../dist/index.html" with { type: "file" };
 import reviewHtmlPath from "../dist/review.html" with { type: "file" };
 // @ts-ignore - Bun import attribute for file
 import inboxHtmlPath from "../dist/inbox.html" with { type: "file" };
+// The Shape page is embedded gzipped (about 3 MB instead of 13 MB; scripts/gzip-page.ts at build): the Shapes
+// server sends these bytes as they are to a browser that takes gzip, and unzips them once for one that does not.
+// @ts-ignore - Bun import attribute for file
+import shapeHtmlGzPath from "../dist/shape.html.gz" with { type: "file" };
 
 function embeddedPage(path: unknown): () => string {
   let html: string | undefined;
@@ -288,6 +294,8 @@ function embeddedPage(path: unknown): () => string {
 const planHtmlContent = embeddedPage(planHtmlPath);
 const reviewHtmlContent = embeddedPage(reviewHtmlPath);
 const inboxHtmlContent = embeddedPage(inboxHtmlPath);
+let shapeHtmlGz: Buffer | undefined;
+const shapeHtmlGzip = () => (shapeHtmlGz ??= readFileSync(shapeHtmlGzPath as unknown as string));
 
 // Code review's diagram engine: embedded too, read on first need.
 import { loadEmbeddedDiagramEngine } from "./diagram-engine";
@@ -343,9 +351,28 @@ const rawArgs = process.argv.slice(2);
   const args = rawArgs;
   // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
   // learns nothing of it (the same switch hides the Pebble, the row and the routes).
-  if (args[0] === "shape" && loadConfig().inboxShape !== true) {
+  // `shape on|off` is the switch itself, so it runs while Shape is off (only it; `on --help` still gets the off line).
+  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
+    process.exit(runShapeSwitch(args.slice(1)));
+  }
+  if (args[0] === "shape" && !shapeSwitchOn()) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
+  }
+  // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
+  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
+  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
+    process.exit(
+      await runShapeOpen(args.slice(2), {
+        dataDir: getPlannotatorDataDir(),
+        openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        // Bare: the page already open, if there is one; `shape open` always opens a tab.
+        reuseOpenPage: args.length === 1,
+      }),
+    );
+  }
+  if (args[0] === "shape" && args[1] === "serve" && args.length === 2) {
+    process.exit(await runShapeServe({ dataDir: getPlannotatorDataDir(), pageGzip: shapeHtmlGzip, version: getCliVersion() ?? "dev" }));
   }
   if (args[0] === "shape" && !hasHelpFlag(args.slice(1))) {
     process.exit(

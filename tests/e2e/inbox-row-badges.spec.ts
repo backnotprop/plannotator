@@ -548,7 +548,8 @@ test('desktop, rows whose count has words (a draft, Undelivered) or open action 
   // (tests/e2e/inbox-undelivered.spec.ts, inbox-replaced.spec.ts).
   const waitFor = (min: number) => ({ kind: 'reply', state: 'queued', reason: 'working', send_now: false, message_id: 'msg_waiting', at: null, host: 'claude-code', name: 'Claude Code', waiting_since: new Date(Date.now() - min * 60_000).toISOString(), steerable: false, auto_send_at: null });
   await page.route('**/api/inbox/threads?archived=exclude*', async (route) => {
-    const response = await route.fetch();
+    // Asked without `since`, the whole list: an answer of changed rows has no sections to put these on.
+    const response = await route.fetch({ url: route.request().url().replace(/&since=[^&]*/, '') });
     const model = (await response.json()) as { sections: { threads: Record<string, unknown>[] }[] };
     for (const row of model.sections.flatMap((s) => s.threads)) {
       if (row.thread_id === world.news) row.unsent = { reply_at: new Date().toISOString(), picks: 2, comments: 3 };
