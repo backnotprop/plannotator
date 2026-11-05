@@ -597,7 +597,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await waitFor("a wake in either process", () => wakes(first).length + wakes(second).length > 0);
 		await Bun.sleep(5_000);
 		expect(wakes(first).length + wakes(second).length).toBe(1);
-		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([replyId]);
+		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([`${replyId}.${first.sessionId}`]);
 		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
 		expect(delivered?.session).toBe(first.sessionId);
 		w.proof(`two Pi processes on session ${first.sessionId}: wakes ${wakes(first).length} + ${wakes(second).length} = 1, one claim (${replyId}), delivered at ${delivered?.at}`);
@@ -636,7 +636,7 @@ describe.skipIf(!piRuns)("Pi ↔ Plannotator Inbox (the real Pi in RPC mode, a r
 		await Bun.sleep(5_000);
 		expect(wakes(a)).toEqual([]);
 		expect(wakes(b)).toHaveLength(1);
-		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([replyId]);
+		expect(readdirSync(join(w.dataDir, "inbox", "claims"))).toEqual([`${replyId}.${a.sessionId}`]);
 		const delivered = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)?.delivery;
 		expect(delivered).toMatchObject({ state: "delivered", host: "pi", session: a.sessionId });
 		w.proof(`B's turn ended: the reply was delivered in B, once (wakes A 0, B 1; one claim ${replyId}; delivered at ${delivered?.at})`);
