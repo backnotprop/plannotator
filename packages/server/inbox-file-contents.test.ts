@@ -131,6 +131,15 @@ describe("a PR's file", () => {
     expect(f.reads.length).toBe(asked);
   });
 
+  test("the whole stack: the list's head, and where it left the stack's base", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "stack", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(f.reads).toContain(`repos/northwind/billing-svc/compare/main...${HEAD}?per_page=1`);
+  });
+
   test("a local clone with the commits answers, and the forge is not asked for the file", async () => {
     const f = scripted();
     const read: string[] = [];
@@ -217,6 +226,7 @@ describe("a PR's file", () => {
       const endpoint = args[3]!;
       reads.push(`${cli} ${endpoint}`);
       if (endpoint === "projects/northwind%2Fdata%2Fledger/merge_requests/61") return { stdout: JSON.stringify({ diff_refs: { base_sha: BASE, head_sha: HEAD } }), stderr: "", exitCode: 0 };
+      if (endpoint === `projects/northwind%2Fdata%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`) return { stdout: JSON.stringify({ id: BASE }), stderr: "", exitCode: 0 };
       if (endpoint === `projects/northwind%2Fdata%2Fledger/repository/files/src%2Fa.ts/raw?ref=${HEAD}`) return { stdout: "new\n", stderr: "", exitCode: 0 };
       if (endpoint === `projects/northwind%2Fdata%2Fledger/repository/files/src%2Fa.ts/raw?ref=${BASE}`) return { stdout: "old\n", stderr: "", exitCode: 0 };
       return { stdout: "", stderr: "404 Not Found", exitCode: 1 };
@@ -225,6 +235,9 @@ describe("a PR's file", () => {
     await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
     expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "layer", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads.every((r) => r.startsWith("glab "))).toBe(true);
+    // The whole stack has no merge request's refs to read: the project's merge base. (The texts are cached by now.)
+    expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "stack", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(reads).toContain(`glab projects/northwind%2Fdata%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`);
   });
 });
 
