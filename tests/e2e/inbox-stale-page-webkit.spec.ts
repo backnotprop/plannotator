@@ -4,7 +4,7 @@
  *
  * The Inbox runs from source as this repo's release (tests/e2e/stale-page-inbox.ts), serving the built window. The
  * first page load is served as an older release served it: the build's one release literal (stalePage.ts
- * `pageBuild`) is rewritten to the release before. What is proved:
+ * `pageBuild`, in the entry script) is rewritten to the release before. What is proved:
  * - a phone (390 x 844) shows "Inbox updated to X · Reload" at the list's top, and at the thread's top once a thread
  *   covers the list;
  * - Reload pressed inside the reply box's 500 ms pause saves the reply draft before the page goes (the save answered
@@ -94,17 +94,30 @@ async function open(browser: Browser, phone: boolean, colorScheme: 'light' | 'da
   return context.newPage();
 }
 
-/** The next page load is served as the release before served it: the build's one release literal says `older`. */
+/**
+ * The next page load is served as the release before served it: the build's one release literal says `older`. The
+ * literal is in the window's entry script, which the page names (`/assets/<name>`, build/pack-inbox.ts), not in the page.
+ */
 async function serveOlderPageOnce(page: Page) {
+  let entry: string | null = null;
   let served = false;
   await page.route('**/*', async (route) => {
-    if (served || route.request().resourceType() !== 'document') return route.fallback();
-    served = true;
+    const request = route.request();
+    if (served) return route.fallback();
+    if (request.resourceType() === 'document') {
+      const response = await route.fetch();
+      const html = await response.text();
+      entry = /<script[^>]*\bsrc="(\/assets\/[^"]+\.js)"/.exec(html)?.[1] ?? null;
+      expect(entry, 'the page names its entry script').not.toBeNull();
+      return route.fulfill({ response, body: html });
+    }
+    if (new URL(request.url()).pathname !== entry) return route.fallback();
     const response = await route.fetch();
-    const html = await response.text();
+    served = true;
+    const script = await response.text();
     const literal = JSON.stringify(version);
-    expect(html.split(literal).length - 1, 'the build names its release once (stalePage.ts pageBuild)').toBe(1);
-    await route.fulfill({ response, body: html.replace(literal, JSON.stringify(older)) });
+    expect(script.split(literal).length - 1, 'the build names its release once (stalePage.ts pageBuild)').toBe(1);
+    await route.fulfill({ response, body: script.replace(literal, JSON.stringify(older)) });
   });
 }
 
