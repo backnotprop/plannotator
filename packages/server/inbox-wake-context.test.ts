@@ -279,6 +279,17 @@ describe("the other kinds of turn", () => {
     expect(text).not.toContain("don't re-ask");
   });
 
+  test("a Re-ask on an older message names no message to reply to: its own lines say what to ask again", async () => {
+    const w = await setup();
+    const sent = await w.send(QUESTION);
+    await w.send("Second update.", { reply_to: sent.message_id });
+    await w.post(`/api/inbox/messages/${sent.message_id}/reask`, { idempotency_key: "r2" });
+    const [command] = await w.poll();
+    expect(command!.reask).toBe(true);
+    expect(command!.context!.last_agent_at).toBeDefined();
+    expect(inboxWakeText(command!)).not.toContain("[Replying to");
+  });
+
   test("a 👍 carries no context: its wake is its one line", async () => {
     const w = await setup();
     const sent = await w.send("Shipped.");
