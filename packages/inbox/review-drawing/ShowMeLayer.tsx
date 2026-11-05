@@ -29,10 +29,15 @@ const CORNER_DRAWN_WIDTH = 960;
 
 const linesWord = (lines: readonly [number, number]) => `${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}`;
 
-function Place({ place }: { place: ShowMePlace }) {
+function Place({ place, queued }: { place: ShowMePlace; queued: number }) {
   return (
     <div className="ib-sm-at" data-show-me-place="">
-      {place.file ? (
+      {place.part ? (
+        <>
+          {place.part.name}
+          {queued > 0 && ` · then ${queued} more`}
+        </>
+      ) : place.file ? (
         <>
           {baseName(place.file)}
           {place.lines && ` · ${linesWord(place.lines)}`}
@@ -69,7 +74,7 @@ export function ShowMeBox({
   }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
   if (!box) return null;
   return (
-    <section className="ib-sm-box" aria-label="Show me" data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
+    <section className="ib-sm-box" aria-label="Show me" data-over-board={box.place.part ? '' : undefined} data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
       <div className="ib-sm-h">
         <Pebble alive={false} size={18} className="ib-sm-peb" />
         <b>Show me</b>
@@ -82,7 +87,7 @@ export function ShowMeBox({
         </Tip>
       </div>
       <div className="ib-sm-b">
-        <Place place={box.place} />
+        <Place place={box.place} queued={state.queued} />
         {!box.turn ? (
           <>
             <textarea
@@ -116,7 +121,7 @@ export function ShowMeBox({
                       `Interrupting ${agent}…`
                     ) : (
                       <>
-                        <b>{agent} is drawing it.</b> It opens over the review when it’s ready.
+                        <b>{agent} is drawing it.</b> {box.place.part ? 'It opens here when it’s ready.' : 'It opens over the review when it’s ready.'}
                       </>
                     )}
                   </span>

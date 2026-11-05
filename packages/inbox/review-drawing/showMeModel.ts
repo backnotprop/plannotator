@@ -33,7 +33,9 @@ type Place = { file: string | null; lines: readonly [number, number] | null };
  * least half of the lines the two cover together. Lines 1–200 are not a
  * picture of 16–18; 15–18 is.
  */
-export function showMeSamePlace(asked: Place, place: Place): boolean {
+export function showMeSamePlace(asked: Place & { part?: unknown }, place: Place): boolean {
+  // A Show me from a board always makes a new board: it never stands for lines, or for the whole review.
+  if (asked.part) return false;
   if (place.file === null || place.lines === null) return asked.file === null && asked.lines === null;
   if (asked.file !== place.file || !asked.lines) return false;
   const [a0, a1] = asked.lines;
@@ -48,7 +50,7 @@ export function showMeSamePlace(asked: Place, place: Place): boolean {
 interface ShowMeTurn {
   id: string;
   kind?: 'show_me';
-  show_me?: { review: string; file: string | null; lines: [number, number] | null };
+  show_me?: { review: string | null; file: string | null; lines: [number, number] | null; part?: { board: string } };
   shape?: string;
   answer?: string;
   stopped?: boolean;
@@ -84,16 +86,7 @@ export function targetLines(target: ShapeCodeTarget): [number, number] {
   return [target.line, target.lineEnd ?? target.line];
 }
 
-/**
- * A part's name for the corner card: its first heading or bold words, else
- * its first words. Read from the drawing as the reviewer sees it.
- */
-export function partName(el: Element): string {
-  const named = el.querySelector('h1, h2, h3, h4, h5, h6, b, strong, .tt, .title, text');
-  const words = (named?.textContent ?? el.textContent ?? '').replace(/\s+/g, ' ').trim();
-  const chars = Array.from(words);
-  return chars.length > 48 ? `${chars.slice(0, 47).join('').trimEnd()}…` : words;
-}
+export { partName } from '@plannotator/ui/components/shape/partName';
 
 /** The `data-mark` of the part a click landed in, if it has one. */
 export function markOf(el: Element): string | null {
@@ -337,4 +330,53 @@ export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?:
  */
 export function showMeEnded(turn: { answer?: string; stopped?: boolean; shape?: string } | undefined, now: { running: boolean; busy: boolean }): boolean {
   return !now.running && !now.busy && !turn?.shape && !turn?.stopped && turn?.answer === undefined;
+}
+
+/**
+ * Which board each board was made from: a Show me on a part of a board names both (`show_me.part.board`, and `shape`,
+ * the board it made). Read from the turns, so nothing is kept twice and a reload keeps it. The first link a board has
+ * wins (Show me again keeps the same one); a turn the agent answered by moving the board it was on, or that would
+ * close a loop, links nothing.
+ */
+export function boardParents(turns: readonly { shape?: string; show_me?: { part?: { board: string } } }[]): Map<string, string> {
+  const parents = new Map<string, string>();
+  for (const turn of turns) {
+    const child = turn.shape;
+    const parent = turn.show_me?.part?.board;
+    if (!child || !parent || child === parent || parents.has(child)) continue;
+    let up: string | undefined = parent;
+    while (up && up !== child) up = parents.get(up);
+    if (up === child) continue;
+    parents.set(child, parent);
+  }
+  return parents;
+}
+
+export interface BoardRow {
+  id: string;
+  title: string;
+  /** How many Show mes it is from a board nobody made one from. No limit. */
+  depth: number;
+  parent: string | null;
+}
+
+/** A thread's boards as a list to go down: each after the board it came from, oldest first at each level (ids sort by time). */
+export function boardRows(boards: readonly { id: string; title: string }[], parents: ReadonlyMap<string, string>): BoardRow[] {
+  const ids = new Set(boards.map((board) => board.id));
+  const order = [...boards].sort((a, b) => a.id.localeCompare(b.id));
+  const under = new Map<string | null, typeof order>();
+  for (const board of order) {
+    const from = parents.get(board.id);
+    const key = from && ids.has(from) ? from : null;
+    under.set(key, [...(under.get(key) ?? []), board]);
+  }
+  const rows: BoardRow[] = [];
+  const walk = (parent: string | null, depth: number) => {
+    for (const board of under.get(parent) ?? []) {
+      rows.push({ id: board.id, title: board.title, depth, parent });
+      walk(board.id, depth + 1);
+    }
+  };
+  walk(null, 0);
+  return rows;
 }

@@ -3267,7 +3267,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   });
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
-    on: askOnNow,
+    // Shape on its own needs it only for a Show me from a board (`questionsOn`): the window's Ask stays off (`ask_ai`).
+    on: () => askOnNow() || shapeOn(),
+    questionsOn: askOnNow,
     codeReviewOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
@@ -3541,7 +3543,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // (this machine, no browser, the Inbox token), then the launch's own key. Never a window route.
     const isPermissionHook = /^\/api\/inbox\/launch\/[^/]+\/permission$/.test(path);
     // Ask AI's client (inbox-ask-live.ts). With the setting off, the unknown route, as if it did not exist.
-    const askClient = askOnNow() && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
+    const askClient = (askOnNow() || shapeOn()) && path.startsWith(INBOX_ASK_BRIDGE_PREFIX);
     if (path.startsWith("/api/inbox/control/") || path.startsWith("/api/inbox/bridge/") || isPermissionHook || askClient) {
       // A tailnet peer can claim a loopback Host (serve passes it through, and
       // the tailnet HTTPS port is this port), so the listener decides.

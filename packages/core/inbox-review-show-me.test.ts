@@ -132,3 +132,44 @@ describe("the review skills mention the overview's drawing", () => {
     expect(recheck.indexOf(INBOX_REVIEW_RECHECK_DRAWING_LINE)).toBeGreaterThan(chapters);
   });
 });
+
+describe("the Show me request from a board", () => {
+  const review = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F";
+  const onPart = (over: Partial<InboxShowMeTarget> = {}): InboxShowMeTarget => ({ review, file: null, lines: null, round: 1, part: { board: "shp_a", name: "The next attempt", code: "src/s.ts#L3-L6" }, ...over });
+
+  test("names the part and its code, asks for a new board, and leaves the board it came from", () => {
+    const lines = inboxShowMeRequest({ target: onPart({ words: "how it adds up" }), title: "T", threadId: THREAD }).split("\n");
+    expect(lines[0]).toBe(`The reviewer pressed Show me on "The next attempt" (src/s.ts#L3-L6) in your Shape shp_a, from your review "T" (${review}): "how it adds up".`);
+    expect(lines[1]).toContain("Make a new Shape of that part");
+    expect(lines[1]).toContain("leave shp_a as it is");
+    expect(lines[2]).toContain(`--thread ${THREAD} --through ${review}`);
+    // The code may be anywhere in the repo, so a click lands in the diff or in the whole file.
+    expect(lines[3]).toContain("in the diff or in the whole file");
+  });
+
+  test("with no review behind the board: no --through, and no word of a review", () => {
+    const text = inboxShowMeRequest({ target: onPart({ review: null }), title: "", threadId: THREAD });
+    expect(text.split("\n")[0]).toBe('The person pressed Show me on "The next attempt" (src/s.ts#L3-L6) in your Shape shp_a.');
+    expect(text).toContain(`\`--thread ${THREAD}\`: it opens by itself`);
+    expect(text).not.toContain("--through");
+    expect(text).not.toMatch(/\breview\b/);
+  });
+
+  test("what a dragged box holds fits the same request: its words and each code", () => {
+    const box = { board: "shp_a", name: "Got it Try it", code: "src/intro.ts#L1, src/try.ts#L4-L9" };
+    const line = inboxShowMeRequest({ target: onPart({ review: null, part: box, words: "What does this do?" }), title: "", threadId: THREAD }).split("\n")[0];
+    expect(line).toBe('The person pressed Show me on "Got it Try it" (src/intro.ts#L1, src/try.ts#L4-L9) in your Shape shp_a: "What does this do?".');
+  });
+
+  test("Show me again from a part's board asks for a new version of that board, not a new board", () => {
+    const text = inboxShowMeRequest({ target: onPart(), title: "T", threadId: THREAD, again: "shp_b" });
+    expect(text).toContain("Bring your Shape shp_b up to date");
+    expect(text).not.toContain("new Shape");
+  });
+
+  test("a words' quote in a part's name cannot break the request's own quotes", () => {
+    const line = inboxShowMeRequest({ target: onPart({ part: { board: "shp_a", name: 'Say "hi"\nthen go' } }), title: "T", threadId: THREAD }).split("\n");
+    expect(line[0]).not.toContain('"hi"');
+    expect(line[1]).toContain("Make a new Shape");
+  });
+});

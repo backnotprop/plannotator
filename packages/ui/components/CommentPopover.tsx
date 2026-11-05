@@ -53,6 +53,13 @@ export interface CommentTargetChip {
 /** Composer-yield stage while the user is shift-selecting (see composerYield.ts). */
 export type CommentPopoverYieldState = 'none' | 'near' | 'over';
 
+/** A third action on the box: words optional. */
+export interface CommentExtraAction {
+  label: string;
+  icon?: React.ReactNode;
+  onAction: (words: string) => void;
+}
+
 interface CommentPopoverProps {
   /** Element to anchor the popover near (re-reads position on scroll) */
   anchorEl?: HTMLElement;
@@ -96,6 +103,11 @@ interface CommentPopoverProps {
   onAskAI?: CommentAskAIHandler;
   askAIContext?: CommentAskAIContext;
   askAIDisabled?: boolean;
+  /**
+   * Opt-in: a third action at the footer's end, needing no words (Shape's Show me). It gets what was typed, and the
+   * box closes. Absent: nothing changes.
+   */
+  extraAction?: CommentExtraAction;
   /** Opt-in: the primary action's label (Shape: "Change it"). Absent → "Add" / "Save", as always. */
   submitLabel?: string;
   /** Opt-in: the Ask AI action's label (Shape: "Ask"). Absent → "Ask AI", as always. */
@@ -236,6 +248,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   askAIContext,
   askAIDisabled = false,
   submitLabel,
+  extraAction,
   askAILabel,
   skillReferences = false,
   mentionSource,
@@ -587,6 +600,26 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     onClose();
   }, [allowImages, askAIContext, contextText, draftKey, isGlobal, onAskAI, onClose, onDraftChange, text]);
 
+  const handleExtra = useCallback(() => {
+    if (!extraAction) return;
+    extraAction.onAction(text.trim());
+    if (draftKey) draftStore.delete(draftKey);
+    onDraftChange?.('', allowImages ? [] : undefined);
+    onClose();
+  }, [allowImages, draftKey, extraAction, onClose, onDraftChange, text]);
+
+  const extraButton = extraAction ? (
+    <button
+      type="button"
+      onClick={handleExtra}
+      className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md text-primary border border-primary/40 hover:bg-primary/10 transition-colors"
+      data-comment-extra-action=""
+    >
+      {extraAction.icon}
+      {extraAction.label}
+    </button>
+  ) : null;
+
   const skillAc = useSkillReferenceAutocomplete({
     text,
     setText,
@@ -798,6 +831,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {/* Footer — DOM order sets tab order (Save first); row-reverse keeps the visual layout unchanged */}
           <div className="flex flex-row-reverse flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-border/50">
             <div className="flex flex-row-reverse flex-wrap items-center gap-3">
+              {extraButton}
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
@@ -954,7 +988,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
       {/* Footer — same DOM-order/row-reverse pattern as the dialog footer above */}
       <div className="flex flex-row-reverse items-center justify-between px-3 py-2 border-t border-border/50">
-        <div className="flex flex-row-reverse items-center gap-3">
+        <div className="flex flex-row-reverse flex-wrap items-center gap-3">
+          {extraButton}
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}

@@ -8,11 +8,14 @@
  * is stored; the Inbox names it on the turn when the window reads the
  * conversation (`showMeShapes`), and the board opens over the review. Its short
  * answer streams here as an Ask answer does. No new keys.
+ *
+ * From a board (`fromBoard`): a part of it, always a new board, the one it was
+ * pressed on untouched, and no review needed. See inbox-files-and-guides.md.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { parseGuideSnapshot } from '@plannotator/core/guide-format';
-import { inboxShowMeRequest, type InboxShowMeTarget } from '@plannotator/core/inbox-review';
+import { inboxShowMeRequest, type InboxShowMePart, type InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import type { AIResponse } from '@plannotator/ui/types';
 import { SESSION_ASK_ERROR_CODES } from '@plannotator/ui/utils/aiProvider';
@@ -22,15 +25,16 @@ import { inboxApi, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
-import { earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
+import { boardParents, earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
 
-/** What a Show me is about: lines of a file, or the whole review (`file` null). */
+/** What a Show me is about: lines of a file, the whole review (`file` null), or a part of a board. */
 export interface ShowMePlace {
   file: string | null;
   lines: [number, number] | null;
+  part?: InboxShowMePart;
 }
 
 export interface ShowMeState {
@@ -40,6 +44,8 @@ export interface ShowMeState {
   box: { place: ShowMePlace; words: string; turn: string | null; again?: string } | null;
   /** The turn is running: the agent is drawing it (or, `waiting`, about to). */
   drawing: boolean;
+  /** Show mes pressed on a board while another draws: each goes when the one before ends. */
+  queued: number;
   /** While it runs: the agent was busy and the Show me waits for it, or interrupts it (the Ask window's words). */
   waiting?: 'waiting' | 'interrupting' | null;
   /** The agent was busy when asked: the Ask window's choice (ask when it finishes, or interrupt). */
@@ -55,7 +61,7 @@ export function useShowMe({
   reviewId,
   title,
   round,
-  agent,
+  agent: agentIn,
   others,
   files,
   boardOpen,
@@ -64,11 +70,12 @@ export function useShowMe({
   onBoard,
 }: {
   threadId: string;
-  reviewId: string;
+  /** The review it is on; null: a board over its thread, with no review behind it. */
+  reviewId: string | null;
   title: string;
   round: number;
-  /** The agent's name, for the Ask window's notes ("Claude Code went away before it finished."). */
-  agent: string;
+  /** The agent's name, for the Ask window's notes ("Claude Code went away before it finished."); null: the Inbox's word for it. */
+  agent: string | null;
   /** The thread's other reviews: a board drawn on one is anchored again here. */
   others: readonly string[];
   /** This review's files, to find where another review's lines are now. */
@@ -92,6 +99,8 @@ export function useShowMe({
   /** What the box sent, to send again when the person picks a busy choice (the same turn, as Ask's retry). */
   const sent = useRef<{ turn: string; question: string; showMe: InboxShowMeAsk } | null>(null);
 
+  const [agentRead, setAgentRead] = useState<string | null>(null);
+  const agent = agentIn ?? agentRead ?? 'The agent';
   const reload = useCallback(() => {
     if (!enabled) return;
     inboxApi.askRead(threadId).then(
@@ -99,6 +108,7 @@ export function useShowMe({
         setTurns(model.conversation?.turns ?? []);
         setRunning(model.running);
         setCanAsk(model.can_ask);
+        setAgentRead(model.agent.name);
       },
       () => {},
     );
@@ -120,7 +130,7 @@ export function useShowMe({
   // one that cannot be read anchors nothing.
   const [otherLines, setOtherLines] = useState<Record<string, ReviewLines>>({});
   const nowLines = useMemo(() => reviewLines(files), [files]);
-  const askedElsewhere = turns.filter((turn) => turn.shape && turn.show_me && turn.show_me.review !== reviewId);
+  const askedElsewhere = turns.filter((turn) => turn.shape && turn.show_me && !turn.show_me.part && turn.show_me.review !== reviewId);
   const toRead = boardOpen || askedElsewhere.length > 0 ? others.join(',') : '';
   useEffect(() => {
     if (!toRead) return;
@@ -145,7 +155,7 @@ export function useShowMe({
   /** Where another review's lines are in this one; null when that is not known. */
   const placeNow = (asked: InboxShowMeTarget): ShowMePlace | null => {
     if (!asked.file || !asked.lines) return null;
-    const now = earlierLinesNow(asked.lines, otherLines[asked.review]?.get(asked.file), nowLines.get(asked.file));
+    const now = earlierLinesNow(asked.lines, otherLines[asked.review ?? '']?.get(asked.file), nowLines.get(asked.file));
     return now ? { file: asked.file, lines: now } : null;
   };
 
@@ -153,10 +163,14 @@ export function useShowMe({
 
   // The board for the request in the box arrived: it opens over the review.
   const boxTurn = turnOf(box?.turn ?? null);
+  // With more waiting to be drawn, it stays in the thread's list and the last one opens: no board jumps under the person.
+  const [queue, setQueue] = useState<{ place: ShowMePlace; words: string }[]>([]);
+  /** A Show me from a board shows its wait before its POST answers: a read that comes first must not call it ended. */
+  const [startingTurn, setStartingTurn] = useState<string | null>(null);
   useEffect(() => {
     if (!boxTurn?.shape) return;
     setBox(null);
-    onBoard(boxTurn.shape);
+    if (queue.length === 0) onBoard(boxTurn.shape);
   }, [boxTurn?.id, boxTurn?.shape]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The stream's words for a turn, until the Inbox keeps the answer.
@@ -177,7 +191,7 @@ export function useShowMe({
 
   // Drawing only while the turn runs (the Inbox's slot holds it, or this page's answer streams), as waitingShowMe
   // reads it: a Show me the agent never took (busy, no connection) is not drawing.
-  const boxRunning = !!box?.turn && (running === box.turn || (live.current?.turn === box.turn && streaming));
+  const boxRunning = !!box?.turn && (startingTurn === box.turn || running === box.turn || (live.current?.turn === box.turn && streaming));
   const boxDone = !!boxTurn && (boxTurn.answer !== undefined || boxTurn.stopped === true || boxTurn.failure !== undefined);
   const boxResponse = box?.turn && live.current?.turn === box.turn && !streaming ? liveResponse : undefined;
   const boxBusy = !boxRunning && !boxDone && boxResponse?.errorCode === SESSION_ASK_ERROR_CODES.agentBusy ? boxResponse : null;
@@ -195,7 +209,7 @@ export function useShowMe({
 
   /** A Show me pressed while another review's lines for its file are still being read: it opens once they are. */
   const openWhenRead = useRef<ShowMePlace | null>(null);
-  const stillReading = (place: ShowMePlace) => askedElsewhere.some((turn) => turn.show_me!.file === place.file && !otherLines[turn.show_me!.review]);
+  const stillReading = (place: ShowMePlace) => askedElsewhere.some((turn) => turn.show_me!.file === place.file && !otherLines[turn.show_me!.review ?? '']);
 
   /**
    * Show me on these lines (or the whole review). What was asked about the
@@ -214,7 +228,7 @@ export function useShowMe({
       onBoard(made.shape);
       return;
     }
-    const waiting = waitingShowMe(turns, reviewId, place, running, streaming ? (live.current?.turn ?? null) : null);
+    const waiting = waitingShowMe(turns, reviewId ?? '', place, running, streaming ? (live.current?.turn ?? null) : null);
     if (waiting?.show_me) {
       setBox({
         place: { file: waiting.show_me.file, lines: waiting.show_me.lines },
@@ -254,7 +268,7 @@ export function useShowMe({
   const again = (shape: string) => {
     setProblem(null);
     const made = turns.filter((turn) => turn.shape === shape && turn.show_me).at(-1)?.show_me;
-    const place = made?.review === reviewId ? { file: made.file, lines: made.lines } : made ? placeNow(made) : null;
+    const place = made?.part ? { file: null, lines: null, part: made.part } : made?.review === reviewId ? { file: made.file, lines: made.lines } : made ? placeNow(made) : null;
     setBox({ place: place ?? { file: null, lines: null }, words: made?.words ?? '', turn: null, again: shape });
   };
 
@@ -276,22 +290,59 @@ export function useShowMe({
       }
       reload();
     } catch (cause) {
+      setBox((current) => (current?.turn === turnId ? { ...current, turn: null } : current));
       setProblem(errorText(cause, 'That question did not go through. Try again.'));
     } finally {
       setPosting(false);
     }
   };
 
+  const request = (place: ShowMePlace, rawWords: string, againShape?: string) => {
+    const words = rawWords.replace(/\s+/g, ' ').trim();
+    const target: InboxShowMeTarget = { review: reviewId, file: place.file, lines: place.lines, round, ...(words ? { words } : {}), ...(place.part ? { part: place.part } : {}) };
+    const turnId = generateId('ask');
+    const question = inboxShowMeRequest({ target, title, threadId, ...(againShape !== undefined ? { again: againShape } : {}) });
+    const showMe: InboxShowMeAsk = { kind: 'show_me', show_me: target, ...(againShape !== undefined ? { again_shape: againShape } : {}) };
+    sent.current = { turn: turnId, question, showMe };
+    return { turnId, question, showMe };
+  };
+
   const send = async () => {
     if (!box || box.turn || posting) return;
-    const words = box.words.replace(/\s+/g, ' ').trim();
-    const target: InboxShowMeTarget = { review: reviewId, file: box.place.file, lines: box.place.lines, round, ...(words ? { words } : {}) };
-    const turnId = generateId('ask');
-    const question = inboxShowMeRequest({ target, title, threadId, ...(box.again !== undefined ? { again: box.again } : {}) });
-    const showMe: InboxShowMeAsk = { kind: 'show_me', show_me: target, ...(box.again !== undefined ? { again_shape: box.again } : {}) };
-    sent.current = { turn: turnId, question, showMe };
-    await post(turnId, question, showMe);
+    const asked = request(box.place, box.words, box.again);
+    await post(asked.turnId, asked.question, asked.showMe);
   };
+
+  /** Draw it now: the box shows the wait straight away. */
+  const start = async (place: ShowMePlace, words: string, policy?: SessionAskAction) => {
+    const asked = request(place, words);
+    setBox({ place, words, turn: asked.turnId });
+    setStartingTurn(asked.turnId);
+    await post(asked.turnId, asked.question, asked.showMe, policy);
+    setStartingTurn(null);
+  };
+
+  /**
+   * Show me on a part of a board: always a new board, and the one it was pressed on stays as it is. While another
+   * draws it waits its turn (the Inbox takes one at a time), so the person can press as many as they like.
+   */
+  const fromBoard = (part: InboxShowMePart, words: string) => {
+    setProblem(null);
+    const place: ShowMePlace = { file: null, lines: null, part };
+    // One is drawing and its box is closed (or the page was reloaded): its box comes back, and this one waits.
+    const drawing = !box?.turn && running ? turnOf(running) : undefined;
+    if (drawing?.show_me) setBox({ place: { file: drawing.show_me.file, lines: drawing.show_me.lines, ...(drawing.show_me.part ? { part: drawing.show_me.part } : {}) }, words: drawing.show_me.words ?? '', turn: drawing.id });
+    if (box?.turn || posting || drawing?.show_me) setQueue((current) => [...current, { place, words }]);
+    else void start(place, words);
+  };
+  // The one before ended and its box closed: the next goes.
+  useEffect(() => {
+    if (box || posting || running || queue.length === 0) return;
+    const [next, ...rest] = queue;
+    setQueue(rest);
+    // It was pressed to wait its turn: an agent still finishing the last one is no choice to put to the person.
+    void start(next!.place, next!.words, 'wait');
+  }, [box, posting, running, queue.length]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** The agent was busy: the person's choice, ask when it finishes or interrupt it (the Ask window's busy choice). */
   const busyChoice = async (policy: SessionAskAction) => {
@@ -313,6 +364,7 @@ export function useShowMe({
       }
     }
     setBox(null);
+    setQueue([]);
     setProblem(null);
     reload();
   };
@@ -321,6 +373,7 @@ export function useShowMe({
     canAsk: enabled && canAsk,
     box,
     drawing: boxRunning,
+    queued: queue.length,
     waiting: boxRunning && live.current?.turn === box?.turn ? (liveResponse?.status ?? null) : null,
     busy: boxBusy,
     answerOnly: box?.turn && boxDone && !boxTurn?.shape ? answerOf(boxTurn) || null : null,
@@ -337,10 +390,14 @@ export function useShowMe({
     busyChoice,
     stop,
     closeBox: () => setBox(null),
+    fromBoard,
+    agent,
+    /** Which board each board was made from. */
+    parents: useMemo(() => boardParents(turns), [turns]),
     /** This review's lines by file, and another review's (undefined until read). */
     nowLines,
     linesOf: (review: string): ReviewLines | undefined => otherLines[review],
     /** The review the newest Show me that made this board was asked on. */
-    askedOn: (board: string): string | undefined => [...turns].reverse().find((turn) => turn.shape === board)?.show_me?.review,
+    askedOn: (board: string): string | undefined => [...turns].reverse().find((turn) => turn.shape === board)?.show_me?.review ?? undefined,
   };
 }

@@ -40,6 +40,15 @@ export type ShapeEvent =
   | { type: 'state'; shape: ShapeRecord }
   | { type: 'session'; session: ShapeSessionStatus };
 
+/** What the Annotate box was opened on, and the optional words. */
+export interface ShapeShowMeInput {
+  /** What the person calls it: the part's heading, the words they selected or boxed, or the file and lines. */
+  name: string;
+  /** Its `data-code` values, when it has any (several, as a box may hold: joined with ", "). */
+  code?: string;
+  words: string;
+}
+
 export interface ShapeHost {
   load(id: string): Promise<ShapeLoaded>;
   /** One older version ("what changed since you looked"). */
@@ -53,6 +62,8 @@ export interface ShapeHost {
   /** Subscribe; returns the unsubscribe. */
   events(id: string, listener: (event: ShapeEvent) => void): () => void;
 
+  /** Show me on a part, from the Annotate box: the agent draws a new board of it, and this one stays. Absent: no button. */
+  showMe?(id: string, input: ShapeShowMeInput): void;
   /** "Bring it up to date": a quiet request to the agent. Absent: no button. */
   refresh?(id: string): Promise<void>;
   /** The refresh button's words, when a host has its own. Absent: "Bring it up to date". */
@@ -141,4 +152,6 @@ export interface ShapeSurfaceProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
   headStart?: ReactNode;
+  /** In the group at the title's right, first (the Inbox's list of a thread's boards). */
+  headSide?: ReactNode;
 }

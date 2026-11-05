@@ -180,7 +180,8 @@ import { emitAskChange } from './ask/askEvents';
 import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
-import { ShapeGridPage, ShapeLayer, ShapePebbleButton } from './shape/ShapeParts';
+import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
+import { ThreadShapeLayer } from './shape/ThreadShapeLayer';
 import { useInboxShapes } from './shape/useInboxShapes';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
@@ -5670,7 +5671,7 @@ function Inbox() {
             shapeButton={(() => {
               const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
               if (!board) return null;
-              const open = route.shape === board.id;
+              const open = !!route.shape;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
             })()}
             askFileButton={ask.fileButton}
@@ -5910,11 +5911,13 @@ function Inbox() {
         <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
           {main}
           {shapeLayerId && !reviewPaneOpen && (
-            <ShapeLayer
+            <ThreadShapeLayer
               host={shapeHost}
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
+              shapes={shapes}
               onClose={() => close({ ...routeRef.current, shape: null })}
+              onBoard={(id) => go({ ...routeRef.current, shape: id })}
             />
           )}
         </main>

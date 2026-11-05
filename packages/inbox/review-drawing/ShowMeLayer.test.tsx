@@ -44,12 +44,24 @@ function mount(node: React.ReactNode): HTMLElement {
 const PICTURE = { html: '<div data-mark="pick"><b>Pick the next job</b> from the queue</div><div data-mark="wait">Wait</div>' };
 
 function state(over: Partial<ShowMeState>): ShowMeState {
-  return { canAsk: true, box: null, drawing: false, answerOnly: null, problem: null, posting: false, ...over };
+  return { canAsk: true, box: null, drawing: false, queued: 0, answerOnly: null, problem: null, posting: false, ...over };
 }
 
 const board = (el: HTMLElement) => el.querySelector('.shp-drawn-host')!.shadowRoot!.querySelector('.board') as HTMLElement;
 
 describe.skipIf(!hasDom)('Show me over the code review', () => {
+  test('a Show me from a board waits on the board, names the part, says how many more wait, and the review\'s words stay', () => {
+    const props = { agent: 'Claude Code', onWords: () => {}, onSend: () => {}, onStop: () => {}, onClose: () => {} };
+    const part = { board: 'shp_a', name: 'The next attempt' };
+    const el = mount(<layer.ShowMeBox state={state({ drawing: true, queued: 2, box: { place: { file: null, lines: null, part }, words: 'why', turn: 'ask_1' } })} {...props} />);
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(true);
+    expect(el.querySelector('[data-show-me-place]')!.textContent).toBe('The next attempt · then 2 more');
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens here when it’s ready.');
+    act(() => root!.render(<layer.ShowMeBox state={state({ drawing: true, box: { place: { file: null, lines: null }, words: '', turn: 'ask_1' } })} {...props} />));
+    expect(el.querySelector('[data-show-me-box]')!.hasAttribute('data-over-board')).toBe(false);
+    expect(el.querySelector('[role="status"]')!.textContent).toContain('It opens over the review when it’s ready.');
+  });
+
   test('the box names the lines and sends; while drawn it offers Stop and no second Show me', () => {
     let sent = 0;
     let stopped = 0;

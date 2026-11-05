@@ -85,6 +85,7 @@ export function ShapeBoardLayer({
   hidden,
   onCode,
   headStart,
+  headSide,
 }: {
   host: ShapeHost;
   id: string;
@@ -93,6 +94,7 @@ export function ShapeBoardLayer({
   hidden?: boolean;
   onCode?: (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null) => boolean;
   headStart?: ReactNode;
+  headSide?: ReactNode;
 }) {
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
@@ -116,6 +118,7 @@ export function ShapeBoardLayer({
           onCode={onCode}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
           headStart={headStart}
+          headSide={headSide}
         />
       </PanePart>
     </section>

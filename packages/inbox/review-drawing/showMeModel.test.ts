@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
+import { boardParents, boardRows, reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
   test("a part drawn on this review lands on lines its diff shows; lines it does not show go to the board's own viewer", () => {
@@ -197,5 +197,44 @@ describe('a part whose lines mean nothing here', () => {
   test('a file with no hunks shows no lines and hides none: the board opens it', () => {
     const lines = reviewLines([{ path: 'moved.ts', patch: 'diff --git a/o.ts b/moved.ts\nsimilarity index 100%\nrename from o.ts\nrename to moved.ts\n' }]);
     expect(partLanding({ path: 'moved.ts', line: 2 }, lines)).toBeNull();
+  });
+});
+
+describe('a thread\'s boards, made from each other', () => {
+  const made = (shape: string, from: string) => ({ shape, show_me: { part: { board: from } } });
+  const boards = (...ids: string[]) => ids.map((id) => ({ id, title: id.toUpperCase() }));
+
+  test('three levels and a sibling: each under the board it came from, a board with no link at the top', () => {
+    const parents = boardParents([made('b', 'a'), made('c', 'b'), made('d', 'a')]);
+    const rows = boardRows(boards('a', 'b', 'c', 'd', 'e'), parents);
+    expect(rows.map((row) => [row.id, row.depth, row.parent])).toEqual([['a', 0, null], ['b', 1, 'a'], ['c', 2, 'b'], ['d', 1, 'a'], ['e', 0, null]]);
+  });
+
+  test('every board is listed, however many and however deep', () => {
+    const ids = Array.from({ length: 40 }, (_, i) => `b${String(i).padStart(2, '0')}`);
+    const turns = ids.slice(1).map((id, i) => made(id, ids[i]!));
+    const rows = boardRows(ids.map((id) => ({ id, title: id })), boardParents(turns));
+    expect(rows.map((row) => row.id)).toEqual(ids);
+    expect(rows.at(-1)!.depth).toBe(39);
+  });
+
+  test('Show me again and an agent that moved the board it was on change no link, and nothing can loop', () => {
+    const parents = boardParents([made('b', 'a'), made('b', 'c'), made('a', 'a'), made('a', 'b')]);
+    expect([...parents]).toEqual([['b', 'a']]);
+  });
+
+  test('a turn with no board yet, and a plain Show me, link nothing', () => {
+    expect(boardParents([{ show_me: { part: { board: 'a' } } }, { shape: 'b', show_me: {} }, { shape: 'c' }]).size).toBe(0);
+  });
+
+  test('a board whose source is gone from the list stays listed, at the top', () => {
+    const rows = boardRows(boards('b'), boardParents([made('b', 'gone')]));
+    expect(rows).toEqual([{ id: 'b', title: 'B', depth: 0, parent: null }]);
+  });
+
+  test('a Show me from a board is never the same place as the review\'s Overview, which also has no file', () => {
+    const fromBoard = { file: null, lines: null, part: { board: 'a' } };
+    expect(showMeSamePlace(fromBoard, { file: null, lines: null })).toBe(false);
+    expect(showMeSamePlace({ file: null, lines: null }, { file: null, lines: null })).toBe(true);
   });
 });

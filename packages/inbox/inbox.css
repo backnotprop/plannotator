@@ -8173,11 +8173,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-sm-send .ib-sm-peb.shp-pebble path { stroke: currentColor; fill: color-mix(in oklab, currentColor 28%, transparent); }
 .ib-sm-box, .ib-sm-pip { position: absolute; right: 18px; bottom: 18px; z-index: 12; display: flex; flex-direction: column; overflow: hidden; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: var(--ib-float-shadow); }
 .ib-sm-box { width: 380px; max-width: calc(100% - 20px); border-radius: 14px; }
+/* A Show me from a board waits on the board, not behind it. */
+.ib-sm-box[data-over-board] { z-index: 21; bottom: 72px; }
+/* A thread's boards: the way back beside the title, the list at its right (the chapter menu's look). */
+.ib-shape-layer .shp-head-start { display: flex; align-items: center; gap: 2px; }
+.ib-shape-back { flex: none; }
+[data-shape-boards-menu] .ib-rj-row { padding-left: calc(8px + min(var(--ib-board-depth, 0), 6) * 14px); }
 .ib-sm-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-sm-h b { font-weight: 650; }
 .ib-sm-by { color: var(--muted-foreground); }
 .ib-sm-b { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
 .ib-sm-at { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
+.ib-sm-box[data-over-board] .ib-sm-at { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pn-inbox .ib-sm-field { min-height: 60px; resize: vertical; border: 0; border-radius: 9px; background: color-mix(in oklch, var(--muted) 45%, var(--card)); box-shadow: inset 0 0 0 1px var(--ib-line); padding: 8px 10px; font: inherit; font-size: var(--ib-fs-13-5, 13.5px); line-height: 1.45; color: var(--foreground); }
 .pn-inbox .ib-sm-field:focus { outline: none; box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 60%, var(--border)), 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent); }
 .ib-sm-fine { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }

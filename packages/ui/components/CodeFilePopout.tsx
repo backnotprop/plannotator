@@ -7,7 +7,7 @@ import { PopoutDialog } from './PopoutDialog';
 import { isCommentSubmitKey } from '../utils/commentSubmitKey';
 import { useConfigValue } from '../config/useConfig';
 import { extendThemeSwitch, useTheme } from './ThemeProvider';
-import { CommentPopover } from './CommentPopover';
+import { CommentPopover, type CommentExtraAction } from './CommentPopover';
 import { ImageThumbnail } from './ImageThumbnail';
 import type { CodeAnnotation, ImageAttachment } from '../types';
 import { copyTextToClipboard } from '../utils/clipboard';
@@ -324,6 +324,8 @@ export interface CodeFileViewProps {
   /** Opt-in: the line composer's labels (Shape: "Change it" / "Ask"). Absent → "Save" / "Ask AI". */
   commentSubmitLabel?: string;
   commentAskLabel?: string;
+  /** The comment box's third action (Shape's Show me): these lines, and the words typed. */
+  commentExtraAction?: (lines: { filePath: string; lineStart: number; lineEnd: number; originalCode: string }) => CommentExtraAction | undefined;
   onEditAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
@@ -376,6 +378,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
   onAskAnnotation,
   commentSubmitLabel,
   commentAskLabel,
+  commentExtraAction,
   onEditAnnotation,
   onDeleteAnnotation,
   onSelectAnnotation,
@@ -693,6 +696,7 @@ export const CodeFileView: React.FC<CodeFileViewProps> = ({
           }}
           submitLabel={commentSubmitLabel}
           askAILabel={commentAskLabel}
+          extraAction={commentExtraAction?.({ filePath: filepath, lineStart: pendingComment.range.start, lineEnd: pendingComment.range.end, originalCode: pendingComment.originalCode })}
           onAskAI={onAskAnnotation ? (question) => {
             onAskAnnotation({
               filePath: filepath,

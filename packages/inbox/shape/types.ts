@@ -17,4 +17,6 @@ export interface ShapeBoardProps {
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
   /** Before the board's title (the Inbox's sidebar toggle). */
   headStart?: ReactNode;
+  /** In the group at the title's right (the thread's other boards). */
+  headSide?: ReactNode;
 }

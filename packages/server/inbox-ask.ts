@@ -88,6 +88,11 @@ export function createInboxAsk(options: {
   on: () => boolean;
   /** Code review (Settings → Capabilities): Show me exists only while it is on. Absent: off. */
   codeReviewOn?: () => boolean;
+  /**
+   * Plain questions are on. `on` is also true for a Shape on its own (Shape's switch alone), whose only question is a
+   * Show me from a board: its plain questions answer as if the Ask were off, so Shape's Ask keeps waiting for the agent.
+   */
+  questionsOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
   reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
@@ -221,24 +226,31 @@ export function createInboxAsk(options: {
       return json({ conversation: seen.conversation });
     }
 
+    if (!(options.questionsOn?.() ?? true) && !(body as { show_me?: { part?: unknown } } | null)?.show_me?.part) return null;
     const input = checkInboxAskInput(body);
     // Show me: a question that asks the agent to draw, about a review of this thread. Only while Code review is on.
     const showMe = checkInboxShowMeInput(body);
     let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
     if (showMe) {
-      if (!(options.codeReviewOn?.() ?? false)) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
-      const review = options.reviewOf?.(showMe.target.review) ?? null;
-      if (review === null) return json({ error: `No review ${showMe.target.review} here.`, code: "not_found" }, 404);
-      if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${showMe.target.review} is not a review in this thread.`, code: "not_a_review" }, 409);
-      if (showMe.target.file !== null && !review.files.includes(showMe.target.file)) {
-        throw new InboxError("validation_error", `show_me.file: ${showMe.target.file} is not a file of this review.`, { field: "show_me" });
+      const asked = showMe.target;
+      if (!(options.codeReviewOn?.() ?? false) && !asked.part) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      if (asked.part && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === asked.part!.board)) {
+        throw new InboxError("validation_error", `show_me.part: ${asked.part.board} is not a board of this thread.`, { field: "show_me" });
+      }
+      const review = asked.review === null ? null : (options.reviewOf?.(asked.review) ?? null);
+      if (asked.review !== null) {
+        if (review === null) return json({ error: `No review ${asked.review} here.`, code: "not_found" }, 404);
+        if (review === "not_a_review" || review.threadId !== threadId) return json({ error: `${asked.review} is not a review in this thread.`, code: "not_a_review" }, 409);
+        if (asked.file !== null && !review.files.includes(asked.file)) {
+          throw new InboxError("validation_error", `show_me.file: ${asked.file} is not a file of this review.`, { field: "show_me" });
+        }
       }
       if (showMe.againShape !== undefined && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === showMe.againShape)) {
         throw new InboxError("validation_error", `again_shape: ${showMe.againShape} is not a board of this thread.`, { field: "again_shape" });
       }
       // The round is the Inbox's to say: the review's place among the thread's reviews.
-      const target: InboxShowMeTarget = { ...showMe.target, round: inboxReviewRound(thread.messages, showMe.target.review) };
-      const expected = inboxShowMeRequest({ target, title: review.title, threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
+      const target: InboxShowMeTarget = { ...asked, round: asked.review === null ? 1 : inboxReviewRound(thread.messages, asked.review) };
+      const expected = inboxShowMeRequest({ target, title: review && review !== "not_a_review" ? review.title : "", threadId, ...(showMe.againShape !== undefined ? { again: showMe.againShape } : {}) });
       if (input.question !== expected) throw new InboxError("validation_error", "question: a Show me's question is its request, as inboxShowMeRequest writes it.", { field: "question" });
       showMeFields = { kind: "show_me", show_me: target, ...(showMe.againShape !== undefined ? { again_shape: showMe.againShape } : {}) };
     }

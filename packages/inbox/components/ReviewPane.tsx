@@ -51,6 +51,7 @@ import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
+import { useBoardsNav } from '../shape/ShapeBoardsNav';
 import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelectionActions } from '../guide/types';
 import { reviewSourceLine } from '../guide/sourceLine';
@@ -297,12 +298,16 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
   showMeAgain.current = showMe.again;
   const onBoardRef = useRef(onBoard);
   onBoardRef.current = onBoard;
+  const showMeFromBoard = useRef(showMe.fromBoard);
+  showMeFromBoard.current = showMe.fromBoard;
+  const boardsNav = useBoardsNav({ shapes: shapes.shapes, threadId: thread.thread_id, board, parents: showMe.parents, onBoard });
   // The board's Show me again: the box, over the review, for what it was made of; the new version opens the board again.
   const boardHost = useMemo<ShapeHost>(
     () =>
       showMe.state.canAsk
         ? {
             ...shapeHost,
+            showMe: (id, part) => showMeFromBoard.current({ board: id, name: part.name, ...(part.code ? { code: part.code } : {}) }, part.words),
             refreshLabel: 'Show me again',
             refresh: async (id) => {
               onBoardRef.current(null);
@@ -646,7 +651,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
           </Tip>
         )}
         <span className="ib-sp" />
-        {threadBoard && <ShapePebbleButton shape={threadBoard} open={board === threadBoard.id} onToggle={() => onBoard(board === threadBoard.id ? null : threadBoard.id)} />}
+        {threadBoard && <ShapePebbleButton shape={threadBoard} open={!!board} onToggle={() => onBoard(board ? null : threadBoard.id)} />}
         {docked && !phone && (
           <span ref={dockRef} className="ib-rv-docked" data-review-diff-style-docked="">
             <DiffStyleSwitch icons name="ib-diff-style-docked" label="Diff layout, top bar" />
@@ -842,7 +847,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
-      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} />}
+      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} headStart={boardsNav.back} headSide={boardsNav.list} />}
       {board && landed && (
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} {...(showMe.state.canAsk ? { onAgain: () => { onBoard(null); showMe.again(board); } } : {})} />
       )}

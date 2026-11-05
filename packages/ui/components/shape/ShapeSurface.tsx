@@ -31,7 +31,8 @@ import {
 } from '@plannotator/core/shape';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { AnnotationToolstrip } from '../AnnotationToolstrip';
-import { CommentPopover } from '../CommentPopover';
+import { CommentPopover, type CommentExtraAction } from '../CommentPopover';
+import { partName } from './partName';
 import { DocumentAIChatPanel } from '../ai/DocumentAIChatPanel';
 import { SparklesIcon } from '../SparklesIcon';
 import { RefHoverCards } from '../RefHoverCard';
@@ -157,7 +158,19 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart }: ShapeSurfaceProps) {
+/**
+ * What the Annotate box is on, for Show me: the words picked if they are less than the part, else the part's name.
+ * In What to know a part is words: its own words name it (a bold word in it is no heading).
+ */
+function shapeBoxPart(target: { el: HTMLElement; view: string | null; id: string | null; text: string }): { name: string; code?: string } {
+  const whole = partWords(target.el).replace(/\s+/g, ' ').trim();
+  const words = (target.text && target.text !== whole) || target.view === 'know';
+  const name = (words ? target.text || whole : partName(target.el)) || target.id || 'A part of the board';
+  const code = (target.el.closest('[data-code]') ?? target.el.querySelector('[data-code]'))?.getAttribute('data-code') ?? undefined;
+  return { name: Array.from(name).slice(0, 600).join(''), ...(code ? { code } : {}) };
+}
+
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart, headSide }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -622,6 +635,12 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
 
   const refsState = useMemo<RefsState>(() => ({ refs, hover: refHover, flash: refFlash, onHover: setRefHover, onOpen: openRef, onPeek: readFirst ? onRefPeek : undefined }), [refs, refHover, refFlash, openRef, onRefPeek, readFirst]);
 
+  // ── Show me, the Annotate box's third action: on whatever the box was opened on ──
+  const showMeAction = (part: { name: string; code?: string }): CommentExtraAction | undefined =>
+    host.showMe && !finished
+      ? { label: 'Show me', icon: <Pebble alive={false} size={13} />, onAction: (words) => host.showMe!(id, { ...part, words }) }
+      : undefined;
+
   // ── pointing at the board ──
   const pickMark = useCallback((el: HTMLElement, v: ShapeViewId, text?: string) => {
     setTarget({ el, view: v, id: el.getAttribute('data-mark'), text: (text ?? partWords(el)).replace(/\s+/g, ' ').trim() });
@@ -814,6 +833,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
         annotations={codeNotes}
         onComment={codeInput('change')}
         onAsk={codeInput('ask')}
+        lineAction={(lines) => showMeAction({ name: `${lines.filePath.split('/').pop()} ${lines.lineStart === lines.lineEnd ? `line ${lines.lineStart}` : `lines ${lines.lineStart}–${lines.lineEnd}`}`, code: `${lines.filePath}#L${lines.lineStart}${lines.lineEnd !== lines.lineStart ? `-L${lines.lineEnd}` : ''}` })}
         generalComment={phase === 'leaving' ? null : generalButton('code')}
         phone={phone}
         fileAction={host.fileAction ? fileAction : undefined}
@@ -863,6 +883,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
                   </span>
                 )}
                 {finished && <span className="shp-finished">Finished</span>}
+                {headSide}
                 {!phone && generalButton(null)}
                 {host.refresh && !finished && (
                   <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>{host.refreshLabel ?? 'Bring it up to date'}</button>
@@ -1010,6 +1031,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               draftKey={shapeCommentDraftKey(id, target)}
               submitLabel="Change it"
               askAILabel="Ask"
+              extraAction={showMeAction(shapeBoxPart(target))}
               initialText={target.retry?.text}
               errorText={target.retry?.error}
               onSubmit={(text) => {
@@ -1039,6 +1061,7 @@ export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCa
               draftKey={shapeCommentDraftKey(id, { view: general.view, id: null, text: '' })}
               submitLabel="Change it"
               askAILabel="Ask"
+              extraAction={showMeAction({ name: 'The whole board' })}
               initialText={general.retry?.text}
               errorText={general.retry?.error}
               onSubmit={(text) => {
