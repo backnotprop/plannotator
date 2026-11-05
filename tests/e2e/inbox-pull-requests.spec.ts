@@ -785,6 +785,13 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
 });
 
 /** The agent's guided review of a one-file PR, sent as phase 1's review (`review: true`), in reply to the review thread's first message. */
+/** Open, not reviewed starts folded in a new window; the row a test opens is under it. */
+async function openNotReviewed(page: Page): Promise<void> {
+  const fold = page.locator('[data-reviews-fold="not_reviewed"]');
+  await fold.waitFor();
+  if ((await fold.getAttribute('aria-expanded')) === 'false') await fold.click();
+}
+
 async function sendReview(agent: SimAgent, projectPath: string, replyTo: string, patch: string, file: string, title: string): Promise<void> {
   await agent.submitGuide({
     project_path: projectPath,
@@ -951,67 +958,6 @@ test('the Board on, a card linking the stack: a quiet Board chip, its review thr
   await shot(page, '6b-stack-board-on');
 });
 
-test('Reviews: a review from an ordinary thread is a local row, opens at its card with the earlier messages folded, and is the same thread', async () => {
-  const { page, claude } = world;
-  await setCodeReview(true);
-  // An ordinary thread: the person and the agent talk first, then the agent sends a review of local changes.
-  const first = await claude.send({ project_path: world.projects.web, thread: 'jitter', subject: 'Add jitter to the retries', body: 'I looked at the retries.' });
-  await claude.send({ project_path: world.projects.web, thread: 'jitter', body: 'Thundering herd confirmed; I will add jitter.' });
-  await page.goto(`${world.url}#reviews`);
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
-  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
-  await claude.submitGuide({
-    project_path: world.projects.web,
-    reply_to: String(first.id),
-    patch: world.patches.locale,
-    body: 'Ready for you.',
-    guide: {
-      title: 'Add jitter to retries',
-      intent: 'Spread retries out.',
-      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
-      review: { gitRef: 'working-tree', base: 'main', branch: 'retry-jitter' },
-      generator: { engine: 'claude-code', model: 'claude-opus-5' },
-    },
-    review: true,
-  } as never);
-  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
-  const row = page.locator(`[data-reviews-kind="local"][data-row="${first.thread_id}"]`);
-  await expect(row).toContainText('Add jitter to retries');
-  await expect(row).toContainText('Review ready');
-  await shot(page, 'r-page');
-
-  // Opened from Reviews: the list stays, the thread opens at its review, and what came before is one chip.
-  await row.click();
-  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
-  await expect(page.locator('[data-pulls-list]')).toBeVisible();
-  await expect(page.locator('[data-pulls-nav]')).toHaveAttribute('aria-current', 'page');
-  await expect(page.locator('h2.ib-subject')).toHaveText('Add jitter to retries');
-  await expect(page.locator('[data-review-context]')).toContainText('Local changes');
-  const earlier = page.locator('[data-review-earlier]');
-  await expect(earlier).toHaveText('2 earlier messages in the thread');
-  await expect(page.locator('[data-thread-pane], .ib-thread').getByText('Thundering herd confirmed')).toHaveCount(0);
-  await shot(page, 'r-thread');
-  // In place, with no change of address; a new thread opens folded again.
-  await earlier.click();
-  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
-  await expect(earlier).toHaveCount(0);
-  // Its other view is the same thread: the Inbox, whole, whose card links back.
-  await page.reload();
-  await page.locator('[data-review-from-link]').click();
-  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#thread=${first.thread_id}`);
-  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
-  await expect(page.locator('[data-inbox-list], [data-row]').first()).toBeVisible();
-  await page.locator('[data-review-in-reviews]').click();
-  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
-  await expect(page.locator('[data-pulls-list]')).toBeVisible();
-  // Back from a phone or a list: the page.
-  await page.setViewportSize({ width: 390, height: 844 });
-  await shot(page, 'r-thread-phone');
-  await page.setViewportSize({ width: 1440, height: 900 });
-  await setCodeReview(false);
-});
-
 test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from the lowest open layer, and Approve into the agent\'s thread', async () => {
   const { page, claude } = world;
   const asked: string[] = [];
@@ -1137,6 +1083,7 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const list = page.locator('[data-pulls-list]');
     await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
     await shot(page, 'phone-1-list');
+    await openNotReviewed(page);
     await list.locator(`[data-pulls-row="${STACK_ID}"]`).click();
     const pane = page.locator('[data-pulls-stack]');
     await expect(pane).toBeVisible();
@@ -1302,6 +1249,7 @@ test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
+    await openNotReviewed(page);
     await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
     const review = page.locator('[data-pull-review]');
@@ -1380,4 +1328,97 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
   }
   const [recorded] = readdirSync(dir).filter((f) => f.endsWith('.webm'));
   renameSync(join(dir, recorded!), join(proofDir, 'walkthrough.webm'));
+});
+
+test('Reviews: a review from an ordinary thread is a local row, opens at its card with the earlier messages folded, and is the same thread', async () => {
+  const { page, claude } = world;
+  await setCodeReview(true);
+  // An ordinary thread: the person and the agent talk first, then the agent sends a review of local changes.
+  const first = await claude.send({ project_path: world.projects.web, thread: 'jitter', subject: 'Add jitter to the retries', body: 'I looked at the retries.' });
+  await claude.send({ project_path: world.projects.web, thread: 'jitter', body: 'Thundering herd confirmed; I will add jitter.' });
+  await page.goto(`${world.url}#reviews`);
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toBeVisible();
+  const before = Number(await page.locator('[data-pulls-nav] .ib-n').textContent());
+  await claude.submitGuide({
+    project_path: world.projects.web,
+    thread: 'jitter',
+    patch: world.patches.locale,
+    body: 'Ready for you.',
+    guide: {
+      title: 'Add jitter to retries',
+      intent: 'Spread retries out.',
+      sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
+      review: { gitRef: 'working-tree', base: 'main', branch: 'retry-jitter' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    review: true,
+  } as never);
+  // The list follows a review that arrives, with no reload: the new row, and the sidebar's count.
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText(String(before + 1), { timeout: 15_000 });
+  const row = page.locator(`[data-reviews-kind="reviewed"][data-row="${first.thread_id}"]`);
+  await expect(row).toContainText('Add jitter to retries');
+  await expect(row).not.toHaveAttribute('data-pulls-row');
+  await expect(row).toContainText('Review ready');
+  await shot(page, 'r-page');
+
+  // Opened from Reviews: the list stays, the thread opens at its review, and what came before is one chip.
+  await row.click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('[data-pulls-nav]')).toHaveAttribute('aria-current', 'page');
+  await expect(page.locator('h2.ib-subject')).toHaveText('Add jitter to retries');
+  await expect(page.locator('[data-review-context]')).toContainText('Local changes');
+  const earlier = page.locator('[data-review-earlier]');
+  await expect(earlier).toHaveText('2 earlier messages in the thread');
+  await expect(page.getByText('Thundering herd confirmed')).toHaveCount(0);
+  await shot(page, 'r-thread');
+  // In place, with no change of address; a new thread opens folded again.
+  await earlier.click();
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await expect(earlier).toHaveCount(0);
+  // Its other view is the same thread: the Inbox, whole, whose card links back.
+  await page.reload();
+  await page.locator('[data-review-from-link]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#thread=${first.thread_id}`);
+  await expect(page.getByText('Thundering herd confirmed')).toBeVisible();
+  await expect(page.locator('[data-inbox-list], [data-row]').first()).toBeVisible();
+  await page.locator('[data-review-in-reviews]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${first.thread_id}`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  // Back from a phone or a list: the page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await shot(page, 'r-thread-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto(`${world.url}#reviews`);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await shot(page, 'r-page-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('Reviews with nothing in it: says so, and offers a new review', async () => {
+  const { page } = world;
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    const answer = await route.fetch();
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), rows: [] } });
+  });
+  await page.route('**/api/inbox/pulls?*', async (route) => {
+    const answer = await route.fetch();
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), pulls: [] } });
+  });
+  try {
+    await page.goto(`${world.url}#reviews`);
+    await page.reload();
+    await expect(page.locator('[data-reviews-new="empty"]')).toBeVisible();
+    await shot(page, 'r-empty');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'r-empty-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await page.locator('[data-reviews-new="empty"]').click();
+    await expect(page.locator('dialog[data-compose]')).toBeVisible();
+    await page.keyboard.press('Escape');
+  } finally {
+    await page.unroute('**/api/inbox/reviews*');
+    await page.unroute('**/api/inbox/pulls?*');
+  }
 });

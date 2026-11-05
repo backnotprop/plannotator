@@ -285,6 +285,16 @@ describe("inboxReviewSourceOf", () => {
   });
 });
 
+describe("a teammate's PR assigned to the person", () => {
+  test("is on them, as a request is; a request's own words win", () => {
+    const assigned = pr({ number: 1, mine: false, assigned: true });
+    const rows = (p: InboxPull) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([p]), links: {}, pulls: [p] });
+    expect(rows(assigned).map((r) => [r.move, r.reason])).toEqual([["on_you", "assigned"]]);
+    expect(rows({ ...assigned, requested: true }).map((r) => r.reason)).toEqual(["requested"]);
+    expect(rows({ ...assigned, assigned: false }).map((r) => r.move)).toEqual(["not_reviewed"]);
+  });
+});
+
 describe("landed PRs", () => {
   const MERGED_AT = "2026-11-04T12:00:00.000Z";
   const merged = () => pr({ number: 10, head: "feature", state: "merged", merged_at: MERGED_AT });

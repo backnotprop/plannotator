@@ -59,7 +59,7 @@ const lower = (words: string) => words.replace(/^./, (c) => c.toLowerCase());
 /** The layer a row's words are about: the first that asked the person, else the next to land, else the top. */
 function focusOf(stack: InboxPullStack): InboxPull {
   const open = openLayers(stack);
-  return open.find((pull) => pull.requested && !pull.mine) ?? startLayer(stack) ?? open[0] ?? stack.layers[stack.layers.length - 1]!;
+  return open.find((pull) => (pull.requested || pull.assigned) && !pull.mine) ?? startLayer(stack) ?? open[0] ?? stack.layers[stack.layers.length - 1]!;
 }
 
 const whose = (pull: InboxPull) => (pull.mine ? 'yours' : (pull.author ?? 'a deleted account'));
@@ -88,6 +88,8 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
       return { status: `You approved${checks ? ` · ${lower(checks)}` : ''}`, tone: 'ok' };
     case 'requested':
       return { status: pull?.author ? `${pull.author} asked for your review` : 'Your review was asked for', tone: null };
+    case 'assigned':
+      return { status: 'assigned to you', tone: null };
     case 'changes':
       return { status: 'Changes requested', tone: 'warn' };
     case 'failing':

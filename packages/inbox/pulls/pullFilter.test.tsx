@@ -281,6 +281,16 @@ test.if(hasDom)('× and Clear filters clear the view and the project in one step
   expect(again.picks).toEqual([{ filter: 'all', project: null }]);
 });
 
+test.if(hasDom)('nothing anywhere: "No reviews yet", with the way to start one', async () => {
+  let asked = 0;
+  draw({ state: pullsStateOf({ ...MODEL, pulls: [] }), onNew: () => asked++ });
+  await settle();
+  expect($('[data-pulls-list]')!.textContent).toContain('No reviews yet');
+  await act(async () => $('[data-reviews-new="empty"]')!.click());
+  await act(async () => $('[data-reviews-new="head"]')!.click());
+  expect(asked).toBe(2);
+});
+
 test.if(hasDom)('one project offered: no project rows', async () => {
   const one: InboxPullsAnswer = { ...MODEL, pulls: [pull(1), pull(4, { mine: false, author: 'tomas' })], projects: { [`github.com/${WEB}`]: ['prj_web'] } };
   draw({ state: pullsStateOf(one) });

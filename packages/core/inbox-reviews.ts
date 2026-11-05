@@ -168,6 +168,7 @@ export type InboxReviewReason =
   | "draft"
   | "forge_review"
   | "others"
+  | "assigned"
   | "not_reviewed";
 
 /**
@@ -275,7 +276,8 @@ export function inboxReviewMove(review: InboxReviewThread | null, pulls: readonl
   if (!review.answered && !review.verdict) return { move: "on_you", reason: "review_ready" };
   const open = pulls.filter(inboxPullIsOpen);
   if (open.length > 0 && open.every((pull) => !pull.mine)) {
-    return open.some((pull) => pull.requested) ? { move: "on_you", reason: "requested" } : { move: "waiting", reason: "others" };
+    if (open.some((pull) => pull.requested)) return { move: "on_you", reason: "requested" };
+    return open.some((pull) => pull.assigned) ? { move: "on_you", reason: "assigned" } : { move: "waiting", reason: "others" };
   }
   if (review.verdict?.verdict !== "approved") return { move: "agents", reason: "feedback_sent" };
   const own = open.filter((pull) => pull.mine);
@@ -309,7 +311,9 @@ export function inboxReviewIsOf(source: InboxReviewSource | null, pull: Pick<Inb
 
 /** A PR row (no review thread): On you when a teammate asked for the person's review, else not reviewed. */
 export function inboxReviewPullMove(stack: InboxPullStack): { move: InboxReviewMove; reason: InboxReviewReason } {
-  return stack.layers.some((pull) => inboxPullIsOpen(pull) && pull.requested && !pull.mine) ? { move: "on_you", reason: "requested" } : { move: "not_reviewed", reason: "not_reviewed" };
+  const theirs = stack.layers.filter((pull) => inboxPullIsOpen(pull) && !pull.mine);
+  if (theirs.some((pull) => pull.assigned) && !theirs.some((pull) => pull.requested)) return { move: "on_you", reason: "assigned" };
+  return theirs.some((pull) => pull.requested) ? { move: "on_you", reason: "requested" } : { move: "not_reviewed", reason: "not_reviewed" };
 }
 
 export interface InboxReviewGroups {

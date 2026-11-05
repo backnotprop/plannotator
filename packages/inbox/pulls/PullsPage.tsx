@@ -1,8 +1,7 @@
 /**
- * Pull requests (approval "inbox-code-review-direction", items 4 and 5;
- * concept B, take 1; the agent flow: approval "pr-page-review-with-agent",
- * the Inline take): a sidebar row, shown only while Settings → Capabilities →
- * Code review is on. It needs no Board.
+ * Reviews (approval "inbox-reviews-page", on approvals "inbox-code-review-direction", items 4 and 5, and
+ * "pr-page-review-with-agent", the Inline take): a sidebar row, shown only while Settings → Capabilities →
+ * Code review is on. It needs no Board. The list is ReviewsList.tsx; beside a thread, the pane is the Inbox's own.
  *
  * - The head: "Reviews", and on its right the filter mark (approval
  *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,

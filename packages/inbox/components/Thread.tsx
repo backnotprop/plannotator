@@ -1421,7 +1421,7 @@ function labelledAuthorName({ agent, label, open = false, hidden, onFold }: { ag
   );
 }
 
-export function ThreadPane({ reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull }: ThreadPaneProps) {
+export function ThreadPane({ reviewView = null, onInReviews, notice, thread, threadSteps = null, codeReview = false, machine = null, outbox = NO_OUTBOX, onDismissOutbox, sent, onQuestions, onPickSaves, onChanged, draftChanged = 0, filesChanged = 0, onClose, file, onOpenFile, onOpenGuide, lookSeq, seenThrough = null, onSeen, covered = false, onScreenChange, row, drawn = null, onMarkRead, onMarkUnread, onAck, onAction, onArchive, pinned = false, onPin, onSnooze, onUnsnooze, replyRequest, onReplyOpened, askButton = null, shapeButton = null, askFileButton = null, replyWords = null, onReplyWordsTaken, backLabel = 'Inbox', cardChip, phone = false, stacked = false, fileStacked = false, remote = false, guest = false, onBackToList, onToast, linkOf, onInboxLink, fullFromSide = false, fullExitFile = null, landing = null, onLanded, artifacts: artifactsRoute = false, onArtifacts, decide = null, threadAlone = false, fullSidebar = true, onFull, run: runLine, attachCommand = null, onRunChanged, openedWith = null }: ThreadPaneProps) {
   // "Open in" (OpenIn.tsx): apps on this computer; a new tab only through the tailnet or on a phone.
   const openIn: OpenInSurface | undefined = phone || remote === true ? 'tab' : remote === null ? undefined : 'apps';
   // Thread steps (approval "inbox-thread-steps"): the lists with steps, newest first; none while the switch is off.
@@ -5386,7 +5386,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
         <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? thread.subject ?? '(no subject)'}</h2>
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
-            <Icon name="questionBubble" size={14} />
+            <Icon name="contents" size={14} />
             Review from the thread{' '}
             <button type="button" className="ib-rvctx-link" dir="auto" onClick={reviewView.onWholeThread} data-review-from-link="">
               {reviewView.fromThread}
@@ -5395,6 +5395,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
         )}
         {beforeReview.length > 0 && (
           <button type="button" className="ib-rvearlier" onClick={() => setEarlierShownIn(thread.thread_id)} data-review-earlier={beforeReview.length}>
+            <Icon name="contents" size={14} />
             {plural(beforeReview.length, 'earlier message')} in the thread
           </button>
         )}
@@ -5519,7 +5520,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
         )}
         {/* The count and time; a one-message thread has none. No name chip: the top bar shows the name whenever the
             chip would (the owner, 2026-11-02: never the same words twice). */}
-        {!one && (
+        {!one && !reviewView && (
           <div className="ib-tmeta" data-thread-meta="">
             <span className="ib-tmeta-rest" data-thread-meta-rest="">
                 {participants.length > 1 && (
