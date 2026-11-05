@@ -116,15 +116,20 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewFigure?: () => React.ReactNode | null;
   /**
+   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`: the Inbox's
+   * Show me). No other heading draws them. Answering null (or absent) adds nothing.
+   */
+  renderHeadActions?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
-   * edge (the Inbox: its Split | Unified switch on the first card). Called with
+   * edge (the Inbox: its Split | Unified switch). Called with
    * each card's index (the "Everything else" card's is the number of
    * sections); answering null (or absent) leaves that card exactly as it is.
    * The card draws the tab in its own background and border, only as wide as
    * the control; the host draws only the control. The tab assumes the guide
    * sits on `--background`, as it does in every host.
    */
-  renderSectionTab?: (index: number) => React.ReactNode | null;
+  renderSectionTab?: (index: number, card: { folded: boolean; diffs: number; title: string }) => React.ReactNode | null;
   /**
    * Controls a host draws on a file card's summary row, at its right (the VS
    * Code extension: Open in editor, Diff). Answering null (or absent) leaves
