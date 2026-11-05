@@ -22,11 +22,11 @@
  * Only a scratch data dir is accepted (tests/helpers/real-data-dir.ts).
  */
 
-import { mkdirSync, mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { heapStats } from "bun:jsc";
-import { refuseRealDataDir } from "../tests/helpers/real-data-dir";
+import { isScratchDataDir, refuseRealDataDir } from "../tests/helpers/real-data-dir";
 import { seedInboxSearchWorld, WORST_CASE, type UniqueMix } from "./inbox-large-store";
 
 // The seed moved to inbox-large-store.ts (node-safe, for the memory soak spec); kept importable from here.
@@ -175,4 +175,18 @@ async function main() {
   }
 }
 
-if (import.meta.main) await main();
+/**
+ * Bun fixes `homedir()` at startup, and the Inbox's sandbox guard refuses a real one even when
+ * HOME is changed later: run again with a scratch HOME from the start, then remove it.
+ */
+function rerunWithScratchHome(): never {
+  const home = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-search-bench-home-")));
+  const child = Bun.spawnSync([process.execPath, ...process.argv.slice(1)], { env: { ...process.env, HOME: home }, stdio: ["inherit", "inherit", "inherit"] });
+  rmSync(home, { recursive: true, force: true });
+  process.exit(child.exitCode ?? 1);
+}
+
+if (import.meta.main) {
+  if (!isScratchDataDir(homedir())) rerunWithScratchHome();
+  await main();
+}

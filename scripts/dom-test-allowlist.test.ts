@@ -29,6 +29,8 @@ const SELF = new Set([
   'scripts/dom-test-allowlist.test.ts',
   // The lane guard names the DOM lane's environment variable; it needs no DOM either.
   'scripts/ci-test-lanes.test.ts',
+  // The sandbox command's proof checks that it sets and drops that variable; it needs no DOM either.
+  'scripts/test-sandbox.test.ts',
 ]);
 
 function testFiles(dir: string, out: string[] = []): string[] {

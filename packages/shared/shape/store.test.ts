@@ -241,7 +241,7 @@ const r = createShapeStore({ dataDir }).update({ board, id, base: 1, project: ${
 console.log(r.ok ? "OK" : r.code);`,
     );
     const runs = Array.from({ length: count }, (_, i) =>
-      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "" } }),
+      Bun.spawn([process.execPath, worker, dataDir, id, String(i)], { stdout: "pipe", stderr: "pipe", env: { PATH: process.env.PATH ?? "", HOME: process.env.HOME! } }),
     );
     return Promise.all(runs.map(async (p) => (await new Response(p.stdout).text()).trim()));
   }
