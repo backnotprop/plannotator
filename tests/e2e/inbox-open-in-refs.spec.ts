@@ -373,9 +373,11 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await shot(page, `08-phone-message-${colorScheme}`);
 
       await page.goto(`${world.url}#thread=${world.shapeThread}&shape=${world.shape}`);
-      await page.getByRole('button', { name: /References/ }).first().click();
+      // The phone's dock has the count, not the word.
+      await page.locator('.shp-tbtn', { hasText: '3' }).click();
       await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
       await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
+      await page.waitForTimeout(600); // the sheet has finished rising, for the picture
       await shot(page, `09-phone-shape-${colorScheme}`);
 
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
