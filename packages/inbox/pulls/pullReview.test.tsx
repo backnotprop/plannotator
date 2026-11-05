@@ -646,14 +646,17 @@ test.skipIf(!hasDom)("an unlinked layer of the person's stack falls back to the 
 });
 
 test.skipIf(!hasDom)('comments kept from before a new push are dropped; the ones of this push are kept', async () => {
-  const layer = stack[0]!;
+  // Its own head: a diff the window remembers is not a read and moves nothing stored; named by the list, so the read
+  // does not change the key.
+  const now = 'f'.repeat(40);
+  diffHead = now;
+  const layer = { ...stack[0]!, head_sha: now };
   const store = 'plannotator-inbox-pull-review:';
   const comment = { id: 'c1', type: 'comment', filePath: 'a.ts', lineStart: 1, lineEnd: 1, side: 'new', text: 'old line', createdAt: 1 };
   const before = 'b'.repeat(40);
-  const now = 'a'.repeat(40);
   window.localStorage.setItem(`${store}${layer.key}:layer:${before}`, JSON.stringify({ comments: [comment], viewed: [] }));
   window.localStorage.setItem(`${store}${layer.key}:layer:${now}`, JSON.stringify({ comments: [{ ...comment, id: 'c2' }], viewed: [] }));
-  mount(<Review stackId={STACK_ID} from={layer.key} answer={model} />);
+  mount(<Review stackId={STACK_ID} from={layer.key} answer={{ ...model, pulls: model.pulls.map((p) => (p.key === layer.key ? layer : p)) }} />);
   await settle();
   expect(window.localStorage.getItem(`${store}${layer.key}:layer:${before}`)).toBeNull();
   expect(window.localStorage.getItem(`${store}${layer.key}:layer:${now}`)).not.toBeNull();

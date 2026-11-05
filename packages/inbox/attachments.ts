@@ -418,6 +418,7 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
     : '';
   const prefix = conventionalPrefix(comment);
   let output = `${heading} ${range} (${comment.side})${token}\n`;
+  if (comment.outdated) output += '[Outdated — the code changed after this comment]\n';
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
   if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;

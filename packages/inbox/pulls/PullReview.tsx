@@ -99,12 +99,12 @@ export function PullReview(props: PullReviewProps) {
 }
 
 /**
- * A layer's other stored reviews move to this head's. One kept for another head commit (only once `sure` this head is
- * the newest): its lines may have moved, so line comments and Viewed go; global comments are on no line and move. One
- * that names no commit (written before the head was known, or by an older Inbox, which named the PR's last update):
- * nothing says a commit came since, so all of it moves.
+ * A layer's other stored reviews move to this head's. One kept for another head commit: its lines may have moved, so
+ * line comments and Viewed go; global comments are on no line and move. One that names no commit (written before the
+ * head was known, or by an older Inbox, which named the PR's last update): nothing says whether a commit came since, so
+ * all of it moves, its line comments marked outdated: they never post on whatever sits at those lines now.
  */
-function dropStale(layerKey: string, scope: string, keptId: string, sure: boolean): void {
+function dropStale(layerKey: string, scope: string, keptId: string): void {
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
     const carried: CodeAnnotation[] = [];
@@ -113,9 +113,8 @@ function dropStale(layerKey: string, scope: string, keptId: string, sure: boolea
       const name = window.localStorage.key(i);
       if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
       const ofAHead = HEAD_SHA.test(name.slice(prefix.length));
-      if (ofAHead && !sure) continue;
       const was = readKept(name.slice(STORE.length));
-      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments));
+      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments.map((c) => ((c.scope ?? 'line') === 'line' ? { ...c, outdated: true } : c))));
       if (!ofAHead) ticks.push(...was.viewed);
       window.localStorage.removeItem(name);
     }
@@ -158,9 +157,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   // What makes this diff: its head commit and its base. `updated_at` also moves with a label, a comment or a review,
   // which change nothing here (no read, no scroll lost); it only stands in while the list names no head.
-  const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${scope === 'stack' ? stack?.open_base : layer.base}` : '';
+  const diffBase = scope === 'stack' ? stack?.open_base : layer?.base;
+  const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => SEEN.get(seenId) ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
+  // The head of a patch this review read itself. One remembered in `SEEN` can be older than what another window kept.
+  const readHead = useRef<string | null>(null);
   useEffect(() => {
     if (!layer) return;
     // Back to a diff read a moment ago (This layer → Whole stack → This layer): drawn at once, not read again.
@@ -171,18 +173,20 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       return;
     }
     // The list caught up with the patch on screen: nothing new to read.
-    if (diff?.head_sha && diff.head_sha === layer.head_sha && diff.base === layer.base) {
+    if (diff?.head_sha && diff.head_sha === layer.head_sha && diff.base === diffBase) {
       SEEN.set(seenId, diff);
       return;
     }
     const controller = new AbortController();
-    // A new commit draws afresh; otherwise the reader stays (its scroll, a comment being typed) while this reads.
-    if (layer.head_sha && diff?.head_sha !== layer.head_sha) setDiff(null);
+    // A patch that names its head stays on screen, and keeps its comments, until the read names a newer one: the list
+    // can land on a head still behind it.
+    if (layer.head_sha && !diff?.head_sha) setDiff(null);
     inboxApi
       .pullDiff(layer.key, scope, controller.signal)
       .then((answer) => {
         if (controller.signal.aborted) return;
         SEEN.set(seenId, answer);
+        readHead.current = answer.head_sha ?? null;
         while (SEEN.size > SEEN_MAX) SEEN.delete(SEEN.keys().next().value!);
         setDiff(answer);
       })
@@ -195,28 +199,25 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }, [seenId]);
 
   // Comments and Viewed are kept per head commit: a new commit starts clean, but for the global comments. The head is
-  // the patch's when it says (the list can be minutes behind it, and the comments are on the patch), else the list's
-  // (a whole stack's compare ends at this layer's head; another layer's commit changes nothing here). Neither says: the
-  // last one known stays, and only a head that is named can clear anything.
+  // the patch's when it says, in either scope (the list can be minutes behind it, and the comments are on the patch;
+  // another layer's commit changes nothing here), else the list's. Neither says: the last one known stays.
   const lastHead = useRef<string | null>(null);
   const head = diff?.head_sha ?? layer?.head_sha ?? lastHead.current;
   lastHead.current = head;
   const keptId = `${layerKey}:${scope}:${head ?? ''}`;
-  // A layer's newest comments can be on a patch newer than the list: its older heads go once a patch has named its head.
-  const pinned = useRef(scope === 'stack');
-  if (diff?.head_sha) pinned.current = true;
-  const sure = pinned.current;
+  // Only a patch read here says this head is the newest: until then nothing stored moves or goes (it can be newer).
+  const sure = !!head && readHead.current === head;
   const [comments, setComments] = useState<CodeAnnotation[]>(() => readKept(keptId).comments);
   const [viewed, setViewed] = useState<string[]>(() => readKept(keptId).viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   useEffect(() => {
-    if (head) dropStale(layerKey, scope, keptId, sure);
+    if (sure) dropStale(layerKey, scope, keptId);
     const kept = readKept(keptId);
     setComments(kept.comments);
     setViewed(kept.viewed);
     setSelectedId(null);
-    // `head` and the layer are in `keptId`.
+    // The layer and scope are in `keptId`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptId, sure]);
   const write = (next: { comments?: CodeAnnotation[]; viewed?: string[] }) => {
@@ -575,7 +576,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           ) : snapshot ? (
             <Suspense fallback={null}>
-              <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <GuideReader key={diff?.head_sha ?? diff?.patch} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
             </Suspense>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">

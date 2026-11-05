@@ -649,7 +649,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         head = `${owner}:${pull.head}`;
         headRef = `${owner}:${compareRef(pull.head)}`;
       }
-      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.updated_at}`;
+      // By what makes the diff: a label or a comment moves `updated_at` and costs no read.
+      const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.head_sha ?? pull.updated_at}`;
       const hit = diffs.get(cacheKey);
       if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
       if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
@@ -669,7 +670,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // A layer's head commit, read around its patch: a push between the two reads leaves it unknown (no post).
+      // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer's posts nothing).
       const headNow = async (): Promise<string | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
         const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
@@ -682,7 +683,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return null;
         }
       };
-      const headBefore = scope === "layer" ? await headNow() : null;
+      const headBefore = await headNow();
       let base = bases[0]!;
       let result = await diffRun(cli, argsFor(base), INBOX_PULL_DIFF_MAX_BYTES);
       if (result.exitCode !== 0 && !result.tooLarge && bases.length > 1 && /\b404\b|not found|no common ancestor|could not compare/i.test(`${result.stderr}\n${result.stdout}`)) {
@@ -709,8 +710,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       const headAfter = headBefore ? await headNow() : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      if (head_sha) readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, ...(scope === "layer" ? { head_sha } : {}) };
+      if (head_sha && scope === "layer") readHeads.set(key, head_sha);
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);

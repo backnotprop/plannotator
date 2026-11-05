@@ -407,14 +407,14 @@ describe("on", () => {
     const stack = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#413")}&scope=stack`);
     const stackAnswer = (await stack.json()) as { patch: string; base: string; head: string };
     expect(stackAnswer.patch).toBe("diff of repos/northwind/billing-svc/compare/main...retry/backoff\n");
-    expect(stackAnswer).toMatchObject({ base: "main", head: "retry/backoff" });
+    expect(stackAnswer).toMatchObject({ base: "main", head: "retry/backoff", head_sha: "413".padStart(40, "a") });
     const diffCalls = w.forge.calls.slice(before);
     expect(diffCalls.every((c) => c.args.includes("--hostname") && c.args[c.args.indexOf("--hostname") + 1] === "github.com")).toBe(true);
 
     const unknown = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/elsewhere/thing#9")}&scope=layer`);
     expect(unknown.status).toBe(404);
-    // The layer: its head, its patch, its head again; the stack: its compare.
-    expect(w.forge.calls.length).toBe(before + 4);
+    // Each: its head, its patch, its head again.
+    expect(w.forge.calls.length).toBe(before + 6);
   });
 });
 
@@ -628,9 +628,53 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await w.pulls();
     const before = w.forge.calls.length;
     const answer = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#22")}&scope=stack`)).json()) as { head: string; base: string };
-    const call = w.forge.calls[before]!;
+    const call = w.forge.calls.slice(before).find((c) => !c.args.includes("--jq"))!;
     expect(call.args[3]).toBe("repos/northwind/billing-svc/compare/charge-client...dana:feat-2");
     expect(answer).toMatchObject({ base: "charge-client", head: "dana:feat-2" });
+  });
+
+  test("names the head its compare ended at, read around it: the list can be behind, a push during the read leaves it unknown", async () => {
+    const f = forge(stackAnswer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const pushed = "b".repeat(40);
+    f.heads = [pushed, pushed];
+    expect((await pulls.diff("github.com/northwind/billing-svc#22", "stack")).head_sha).toBe(pushed);
+    f.heads = [pushed, "c".repeat(40)];
+    expect((await pulls.diff("github.com/northwind/billing-svc#21", "stack")).head_sha).toBeNull();
+    // A whole stack's read is no head to post a layer's review at.
+    expect(pulls.readHead("github.com/northwind/billing-svc#22")).toBeNull();
+  });
+
+  test("a label moving updated_at reads nothing again; a new head does", async () => {
+    const at = (updatedAt: string, headRefOid: string) => answerOf([ghPull(21, { headRefName: "feat", baseRefName: "charge-client", updatedAt, headRefOid })], [], [ghPull(20, { state: "MERGED", headRefName: "charge-client", mergedAt: "2026-11-02T10:00:00Z" })]);
+    let answer = at("2026-11-03T10:00:00Z", "a".repeat(40));
+    const f = forge();
+    const run: typeof f.run = async (cli, args, env) => {
+      if (cli === "gh" && args.includes("graphql")) {
+        f.calls.push({ cli, args });
+        return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
+      }
+      return f.run(cli, args, env);
+    };
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run, now: () => clock });
+    const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+    const reread = async (next: unknown) => {
+      answer = next as typeof answer;
+      clock += INBOX_PULLS_FRESH_MS;
+      await pulls.list(repos);
+    };
+    await pulls.list(repos);
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    await reread(at("2026-11-03T11:00:00Z", "a".repeat(40)));
+    const asked = f.calls.length;
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    expect(f.calls.length).toBe(asked);
+    await reread(at("2026-11-03T12:00:00Z", "b".repeat(40)));
+    const before = f.calls.length;
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    expect(f.calls.length).toBe(before + 3);
   });
 
   test("the lowest open layer's base gone (a merged branch deleted): the stack's own base", async () => {
@@ -646,7 +690,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
     const answer = await pulls.diff("github.com/northwind/billing-svc#21", "stack");
     expect(answer.base).toBe("main");
-    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname").map((c) => c.args[3])).toEqual([
+    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname" && !c.args.includes("--jq")).map((c) => c.args[3])).toEqual([
       "repos/northwind/billing-svc/compare/charge-client...feat",
       "repos/northwind/billing-svc/compare/main...feat",
     ]);
@@ -848,7 +892,7 @@ describe("the worst case (break-ui on #2590)", () => {
     const diff = await pulls.diff("github.com/northwind/billing-svc#331", "stack");
     expect(diff.patch).toBe("diff of repos/northwind/billing-svc/compare/main...fehlermeldungen-im-dashboard\n");
     await pulls.diff("github.com/northwind/billing-svc#330", "stack");
-    expect(f.calls.at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
+    expect(f.calls.filter((c) => !c.args.includes("--jq")).at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
     const before = f.calls.length;
     await expect(pulls.diff("github.com/northwind/billing-svc#340", "stack")).rejects.toMatchObject({ code: "pull_diff_failed" });
     expect(f.calls.length).toBe(before);

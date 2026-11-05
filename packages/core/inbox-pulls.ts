@@ -148,8 +148,8 @@ export interface InboxPullDiffAnswer {
   head: string;
   patch: string;
   /**
-   * The head commit this layer's patch is of, read from the forge just before and just after the patch (null when
-   * they differ, when the forge did not say, and for the whole stack). A review posted from it is pinned to it.
+   * The head commit this patch is of, read from the forge just before and just after the patch (null when they differ
+   * or the forge did not say). The window keeps comments per this head; a review posted from a layer's patch is pinned to it.
    */
   head_sha?: string | null;
 }
