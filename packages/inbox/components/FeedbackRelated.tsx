@@ -7,8 +7,10 @@ import { relatedIndex, relatedLinks, type RelatedData, type RelatedIndex, type R
 export const RELATED_PAUSE_MS = 500;
 /** Below the dialog's foot, when the pinned dialog is taller than what is left of the window. */
 const FOOT_ROOM = 16;
-/** A click this soon after the list changed was aimed at what used to be there, on any device: it opens nothing. */
+/** A press this soon after the list changed was aimed at what used to be there, anywhere in the form: it does nothing. */
 const LINK_SETTLE_MS = 400;
+/** After a finger lifts or a pointer leaves: long enough for the press's own click to land first. */
+const LIFT_MS = 120;
 /** Above the box in the sheet over a keyboard, once the title has scrolled away. */
 const BOX_HEAD = 4;
 
@@ -129,7 +131,8 @@ export function useFeedbackRelated(options: {
       }
       setLinks(next);
     };
-    const timer = setTimeout(() => {
+    // Each wait ends here again: leaving one hold can land in the other.
+    const showWhenClear = () => {
       const below = belowRef.current;
       const list = listRef.current;
       if (list?.contains(document.activeElement)) {
@@ -138,16 +141,24 @@ export function useFeedbackRelated(options: {
           // Still focused: the window lost focus, not the link. Tabbing to the next link is still inside.
           if (document.activeElement === event.target || list.contains(event.relatedTarget as Node | null)) return;
           list.removeEventListener('focusout', left);
-          show();
+          showWhenClear();
         };
         list.addEventListener('focusout', left);
         stopWaiting = () => list.removeEventListener('focusout', left);
       } else if (below && (pointerRestsOn(below) || pressing.current)) {
         // The chips, the email and Send must not move under a pointer or a finger about to press them.
-        below.addEventListener('pointerleave', show, { once: true });
-        stopWaiting = () => below.removeEventListener('pointerleave', show);
+        let lifted: ReturnType<typeof setTimeout> | undefined;
+        const left = () => {
+          lifted = setTimeout(showWhenClear, LIFT_MS);
+        };
+        below.addEventListener('pointerleave', left, { once: true });
+        stopWaiting = () => {
+          below.removeEventListener('pointerleave', left);
+          clearTimeout(lifted);
+        };
       } else show();
-    }, RELATED_PAUSE_MS);
+    };
+    const timer = setTimeout(showWhenClear, RELATED_PAUSE_MS);
     return () => {
       clearTimeout(timer);
       stopWaiting();
@@ -198,21 +209,32 @@ const opens = (link: RelatedLink) => ({ href: link.href, target: '_blank', rel: 
  * itself ("Already there: ..."), so it stays whole and wraps.
  */
 export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; listRef: RefObject<HTMLDivElement | null> }) {
-  const changedAt = useRef(0);
+  const changedAt = useRef<number | null>(null);
   const lines = links.map((link) => link.href).join(' ');
+  const lastLines = useRef(lines);
   useLayoutEffect(() => {
-    changedAt.current = performance.now();
+    if (lines !== lastLines.current) changedAt.current = performance.now();
+    lastLines.current = lines;
   }, [lines]);
+  // Enter or Space on a focused control (detail 0) aimed at that control, wherever it now sits.
+  useEffect(() => {
+    const form = listRef.current?.closest('form');
+    if (!form) return;
+    const settle = (event: MouseEvent) => {
+      if (event.detail > 0 && changedAt.current !== null && performance.now() - changedAt.current < LINK_SETTLE_MS) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    form.addEventListener('click', settle, true);
+    return () => form.removeEventListener('click', settle, true);
+  }, [listRef]);
   return (
     <div className="ib-fbk-rel" role="status" data-feedback-related="" ref={listRef}>
       {links.length > 0 && (
         <>
           <p className="ib-fbk-rel-h">Might be related</p>
-          <ul
-            onClickCapture={(event) => {
-              if (performance.now() - changedAt.current < LINK_SETTLE_MS) event.preventDefault();
-            }}
-          >
+          <ul>
             {links.map((link) =>
               link.kind === 'feature' ? (
                 <li key={link.href + link.title} className="ib-fbk-rel-said">

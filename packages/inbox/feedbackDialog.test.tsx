@@ -465,19 +465,97 @@ describe.skipIf(!hasDom)('Might be related under the box', () => {
     await pause();
     expect(list().childNodes.length).toBe(0);
     await act(async () => below.dispatchEvent(new Event('pointerleave')));
+    await act(async () => new Promise((done) => setTimeout(done, 200)));
     expect(list().querySelectorAll('a').length).toBe(1);
   });
 
-  test('a click just after the list changes opens nothing; a later one opens the link', async () => {
-    await typeAndPause('need a done button');
-    const click = () => {
-      const event = new MouseEvent('click', { bubbles: true, cancelable: true });
-      list().querySelector('a')!.dispatchEvent(event);
+  describe('a press aimed at what used to be there', () => {
+    /** A real press has a click count; Enter on a focused control has none. */
+    const pressOn = (element: Element, detail = 1) => {
+      const event = new MouseEvent('click', { bubbles: true, cancelable: true, detail });
+      element.dispatchEvent(event);
       return event.defaultPrevented;
     };
-    expect(click()).toBe(true);
-    await act(async () => new Promise((done) => setTimeout(done, 420)));
-    expect(click()).toBe(false);
+    /** Moves the window's clock past the list's change, so no test depends on how busy the machine is. */
+    function clockAt(ahead: number) {
+      const base = performance.now();
+      const real = performance.now.bind(performance);
+      performance.now = () => base + ahead;
+      restorers.push(() => {
+        performance.now = real;
+      });
+    }
+
+    test('anywhere in the form, for 400 ms after the list changes, it does nothing; then it works', async () => {
+      const calls = stubFetch(() => Response.json({ ok: true }));
+      const dialog = await typeAndPause('need a done button');
+      clockAt(250);
+      expect(pressOn(list().querySelector('a')!)).toBe(true);
+      expect(pressOn(dialog.send())).toBe(true);
+      expect(pressOn(dialog.cat('bug'))).toBe(true);
+      await act(async () => new Promise((done) => setTimeout(done, 0)));
+      expect(calls).toEqual([]);
+      expect(dialog.cat('bug').getAttribute('aria-pressed')).toBe('false');
+      clockAt(401);
+      expect(pressOn(list().querySelector('a')!)).toBe(false);
+      await act(async () => {
+        pressOn(dialog.cat('bug'));
+      });
+      expect(dialog.cat('bug').getAttribute('aria-pressed')).toBe('true');
+    });
+
+    test('opening the form is not a change: a press works from the start', async () => {
+      const dialog = render();
+      await act(async () => {
+        pressOn(dialog.cat('bug'));
+      });
+      expect(dialog.cat('bug').getAttribute('aria-pressed')).toBe('true');
+    });
+
+    test('Enter or Space on a focused control still works at once', async () => {
+      const dialog = await typeAndPause('need a done button');
+      await act(async () => {
+        pressOn(dialog.cat('bug'), 0);
+      });
+      expect(dialog.cat('bug').getAttribute('aria-pressed')).toBe('true');
+    });
+  });
+
+  test('after a finger lifts, its own press lands first: the list comes a moment later', async () => {
+    const dialog = render();
+    await act(async () => new Promise((done) => setTimeout(done, 30)));
+    const below = dialog.cat('bug').closest('form')!.lastElementChild!;
+    await act(async () => dialog.cat('bug').dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    type(dialog.box(), 'need a done button');
+    await pause();
+    await act(async () => below.dispatchEvent(new Event('pointerleave')));
+    expect(list().childNodes.length).toBe(0);
+    await act(async () => new Promise((done) => setTimeout(done, 200)));
+    expect(list().querySelectorAll('a').length).toBe(1);
+  });
+
+  test('a finger that has lifted holds nothing: tap a chip, type, and the line comes', async () => {
+    const dialog = render();
+    await act(async () => new Promise((done) => setTimeout(done, 30)));
+    const below = dialog.cat('bug').closest('form')!.lastElementChild!;
+    await act(async () => {
+      dialog.cat('bug').dispatchEvent(new Event('pointerdown', { bubbles: true }));
+      below.dispatchEvent(new Event('pointerleave'));
+    });
+    type(dialog.box(), 'need a done button');
+    await pause();
+    expect(list().querySelectorAll('a').length).toBe(1);
+  });
+
+  test('when focus leaves a link onto something a finger is pressing, the list still waits', async () => {
+    const dialog = await typeAndPause('need a done button');
+    const link = list().querySelector('a')!;
+    link.focus();
+    type(dialog.box(), 'works great, thank you');
+    await pause();
+    await act(async () => dialog.cat('bug').dispatchEvent(new Event('pointerdown', { bubbles: true })));
+    await act(async () => dialog.box().focus());
+    expect(list().querySelector('a') === link).toBe(true);
   });
 
   test('no match draws nothing: the slot stays empty', async () => {

@@ -163,6 +163,128 @@ describe('it finds what it is for', () => {
   });
 });
 
+describe('the opening decides', () => {
+  // Made-up messages, in the shapes real long messages take. Public titles that a looser reading drew from their tails.
+  const LOOSE: RelatedData = {
+    ...FROZEN,
+    features: [
+      ...FROZEN.features,
+      { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread'], reason: 'Already there.', url: DOC },
+    ],
+    releases: [
+      release('Snoozing the thread you have open moves its row out of the list right away.'),
+      release('Mark read, and replies that do not leave the thread at the top'),
+      release('Skip questions from the open-questions list'),
+      release('Re-ask from the open-questions list'),
+      release('Question cards'),
+      release('Click Inbox to refresh'),
+      release('Right-click a thread'),
+      release('Start a Grok Build session from the Inbox'),
+      release('Thread names for threads you start'),
+      release('One project per Claude Code session'),
+      release('Code Tour on Linux when Claude Code sandbox cannot start'),
+      release('Large messages through plannotator inbox mcp'),
+      release('Replying when the agent session has ended'),
+      ...FROZEN.releases,
+    ],
+  };
+  const loose = relatedIndex(LOOSE);
+  const said = (text: string) => relatedLinks(loose, text).map((link) => link.title);
+
+  const ASK = 'Please let threads be marked as unread, or set aside as waiting on me. I read through plenty of threads each morning and by noon I no longer know which replies I owe. Replies staying at the top is fine and snoozing is close, but picking a time is too much, and the thread you have open should stay in the list too.';
+  const DONE = 'I need a done button on each thread. My agents leave questions open and the open-questions list keeps growing, so I skip questions or ask again later. I only want to say that I am finished from my side.';
+  const BUG = 'A thread left open stops refreshing when something new comes in. Going back to the list and in again brings it up. Seen with question cards and with large messages through the mcp, after the window has been idle for a while. A right-click on the thread does not help.';
+
+  test('a long ask keeps the answer in its opening line, whatever follows', () => {
+    expect(said(ASK)).toEqual(['Mark unread']);
+    expect(said(DONE)).toEqual(['Archive']);
+  });
+
+  test('a long bug report with an unhelpful tail draws nothing from the tail', () => {
+    expect(said(BUG)).toEqual([]);
+  });
+
+  test('a long message does at least as well as its opening: nothing it found is lost', () => {
+    for (const text of [ASK, DONE, BUG]) {
+      const opening = text.slice(0, text.indexOf('. ') + 1);
+      expect(said(text).slice(0, said(opening).length)).toEqual(said(opening));
+    }
+  });
+
+  test('word by word the list settles: past the opening it may only grow, and by one line at most', () => {
+    for (const text of [ASK, DONE, BUG]) {
+      const opening = text.slice(0, text.indexOf('. ') + 1);
+      const settled = said(opening);
+      const all = text.split(' ');
+      for (let end = opening.split(' ').length; end <= all.length; end++) {
+        const now = said(all.slice(0, end).join(' '));
+        expect(now.slice(0, settled.length)).toEqual(settled);
+        expect(now.length).toBeLessThanOrEqual(settled.length + 1);
+      }
+    }
+  });
+
+  test('a run-on with no sentence ends: the opening is its first words', () => {
+    const tail = ' and then the open questions list and skip questions and ask again '.repeat(4);
+    expect(said(`I need a done button on each thread${tail}`)).toEqual(['Archive']);
+    expect(said('we keep talking about this every week and nobody here remembers what happened before the last release went out the door and then someone said need a done button please')).toEqual([]);
+  });
+
+  test('a greeting is not the opening: the ask after it counts as one', () => {
+    expect(said('Hi team,\nCould you add a done button for threads? I keep them around too long.')).toEqual(['Archive']);
+  });
+
+  test('a clause after a comma cannot take away what the first one asked', () => {
+    expect(said('let me mark a thread as unread, or put it aside as something that waits on me for later')).toEqual(['Mark unread']);
+  });
+
+  test('a later part adds a line only by naming a long title, or asking for a feature in a few words', () => {
+    expect(said('The list gets busy during the day. It would help with replying when the agent session has ended.')).toEqual(['Replying when the agent session has ended']);
+    expect(said('The list gets busy during the day. Is there a way to mark as unread?')).toEqual(['Mark unread']);
+    // In passing: a short title, or a feature inside a longer sentence.
+    expect(said('The list gets busy during the day. It happens with question cards.')).toEqual([]);
+    expect(said('The list gets busy during the day. I opened a thread yesterday and tried marking it unread, then wrote the same reply from another agent again.')).toEqual([]);
+  });
+
+  test('a feature mentioned in a clause of a later sentence is a mention, not an ask', () => {
+    expect(said('The list gets busy during the day. I went through them all yesterday, tried marking it unread, then wrote the same reply from another agent again.')).toEqual([]);
+  });
+
+  test('past its first words a run-on is a later part: it can still name a long title', () => {
+    expect(said('my agents write all day and by the evening I have lost track of who asked what and it would help with replying when the agent session has ended')).toEqual(['Replying when the agent session has ended']);
+  });
+
+  test('a later part never replaces, and never adds a second line', () => {
+    const text = 'I need a done button on each thread. It would help with replying when the agent session has ended. And a code tour on linux when claude code sandbox cannot start.';
+    expect(said(text)).toEqual(['Archive']);
+    const two = 'The list gets busy during the day. It would help with replying when the agent session has ended. And a code tour on linux when claude code sandbox cannot start.';
+    expect(said(two)).toEqual(['Replying when the agent session has ended']);
+  });
+
+  test('common words spread through a title do not draw it, even in the opening', () => {
+    const titles = said('start a new claude session when I start a new thread');
+    expect(titles).not.toContain('Start a Grok Build session from the Inbox');
+    expect(titles).not.toContain('Code Tour on Linux when Claude Code sandbox cannot start');
+  });
+
+  test('words every title has do not make a title what was asked for', () => {
+    expect(said('start a session in the inbox')).toEqual([]);
+  });
+
+  test('a title must hold about half of what was asked, not just most of its own words', () => {
+    expect(said('Inbox: start a fresh claude session whenever I start a thread')).toEqual([]);
+  });
+
+  test('the same text gives the same lines, typed or pasted', () => {
+    expect(said(ASK)).toEqual(said(ASK));
+    const typed = ASK.split(' ').reduce((text, word) => {
+      said(text);
+      return `${text} ${word}`;
+    });
+    expect(said(typed)).toEqual(said(ASK));
+  });
+});
+
 describe('a link goes only to a public address', () => {
   test.each([
     ['https://github.com/backnotprop/plannotator/issues/1', true],
@@ -237,7 +359,7 @@ describe('the shipped file holds public titles and nothing else', () => {
     ['mark a thread as unread', 'Mark unread'],
     ['pin a thread', 'Pin a thread'],
     ['remind me later', 'Snooze a thread'],
-    ['reply by voice', 'Dictate your replies'],
+    ['reply by voice', 'Voice'],
     ['compose a message', 'New message'],
     ['please add dark mode', 'Settings, Appearance'],
     ['can I use this on my phone', 'Over your tailnet'],

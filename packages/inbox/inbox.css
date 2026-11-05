@@ -6711,6 +6711,8 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
   /* Over a keyboard: a shorter box and one line of at most two rows leave the line, the "what is sent" line and Send all in the sheet. */
   :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
+  /* The line's room is kept while the keyboard is up, so nothing moves under a finger when it lands: the box and Send both stay put. */
+  :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: 82px; }
   :root[data-ib-keyboard] .ib-fbk-rel li > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }

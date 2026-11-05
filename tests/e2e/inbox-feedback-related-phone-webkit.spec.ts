@@ -143,24 +143,55 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     await showsInSheet(page, '[data-feedback-send]');
   });
 
-  test('a tap on the old spot of Bug, in the instant the line lands there, opens no page', async ({ page, context }) => {
+  test('when the line lands nothing moves: the chips, Cancel and Send stay under the finger', async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    const spots = () => page.locator('[data-feedback-category], [data-feedback-contact], .ib-fbk-acts button').evaluateAll((all) => all.map((el) => el.getBoundingClientRect().y));
+    const before = await spots();
+    await page.keyboard.type('need a done button', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    expect(await spots()).toEqual(before);
+    const twoRows = await spots();
+    await page.locator('[data-feedback-message]').fill('');
+    await page.keyboard.type('quick labels please', { delay: 15 });
+    await page.waitForTimeout(800);
+    expect(await spots()).toEqual(twoRows);
+  });
+
+  test('a real tap on Cancel as the line lands sends nothing, and a later tap cancels', async ({ page }) => {
+    const sent: string[] = [];
+    page.on('request', (request) => {
+      if (request.url().includes('/api/inbox/feedback')) sent.push(request.url());
+    });
+    await openSheet(page);
+    await keyboardUp(page);
+    const cancel = page.locator('.ib-fbk-acts button', { hasText: 'Cancel' });
+    await cancel.scrollIntoViewIfNeeded();
+    const at = (await cancel.boundingBox())!;
+    await page.keyboard.type('need a done button', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    await page.touchscreen.tap(at.x + at.width / 2, Math.min(at.y + at.height - 4, 506));
+    await page.waitForTimeout(450);
+    expect(sent).toEqual([]);
+    await page.touchscreen.tap(at.x + at.width / 2, Math.min(at.y + at.height - 4, 506));
+    await expect(page.locator('dialog.ib-fbk-phone')).toHaveCount(0);
+    expect(sent).toEqual([]);
+  });
+
+  test('a press in the instant the line lands opens no page', async ({ page, context }) => {
     await openSheet(page);
     await keyboardUp(page);
     const opened: unknown[] = [];
     context.on('page', (other) => opened.push(other));
-    const bug = (await page.locator('[data-feedback-category="bug"]').boundingBox())!;
-    await page.evaluate(
-      ([x, y]) => {
-        const slot = document.querySelector('[data-feedback-related]')!;
-        new MutationObserver((_, watch) => {
-          if (!slot.querySelector('a')) return;
-          watch.disconnect();
-          (document.elementFromPoint(x!, y!) as HTMLElement | null)?.closest('a')?.click();
-          slot.querySelector('a')!.click();
-        }).observe(slot, { childList: true, subtree: true });
-      },
-      [bug.x + bug.width / 2, bug.y + bug.height / 2],
-    );
+    await page.evaluate(() => {
+      const slot = document.querySelector('[data-feedback-related]')!;
+      new MutationObserver((_, watch) => {
+        const link = slot.querySelector('a');
+        if (!link) return;
+        watch.disconnect();
+        link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+      }).observe(slot, { childList: true, subtree: true });
+    });
     await page.keyboard.type('need a done button', { delay: 15 });
     await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
     await page.waitForTimeout(200);

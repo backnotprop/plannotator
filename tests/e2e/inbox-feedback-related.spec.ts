@@ -178,7 +178,7 @@ test('a click in the instant the list appears opens no page', async ({ page, con
       const link = slot.querySelector('a');
       if (!link) return;
       watch.disconnect();
-      link.click();
+      link.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
     }).observe(slot, { childList: true, subtree: true });
   });
   await page.keyboard.type('need a done button', { delay: 15 });
