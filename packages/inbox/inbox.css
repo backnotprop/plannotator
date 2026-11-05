@@ -7755,7 +7755,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvreadok svg { color: var(--success); }
 .ib-cp-rvreadrow { padding: 8px 14px 10px 16px; border-bottom: 1px solid var(--ib-line); }
 .ib-cp-rvfrompull { color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-cp-picker.ib-cp-rvpulls { top: calc(100% + 4px); left: 8px; width: min(600px, calc(100% - 22px)); }
+.ib-cp-picker.ib-cp-rvpulls:not([data-phone]) { top: calc(100% + 4px); left: 8px; width: min(600px, calc(100% - 22px)); }
 /* The picker's words line up with the toggle above it; its hover reaches past them. */
 .ib-cp-rvrow > .ib-cp-tobtn { margin-left: -8px; }
 .ib-cp-rvpulls .ib-cp-list { display: block; }

@@ -1105,6 +1105,16 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
       expect(target.height).toBeGreaterThanOrEqual(44);
     }
     await shot(page, 'phone-4a-box');
+    // The picker is the whole screen on a phone: something can be found and picked there.
+    await box.locator('[data-review-pick]').click();
+    const phonePicker = box.locator('[data-review-pulls]');
+    const onScreen = await phonePicker.boundingBox();
+    expect(onScreen).toMatchObject({ x: 0, y: 0, width: 390 });
+    expect(onScreen!.height).toBeGreaterThan(700);
+    await expect(phonePicker.getByRole('combobox')).toBeInViewport();
+    await shot(page, 'phone-4b-picker', ['light']);
+    await phonePicker.locator('.ib-cp-rvopt').first().click();
+    await expect(phonePicker).toHaveCount(0);
     await box.locator('[data-compose-text] textarea').fill('what changes for Arabic and Hebrew');
     await shot(page, 'phone-5-ask-custom');
     await box.locator('[data-compose-cancel]').click();
