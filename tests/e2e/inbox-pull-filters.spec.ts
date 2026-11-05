@@ -7,7 +7,7 @@
  *
  * What is proved, in order:
  *  1. The read: the person's own lists, then Others as a call of its own scoped to the projects (never unscoped).
- *  2. At 1440: the head is "PRs" and the filter mark only; the menu's views and projects with counts, the picked rows
+ *  2. At 1440: the head is "Reviews" and the filter mark only; the menu's views and projects with counts, the picked rows
  *     tinted; a view and a project narrow the rows, the mark says so, one quiet line names them; the address keeps
  *     them over a reload; × clears both and focus comes back to the mark.
  *  3. The keys: the mark's tooltip on keyboard focus; Enter opens; the arrows walk the rows; Enter picks; Escape
@@ -359,7 +359,7 @@ async function fit(page: Page) {
 }
 
 function fits(f: Awaited<ReturnType<typeof fit>>, phone: boolean): void {
-  expect(f.head, 'the head holds "PRs" only').toBe('PRs');
+  expect(f.head, 'the head holds "Reviews" only').toBe('Reviews');
   expect(f.past_edge, 'past the edge').toBe(false);
   if (f.scope_h) expect(f.scope_h, 'the line is one line').toBeLessThanOrEqual(phone ? 44 : 30);
   if (phone) {
@@ -396,7 +396,12 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   await expect(page.locator('[data-pulls-row]').first()).toBeVisible();
-  const calls = readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  const read = () => readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
+  // The first row shows when one forge has answered; the other calls may still be on their way.
+  await expect
+    .poll(() => ['gh pulls', 'glab pulls', 'gh others', 'glab others'].filter((name) => read().some((c) => c.startsWith(name))))
+    .toEqual(['gh pulls', 'glab pulls', 'gh others', 'glab others']);
+  const calls = read();
   const gh = calls.filter((c) => c.startsWith('gh pulls'));
   const glab = calls.filter((c) => c.startsWith('glab pulls'));
   const ghOthers = calls.filter((c) => c.startsWith('gh others'));
@@ -417,12 +422,12 @@ test('the read: the person\'s own lists, then Others as a call of its own scoped
   expect(calls.filter((c) => c.includes('graphql-other'))).toEqual([]);
 });
 
-test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the list, are named once over it, and stay in the address', async () => {
+test('1440: "Reviews" and the filter mark; the menu; a view and a project narrow the list, are named once over it, and stay in the address', async () => {
   const { page } = world;
   await landed(page, async () => (await page.goto('about:blank'), page.goto(`${world.url}#pulls`)));
   const list = page.locator('[data-pulls-list]');
   const trigger = list.locator(TRIGGER);
-  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
   await expect(trigger).toHaveAccessibleName('Filter');
   await expect(list.locator('[data-pulls-scope]')).toHaveCount(0);
   fits(await fit(page), false);
@@ -457,7 +462,7 @@ test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the
   fits(await fit(page), false);
 
   // The address keeps both: a reload draws the same list.
-  expect(await page.evaluate(() => location.hash)).toMatch(/^#pulls&project=prj_[^&]+&view=review$/);
+  expect(await page.evaluate(() => location.hash)).toMatch(/^#reviews&project=prj_[^&]+&view=review$/);
   await landed(page, () => page.reload());
   await expect(trigger).toHaveAccessibleName('Filter: To review, web-app');
   expect(await rows(page)).toHaveLength(2);
@@ -466,7 +471,7 @@ test('1440: "PRs" and the filter mark; the menu; a view and a project narrow the
   await list.locator('[data-pulls-filter-clear]').click();
   await expect(trigger).toHaveAccessibleName('Filter');
   await expect(trigger).toBeFocused();
-  expect(await page.evaluate(() => location.hash)).toBe('#pulls');
+  expect(await page.evaluate(() => location.hash)).toBe('#reviews');
   expect(await rows(page)).toHaveLength(14);
   expect(world.errors).toEqual([]);
 });
@@ -498,7 +503,7 @@ test('1440, the keys: the mark says its name on keyboard focus; Enter opens, the
   await expect(menu).toHaveCount(0);
   await expect(trigger).toBeFocused();
   await expect(trigger).toHaveAccessibleName('Filter: To review');
-  expect(await page.evaluate(() => location.hash)).toBe('#pulls&view=review');
+  expect(await page.evaluate(() => location.hash)).toBe('#reviews&view=review');
   // Escape from the open menu also brings focus back.
   await page.keyboard.press('Enter');
   await expect(menu).toBeVisible();
