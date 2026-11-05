@@ -7761,6 +7761,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-vhead .ib-risk { margin-left: 4px; }
 .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-l { position: static; width: auto; height: auto; clip-path: none; }
 .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) { flex: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf { margin-left: auto; }
 .ib-prlist .ib-lhead:has(.ib-pr-riskf) .ib-sp { margin-left: -10px; }
 .ib-prlist .ib-lhead:has(.ib-pr-riskf[data-set]) .ib-pr-onyou { display: none; }
 .ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
