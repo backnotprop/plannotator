@@ -4400,7 +4400,8 @@ function Inbox() {
   const pulls = usePulls(route.page === 'reviews' && pullsShown, pullsShown);
   // A #reviews link on a guest's page (it could not turn Code review on): the Inbox, as if the page were not there.
   useEffect(() => {
-    if (route.page === 'reviews' && guestPage) close({ page: 'inbox', project: null, thread: null });
+    // In place: Back from the Inbox must not land on #reviews and be sent back again.
+    if (route.page === 'reviews' && guestPage) writeRoute({ page: 'inbox', project: null, thread: null }, { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [route.page, guestPage]);
   // `#reviews&new`: the box opens once, over the page, and the address goes back to the page (Back and a reload do not reopen it).

@@ -560,7 +560,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
         {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to pull requests">
+          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
             <Icon name="back" />
           </button>
         )}
