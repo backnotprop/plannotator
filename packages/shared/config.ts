@@ -339,9 +339,9 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
-   * Plan review of Claude Code's ExitPlanMode: the mod's non-blocking review
-   * and the classic PermissionRequest hook. `false` leaves ExitPlanMode to
-   * Claude Code's own dialog. The rest of Plannotator is unchanged.
+   * Plan review in every harness that supports this switch (Claude Code's
+   * ExitPlanMode today). `false` leaves plan approval to the harness's own
+   * dialog. The rest of Plannotator is unchanged.
    * PLANNOTATOR_PLAN_REVIEW wins over this key. Default: true.
    */
   planReview?: boolean;
