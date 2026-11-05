@@ -213,8 +213,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
   // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
-  // without them (GitLab's whole stack), or a layer whose head moved during its read, opens nothing.
-  const headMoved = scope === 'layer' && !!diff && !diff.head_sha;
+  // without them (GitLab's whole stack), or a diff whose head moved during its read, opens nothing.
+  const headMoved = !!diff && !diff.head_sha;
   const fileContents = useCallback(
     async (path: string, signal: AbortSignal, patch: string) => {
       const ids = headMoved ? null : patchBlobIds(patch);

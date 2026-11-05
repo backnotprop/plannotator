@@ -118,6 +118,7 @@ packages/inbox/notificationStates.test.tsx
 packages/inbox/attachmentStepping.test.tsx
 packages/inbox/imageZoom.test.tsx
 packages/inbox/fullView.test.tsx
+packages/inbox/earlierComments.test.tsx
 packages/inbox/phoneStepping.test.tsx
 packages/inbox/imageSwipe.test.tsx
 packages/inbox/fullScreenThread.test.tsx
@@ -131,6 +132,7 @@ packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
+packages/inbox/sessionLabels.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
 packages/inbox/tidyMenu.test.tsx
 packages/inbox/listLook.test.tsx
@@ -142,6 +144,7 @@ packages/inbox/composeThread.test.tsx
 packages/inbox/sendNow.test.tsx
 packages/inbox/undelivered.test.tsx
 packages/inbox/tagAgents.test.tsx
+packages/inbox/taterMark.test.tsx
 packages/inbox/restartWarning.test.tsx
 packages/inbox/reloadHosts.test.tsx
 packages/inbox/pasteFiles.test.tsx
@@ -492,6 +495,7 @@ packages/ui/components/StartCutPath.test.tsx
 packages/inbox/heldPick.test.tsx
 packages/inbox/pickQueue.test.tsx
 packages/inbox/pickSaveReads.test.tsx
+packages/inbox/listDeltaWindow.test.tsx
 packages/inbox/linkedMachines.test.tsx
 packages/inbox/voiceMirror.test.tsx
 packages/inbox/voiceComposeRenders.test.tsx

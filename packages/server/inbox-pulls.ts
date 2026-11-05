@@ -394,7 +394,7 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
-  /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
+  /** The head commit of the last patch read for this PR whose head held still (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /**
    * One file's whole text at the commits this PR's diff runs between, for the viewer's expand arrows: read from the
@@ -511,7 +511,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const fileHoldUntil = new Map<string, number>();
   const signed = new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
-  const readHeads = new Map<string, string | null>();
+  const readHeads = new Map<string, string>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -776,8 +776,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       const headAfter = headBefore ? await headNow() : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      if (scope === "layer") readHeads.set(key, head_sha);
-      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, ...(scope === "layer" ? { head_sha } : {}) };
+      if (head_sha) readHeads.set(key, head_sha);
+      const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
@@ -791,9 +791,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // A fork's commits live in the fork; the diff stays as it came.
       if (!!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) return none;
-      // The commit the patch on screen was read at, when the Inbox read one; a stack's is the list's. A layer whose head
-      // moved during its read (readHeads holds null) has no commit to read at.
-      const head = shaOf(scope === "layer" ? (readHeads.has(key) ? readHeads.get(key) : pull.head_sha) : pull.head_sha);
+      // The commit the patch on screen was read at, when the Inbox read one, else the list's. A patch whose head moved
+      // during its read is the client's to catch (its answer has no head_sha, so it asks nothing); the blob ids catch the rest.
+      const head = shaOf(readHeads.get(key) ?? pull.head_sha);
       if (!head) return none;
       const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
       const parts = splitPath(pull.repo)!;

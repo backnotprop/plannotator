@@ -4691,6 +4691,22 @@ export class InboxStore {
   }
 
   /**
+   * The person's comments on files in a thread that a Send already carried: what the file view lists as earlier
+   * comments (`earlierCommentsOn` in packages/inbox/earlierComments.ts narrows them to the file open). A sent record
+   * is never edited, so its `updated_at` is its reply's `created_at`. Comments on a guided review or a message's text are not on a file.
+   */
+  earlierAnnotations(threadId: string): InboxAnnotationRecord[] {
+    const out: InboxAnnotationRecord[] = [];
+    for (const record of this.annotations.values()) {
+      if (record.thread_id !== threadId || record.removed_at !== null || record.sent_reply_id === null) continue;
+      if (record.guide || record.message) continue;
+      if (this.messages.get(record.sent_reply_id)?.author.kind !== "person") continue;
+      out.push(record);
+    }
+    return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
    * Save an annotation on an attachment's version (a new one, or an edit of
    * one still waiting). Its key is the attachment's path and the version:
    * "current" (the file on disk, whatever its bytes are now) or the sent

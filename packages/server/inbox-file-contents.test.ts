@@ -218,16 +218,29 @@ describe("a PR's file", () => {
     expect(f.reads).toContain(`repos/northwind/billing-svc/compare/release...${HEAD}?per_page=1`);
   });
 
-  test("a head that moved during the diff's read has no commit to read at: nothing runs", async () => {
+  // The client stops asking when an answer has no head_sha; this is what a read still on its way gets.
+  test("a head that moved during the diff's read is not remembered: files read at the list's head, then at the next head that held", async () => {
     const f = scripted();
     let heads = 0;
-    const run: RefRunner = (cli, args) => (args.includes(".head.sha") ? Promise.resolve({ stdout: `${(heads++ === 0 ? "c" : "e").repeat(40)}\n`, stderr: "", exitCode: 0 }) : f.run(cli, args));
-    const pulls = createInboxPulls({ run, gitRead: async () => null });
+    // Before and after the first read: two different heads. Before and after the next: the same one.
+    const sequence = ["c", "e", "d", "d", "f", "g"];
+    const run: RefRunner = (cli, args) => (args.includes(".head.sha") ? Promise.resolve({ stdout: `${sequence[heads++]!.repeat(40)}\n`, stderr: "", exitCode: 0 }) : f.run(cli, args));
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run, gitRead: async () => null, now: () => clock });
     await pulls.list([REPO]);
     expect((await pulls.diff(KEY, "layer")).head_sha).toBeNull();
     f.reads.length = 0;
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
-    expect(f.reads).toEqual([]);
+    await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS);
+    expect(f.reads.some((read) => read.endsWith(`ref=${"a".repeat(40)}`))).toBe(true);
+    clock += 3_600_000;
+    expect((await pulls.diff(KEY, "layer")).head_sha).toBe("d".repeat(40));
+    f.reads.length = 0;
+    await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS);
+    expect(f.reads.some((read) => read.endsWith(`ref=${"d".repeat(40)}`))).toBe(true);
+    // A later read that moved keeps that head: posting relies on it too.
+    clock += 3_600_000;
+    expect((await pulls.diff(KEY, "layer")).head_sha).toBeNull();
+    expect(pulls.readHead(KEY)).toBe("d".repeat(40));
   });
 
   test("a patch that names no blobs (GitLab's whole stack): no arrows, and nothing runs", async () => {
