@@ -29,6 +29,7 @@ import { INBOX_TIDY_WITHDRAWN_HOST, inboxTidyBodyStepsOff, inboxTidyIsStepsOnly 
 import { QUESTION_OPENERS_WITH_TEXT_MAX, questionOpenersWithText, questionOpenersWithTextText, type QuestionOpenerWithText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxSendResult, InboxStore } from "@plannotator/shared/inbox/store";
+import { inboxViewingLine } from "@plannotator/shared/inbox/uploads";
 import type { InboxAttachment, InboxListRow } from "@plannotator/core/inbox-types";
 import { registerInboxGuideTools } from "./inbox-guides";
 import { lastContactOf, noteSessionRead, staleThreadOf, staleThreadText } from "./inbox-session-reads";
@@ -44,8 +45,9 @@ import { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResul
 export { fail, guarded, ok, okComplete, PROJECT_PATH_DESCRIPTION, type ToolResult };
 import type { InboxSearchIndex } from "@plannotator/shared/inbox/search";
 import { isInsideFolder, type InboxProjectRoot } from "./inbox-project-root";
+import { registerInboxSnoozeTool, type InboxSnoozeMcpContext } from "./inbox-mcp-snooze";
 
-export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "get_guide_brief", "submit_guide", "card", "steps"] as const;
+export const INBOX_MCP_TOOLS = ["send_message", "read_thread", "search", "resolve_message", "snooze_thread", "get_guide_brief", "submit_guide", "card", "steps"] as const;
 
 /**
  * The tools this Inbox serves with the Board on (and steps off): every one,
@@ -217,7 +219,7 @@ export const SEND_ROUTING_FIELDS = {
   agent_host: z.string().optional().describe("Your agent host, e.g. claude-code, codex, cursor."),
 };
 
-export interface InboxMcpContext {
+export interface InboxMcpContext extends InboxSnoozeMcpContext {
   store: InboxStore;
   /** The Inbox's base URL, `http://localhost:<port>/`. */
   baseUrl: () => string;
@@ -1110,7 +1112,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
             // This session has read the thread now (send_message's "not read since" line).
             noteSessionRead(store, reader, threadId, clock());
             // The full records, as before the window (tests, scripts, a jq over the result).
-            const thread = store.agentThread(threadId, reader)!;
+            const records = store.agentThread(threadId, reader)!;
+            // What was on screen reads the same here as in the transcript: the line, not its parts.
+            const thread = { ...records, messages: records.messages.map((m) => (m.viewing ? { ...m, viewing: inboxViewingLine(m) } : m)) };
             const replies = thread.messages.filter((m) => m.author.kind === "person").length;
             return ok(
               `Thread ${threadId}${thread.subject ? ` (${thread.subject})` : ""}: ${thread.messages.length} message${thread.messages.length === 1 ? "" : "s"}, ${replies} from the person${thread.resolved_at ? ", resolved" : ""}.${naming?.line ?? ""}`,
@@ -1211,6 +1215,9 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
         return ok(`Thread ${summary.thread_id} is ${summary.resolved_at ? "resolved" : "open"}.`, { thread: summary });
       }),
   );
+
+  // Snooze, when the person asks an agent to: packages/server/inbox-mcp-snooze.ts.
+  registerInboxSnoozeTool(server, context);
 
   // Guided reviews (step 5): packages/server/inbox-guides.ts.
   registerInboxGuideTools(server, context);

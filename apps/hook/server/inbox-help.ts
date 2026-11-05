@@ -24,6 +24,7 @@
 import { INBOX_CARD_ACTION_ON, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
+import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
@@ -137,6 +138,13 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     args: ["message_id", "resolved"],
     lines: [
       "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed.",
+    ],
+  },
+  snooze_thread: {
+    args: ["thread_id", "until"],
+    lines: [
+      `Only when the person asks. Snoozes a thread until \`until\` (ISO 8601 with zone, within ${INBOX_SNOOZE_MAX_DAYS} days); it then returns by itself. \`null\` ends it. Sends nothing.`,
+      "- A linked machine's thread works the same, by its thread id. If that machine is away, it applies when it is back. One too old answers `machine_needs_update`.",
     ],
   },
   get_guide_brief: {
@@ -319,7 +327,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- A question you cannot settle from the code or the conversation, which can wait for an answer.",
     "- A blocker: say what stops you (a `Stopped:` line, below). When you can go on with other work, leave `Stopped:` out and name what waits in `Holds up:`; a question that stops you can carry both.",
     "- A true blocker only the person can clear, outside this conversation (approve a deploy, sign in, touch a security key, merge a pull request you cannot merge): one `:::action` action item (see \"Action items only the person can do\").",
-    "- Long work you finished: one short summary with its pictures in place (`![alt](path)` in `body`, where you write about each), and the files to look at in `attachments`.",
+    "- Long work you finished: one short summary with its pictures in place (`![alt](path)` in `body`, where you write about each), and the files to look at in `attachments`. You can send a video in `attachments` too. Use your judgment on when one helps.",
     "- A decision that needs pictures or files, even while the person writes in the chat.",
     "- A plan, document, HTML prototype or diagram the person should read and annotate (`attachments`).",
     "- A guided review of a finished code change (get_guide_brief, then submit_guide).",

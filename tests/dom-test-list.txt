@@ -518,6 +518,9 @@ packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/inbox/review-drawing/ShowMeLayer.test.tsx
+packages/review-editor/components/SelectionChooser.test.tsx
+packages/inbox/review-drawing/ShowMeDrag.test.tsx
 packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
