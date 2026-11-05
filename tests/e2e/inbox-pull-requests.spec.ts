@@ -652,21 +652,18 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
 
+  // A teammate's review request stays On you; a PR nobody has reviewed waits, folded, under Open, not reviewed.
   const onYou = list.locator('[data-pulls-group="on_you"] [data-pulls-row]');
-  await expect(onYou).toHaveCount(3);
-  await expect(list.locator(`[data-pulls-group="on_you"] [data-pulls-row="${STACK_ID}"]`)).toBeVisible();
+  await expect(onYou).toHaveCount(2);
   await expect(list.locator('[data-pulls-group="on_you"] [data-pulls-row="github.com/northwind/web-app#880"]')).toContainText('tomas asked for your review');
-  await expect(list.locator('[data-pulls-group="ready"] [data-pulls-row]')).toHaveCount(1);
-  await expect(list.locator('[data-pulls-group="ready"]')).toContainText('Upgrade to Vite 8');
-  const fold = list.locator('[data-pulls-waiting-toggle]');
-  await expect(fold).toHaveText(/2 waiting on others/);
-  await expect(list.locator('[data-pulls-group="waiting"] [data-pulls-row]')).toHaveCount(0);
-  const stackRow = list.locator(`[data-pulls-row="${STACK_ID}"]`);
+  const fold = list.locator('[data-reviews-fold="not_reviewed"]');
+  await expect(fold).toHaveAttribute('aria-expanded', 'false');
+  await expect(list.locator('[data-pulls-group="not_reviewed"] [data-pulls-row]')).toHaveCount(0);
+  await fold.click();
+  const stackRow = list.locator(`[data-pulls-group="not_reviewed"] [data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
   await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
-  // The agent on the third line, its mark before its name; top left, the author's picture (her own stack too).
-  await expect(stackRow).toContainText('3 open, 1 merged · Review thread with Claude Code · start at #412');
-  await expect(stackRow.locator('.ib-pv [data-pulls-row-agent="claude-code"]')).toBeVisible();
+  await expect(stackRow).toContainText('3 open, 1 merged');
   await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
@@ -678,15 +675,15 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
   expect(world.outside).toEqual([]);
   await expect(stackRow).toContainText('Retry failed charges');
-  // The head is "PRs" and the filter mark (inbox-pull-filters.spec.ts); the On you band carries the count.
+  // The head is "Reviews", the filter mark and + (inbox-pull-filters.spec.ts); the On you band carries the count.
   expect(await list.locator('[data-pulls-heading]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
-  await expect(list.locator('[data-pulls-heading]')).toHaveText('PRs');
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
   await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('Filter');
-  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
+  await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('2');
   await shot(page, '2-list');
-  await fold.click();
-  await expect(list.locator('[data-pulls-group="waiting"] [data-pulls-row]')).toHaveCount(2);
-  await fold.click();
+  // Remembered: a new read of the page finds it as the person left it (open for the rest of this spec).
+  await page.reload();
+  await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
 });
 
 test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {
@@ -750,10 +747,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   const page = await context.newPage();
   try {
     await offerLaunch(page);
-    await page.goto(`${world.url}#pulls`);
-    const toggle = page.locator('[data-pulls-waiting-toggle][aria-expanded="false"]');
-    if (await toggle.count()) await toggle.click();
-    await page.locator(`[data-pulls-row="${row}"]`).click();
+    await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(row)}`);
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
     if (openPicker) {
       await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
@@ -780,7 +774,7 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
   const list = page.locator('[data-pulls-list]');
-  await list.locator('[data-pulls-waiting-toggle]').click();
+  await expect(list.locator('[data-reviews-fold="not_reviewed"]')).toHaveAttribute('aria-expanded', 'true');
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   // One button under the title, Open the diff beside it; no picker until it is asked for, no thread, no Reply.
@@ -843,7 +837,7 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Review thread with Claude Code · your review');
+  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="asked"]')).toContainText('Guided review on the way');
   await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
   await expect(page.locator('[data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
@@ -865,13 +859,16 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   await page.goto(world.url);
   await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
   await shot(page, '6t-thread-name', ['light']);
+  // Reviewed, the row opens the same thread, in Reviews; the line over its title leads to the PR's own page.
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toBe(`#reviews&thread=${threadId}`);
+  await expect(page.locator('[data-review-context]')).toContainText('#869');
+  await page.locator('[data-review-open-pull]').click();
   await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
   await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
-  await page.goto(`${world.url}#pulls`);
-  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(LOCALE)}`);
   await page.locator('[data-pulls-stack] [data-pulls-primary="open"]').click();
   await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
   await page.unroute('**/api/inbox/sessions*');

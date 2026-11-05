@@ -271,18 +271,19 @@ export function ReviewsList({
       </div>
     ) : null;
   if (rows.length === 0) {
-    const othersOnItsWay = (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending);
-    if (othersOnItsWay && notices.length === 0) return <p className="ib-pr-empty" data-pulls-empty="reading">Reading your pull requests…</p>;
-    if (filter !== 'all') {
+    // Never "nothing" before Others answers, and the wait never hides a host's own failure.
+    const othersOnItsWay = (filter === 'all' || filter === 'others') && model.hosts.some((h) => h.others_pending) && !model.hosts.some((h) => h.error);
+    if (othersOnItsWay) return <p className="ib-pr-empty" data-pulls-empty="reading">Reading your pull requests…</p>;
+    // A view with nothing in it, while the read was whole: what the view holds. Never while a host failed or was cut.
+    if (filter !== 'all' && notices.every((n) => n.key.startsWith('unsigned:'))) {
       const empty = pullFilterEmptyWords(filter);
       return (
-        <>
-          {notice}
-          <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
-            <p className="ib-pr-empty-h">{empty.head}</p>
-            <p>{empty.line}</p>
-          </div>
-        </>
+        <div className="ib-pr-empty" data-pulls-empty={`view-${filter}`}>
+          <p className="ib-pr-empty-h">{empty.head}</p>
+          {[empty.line, ...notices.map((n) => n.line)].map((line) => (
+            <p key={line}>{line}</p>
+          ))}
+        </div>
       );
     }
     const empty = pullsEmptyWords(model, notices);

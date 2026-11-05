@@ -26,6 +26,7 @@ import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
 import { layerVerdictLink } from './topology';
 
+import { pullsStateOf } from './reviewsTestState';
 const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
@@ -490,12 +491,13 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   mount(
     <SidebarProvider>
     <PullsPage
-      state={{ model, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+      state={pullsStateOf(model)}
       stackId={null}
       project={null}
       projects={[]}
       projectNames={new Map()}
       phone={false}
+      onNew={() => {}}
       onOpenStack={(id) => id && opened.push(id)}
       filter="all"
       onScope={() => {}}
@@ -672,12 +674,13 @@ function Page({
   return (
     <SidebarProvider>
       <PullsPage
-        state={{ model: answer, error: null, loading: false, refresh: () => {}, reload: () => {} }}
+        state={pullsStateOf(answer)}
         stackId={stackId}
         project={null}
         projects={[]}
         projectNames={new Map()}
         phone={false}
+        onNew={() => {}}
         onOpenStack={() => {}}
         filter="all"
         onScope={() => {}}

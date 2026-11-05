@@ -1,7 +1,7 @@
 /**
  * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button"), in the window, with
  * the view and the project held the way App holds them (the address). What regresses:
- *  - the filter shown before the first answer, or anything but "PRs" and the mark in the head (a project's name, the
+ *  - the filter shown before the first answer, or anything but "Reviews" and the mark in the head (a project's name, the
  *    on-you count: the head must never grow);
  *  - a pick not narrowing the rows, the mark not saying it is narrowed, or the picks not named once over the list;
  *    × or Clear filters clearing one and not the other, or in two steps;
@@ -21,6 +21,7 @@ import type { ProjectFolder } from '../api';
 import type { PullFilter } from './model';
 import type { PullsPageProps } from './PullsPage';
 
+import { pullsStateOf } from './reviewsTestState';
 const hasDom = typeof document !== 'undefined';
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
@@ -142,13 +143,14 @@ function draw(over: Partial<PullsPageProps> = {}) {
   root = createRoot(host);
   const picks: { filter: PullFilter; project: string | null }[] = [];
   let props: PullsPageProps = {
-    state: { model: MODEL, error: null, loading: false, refresh: () => {}, reload: () => {} },
+    state: pullsStateOf(MODEL),
     stackId: null,
     project: null,
     filter: 'all',
     projects: PROJECTS,
     projectNames: NAMES,
     phone: false,
+    onNew: () => {},
     onOpenStack: () => {},
     onScope: (next) => {
       picks.push(next);
@@ -176,8 +178,7 @@ function draw(over: Partial<PullsPageProps> = {}) {
 }
 
 async function openWaiting() {
-  const fold = $('[data-pulls-waiting-toggle]');
-  if (fold && fold.getAttribute('aria-expanded') === 'false') {
+  for (const fold of $$('[data-reviews-fold][aria-expanded="false"]')) {
     await act(async () => fold.click());
     await settle();
   }
@@ -191,10 +192,10 @@ const menuRows = (selector: string) =>
     on: row.getAttribute('aria-checked') === 'true',
   }));
 
-test.if(hasDom)('at rest: "PRs" and the filter mark, nothing else in the head; nothing before the first answer', async () => {
-  draw({ state: { model: null, error: null, loading: true, refresh: () => {}, reload: () => {} } });
+test.if(hasDom)('at rest: "Reviews" and the filter mark, nothing else in the head; nothing before the first answer', async () => {
+  draw({ state: pullsStateOf(null, true) });
   await settle();
-  expect($('[data-pulls-heading]')!.textContent).toBe('PRs');
+  expect($('[data-pulls-heading]')!.textContent).toBe('Reviews');
   expect($('[data-pulls-filter-trigger]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
@@ -202,7 +203,7 @@ test.if(hasDom)('at rest: "PRs" and the filter mark, nothing else in the head; n
   draw();
   await settle();
   const head = $('[data-pulls-list] .ib-lhead')!;
-  expect(head.textContent).toBe('PRs');
+  expect(head.textContent).toBe('Reviews');
   const trigger = head.querySelector<HTMLElement>('[data-pulls-filter-trigger]')!;
   expect(trigger.getAttribute('aria-label')).toBe('Filter');
   expect(trigger.hasAttribute('data-set')).toBe(false);
@@ -240,8 +241,8 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   expect(trigger.getAttribute('aria-label')).toBe('Filter: To review');
   expect($('[data-pulls-scope-view]')!.textContent).toBe('To review');
   expect($('[data-pulls-scope-project]')).toBeNull();
-  // The head never grows: still only "PRs".
-  expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('PRs');
+  // The head never grows: still only "Reviews".
+  expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('Reviews');
 
   // The projects' counts follow the view.
   await press(trigger);
@@ -282,7 +283,7 @@ test.if(hasDom)('× and Clear filters clear the view and the project in one step
 
 test.if(hasDom)('one project offered: no project rows', async () => {
   const one: InboxPullsAnswer = { ...MODEL, pulls: [pull(1), pull(4, { mine: false, author: 'tomas' })], projects: { [`github.com/${WEB}`]: ['prj_web'] } };
-  draw({ state: { model: one, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+  draw({ state: pullsStateOf(one) });
   await settle();
   await press($('[data-pulls-filter-trigger]')!);
   expect($$('[data-pulls-filter-menu] [data-pulls-filter]')).toHaveLength(4);
@@ -308,14 +309,14 @@ test.if(hasDom)('a stack the address names opens even when the view leaves it ou
 
 test.if(hasDom)('an empty view says what the view holds; a failed read is never said as an empty view', async () => {
   const theirs: InboxPullsAnswer = { ...MODEL, pulls: [pull(4, { mine: false, author: 'tomas' })] };
-  draw({ filter: 'mine', state: { model: theirs, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+  draw({ filter: 'mine', state: pullsStateOf(theirs) });
   await settle();
   expect($('[data-pulls-empty]')!.getAttribute('data-pulls-empty')).toBe('view-mine');
   act(() => root?.unmount());
   host?.remove();
 
   const failed: InboxPullsAnswer = { ...theirs, pulls: [], hosts: [{ cli: 'gh', host: 'github.com', login: null, error: 'unavailable' }] };
-  draw({ filter: 'mine', state: { model: failed, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+  draw({ filter: 'mine', state: pullsStateOf(failed) });
   await settle();
   expect($('[data-pulls-empty]')!.getAttribute('data-pulls-empty')).toBe('unread');
 });
@@ -333,7 +334,7 @@ test.if(hasDom)('Others failing or on its way: Mine and To review still say what
   // The person's own read failed while Others is on its way: the failure is said at once, never "Reading…".
   const ownFailed = theirs({ cli: 'gh', host: 'github.com', login: 'dana', error: 'unavailable', others_pending: true });
   for (const filter of ['all', 'others'] as const) {
-    draw({ filter, state: { model: ownFailed, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+    draw({ filter, state: pullsStateOf(ownFailed) });
     await settle();
     expect(`${filter}: ${$('[data-pulls-empty]')!.getAttribute('data-pulls-empty')}`).not.toBe(`${filter}: reading`);
     expect($('[data-pulls-list]')!.textContent).not.toContain('Reading your pull requests');
@@ -342,7 +343,7 @@ test.if(hasDom)('Others failing or on its way: Mine and To review still say what
     root = null;
   }
   for (const [filter, model, said] of cases) {
-    draw({ filter, state: { model, error: null, loading: false, refresh: () => {}, reload: () => {} } });
+    draw({ filter, state: pullsStateOf(model) });
     await settle();
     expect(`${filter}: ${$('[data-pulls-empty]')!.getAttribute('data-pulls-empty')}`).toBe(`${filter}: ${said}`);
     act(() => root?.unmount());
