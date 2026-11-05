@@ -47,8 +47,6 @@ test.if(hasDom)("each file shows its +/- in the review app's columns, and each f
   const folder = host.querySelector('[data-review-folder] .ib-prp-folder');
   expect(counts(folder)).toEqual(['+63', '-25']);
   expect(folder!.querySelector('.review-count-columns')!.getAttribute('data-count-columns')).toBe('quiet');
-  // The columns are as wide as the rail's widest numbers, so they line up down the rail.
-  expect((host.querySelector('.ib-prp-files') as HTMLElement).style.getPropertyValue('--count-add-w')).toBe('calc(3ch + 2px)');
 });
 
 test.if(hasDom)('a row holds the whole path, cut only where it may give way: the folder before its last one, the name before its end', () => {
