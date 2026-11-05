@@ -398,6 +398,7 @@ for (const width of [390, 320]) {
       await d.locator(SEND).tap();
       expect((await answer).status()).toBe(200);
       await expect.poll(() => projects()[folder]).toEqual({ hasTrustDialogAccepted: true });
+      await expect.poll(() => startsIn(folder).length, { timeout: 30_000 }).toBe(1);
     } finally {
       await phone.close();
     }

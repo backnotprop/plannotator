@@ -809,7 +809,8 @@ function HandLine({
     }
   };
   const sessions = (targets?.sessions ?? []).filter((s) => !owners.includes(s.session));
-  const canLaunch = launch && targets?.launch === true;
+  // A new agent starts in the PR's project: with no project for its repository, compose would have nowhere to start it.
+  const canLaunch = launch && targets?.launch === true && projects.length > 0;
   // The picked agent: the person's pick, else the last one handed to, else the first live one.
   const [pickedSession, setPickedSession] = useState<string | null>(null);
   const picked = sessions.find((s) => s.session === pickedSession) ?? sessions.find((s) => s.session === lastPullAgent()) ?? sessions[0] ?? null;
