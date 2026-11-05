@@ -2061,12 +2061,14 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   const { model: live, load: loadLive } = useLiveSessions(thread.thread_id, askerToWatch);
   // A launched agent that stopped is not "ended": a reply starts it again (`claude respawn`), so no route choice.
   const launchResumes = !!launched && !launched.deleted_at && runLine !== undefined && runLine?.state !== 'missing' && runLine?.state !== 'failed';
+  // Only the launched session (the root's `to`, the one the server's sweep starts again): another agent in the thread that ended is gone.
+  const resumingSession = launchResumes ? (root.to?.session ?? null) : null;
   // Every other session this Send reaches is checked too (handoff "multi-agent-thread-model", failure 2): a pick
   // on an ended session's question, while the words go to a live one, opens the choice for that answer.
-  const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking);
+  const otherSessions = otherSendSessions(thread, { skip: skipIds, carries: sendCarries, records }, wordsAsking).filter((s) => s.session !== resumingSession);
   const otherEnded = useEndedSessions(thread.thread_id, otherSessions.map((s) => s.session));
   const endedOthers = otherEnded.ended;
-  const wordsEnded = !resolved && !launchResumes && askerHasEnded(wordsAsking, live);
+  const wordsEnded = !resolved && wordsAsking?.session !== resumingSession && askerHasEnded(wordsAsking, live);
   const endedOther = resolved || wordsEnded ? null : (otherSessions.filter((s) => endedOthers.has(s.session)).at(-1) ?? null);
   /** The session the ended note and the choice are about: the words', else another this Send answers that ended. */
   const asking = endedOther ?? wordsAsking;
