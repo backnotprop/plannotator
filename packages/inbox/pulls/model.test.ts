@@ -22,7 +22,7 @@ import { initials, repoLabels } from './labels';
 import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { railRows } from './rail';
-import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, otherLayerAgents, stackAgentsWords, stackLink, stackVerdictLink } from './topology';
+import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, stackLink, stackVerdictLink } from './topology';
 
 function pr(fields: Partial<InboxPull> & { number: number; head: string }): InboxPull {
   const repo = fields.repo ?? 'northwind/payments-gateway';
@@ -80,7 +80,6 @@ describe('several agents on one stack (#2)', () => {
     expect(layerVerdictLink(layers[1]!, stack!, links)!.thread_id).toBe('claude');
     expect(layerVerdictLink(layers[2]!, stack!, links)!.thread_id).toBe('codex');
     expect(layerVerdictLink(layers[3]!, stack!, links)!.thread_id).toBe('codex');
-    expect(otherLayerAgents(stack!, links).map((o) => [o.link.thread_id, o.layers.map((l) => l.number)])).toEqual([['codex', [3, 4]]]);
   });
 
   test('a layer under the only linked one, with two agents on the stack, goes to neither', () => {
@@ -103,7 +102,6 @@ describe('several agents on one stack (#2)', () => {
     const [fork] = inboxPullStacks([a, b, c]);
     const forked = { [a.key]: link('claude'), [b.key]: link('codex') };
     expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('claude');
-    expect(otherLayerAgents(fork!, forked).map((o) => [o.link.thread_id, o.layers.map((l) => l.number)])).toEqual([['codex', [2]]]);
   });
 
   test("a fork: a layer on B takes B's agent, though its cousin C (another agent) comes just before it in the list", () => {
@@ -119,29 +117,30 @@ describe('several agents on one stack (#2)', () => {
     expect(layerVerdictLink(c, fork!, forked)!.thread_id).toBe('codex');
   });
 
-  test("a Whole stack verdict goes to an agent only when every layer under it is that agent's; else to none", () => {
-    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers.
-    const whole = stackVerdictLink(layers[3]!, stack!, links);
-    expect(whole.link).toBeNull();
-    expect(whole.agents.map((a) => a.thread_id).sort()).toEqual(['claude', 'codex']);
-    // Up to #2: Claude's alone.
-    expect(stackVerdictLink(layers[1]!, stack!, links).link!.thread_id).toBe('claude');
-    // A layer of no agent under the agent's own goes with it.
-    expect(stackVerdictLink(layers[3]!, stack!, { [layers[0]!.key]: link('claude') }).link!.thread_id).toBe('claude');
-    expect(stackAgentsWords(['Claude Code', 'Codex'])).toBe('Claude Code and Codex each have layers here. Send to an agent from This layer.');
-    expect(stackAgentsWords(['Claude Code', 'Claude Code'])).toBe('2 Claude Code threads each have layers here. Send to an agent from This layer.');
+  test("a Whole stack verdict goes to the stack's one review thread, its lowest linked layer's, whoever linked a layer above", () => {
+    // Claude on #1, Codex on #3: the stack up to #4 covers both agents' layers, and goes to Claude's thread.
+    expect(stackVerdictLink(layers[3]!, stack!, links)!.thread_id).toBe('claude');
+    expect(stackVerdictLink(layers[1]!, stack!, links)!.thread_id).toBe('claude');
+    // Only a higher layer linked: the stack's thread is that one.
+    expect(stackVerdictLink(layers[0]!, stack!, { [layers[2]!.key]: link('codex') })!.thread_id).toBe('codex');
+    // A teammate's layer takes no verdict here; a teammate's linked layer is not the person's stack thread.
+    const theirs = { ...layers[0]!, mine: false };
+    const [mixed] = inboxPullStacks([theirs, ...layers.slice(1)]);
+    expect(stackVerdictLink(theirs, mixed!, links)).toBeNull();
+    expect(stackVerdictLink(layers[1]!, mixed!, links)!.thread_id).toBe('codex');
   });
 });
 
 describe("the agent on the row's third line (the owner on #2608)", () => {
-  test('a PR an agent has: "#48201 · Claude Code has it · …"; one it opened, "opened it"; an ended one "had it"', () => {
+  test('one review thread, however it began: "#48201 · Review thread with Claude Code · …"; an ended agent, "OpenCode ended"', () => {
     const one = pr({ number: 48201, head: 'x', checks: 'pending' });
     const [item] = inboxPullItems(inboxPullStacks([one]), () => true);
-    expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Claude Code has it · checks running');
-    expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'has it' });
-    expect(rowLine(item!, link('t'))).toBe('#48201 · Claude Code opened it · checks running');
+    expect(rowLine(item!, link('t', { via: 'owner' }))).toBe('#48201 · Review thread with Claude Code · checks running');
+    expect(rowMeta(item!, link('t', { via: 'owner' })).agent).toMatchObject({ host: 'claude-code', name: 'Claude Code', words: 'Review thread with Claude Code' });
+    // The agent's own thread named the PR: the same words (no "opened it").
+    expect(rowLine(item!, link('t'))).toBe('#48201 · Review thread with Claude Code · checks running');
     const ended = link('t', { via: 'owner', agent: { host: 'opencode', session: 's', name: null, ended: true } });
-    expect(rowLine(item!, ended)).toBe('#48201 · OpenCode had it · checks running');
+    expect(rowLine(item!, ended)).toBe('#48201 · OpenCode ended · checks running');
     expect(rowMeta(item!, null).agent).toBeNull();
   });
 });
