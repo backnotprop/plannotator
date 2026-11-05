@@ -557,6 +557,23 @@ test('the viewer adds the version on screen: the version it sent stays the versi
   expect(sha(readFileSync((reply.attachments as { path: string }[])[0]!.path))).toBe(v1);
 });
 
+test('a reload keeps the check: the restored tile is known by its bytes, and the button still takes it out', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await tile(page, REF_A).hover();
+  await button(page, 'tile', REF_A).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  // The draft has saved it, once the foot says so.
+  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await page.reload();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await tile(page, REF_A).hover();
+  const held = page.locator(`[data-reuse-surface="tile"][aria-label^="${REF_A} is in your reply"]`).first();
+  await expect(held).toHaveAttribute('aria-pressed', 'true');
+  await held.click();
+  await expect(replyTiles(page)).toHaveCount(0);
+});
+
 test('a very small picture in the text has no button; a big one has', async () => {
   art('tiny.png', png(40, 40, [120, 20, 20]));
   const { thread_id } = await threadWithFiles({ body: 'Small and big.\n\n![Tiny](art/tiny.png)\n\n![Big](art/inline-a.png)', attachments: [] });
