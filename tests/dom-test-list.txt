@@ -525,6 +525,7 @@ packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
+packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx
