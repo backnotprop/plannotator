@@ -42,9 +42,9 @@ export type ShapeEvent =
 
 /** What the Annotate box was opened on, and the optional words. */
 export interface ShapeShowMeInput {
-  /** What the person calls it: the part's heading, the words they selected or boxed, or the file and lines. */
+  /** What the person calls it: the part's heading, the words they selected, or the file and lines. */
   name: string;
-  /** Its `data-code` values, when it has any (several, as a box may hold: joined with ", "). */
+  /** Its `data-code` value, when it has one. */
   code?: string;
   words: string;
 }

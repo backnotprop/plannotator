@@ -301,7 +301,7 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   const raw = input.show_me;
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw bad("show_me: { review, file, lines, round, words? }.", "show_me");
   const s = raw as Record<string, unknown>;
-  for (const key of Object.keys(s)) if (!SHOW_ME_KEYS.includes(key)) throw bad(`show_me.${key}: not a field (review, file, lines, round, words).`, "show_me");
+  for (const key of Object.keys(s)) if (!SHOW_ME_KEYS.includes(key)) throw bad(`show_me.${key}: not a field (review, file, lines, round, words, part).`, "show_me");
   const fromBoard = s.part !== undefined;
   if (!isInboxId("msg", s.review) && !(fromBoard && (s.review === null || s.review === undefined))) throw bad("show_me.review: the review's message id.", "show_me");
   const file = s.file === null || s.file === undefined ? null : s.file;
@@ -315,7 +315,8 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   if (s.words !== undefined && (typeof s.words !== "string" || s.words.length > INBOX_ASK_TEXT_MAX)) throw bad(`show_me.words: at most ${INBOX_ASK_TEXT_MAX} characters.`, "show_me");
   const rawPart = s.part as Record<string, unknown> | undefined;
   if (rawPart !== undefined) {
-    const text = (value: unknown, max: number) => typeof value === "string" && value.trim() !== "" && value.length <= max;
+    // Counted in characters (code points), as the window cuts a part's name: an emoji is one, not two.
+    const text = (value: unknown, max: number) => typeof value === "string" && value.trim() !== "" && Array.from(value).length <= max;
     if (!rawPart || typeof rawPart !== "object" || !isShapeId(rawPart.board) || !text(rawPart.name, 600) || (rawPart.code !== undefined && !text(rawPart.code, 1100)) || file !== null) {
       throw bad("show_me.part: { board, name, code? }, with file and lines null.", "show_me");
     }

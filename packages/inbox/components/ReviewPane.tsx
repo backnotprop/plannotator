@@ -104,6 +104,8 @@ export interface ReviewPaneProps {
   /** The board open over the review (`&shape=` in the address), or null. */
   board: string | null;
   onBoard: (id: string | null) => void;
+  /** The window's polite live region: a new board's title is said when Show me opens it. */
+  onSay?: (text: string) => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -114,7 +116,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, shapeHost, shapes, board, onBoard }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, shapeHost, shapes, board, onBoard, onSay }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -288,6 +290,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
     enabled: !readOnly,
     subscribeBoards: shapes.subscribe,
     onBoard,
+    say: onSay,
   });
   /** The part a click landed on: the board shrinks to the corner card, kept as it is underneath. */
   const [landed, setLanded] = useState<{ name: string; mark: string | null; file: string; lines: [number, number] | null } | null>(null);

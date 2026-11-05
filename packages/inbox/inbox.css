@@ -8189,7 +8189,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-layer .shp-root.phone .shp-head:has(.ib-shape-back, [data-shape-boards]) .shp-claim { margin-left: 0; }
 .ib-sm-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-sm-h b { font-weight: 650; flex: none; white-space: nowrap; }
-.ib-sm-by { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* A narrow box (a 320 phone): the agent's line wraps between words, never cut. */
+.ib-sm-by { color: var(--muted-foreground); }
 .ib-sm-b { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
 .ib-sm-at { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-sm-box[data-over-board] .ib-sm-at { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

@@ -25,6 +25,7 @@ import { inboxApi, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { onAskChange } from '../ask/askEvents';
 import { askTurnNote } from '../ask/askModel';
 import { errorText } from '../toastError';
+import { focusBoardTitle } from '../shape/boardFocus';
 import { boardParents, earlierLinesNow, reviewLines, showMeEnded, showMeSamePlace, waitingShowMe, type ReviewLines } from './showMeModel';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
@@ -44,8 +45,6 @@ export interface ShowMeState {
   box: { place: ShowMePlace; words: string; turn: string | null; again?: string } | null;
   /** The turn is running: the agent is drawing it (or, `waiting`, about to). */
   drawing: boolean;
-  /** Show mes pressed on a board while another draws: each goes when the one before ends. */
-  queued: number;
   /** While it runs: the agent was busy and the Show me waits for it, or interrupts it (the Ask window's words). */
   waiting?: 'waiting' | 'interrupting' | null;
   /** The agent was busy when asked: the Ask window's choice (ask when it finishes, or interrupt). */
@@ -68,13 +67,14 @@ export function useShowMe({
   enabled,
   subscribeBoards,
   onBoard,
+  say,
 }: {
   threadId: string;
   /** The review it is on; null: a board over its thread, with no review behind it. */
   reviewId: string | null;
   title: string;
   round: number;
-  /** The agent's name, for the Ask window's notes ("Claude Code went away before it finished."); null: the Inbox's word for it. */
+  /** The agent's name, for the box and the Ask window's notes ("Claude Code went away before it finished."); null: the thread's read names it. */
   agent: string | null;
   /** The thread's other reviews: a board drawn on one is anchored again here. */
   others: readonly string[];
@@ -87,6 +87,8 @@ export function useShowMe({
   subscribeBoards: (listener: () => void) => () => void;
   /** Open this board over the review. */
   onBoard: (id: string) => void;
+  /** The window's polite live region: a new board's title is said when it opens. */
+  say?: (text: string) => void;
 }) {
   const chat = useAIChat({ context: ASK_CONTEXT });
   const [turns, setTurns] = useState<InboxAskTurnWire[]>([]);
@@ -100,7 +102,8 @@ export function useShowMe({
   const sent = useRef<{ turn: string; question: string; showMe: InboxShowMeAsk } | null>(null);
 
   const [agentRead, setAgentRead] = useState<string | null>(null);
-  const agent = agentIn ?? agentRead ?? 'The agent';
+  /** Null until the thread's read names it: the box waits for the name. */
+  const agent = agentIn ?? agentRead;
   const reload = useCallback(() => {
     if (!enabled) return;
     inboxApi.askRead(threadId).then(
@@ -170,7 +173,10 @@ export function useShowMe({
   useEffect(() => {
     if (!boxTurn?.shape) return;
     setBox(null);
-    if (queue.length === 0) onBoard(boxTurn.shape);
+    if (queue.length > 0) return;
+    onBoard(boxTurn.shape);
+    // The new board takes the focus and is said, so a keyboard or a screen reader is on it too.
+    focusBoardTitle(boxTurn.shape, (title) => say?.(title));
   }, [boxTurn?.id, boxTurn?.shape]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The stream's words for a turn, until the Inbox keeps the answer.
@@ -199,7 +205,7 @@ export function useShowMe({
   // problem (the session is blocked…). A window that is not streaming it (a reload) has no chat: when the Inbox no
   // longer runs the turn and kept nothing, it is the Ask window's "No answer arrived."
   const boxEnded = !!box?.turn && showMeEnded(boxTurn, { running: boxRunning, busy: !!boxBusy });
-  const boxFailed = boxEnded ? ((boxTurn && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && live.current?.turn !== box?.turn ? 'No answer arrived.' : null)) : null;
+  const boxFailed = boxEnded ? ((boxTurn && agent && askTurnNote(boxTurn, agent)) ?? boxResponse?.error ?? (boxTurn && live.current?.turn !== box?.turn ? 'No answer arrived.' : null)) : null;
   // The box goes back to its words, with the note, ready to send again.
   useEffect(() => {
     if (!boxFailed) return;
@@ -334,6 +340,8 @@ export function useShowMe({
     if (drawing?.show_me) setBox({ place: { file: drawing.show_me.file, lines: drawing.show_me.lines, ...(drawing.show_me.part ? { part: drawing.show_me.part } : {}) }, words: drawing.show_me.words ?? '', turn: drawing.id });
     if (box?.turn || posting || drawing?.show_me) setQueue((current) => [...current, { place, words }]);
     else void start(place, words);
+    // The box it was pressed in has closed: the focus goes back to the board, not to the page.
+    focusBoardTitle(part.board);
   };
   // The one before ended and its box closed: the next goes.
   useEffect(() => {
@@ -351,7 +359,10 @@ export function useShowMe({
     await post(asked.turn, asked.question, asked.showMe, policy);
   };
 
-  /** Stop: the running turn stops; a Show me that is not running (busy, or never taken) just goes. */
+  /**
+   * Stop: the running turn stops; a Show me that is not running (busy, or never taken) just goes. Only that one: the
+   * next one waiting then goes, so nothing pressed is lost, and Stop stops it too.
+   */
   const stop = async () => {
     const turn = box?.turn;
     if (!turn) return;
@@ -364,7 +375,6 @@ export function useShowMe({
       }
     }
     setBox(null);
-    setQueue([]);
     setProblem(null);
     reload();
   };
@@ -373,7 +383,6 @@ export function useShowMe({
     canAsk: enabled && canAsk,
     box,
     drawing: boxRunning,
-    queued: queue.length,
     waiting: boxRunning && live.current?.turn === box?.turn ? (liveResponse?.status ?? null) : null,
     busy: boxBusy,
     answerOnly: box?.turn && boxDone && !boxTurn?.shape ? answerOf(boxTurn) || null : null,
@@ -391,6 +400,8 @@ export function useShowMe({
     stop,
     closeBox: () => setBox(null),
     fromBoard,
+    /** Something is going: a request in the box, one being sent, or presses waiting behind it. */
+    inUse: !!box?.turn || posting || queue.length > 0,
     agent,
     /** Which board each board was made from. */
     parents: useMemo(() => boardParents(turns), [turns]),

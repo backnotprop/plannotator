@@ -19,6 +19,7 @@ import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { Client, StreamableHTTPClientTransport } from '@modelcontextprotocol/client';
+import { inboxShowMeRequest } from '../../packages/core/inbox-review';
 import { scratchProject } from '../../scripts/inbox-sim';
 import { startScriptedAskAgent, type ScriptedAskAgent } from '../helpers/inbox-ask-agent';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -190,6 +191,26 @@ const stored = (id: string) => {
   const read = JSON.parse(world.shape(['read', id]).stdout) as { version: { n: number; views: { picture?: { html?: string } } }; title?: string };
   return { n: read.version.n, picture: read.version.views.picture?.html ?? '' };
 };
+/** From now on, every other board the page shows, in the order it showed them (the one open now is not counted). */
+const watchOpened = (page: Page) =>
+  page.evaluate(() => {
+    const showing = () => [...document.querySelectorAll('[data-shape-layer]:not([hidden])')].map((el) => el.getAttribute('data-shape-layer')!);
+    const open = new Set(showing());
+    const seen: string[] = [];
+    (window as unknown as { __opened: string[] }).__opened = seen;
+    const note = () => {
+      for (const id of showing()) if (!open.has(id) && !seen.includes(id)) seen.push(id);
+    };
+    new MutationObserver(note).observe(document.body, { subtree: true, childList: true, attributes: true, attributeFilter: ['data-shape-layer', 'hidden'] });
+  });
+const opened = (page: Page) => page.evaluate(() => (window as unknown as { __opened?: string[] }).__opened ?? []);
+/** The boards made since `before`, oldest first (ids sort by time). */
+const madeSince = (before: Set<string>) => listed().map((s) => s.id).filter((id) => !before.has(id)).sort();
+/** The new board has the focus on its title, and the window's live region says it. */
+const focusedAndSaid = async (page: Page, newTitle: RegExp) => {
+  await expect(board(page).locator('h1')).toBeFocused();
+  await expect(page.locator('[data-inbox-live]')).toHaveText(newTitle);
+};
 /** Annotate, click a part, optional words, Show me; the new board opens by itself. */
 const showMeOnPart = async (page: Page, mark: string, newTitle: RegExp, words = '') => {
   await startAnnotating(page);
@@ -350,6 +371,8 @@ test('the box offers Ask, Change it, Show me; the wait is on the board; a new bo
   await showMeButton(page).click();
   const wait = waitBox(page);
   await expect(wait).toHaveAttribute('data-show-me-box', 'drawing');
+  // The box it was pressed in has closed: the focus is on the board's title, not lost to the page.
+  await expect(board(page).locator('h1')).toBeFocused();
   await expect(wait).toContainText('Claude Code is drawing it. It opens here when it’s ready.');
   await expect(wait).toContainText('The next attempt');
   await expect(wait).toContainText('how the delays add up');
@@ -369,6 +392,7 @@ test('the box offers Ask, Change it, Show me; the wait is on the board; a new bo
 
   await expect(title(page)).toHaveText('About The next attempt', { timeout: 30_000 });
   await expect(waitBox(page)).toHaveCount(0);
+  await focusedAndSaid(page, /^About The next attempt$/);
   expect(stored(first)).toEqual(before);
   second = listed().find((s) => s.title === 'About The next attempt')!.id;
   await expect(boardBack(page)).toHaveAttribute('data-shape-board-back', first);
@@ -492,8 +516,9 @@ test('the list with 6 boards and with 20: from any board, each under the board i
 test('several in a row: each waits its turn, only the last opens, none is lost', async () => {
   test.setTimeout(120_000);
   const { page } = world;
-  const count = listed().length;
+  const before = new Set(listed().map((s) => s.id));
   const firstBefore = stored(first);
+  await watchOpened(page);
   world.hold = gate();
   await startAnnotating(page);
   await part(page, 'next').click();
@@ -503,15 +528,48 @@ test('several in a row: each waits its turn, only the last opens, none is lost',
   await part(page, 'charge').click();
   await page.locator('textarea:visible').last().fill('queue two');
   await showMeButton(page).click();
-  await expect(waitBox(page)).toContainText('then 1 more');
+  // The card stays on the one drawing; the press behind it says nothing and waits.
+  await expect(waitBox(page).locator('[data-show-me-place]')).toHaveText('The next attempt');
   await shot(page, '08-second-press-waits', ['light']);
   world.hold.release();
   world.hold = null;
   await expect(title(page)).toHaveText(/^About The worker charges/, { timeout: 40_000 });
-  expect(listed().length).toBe(count + 2);
+  const made = madeSince(before);
+  expect(made).toHaveLength(2);
+  // Only the last opened: the first never showed, not even for a moment.
+  expect(await opened(page)).toEqual([made[1]]);
   await boardBack(page).click();
   await expect(title(page)).toHaveText('First board');
   expect(stored(first)).toEqual(firstBefore);
+});
+
+test('Stop stops only the one drawing: the next one waiting then goes, and nothing pressed is lost', async () => {
+  test.setTimeout(120_000);
+  const { page } = world;
+  const before = new Set(listed().map((s) => s.id));
+  const asked = world.requests.length;
+  // The first waits on its own gate, so the second can be drawn while it holds.
+  const held = gate();
+  world.hold = held;
+  await startAnnotating(page);
+  await part(page, 'next').click();
+  await page.locator('textarea:visible').last().fill('stop one');
+  await showMeButton(page).click();
+  await expect(waitBox(page)).toHaveAttribute('data-show-me-box', 'drawing');
+  await expect.poll(() => world.requests.length, { timeout: 30_000 }).toBe(asked + 1);
+  world.hold = null;
+  await part(page, 'charge').click();
+  await page.locator('textarea:visible').last().fill('stop two');
+  await showMeButton(page).click();
+  await waitBox(page).locator('[data-show-me-stop]').click();
+  // The one behind it goes on its own: it reaches the agent, and its board opens.
+  await expect.poll(() => world.requests.length, { timeout: 30_000 }).toBe(asked + 2);
+  expect(world.requests.at(-1)).toContain('stop two');
+  await expect(title(page)).toHaveText(/^About The worker charges/, { timeout: 40_000 });
+  await expect(waitBox(page)).toHaveCount(0);
+  // The scripted agent goes on with the stopped one when let go; wait for it, so no later Show me takes its board.
+  held.release();
+  await expect.poll(() => madeSince(before).length, { timeout: 30_000 }).toBe(2);
 });
 
 test('the board\'s × goes to the review, and the review\'s Shape button comes back to the newest board', async () => {
@@ -557,6 +615,13 @@ test('800 wide and on a phone: the arrow, the list, and a tap on a part offers t
       await showMeButton(tab).tap();
       await expect(waitBox(tab)).toBeVisible();
       await expect(waitBox(tab)).toBeInViewport();
+      // The header's line is whole: it may wrap between words, never cut.
+      const by = waitBox(tab).locator('.ib-sm-by');
+      await expect(by).toHaveText('· Claude Code draws it');
+      expect(await by.evaluate((el) => el.scrollWidth <= el.clientWidth && getComputedStyle(el).textOverflow !== 'ellipsis')).toBe(true);
+      const close = (await waitBox(tab).locator('.ib-sm-x').boundingBox())!;
+      const byBox = (await by.boundingBox())!;
+      expect(byBox.x + byBox.width).toBeLessThanOrEqual(close.x + 1);
       await shot(tab, `14-phone-wait-${width}`, ['light', 'dark']);
       world.hold.release();
       world.hold = null;
@@ -602,9 +667,18 @@ test('Shape on its own, Code review off: the same on a board over its thread; pl
     return { plain: plain.status };
   }, thread);
   expect(info.plain).toBe(404);
-  // A board of another thread is refused.
-  const other = await page.evaluate(async (t) => (await fetch(`/api/inbox/threads/${t}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: 'ask_01J8ZK3TQ4VW7Y9A2B5C6D8E0F', question: 'x', kind: 'show_me', show_me: { review: null, file: null, lines: null, part: { board: 'shp_01J8ZK3TQ4VW7Y9A2B5C6D8E0F', name: 'x' } } }) })).status, thread);
-  expect(other).toBe(422);
+  // A board of another thread is refused, even with the exact request the window would send for it.
+  const elsewhere = { review: null, file: null, lines: null, round: 1, part: { board: 'shp_01J8ZK3TQ4VW7Y9A2B5C6D8E0F', name: 'x' } };
+  const otherQuestion = inboxShowMeRequest({ target: elsewhere, title: '', threadId: thread });
+  const other = await page.evaluate(
+    async ([t, question, showMe]) => {
+      const res = await fetch(`/api/inbox/threads/${t}/ask`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ turn_id: 'ask_01J8ZK3TQ4VW7Y9A2B5C6D8E0F', question, kind: 'show_me', show_me: JSON.parse(showMe!) }) });
+      return { status: res.status, body: await res.text() };
+    },
+    [thread, otherQuestion, JSON.stringify(elsewhere)],
+  );
+  expect(other.status).toBe(422);
+  expect(other.body).toContain('is not a board of this thread');
   await showMeOnPart(page, 'next', /^About The next attempt/);
   const request = world.requests.at(-1)!;
   expect(request).toContain(`The person pressed Show me on "The next attempt" (${SCHEDULE}#L3-L6) in your Shape ${made.id}.`);
@@ -629,6 +703,37 @@ test('Shape on its own, Code review off: the same on a board over its thread; pl
   await showMeButton(page).click();
   await expect(title(page)).toHaveText(/^About ledger\.ts line 2/, { timeout: 30_000 });
   expect(world.requests.at(-1)).toContain(`(${OUTSIDE}#L2)`);
+});
+
+test('over a thread, × while one draws keeps the wait and the press behind it; the last opens when it lands', async () => {
+  test.setTimeout(150_000);
+  const { page } = world;
+  const thread = world.review.thread_id;
+  const made = world.storeBoard('Closed while drawing', ['--thread', thread]);
+  await page.goto(`${world.url}#thread=${thread}&shape=${made.id}`);
+  await expect(title(page)).toHaveText('Closed while drawing', { timeout: 30_000 });
+  const before = new Set(listed().map((s) => s.id));
+  await watchOpened(page);
+  world.hold = gate();
+  await startAnnotating(page);
+  await part(page, 'next').click();
+  await showMeButton(page).click();
+  await expect(waitBox(page)).toHaveAttribute('data-show-me-box', 'drawing');
+  await part(page, 'charge').click();
+  await showMeButton(page).click();
+  await board(page).locator('.shp-close').first().click();
+  await expect(board(page)).toHaveCount(0);
+  // The board is closed; the wait is not.
+  await expect(waitBox(page)).toHaveAttribute('data-show-me-box', 'drawing');
+  await shot(page, '19-thread-board-closed-wait-stays', ['light']);
+  world.hold.release();
+  world.hold = null;
+  await expect(title(page)).toHaveText(/^About The worker charges/, { timeout: 40_000 });
+  const two = madeSince(before);
+  expect(two).toHaveLength(2);
+  // Both pressed reached the agent, and only the last opened.
+  expect(await opened(page)).toEqual([two[1]]);
+  await focusedAndSaid(page, /^About The worker charges/);
 });
 
 test('both off: no board, and a Show me is refused', async () => {

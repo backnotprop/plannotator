@@ -29,14 +29,11 @@ const CORNER_DRAWN_WIDTH = 960;
 
 const linesWord = (lines: readonly [number, number]) => `${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}`;
 
-function Place({ place, queued }: { place: ShowMePlace; queued: number }) {
+function Place({ place }: { place: ShowMePlace }) {
   return (
     <div className="ib-sm-at" data-show-me-place="">
       {place.part ? (
-        <>
-          {place.part.name}
-          {queued > 0 && ` · then ${queued} more`}
-        </>
+        place.part.name
       ) : place.file ? (
         <>
           {baseName(place.file)}
@@ -59,7 +56,8 @@ export function ShowMeBox({
   onClose,
 }: {
   state: ShowMeState;
-  agent: string;
+  /** Null until the thread's read names the agent: the box waits for the name. */
+  agent: string | null;
   onWords: (words: string) => void;
   onSend: () => void;
   /** The agent was busy: ask when it finishes, or interrupt it. */
@@ -72,7 +70,7 @@ export function ShowMeBox({
   useEffect(() => {
     if (box && !box.turn) field.current?.focus({ preventScroll: true });
   }, [box?.place.file, box?.place.lines?.[0], box?.place.lines?.[1]]); // eslint-disable-line react-hooks/exhaustive-deps
-  if (!box) return null;
+  if (!box || agent === null) return null;
   return (
     <section className="ib-sm-box" aria-label="Show me" data-over-board={box.place.part ? '' : undefined} data-show-me-box={box.turn ? (state.drawing ? 'drawing' : state.busy ? 'busy' : 'done') : 'compose'} {...LAYER}>
       <div className="ib-sm-h">
@@ -87,7 +85,7 @@ export function ShowMeBox({
         </Tip>
       </div>
       <div className="ib-sm-b">
-        <Place place={box.place} queued={state.queued} />
+        <Place place={box.place} />
         {!box.turn ? (
           <>
             <textarea

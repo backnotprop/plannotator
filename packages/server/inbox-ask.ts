@@ -93,6 +93,11 @@ export function createInboxAsk(options: {
    * Show me from a board: its plain questions answer as if the Ask were off, so Shape's Ask keeps waiting for the agent.
    */
   questionsOn?: () => boolean;
+  /**
+   * The boards are on (Shape's switch or Code review): a Show me from a board is taken only then, even with
+   * PLANNOTATOR_INBOX_ASK_AI set. Absent: off.
+   */
+  boardsOn?: () => boolean;
   /** A review message (`guide.review`) by id, or null when the message is not one. Absent: none. */
   reviewOf?: (messageId: string) => InboxAskReview | "not_a_review" | null;
   /** A thread's Shape boards, and when each version was written, to name the board each Show me made. Absent: none. */
@@ -233,7 +238,8 @@ export function createInboxAsk(options: {
     let showMeFields: { kind: "show_me"; show_me: InboxShowMeTarget; again_shape?: string } | null = null;
     if (showMe) {
       const asked = showMe.target;
-      if (!(options.codeReviewOn?.() ?? false) && !asked.part) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
+      // A review's Show me needs Code review; a board's, the boards (Shape or Code review).
+      if (!(asked.part ? (options.boardsOn?.() ?? false) : (options.codeReviewOn?.() ?? false))) return json({ error: "Code review is off in this Inbox (Settings → Capabilities).", code: "code_review_off" }, 409);
       if (asked.part && !(options.boardsOf?.(threadId) ?? []).some((board) => board.id === asked.part!.board)) {
         throw new InboxError("validation_error", `show_me.part: ${asked.part.board} is not a board of this thread.`, { field: "show_me" });
       }

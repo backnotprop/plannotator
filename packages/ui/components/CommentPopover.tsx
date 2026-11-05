@@ -608,11 +608,14 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     onClose();
   }, [allowImages, draftKey, extraAction, onClose, onDraftChange, text]);
 
+  // After the primary action in the DOM, so Tab reaches it second; `order` keeps it at the footer's end on screen,
+  // and Tab goes the way the eye reads the two: the primary, then this.
   const extraButton = extraAction ? (
     <button
       type="button"
       onClick={handleExtra}
       className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md text-primary border border-primary/40 hover:bg-primary/10 transition-colors"
+      style={{ order: -1 }}
       data-comment-extra-action=""
     >
       {extraAction.icon}
@@ -831,7 +834,6 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {/* Footer — DOM order sets tab order (Save first); row-reverse keeps the visual layout unchanged */}
           <div className="flex flex-row-reverse flex-wrap items-center justify-between gap-2 px-4 py-3 border-t border-border/50">
             <div className="flex flex-row-reverse flex-wrap items-center gap-3">
-              {extraButton}
               <button
                 onClick={handleSubmit}
                 disabled={!canSubmit}
@@ -839,6 +841,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               >
                 {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
               </button>
+              {extraButton}
               {quickLookGoodButton}
               {onAskAI && (
                 <button
@@ -988,8 +991,8 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
 
       {/* Footer — same DOM-order/row-reverse pattern as the dialog footer above */}
       <div className="flex flex-row-reverse items-center justify-between px-3 py-2 border-t border-border/50">
-        <div className="flex flex-row-reverse flex-wrap items-center gap-3">
-          {extraButton}
+        {/* Wraps only with the opt-in third action, which can take the row past a narrow box. */}
+        <div className={extraAction ? 'flex flex-row-reverse flex-wrap items-center gap-3' : 'flex flex-row-reverse items-center gap-3'}>
           <button
             onClick={handleSubmit}
             disabled={!canSubmit}
@@ -997,6 +1000,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           >
             {submitLabel ?? (isGlobal ? 'Add' : 'Save')}
           </button>
+          {extraButton}
           {quickLookGoodButton}
           {onAskAI && (
             <button

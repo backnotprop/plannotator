@@ -181,7 +181,7 @@ import { useInboxAsk } from './ask/useInboxAsk';
 import { setSessionLabels } from './sessionLabels';
 import { createInboxShapeHost } from './shape/inboxShapeHost';
 import { ShapeGridPage, ShapePebbleButton } from './shape/ShapeParts';
-import { ThreadShapeLayer } from './shape/ThreadShapeLayer';
+import { ThreadShapeLayer, ThreadShowMeBox, useThreadShowMe } from './shape/ThreadShapeLayer';
 import { useInboxShapes } from './shape/useInboxShapes';
 import { filterShapeItems, shapeAgo } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { SearchShape } from './search/model';
@@ -4949,6 +4949,21 @@ function Inbox() {
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // A review, while Code review is on: the full-window review (ReviewPane).
   const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
+  // Show me from a thread's board, above the board: one closed while another draws keeps its wait and the presses
+  // behind it, and the new board opens when it lands (in its thread, if the page shows no board now).
+  const showMeThreadRef = useRef<string | null>(null);
+  const threadShowMe = useThreadShowMe({
+    shapes,
+    board: shapeLayerId && !reviewPaneOpen ? shapeLayerId : null,
+    onBoard: (id) => {
+      const now = routeRef.current;
+      const home = showMeThreadRef.current;
+      const shows = now.page === 'shapes' || (now.page === 'inbox' && !!now.thread);
+      go(shows || !home ? { ...now, shape: id } : { page: 'inbox', project: null, thread: home, shape: id });
+    },
+    say,
+  });
+  showMeThreadRef.current = threadShowMe.threadId;
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
   // held for it. A phone and a stacked window show this in the thread's place too, so a held answer is never out of sight.
   const openOwner = route.thread ? machines.linked.find((m) => m.id === machineOf(route.thread!)) : undefined;
@@ -5916,10 +5931,12 @@ function Inbox() {
               id={shapeLayerId}
               thread={route.page === 'inbox' && thread && thread.thread_id === route.thread ? thread : null}
               shapes={shapes}
+              threadShowMe={threadShowMe}
               onClose={() => close({ ...routeRef.current, shape: null })}
               onBoard={(id) => go({ ...routeRef.current, shape: id })}
             />
           )}
+          {!reviewPaneOpen && <ThreadShowMeBox threadShowMe={threadShowMe} />}
         </main>
       </SidebarShell>
       <UsagePeek
@@ -6267,6 +6284,7 @@ function Inbox() {
               if (id) go({ ...now, shape: id });
               else close({ ...now, shape: null });
             }}
+            onSay={say}
           />
         ) : (
           <GuidePane

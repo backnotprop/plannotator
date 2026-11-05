@@ -80,4 +80,14 @@ describe("what the route takes", () => {
     expect(() => checkInboxShowMeInput(input({ review: null, file: null, lines: null, part: { board } }))).toThrow(/show_me\.part/);
     expect(() => checkInboxShowMeInput(input({ review: null, file: "a.ts", lines: [1, 1], part: { board, name: "A" } }))).toThrow(/show_me\.part/);
   });
+
+  test("a name is counted as the window cuts it, in characters: 600 emoji pass, 601 do not", () => {
+    const name = (n: number) => "🙂".repeat(n);
+    expect(checkInboxShowMeInput(input({ review: null, file: null, lines: null, part: { board, name: name(600) } }))?.target.part?.name).toBe(name(600));
+    expect(() => checkInboxShowMeInput(input({ review: null, file: null, lines: null, part: { board, name: name(601) } }))).toThrow(/show_me\.part/);
+  });
+
+  test("an unknown field's error lists part among the fields", () => {
+    expect(() => checkInboxShowMeInput(input({ review: null, file: null, lines: null, part: { board, name: "A" }, extra: 1 }))).toThrow(/show_me\.extra: not a field \(review, file, lines, round, words, part\)/);
+  });
 });

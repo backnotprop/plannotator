@@ -1,7 +1,7 @@
 /**
  * The box's opt-in third action (DOM_TESTS=1): Shape's Show me lives here so every way into the box has it. What
- * regresses if these fail: it needs words it shouldn't, it keeps the words after they were sent, or the box everyone
- * else uses grows a button.
+ * regresses if these fail: it needs words it shouldn't, it keeps the words after they were sent, the box everyone
+ * else uses grows a button or a wrapping footer, or Tab skips past Change it to Show me.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -39,9 +39,18 @@ const type = async (words: string) => {
 describe.skipIf(!hasDom)('CommentPopover extraAction', () => {
   const base = { contextText: 'A part', isGlobal: false, onSubmit: () => {}, submitLabel: 'Change it', askAILabel: 'Ask', onAskAI: () => {} };
 
-  test('absent: the box has no third button', async () => {
+  const primary = () => [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('Change it'))!;
+
+  test('absent: the box has no third button, and its footer row does not wrap (as every other host has it)', async () => {
     await mount((el) => <CommentPopover {...base} anchorEl={el} onClose={() => {}} />);
     expect(extra()).toBeNull();
+    expect(primary().parentElement!.className.split(' ')).not.toContain('flex-wrap');
+  });
+
+  test('present: the row may wrap in a narrow box, and Tab reaches Change it before Show me, as they read on screen', async () => {
+    await mount((el) => <CommentPopover {...base} anchorEl={el} onClose={() => {}} extraAction={{ label: 'Show me', onAction: () => {} }} />);
+    expect(primary().parentElement!.className.split(' ')).toContain('flex-wrap');
+    expect(primary().compareDocumentPosition(extra()!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   test('takes no words: enabled with an empty box, and it closes', async () => {
@@ -57,8 +66,7 @@ describe.skipIf(!hasDom)('CommentPopover extraAction', () => {
   test('gets the words typed, and Change it stays what it was: it still needs them', async () => {
     const got: string[] = [];
     await mount((el) => <CommentPopover {...base} anchorEl={el} onClose={() => {}} extraAction={{ label: 'Show me', onAction: (words) => got.push(words) }} />);
-    const primary = [...document.querySelectorAll('button')].find((button) => button.textContent?.includes('Change it'))!;
-    expect(primary.disabled).toBe(true);
+    expect(primary().disabled).toBe(true);
     await type('  how it adds up ');
     await act(async () => extra()!.click());
     expect(got).toEqual(['how it adds up']);

@@ -210,13 +210,13 @@ export interface InboxShowMeTarget {
   part?: InboxShowMePart;
 }
 
-/** What a Show me from a board is on: a part, words picked, a file's lines, the whole board, or what a box holds. */
+/** What a Show me from a board is on: a part, words picked, a file's lines, or the whole board. */
 export interface InboxShowMePart {
   /** The board it was pressed on. */
   board: string;
-  /** What the person calls it: a part's heading, or the words picked or boxed. */
+  /** What the person calls it: a part's heading, the words picked, or a file and its lines. */
   name: string;
-  /** Its `data-code` values, when it has any (a box may hold several, joined with ", "). */
+  /** Its `data-code` value, when it has one. */
   code?: string;
 }
 
@@ -267,9 +267,8 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
         ? `Make a new Shape of that part, so they can see it the way you see it, and leave ${part.board} as it is. It can show code the board doesn't. \`plannotator shape --help\` has how.`
         : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
     `Store it with \`${tie}\`: it opens ${target.review ? 'over the review ' : ''}by itself, so don't open a page.`,
-    part
-      ? 'On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the repo\'s paths and the new file\'s line numbers: a click lands on those lines, in the diff or in the whole file.'
-      : 'On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.',
+    // A board with no review behind it has no diff for a click to land in: the agent draws it as any board.
+    ...(target.review ? ['On each part that is code, put `data-code="path#L42"` (or `#L42-L48`) with the review\'s paths and the new file\'s line numbers: a click lands on those lines of the diff.'] : []),
     'Then answer here in one or two sentences.',
   ].join('\n');
 }

@@ -3271,6 +3271,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     on: () => askOnNow() || shapeOn(),
     questionsOn: askOnNow,
     codeReviewOn,
+    boardsOn,
     // The boards of a thread, for naming the board each Show me made (`showMeShapes`).
     boardsOf: (threadId) =>
       shapes.store
