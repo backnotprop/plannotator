@@ -116,6 +116,13 @@ export interface ShapeSurfaceProps {
   CodeHoverCard?: ComponentType<ShapeCodeHoverCardProps>;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
+  /**
+   * Plannotator's board: annotation starts off behind an Annotate button, a number pops out a bubble with its
+   * picture and line (a file's lines through `host.readFile`, and a PR or link with a picture opens the picture),
+   * and a narrow canvas scrolls sideways. Absent: a part can be marked at once, a number lights and opens, a
+   * narrow canvas shrinks to fit.
+   */
+  readFirst?: boolean;
   /** Where to start. */
   initialView?: ShapeViewId;
   initialPanel?: ShapePanelTab | null;
