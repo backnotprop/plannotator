@@ -51,7 +51,7 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { landInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -93,6 +93,8 @@ import { ReplyFootPhone } from './ReplyFootPhone';
 import { ReplyRecipient } from './ReplyRecipient';
 import { aimable, canTakeAlone, headFolder, knownRecipients, latestBy, RECIPIENTS_MAX, recipientRows, recipientState, sessionFolder, toggleRecipient, type RecipientPerson, type RecipientRow } from '../replyRecipients';
 import { useVoiceSession } from '../voice';
+import { spaced } from '../voiceField';
+import type { VoiceLate } from '../voiceSession';
 import type { FullScreenComposerValue } from './FullScreenComposer';
 import { ReplyAnswers, SentAnswers, draftAnswerWords, ReplyActions, type ActionRow, type DraftAnswer } from './ReplyAnswers';
 import { actionSavesPending, actionSavesSettled } from '../actionSaves';
@@ -1624,6 +1626,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   }, [sending]);
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
+  /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
+  const lateVoice = useRef<{ threadId: string; text: string }[]>([]);
+  const [lateVoiceTick, setLateVoiceTick] = useState(0);
+  const paneMounted = useRef(true);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
   /**
@@ -2973,7 +2979,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The Reply button's path, from a key: from a file in full screen, back beside the thread first (the strip's Write a reply). */
   const replyByKey = () => {
     // From a file in full screen, back beside the thread first, even with the box open (the composer opens it behind the file).
-    if (file && full) writeReplyFromFile();
+    // A file full screen is all a narrow window shows, so this leaves it: an unsaved comment on it is asked about first.
+    if (file && shownFull) (phone || fileStacked ? () => fileToThread(writeReplyFromFile) : writeReplyFromFile)();
     else if (box.open) textRef.current?.focus();
     else openBox();
   };
@@ -3526,8 +3533,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
   const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
-    // A phone has no view beside the thread, so leaving full screen would change nothing on screen: the file closes.
-    if (phone) onOpenFile(null);
+    // No room for a view beside the thread, so leaving full screen would change nothing on screen: the file closes.
+    const closes = phone || fileStacked;
+    if (closes) onOpenFile(null);
     else setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
     // back to it where the caret was (as R did with the box open before the composer).
@@ -3536,8 +3544,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       setNewMessage(null);
       setRoute((current) => ({ ...current, open: false, error: null }));
       setError(null);
-      // A phone's words came from the card, so this box has no caret of its own yet: focus lands at their end.
-      if (phone) focusReplyEnd();
+      // The words came from the card, so this box has no caret of its own yet: focus lands at their end.
+      if (closes) focusReplyEnd();
       else requestAnimationFrame(() => textRef.current?.focus());
     } else openBox();
   };
@@ -3547,6 +3555,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       if (!text) return;
       text.focus();
       text.setSelectionRange(text.value.length, text.value.length);
+      text.scrollTop = text.scrollHeight;
     });
   /**
    * From full screen to the thread, on the device's own route: beside the thread where there is room (as
@@ -3591,6 +3600,38 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     filesSaved.current = pastedSignature(files);
     replyDraft.save(text, files);
   };
+
+  /** A take that outlived the card's field: its words go to the reply of the thread it was said in, open or not. */
+  const onLateVoice = useCallback((threadId: string, outcome: VoiceLate) => {
+    const here = paneMounted.current && threadRef.current.thread_id === threadId;
+    if ('failed' in outcome) {
+      if (here) setError('Dictation failed, so those words are not in the reply.');
+    } else if (here) {
+      lateVoice.current.push({ threadId, text: outcome.text });
+      setLateVoiceTick((tick) => tick + 1);
+    } else void landWordsInReplyDraft(threadId, outcome.text);
+  }, []);
+  useEffect(() => {
+    const away = lateVoice.current.filter((late) => late.threadId !== thread.thread_id);
+    for (const late of away) void landWordsInReplyDraft(late.threadId, late.text);
+    const waiting = lateVoice.current.filter((late) => late.threadId === thread.thread_id);
+    lateVoice.current = waiting;
+    if (waiting.length === 0 || sending || (!boxRef.current.open && replyDraft.loadedFor !== thread.thread_id)) return;
+    lateVoice.current = [];
+    let text = boxRef.current.open ? boxRef.current.text : (replyDraft.conflict ?? replyDraft.draft?.body ?? '');
+    for (const late of waiting) text += spaced(text.at(-1), undefined, late.text);
+    changeReply(text, true);
+    // changeReply reads this render's Send state.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lateVoiceTick, sending, replyDraft.loadedFor, thread.thread_id]);
+  useEffect(() => {
+    paneMounted.current = true;
+    return () => {
+      paneMounted.current = false;
+      for (const late of lateVoice.current) void landWordsInReplyDraft(late.threadId, late.text);
+      lateVoice.current = [];
+    };
+  }, []);
 
   /** The reply box opens behind full screen, without taking focus (full screen's composer writes into it). */
   const openBehind = () => {
@@ -4616,6 +4657,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             to: replyTo,
             value: box.open ? (composerText ?? '') : (replyDraft.conflict ?? replyDraft.draft?.body ?? ''),
             onChange: (text) => changeReply(text, true),
+            onLateVoice,
             onSend: () => void send({ stayFull: true }),
             sending,
             canSend: hasWords || picksCount > 0 || records.length > 0 || draftActions.length > 0 || (box.open && replyUploads.length > 0) || draftPastes > 0,

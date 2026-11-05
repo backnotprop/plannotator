@@ -50,6 +50,7 @@
  * `ReplyDraftStore`); this Inbox's is HTTP (replyDraftHttp.ts).
  */
 import { machineOf } from './inboxUrl';
+import { spaced } from './voiceField';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_DRAFT_BODY_MAX, type InboxReplyDraft, type InboxUpload } from '@plannotator/core/inbox-types';
 import {
@@ -181,6 +182,37 @@ export function landInReplyDraft(threadId: string, upload: Promise<InboxUpload |
         return;
       } catch (cause) {
         // The words changed meanwhile (or the draft went): read it again and add the file to that one.
+        if (codeOf(cause) !== 'draft_conflict') return;
+      }
+    }
+  })().finally(() => {
+    landing -= 1;
+    unsavedChanged();
+  });
+}
+
+/**
+ * Dictated words whose thread is no longer open (the person moved on while they were being transcribed): they join the
+ * end of that thread's draft, as `landInReplyDraft` does a file, never the box of the thread now open.
+ */
+export function landWordsInReplyDraft(threadId: string, words: string, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
+  landing += 1;
+  unsavedChanged();
+  const discarded = discardsOf(threadId);
+  return (async () => {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      if (discardsOf(threadId) !== discarded) return;
+      const latest = await store.read(threadId).catch(() => undefined);
+      if (latest === undefined || discardsOf(threadId) !== discarded) return;
+      const body = latest?.body ?? '';
+      try {
+        await store.save(
+          threadId,
+          { body: `${body}${spaced(body.at(-1), undefined, words)}`, base: latest?.updated_at ?? null, baseBody: latest?.body ?? null, files: NO_FILE_OPS },
+          { keepalive: false },
+        );
+        return;
+      } catch (cause) {
         if (codeOf(cause) !== 'draft_conflict') return;
       }
     }

@@ -21,6 +21,9 @@
  *    a take on its way. On a desktop Save draft stays put when listening starts.
  *  - The announcement: once, on a computer with a ChatGPT login only, its Phones only option saved by Turn on voice.
  *  - A file or the artifacts opening over the box closes the microphone.
+ *  - A take full screen's card is transcribing outlives the card: Write the reply (through the unsaved-comment question
+ *    too), the Comment tab and browser Back; its words reach the thread it was said in, never the thread now open. A
+ *    microphone still listening closes all the same.
  *
  * Build the apps first (bun run --cwd apps/review build && bun run build:hook), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-voice.spec.ts`. PNGs land in
@@ -195,6 +198,39 @@ async function hold(page: Page, ms = 1500) {
   await expect(line(pane(page), 'hold')).toBeVisible();
   await page.waitForTimeout(ms);
 }
+
+/** WebKit has no fake capture device: a tone that comes and goes, through a real MediaStream. Nothing is heard. */
+const toneForAMicrophone = () => {
+  const Real = window.AudioContext;
+  let last: AudioContext | null = null;
+  window.AudioContext = class extends Real {
+    constructor(...args: ConstructorParameters<typeof AudioContext>) {
+      super(...args);
+      last = this;
+    }
+  };
+  Object.defineProperty(MediaDevices.prototype, 'getUserMedia', {
+    configurable: true,
+    writable: true,
+    value: async () => {
+      const context = last!;
+      const tone = context.createOscillator();
+      tone.frequency.value = 220;
+      const gain = context.createGain();
+      gain.gain.value = 0.3;
+      const swell = context.createOscillator();
+      swell.frequency.value = 2.5;
+      const depth = context.createGain();
+      depth.gain.value = 0.3;
+      swell.connect(depth).connect(gain.gain);
+      const out = context.createMediaStreamDestination();
+      tone.connect(gain).connect(out);
+      tone.start();
+      swell.start();
+      return out.stream;
+    },
+  });
+};
 
 const consoleErrors = (page: Page) => {
   const seen: string[] = [];
@@ -477,7 +513,7 @@ test('full screen’s composer on a phone at 320: the mic within “Sent to …�
   w.send({ upstream: [{ text: 'Looks right.' }] });
   await mic(card).click();
   await expect(line(card, 'tap')).toBeVisible();
-  await expect(card.locator('[data-fcomp-sent]')).toBeHidden();
+  await expect(card.locator('[data-fcomp-sent]')).toBeHidden({ timeout: 500 });
   const [box, cancel, clock, button] = await Promise.all(['', '[data-voice-cancel]', '.ib-dttime', '[data-voice-mic]'].map(async (part) => (await (part ? card.locator(part) : card).boundingBox())!));
   expect(cancel!.x + cancel!.width).toBeLessThanOrEqual(clock!.x);
   expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
@@ -811,6 +847,244 @@ test('a phone: hold to talk, the keyboard stays down, Cancel on screen, and a ta
   await context.close();
 });
 
+test.describe('a take being transcribed outlives full screen’s card', () => {
+  const engines = [
+    { name: 'Chromium', ios: false },
+    { name: 'WebKit', ios: true },
+  ] as const;
+  const box = (page: Page) => page.locator('section.ib-pane textarea.ib-rtext');
+  const finish = async (page: Page, context: BrowserContext) => {
+    await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
+    await context.close();
+  };
+  const fileHash = (w: World) => `#thread=${w.filed.thread}&file=${w.filed.attachment}&view=full`;
+  const draftOf = async (w: World, thread: string) => {
+    const answer = await fetch(new URL(`/api/inbox/threads/${thread}/draft`, w.url));
+    return ((await answer.json()) as { draft?: { body?: string } | null }).draft?.body ?? null;
+  };
+  /** Seed a comment on the file, so the sheet has a row to edit. */
+  const seedComment = async (w: World) => {
+    const answer = await fetch(new URL('/api/inbox/annotations', w.url), {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', Origin: new URL(w.url).origin },
+      body: JSON.stringify({ attachment_id: w.filed.attachment, version: 'current', annotation: { id: 'c-1', type: 'COMMENT', text: 'A thought', originalText: '', blockId: 'img', offset: 0, startMeta: { parentTagName: 'img', parentIndex: 0, textOffset: 0 }, endMeta: { parentTagName: 'img', parentIndex: 0, textOffset: 0 }, createdA: Date.now() } }),
+    });
+    expect(answer.status).toBe(200);
+  };
+
+  for (const engine of engines) {
+    test.describe(engine.name, () => {
+      let browser: Browser;
+      test.beforeAll(async () => {
+        browser = engine.ios ? await webkit.launch({ args: [] }) : speech;
+      });
+      test.afterAll(async () => {
+        if (engine.ios) await browser.close();
+      });
+
+      const start = async (options: { phone?: boolean; width?: number; height?: number } = {}) => {
+        const w = await startWorld();
+        await turnOn(w);
+        const phone = options.phone ?? true;
+        const context = await browser.newContext({ viewport: { width: options.width ?? 390, height: options.height ?? 844 }, ...(phone ? { isMobile: true, hasTouch: true, deviceScaleFactor: 2 } : {}) });
+        if (!engine.ios) await context.grantPermissions(['microphone'], { origin: new URL(w.url).origin });
+        const page = await context.newPage();
+        if (engine.ios) await page.addInitScript(toneForAMicrophone);
+        return { w, context, page };
+      };
+      /** On the card's Reply tab with words and a take listening, its answer held. */
+      const listening = async (page: Page, w: World, upstream: Record<string, unknown> = { text: 'Landed.', hold: true }) => {
+        const card = page.locator('[data-fcomp]');
+        await expect(card).toBeVisible();
+        await page.locator('[data-fcomp-mode="reply"]').click();
+        const field = card.locator('[data-fcomp-field] textarea');
+        await field.fill('Before.');
+        w.send({ upstream: [upstream] });
+        await mic(card).click();
+        await expect(line(card, 'tap')).toBeVisible();
+        await page.waitForTimeout(1200);
+        return { card, field };
+      };
+      /** The same, the mic stopped: the take is being transcribed. */
+      const transcribing = async (page: Page, w: World, upstream?: Record<string, unknown>) => {
+        const taken = await listening(page, w, upstream);
+        await mic(taken.card).click();
+        await expect(line(taken.card, 'sending')).toBeVisible();
+        return taken;
+      };
+      const writeTheReply = (page: Page) => page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).click();
+      const openTheSheet = (page: Page) => page.locator('[data-full-view-bar] .ib-fvcount').click();
+
+      test('Write the reply: the words reach the thread’s box, and its draft', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card } = await listening(page, w);
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+        await expect(card).toHaveCount(0);
+        await expect(box(page)).toHaveValue('Before.');
+        w.send({ release: true });
+        await expect(box(page)).toHaveValue('Before. Landed.');
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
+        await finish(page, context);
+      });
+
+      for (const answer of ['save', 'discard', 'keep'] as const) {
+        test(`the unsaved comment’s question, ${answer}: the words still reach the reply`, async () => {
+          const { w, context, page } = await start();
+          await page.goto(`${w.url}${fileHash(w)}`);
+          const { card, field } = await transcribing(page, w);
+          await page.locator('[data-fcomp-mode="comment"]').click();
+          const comment = card.locator('[data-image-composer] textarea');
+          await comment.fill('A thought');
+          await openTheSheet(page);
+          await writeTheReply(page);
+          await page.locator('[data-step-guard]').waitFor();
+          await page.locator(`[data-guard-${answer}]`).click();
+          if (answer === 'keep') {
+            await expect(comment).toHaveValue('A thought');
+            w.send({ release: true });
+            await page.locator('[data-fcomp-mode="reply"]').click();
+            await expect(field).toHaveValue('Before. Landed.');
+          } else {
+            await expect(box(page)).toHaveValue('Before.');
+            w.send({ release: true });
+            await expect(box(page)).toHaveValue('Before. Landed.');
+          }
+          await finish(page, context);
+        });
+      }
+
+      test('the Comment tab: the words wait in the reply, Esc there leaves the take alone, and Reply’s Send is on again', async () => {
+        const { w, context, page } = await start({ phone: false, width: 1440, height: 900 });
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card, field } = await transcribing(page, w);
+        await page.locator('[data-fcomp-mode="comment"]').click();
+        await page.keyboard.press('Escape');
+        w.send({ release: true });
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
+        await page.locator('[data-fcomp-mode="reply"]').click();
+        await expect(field).toHaveValue('Before. Landed.');
+        await expect(card.locator('[data-fcomp-send]')).toBeEnabled();
+        await finish(page, context);
+      });
+
+      test('back on the Reply tab before the answer: the take shows, Send waits, and the words land in the field', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card, field } = await transcribing(page, w);
+        await page.locator('[data-fcomp-mode="comment"]').click();
+        await page.locator('[data-fcomp-mode="reply"]').click();
+        await expect(line(card, 'sending')).toBeVisible();
+        await expect(card.locator('[data-fcomp-send]')).toBeDisabled();
+        w.send({ release: true });
+        await expect(field).toHaveValue('Before. Landed.');
+        await expect(line(card, 'sending')).toBeHidden();
+        await expect(card.locator('[data-fcomp-send]')).toBeEnabled();
+        await finish(page, context);
+      });
+
+      test('browser Back: the words reach the thread’s box', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}#thread=${w.filed.thread}`);
+        await expect(pane(page)).toBeVisible();
+        await page.evaluate((hash) => (location.hash = hash), fileHash(w));
+        const { card } = await transcribing(page, w);
+        await page.goBack();
+        await expect(card).toHaveCount(0);
+        w.send({ release: true });
+        await expect(box(page)).toHaveValue('Before. Landed.');
+        await finish(page, context);
+      });
+
+      for (const moved of ['another thread', 'the list'] as const) {
+        test(`moved on to ${moved}: the words go to the first thread’s draft, never the open one`, async () => {
+          const { w, context, page } = await start();
+          await page.goto(`${w.url}${fileHash(w)}`);
+          const { card } = await transcribing(page, w);
+          // A draft that saved "Before." only: what a landing adds to.
+          await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+          const other = w.threads[0]!;
+          await page.evaluate((hash) => (location.hash = hash), moved === 'the list' ? '' : `#thread=${other}`);
+          await expect(card).toHaveCount(0);
+          if (moved === 'another thread') await expect(pane(page)).toContainText('Voice thread 0');
+          w.send({ release: true });
+          await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
+          expect(await draftOf(w, other)).toBeNull();
+          if (moved === 'another thread') await expect(box(page)).toHaveCount(0);
+          await page.evaluate((hash) => (location.hash = hash), `#thread=${w.filed.thread}`);
+          await expect(box(page)).toHaveValue('Before. Landed.');
+          await finish(page, context);
+        });
+      }
+
+      test('the answer fails with nothing left to show it: the thread says so', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await listening(page, w, { status: 403, html: '<html>blocked</html>', hold: true });
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(box(page)).toHaveValue('Before.');
+        w.send({ release: true });
+        await expect(pane(page).locator('.ib-error')).toContainText('Dictation failed');
+        await expect(box(page)).toHaveValue('Before.');
+        await finish(page, context);
+      });
+
+      test('a mic still listening stops when the field goes, and nothing is sent', async () => {
+        const { w, context, page } = await start();
+        const open_ = engine.ios ? null : await watchMic(page);
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card, field } = await listening(page, w, { text: 'Never sent.' });
+        if (open_) await expect.poll(open_).toBe(1);
+        await page.locator('[data-fcomp-mode="comment"]').click();
+        if (open_) await expect.poll(open_).toBe(0);
+        await page.waitForTimeout(400);
+        expect(w.upstreamCalls()).toHaveLength(0);
+        await page.locator('[data-fcomp-mode="reply"]').click();
+        await expect(line(card, 'tap')).toBeHidden();
+        await expect(field).toHaveValue('Before.');
+        await finish(page, context);
+      });
+
+      test('a narrow desktop window: a late transcript goes to the reply, not the comment being edited in the sheet', async () => {
+        const { w, context, page } = await start({ phone: false, width: 500, height: 800 });
+        await seedComment(w);
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { field } = await listening(page, w);
+        await openTheSheet(page);
+        await page.locator('[data-full-view-foot]').waitFor();
+        const edit = page.locator('.ib-apanel').getByRole('button', { name: 'Edit annotation', exact: true });
+        await edit.hover();
+        await edit.click();
+        const editing = page.locator(':focus');
+        await page.keyboard.type(' typed');
+        const typed = await editing.inputValue();
+        w.send({ release: true });
+        await expect(field).toHaveValue('Before. Landed.');
+        await expect(editing).toHaveValue(typed);
+        expect(typed).not.toContain('Landed');
+        await finish(page, context);
+      });
+
+      test('Mod+Enter from the card’s tabs waits for the take, as the Send button does', async () => {
+        const { w, context, page } = await start({ phone: false, width: 1440, height: 900 });
+        await page.goto(`${w.url}${fileHash(w)}`);
+        const { card, field } = await transcribing(page, w);
+        await page.locator('[data-fcomp-mode="reply"]').focus();
+        await page.keyboard.press('ControlOrMeta+Enter');
+        await page.waitForTimeout(300);
+        await expect(card.locator('[data-fcomp-sent]')).toHaveCount(0);
+        await expect(field).toHaveValue('Before.');
+        w.send({ release: true });
+        await expect(field).toHaveValue('Before. Landed.');
+        await finish(page, context);
+      });
+    });
+  }
+});
+
 test.describe('New message dictates as the reply box does', () => {
   const SESSION = 'ses-voice-compose';
   /** One live agent, told to the page: this world's sessions never poll. Sending is answered by the page too. */
@@ -905,39 +1179,6 @@ test.describe('New message dictates as the reply box does', () => {
       },
       { ios, height },
     );
-
-  /** WebKit has no fake capture device: a tone that comes and goes, through a real MediaStream. Nothing is heard. */
-  const toneForAMicrophone = () => {
-    const Real = window.AudioContext;
-    let last: AudioContext | null = null;
-    window.AudioContext = class extends Real {
-      constructor(...args: ConstructorParameters<typeof AudioContext>) {
-        super(...args);
-        last = this;
-      }
-    };
-    Object.defineProperty(MediaDevices.prototype, 'getUserMedia', {
-      configurable: true,
-      writable: true,
-      value: async () => {
-        const context = last!;
-        const tone = context.createOscillator();
-        tone.frequency.value = 220;
-        const gain = context.createGain();
-        gain.gain.value = 0.3;
-        const swell = context.createOscillator();
-        swell.frequency.value = 2.5;
-        const depth = context.createGain();
-        depth.gain.value = 0.3;
-        swell.connect(depth).connect(gain.gain);
-        const out = context.createMediaStreamDestination();
-        tone.connect(gain).connect(out);
-        tone.start();
-        swell.start();
-        return out.stream;
-      },
-    });
-  };
 
   const ENGINES = [
     { name: 'Chromium', device: devices['Pixel 7'], ios: false },

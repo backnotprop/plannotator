@@ -13,7 +13,8 @@
  *  - The comments sheet covers the file: the box and its pill step aside from Write the reply. Write the reply closes
  *    the file and gives the thread's box focus; Keep writing and a refused Save it close the sheet to reach the words.
  *  - A folded pill never lies under the toolbar: it shares the row when both fit, else it sits above (360 px overlapped by 24).
- *  - A desktop window's foot takes none of this.
+ *  - A desktop window's foot takes none of this. A window too narrow for a view beside the thread leaves the file as a
+ *    phone does: R and Write the reply close it, and R asks about an unsaved comment first.
  *
  * Voice is on but not ready in this sandbox, so the box also carries its note: the mic shows, dimmed, as it does on a
  * phone that cannot record. Build the binary first (see inbox.spec.ts).
@@ -179,6 +180,10 @@ for (const phone of PHONES) {
       const context = await browser.newContext({ ...device, colorScheme: 'dark' });
       page = await context.newPage();
       await page.emulateMedia({ reducedMotion: 'reduce' });
+    });
+
+    test.afterEach(async () => {
+      await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
     });
 
     test.afterAll(async () => {
@@ -385,6 +390,17 @@ for (const phone of PHONES) {
       }
     }
 
+    test('Write the reply with a long draft: the caret and the end of the words are in sight', async () => {
+      await page.setViewportSize({ width: 390, height: 844 });
+      const t = await seed(short, 2);
+      await openSheet(t, 'shot.png', Array.from({ length: 80 }, (_, i) => `Line ${i} of a long reply.`).join('\n'));
+      await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).tap();
+      const box = page.locator('section.ib-pane textarea.ib-rtext');
+      await expect(box).toBeFocused();
+      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight - el.clientHeight - el.scrollTop)).toBeLessThanOrEqual(2);
+      await expect.poll(() => box.evaluate((el: HTMLTextAreaElement) => el.scrollHeight > el.clientHeight)).toBe(true);
+    });
+
     test('Keep writing, and a refused Save it, from under the sheet: the sheet closes and the words have focus', async () => {
       await page.setViewportSize({ width: 390, height: 844 });
       const t = await seed(short, 2);
@@ -472,6 +488,52 @@ for (const phone of PHONES) {
         await page.emulateMedia({ reducedMotion: 'reduce' });
       }
     });
+  });
+}
+
+for (const width of [500, 768, 900]) {
+  test(`a window ${width} px wide with no room beside the thread: R and Write the reply close the file, an unsaved comment asked about first`, async ({ browser }: { browser: Browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 800 } });
+    const page = await context.newPage();
+    const box = page.locator('section.ib-pane textarea.ib-rtext');
+    const field = card(page).locator('[data-image-composer] textarea');
+    const thread = await seed(short, 2);
+    const onCard = async () => {
+      await page.goto('about:blank');
+      await page.goto(fileUrl(thread, 'shot.png'));
+      await card(page).waitFor();
+    };
+    const left = async () => {
+      await expect(page.locator('[data-attachment-pane]')).toHaveCount(0);
+      await expect(box).toBeFocused();
+    };
+
+    await onCard();
+    await page.locator('[data-fcomp-mode="comment"]').click();
+    await field.fill('Not saved yet.');
+    await field.blur();
+    await page.keyboard.press('r');
+    await page.locator('[data-step-guard]').waitFor();
+    await expect(page.locator('[data-attachment-pane]')).toHaveCount(1);
+    await page.locator('[data-guard-keep]').click();
+    await expect(field).toHaveValue('Not saved yet.');
+    await field.blur();
+    await page.keyboard.press('r');
+    await page.locator('[data-guard-discard]').click();
+    await left();
+    await page.keyboard.press('Escape');
+
+    await onCard();
+    await page.locator('[data-fcomp-mode="reply"]').click();
+    await card(page).locator('[data-fcomp-field] textarea').fill('Going left.');
+    await page.locator('[data-full-view-bar] .ib-fvcount').click();
+    await page.locator('[data-full-view-foot]').getByRole('button', { name: 'Write the reply' }).click();
+    await left();
+    await expect(box).toHaveValue('Going left.');
+    await page.keyboard.type(' More.');
+    await expect(box).toHaveValue('Going left. More.');
+    await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
+    await context.close();
   });
 }
 

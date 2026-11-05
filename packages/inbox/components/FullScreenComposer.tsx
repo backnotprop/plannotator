@@ -43,6 +43,7 @@ import { AnnotationsList, type AnnotationsListProps, type CommentsListAt } from 
 import { InboxComposerField, type InboxComposerTags } from './ComposerField';
 import { VoiceFoot } from './VoiceMic';
 import { useVoiceSession } from '../voice';
+import type { VoiceLate } from '../voiceSession';
 import { AttachFilesButton, ComposeFileTiles, useFileDrop, type ComposeFile } from '../compose/ComposeFiles';
 import { Icon } from '../icons';
 import { Tip } from './Tip';
@@ -58,6 +59,8 @@ export interface FullScreenReply {
   value: string;
   /** The reply box's own change: the box takes the words and the draft saves them. */
   onChange: (text: string) => void;
+  /** A take this card's field left behind while it was being transcribed: the thread's reply takes the words. Can run after the card has gone. */
+  onLateVoice: (threadId: string, outcome: VoiceLate) => void;
   /** The thread's Send, kept in full screen. */
   onSend: () => void;
   sending: boolean;
@@ -174,7 +177,7 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
     apply(next);
     setForm(next.form);
   }, [phone]);
-  useLayoutEffect(() => fit());
+  useLayoutEffect(() => fit(), [fit, n, a, reply.picks, reply.actions, reply.annotations]);
   // The foot outlives this row ("Sent to …" takes its place for a moment): the fit goes with the chips.
   useLayoutEffect(() => {
     const foot = chips.current?.closest('[data-fcomp-foot]');
@@ -241,13 +244,12 @@ function Rides({ reply, phone, linkRef, onComments }: { reply: FullScreenReply; 
   );
 }
 
-export function FullScreenComposer({
-  value,
-  noun,
-  comment,
-  foldedByDefault = false,
-  onMinimized,
-}: {
+/** One card per thread: a take on its way stays with the thread it was said in when the same pane shows another. */
+export function FullScreenComposer(props: FullScreenComposerProps) {
+  return <ThreadComposer key={props.value.threadId} {...props} />;
+}
+
+interface FullScreenComposerProps {
   value: FullScreenComposerValue;
   /** What a comment is on ("this image", "this video", "this page"). */
   noun: 'image' | 'video' | 'page' | null;
@@ -257,7 +259,9 @@ export function FullScreenComposer({
   foldedByDefault?: boolean;
   /** The person minimized the card (a comment with no words yet drops its draft). */
   onMinimized?: () => void;
-}) {
+}
+
+function ThreadComposer({ value, noun, comment, foldedByDefault = false, onMinimized }: FullScreenComposerProps) {
   const { reply, phone, threadId } = value;
   const takesComments = comment !== null;
   const hasDraft = reply.value.trim() !== '';
@@ -269,7 +273,7 @@ export function FullScreenComposer({
   const commentsRef = useRef<HTMLButtonElement | null>(null);
   /** The card's height when the list opened: the list sits just above the card. */
   const [cardHeight, setCardHeight] = useState(0);
-  const voice = useVoiceSession(!value.covered);
+  const voice = useVoiceSession(!value.covered && mode === 'reply' && !state.minimized, (outcome) => reply.onLateVoice(threadId, outcome));
   // The sheet hides the status and Stop, so no microphone stays open behind it. What was said still lands in the reply.
   const covered = value.covered === true;
   useEffect(() => {
@@ -487,7 +491,7 @@ export function FullScreenComposer({
         // Mod+Enter sends the reply from anywhere in the card (the tabs, the buttons, the tags), as it does from the
         // reply field, whose own handler has stopped it by now. Never from the comment tab (its Enter is the file's).
         if (mode !== 'reply' || event.key !== 'Enter' || !(event.metaKey || event.ctrlKey) || event.defaultPrevented || event.repeat || event.shiftKey || event.altKey || event.nativeEvent.isComposing) return;
-        if (!reply.canSend || reply.sending) return;
+        if (!reply.canSend || reply.sending || voice.busy) return;
         event.preventDefault();
         event.stopPropagation();
         reply.onSend();

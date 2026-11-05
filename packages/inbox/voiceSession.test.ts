@@ -7,14 +7,14 @@
  * posted; a recording running past 2:00; two recordings at once.
  */
 import { afterEach, describe, expect, test } from 'bun:test';
-import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
+import { createVoiceSession, VOICE_ASKING_GIVE_UP_MS, VOICE_CAP_MS, VOICE_OPENING_GIVE_UP_MS, VOICE_OPENING_SLOW_MS, VOICE_QUIET_STOP_MS, type VoiceAnswer, type VoiceLate, type VoiceDeps, type VoiceField, type VoiceSession } from './voiceSession';
 import { openVoiceRecorder, type VoiceRecorder } from './voiceRecorder';
 
 const LOUD = -20;
 const ROOM = -70;
 const TICK = 33;
 
-function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: number; failStop?: boolean; open?: VoiceDeps['open'] } = {}) {
+function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: number; failStop?: boolean; open?: VoiceDeps['open']; late?: (outcome: VoiceLate) => void } = {}) {
   let throwMic = options.throwMic ?? 0;
   const log: string[] = [];
   const posted: Blob[] = [];
@@ -108,7 +108,7 @@ function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: num
       };
     },
   };
-  const session = createVoiceSession(deps);
+  const session = createVoiceSession(deps, options.late);
   return {
     log,
     posted,
@@ -116,6 +116,7 @@ function script(options: { prompts?: boolean; refuseMic?: string; throwMic?: num
     /** The signal each open was given. */
     opens,
     session,
+    field,
     detach: session.attach(field),
     value: () => value,
     type: (text: string) => {
@@ -765,6 +766,84 @@ describe('failures', () => {
     expect(w.session.view()).toMatchObject({ phase: 'idle', trouble });
     w.session.release();
     expect(w.session.view().phase).toBe('idle');
+  });
+});
+
+describe('the field goes while the words are on their way', () => {
+  /** A take at its answer, held, with a host that takes the words once there is no field. */
+  const taken = async () => {
+    const late: VoiceLate[] = [];
+    const w = world({ late: (outcome) => late.push(outcome) });
+    let answer: (value: VoiceAnswer) => void = () => {};
+    w.answer(new Promise<VoiceAnswer>((resolve) => (answer = resolve)));
+    await held(w);
+    w.session.release();
+    await settle();
+    expect(w.session.view().phase).toBe('sending');
+    return { w, late, answer };
+  };
+
+  test('the host takes the words, and the field is left alone', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    expect(w.session.view().phase).toBe('sending');
+    expect(w.signals[0]!.aborted).toBe(false);
+    answer({ text: 'late words' });
+    await settle();
+    expect(late).toEqual([{ text: 'late words' }]);
+    expect(w.value()).toBe('Draft ');
+    expect(w.session.view().phase).toBe('idle');
+  });
+
+  test('a field back before the answer takes the words itself, and the host nothing', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    const again = w.session.attach(w.field);
+    answer({ text: 'words' });
+    await settle();
+    expect(late).toEqual([]);
+    expect(w.value()).toBe('Draft words');
+    again();
+  });
+
+  test('a failed answer, the host gone: it says so. The host still drawn keeps the line and the clip for Retry', async () => {
+    const gone = await taken();
+    gone.w.detach();
+    gone.answer({ code: 'voice_refused' });
+    await settle();
+    expect(gone.late).toEqual([{ failed: true }]);
+    expect(gone.w.session.view().trouble).toBeNull();
+
+    const drawn = await taken();
+    const stopListening = drawn.w.session.subscribe(() => {});
+    drawn.w.detach();
+    drawn.answer({ code: 'voice_refused' });
+    await settle();
+    expect(drawn.late).toEqual([]);
+    expect(drawn.w.session.view()).toMatchObject({ trouble: 'refused', kept: true });
+    stopListening();
+  });
+
+  test('a mic still listening stops, and nothing is sent or handed over', async () => {
+    const late: VoiceLate[] = [];
+    const w = world({ late: (outcome) => late.push(outcome) });
+    await held(w);
+    w.detach();
+    expect(w.log).toContain('mic aborted');
+    expect(w.session.view().phase).toBe('idle');
+    await settle();
+    expect(w.posted).toHaveLength(0);
+    expect(late).toEqual([]);
+  });
+
+  test('Cancel in the meantime: the answer goes nowhere', async () => {
+    const { w, late, answer } = await taken();
+    w.detach();
+    w.session.cancel();
+    answer({ text: 'too late' });
+    await settle();
+    expect(late).toEqual([]);
+    expect(w.value()).toBe('Draft ');
   });
 });
 
