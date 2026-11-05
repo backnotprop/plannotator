@@ -398,9 +398,10 @@ export interface InboxPulls {
   readHead(key: string): string | null;
   /**
    * One file's whole text at the commits this PR's diff runs between, for the viewer's expand arrows: read from the
-   * first of `roots` (local clones of the repository) that has the commit, else from the forge. Both sides null when
-   * either is missing, binary, too large or can't be read, and for a fork's layer. Throws InboxPullsError only for a
-   * PR the last list did not name.
+   * first of `roots` (local clones of the repository) that has the commit, else from the forge, a fork's commits too:
+   * they are reachable by id from the base repository. `oldPath`: a renamed file's old side. Both sides null when either
+   * is missing, binary or too large, with `failed` when the forge did not answer. Throws InboxPullsError only for a PR
+   * the last list did not name.
    */
   /** `ids` are the blobs the patch on screen names: a text that does not hash to them is not that patch's file, and no arrows open. */
   fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[], ids: PatchBlobIds | null, oldPath?: string): Promise<InboxFileContents>;
