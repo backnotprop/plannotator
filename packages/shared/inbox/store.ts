@@ -2017,13 +2017,6 @@ export class InboxStore {
   }
 
   /**
-   * Where the person's latest sent item in the thread is, for its list row:
-   * the same inputs, gathered the same way, as the thread's delivery line
-   * (packages/inbox/components/Thread.tsx, `deliveryLine` and `ackPillLine`),
-   * decided by the one rule (`inboxDeliveryState`), so a row and its thread
-   * agree. Memory only: a few map lookups per row.
-   */
-  /**
    * Where a person's message is addressed: its own `to`, or in a thread the person started, that thread's. Not when it
    * answers another session that wrote in it: the reply goes to that one (the thread's rule too).
    */
@@ -2033,6 +2026,13 @@ export class InboxStore {
     return last.to ?? (startedTo && last.reply_to && !otherSessionThan(askedBy, startedTo) ? startedTo : null);
   }
 
+  /**
+   * Where the person's latest sent item in the thread is, for its list row:
+   * the same inputs, gathered the same way, as the thread's delivery line
+   * (packages/inbox/components/Thread.tsx, `deliveryLine` and `ackPillLine`),
+   * decided by the one rule (`inboxDeliveryState`), so a row and its thread
+   * agree. Memory only: a few map lookups per row.
+   */
   private rowDelivery(
     root: InboxMessage,
     lastReal: InboxMessage,

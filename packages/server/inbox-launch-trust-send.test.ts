@@ -509,13 +509,16 @@ describe("a launched session and a reply going elsewhere", () => {
   test("stopped: a reply aimed elsewhere leaves it the thread, a reply waiting on it stays; once its launch is deleted, the reply takes the thread", async () => {
     const w = await launched();
     const asked = w.says("Done.", w.L, w.rootId, "a1");
+    // Addressed to it while it still polled; it stops after.
+    await w.poll(w.L);
+    const addressed = await w.reply(asked.id, "k0", w.to(w.L));
+    await w.fake.host.stop("f1");
     w.pastGrace();
     await w.poll("ses_c");
     expect((await w.reply(asked.id, "k1", w.to("ses_c"))).took_over).toBeUndefined();
     expect(w.owner()).toBe(w.L);
-    const waiting = await w.reply(asked.id, "k2", w.to(w.L)).catch(() => null);
     // The stopped launched session is there: a reply addressed to it is not moved off it.
-    if (waiting) expect(await w.move(waiting.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
+    expect(await w.move(addressed.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
 
     const saved = await w.reply(asked.id, "k3");
     expect(await w.move(saved.id, "ses_c")).toMatchObject({ status: 422, code: "session_still_live" });
@@ -540,11 +543,27 @@ describe("a launched session and a reply going elsewhere", () => {
   test("gone: a reply addressed to it moves at once too", async () => {
     const w = await launched();
     const asked = w.says("Done.", w.L, w.rootId, "a1");
+    await w.poll(w.L);
     await w.poll("ses_c");
-    const stamped = await w.reply(asked.id, "k1", w.to(w.L)).catch(() => null);
+    const addressed = await w.reply(asked.id, "k1", w.to(w.L));
     w.gone();
-    if (stamped) expect(await w.move(stamped.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
-    else expect((await w.move(w.rootId, "ses_c")).status).toBe(200);
+    expect(await w.move(addressed.id, "ses_c")).toMatchObject({ status: 200, tookOver: true });
+    expect(w.owner()).toBe("ses_c");
+  });
+
+  test("the row on a real server: a stopped launched session has not ended, until its launch is deleted", async () => {
+    const w = await launched();
+    w.says("Done.", w.L, w.rootId, "a1");
+    await w.fake.host.stop("f1");
+    w.pastGrace();
+    const mark = async () => {
+      const list = (await (await fetch(`${w.base}/api/inbox/threads`)).json()) as { sections: { threads: { thread_id: string; session_ended?: boolean }[] }[] };
+      return list.sections.flatMap((section) => section.threads).find((row) => row.thread_id === w.rootId)!.session_ended;
+    };
+    expect(await mark()).toBeUndefined();
+    await fetch(`${w.base}/api/inbox/launch/${w.store.message(w.rootId)!.launch!.id}/delete`, { method: "POST", headers: { Origin: w.base, "Content-Type": "application/json" }, body: "{}" });
+    for (let tries = 0; tries < 200 && !w.store.message(w.rootId)!.launch!.deleted_at; tries++) await Bun.sleep(10);
+    expect(await mark()).toBe(true);
   });
 
   test("a start that failed, the root moved to a live session: that session keeps the thread, and a reply to it stays on it", async () => {

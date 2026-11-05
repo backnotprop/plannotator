@@ -914,6 +914,39 @@ test.skipIf(!hasDom)('a launched thread, a plain reply for its own agent: stoppe
   expect(posted.find((p) => p.path.endsWith(`/messages/${SAVED_REPLY}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
 });
 
+test.skipIf(!hasDom)('a launched thread, its agent gone: the words and the form only while the reply can move', async () => {
+  liveness = { ses_launched: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const gone = { ...stoppedRun, state: 'missing' } as typeof stoppedRun;
+  const OFFER = 'or send the reply to another session';
+  const read = async (t: InboxThread) => {
+    const el = await render(t, SAVED_AT, gone);
+    const seen = { words: !!el.querySelector('[data-run]')?.textContent?.includes(OFFER), form: !!el.querySelector('[data-readdress-open]') };
+    act(() => root?.unmount());
+    host?.remove();
+    return seen;
+  };
+  const saved = savedIn(asked, M1);
+  const withSaved = { ...thread, messages: [rootMessage, asked, saved] };
+  expect(await read(withSaved)).toEqual({ words: true, form: true });
+  // Taken already, by delivery or by a read that settled it: refused as already delivered.
+  const taken = { ...saved, delivery: { host: 'claude-code', session: 'ses_launched', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [rootMessage, asked, taken] })).toEqual({ words: false, form: false });
+  const read9 = { ...rootMessage, agent_checked_seq: 9 } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [read9, asked, { ...saved, seq: 2 } as InboxMessageWire] })).toEqual({ words: false, form: false });
+  // Archived: refused as resolved.
+  const at = '2026-10-11T11:00:00.000Z';
+  expect(await read({ ...thread, resolved_at: at, messages: [{ ...rootMessage, resolved_at: at }, asked, saved] })).toEqual({ words: false, form: false });
+  // Every other live session took it through a tag: nowhere to send it, and no form.
+  const tagged = { ...saved, tags: [{ host: 'pi', session: 'ses_other', wakes: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:51:00.000Z' } }] } as InboxMessageWire;
+  expect(await read({ ...thread, messages: [rootMessage, asked, tagged] })).toEqual({ words: false, form: false });
+  // No other session running: the words say nothing of it; the form stays, since opening it reads the sessions again.
+  sessions = { sessions: [] };
+  expect((await read(withSaved)).words).toBe(false);
+});
+
 test.skipIf(!hasDom)('a launched thread, a plain reply for a tagged agent that ended: a move, and no line saying the reply starts the launched agent', async () => {
   liveness = { ses_launched: false, ses_tagged: false };
   sessions = { sessions: [live('ses_other', 'pi')] };
