@@ -3190,10 +3190,11 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   const itemMetrics = useMemo<Partial<VirtualFileMetrics>>(
     () => ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
-      hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
+      // The 32 is the line-info row's; a simple one's height is the library's own.
+      ...(hunkSeparators === 'line-info' && { hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT }),
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight],
+    [compactTouchLayout, customLineHeight, hunkSeparators],
   );
   itemMetricsRef.current = itemMetrics;
 

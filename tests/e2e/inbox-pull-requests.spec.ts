@@ -1890,7 +1890,6 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
       generator: { engine: 'claude-code', model: 'claude-opus-5' },
     },
   } as never);
-  rmSync(longFile);
   const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
   await expect(reviewed).toContainText('Ready', { timeout: 15_000 });
   await expect(reviewed).toContainText('Walkthrough');
@@ -1913,6 +1912,13 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
   await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
   await expect(page.getByText('unmodified line')).toHaveCount(0);
+  // The file's header sits at the top of its box, with no room left over for a separator that isn't there.
+  const gap = await page.locator('[data-guide-file-shell="src/walk-long.ts"]').first().evaluate((shell) => {
+    const hosts = [shell, ...shell.querySelectorAll('*')];
+    const body = hosts.flatMap((el) => (el.shadowRoot ? [...el.shadowRoot.querySelectorAll('[data-code], pre')] : []))[0];
+    return body ? body.getBoundingClientRect().top - shell.getBoundingClientRect().top : null;
+  });
+  expect(gap).toBeLessThan(60);
   await page.waitForTimeout(1200);
   await shot(page, 'w-pane');
   // All files: the same code, nothing counted, and no words about changes.
@@ -1929,6 +1935,7 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await page.goto(`${world.url}#thread=${encodeURIComponent(threadId!)}`);
   await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
   await shot(page, 'w-thread');
+  rmSync(longFile);
 });
 
 test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {
