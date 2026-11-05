@@ -112,7 +112,7 @@ When Claude Code calls `ExitPlanMode`, this hook intercepts and waits for your d
 
 ## Remote / Devcontainer Usage
 
-Over SSH, remote mode turns on by itself, so you only need to forward the port (`19432` unless you set `PLANNOTATOR_PORT`). WSL2 does not need remote mode. Devcontainers and Docker are not detected, so set `PLANNOTATOR_REMOTE=1` (or `true`) and `PLANNOTATOR_PORT` there; in a VS Code devcontainer you need this only if the browser does not open by itself. See the [remote and devcontainers guide](https://plannotator.ai/docs/guides/remote-and-devcontainers/).
+Over SSH, remote mode turns on by itself, so you only need to forward the port: `19432`, or your `PLANNOTATOR_PORT` if you set one. WSL2 does not need remote mode. Devcontainers and Docker are not detected. In a VS Code devcontainer the browser usually opens by itself, so you need the settings below only if it does not. In any other devcontainer or Docker, set:
 
 ```bash
 export PLANNOTATOR_REMOTE=1
@@ -126,11 +126,15 @@ This tells Plannotator to:
 
 **Port forwarding in VS Code devcontainers:** The port should be automatically forwarded. Check the "Ports" tab.
 
-**SSH port forwarding:** Add to your `~/.ssh/config`:
+**SSH port forwarding:** Add to your `~/.ssh/config` (use your `PLANNOTATOR_PORT` value if you set one):
 ```
 Host your-server
-    LocalForward 9999 localhost:9999
+    LocalForward 19432 localhost:19432
 ```
+
+**Docker:** Publish the port: `docker run -e PLANNOTATOR_REMOTE=1 -e PLANNOTATOR_PORT=9999 -p 9999:9999 your-image`.
+
+See the [remote access guide](https://docs.plannotator.ai/open-source/remote-access).
 
 ## Slash Commands
 
