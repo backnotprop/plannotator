@@ -27,7 +27,7 @@
 import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
-import { inboxSnoozeRefusal } from "@plannotator/core/inbox-snooze";
+import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
 import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
@@ -153,6 +153,8 @@ export interface MachineSnoozeAnswer {
   name: string;
   snoozed: { until: string; at: string } | null;
   held: string | null;
+  /** `until: null` took off a snooze this machine's list showed running. */
+  ended: boolean;
 }
 
 /** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
@@ -719,12 +721,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
     if (response.status === 202) {
       const state = body.outbox?.state;
-      if (state === "queued" || state === "sending") return { machine, name, snoozed: null, held: machineHeldWords(name, body.machine?.state ?? null) };
+      if (state === "queued" || state === "sending") return { machine, name, snoozed: null, held: machineHeldWords(name, body.machine?.state ?? null), ended: false };
       const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
       throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
     }
     if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
-    return { machine, name, snoozed: body.snoozed ?? null, held: null };
+    return { machine, name, snoozed: body.snoozed ?? null, held: null, ended: until === null && !!row.snoozed && inboxSnoozeRunning(row.snoozed.until) };
   };
 
   // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──

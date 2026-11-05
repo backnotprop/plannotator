@@ -83,8 +83,14 @@ describe("snooze_thread, the agent's call", () => {
     expect(JSON.stringify(await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } }))).not.toMatch(/snooz/i);
     // Ended: back in its section at once.
     const ended = await call(client, { thread_id: a.thread_id, until: null });
-    expect(ended.structuredContent!.snoozed).toBeNull();
+    expect(ended.content[0]!.text).toBe(`Thread ${a.thread_id}: snooze ended.`);
+    // In the structured result too: an MCP client may show the agent only that.
+    expect(ended.structuredContent).toEqual({ thread_id: a.thread_id, snoozed: null, ended: `Thread ${a.thread_id}: snooze ended.` });
     expect((await list(server)).snoozed).toEqual([]);
+    // Nothing to take off: not "ended".
+    const none = await call(client, { thread_id: a.thread_id, until: null });
+    expect(none.content[0]!.text).toBe(`Thread ${a.thread_id} is not snoozed.`);
+    expect(none.structuredContent).toEqual({ thread_id: a.thread_id, snoozed: null });
     expect(sectionOf(await list(server), a.thread_id)).toBe("waiting");
     // Its time: back by itself, with the return's mark.
     await call(client, { thread_id: a.thread_id, until: later(600) });

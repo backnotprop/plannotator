@@ -1239,9 +1239,15 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect(await rowOn(a.port, thread)).toBe(false);
 
       const ended = await call(onA, thread, null);
-      expect(ended.structuredContent!.snoozed).toBeNull();
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+      expect(ended.structuredContent).toMatchObject({ snoozed: null, ended: ended.content[0]!.text });
       expect(b.store.snoozes()).toEqual([]);
       await waitFor("back in A's sections", () => rowOn(a.port, thread));
+      await waitFor("the band on A is empty", async () => !(await snoozedIds(a.port)).includes(thread));
+      // Nothing left to take off: not "ended".
+      const none = await call(onA, thread, null);
+      expect(none.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(none.structuredContent!.ended).toBeUndefined();
 
       // B asleep: the words the window uses, nothing lost, and it lands when B is back.
       await onB.close();
@@ -1254,7 +1260,8 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect(await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()).toMatchObject({ waiting: [], notices: [] });
       const held = await call(onA, thread, inSoon());
       expect(held.isError).toBeUndefined();
-      expect(held.structuredContent!.held).toBe(true);
+      // Said in the structured result too: an MCP client may show the agent only that.
+      expect(held.structuredContent!.held).toBe(held.content[0]!.text);
       expect(held.content[0]!.text).toMatch(/^Waiting for .+: this applies when .+ is back\.$/);
       b = await start(dataB);
       await waitFor("the held snooze on B", () => b.store.snoozes().some((s) => s.thread_id === thread), 45_000);
@@ -1410,6 +1417,18 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
     expect(seen).toEqual(["snooze", "end"]);
   });
 
+  test("only an explicit null says ended: a time that did not apply on a machine whose clock is ahead stays not snoozed, though a snooze was running", async () => {
+    const thread = "msg_01K0000000000000000000000F";
+    const running = { until: new Date(Date.now() + 30 * 86_400_000).toISOString(), at: new Date().toISOString() };
+    await withDoor("plannotator-snooze-agent-clock-ahead-", thread, true, { row: { snoozed: running }, snooze: () => Response.json({ snoozed: null }) }, async (_inbox, client) => {
+      const missed = await call(client, thread, inSoon());
+      expect(missed.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(missed.structuredContent!.ended).toBeUndefined();
+      const ended = await call(client, thread, null);
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+    });
+  });
+
   test("a machine still answering past its wait is on its way: said as held, not as refused", async () => {
     let answered = () => {};
     const slow = new Promise<Response>((resolve) => { answered = () => resolve(Response.json({ snoozed: null })); });
@@ -1417,7 +1436,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       const answer = await call(client, "msg_01K0000000000000000000000A", inSoon());
       answered();
       expect(answer.isError).toBeUndefined();
-      expect(answer.structuredContent!.held).toBe(true);
+      expect(answer.structuredContent!.held).toBe(answer.content[0]!.text);
       expect(answer.content[0]!.text).toStartWith("Sending to ");
     });
   }, 20_000);
@@ -1485,7 +1504,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       expect((await person(moved, soon, undefined, "person-moved")).status).toBe(202);
       expect((await person(undone, inMonth(40))).status).toBe(202);
       expect((await person(undone, soon, firstAt[undone])).status).toBe(202);
-      expect((await call(onA, agents, soon)).structuredContent!.held).toBe(true);
+      expect((await call(onA, agents, soon)).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
       expect((await person(quiet, soon)).status).toBe(202);
       await Bun.sleep(Date.parse(soon) - Date.now() + 100);
 
@@ -1548,7 +1567,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       const soon = () => new Date(Date.now() + 5_000).toISOString();
       const last = Date.now() + 5_000;
       const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
-      expect((await call(onA, thread, soon())).structuredContent!.held).toBe(true);
+      expect((await call(onA, thread, soon())).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
       const own = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key: "own-held", until: soon() }) });
       expect(own.status).toBe(202);
       expect((await outboxOf(a.port)).waiting).toHaveLength(2);

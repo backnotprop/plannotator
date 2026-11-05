@@ -166,7 +166,7 @@ describe("what a script gets", () => {
     expect(JSON.parse(snoozed.stdout).snoozed.until).toBe(until);
     expect(box.server.store.snoozes().map((s) => s.thread_id)).toEqual([sent.thread_id]);
     const ended = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until: null })]);
-    expect(JSON.parse(ended.stdout).snoozed).toBeNull();
+    expect(JSON.parse(ended.stdout)).toEqual({ thread_id: sent.thread_id, snoozed: null, ended: `Thread ${sent.thread_id}: snooze ended.` });
     expect(box.server.store.snoozes()).toEqual([]);
   });
 
