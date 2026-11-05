@@ -7848,6 +7848,12 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-att-w-reuse > .ib-att-t:not(.ib-open-beside) .ib-open { padding-right: 30px; margin-right: 0; }
   .ib-att-w-reuse.ib-att-w-more > .ib-att-t:not(.ib-open-beside) .ib-open { padding-right: 58px; }
 }
+/* No hover: Open stays where it was, unless the check rests on the tile and needs the room (approval: nothing new rests on a phone's thread). */
+@media (hover: none) {
+  .ib-att-w-reuse:not(.ib-att-w-more) > .ib-att-t .ib-open { margin-right: 0; }
+  .ib-att-w-reuse:has(.ib-reuse-on) > .ib-att-t .ib-open { margin-right: 30px; }
+  .ib-att-w-reuse.ib-att-w-more:has(.ib-reuse-on) > .ib-att-t .ib-open { margin-right: 58px; }
+}
 /* A big preview: top right of the frame, on the card's colour, like an Artifacts card's ⋯. */
 .ib-gal-w { position: relative; display: flex; min-width: 0; }
 .ib-gal-w > .ib-gal-item { flex: 1 1 auto; width: 100%; }

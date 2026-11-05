@@ -26,7 +26,6 @@ import { randomBytes } from "node:crypto";
 import {
   chmodSync,
   constants,
-  copyFileSync,
   existsSync,
   mkdirSync,
   readdirSync,
@@ -38,7 +37,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { open, type FileHandle } from "node:fs/promises";
+import { copyFile, open, type FileHandle } from "node:fs/promises";
 import { join } from "node:path";
 import {
   inboxAttachmentId,
@@ -275,18 +274,25 @@ function streamOfFile(handle: FileHandle): ReadableStream<Uint8Array> {
  * its bytes come in once, through the same door as an upload, and a second add
  * finds the blob. The version is fixed now: the agent changing the file later
  * moves nothing.
+ *
+ * `sha256` is the version the page showed. A tab that read the thread before the
+ * agent changed the file gets what it showed, or a refusal if those bytes have
+ * gone, never newer bytes under the same tile. A big changed file is listed by
+ * its stat rather than a hash, so only a real hash is held to this.
  */
 export async function inboxUploadFromAttachment(
   inboxDirPath: string,
   attachment: InboxAttachment,
   version: "current" | "sent",
-  options: { at: string },
+  options: { at: string; sha256?: string },
 ): Promise<InboxUpload> {
   const refusal = inboxUploadNameRefusal(attachment.name);
   if (refusal) throw new InboxError("upload_refused", refusal, { field: "name" });
-  if (version === "current") {
+  const shown = options.sha256 && /^[0-9a-f]{64}$/.test(options.sha256) ? options.sha256 : null;
+  if (version === "current" && shown !== attachment.sent_sha256) {
     const info = await inboxAttachmentCurrentInfo(attachment);
-    if (!info.ok) throw new InboxError("upload_not_found", `${attachment.name} is not there as it was; add the version it sent.`);
+    if (!info.ok) throw new InboxError("upload_not_found", `${info.unavailable.message} Add the version it sent.`);
+    if (shown && info.sha256 !== shown) throw new InboxError("upload_not_found", `${attachment.name} changed since this page showed it. Look at it again, then add it.`);
     if (info.sha256 !== attachment.sent_sha256) {
       const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current", { hash: "none" });
       if (!opened.ok) throw new InboxError("upload_not_found", opened.message);
@@ -325,7 +331,7 @@ export async function inboxUploadFromAttachment(
  * written. `removeInboxAttachmentFiles` takes them back when the message is
  * not written after all.
  */
-export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): InboxAttachment[] {
+export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly unknown[], at: string): Promise<InboxAttachment[]> {
   const uploads = ids.map((id, index) => {
     const upload = readInboxUpload(inboxDirPath, id);
     if (!upload || !existsSync(inboxBlobPath(inboxDirPath, upload.sha256))) {
@@ -334,8 +340,9 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
     return upload;
   });
   const made: string[] = [];
+  const attachments: InboxAttachment[] = [];
   try {
-    return uploads.map((upload) => {
+    for (const upload of uploads) {
       const id = inboxAttachmentId();
       const dir = join(uploadsDir(inboxDirPath), id);
       ensureDir(dir);
@@ -345,7 +352,8 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
       // A clone where the disk has them, else a full copy. Never a hard link: the read-only mode stops no agent that
       // chmods the file and writes it in place, and with a link that write would change the blob and every other
       // message's copy of these bytes, in any project (uploads-reuse.test.ts).
-      copyFileSync(blob, target, constants.COPYFILE_FICLONE);
+      // Not the sync call: where a disk has no clones, a big file would stop the whole Inbox while it copies.
+      await copyFile(blob, target, constants.COPYFILE_FICLONE);
       // Read-only, so the file reads as the version sent. Not on Windows,
       // where a read-only file cannot be deleted by the sweep.
       if (process.platform !== "win32") {
@@ -356,7 +364,7 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
         }
       }
       const real = realpathSync(target);
-      return {
+      attachments.push({
         id,
         path: real,
         named_path: null,
@@ -369,11 +377,14 @@ export function inboxUploadAttachments(inboxDirPath: string, ids: readonly unkno
         ...(upload.media_type ? { media_type: upload.media_type } : {}),
         ...(upload.width !== undefined && upload.height !== undefined ? { width: upload.width, height: upload.height } : {}),
         ...(upload.duration_ms !== undefined ? { duration_ms: upload.duration_ms } : {}),
-      } satisfies InboxAttachment;
-    });
+      });
+    }
+    return attachments;
   } catch (error) {
     for (const dir of made) rmSync(dir, { recursive: true, force: true });
     if (error instanceof InboxError) throw error;
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOSPC" || code === "EDQUOT") throw new InboxError("upload_no_space", "The disk is full, so the file could not be attached and nothing was sent. Free some space and send again.");
     throw new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
   }
 }

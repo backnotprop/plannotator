@@ -156,7 +156,7 @@ export function createInboxCompose(options: {
     const project = target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
-    const attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+    const attachments = uploads.length > 0 ? await inboxUploadAttachments(store.dir, uploads, at) : [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
       result = store.startPersonThread({
@@ -265,7 +265,8 @@ export function createInboxCompose(options: {
       const hit = typeof body.attachment_id === "string" ? store.attachment(body.attachment_id) : null;
       if (!hit) throw new InboxError("upload_not_found", "That file is no longer in the Inbox.");
       const version = body.version === "current" ? "current" : "sent";
-      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString() });
+      const sha256 = typeof body.sha256 === "string" ? body.sha256 : undefined;
+      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString(), ...(sha256 ? { sha256 } : {}) });
       return json({ upload });
     }
     const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);

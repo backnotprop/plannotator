@@ -436,6 +436,165 @@ test("a phone's HTML page opens clear: the pill keeps its room; the button comes
   }
 });
 
+test("a phone's tiles keep their place: Open and Download sit at the tile's edge, a size is whole; the check takes room only once it rests there", async ({ browser, browserName }) => {
+  test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
+  const { thread_id } = await threadWithFiles();
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const phone = await context.newPage();
+  const cue = (name: string) => tile(phone, name).locator('.ib-open');
+  /** How far the tile's word sits from its right edge. Today's tile, before reuse: 20 px, at any width. */
+  const gap = async (name: string) => {
+    const box = (await tile(phone, name).boundingBox())!;
+    const word = (await cue(name).boundingBox())!;
+    return box.x + box.width - (word.x + word.width);
+  };
+  try {
+    await open(phone, thread_id);
+    await tile(phone, REF_A).scrollIntoViewIfNeeded();
+    for (const name of [REF_A, SHEET]) {
+      expect(await gap(name)).toBeLessThanOrEqual(24);
+      const detail = tile(phone, name).locator('.ib-kd');
+      expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    }
+    await preview(phone, REF_A).tap();
+    const bar = phone.locator('[data-reuse-surface="bar"]').first();
+    await bar.tap();
+    await expect(bar).toHaveAttribute('data-reuse-state', 'added');
+    await phone.locator('[data-full-view-exit]').first().tap();
+    const check = phone.locator(`section.ib-pane [data-reuse-surface="tile"][aria-label^="${REF_A} is in your reply"]`).first();
+    await check.scrollIntoViewIfNeeded();
+    await expect(check).toBeVisible();
+    const checkBox = (await check.boundingBox())!;
+    const word = (await cue(REF_A).boundingBox())!;
+    expect(word.x + word.width).toBeLessThanOrEqual(checkBox.x);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a phone reaches a file that downloads through the viewer's steps: the button is on its card's toolbar", async ({ browser, browserName }) => {
+  test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
+  const { thread_id } = await threadWithFiles();
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
+  const phone = await context.newPage();
+  try {
+    await open(phone, thread_id);
+    await preview(phone, REF_A).tap();
+    await phone.locator('[data-full-view-position].ib-fvpill').tap();
+    await phone.getByRole('gridcell', { name: new RegExp(SHEET.replace('.', '\\.')) }).first().tap();
+    await expect(phone.locator('[data-download-card]')).toBeVisible();
+    const bar = phone.locator(`[data-reuse-surface="bar"][aria-label="Add ${SHEET} to your reply"]`).first();
+    await expect(bar).toBeVisible();
+    await bar.tap();
+    await expect(phone.locator('[data-reuse-surface="bar"]').first()).toHaveAttribute('data-reuse-state', 'added');
+    await phone.locator('[data-full-view-exit]').first().tap();
+    await expect(phone.locator(`[data-reply-files] [data-compose-file="done"][data-compose-file-name="${SHEET}"]`)).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('a refused add shows no check; the button tries again in its place', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await page.route('**/api/inbox/uploads/reuse', (route) => route.fulfill({ status: 404, contentType: 'application/json', body: JSON.stringify({ code: 'upload_not_found', error: 'That file is no longer in the Inbox.' }) }));
+  await tile(page, REF_A).hover();
+  await button(page, 'tile', REF_A).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="refused"]')).toContainText('no longer in the Inbox');
+  const add = page.locator(`[data-reuse="${await tile(page, REF_A).getAttribute('data-attachment-id')}"]`);
+  for (const one of await add.all()) {
+    await expect(one).toHaveAttribute('data-reuse-state', 'idle');
+    await expect(one).toHaveAttribute('aria-pressed', 'false');
+    await expect(one).toHaveAttribute('aria-label', `Add ${REF_A} to your reply`);
+  }
+  await page.unroute('**/api/inbox/uploads/reuse');
+  await tile(page, REF_A).hover();
+  await button(page, 'tile', REF_A).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(page.locator('[data-reply-files] [data-compose-file="refused"]')).toHaveCount(0);
+  await expect(add.first()).toHaveAttribute('data-reuse-state', 'added');
+});
+
+test('a tab that read the thread before the agent changed the file adds what it showed', async () => {
+  const path = art('stale.png', png(400, 300, [200, 200, 200]));
+  const v1 = sha(readFileSync(path));
+  const { thread_id } = await threadWithFiles({ attachments: [path] });
+  await open(page, thread_id);
+  await tile(page, 'stale.png').scrollIntoViewIfNeeded();
+  await expect(tile(page, 'stale.png')).not.toContainText('Changed');
+  // This tab misses every later read of the thread's files: what it shows now is what it keeps showing.
+  const reads = /\/api\/inbox\/threads\/[^/]+\/attachments/;
+  await page.route(reads, (route) => route.abort());
+  writeFileSync(path, png(400, 300, [10, 80, 200]));
+  await tile(page, 'stale.png').hover();
+  await button(page, 'tile', 'stale.png').click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await page.unroute(reads);
+  await sendReply(page);
+  const reply = await agent.nextReply(thread_id);
+  expect(sha(readFileSync((reply.attachments as { path: string }[])[0]!.path))).toBe(v1);
+});
+
+test('the viewer adds the version on screen: the version it sent stays the version it sent', async () => {
+  const path = art('versions.png', png(400, 300, [200, 200, 200]));
+  const v1 = sha(readFileSync(path));
+  const { thread_id } = await threadWithFiles({ attachments: [path] });
+  writeFileSync(path, png(400, 300, [10, 80, 200]));
+  await open(page, thread_id);
+  await tile(page, 'versions.png').scrollIntoViewIfNeeded();
+  await tile(page, 'versions.png').click();
+  const pane = page.locator('[data-attachment-pane]').first();
+  await expect(pane).toHaveAttribute('data-version', 'current');
+  await pane.getByRole('button', { name: 'Open the version it sent' }).click();
+  await expect(pane).toHaveAttribute('data-version', 'sent');
+  const before = blobsOf(studio);
+  await pane.locator('[data-reuse-surface="pane"], [data-reuse-surface="bar"]').first().click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]').first()).toBeAttached();
+  expect(blobsOf(studio)).toEqual(before);
+  await page.locator('[data-full-view-close]').first().click();
+  await sendReply(page);
+  const reply = await agent.nextReply(thread_id);
+  expect(sha(readFileSync((reply.attachments as { path: string }[])[0]!.path))).toBe(v1);
+});
+
+test('a very small picture in the text has no button; a big one has', async () => {
+  art('tiny.png', png(40, 40, [120, 20, 20]));
+  const { thread_id } = await threadWithFiles({ body: 'Small and big.\n\n![Tiny](art/tiny.png)\n\n![Big](art/inline-a.png)', attachments: [] });
+  await page.goto(`${studio.url}/#thread=${thread_id}`);
+  await expect(page.locator('section.ib-pane img[data-inline-image]')).toHaveCount(2);
+  await expect(page.locator('section.ib-pane [data-reuse-surface="inline"]')).toHaveCount(1);
+  await expect(page.locator('section.ib-pane [data-reuse-surface="inline"]')).toHaveAttribute('aria-label', 'Add inline-a.png to your reply');
+});
+
+test('an Artifacts card has the button: it adds to the reply and stays on the view', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await page.locator('[data-artifacts-button]').click();
+  const view = page.locator('[data-artifacts-view]');
+  await expect(view).toBeVisible();
+  const card = view.locator(`[data-reuse-surface="card"][aria-label="Add ${SHEET} to your reply"]`);
+  await card.locator('xpath=..').hover();
+  await card.click();
+  await expect(view).toBeVisible();
+  await expect(view.locator(`[data-reuse-surface="card"][aria-label^="${SHEET} is in your reply"]`)).toBeVisible();
+  await page.locator('[data-artifacts-button]').click();
+  await expect(page.locator(`[data-reply-files] [data-compose-file="done"][data-compose-file-name="${SHEET}"]`)).toBeVisible();
+});
+
+test('the reply box closed with its draft: adding those bytes again opens the box with one tile, not two', async () => {
+  const { thread_id } = await threadWithFiles();
+  await open(page, thread_id);
+  await tile(page, REF_A).hover();
+  await button(page, 'tile', REF_A).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await page.locator('section.ib-pane .ib-acts').getByRole('button', { name: 'Cancel' }).click();
+  await expect(replyTiles(page)).toHaveCount(0);
+  await tile(page, REF_A).hover();
+  await button(page, 'tile', REF_A).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(replyTiles(page)).toHaveCount(1);
+});
+
 test("a linked machine's thread offers no button, on any surface", async () => {
   await open(page, macbookThread);
   await expect(page.getByText('away.png').first()).toBeVisible();

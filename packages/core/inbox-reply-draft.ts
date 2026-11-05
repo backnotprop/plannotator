@@ -251,5 +251,5 @@ export interface DraftFileUploader {
    * A file this host already holds, as a ref of its own: no bytes travel, and the file names the version on
    * screen. Absent: the host cannot, and the window offers no control for it.
    */
-  reuse?(attachmentId: string, version: 'current' | 'sent', options: { signal: AbortSignal }): Promise<InboxUpload>;
+  reuse?(attachmentId: string, version: 'current' | 'sent', options: { signal: AbortSignal; sha256?: string }): Promise<InboxUpload>;
 }

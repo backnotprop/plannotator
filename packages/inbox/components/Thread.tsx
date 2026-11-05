@@ -5100,7 +5100,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     // Full screen's card shows the file under its Reply tab: a comment's words wait on theirs, and the person sees it went in.
     pickComposerMode(thread.thread_id, 'reply');
   };
-  const reuseHeld = replyFiles.files.map((f) => f.reuse?.sha256 ?? f.upload?.sha256 ?? '').join();
+  // A refused tile holds nothing: it says why, and the button can try again. A tile answers to both hashes: the one the
+  // page knew and the bytes the Inbox gave, which is a stat for a big changed file until it is read.
+  const reuseHeld = replyFiles.files
+    .filter((f) => f.state !== 'refused')
+    .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256])
+    .filter(Boolean)
+    .join();
   const reuseOffered = !resolved && newMessage?.kind !== 'compose' && replyFiles.canReuse;
   const reuseApi = useMemo<ReuseApi | null>(
     () =>

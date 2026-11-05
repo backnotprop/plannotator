@@ -682,6 +682,7 @@ const ERROR_STATUS: Record<string, number> = {
   upload_too_large: 413,
   markup_too_large: 413,
   upload_not_found: 404,
+  upload_no_space: 507,
   // The Board's cards (approval "inbox-board"): who may move a card.
   card_not_found: 404,
   card_no_project: 404,
@@ -4564,7 +4565,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             const replayKey = typeof body.idempotency_key === "string" ? body.idempotency_key.trim() : "";
             const fresh = uploads.length > 0 && !store.replyByKey(messageId, replayKey);
             if (fresh && !store.message(messageId)) throw new InboxError("message_not_found", `No message ${messageId}.`);
-            const attachments = fresh ? inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
+            const attachments = fresh ? await inboxUploadAttachments(store.dir, uploads, new Date().toISOString()) : [];
             let result: ReturnType<typeof store.sendReply>;
             try {
               result = store.sendReply(messageId, {
