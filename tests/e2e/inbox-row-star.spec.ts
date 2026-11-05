@@ -160,7 +160,9 @@ test.describe('a mouse', () => {
     const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
     await page.mouse.click(x, y);
     await page.waitForTimeout(500);
-    await page.mouse.click(x, y, { clickCount: 2 });
+    // One press the system counts as the double's second (`mouse.click` with a clickCount sends the first press again).
+    await page.mouse.down({ clickCount: 2 });
+    await page.mouse.up({ clickCount: 2 });
     await page.waitForTimeout(500);
     expect(await threadOpen(page)).toBe(false);
     expect(await serverPins(page)).toEqual([]);
