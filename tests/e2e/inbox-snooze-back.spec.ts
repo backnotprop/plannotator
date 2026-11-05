@@ -549,7 +549,7 @@ test('a message waiting below the view at the return stays unread after the look
 
 test('a phone in WebKit: a held message taller than the view gives way to the back line', async () => {
   test.setTimeout(120_000);
-  const browser = await webkit.launch();
+  const browser = await webkit.launch({ args: [] });
   const context = await browser.newContext({ ...devices['iPhone 15'], colorScheme: 'light' });
   const phone = await context.newPage();
   try {
@@ -565,7 +565,7 @@ test('a phone in WebKit: a held message taller than the view gives way to the ba
 
 test('a phone in WebKit: on screen when the thread opens, with news, the agent last, the person last, a very long last message and one message', async () => {
   test.setTimeout(120_000);
-  const browser = await webkit.launch();
+  const browser = await webkit.launch({ args: [] });
   const context = await browser.newContext({ ...devices['iPhone 15'], colorScheme: 'light' });
   const phone = await context.newPage();
   try {
@@ -594,7 +594,7 @@ test('a phone in WebKit: on screen when the thread opens, with news, the agent l
 
 test('open at the return on a phone in WebKit, reading further down: the words under the eye do not move', async () => {
   test.setTimeout(120_000);
-  const browser = await webkit.launch();
+  const browser = await webkit.launch({ args: [] });
   const context = await browser.newContext({ ...devices['iPhone 15'], colorScheme: 'light' });
   const phone = await context.newPage();
   try {
