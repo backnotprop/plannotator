@@ -168,7 +168,10 @@ function withoutCode(text: string): string {
     .join("\n")
     .replace(/\]\([^)\n]*\)/g, (m) => "](" + blank(m.slice(2)))
     .replace(/<[a-z][a-z0-9+.-]*:[^>\s]*>/gi, blank)
-    .replace(/(?:[a-z][a-z0-9+.-]*:\/\/|www\.)[^\s<>]*/gi, blank);
+    // The scheme's length is capped so that a long run of letters (a pasted log, base64) stays linear; uncapped,
+    // the search walks the rest of the run from every letter. A longer scheme still blanks: from its last 32
+    // characters on, and a tag can only start after its `://`.
+    .replace(/(?:[a-z][a-z0-9+.-]{0,31}:\/\/|www\.)[^\s<>]*/gi, blank);
 }
 
 export interface InboxHashtag {
@@ -184,6 +187,7 @@ export interface InboxHashtag {
 /** Every hashtag in `text`, in order. */
 export function inboxHashtags(text: string): InboxHashtag[] {
   const out: InboxHashtag[] = [];
+  if (!text.includes("#")) return out;
   const re = /#([\p{L}\p{N}][\p{L}\p{N}_-]*)/gu;
   const plain = withoutCode(text);
   for (let match = re.exec(plain); match; match = re.exec(plain)) {

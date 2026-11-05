@@ -84,3 +84,13 @@ test('the picker offers only names that make a tag', () => {
   const odd = [ini('ini_n', '123'), ini('ini_p', '!!!'), SHAPE];
   expect(filterInitiatives(odd, '').map((i) => i.name)).toEqual(['Shape']);
 });
+
+// A reply reads its tags on the server's one thread, on every Send: a long run of letters must not stall the Inbox.
+test('a long run of letters is read at once, a tag beside it or not, and a long scheme still holds no tag', () => {
+  const run = 'x'.repeat(400_000);
+  const at = performance.now();
+  expect(inboxHashtags(run)).toEqual([]);
+  expect(inboxHashtags(`#Shape ${run}`).map((t) => t.tag)).toEqual(['Shape']);
+  expect(performance.now() - at).toBeLessThan(2000);
+  expect(inboxHashtags(`${'x'.repeat(64)}://x.dev/#Shape`)).toEqual([]);
+});
