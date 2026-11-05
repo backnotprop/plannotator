@@ -24,9 +24,10 @@
  *    (`link-back`, `unlink`).
  */
 
-import type { InboxListRow, InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
@@ -151,6 +152,12 @@ export interface MachineSnoozeAnswer {
   name: string;
   snoozed: { until: string; at: string } | null;
   held: string | null;
+}
+
+/** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). */
+export function machineHeldWords(name: string, state: string | null): string {
+  if (state === "revoked") return `Not sent: ${name} removed the link. Link it again to send.`;
+  return state !== null && state !== "online" && state !== "connecting" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}: this applies once ${name} confirms.`;
 }
 
 export interface OutboxView {
@@ -677,12 +684,27 @@ export function createInboxMachines(context: InboxMachinesContext) {
    * linked machine lists the thread. A machine too old to keep snoozes is refused here, with nothing held or noticed.
    */
   const snoozeThread = async (threadId: string, until: string | null): Promise<MachineSnoozeAnswer | null> => {
-    const owners = [...peers.values()].filter((peer) => peer.list?.rows.some((row) => row.thread_id === threadId));
-    if (owners.length === 0) return null;
+    const owners = [...peers.values()].flatMap((peer) => {
+      const row = peer.list?.rows.find((candidate) => candidate.thread_id === threadId);
+      return row ? [{ peer, row }] : [];
+    });
+    if (owners.length === 0) {
+      if (peers.size === 0) return null;
+      // Right after this Inbox starts, a machine that is away has sent no list, so the thread may be there.
+      const unknown = [...peers.values()].filter((peer) => peer.list === null && peer.state !== "needs_update" && peer.state !== "revoked").map((peer) => links.get(peer.id)?.name ?? "A linked machine");
+      if (unknown.length > 0) throw new InboxError("machine_offline", `This thread may be on ${unknown.join(" or ")}, whose threads are not known yet (away or still connecting). Nothing changed.`);
+      throw new InboxError("thread_not_found", `No thread ${threadId}. On a linked machine, use the thread's id, not a message's.`);
+    }
     if (owners.length > 1) throw new InboxError("machine_conflict", "Two linked machines both claim this thread, so it opens on neither.");
-    const machine = owners[0]!.id;
+    const { peer, row } = owners[0]!;
+    const machine = peer.id;
     const name = links.get(machine)?.name ?? "that machine";
-    if (!owners[0]!.list!.snoozes) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: it cannot snooze threads yet. Nothing changed.`);
+    if (!peer.list!.snoozes) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: it cannot snooze threads yet. Nothing changed.`);
+    // Refused here, as that machine's store would: sent, an agent's mistake would wait as if it will apply, then leave the person a notice.
+    if (until !== null) {
+      refuseInboxSnoozeUntil(until, new Date());
+      if (inboxRowArchived(row)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    }
     const route = `threads/${encodeURIComponent(threadId)}/snooze`;
     const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
     const asked = new Request(url, {
@@ -691,9 +713,12 @@ export function createInboxMachines(context: InboxMachinesContext) {
       body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, until }),
     });
     const response = await forward(asked, url, machine, route, "local");
-    const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: unknown } | null };
+    const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
     if (response.status === 202) {
-      return { machine, name, snoozed: null, held: body.machine?.state === "offline" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}…` };
+      const state = body.outbox?.state;
+      if (state === "queued" || state === "sending") return { machine, name, snoozed: null, held: machineHeldWords(name, body.machine?.state ?? null) };
+      const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
+      throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
     }
     if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
     return { machine, name, snoozed: body.snoozed ?? null, held: null };

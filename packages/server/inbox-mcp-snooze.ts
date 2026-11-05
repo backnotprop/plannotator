@@ -26,6 +26,20 @@ export interface InboxSnoozeMcpContext {
 
 const line = (threadId: string, until: string | null, where = "") => (until === null ? `Thread ${threadId}${where} is not snoozed.` : `Thread ${threadId}${where} is snoozed until ${until}.`);
 
+const ISO_WITH_ZONE = /^(\d{4})-(\d{2})-(\d{2})T\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:\d{2})$/;
+
+/**
+ * An agent's `until` is an ISO 8601 time with its zone: `Date.parse` alone takes a time with no zone (read in this
+ * Inbox's zone, not the person's) and guesses at "12/25/2026" or "Nov 12". The person's own window always sends one.
+ */
+function refuseAgentUntil(until: string): void {
+  const match = ISO_WITH_ZONE.exec(until);
+  const day = match ? new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]))) : null;
+  if (!match || !day || Number.isNaN(Date.parse(until)) || day.getUTCMonth() + 1 !== Number(match[2]) || day.getUTCDate() !== Number(match[3])) {
+    throw new InboxError("validation_error", "until: an ISO 8601 time with its zone, like 2026-11-05T08:00:00-05:00.", { field: "until" });
+  }
+}
+
 export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeMcpContext): void {
   server.registerTool(
     "snooze_thread",
@@ -42,6 +56,7 @@ export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeM
     },
     async (input) =>
       guarded(async () => {
+        if (input.until !== null) refuseAgentUntil(input.until);
         const threadId = context.store.message(input.thread_id)?.thread_id ?? null;
         if (threadId) {
           if (input.until === null) {

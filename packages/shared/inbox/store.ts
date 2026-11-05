@@ -134,8 +134,8 @@ import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
-import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
-import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
+import { inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
@@ -1194,9 +1194,7 @@ export class InboxStore {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
-    const refusal = inboxSnoozeRefusal(until, this.now());
-    if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
-    if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
+    refuseInboxSnoozeUntil(until, this.now());
     const now = this.now();
     // `at` (Undo's earlier snooze) is a real ISO time, not after now; stored normalized like `until`.
     if (at !== undefined && (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime())) {

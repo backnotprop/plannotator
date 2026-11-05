@@ -8,7 +8,7 @@
  * snoozed thread, a project batch ending one, and a past time accepted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -92,6 +92,59 @@ describe("snooze_thread, the agent's call", () => {
     const back = await list(server);
     expect(back.snoozed).toEqual([]);
     expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.snooze_back).toEqual(expect.any(String));
+  });
+
+  test("any message of a thread names that thread: a reply's id, not only the root's", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const later1 = await send("Plain news", "ses_a");
+    expect(later1.thread_id).toBe(a.thread_id);
+    expect(later1.message_id).not.toBe(a.thread_id);
+    const answer = await call(client, { thread_id: later1.message_id, until: later(3_600_000) });
+    expect(answer.isError).toBeUndefined();
+    expect(server.store.snoozes().map((s) => s.thread_id)).toEqual([a.thread_id]);
+  });
+
+  test("an agent's time must be ISO 8601 with its zone; a time Date.parse would guess at is refused and names the format", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const year = new Date().getUTCFullYear() + 1;
+    for (const until of [`${year}-06-01T09:00:00`, `06/25/${year}`, String(year), "Nov 12", `${year}-02-31T08:00:00Z`, `${year}-06-01`, "tomorrow"]) {
+      const refused = await call(client, { thread_id: a.thread_id, until });
+      expect([until, refused.isError]).toEqual([until, true]);
+      expect(refused.content[0]!.text).toStartWith("validation_error: until: an ISO 8601 time with its zone");
+    }
+    expect(server.store.snoozes()).toEqual([]);
+    for (const until of [`${year}-06-01T09:00:00-05:00`, `${year}-06-01T09:00:00Z`, `${year}-06-01T09:00+01:00`, `${year}-06-01T09:00:00.250Z`]) {
+      expect([until, (await call(client, { thread_id: a.thread_id, until })).isError]).toEqual([until, undefined]);
+    }
+  });
+
+  test("the window's own route still takes what it always took", async () => {
+    const { server, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const year = new Date().getUTCFullYear() + 1;
+    expect((await snooze(server, a.thread_id, `${year}-06-01T09:00:00`)).status).toBe(200);
+  });
+
+  test("a snooze that went through marks the person as having used Snooze; ending one or a refusal does not", async () => {
+    const was = process.env.PLANNOTATOR_DATA_DIR;
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-zz-config-")));
+    roots.push(configDir);
+    process.env.PLANNOTATOR_DATA_DIR = configDir;
+    try {
+      const { client, send } = await setup();
+      const a = await send(ASK, "ses_a");
+      const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+      await call(client, { thread_id: a.thread_id, until: null });
+      await call(client, { thread_id: a.thread_id, until: later(-60_000) });
+      expect(mark()).toBeUndefined();
+      await call(client, { thread_id: a.thread_id, until: later(3_600_000) });
+      expect(mark()).toEqual(expect.any(String));
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = was;
+    }
   });
 
   test("the store's rules hold: a past time and an unknown thread are refused, and nothing is snoozed", async () => {

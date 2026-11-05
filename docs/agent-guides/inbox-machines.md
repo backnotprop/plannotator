@@ -41,7 +41,7 @@ One Inbox across machines, Phase 1: the server engine, then the window (see "The
 | --- | --- | --- |
 | 1 One key end to end: the window's key; every outcome kept per key, refusals included | `submit` | `inbox-outbox.test.ts` rule 1; e2e 2 and 3 (a retried Send answers the same reply) |
 | 2 One queue per machine (stronger than per thread): each waits for the one before it | `drain` | rule 2 (order, one at a time, an online Send never overtakes a held one) |
-| 3 Refused answers leave, with a notice | `settle`, `classifyAnswer` | rule 3 |
+| 3 Refused answers leave, with a notice (none for a held snooze whose time lapsed: `snooze_past`, not applied) | `settle`, `classifyAnswer` | rule 3 |
 | 4 Unlink and revoke empty that machine's queue: "not delivered", or "may have been delivered" | `dropMachine` | rule 4; e2e 6 |
 | 5 The list only moves forward | `PeerLink.acceptList`, `refreshList` | `inbox-peer-link.test.ts` "the list" |
 | 6 A restart shows a sleeping machine's rows when it wakes (no copy on disk) | `PeerLink.list` in memory | by design, not tested directly; e2e 3 shows the rows kept in memory while B is down |
