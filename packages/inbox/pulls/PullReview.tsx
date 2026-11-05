@@ -528,7 +528,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </div>
           )}
           {!canDecide && !posted && !diffError && (
-            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
+            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'} title={layer.mine ? undefined : `${layer.author ?? 'A teammate'}'s ${noun}`}>
               {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
             </p>
           )}

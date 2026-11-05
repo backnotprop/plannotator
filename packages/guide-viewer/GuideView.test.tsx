@@ -525,8 +525,8 @@ function addedFile(path: string, rows: number): DiffFile {
   };
 }
 
-const boxHeight = (path: string) =>
-  host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.height;
+const box = (path: string) => host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!;
+const boxHeight = (path: string) => box(path).style.height;
 
 describe('GuideView bare (the Inbox PR page)', () => {
   // Guards the empty band under a short file on the PR page (#2615): the box was sized by an estimate that counted
@@ -544,7 +544,24 @@ describe('GuideView bare (the Inbox PR page)', () => {
     await act(async () => report('m.sql')(300));
     expect(boxHeight('m.sql')).toBe('302px');
     await act(async () => report('m.sql')(4000));
-    expect(boxHeight('m.sql')).toBe('620px');
+    expect(boxHeight('m.sql')).toBe('4002px');
+    expect(box('m.sql').style.maxHeight).toBe('var(--guide-file-fit-max, 620px)');
+  });
+
+  // Guards a long file on the PR page standing at 620px until it is first measured, and jumping when it is.
+  test.skipIf(!hasDom)('a long file keeps its whole height before a measure, for the cap to cut', async () => {
+    const guide = makeGuide({ sections: [{ title: 'Every changed file', overview: '', diffs: [{ file: 'long.ts' }] }] });
+    await renderView(guide, { bare: true, state: makeState({ files: [addedFile('long.ts', 200)] }) });
+    expect(boxHeight('long.ts')).toBe(`${59 + 200 * 20}px`);
+    expect(box('long.ts').style.maxHeight).toBe('var(--guide-file-fit-max, 620px)');
+  });
+
+  // Guards the hosts that fit nothing (the review app, guides.show, VS Code): plain capped pixels, with no variable to read.
+  test.skipIf(!hasDom)('a guide that does not fit keeps the fixed estimate', async () => {
+    const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'long.ts' }] }] });
+    await renderView(guide, { state: makeState({ files: [addedFile('long.ts', 200)] }) });
+    expect(boxHeight('long.ts')).toBe('620px');
+    expect(box('long.ts').style.maxHeight).toBe('');
   });
 
   // Guards the Inbox's guided review in a thread (not bare) getting the fit through the opt-in.

@@ -2292,6 +2292,14 @@ pre code.pn-code[data-keep-layout] {
 .ib-gbody { min-height: 0; overflow-y: auto; --text-xs: 0.8125rem; --text-xs--line-height: calc(1 / 0.75); }
 /* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
+/* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
+.ib-gbody { --panel-header-h: 33px; }
+/* A file's own horizontal scrollbar rides its header's bottom edge: it shows only under the pointer, or while dragged. */
+.ib-gbody [data-diff-hscrollbar] > div { opacity: 0; transition: opacity 120ms ease-out, background-color 150ms ease; }
+.ib-gbody [data-guide-file-shell]:hover [data-diff-hscrollbar] > div, .ib-gbody [data-diff-hscrollbar]:active > div { opacity: 1; }
+@media (prefers-reduced-motion: reduce) {
+  .ib-gbody [data-diff-hscrollbar] > div { transition: none; }
+}
 /* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
 .ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
 .ib-gstrip { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 10px 12px; border-top: 1px solid color-mix(in oklch, var(--border) 60%, transparent); }
@@ -7668,6 +7676,33 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The flat PR view (the owner: parity with the code review app's layering of background colours). The review area is
+   --background; the header, strip and foot are the review app's half-card. The reader's section and file cards draw
+   nothing: each file is its header, its code and a hairline, edge to edge. */
+.ib-viewer.ib-prreview :is(.ib-vhead, .ib-prr-strip, .ib-prr-foot) { background: color-mix(in oklab, var(--card) 50%, var(--background)); }
+.ib-prreview .ib-gbody > .w-full { padding-inline: 0; padding-bottom: 0; }
+.ib-prreview [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
+.ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) { background: transparent; padding: 0; }
+.ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) > * { margin: 0; }
+.ib-prreview [data-guide-file-shell] { scroll-margin-top: 0; border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
+.ib-prreview [data-guide-file-shell]:last-child { border-bottom: 0; }
+.ib-prreview [data-guide-code-view-mounted] { border: 0; border-radius: 0; background: transparent; }
+/* A long file's box is as tall as the pane (GuideFileCard's `--guide-file-fit-max`), past which it scrolls inside. */
+.ib-prreview .ib-gbody { container-type: size; --guide-file-fit-max: 100cqh; }
+/* The tab that rose out of the section card goes with the card: its controls stay, on a plain row. */
+.ib-prreview [data-guide-section-tab] { margin-inline: 12px; }
+.ib-prreview [data-guide-section-tab] > svg { display: none; }
+/* What else sits in the pane keeps the row's margin. A phone's Global comment has no tab: its own row. */
+.ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
+.ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
+.ib-prreview .ib-prr-posted { margin-inline: 16px; }
+.ib-prreview .ib-gerror { padding-inline: 16px; }
+/* No band: quiet words, on the controls' row when one follows and there is room (34 px: the tab's height; 14 px: the
+   reader's top padding; the controls' width kept clear), else on their own line. */
+.ib-prreview .ib-prr-note { margin: 10px 16px 0; padding: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
+@container (min-width: 520px) {
+  .ib-prreview .ib-prr-note[data-pull-review-readonly]:has(+ .w-full [data-guide-section-tab]):not(:has(+ .w-full [data-guide-global-comments])) { position: relative; z-index: 1; width: fit-content; max-width: calc(100% - 340px); height: 34px; margin: 14px 0 -48px 16px; line-height: 34px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+}
 
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments

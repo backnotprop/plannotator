@@ -46,6 +46,11 @@
  *     loopback server, tests/helpers/fake-avatars.ts); the window never asks
  *     another origin for anything. A long title is cut in the review header,
  *     whose controls stay in the window from 1280 down to 760 wide.
+ * 11. The flat PR view (parity with the code review app's layering of
+ *     background colours): no card around a file, a hairline between files,
+ *     one row for Global comment and Split | Unified from 800 wide, quiet
+ *     words on it, a long file's box as tall as the pane, and its scrollbar
+ *     only under the pointer.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -907,6 +912,57 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const layoutSwitch = (await review.locator('[data-guide-section-tab] [data-diff-style-switch]').boundingBox())!;
   expect(Math.abs(addGlobal.y + addGlobal.height / 2 - (layoutSwitch.y + layoutSwitch.height / 2))).toBeLessThan(3);
   expect(addGlobal.x + addGlobal.width).toBeLessThan(layoutSwitch.x);
+  // Flat (the owner: parity with the code review app's layering of background colours): the review area is one
+  // surface, a file its header, its code and a hairline, edge to edge, with no card around it.
+  const frame = await review.evaluate((root) => {
+    const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
+    const none = { border: '0px', radius: '0px', fill: 'rgba(0, 0, 0, 0)' };
+    const shells = [...root.querySelectorAll('[data-guide-file-shell]')];
+    return {
+      none,
+      section: read(root.querySelector('[data-guide-section]')!),
+      box: read(root.querySelector('[data-guide-code-view-mounted]')!),
+      hairlines: shells.map((shell) => getComputedStyle(shell).borderBottomWidth),
+      tabShape: getComputedStyle(root.querySelector('[data-guide-section-tab] > svg')!).display,
+    };
+  });
+  expect(frame.section).toEqual(frame.none);
+  expect(frame.box).toEqual(frame.none);
+  expect(frame.hairlines).toEqual([...frame.hairlines.slice(1).map(() => '1px'), '0px']);
+  expect(frame.tabShape).toBe('none');
+  const pane = (await review.locator('.ib-gbody').boundingBox())!;
+  const edge = (await sqlShell.boundingBox())!;
+  expect([edge.x, edge.width]).toEqual([pane.x, pane.width]);
+  // The header, strip and foot share one fill, neither the card's nor the review area's.
+  const fills = await review.evaluate((root) => {
+    const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
+    const token = (name: string) => {
+      const probe = root.appendChild(document.createElement('div'));
+      probe.style.background = `var(${name})`;
+      const value = getComputedStyle(probe).backgroundColor;
+      probe.remove();
+      return value;
+    };
+    return { head: fill('.ib-vhead'), strip: fill('.ib-prr-strip'), foot: fill('.ib-prr-foot'), card: token('--card'), ground: token('--background') };
+  });
+  expect(fills.strip).toBe(fills.head);
+  expect(fills.foot).toBe(fills.head);
+  expect([fills.card, fills.ground]).not.toContain(fills.head);
+  // One row holds Global comment and Split | Unified at every width from 800 up, both inside the pane.
+  for (const width of [800, 1024, 1440]) {
+    await page.setViewportSize({ width, height: 900 });
+    // Read in one frame, once the resize's folds have landed: the row moves when the file rail folds.
+    await expect
+      .poll(() =>
+        review.evaluate((root) => {
+          const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
+          const style = root.querySelector('[data-diff-style-switch]')!.getBoundingClientRect();
+          const body = root.querySelector('.ib-gbody')!.getBoundingClientRect();
+          return Math.abs(add.y + add.height / 2 - (style.y + style.height / 2)) < 3 && add.right < style.left && add.left >= body.left && style.right <= body.right;
+        }),
+      )
+      .toBe(true);
+  }
   await shot(page, '7-layer-review');
   // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
   const fn = review.locator('[data-pull-review-title]');
@@ -981,6 +1037,78 @@ test('Reply at the stack\'s foot goes into the agent\'s thread', async () => {
   expect(String(reply.body)).toBe('Hold #414 until Priya has read the email copy.');
   expect(world.errors).toEqual([]);
   expect(world.outside).toEqual([]);
+});
+
+test('the flat PR view: quiet words on the controls\' row, a long file\'s box as tall as the pane, its scrollbar under the pointer only', async ({ browser }) => {
+  // A window of its own: the stubbed diff stays out of the shared window's cache of the diffs it read.
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  // A long file with one line past the column's width, added to a layer's real diff.
+  const rows = Array.from({ length: 300 }, (_, i) => `+export const ROW_${i + 1} = ${i + 1};`);
+  rows[0] = `+export const ROW_1 = '${'a very long line '.repeat(40)}';`;
+  const long = `diff --git a/src/long.ts b/src/long.ts\nnew file mode 100644\nindex 0000000..1111111\n--- /dev/null\n+++ b/src/long.ts\n@@ -0,0 +1,300 @@\n${rows.join('\n')}\n`;
+  await page.route('**/api/inbox/pulls/diff*', async (route) => {
+    const answer = await route.fetch();
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), patch: long } });
+  });
+  try {
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+    const review = page.locator('[data-pull-review]');
+    const shell = review.locator('[data-guide-file-shell="src/long.ts"]');
+    const box = shell.locator('[data-guide-code-view-mounted="true"]');
+    await expect(box).toBeVisible({ timeout: 30_000 });
+
+    // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, at 800 and up.
+    const note = review.locator('[data-pull-review-readonly]');
+    await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    const onRow = async (width: number) => {
+      await page.setViewportSize({ width, height: 900 });
+      // Read in one frame, once the resize's folds have landed: the row moves when the file rail folds.
+      await expect
+        .poll(() =>
+          review.evaluate((root) => {
+            const words = root.querySelector('[data-pull-review-readonly]')!.getBoundingClientRect();
+            const add = root.querySelector('[data-guide-global-comment-add]')!.getBoundingClientRect();
+            return Math.abs(words.y + words.height / 2 - (add.y + add.height / 2)) < 3 && words.right < add.left;
+          }),
+        )
+        .toBe(true);
+    };
+    for (const width of [800, 1024, 1440]) await onRow(width);
+    // A long name is cut on that row, never under the controls.
+    const words = await note.evaluate((node) => {
+      const before = node.textContent;
+      node.textContent = `${'a-very-long-name-'.repeat(20)}'s pull request`;
+      return before;
+    });
+    for (const width of [800, 1440]) await onRow(width);
+    await note.evaluate((node, text) => (node.textContent = text), words);
+
+    // The box is as tall as the pane, here taller than the 620 px a guide's box stops at, and follows the pane.
+    const fits = async () => {
+      const pane = (await review.locator('.ib-gbody').boundingBox())!;
+      const height = (await box.boundingBox())!.height;
+      expect(Math.abs(height - pane.height)).toBeLessThan(2);
+      return height;
+    };
+    await expect.poll(async () => (await box.boundingBox())!.height).toBeGreaterThan(620);
+    await fits();
+    await page.setViewportSize({ width: 1440, height: 700 });
+    expect(await fits()).toBeLessThan(620);
+    await page.setViewportSize({ width: 1440, height: 900 });
+
+    // The file's scrollbar stays off its header until the pointer is on the file, and the header keeps its 33 px.
+    const thumb = shell.locator('[data-diff-hscrollbar] > div');
+    await expect(thumb).toHaveCount(1);
+    await page.mouse.move(2, 2);
+    await expect(thumb).toHaveCSS('opacity', '0');
+    await shell.hover();
+    await expect(thumb).toHaveCSS('opacity', '1');
+    const header = await shell.locator('[data-diff-hscrollbar]').evaluate((bar) => bar.parentElement!.getBoundingClientRect().height);
+    expect(header).toBe(33);
+  } finally {
+    await context.close();
+  }
 });
 
 test('a phone at 390 px: the list, a stack, a layer review; and off, no row', async ({ browser }) => {
