@@ -42,6 +42,9 @@ const VERDICTS: Record<string, string> = {
   'Split the settings page': '{"risk":"low","why":"It only moves settings components."}',
   'Change who can open settings': '{"risk":"high","why":"It changes the permission check on the settings route."}',
 };
+/** About 3 MB: more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
+const BIG_LINES = 130_000;
+const REFUSAL = 'prompt is too long: 900000 tokens > 200000 maximum';
 const RULES = 'Anything in billing or charges.\nAnything that changes permissions.';
 
 function ghPull(number: number, title: string, fields: Record<string, unknown> = {}) {
@@ -80,6 +83,7 @@ function writeGh(dir: string) {
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then cat "$dir/gh-pulls.json"; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then printf "%040d\\n" "${4##*/}"; exit 0; fi',
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "${4##*/}" = 507 ]; then cat "$dir/big.patch"; exit 0; fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  printf "diff --git a/src/pr%s.ts b/src/pr%s.ts\\n--- a/src/pr%s.ts\\n+++ b/src/pr%s.ts\\n@@ -1 +1 @@\\n-old\\n+new\\n" "${4##*/}" "${4##*/}" "${4##*/}" "${4##*/}"; exit 0',
     'fi',
@@ -97,6 +101,7 @@ function writePi(dir: string) {
 const fs = require('fs');
 const log = ${JSON.stringify(join(dir, 'pi.log'))};
 const verdicts = ${JSON.stringify(VERDICTS)};
+const refusal = ${JSON.stringify(REFUSAL)};
 if (process.argv.includes('--version')) { console.log('0.90.0'); process.exit(0); }
 fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2) }) + '\\n');
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
@@ -107,12 +112,18 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
       { provider: 'anthropic', id: 'claude-opus-5-5', name: 'Opus 5.5' },
       { provider: 'anthropic', id: 'claude-sonnet-5', name: 'Sonnet 5' },
       { provider: 'openai', id: 'gpt-5.6-terra', name: 'GPT-5.6-Terra' },
+      ...Array.from({ length: 12 }, (_, i) => ({ provider: 'openrouter', id: 'model-' + i, name: 'Model ' + i })),
     ] } });
     return;
   }
   send({ type: 'response', id: m.id, command: m.type, success: true, data: {} });
   if (m.type === 'prompt') {
     fs.appendFileSync(log, JSON.stringify({ prompt: m.message }) + '\\n');
+    if (m.message.length > 1_000_000) {
+      send({ type: 'message_end', message: { role: 'assistant', stopReason: 'error', errorMessage: refusal } });
+      send({ type: 'agent_end' });
+      return;
+    }
     const title = /^Title: (.*)$/m.exec(m.message)?.[1] ?? '';
     send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: verdicts[title] ?? 'no idea' }] } });
     send({ type: 'agent_end' });
@@ -188,6 +199,12 @@ test.beforeAll(async ({ browser }) => {
   mkdirSync(fakes, { recursive: true });
   writeGh(fakes);
   writePi(fakes);
+  writeFileSync(join(fakes, 'big.patch'), `diff --git a/api.ts b/api.ts\n--- a/api.ts\n+++ b/api.ts\n@@ -1 +1,${BIG_LINES} @@\n${'+export const line = 1;\n'.repeat(BIG_LINES)}`);
+  // Installed, with no model list to give: they stay on the built-in catalog. They never run a judgment here.
+  for (const cli of ['claude', 'codex']) {
+    writeFileSync(join(fakes, cli), '#!/bin/sh\nexit 1\n');
+    chmodSync(join(fakes, cli), 0o755);
+  }
   writeFileSync(
     join(fakes, 'gh-pulls.json'),
     JSON.stringify({
@@ -201,6 +218,7 @@ test.beforeAll(async ({ browser }) => {
             ghPull(504, 'Upgrade the linter'),
             ghPull(505, 'Split the settings page'),
             ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
+            ghPull(507, 'Regenerate the API client'),
           ],
         },
         authored: { nodes: [] },
@@ -211,11 +229,12 @@ test.beforeAll(async ({ browser }) => {
   const project = scratchProject(join(root, 'src'), 'billing-svc');
   const git = (...args: string[]) => spawnSync('git', args, { cwd: project, env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' } });
   git('remote', 'add', 'origin', `https://github.com/${REPO}.git`);
-  for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
+  for (const dir of ['claude', 'codex', 'xdg', 'home']) mkdirSync(join(root, dir), { recursive: true });
   env = {
     // Fakes and the system's own folders only: no real agent can be found.
     PATH: `${fakes}:/usr/bin:/bin`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    // This Inbox's own: it never reads a person's real home.
+    HOME: join(root, 'home'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -267,34 +286,80 @@ test('on with no rules: the chip holds only the way to the rules; no agent run',
   await page.keyboard.press('Escape');
 });
 
-test('the dialog: the installed agent, its models from the agent, the cheap one picked; saving starts the judgments', async () => {
+test('the dialog: the guided review\'s list; Sonnet on Claude, the newest Luna on Codex, Default on Pi; saving starts the judgments', async () => {
   await page.locator('[data-pulls-risk-chip]').click();
   await page.locator('[data-pulls-risk-rules]').click();
   const dialog = page.locator('[data-dialog="pull-risk-rules"]');
+  const agentList = dialog.locator('[data-pull-risk-agent]');
+  const modelList = dialog.locator('[data-pull-risk-model]');
+  const pickAgent = async (name: string) => {
+    await agentList.getByRole('button').first().click();
+    await agentList.getByRole('button', { name, exact: true }).click();
+  };
   await expect(dialog.getByRole('heading', { name: 'No slop rules' })).toBeVisible();
-  await expect(dialog.locator('[data-pull-risk-agent] option')).toHaveText(['Pi']);
-  await expect(dialog.locator('[data-pull-risk-model] option')).toHaveCount(3);
-  await expect(dialog.locator('[data-pull-risk-model]')).toHaveValue('anthropic/claude-sonnet-5');
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toBeFocused();
-  await shots('dialog-empty');
+  await expect(agentList).toHaveAttribute('data-pull-risk-agent', 'claude-agent-sdk');
+  await expect(modelList).toHaveAttribute('data-pull-risk-model', 'sonnet');
+  await expect(modelList.getByRole('button').first()).toContainText('Sonnet');
   await dialog.locator('[data-pull-risk-rules-text]').fill(RULES);
   await shots('dialog');
-  // Reading the models ran pi, but no judgment ran before the save.
+  await modelList.getByRole('button').first().click();
+  await expect(modelList.getByRole('button', { name: 'Haiku (latest)' })).toBeVisible();
+  await shots('dialog-dropdown');
+
+  // Escape closes the list and keeps the dialog and its words.
+  await page.keyboard.press('Escape');
+  await expect(modelList.getByRole('button', { name: 'Haiku (latest)' })).toHaveCount(0);
+  await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
+
+  await pickAgent('Codex');
+  await expect(modelList).toHaveAttribute('data-pull-risk-model', 'gpt-6-luna');
+  await expect(modelList.getByRole('button').first()).toContainText('GPT-6-Luna');
+  await shots('dialog-codex');
+
+  await pickAgent('Pi');
+  await expect(modelList.getByRole('button').first()).toContainText('Default');
+  await expect(modelList).toHaveAttribute('data-pull-risk-model', '');
+  await modelList.getByRole('button').first().click();
+  // A long list gets the guided review's filter box and its groups.
+  await expect(modelList.getByPlaceholder('Type to filter…')).toBeVisible();
+  await expect(modelList.getByRole('button', { name: 'Default', exact: true })).toBeVisible();
+  await shots('dialog-dropdown-pi');
+  await modelList.getByPlaceholder('Type to filter…').fill('Sonnet');
+  await modelList.getByRole('button', { name: /Sonnet 5/ }).click();
+  await expect(modelList).toHaveAttribute('data-pull-risk-model', 'anthropic/claude-sonnet-5');
+
+  // Reading the models ran the agents, but no judgment ran before the save.
   expect(prompts()).toEqual([]);
   await dialog.locator('[data-pull-risk-save]').click();
   await expect(dialog).toHaveCount(0);
 });
 
-test('the rows: all three levels, no mark for an answer that makes no sense, and how the agent ran', async () => {
+test('the rows: all three levels; an answer that makes no sense and a refused diff say so, with no level; how the agent ran', async () => {
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(502).locator('[data-pull-risk="medium"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => prompts().length).toBe(6);
-  await expect(row(504).locator('[data-pull-risk]')).toHaveCount(0);
+  await expect.poll(() => prompts().length).toBe(7);
+  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
+  await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
+
+  // The whole 3 MB reached the agent, and it refused: failed to rank, with its words. Not Low.
+  const big = prompts().find((l) => l.prompt!.includes('Title: Regenerate the API client'))!.prompt!;
+  expect(big.match(/export const line = 1;/g)).toHaveLength(BIG_LINES);
+  const refused = row(507).locator('[data-pull-risk]');
+  await expect(refused).toHaveAttribute('data-pull-risk', 'failed', { timeout: 30_000 });
+  await expect(refused).toContainText('Couldn\u2019t rank');
+  await refused.hover();
+  await expect(page.locator('[data-pn-tooltip]')).toContainText(REFUSAL);
+  await page.mouse.move(0, 0);
+  await shots('rows-refused');
+
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
-  expect(judged).toHaveLength(6);
+  expect(judged).toHaveLength(7);
+  // Nothing of a diff is ever in an agent's argv.
+  expect(judged.every((l) => l.argv!.join(' ').length < 2_000)).toBe(true);
   expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
   const asked = prompts().find((l) => l.prompt!.includes('Title: Retry failed charges'))!.prompt!;
   expect(asked).toContain('Anything in billing or charges.');
@@ -308,7 +373,7 @@ test('the rows: all three levels, no mark for an answer that makes no sense, and
   expect(readFileSync(join(dataDir, 'inbox', 'pull-risk.json'), 'utf8')).not.toContain('Anything in billing');
 });
 
-test('the filter: High, Medium and up, remembered; what has no judgment is counted', async () => {
+test('the filter: High, Medium and up, remembered; what failed to rank stays on screen', async () => {
   const pick = async (option: string) => {
     await page.locator('[data-pulls-risk-chip]').click();
     await page.locator(`[data-pulls-risk-option="${option}"]`).click();
@@ -327,7 +392,9 @@ test('the filter: High, Medium and up, remembered; what has no judgment is count
   await expect(row(506)).toBeVisible();
   await expect(row(502)).toHaveCount(0);
   await expect(row(503)).toHaveCount(0);
-  await expect(page.locator('[data-pulls-risk-not-judged="1"]')).toHaveText('1 pull request not ranked yet.');
+  await expect(row(504)).toBeVisible();
+  await expect(row(507)).toBeVisible();
+  await expect(page.locator('[data-pulls-risk-not-judged]')).toHaveCount(0);
   await shots('filter-high');
   await page.reload();
   await expect(row(501)).toBeVisible();
@@ -362,15 +429,16 @@ test("the PR's page and its review carry the mark and the sentence; a stack show
 test('a restart redoes nothing', async () => {
   await context.close();
   await stopScratchInbox(dataDir);
-  const before = prompts().filter((l) => !l.prompt!.includes('Title: Upgrade the linter')).length;
+  const failed = (l: { prompt?: string }) => l.prompt!.includes('Title: Upgrade the linter') || l.prompt!.includes('Title: Regenerate the API client');
+  const before = prompts().filter((l) => !failed(l)).length;
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   page = await context.newPage();
   await openPulls();
   await expect(row(501).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
   await page.waitForTimeout(1_000);
-  // Only the one with no judgment is tried again.
-  expect(prompts().filter((l) => !l.prompt!.includes('Title: Upgrade the linter')).length).toBe(before);
+  // Only the ones with no judgment are tried again.
+  expect(prompts().filter((l) => !failed(l)).length).toBe(before);
 });
 
 test("a phone: tapping a mark shows the sentence and doesn't open the row", async ({ browser }) => {

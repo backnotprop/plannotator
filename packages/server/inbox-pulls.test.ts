@@ -375,10 +375,11 @@ describe("risk ranking", () => {
     expect(((await (await fetch(`${w.base}/api/inbox/pulls/risk`)).json()) as InboxPullRiskAnswer).rules).toBe("");
   });
 
-  test("the models of an installed agent, starting on the cheap one; any other agent is refused", async () => {
+  test("the models of an installed agent; any other agent is refused", async () => {
     const w = await riskWorld(async () => null);
     const list = (await (await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=pi-sdk`)).json()) as InboxPullRiskModels;
-    expect(list.default_model).toBe("a/claude-sonnet-5");
+    // Pi starts on the person's own default, as the guided review does.
+    expect(list.default_model).toBeNull();
     expect(list.models.map((m) => m.id)).toEqual(["a/claude-sonnet-5", "a/opus"]);
     expect((await fetch(`${w.base}/api/inbox/pulls/risk/models?provider=codex-sdk`)).status).toBe(422);
     expect((await fetch(`${w.base}/api/inbox/pulls/risk`, { method: "DELETE" })).status).toBe(405);

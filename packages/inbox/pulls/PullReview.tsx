@@ -208,7 +208,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   // A diff that could not be read (too large, a refused compare) takes no verdict: there is nothing on screen to judge.
   const canDecide = !!link?.last && !diffError;
-  const judged = usePullRisk(model).answer?.judgments[layer?.key ?? ''];
+  const riskAnswer = usePullRisk(model).answer;
+  const judged = riskAnswer?.judgments[layer?.key ?? ''];
+  const riskFailure = riskAnswer?.failed[layer?.key ?? ''];
   // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
   // teammate's, with or without an agent. The person chooses at the end where the review goes.
   // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
@@ -387,6 +389,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           <bdi>{layer.title}</bdi>
         </span>
         {judged && <RiskMark judgment={judged} />}
+        {!judged && riskFailure && <RiskMark failed={riskFailure} />}
         <span className="ib-sp" />
         {folded && readerComments && (
           <button

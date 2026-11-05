@@ -68,7 +68,8 @@ const JUDGED: InboxPullRiskAnswer = {
   model: 'a/sonnet',
   agents: [{ id: 'pi-sdk', label: 'Pi' }],
   pending: 0,
-  agent_failed: false,
+  last_failure: null,
+  failed: {},
   judgments: {
     [key(1)]: { level: 'low', why: 'Docs only.' },
     [key(2)]: { level: 'high', why: 'It changes charges.' },
@@ -120,7 +121,7 @@ const page = (stackId: string | null = null, opened: string[] = []) => (
       projectNames={new Map()}
       phone={false}
       onOpenStack={(id) => id && opened.push(id)}
-      onProject={() => {}}
+      filter="all" onScope={() => {}}
       onReview={() => {}}
       onOpenThread={() => {}}
       onLaunch={() => {}}
@@ -161,7 +162,7 @@ test.skipIf(!hasDom)('High keeps the high rows, also from the folded group, and 
 });
 
 test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it can say, High hides it and counts it, high still shows', async () => {
-  // #5 and #6 are one stack. #5 low with #6 not ranked: maybe past the size the Inbox reads, so never.
+  // #5 and #6 are one stack. #5 low with #6 not ranked: #6 could be anything.
   const low = { ...JUDGED.judgments };
   delete low[key(6)];
   spy('pullRisk', async () => ({ ...JUDGED, judgments: low }));
@@ -184,6 +185,43 @@ test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it c
   await mount(page());
   expect(shownRows()).toContain(key(6));
   expect(document.querySelector('[data-pulls-risk-not-judged]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Low; no filter hides it; the review says it too', async () => {
+  const reason = 'prompt is too long: 2500000 tokens > 200000 maximum';
+  const judgments = { ...JUDGED.judgments };
+  delete judgments[key(3)];
+  // #5 and #6 are one stack: Low on one layer and a failure on the other is no Low.
+  delete judgments[key(6)];
+  spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(3)]: reason, [key(6)]: reason } }));
+  await mount(page(key(3)));
+  expect(markOf(3)).toBe('failed');
+  expect(markOf(6)).toBe('failed');
+  const mark = document.querySelector(`[data-pulls-row="${key(3)}"] [data-pull-risk]`)!;
+  expect(mark.textContent).toContain('Couldn\u2019t rank');
+  expect(mark.textContent).toContain(reason);
+  expect(document.querySelector('[data-pulls-risk-line="failed"]')?.textContent).toContain(reason);
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  await mount(page());
+  const shown = shownRows();
+  expect(shown).toContain(key(3));
+  expect(shown).toContain(key(6));
+  expect(shown).not.toContain(key(1));
+  // Ranked first: a failed row can't push a high one down.
+  expect(shown.indexOf(key(2))).toBeLessThan(shown.indexOf(key(3)));
+  // On screen, so not counted as hidden.
+  expect(document.querySelector('[data-pulls-risk-not-judged]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a failure on a layer of a stack with a higher one found: the stack shows that level', async () => {
+  const judgments = { ...JUDGED.judgments };
+  delete judgments[key(5)];
+  spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(5)]: 'Too big.' } }));
+  await mount(page());
+  expect(markOf(6)).toBe('high');
 });
 
 test.skipIf(!hasDom)('Medium and up puts high first within a group; All keeps the list as it came', async () => {
@@ -231,12 +269,23 @@ test.skipIf(!hasDom)('a tap on a mark, on a touch screen, shows the sentence ins
   expect(opened).toEqual([key(2)]);
 });
 
-test.skipIf(!hasDom)('a save that fails keeps the words and says why; a switch of agent takes that agent\'s own cheap model', async () => {
+/** Pick from one of the dialog's two lists, as a person does: the button, then the entry. */
+const pick = async (list: 'agent' | 'model', label: string) => {
+  const holder = document.querySelector(`[data-pull-risk-${list}]`)!;
+  await act(async () => holder.querySelector('button')!.click());
+  const entry = [...holder.querySelectorAll('button')].slice(1).find((b) => b.textContent === label)!;
+  await act(async () => entry.click());
+  await settle();
+};
+const modelShown = () => document.querySelector('[data-pull-risk-model]')!.getAttribute('data-pull-risk-model');
+const modelButton = () => document.querySelector('[data-pull-risk-model] button')!.textContent;
+
+test.skipIf(!hasDom)('a save that fails keeps the words and says why; a switch of agent takes what that agent starts on', async () => {
   const twoAgents = { ...JUDGED, agents: [{ id: 'pi-sdk', label: 'Pi' }, { id: 'codex-sdk', label: 'Codex' }] };
   spy('pullRiskModels', async (provider) =>
     provider === 'pi-sdk'
-      ? { models: [{ id: 'a/sonnet', label: 'Sonnet' }, { id: 'a/opus', label: 'Opus' }], default_model: 'a/sonnet' }
-      : { models: [{ id: 'gpt-terra', label: 'Terra' }, { id: 'gpt-sol', label: 'Sol' }], default_model: 'gpt-terra' },
+      ? { models: [{ id: 'a/sonnet', label: 'Sonnet' }, { id: 'a/opus', label: 'Opus' }], default_model: null }
+      : { models: [{ id: 'gpt-6-luna', label: 'Luna' }, { id: 'gpt-6-sol', label: 'Sol' }], default_model: 'gpt-6-luna' },
   );
   const saves: unknown[] = [];
   spy('savePullRisk', async (input) => {
@@ -245,24 +294,67 @@ test.skipIf(!hasDom)('a save that fails keeps the words and says why; a switch o
   });
   let closed = 0;
   await mount(<RiskRulesDialog answer={twoAgents} onSaved={() => {}} onClose={() => closed++} />);
-  const select = document.querySelector<HTMLSelectElement>('[data-pull-risk-agent]')!;
-  await act(async () => {
-    select.value = 'codex-sdk';
-    select.dispatchEvent(new Event('change', { bubbles: true }));
-  });
-  await settle();
-  expect(document.querySelector<HTMLSelectElement>('[data-pull-risk-model]')!.value).toBe('gpt-terra');
+  await pick('agent', 'Codex');
+  expect(modelShown()).toBe('gpt-6-luna');
+  expect(modelButton()).toContain('Luna');
   await act(async () => {
     document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
   });
   await settle();
-  expect(saves).toEqual([{ rules: 'Anything in billing.', provider: 'codex-sdk', model: 'gpt-terra' }]);
+  expect(saves).toEqual([{ rules: 'Anything in billing.', provider: 'codex-sdk', model: 'gpt-6-luna' }]);
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('could not be saved');
   expect(document.querySelector<HTMLTextAreaElement>('[data-pull-risk-rules-text]')!.value).toBe('Anything in billing.');
   expect(closed).toBe(0);
 });
 
-test.skipIf(!hasDom)('Save waits for a new agent\'s cheap model, so a save during the read can\'t leave it on the person\'s default; a saved model needs no wait', async () => {
+test.skipIf(!hasDom)('Pi starts on Default, as the guided review does, and saves no model; a model picked from the list is saved; Default takes it back', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }, { id: 'a/opus', label: 'Opus' }], default_model: null }));
+  const saves: unknown[] = [];
+  spy('savePullRisk', async (input) => {
+    saves.push(input);
+    return JUDGED;
+  });
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, provider: null, model: null }} onSaved={() => {}} onClose={() => {}} />);
+  expect(modelButton()).toContain('Default');
+  expect(modelShown()).toBe('');
+  await pick('model', 'Opus');
+  expect(modelShown()).toBe('a/opus');
+  const submit = async () => {
+    await act(async () => {
+      document.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await settle();
+  };
+  await submit();
+  await pick('model', 'Default');
+  await submit();
+  expect(saves).toEqual([
+    { rules: 'Anything in billing.', provider: 'pi-sdk', model: 'a/opus' },
+    { rules: 'Anything in billing.', provider: 'pi-sdk', model: null },
+  ]);
+});
+
+test.skipIf(!hasDom)('Escape on an open list closes the list, not the dialog with the words in it', async () => {
+  spy('pullRiskModels', async () => ({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: null }));
+  let closed = 0;
+  await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => closed++} />);
+  const holder = document.querySelector('[data-pull-risk-model]')!;
+  await act(async () => holder.querySelector('button')!.click());
+  expect(holder.querySelectorAll('button').length).toBeGreaterThan(1);
+  await act(async () => holder.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(holder.querySelectorAll('button').length).toBe(1);
+  expect(closed).toBe(0);
+  await act(async () => holder.querySelector('button')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
+  expect(closed).toBe(1);
+});
+
+test.skipIf(!hasDom)('a failed last run says why in the dialog', async () => {
+  spy('pullRiskModels', async () => ({ models: [], default_model: null }));
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, last_failure: 'Not signed in.' }} onSaved={() => {}} onClose={() => {}} />);
+  expect(document.querySelector('[data-pull-risk-failed]')?.textContent).toContain('Not signed in.');
+});
+
+test.skipIf(!hasDom)('Save waits for a new agent\'s pick, so a save during the read can\'t leave it on another model; a saved model needs no wait', async () => {
   let arrive = (_: { models: { id: string; label: string }[]; default_model: string | null }) => {};
   spy('pullRiskModels', () => new Promise((resolve) => (arrive = resolve)));
   await mount(<RiskRulesDialog answer={{ ...JUDGED, provider: null, model: null, agents: [{ id: 'pi-sdk', label: 'Pi' }] }} onSaved={() => {}} onClose={() => {}} />);
@@ -271,7 +363,7 @@ test.skipIf(!hasDom)('Save waits for a new agent\'s cheap model, so a save durin
   await act(async () => arrive({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: 'a/sonnet' }));
   await settle();
   expect(save().disabled).toBe(false);
-  expect(document.querySelector<HTMLSelectElement>('[data-pull-risk-model]')!.value).toBe('a/sonnet');
+  expect(modelShown()).toBe('a/sonnet');
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
 

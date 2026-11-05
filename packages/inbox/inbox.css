@@ -7913,6 +7913,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
 .ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-risk[data-risk="failed"] { font-style: italic; }
 .ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
 .ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
 .ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
@@ -7923,18 +7924,23 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-l { position: static; width: auto; height: auto; clip-path: none; }
 .ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) { flex: none; }
 .ib-prlist .ib-lhead .ib-pr-riskf { margin-left: auto; }
-.ib-prlist .ib-lhead:has(.ib-pr-riskf) .ib-sp { margin-left: -10px; }
-.ib-prlist .ib-lhead:has(.ib-pr-riskf[data-set]) .ib-pr-onyou { display: none; }
+.ib-prlist .ib-lhead .ib-pf-slot:has(+ .ib-pr-riskf) { margin-right: 0; }
+.ib-prlist .ib-lhead .ib-pf-slot + .ib-pr-riskf { margin-left: 6px; }
 .ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
 .ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
 .ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
-.ib-riskd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
-.ib-riskd-row label { display: grid; gap: 4px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; }
-.ib-riskd-s { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; font-weight: 400; font-size: var(--ib-fs-13, 13px); }
+/* The model list opens over the dialog's edge: a dialog that scrolls would clip it. */
+.ib-riskd:has(.ib-riskd-row .absolute) { overflow: visible; }
+.ib-riskd-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 14px; }
 .ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
 @media (max-width: 640px) {
-  .ib-riskd-row { grid-template-columns: 1fr; }
-  .ib-riskd-s { height: 44px; font-size: var(--ib-fs-16-in, 16px); }
+  .ib-riskd-row > div { width: 100%; }
+  .ib-riskd-row button { width: 100%; min-height: 44px; font-size: var(--ib-fs-14, 14px); }
+  .ib-riskd-row button > span:nth-child(2) { flex: 1; min-width: 0; max-width: none; text-align: left; }
+  .ib-riskd-row input { font-size: var(--ib-fs-16-in, 16px); }
+  .ib-riskd-row .absolute { width: 100%; min-width: 0; }
+  /* The list stays on the screen, under a dialog that has already used most of it. */
+  .ib-riskd-row .absolute > .overflow-y-auto { max-height: min(224px, 30dvh); }
   .ib-riskd-t { font-size: var(--ib-fs-16-in, 16px); }
 }
 /* A long chain: the first two marks, "+N", the last two. */

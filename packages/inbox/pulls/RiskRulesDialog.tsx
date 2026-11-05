@@ -1,9 +1,14 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { InboxPullRiskAnswer, InboxPullRiskModels } from '@plannotator/core/inbox-types';
+import { modelSelectOptions } from '@plannotator/core/model-catalog';
+import { InlinePicker } from '@plannotator/review-editor/components/guide/InlinePicker';
 import { inboxApi } from '../api';
 import { Modal } from '../components/Updates';
 
 const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user data.';
+const LOADING = [{ value: '', label: 'Loading models…' }];
+/** What the guided review's picker calls an agent's own default model. */
+const AGENT_DEFAULT = { value: '', label: 'Default' };
 
 /**
  * "No slop rules": the person's words for what a high-risk pull request is, and the
@@ -13,8 +18,6 @@ const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user d
 export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPullRiskAnswer; onSaved: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
   const titleId = useId();
   const rulesId = useId();
-  const agentId = useId();
-  const modelId = useId();
   const [rules, setRules] = useState(answer.rules);
   const saved = answer.provider && answer.agents.some((a) => a.id === answer.provider) ? answer.provider : null;
   const [provider, setProvider] = useState<string | null>(saved ?? answer.agents[0]?.id ?? null);
@@ -34,7 +37,8 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       .then((next) => {
         if (controller.signal.aborted) return;
         setList(next);
-        setModel((was) => (was && next.models.some((m) => m.id === was) ? was : next.default_model));
+        // A saved pick stays while the list can't say otherwise.
+        setModel((was) => (was && (next.models.length === 0 || next.models.some((m) => m.id === was)) ? was : next.default_model));
       })
       .catch(() => {
         if (!controller.signal.aborted) setList({ models: [], default_model: null });
@@ -51,9 +55,10 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       setSaving(false);
     }
   };
-  // No model yet: wait for the list and its cheap pick, or Save would leave the agent on the person's own default.
+  // No model yet: wait for the list and the pick it starts on.
   const readingModel = !!provider && !list && !model;
-  const agentName = answer.agents.find((a) => a.id === provider)?.label;
+  // No pick to start on means the agent's own default is a choice, as in the guided review (Pi, OpenCode).
+  const modelOptions = !list ? LOADING : [...(list.default_model ? [] : [AGENT_DEFAULT]), ...modelSelectOptions(list.models, model ?? undefined)];
   return (
     <Modal labelledBy={titleId} onClose={onClose} testId="pull-risk-rules" className="ib-riskd" ownKeys>
       <form
@@ -75,42 +80,26 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
         ) : (
           <>
             <div className="ib-riskd-row">
-              <label htmlFor={agentId}>
-                <span>Risk agent</span>
-                <select
-                  id={agentId}
-                  className="ib-riskd-s"
+              <div data-pull-risk-agent={provider ?? ''}>
+                <InlinePicker
+                  label="Risk agent"
                   value={provider ?? ''}
-                  onChange={(event) => {
+                  options={answer.agents.map((agent) => ({ value: agent.id, label: agent.label }))}
+                  onChange={(next) => {
+                    if (next === provider) return;
                     setModel(null);
-                    setProvider(event.target.value);
+                    setProvider(next);
                   }}
-                  data-pull-risk-agent=""
-                >
-                  {answer.agents.map((agent) => (
-                    <option key={agent.id} value={agent.id}>
-                      {agent.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label htmlFor={modelId}>
-                <span>Model</span>
-                <select id={modelId} className="ib-riskd-s" value={model ?? ''} disabled={!list || list.models.length === 0} onChange={(event) => setModel(event.target.value)} data-pull-risk-model="">
-                  {!list && <option value={model ?? ''}>{model ?? 'Reading models…'}</option>}
-                  {list && list.models.length === 0 && <option value="">Its default model</option>}
-                  {list?.models.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
+                />
+              </div>
+              <div data-pull-risk-model={model ?? ''}>
+                <InlinePicker label="Model" value={list ? (model ?? '') : ''} options={modelOptions} onChange={(next) => setModel(next || null)} />
+              </div>
             </div>
-            <p className="ib-quietline">A cheap model is plenty: Sonnet, Terra or similar. Diffs go only to the provider you choose here.</p>
-            {answer.agent_failed && (
+            <p className="ib-quietline">A cheap model is plenty: Sonnet, Luna or similar. Diffs go only to the provider you choose here.</p>
+            {answer.last_failure && (
               <p className="ib-quietline" data-pull-risk-failed="">
-                The last ranking didn&rsquo;t finish. Make sure {agentName ?? 'the agent'} works on this computer.
+                The last ranking didn&rsquo;t finish. {answer.last_failure}
               </p>
             )}
           </>

@@ -1,8 +1,9 @@
 /**
  * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4). The
  * person writes what a high-risk pull request is for them (the "no slop rules")
- * and picks a cheap agent. Each PR head the list shows gets one judgment, low,
- * medium or high with one sentence why, in the background, a few at a time.
+ * and picks an agent and its model. Each PR head the list shows gets one judgment,
+ * low, medium or high with one sentence why, in the background, a few at a time. The
+ * agent reads the whole diff.
  *
  *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, rules, level, why } } }
  *
@@ -11,9 +12,10 @@
  * - A judgment belongs to a head and to the rules it was made against (`rules` is a
  *   hash of them, the words stay in config.json): a new head or new rules means a new
  *   judgment, and a restart redoes nothing.
- * - A failed run keeps no judgment and that PR waits (`RISK_RETRY_MS`). Failures in a
- *   row mean the agent itself is broken: nothing runs for a while (`RISK_AGENT_PAUSE_MS`).
- *   It never blocks the list.
+ * - A failed run keeps no judgment: the PR shows the reason, a diff too big for the
+ *   model or the forge included, and never a level. It waits (`RISK_RETRY_MS`). Failures
+ *   in a row mean the agent itself is broken: nothing runs for a while
+ *   (`RISK_AGENT_PAUSE_MS`). It never blocks the list.
  * - The agent is an Ask AI provider started for one answer (`oneShot`): no tools where
  *   its CLI allows, in an empty folder. A provider that still reaches for a tool or asks
  *   permission is stopped and its run discarded, so a diff can't get a judgment out of
@@ -27,17 +29,18 @@ import { resolveWindowsCommandShim } from "@plannotator/ai/providers/command-pat
 import { createProvider } from "@plannotator/ai/provider";
 import type { AIProvider, AISession, CatalogModel, ClaudeAgentSDKConfig, CodexSDKConfig, PiSDKConfig } from "@plannotator/ai/types";
 import { inboxPullIsOpen, type InboxPull, type InboxPullRiskAgent, type InboxPullRiskAnswer, type InboxPullRiskJudgment, type InboxPullRiskModels } from "@plannotator/core/inbox-types";
+import { resolveModelChoice } from "@plannotator/core/model-catalog";
 import { childPath } from "@plannotator/shared/child-env";
 import { loadConfig, saveConfig } from "@plannotator/shared/config";
 import { InboxError, inboxDir } from "@plannotator/shared/inbox/schema";
-import { buildRiskPrompt, parseRiskAnswer, riskFence, RISK_SYSTEM_PROMPT, trimDiffForRisk } from "./inbox-pull-risk-prompt";
+import { buildRiskPrompt, parseRiskAnswer, riskFailureLine, riskFence, RISK_SYSTEM_PROMPT } from "./inbox-pull-risk-prompt";
 import type { InboxPulls } from "./inbox-pulls";
 
 export const INBOX_PULL_RISK_FILE = "pull-risk.json";
 /** A few at a time. */
 export const RISK_CONCURRENCY = 3;
-/** One judgment gets this long: past it the run counts as failed. */
-export const RISK_RUN_TIMEOUT_MS = 120_000;
+/** One judgment gets this long, a large diff's slow answer included: past it the run counts as failed. */
+export const RISK_RUN_TIMEOUT_MS = 5 * 60_000;
 /** A PR whose run failed waits this long. Longer than the pause, so PRs that keep failing don't take every turn after it. */
 export const RISK_RETRY_MS = 60 * 60_000;
 /** This many failures in a row mean the agent is broken, not one PR: nothing runs for `RISK_AGENT_PAUSE_MS`. */
@@ -55,19 +58,23 @@ const RISK_AGENTS: readonly (InboxPullRiskAgent & { cli: string })[] = [
 /** The context a provider's session requires; `oneShot` means its prompt is never used. */
 const NO_CONTEXT = { mode: "code-review", review: { patch: "" } } as const;
 
-/**
- * Cheap and good enough for a quick judgment, best first: what the owner named (Sonnet,
- * Terra), then the small models of other makers. Matched on any id a provider lists.
- */
-const CHEAP_MODELS = [/sonnet/i, /terra/i, /haiku/i, /flash/i, /(^|[^a-z])mini(?!max)/i, /luna/i, /small|lite/i];
+/** The newest Luna a list offers: `gpt-6-luna` over `gpt-5.6-luna`. */
+function newestLuna(models: readonly Pick<CatalogModel, "id">[]): string | null {
+  const version = (id: string) => {
+    const found = /(\d+)(?:\.(\d+))?/.exec(id);
+    return found ? Number(found[1]) * 1000 + Number(found[2] ?? 0) : -1;
+  };
+  return models.filter((m) => /luna/i.test(m.id)).sort((a, b) => version(b.id) - version(a.id))[0]?.id ?? null;
+}
 
-/** The model to start on: the cheapest sensible one a provider lists, else its own default. */
-export function defaultRiskModel(models: readonly Pick<CatalogModel, "id" | "default">[]): string | null {
-  for (const cheap of CHEAP_MODELS) {
-    const found = models.find((m) => cheap.test(m.id));
-    if (found) return found.id;
-  }
-  return models.find((m) => m.default)?.id ?? models[0]?.id ?? null;
+/**
+ * The model the dialog starts on: Sonnet for Claude, the newest Luna for Codex. Pi and OpenCode start on the
+ * person's own default, null, as the guided review's picker does: only they know what those are set up with.
+ */
+export function startingRiskModel(provider: string, models: readonly CatalogModel[]): string | null {
+  if (provider === "claude-agent-sdk") return resolveModelChoice("sonnet", models);
+  if (provider === "codex-sdk") return newestLuna(models) ?? (resolveModelChoice("", models) || null);
+  return null;
 }
 
 /** The lowest effort a model takes, or nothing for a model that takes none. */
@@ -124,26 +131,26 @@ export interface RiskRun {
   cwd: string;
 }
 
-/** The agent's whole answer, or null when the run failed. */
-export type RiskRunner = (run: RiskRun) => Promise<{ text: string } | null>;
+/** The agent's whole answer, or why there is none, in words a person reads. */
+export type RiskRunResult = { text: string } | { failed: string };
+export type RiskRunner = (run: RiskRun) => Promise<RiskRunResult>;
 
 /** Ask a provider that reads its models only on request (Pi, OpenCode). */
 const readModels = (provider: AIProvider) => (provider as AIProvider & { fetchModels?: () => Promise<void> }).fetchModels?.().catch(() => {});
 
-/** Run one answer on an AI provider. Any tool use or permission ask ends the run with no answer, and so do the timeout and `signal`, from the first step. */
-export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "provider">, timeoutMs = RISK_RUN_TIMEOUT_MS, signal?: AbortSignal): Promise<{ text: string } | null> {
+/**
+ * Run one answer on an AI provider. Any tool use or permission ask ends the run with no answer, and so do the timeout
+ * and `signal`, from the first step. A CLI or model that refuses (the diff is too big, not signed in) says why here.
+ */
+export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "provider">, timeoutMs = RISK_RUN_TIMEOUT_MS, signal?: AbortSignal): Promise<RiskRunResult> {
   let session: AISession | null = null;
   let over = false;
   const close = (open: AISession) => {
     open.abort();
     open.dispose?.();
   };
-  const read = async (): Promise<{ text: string } | null> => {
-    // No model saved, and none known yet: find the cheap one instead of running on the person's default.
-    if (!run.model && !provider.models?.length) await readModels(provider);
-    // Ended during that: no agent starts (OpenCode would start a new server for it).
-    if (over) return null;
-    const model = run.model ?? defaultRiskModel(provider.models ?? []);
+  const read = async (): Promise<RiskRunResult> => {
+    const model = run.model ?? startingRiskModel(provider.name, provider.models ?? []);
     const opened = await provider.createSession({
       context: NO_CONTEXT,
       cwd: run.cwd,
@@ -155,34 +162,37 @@ export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "pro
     // It came back after the end: nobody is waiting for it.
     if (over) {
       close(opened);
-      return null;
+      return { failed: "" };
     }
     session = opened;
     const whole: string[] = [];
     const deltas: string[] = [];
     let final: string | undefined;
     for await (const message of opened.query(run.prompt)) {
-      if (message.type === "tool_use" || message.type === "permission_request" || message.type === "error") return null;
+      if (message.type === "tool_use" || message.type === "permission_request") return { failed: "The agent tried to use a tool, so its answer was dropped." };
+      if (message.type === "error") return { failed: message.error };
       if (message.type === "text") whole.push(message.text);
       if (message.type === "text_delta") deltas.push(message.delta);
       if (message.type === "result") {
-        if (!message.success) return null;
+        if (!message.success) return { failed: message.result || "The agent stopped with an error." };
         final = message.result;
       }
     }
     const text = final || whole.join("") || deltas.join("");
-    return text ? { text } : null;
+    return text ? { text } : { failed: "The agent gave no answer." };
   };
-  let end = () => {};
-  const ended = new Promise<null>((resolve) => (end = () => resolve(null)));
-  const timer = setTimeout(end, timeoutMs);
-  signal?.addEventListener("abort", end);
+  let end: (result: RiskRunResult) => void = () => {};
+  const ended = new Promise<RiskRunResult>((resolve) => (end = resolve));
+  const minutes = Math.round(timeoutMs / 60_000);
+  const timer = setTimeout(() => end({ failed: `The agent took longer than ${minutes} ${minutes === 1 ? "minute" : "minutes"}.` }), timeoutMs);
+  const stopped = () => end({ failed: "The Inbox stopped." });
+  signal?.addEventListener("abort", stopped);
   try {
     return await Promise.race([read(), ended]);
   } finally {
     over = true;
     clearTimeout(timer);
-    signal?.removeEventListener("abort", end);
+    signal?.removeEventListener("abort", stopped);
     if (session) close(session);
   }
 }
@@ -212,7 +222,7 @@ interface Kept extends InboxPullRiskJudgment {
 }
 
 export interface PullRisk {
-  /** The settings, and the judgments of the PRs the last `assess` saw. */
+  /** The settings, and the judgments and failures of the PRs the last `assess` saw. */
   answer(): InboxPullRiskAnswer;
   /** Start judging what has none yet. Never waits, never throws. */
   assess(pulls: readonly InboxPull[]): void;
@@ -293,11 +303,13 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   const queued = new Set<string>();
   /** When a job that failed may run again. */
   const waits = new Map<string, number>();
+  /** Why a PR has no judgment at that head and those rules. Kept for this run of the Inbox: a restart tries again. */
+  const failures = new Map<string, { head: string; rules: string; reason: string }>();
   const modelLists = new Map<string, Promise<CatalogModel[]>>();
   /** The providers running now, for `stop`. */
   const live = new Set<AIProvider>();
   let running = 0;
-  let agentFailed = false;
+  let lastFailure: string | null = null;
   let failuresInARow = 0;
   let agentPausedUntil = 0;
   /** Aborted when the Inbox stops. */
@@ -307,10 +319,10 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     options.run ??
     (async (one) => {
       const provider = await startProvider(one.provider, one.cwd);
-      if (!provider) return null;
+      if (!provider) return { failed: "The agent could not start." };
       if (stopping.signal.aborted) {
         provider.dispose();
-        return null;
+        return { failed: "The Inbox stopped." };
       }
       live.add(provider);
       try {
@@ -330,41 +342,54 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     // Only the agent the person chose ever sees a diff.
     const provider = current.provider;
     if (!provider || !agents().some((a) => a.id === provider)) return;
+    const failed = (reason: string) => {
+      failures.set(pull.key, { head: pull.head_sha, rules, reason });
+    };
     let patch: string;
     try {
       const diff = await options.pulls.diff(pull.key, "layer");
       // The diff read is the head judged: a push since the list waits for the next list's head.
-      if (diff.head_sha !== pull.head_sha) throw new Error("the head moved");
+      if (diff.head_sha !== pull.head_sha) {
+        waits.set(job, now() + RISK_RETRY_MS);
+        return;
+      }
       patch = diff.patch;
     } catch (cause) {
-      // Too large stays too large at this head: it shows as not ranked, and isn't read again.
-      waits.set(job, (cause as { code?: string })?.code === "pull_diff_too_large" ? Number.POSITIVE_INFINITY : now() + RISK_RETRY_MS);
+      // Too large stays too large at this head: it isn't read again.
+      const { code, message } = cause as { code?: string; message?: string };
+      waits.set(job, code === "pull_diff_too_large" ? Number.POSITIVE_INFINITY : now() + RISK_RETRY_MS);
+      // A forge's words only come with its code; anything else is no sentence for a person.
+      failed((code && message) || "The diff could not be read.");
       return;
     }
     // The Inbox stopped during that read: no agent starts now.
     if (stopping.signal.aborted) return;
     mkdirSync(agentDir, { recursive: true });
-    let answer: Awaited<ReturnType<RiskRunner>> = null;
+    let result: RiskRunResult;
     try {
-      answer = await run({
+      result = await run({
         provider,
         model: current.model,
         system: RISK_SYSTEM_PROMPT,
-        prompt: buildRiskPrompt({ rules: current.rules, title: pull.title, diff: trimDiffForRisk(patch), fence: riskFence() }),
+        prompt: buildRiskPrompt({ rules: current.rules, title: pull.title, diff: patch, fence: riskFence() }),
         cwd: agentDir,
       });
-    } catch {
-      // Below: the same as no answer.
+    } catch (cause) {
+      result = { failed: (cause instanceof Error && cause.message) || "The agent could not start." };
     }
     if (stopping.signal.aborted) return;
-    const judgment = parseRiskAnswer(answer?.text);
-    agentFailed = !judgment;
+    const judgment = "text" in result ? parseRiskAnswer(result.text) : null;
     if (!judgment) {
+      // An answer that is no ranking may still say why: "Prompt is too long" comes back as a CLI's ordinary answer.
+      const reason = riskFailureLine("failed" in result ? result.failed : `The agent didn\u2019t answer with a ranking: ${result.text}`) || "The agent gave no answer.";
+      failed(reason);
+      lastFailure = reason;
       waits.set(job, now() + RISK_RETRY_MS);
       failuresInARow++;
       if (failuresInARow >= RISK_AGENT_FAILURES) agentPausedUntil = now() + RISK_AGENT_PAUSE_MS;
       return;
     }
+    lastFailure = null;
     failuresInARow = 0;
     waits.delete(job);
     keep(pull.key, { ...judgment, head: pull.head_sha, rules });
@@ -389,14 +414,21 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const current = settings();
       const hash = hashOf(current.rules);
       const judgments: InboxPullRiskAnswer["judgments"] = {};
+      const failed: InboxPullRiskAnswer["failed"] = {};
       if (current.rules) {
         const all = load();
         for (const pull of listed) {
           const one = all.get(pull.key);
-          if (inboxPullIsOpen(pull) && one && one.head === pull.head_sha && one.rules === hash) judgments[pull.key] = { level: one.level, why: one.why };
+          if (!inboxPullIsOpen(pull)) continue;
+          if (one && one.head === pull.head_sha && one.rules === hash) {
+            judgments[pull.key] = { level: one.level, why: one.why };
+            continue;
+          }
+          const failure = failures.get(pull.key);
+          if (failure && failure.head === pull.head_sha && failure.rules === hash) failed[pull.key] = failure.reason;
         }
       }
-      return { ...current, agents: agents(), judgments, pending: queued.size, agent_failed: agentFailed };
+      return { ...current, agents: agents(), judgments, failed, pending: queued.size, last_failure: lastFailure };
     },
     assess(pulls) {
       listed = pulls;
@@ -429,10 +461,11 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const next: PullRiskSettings = { rules: body.rules.trim(), provider: (body.provider as string | null) || null, model: (body.model as string | null) || null };
       if (!saveConfig({ inboxPullRisk: next })) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
       // The person just looked at this: start over, with whatever they changed.
-      agentFailed = false;
+      lastFailure = null;
       failuresInARow = 0;
       agentPausedUntil = 0;
       waits.clear();
+      failures.clear();
     },
     async models(provider) {
       let list = modelLists.get(provider);
@@ -444,7 +477,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const models = await list.catch(() => [] as CatalogModel[]);
       // A later dialog asks again: this one may have run before the CLI was signed in.
       if (models.length === 0) modelLists.delete(provider);
-      return { models: models.map(({ id, label }) => ({ id, label })), default_model: defaultRiskModel(models) };
+      return { models: models.map(({ id, label }) => ({ id, label })), default_model: startingRiskModel(provider, models) };
     },
     stop() {
       stopping.abort();

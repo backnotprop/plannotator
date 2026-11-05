@@ -1,7 +1,7 @@
 /**
  * PR risk ranking (inbox-pull-risk.ts). What regresses: the verdict's parse going soft (a guess, or a diff's own
  * "verdict" being believed); work or cost repeating (per head, across restarts, after a failure); running when it must
- * not (off, no rules, an agent the person didn't choose); a run allowed to act; a big diff hiding what the rules ask about.
+ * not (off, no rules, an agent the person didn't choose); a run allowed to act; a part of a big diff not reaching the agent; a refused or failed run reading as Low.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, writeFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -9,9 +9,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AIMessage, AIProvider, CreateSessionOptions } from "@plannotator/ai/types";
 import type { InboxPull, InboxPullDiffAnswer } from "@plannotator/core/inbox-types";
+import { ClaudeAgentSDKProvider } from "@plannotator/ai/providers/claude-agent-sdk";
+import { CodexAppServerProvider } from "@plannotator/ai/providers/codex-app-server";
+import { PiSDKProvider } from "@plannotator/ai/providers/pi-sdk";
 import { saveConfig } from "@plannotator/shared/config";
-import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, defaultRiskModel, installedPath, runRiskAgent, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
-import { buildRiskPrompt, parseRiskAnswer, trimDiffForRisk } from "./inbox-pull-risk-prompt";
+import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, installedPath, runRiskAgent, startingRiskModel, type RiskRunResult, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
+import { buildRiskPrompt, parseRiskAnswer } from "./inbox-pull-risk-prompt";
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
@@ -86,46 +89,18 @@ describe("the verdict's parse", () => {
 });
 
 describe("what the agent reads", () => {
-  const file = (path: string, lines: number) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1,${lines} @@\n${Array.from({ length: lines }, (_, i) => `+line ${i} of ${path}`).join("\n")}\n`;
+  test("the whole diff, however large, lockfiles and generated files too", async () => {
+    setRules();
+    const file = (path: string, lines: number) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1,${lines} @@\n${"+a changed line of a file\n".repeat(lines)}`;
+    const patch = `${file("bun.lock", 200_000)}${file("src/generated/client.ts", 200_000)}${file("src/billing.ts", 3)}`;
+    const { risk, runs } = engine({ patch });
+    risk.assess([pull(1)]);
+    await settled();
+    expect(patch.length).toBeGreaterThan(8_000_000);
+    expect(runs[0]!.prompt).toContain(patch);
+    expect(runs[0]!.prompt).not.toMatch(/not shown|trimmed/);
+  });
 
-  test("a diff that fits goes whole", () => {
-    const patch = file("src/a.ts", 3);
-    expect(trimDiffForRisk(patch, 10_000)).toBe(patch);
-  });
-  test("a huge file can't push out a small change the rules ask about, and every path stays named", () => {
-    const patch = file("src/huge.ts", 20_000) + file("src/billing/charge.ts", 2) + file("src/other.ts", 5_000);
-    const out = trimDiffForRisk(patch);
-    expect(out.length).toBeLessThan(42_000);
-    expect(out).toContain("+line 1 of src/billing/charge.ts");
-    expect(out).toContain("src/huge.ts (+20000 -0)");
-    expect(out).toContain("src/other.ts (+5000 -0)");
-    expect(out).toContain("more lines of this file not shown");
-    expect(out).toContain("+line 0 of src/huge.ts");
-    expect(out).toContain("+line 0 of src/other.ts");
-  });
-  test("the limit holds however many files: a list and notes count too", () => {
-    for (const count of [500, 3_000]) {
-      const patch = Array.from({ length: count }, (_, i) => file(`src/f${i}.ts`, 3)).join("");
-      expect(trimDiffForRisk(patch, 40_000).length).toBeLessThanOrEqual(40_000);
-    }
-    const big = Array.from({ length: 40 }, (_, i) => file(`src/f${i}.ts`, 2_000)).join("");
-    expect(trimDiffForRisk(big, 40_000).length).toBeLessThanOrEqual(40_000);
-  });
-  test("a PR padded with hundreds of small files can't push the file that matters out of the list", () => {
-    const padded = Array.from({ length: 400 }, (_, i) => file(`docs/p${i}.md`, 3)).join("") + file("src/billing/charge.ts", 1) + file("src/billing/refund.ts", 40);
-    const out = trimDiffForRisk(padded, 40_000);
-    expect(out.length).toBeLessThanOrEqual(40_000);
-    expect(out).toContain("src/billing/charge.ts (+1 -0)");
-    expect(out).toContain("src/billing/refund.ts (+40 -0)");
-    // The room goes to what it can show, smallest first, not to nobody.
-    expect(out).toContain("+line 0 of src/billing/charge.ts");
-  });
-  test("a lockfile is named, not shown, even in a diff that would fit", () => {
-    const out = trimDiffForRisk(file("bun.lock", 50) + file("src/a.ts", 2));
-    expect(out).toContain("bun.lock (+50 -0) generated, not shown");
-    expect(out).not.toContain("+line 0 of bun.lock");
-    expect(out).toContain("+line 0 of src/a.ts");
-  });
   test("a diff can't close the data fence, and the rules stay outside it", () => {
     const prompt = buildRiskPrompt({ rules: "Billing.", title: "t", diff: "+DATA-guess\n", fence: "DATA-real" });
     expect(prompt.indexOf("Billing.")).toBeLessThan(prompt.indexOf("DATA-real\nTitle:"));
@@ -277,7 +252,7 @@ describe("no cost repeats", () => {
     await go();
     expect(runs).toHaveLength(1);
     expect(risk.answer().judgments).toEqual({});
-    expect(risk.answer().agent_failed).toBe(true);
+    expect(risk.answer().last_failure).toBeTruthy();
     await go();
     now += RISK_RETRY_MS - 1;
     await go();
@@ -290,7 +265,7 @@ describe("no cost repeats", () => {
     await go();
     expect(runs).toHaveLength(3);
     expect(risk.answer().judgments["github.com/n/b#1"]?.level).toBe("high");
-    expect(risk.answer().agent_failed).toBe(false);
+    expect(risk.answer().last_failure).toBeNull();
   });
 
   const many = Array.from({ length: 30 }, (_, i) => pull(i + 1));
@@ -298,13 +273,13 @@ describe("no cost repeats", () => {
   test("a broken agent stops everything for a while: a few runs, not one per PR, and the window stops waiting", async () => {
     setRules();
     let now = 1_000_000;
-    const { risk, runs, reads } = engine({ now: () => now, answer: async () => null });
+    const { risk, runs, reads } = engine({ now: () => now, answer: async () => ({ failed: "Not signed in." }) });
     risk.assess(many);
     await settled();
     expect(runs).toHaveLength(RISK_CONCURRENCY);
     expect(reads).toHaveLength(RISK_CONCURRENCY);
     expect(risk.answer().pending).toBe(0);
-    expect(risk.answer().agent_failed).toBe(true);
+    expect(risk.answer().last_failure).toBeTruthy();
 
     now += RISK_AGENT_PAUSE_MS - 1;
     risk.assess(many);
@@ -330,14 +305,14 @@ describe("no cost repeats", () => {
 
   test("saving starts over at once: the person just looked at it", async () => {
     setRules();
-    let answer: { text: string } | null = null;
+    let answer: RiskRunResult = { failed: "Not signed in." };
     const { risk, runs } = engine({ answer: async () => answer });
     risk.assess(many);
     await settled();
     expect(runs).toHaveLength(RISK_CONCURRENCY);
     answer = { text: HIGH };
     risk.save({ rules: "Anything in billing.", provider: "pi-sdk", model: null });
-    expect(risk.answer().agent_failed).toBe(false);
+    expect(risk.answer().last_failure).toBeNull();
     risk.assess(many);
     await settled();
     expect(Object.keys(risk.answer().judgments)).toHaveLength(many.length);
@@ -362,6 +337,102 @@ describe("no cost repeats", () => {
     flaky.risk.assess([pull(2)]);
     await settled();
     expect(flaky.reads).toHaveLength(2);
+  });
+
+  describe("a diff too big for the model, the CLI or the forge", () => {
+    const key = "github.com/n/b#1";
+    test.each([
+      ["a CLI's error", { failed: "Input exceeds the maximum length of 1048576 characters." }, "Input exceeds the maximum length of 1048576 characters."],
+      ["a refusal that comes back as an ordinary answer", { text: "Prompt is too long" }, "The agent didn\u2019t answer with a ranking: Prompt is too long"],
+      ["a refusal over lines, with reordering characters", { failed: "too\nbig\u202E" }, "too big"],
+      ["no words at all", { failed: "  " }, "The agent gave no answer."],
+    ] as [string, RiskRunResult, string][])("%s: failed to rank, with the reason, and no level", async (_name, result, reason) => {
+      setRules();
+      const { risk } = engine({ answer: async () => result });
+      risk.assess([pull(1)]);
+      await settled();
+      const answer = risk.answer();
+      expect(answer.judgments).toEqual({});
+      expect(answer.failed).toEqual({ [key]: reason });
+      expect(answer.last_failure).toBe(reason);
+    });
+
+    test("a runner that throws is a reason too", async () => {
+      setRules();
+      const { risk } = engine({
+        answer: async () => {
+          throw new Error("opencode: spawn failed");
+        },
+      });
+      risk.assess([pull(1)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({ [key]: "opencode: spawn failed" });
+    });
+
+    test("the forge refusing it: the reason shows, no agent runs, and nothing waits on it", async () => {
+      setRules();
+      const { risk, runs } = engine({ diffFails: "pull_diff_too_large" });
+      risk.assess([pull(1)]);
+      await settled();
+      expect(runs).toEqual([]);
+      expect(risk.answer().judgments).toEqual({});
+      expect(risk.answer().failed).toEqual({ [key]: "gh failed" });
+      expect(risk.answer().pending).toBe(0);
+    });
+
+    test("an error without a forge's code is no sentence for a person", async () => {
+      setRules();
+      const { risk } = engine({ diffFails: true });
+      risk.assess([pull(1)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({ [key]: "The diff could not be read." });
+    });
+
+    test("one PR refused doesn't touch the others' judgments", async () => {
+      setRules();
+      const { risk } = engine({ answer: async (run) => (run.prompt.includes("Title: PR 1\n") ? { failed: "Too big." } : { text: HIGH }) });
+      risk.assess([pull(1), pull(2)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({ [key]: "Too big." });
+      expect(Object.keys(risk.answer().judgments)).toEqual(["github.com/n/b#2"]);
+    });
+
+    test("the reason belongs to its head; a later judgment and a save clear it", async () => {
+      setRules();
+      let now = 1_000_000;
+      let answer: RiskRunResult = { failed: "Too big." };
+      const { risk } = engine({ now: () => now, answer: async () => answer });
+      risk.assess([pull(1)]);
+      await settled();
+      expect(risk.answer().failed[key]).toBe("Too big.");
+
+      // Listed at a new head that hasn't run: that reason isn't this head's.
+      risk.assess([pull(1, { head_sha: "another" })]);
+      await settled();
+      expect(risk.answer().failed).toEqual({});
+
+      answer = { text: HIGH };
+      now += RISK_RETRY_MS;
+      risk.assess([pull(1)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({});
+      expect(risk.answer().judgments[key]?.level).toBe("high");
+
+      answer = { failed: "Too big." };
+      risk.assess([pull(2)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({ "github.com/n/b#2": "Too big." });
+      risk.save({ rules: "Anything in billing.", provider: "pi-sdk", model: null });
+      expect(risk.answer().failed).toEqual({});
+    });
+
+    test("a head that moved during the read is no failure: the next list has the new head", async () => {
+      setRules();
+      const { risk } = engine({ head: () => "head-moved" });
+      risk.assess([pull(1)]);
+      await settled();
+      expect(risk.answer().failed).toEqual({});
+    });
   });
 
   /** The first runs hold the line, so the rest wait in the queue; `release` lets them go. */
@@ -511,11 +582,20 @@ describe("one run on a provider", () => {
     }) as unknown as AIProvider;
   const run = { model: null, system: "SYSTEM", prompt: "PROMPT", cwd: "/empty" };
 
-  test("no tools, one turn, the empty folder, the cheap default at its lowest effort", async () => {
+  test("no tools, one turn, the empty folder, the chosen model at its lowest effort", async () => {
     const seen: { options?: CreateSessionOptions } = {};
-    const answer = await runRiskAgent(provider([{ type: "result", sessionId: "s", success: true, result: HIGH }], seen), run);
+    const answer = await runRiskAgent(provider([{ type: "result", sessionId: "s", success: true, result: HIGH }], seen), { ...run, model: "claude-sonnet-5" });
     expect(answer).toEqual({ text: HIGH });
     expect(seen.options).toMatchObject({ cwd: "/empty", model: "claude-sonnet-5", reasoningEffort: "low", maxTurns: 1, oneShot: { systemPrompt: "SYSTEM" } });
+  });
+
+  test("no model saved: Pi and OpenCode run on the person's own default, and no flag names one", async () => {
+    for (const name of ["pi-sdk", "opencode-sdk"]) {
+      const seen: { options?: CreateSessionOptions } = {};
+      const stub = Object.assign(provider([], seen), { name });
+      await runRiskAgent(stub, run);
+      expect(seen.options!.model).toBeUndefined();
+    }
   });
 
   test("a model that takes no effort gets none", async () => {
@@ -525,21 +605,27 @@ describe("one run on a provider", () => {
   });
 
   test.each([
-    ["uses a tool", { type: "tool_use", toolName: "Bash", toolInput: {}, toolUseId: "t" }],
-    ["asks permission", { type: "permission_request", requestId: "r", toolName: "Bash", toolInput: {}, toolUseId: "t" }],
-    ["errors", { type: "error", error: "nope" }],
-  ] as [string, AIMessage][])("an agent that %s ends the run, with no answer even after a verdict", async (_name, message) => {
+    ["uses a tool", { type: "tool_use", toolName: "Bash", toolInput: {}, toolUseId: "t" }, "The agent tried to use a tool, so its answer was dropped."],
+    ["asks permission", { type: "permission_request", requestId: "r", toolName: "Bash", toolInput: {}, toolUseId: "t" }, "The agent tried to use a tool, so its answer was dropped."],
+    ["errors", { type: "error", error: "prompt is too long" }, "prompt is too long"],
+    ["ends in a failed result", { type: "result", sessionId: "s", success: false, result: "context_length_exceeded" }, "context_length_exceeded"],
+    ["ends in a failed result with no words", { type: "result", sessionId: "s", success: false }, "The agent stopped with an error."],
+  ] as [string, AIMessage, string][])("an agent that %s ends the run, with its reason and no answer even after a verdict", async (_name, message, reason) => {
     const seen: { aborted?: boolean } = {};
     const answer = await runRiskAgent(provider([{ type: "text", text: HIGH }, message, { type: "result", sessionId: "s", success: true, result: HIGH }], seen), run);
-    expect(answer).toBeNull();
+    expect(answer).toEqual({ failed: reason });
     expect(seen.aborted).toBe(true);
+  });
+
+  test("an agent that says nothing has no answer", async () => {
+    expect(await runRiskAgent(provider([{ type: "result", sessionId: "s", success: true }]), run)).toEqual({ failed: "The agent gave no answer." });
   });
 
   test("an agent that never answers ends at the timeout", async () => {
     const hung = provider(async function* () {
       await new Promise(() => {});
     });
-    expect(await runRiskAgent(hung, run, 5)).toBeNull();
+    expect(await runRiskAgent(hung, run, 5)).toHaveProperty("failed");
   });
 
   test("a stop ends a running agent at once, and closes it", async () => {
@@ -551,24 +637,8 @@ describe("one run on a provider", () => {
     const answer = runRiskAgent(hung, run, 60_000, stopping.signal);
     await Bun.sleep(5);
     stopping.abort();
-    expect(await answer).toBeNull();
+    expect(await answer).toHaveProperty("failed");
     expect(seen.aborted).toBe(true);
-  });
-
-  test("a stop during the model read: no agent starts after it", async () => {
-    const seen: { options?: CreateSessionOptions } = {};
-    let finish = () => {};
-    const stub = provider([], seen) as unknown as { models: unknown[]; fetchModels: () => Promise<void> };
-    stub.models = [];
-    stub.fetchModels = () => new Promise<void>((resolve) => (finish = resolve));
-    const stopping = new AbortController();
-    const answer = runRiskAgent(stub as unknown as AIProvider, run, 60_000, stopping.signal);
-    await Bun.sleep(5);
-    stopping.abort();
-    expect(await answer).toBeNull();
-    finish();
-    await Bun.sleep(5);
-    expect(seen.options).toBeUndefined();
   });
 
   test("an agent that never opens its session ends at the timeout too, and the session is closed if it comes late", async () => {
@@ -579,34 +649,131 @@ describe("one run on a provider", () => {
       models: [],
       createSession: () => new Promise((resolve) => (open = resolve)),
     } as unknown as AIProvider;
-    expect(await runRiskAgent(hung, run, 5)).toBeNull();
+    expect(await runRiskAgent(hung, run, 5)).toHaveProperty("failed");
     open({ abort: () => closed++, dispose: () => closed++, query: async function* () {} });
     await Bun.sleep(5);
     expect(closed).toBe(2);
   });
 
-  test("no model saved and none known yet: it reads the list and takes the cheap one, instead of the person's default", async () => {
-    const seen: { options?: CreateSessionOptions } = {};
-    const stub = provider([{ type: "result", sessionId: "s", success: true, result: HIGH }], seen) as unknown as { models: unknown[]; fetchModels: () => Promise<void> };
-    stub.models = [];
-    stub.fetchModels = async () => {
-      stub.models = [{ id: "a/claude-opus" }, { id: "a/claude-sonnet-5" }];
-    };
-    await runRiskAgent(stub as unknown as AIProvider, run);
-    expect(seen.options!.model).toBe("a/claude-sonnet-5");
+});
+
+describe("a very large diff through the real providers, with fake CLIs", () => {
+  // Past Linux's 128 KB for one argument and macOS's 1 MB for all of them, and past the reader's own 8 MB.
+  const diff = "+a changed line of a file\n".repeat(360_000);
+  const key = "github.com/n/b#1";
+
+  /** A CLI in Bun's own runner: it keeps its argv in `<log>.argv`, and `script` answers each line of its stdin. */
+  const fakeCli = (name: string, script: string) => {
+    const log = join(dataDir, `${name}.log`);
+    const path = join(dataDir, name);
+    writeFileSync(
+      path,
+      `#!/bin/sh
+exec ${JSON.stringify(process.execPath)} -e '
+const fs=require("fs");const log=${JSON.stringify(log)};
+fs.writeFileSync(log+".argv",process.argv.slice(1).join("\\n"));
+const out=(m)=>process.stdout.write(JSON.stringify(m)+"\\n");
+require("readline").createInterface({input:process.stdin}).on("line",(l)=>{const m=JSON.parse(l);${script}});
+' -- "$@"
+`,
+    );
+    chmodSync(path, 0o755);
+    return { path, argv: () => readFileSync(`${log}.argv`, "utf8"), arrived: () => readFileSync(log, "utf8") };
+  };
+  /** The whole path a refusal takes: this provider, one run, and what the window is told. */
+  const refusedBy = async (provider: AIProvider, model: string) => {
+    setRules("Billing.", "pi-sdk", model);
+    const risk = createPullRisk({
+      dataDir,
+      isOn: () => true,
+      agents: () => AGENTS,
+      pulls: { diff: async (k) => ({ key: k, scope: "layer", base: "main", head: "x", patch: diff, head_sha: "head-1" }) as InboxPullDiffAnswer },
+      run: (run) => runRiskAgent(provider, run),
+    });
+    risk.assess([pull(1)]);
+    for (let i = 0; i < 2000 && risk.answer().pending > 0; i++) await Bun.sleep(10);
+    provider.dispose();
+    const answer = risk.answer();
+    expect(answer.judgments).toEqual({});
+    return answer.failed[key];
+  };
+  const posix = process.platform !== "win32";
+
+  test.if(posix)("Claude Code: on stdin, whole; its \"Prompt is too long\" is a reason, not a ranking", async () => {
+    const cli = fakeCli(
+      "claude",
+      `if(m.type==="control_request")return out({type:"control_response",response:{subtype:"success",request_id:m.request_id,response:{}}});
+       if(m.type==="user"){const c=m.message.content;fs.writeFileSync(log,typeof c==="string"?c:c.map((x)=>x.text).join(""));out({type:"result",subtype:"success",is_error:true,result:"Prompt is too long",session_id:"s",num_turns:0});}`,
+    );
+    const provider = new ClaudeAgentSDKProvider({ type: "claude-agent-sdk", cwd: dataDir, claudeExecutablePath: cli.path, allowedTools: [] });
+    const reason = await refusedBy(provider, "sonnet");
+    expect(reason).toBe("The agent didn\u2019t answer with a ranking: Prompt is too long");
+    expect(cli.arrived()).toContain(diff);
+    expect(cli.argv().length).toBeLessThan(10_000);
   });
+
+  test.if(posix)("Pi: on stdin, whole, its echo on stdout no trouble; its refusal is the reason", async () => {
+    const cli = fakeCli(
+      "pi",
+      `if(m.id!==undefined&&m.type!=="prompt")return out({type:"response",id:m.id,command:m.type,success:true,data:{}});
+       if(m.type==="prompt"){fs.writeFileSync(log,m.message);out({type:"response",id:m.id,command:m.type,success:true,data:{}});out({type:"message_start",message:{role:"user",content:m.message}});out({type:"message_end",message:{role:"assistant",stopReason:"error",errorMessage:"prompt is too long: 2500000 tokens > 200000 maximum"}});out({type:"agent_end"});}`,
+    );
+    const provider = new PiSDKProvider({ type: "pi-sdk", cwd: dataDir, piExecutablePath: cli.path });
+    expect(await refusedBy(provider, "anthropic/claude-sonnet-5")).toBe("prompt is too long: 2500000 tokens > 200000 maximum");
+    expect(cli.arrived()).toContain(diff);
+    expect(cli.argv().length).toBeLessThan(10_000);
+  });
+
+  const fakeCodex = (turn: string) =>
+    fakeCli(
+      "codex",
+      `if(m.id===undefined||m.method===undefined)return;
+       if(m.method==="thread/start")return out({id:m.id,result:{thread:{id:"th"}}});
+       if(m.method==="turn/start"){const text=m.params.input.map((x)=>x.text).join("");fs.writeFileSync(log,text);${turn}return;}
+       out({id:m.id,result:{}});`,
+    );
+
+  test.if(posix)("Codex: on stdin, whole, its echo on stdout no trouble; a failed turn's words are the reason", async () => {
+    const cli = fakeCodex(
+      `out({id:m.id,result:{turn:{id:"tu"}}});out({method:"item/started",params:{item:{type:"userMessage",id:"u",content:[{type:"text",text}]}}});out({method:"turn/completed",params:{turn:{id:"tu",status:"failed",error:{message:"Your input exceeds the context window of this model."}}}});`,
+    );
+    const provider = new CodexAppServerProvider({ type: "codex-sdk", cwd: dataDir, codexExecutablePath: cli.path });
+    expect(await refusedBy(provider, "gpt-6-luna")).toBe("Your input exceeds the context window of this model.");
+    expect(cli.arrived()).toContain(diff);
+    expect(cli.argv().length).toBeLessThan(10_000);
+  });
+
+  test.if(posix)("Codex refusing the turn outright: the reason shows", async () => {
+    const cli = fakeCodex(`out({id:m.id,error:{code:-32602,message:"Input exceeds the maximum length of 1048576 characters."}});`);
+    const provider = new CodexAppServerProvider({ type: "codex-sdk", cwd: dataDir, codexExecutablePath: cli.path });
+    expect(await refusedBy(provider, "gpt-6-luna")).toBe("Codex rejected the turn: Input exceeds the maximum length of 1048576 characters.");
+  });
+
 });
 
 describe("the model it starts on", () => {
-  test("what the owner named first, then a small one, else the provider's own default", () => {
-    expect(defaultRiskModel([{ id: "opus" }, { id: "sonnet", default: true }, { id: "haiku" }])).toBe("sonnet");
-    expect(defaultRiskModel([{ id: "gpt-6-sol", default: true }, { id: "gpt-5.6-terra" }, { id: "gpt-5.6-luna" }])).toBe("gpt-5.6-terra");
-    expect(defaultRiskModel([{ id: "google/gemini-pro" }, { id: "google/gemini-flash" }])).toBe("google/gemini-flash");
-    expect(defaultRiskModel([{ id: "big" }, { id: "bigger", default: true }])).toBe("bigger");
-    // Gemini has "mini" in it; a mini model is another thing.
-    expect(defaultRiskModel([{ id: "opus", default: true }, { id: "google/gemini-3-pro" }])).toBe("opus");
-    expect(defaultRiskModel([{ id: "opus", default: true }, { id: "o4-mini" }])).toBe("o4-mini");
-    expect(defaultRiskModel([])).toBeNull();
+  const ids = (...list: string[]) => list.map((id) => ({ id, label: id }));
+  test("Claude: Sonnet", () => {
+    expect(startingRiskModel("claude-agent-sdk", [{ ...ids("opus")[0]!, default: true }, ...ids("sonnet", "haiku")])).toBe("sonnet");
+    // A list with no alias still lands on its Sonnet family, or the list's own default.
+    expect(startingRiskModel("claude-agent-sdk", [{ ...ids("opus")[0]!, default: true }])).toBe("opus");
+  });
+  test("Codex: the newest Luna, whatever the order", () => {
+    expect(startingRiskModel("codex-sdk", ids("gpt-5.6-luna", "gpt-6-sol", "gpt-6-luna", "gpt-5.6-terra"))).toBe("gpt-6-luna");
+    expect(startingRiskModel("codex-sdk", ids("gpt-6-luna", "gpt-6.10-luna", "gpt-6.9-luna"))).toBe("gpt-6.10-luna");
+  });
+  test("Codex without a Luna: its own default, or nothing", () => {
+    expect(startingRiskModel("codex-sdk", [...ids("gpt-6-astra"), { ...ids("gpt-6-sol")[0]!, default: true }])).toBe("gpt-6-sol");
+    expect(startingRiskModel("codex-sdk", [])).toBeNull();
+  });
+  test("what the dialog is told to start on is the same pick, from the agent's list", async () => {
+    const risk = createPullRisk({ dataDir, isOn: () => true, pulls: { diff: async () => ({}) as InboxPullDiffAnswer }, listModels: async () => [{ id: "gpt-6-sol", label: "Sol", default: true }, { id: "gpt-6-luna", label: "Luna" }] });
+    expect(await risk.models("codex-sdk")).toEqual({ models: [{ id: "gpt-6-sol", label: "Sol" }, { id: "gpt-6-luna", label: "Luna" }], default_model: "gpt-6-luna" });
+    expect((await risk.models("pi-sdk")).default_model).toBeNull();
+  });
+  test("Pi and OpenCode: the person's own default, even with a cheap model listed", () => {
+    expect(startingRiskModel("pi-sdk", ids("anthropic/claude-sonnet-5", "openai/gpt-6-luna"))).toBeNull();
+    expect(startingRiskModel("opencode-sdk", ids("anthropic/claude-sonnet-5"))).toBeNull();
   });
 });
 

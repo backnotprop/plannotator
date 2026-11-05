@@ -1,7 +1,7 @@
 /**
  * PR risk ranking in the Inbox (approval "code-review-launch-build", item 4):
  * what the window and the server share. The person's rules say what a high-risk
- * pull request is; a cheap agent judges each new PR head against them.
+ * pull request is; an agent judges each new PR head against them.
  */
 
 export type InboxPullRiskLevel = "low" | "medium" | "high";
@@ -31,20 +31,25 @@ export interface InboxPullRiskAnswer {
   rules: string;
   /** The risk agent, or null until one is chosen. */
   provider: string | null;
-  /** The agent's model, or null for the default pick. */
+  /** The agent's model, or null for the agent's own default. */
   model: string | null;
   agents: InboxPullRiskAgent[];
   /** By pull request key, only for its current head and the current rules. */
   judgments: Record<string, InboxPullRiskJudgment>;
+  /**
+   * By pull request key, why it has no judgment at its current head: the agent or the forge refused or failed.
+   * A failed one is never given a level. May hold what an agent wrote: shown as plain text only.
+   */
+  failed: Record<string, string>;
   /** Judgments queued or running now: the window reads again while there are any. */
   pending: number;
-  /** The last run of the agent itself failed (not signed in, an answer that made no sense). */
-  agent_failed: boolean;
+  /** Why the agent's last run failed (not signed in, refused the diff, an answer that made no sense), or null. */
+  last_failure: string | null;
 }
 
 /** `GET /api/inbox/pulls/risk/models`: what the chosen agent offers, and the pick to start on. */
 export interface InboxPullRiskModels {
   models: { id: string; label: string }[];
-  /** The cheapest sensible model of the list, or null when it has none. */
+  /** The pick to start on, or null to start on the agent's own default (as the guided review does for Pi and OpenCode). */
   default_model: string | null;
 }
