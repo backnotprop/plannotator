@@ -104,6 +104,8 @@ interface Forge {
   fail: string | null;
   /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
+  /** The commits GitHub says the PR has; null, that read fails. */
+  prCommits?: string[] | null;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -115,6 +117,7 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     graphql: () => f.calls.filter((c) => c.args.includes("graphql")),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
       if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
@@ -1024,7 +1027,7 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls).toHaveLength(2);
   });
 
-  test("posted at the head of the patch the person read, which the forge moved past the list; a head never read is refused", async () => {
+  test("posted at the head of the patch the person read, which the forge moved past the list; a commit not on the PR is refused for the page to fall back", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");
     await w.pulls();
@@ -1035,8 +1038,9 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     const res = await w.review({ key: PR412, head_sha: pushed, action: "comment", body: "On the pushed commit.", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "Here." }] });
     expect(res.status).toBe(200);
     expect((w.post.calls[0]!.input as { commit_id: string }).commit_id).toBe(pushed);
+    w.forge.prCommits = [SHA412, pushed];
     const never = await w.review({ key: PR412, head_sha: "c".repeat(40), action: "approve", body: "" });
-    expect(((await never.json()) as { code: string }).code).toBe("pull_moved");
+    expect(((await never.json()) as { code: string }).code).toBe("pull_commit_gone");
     expect(w.post.calls).toHaveLength(1);
   });
 
@@ -1047,10 +1051,12 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     w.forge.heads = ["b".repeat(40), "c".repeat(40)];
     const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
     expect(diff.head_sha).toBeNull();
-    // Neither read is kept as a head the person read: a post at either is refused, and nothing runs.
+    // Neither read is kept as a head the person read: the page sends neither (it posts nothing at a null head), and
+    // one the PR does not have is refused with nothing run.
+    w.forge.prCommits = [SHA412];
     for (const sha of ["b".repeat(40), "c".repeat(40)]) {
       const res = await w.review({ key: PR412, head_sha: sha, action: "approve", body: "" });
-      expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
+      expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
     }
     expect(w.post.calls).toEqual([]);
   });
@@ -1125,9 +1131,12 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");
     await w.pulls();
+    w.forge.prCommits = [SHA412];
     const moved = await w.review({ key: PR412, head_sha: "f".repeat(40), action: "approve", body: "" });
     expect(moved.status).toBe(409);
-    expect(((await moved.json()) as { code: string }).code).toBe("pull_moved");
+    expect(((await moved.json()) as { code: string }).code).toBe("pull_commit_gone");
+    const notACommit = await w.review({ key: PR412, head_sha: "not a sha", action: "approve", body: "" });
+    expect(((await notACommit.json()) as { code: string }).code).toBe("pull_moved");
     expect((await w.review({ key: "github.com/northwind/billing-svc#999", head_sha: SHA412, action: "approve" })).status).toBe(404);
     expect((await w.review({ key: PR412, head_sha: SHA412, action: "merge" })).status).toBe(422);
     expect((await w.review({ key: PR412, head_sha: SHA412, action: "comment", fileComments: [{ path: "a", line: 0, side: "RIGHT", body: "x" }] })).status).toBe(422);
@@ -1137,6 +1146,29 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { code: string }).code).toBe("code_review_off");
     expect(off.post.calls).toEqual([]);
+  });
+
+  test("GitHub: an older commit of the PR takes the review at that commit, in that commit's lines", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const older = "e".repeat(40);
+    w.forge.prCommits = [older, SHA412];
+    const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "On what I read." }] });
+    expect(res.status).toBe(200);
+    expect(w.post.calls[0]!.input).toMatchObject({ commit_id: older, comments: [{ line: 3, side: "RIGHT", body: "On what I read." }] });
+  });
+
+  test("GitHub: when it cannot say what the PR has, GitHub decides; its 422 at an older commit is the fallback, not an error", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.forge.prCommits = null;
+    w.post.answer = () => ({ stdout: "", stderr: "HTTP 422: Unprocessable Entity (commit_id is not part of the pull request)", exitCode: 1 });
+    const res = await w.review({ key: PR412, head_sha: "e".repeat(40), action: "comment", body: "", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "x" }] });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
+    expect(w.post.calls).toHaveLength(1);
   });
 
   test("a forge that refuses the review: an error the window shows, nothing claimed posted", async () => {

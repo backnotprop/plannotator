@@ -236,7 +236,7 @@ test.skipIf(!hasDom)('post from Whole stack: the global comment goes in the body
   expect(commentCount()).toBe('Comments, 1');
 });
 
-test.skipIf(!hasDom)('a new push keeps the global comments; the line comments go, as before', async () => {
+test.skipIf(!hasDom)('a new push keeps the global comments and the line comments', async () => {
   keepBoth(own[0]!, 'layer');
   mount(<Review layer={own[0]!} scope="layer" />);
   await settle();
@@ -246,8 +246,8 @@ test.skipIf(!hasDom)('a new push keeps the global comments; the line comments go
   act(() => push(later));
   await settle();
   expect(kept(storeKey(own[0]!, 'layer'))).toBeNull();
-  expect(kept(storeKey(own[0]!, 'layer', later))).toEqual([GLOBAL.id]);
-  expect(commentCount()).toBe('Comments, 1');
+  expect(kept(storeKey(own[0]!, 'layer', later))).toHaveLength(2);
+  expect(commentCount()).toBe('Comments, 2');
   expect(el('[data-review-decision] [data-decision-primary]').textContent).toContain('Send Feedback');
   // The unsaved words of a global comment are kept under the same name across the push.
   expect(reader!.draftScope).toBe(draftScope);

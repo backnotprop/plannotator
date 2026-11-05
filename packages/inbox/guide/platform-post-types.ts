@@ -4,6 +4,19 @@
  */
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
+/**
+ * A comment as the Pull requests review keeps it. A line comment's `line`/`side` are in terms of the diff it was read on,
+ * so it says which: `readHead`, the commit that diff named; `readBase`, its base; `anchorSnapshot`, a stamp of the patch.
+ */
+export type KeptComment = CodeAnnotation & {
+  readHead?: string;
+  readBase?: string;
+  /** For a post: the commit whose diff its lines are in, when that is not the one posted to (GitHub takes it there). */
+  postAt?: string;
+  /** For a post: if `postAt` has gone, its lines still read the same on the diff on screen. */
+  postHere?: boolean;
+};
+
 /** A review event as the forge takes it (the review app's `PRReviewAction`). */
 export type PlatformAction = 'approve' | 'comment' | 'request_changes';
 
@@ -37,12 +50,14 @@ export interface PlatformPostProps {
   /** The event the decision asked for (and whether the dialog offers Comment / Request changes), or null: closed. */
   open: { action: PlatformAction; chooseEvent: boolean } | null;
   /** The person's comments in this review. */
-  comments: readonly CodeAnnotation[];
+  comments: readonly KeptComment[];
   /** What the comments were written on: the PR's own diff, an agent's guided review, or the whole stack. */
   anchor: 'diff' | 'guide' | 'stack';
   /** Sends one request to the Inbox's `POST /api/inbox/pulls/review`. */
   post: (request: Record<string, unknown>) => Promise<Response>;
   onClose: () => void;
   /** `posted`: the ids of the comments that went (a whole stack's line comments map to no PR's lines and stay). */
-  onPosted: (result: { action: PlatformAction; url: string; posted: readonly string[] }) => void;
+  onPosted: (result: { action: PlatformAction; url: string; posted: readonly string[]; head: string }) => void;
+  /** Comments that went at the commit they were read on, ahead of the review itself (which can still fail). */
+  onWent?: (ids: readonly string[]) => void;
 }

@@ -382,6 +382,8 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /** Whether a GitHub PR still has this commit (a force-push takes it off); null when the forge did not say. */
+  hasCommit(key: string, sha: string): Promise<boolean | null>;
 }
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
@@ -626,6 +628,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { ...(avatars.get(host.toLowerCase()) ?? {}) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
+    async hasCommit(key, sha) {
+      const pull = known.get(key);
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !parts || pull.platform !== "github") return null;
+      const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
+      if (!read || read.exitCode !== 0) return null;
+      return read.stdout.split("\n").some((line) => line.trim().toLowerCase() === sha.toLowerCase());
+    },
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");

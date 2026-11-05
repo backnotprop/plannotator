@@ -82,6 +82,8 @@ export interface PostEndingProps {
   onPick: (next: ReviewDestination) => void;
   /** The review went on the PR: the host clears the comments that went (`posted`, their ids) and says so. */
   onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly string[] }) => void;
+  /** Comments that went at the commit they were read on, ahead of the review itself. */
+  onWent?: (ids: readonly string[]) => void;
   /**
    * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
    * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
@@ -91,7 +93,7 @@ export interface PostEndingProps {
   onMoved?: () => void;
 }
 
-export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, onPick, onPosted, headSha, onMoved }: PostEndingProps) {
+export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved }: PostEndingProps) {
   const phone = usePhone();
   const target = useMemo(() => {
     const listed = postablePull(pull);
@@ -222,12 +224,14 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               return response;
             }}
             onClose={() => setOpen(null)}
+            onWent={onWent}
             onPosted={(result) => {
               setOpen(null);
               // A follow-up comment after an approval still reads as the approval.
               const action = sameHead && result.action === 'comment' ? done!.action : result.action;
               const went = new Set(result.posted);
-              setDone({ key: target.key, head: target.head_sha, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
+              // At the commit it went to: a newer one on screen by now is still to be reviewed.
+              setDone({ key: target.key, head: result.head, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
               onPosted({ ...result, action, label: rules.label });
             }}
           />

@@ -123,6 +123,8 @@ interface PanelProps {
   onEdit?: (id: string, updates: Partial<Annotation>) => void;
   selectedId: string | null;
   codeAnnotations?: CodeAnnotation[];
+  /** A short note on a code annotation's card (the Inbox's "Written on older code"). */
+  codeAnnotationNote?: (annotation: CodeAnnotation) => string | null;
   onSelectCodeAnnotation?: (id: string) => void;
   onDeleteCodeAnnotation?: (id: string) => void;
   onEditCodeAnnotation?: (id: string, updates: Partial<CodeAnnotation>) => void;
@@ -255,6 +257,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
   onEdit,
   selectedId,
   codeAnnotations = [],
+  codeAnnotationNote,
   onSelectCodeAnnotation,
   onDeleteCodeAnnotation,
   onEditCodeAnnotation,
@@ -590,6 +593,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                   <CodeAnnotationCard
                     key={annotation.id}
                     annotation={annotation}
+                    note={codeAnnotationNote?.(annotation)}
                     isSelected={selectedId === annotation.id}
                     isMe={isCurrentUser(annotation.author)}
                     onSelect={() => onSelectCodeAnnotation?.(annotation.id)}
@@ -708,6 +712,7 @@ export const AnnotationPanel: React.FC<PanelProps> = ({
                 <CodeAnnotationCard
                   key={entry.annotation.id}
                   annotation={entry.annotation}
+                  note={codeAnnotationNote?.(entry.annotation)}
                   isSelected={selectedId === entry.annotation.id}
                   isMe={isCurrentUser(entry.annotation.author)}
                   onSelect={() => onSelectCodeAnnotation?.(entry.annotation.id)}
@@ -1312,13 +1317,14 @@ const AnnotationCard: React.FC<{
 
 const CodeAnnotationCard: React.FC<{
   annotation: CodeAnnotation;
+  note?: string | null;
   isSelected: boolean;
   isMe: boolean;
   onSelect: () => void;
   onDelete: () => void;
   onEdit?: (updates: Partial<CodeAnnotation>) => void;
   readOnly?: boolean;
-}> = ({ annotation, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false }) => {
+}> = ({ annotation, note, isSelected, isMe, onSelect, onDelete, onEdit, readOnly = false }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [editText, setEditText] = useState(annotation.text || '');
   const enterSavesComment = useConfigValue('enterSavesComment');
@@ -1409,6 +1415,7 @@ const CodeAnnotationCard: React.FC<{
           </div>
         </HostTitle>
       )}
+      {note && <p className="mt-1 text-[11px] text-muted-foreground" data-code-annotation-note="">{note}</p>}
 
       {annotation.originalCode && (
         <p className="mt-1.5 line-clamp-2 whitespace-pre-wrap [overflow-wrap:anywhere] font-mono text-[11px] leading-relaxed text-muted-foreground/80">

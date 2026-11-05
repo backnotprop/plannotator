@@ -4,7 +4,8 @@
  *
  *  - `updated_at` moving with the same head (a label, a teammate's comment, a review) deleting the work, reading the
  *    diff again, or taking the reader down (its scroll, a comment being typed);
- *  - a new head commit keeping line comments or Viewed, or losing global comments;
+ *  - a new head losing a comment, keeping Viewed, or drawing a comment on code it was not written on;
+ *  - a comment posting anywhere but the commit it was read on, or losing its words when that commit has gone;
  *  - another layer of the stack moving taking this layer's work;
  *  - an upgrade losing what an older Inbox kept under the PR's last update, or those line comments posting inline;
  *  - a list that names no head, is behind the patch on screen, or lands on a head still behind it, losing the work or
@@ -32,7 +33,7 @@ import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/co
 
 const hasDom = typeof document !== 'undefined';
 interface ReaderProps {
-  comments?: { onSave: (annotation: unknown) => unknown; onDelete?: (id: string) => void };
+  comments?: { annotations?: { id: string }[]; onSave: (annotation: unknown) => unknown; onDelete?: (id: string) => void };
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
 }
 let reader: ReaderProps | undefined;
@@ -117,11 +118,45 @@ let diffBase = 'main';
 let diffHold: Promise<void> | null = null;
 /** What the diff door's patch reads as: another value is other code. */
 let diffCode = 'b';
+/** The line the patch's one hunk is at. */
+let diffAt = 12;
+/** Set: another file in the patch, so other patch text with the same code at the same lines. */
+let diffFiles: string | null = null;
 /** While set, a diff read fails so. */
 let diffFails: { code: string; status: number } | null = null;
 /** How a posted review is answered, in place of the forge taking it. */
-let postAnswer: ((body: Record<string, unknown>) => Response) | null = null;
+let postAnswer: ((body: Record<string, unknown>) => Response | null) | null = null;
 let posted: { path: string; body: Record<string, unknown> }[] = [];
+/**
+ * A small GitHub, when a test sets it: commits with their diffs, as read. A review lands at the commit it names, and each
+ * line comment on what that commit's diff has at that line. A commit it does not have, or a line not in that commit's
+ * diff, refuses the review, as the Inbox's door answers it. So a test reads where the words landed, not what was asked.
+ */
+let forge: { commits: Map<string, string>; landed: Landed[]; reviews: { commit: string; action: unknown; body: string }[] } | null = null;
+interface Landed {
+  commit: string;
+  line: number;
+  body: string;
+  code: string | null;
+}
+function codeAt(patch: string, line: number, side: unknown): string | null {
+  const hunk = /@@ -(\d+) \+(\d+) @@\n-(.*)\n\+(.*)\n/.exec(patch);
+  if (!hunk) return null;
+  return side === 'LEFT' ? (Number(hunk[1]) === line ? hunk[3]! : null) : Number(hunk[2]) === line ? hunk[4]! : null;
+}
+function forgeTakes(body: Record<string, unknown>): Response {
+  const commit = String(body.head_sha);
+  const patch = forge!.commits.get(commit);
+  const gone = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+  if (patch === undefined) return gone();
+  const inline = (body.fileComments ?? []) as { line: number; side: string; body: string }[];
+  if (inline.some((c) => codeAt(patch, c.line, c.side) === null)) return gone();
+  forge!.reviews.push({ commit, action: body.action, body: String(body.body ?? '') });
+  forge!.landed.push(...inline.map((c) => ({ commit, line: c.line, body: c.body, code: codeAt(patch, c.line, c.side) })));
+  return Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
+}
+/** As GitHub would show it at this head: outdated when the commit's code at that line is not what is there now. */
+const outdatedAtForge = (head: string, comment: Landed) => codeAt(forge!.commits.get(head)!, comment.line, 'RIGHT') !== comment.code;
 
 beforeEach(() => {
   if (!hasDom) return;
@@ -132,6 +167,9 @@ beforeEach(() => {
   readerMounts = 0;
   diffHold = null;
   diffCode = 'b';
+  diffAt = 12;
+  diffFiles = null;
+  forge = null;
   diffFails = null;
   postAnswer = null;
   posted = [];
@@ -141,14 +179,18 @@ beforeEach(() => {
     if (init?.method === 'POST') {
       const body = JSON.parse(String(init.body)) as Record<string, unknown>;
       posted.push({ path: url.pathname, body });
-      return postAnswer?.(body) ?? Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
+      const scripted = postAnswer?.(body);
+      if (scripted) return scripted;
+      if (forge && url.pathname.endsWith('/pulls/review')) return forgeTakes(body);
+      return Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
     }
     if (!url.pathname.endsWith('/pulls/diff')) return Response.json({});
     diffReads += 1;
     const scope = url.searchParams.get('scope')!;
     if (diffHold) await diffHold;
     if (diffFails) return Response.json({ error: 'The forge did not answer.', code: diffFails.code }, { status: diffFails.status });
-    const patch = `diff --git a/${PATH} b/${PATH}\n--- a/${PATH}\n+++ b/${PATH}\n@@ -12 +12 @@\n-a\n+${diffCode}\n`;
+    const patch = `diff --git a/${PATH} b/${PATH}\n--- a/${PATH}\n+++ b/${PATH}\n@@ -${diffAt} +${diffAt} @@\n-a\n+${diffCode}\n${diffFiles ? `diff --git a/other.ts b/other.ts\n--- a/other.ts\n+++ b/other.ts\n@@ -1 +1 @@\n-x\n+y\n` : ''}`;
+    if (diffHead) forge?.commits.set(diffHead, patch);
     return Response.json({ serverSession: 's', key: url.searchParams.get('key'), scope, base: diffBase, head: 'y', patch, head_sha: diffHead });
   }) as typeof fetch;
 });
@@ -212,12 +254,15 @@ async function work() {
   await act(async () => reader!.viewed!.onToggle(PATH));
 }
 
+/** The comments the reader draws on the diff. */
+const drawn = () => (reader!.comments!.annotations ?? []).map((c) => c.id).sort();
 const onScreen = () => ({
   comments: document.querySelector('.ib-vcomments')?.getAttribute('aria-label'),
   viewed: [...reader!.viewed!.files],
 });
 const ALL_KEPT = { comments: 'Comments, 2', viewed: [PATH] };
-const ONLY_GLOBAL = { comments: 'Comments, 1', viewed: [] };
+/** After a new head: every comment, no ticks. */
+const AFTER_PUSH = { comments: 'Comments, 2', viewed: [] };
 const stored = (p: InboxPull, scope: 'layer' | 'stack', suffix: string) => {
   const raw = JSON.parse(window.localStorage.getItem(`${STORE}${p.key}:${scope}:${suffix}`) ?? 'null') as { comments: { id: string }[]; viewed: string[] } | null;
   return raw && { comments: raw.comments.map((c) => c.id).sort(), viewed: raw.viewed };
@@ -241,7 +286,7 @@ for (const scope of ['layer', 'stack'] as const) {
     expect(readerMounts).toBe(mounts);
   });
 
-  test.skipIf(!hasDom)(`${scope}: a new head starts clean but for the global comments, and reads the diff again`, async () => {
+  test.skipIf(!hasDom)(`${scope}: a new head keeps every comment, not the ticks, and reads the diff again`, async () => {
     const { low, top } = layers();
     await open([low, top], top, scope);
     await work();
@@ -249,9 +294,9 @@ for (const scope of ['layer', 'stack'] as const) {
     diffHead = B;
     await act(async () => reread((p) => moved(p, top, { head_sha: B, updated_at: '2026-11-03T10:00:00Z' })));
     await settle();
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
     expect(stored(top, scope, A)).toBeNull();
-    expect(stored(top, scope, B)).toEqual({ comments: ['g1'], viewed: [] });
+    expect(stored(top, scope, B)).toEqual({ comments: ['g1', 'l1'], viewed: [] });
     expect(diffReads).toBe(reads + 1);
   });
 
@@ -272,7 +317,7 @@ for (const scope of ['layer', 'stack'] as const) {
     expect(readerMounts).toBe(mounts);
     await act(async () => land());
     await settle();
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
     // A composer left open on the old patch cannot save onto a moved line.
     expect(readerMounts).toBe(mounts + 1);
   });
@@ -346,7 +391,7 @@ for (const scope of ['layer', 'stack'] as const) {
     await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T10:00:00Z' })));
     await settle();
     expect(diffReads).toBe(reads + 2);
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
   });
 
   test.skipIf(!hasDom)(`${scope}: a first read that fails goes again on the next list read; one too large does not`, async () => {
@@ -388,8 +433,8 @@ for (const scope of ['layer', 'stack'] as const) {
     window.localStorage.setItem(`${STORE}${top.key}:${scope}:2026-11-02T08:00:00Z`, JSON.stringify({ comments: [{ ...LINE, id: 'l2' }], viewed: [] }));
     diffHead = null;
     await open([low, top], top, scope);
-    // Global from the other head, all of the old entry; the other head's line comment may have moved.
-    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 2');
+    // All of the other head's, all of the old entry.
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 3');
     expect(stored(top, scope, B)).toEqual({ comments: ['g1', 'l1'], viewed: [PATH] });
   });
 
@@ -399,9 +444,10 @@ for (const scope of ['layer', 'stack'] as const) {
     diffHead = null;
     await open([low, top], top, scope);
     await act(async () => void reader!.comments!.onDelete!(GLOBAL.id));
+    await act(async () => void reader!.comments!.onDelete!(LINE.id));
     expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
-    // That head's line comment and tick are still there: this review never read a patch to say they are stale.
-    expect(stored(top, scope, B)).toEqual({ comments: ['l1'], viewed: [PATH] });
+    // That head's tick is still there: this review never read a patch to say it is stale.
+    expect(stored(top, scope, B)).toEqual({ comments: [], viewed: [PATH] });
     close();
     diffHead = null;
     await open([low, top], top, scope);
@@ -494,15 +540,15 @@ for (const scope of ['layer', 'stack'] as const) {
     expect(stored(top, scope, B)).toEqual({ comments: ['g1', 'l1'], viewed: [PATH] });
   });
 
-  test.skipIf(!hasDom)(`${scope}: work kept on an older head goes once this head is read, even with the key unchanged by the read`, async () => {
+  test.skipIf(!hasDom)(`${scope}: work kept on another head moves here once this head is read, even with the key unchanged by the read`, async () => {
     const { low, top } = layers();
     window.localStorage.setItem(`${STORE}${top.key}:${scope}:${B}`, JSON.stringify({ comments: [GLOBAL, LINE], viewed: [PATH] }));
     await open([low, top], top, scope);
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
     expect(stored(top, scope, B)).toBeNull();
   });
 
-  test.skipIf(!hasDom)(`${scope}: a 64-digit head is a head: a new one clears its line comments`, async () => {
+  test.skipIf(!hasDom)(`${scope}: a 64-digit head is a head: a new one clears its ticks`, async () => {
     const X = 'a'.repeat(64);
     const Y = 'b'.repeat(64);
     const { low, top } = layers({ head_sha: X });
@@ -512,7 +558,7 @@ for (const scope of ['layer', 'stack'] as const) {
     diffHead = Y;
     await act(async () => reread((p) => moved(p, top, { head_sha: Y })));
     await settle();
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
   });
 
   test.skipIf(!hasDom)(`${scope}: another layer's new commit changes nothing on this one`, async () => {
@@ -557,7 +603,7 @@ for (const scope of ['layer', 'stack'] as const) {
     expect(stored(top, scope, B)).toEqual({ comments: ['g1', 'l1'], viewed: [PATH] });
   });
 
-  test.skipIf(!hasDom)(`${scope}: a list read naming no head loses nothing; the same head after it keeps, a new one clears`, async () => {
+  test.skipIf(!hasDom)(`${scope}: a list read naming no head loses nothing; the same head after it keeps, a new one clears the ticks`, async () => {
     const { low, top } = layers();
     await open([low, top], top, scope);
     await work();
@@ -575,12 +621,12 @@ for (const scope of ['layer', 'stack'] as const) {
     diffHead = B;
     await act(async () => reread((p) => moved(p, top, { head_sha: B })));
     await settle();
-    expect(onScreen()).toEqual(ONLY_GLOBAL);
+    expect(onScreen()).toEqual(AFTER_PUSH);
     expect(stored(top, scope, A)).toBeNull();
   });
 }
 
-test.skipIf(!hasDom)('a list that never named a head: a push seen in the patch starts clean; the same patch keeps', async () => {
+test.skipIf(!hasDom)('a list that never named a head: a push seen in the patch clears the ticks; the same patch keeps', async () => {
   const { low, top } = layers({ head_sha: null });
   await open([low, top], top);
   await work();
@@ -594,7 +640,7 @@ test.skipIf(!hasDom)('a list that never named a head: a push seen in the patch s
   diffHead = B;
   await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T11:00:00Z' })));
   await settle();
-  expect(onScreen()).toEqual(ONLY_GLOBAL);
+  expect(onScreen()).toEqual(AFTER_PUSH);
   expect(stored(top, 'layer', A)).toBeNull();
 });
 
@@ -640,8 +686,11 @@ async function typeInDialog(words: string) {
   });
 }
 
-test.skipIf(!hasDom)('a dialog open over a new commit posts at the head its lines are on: refused, with what was typed kept, then rebuilt', async () => {
-  const { low, top } = layers({ mine: false, author: 'tomas' });
+/** A teammate's MR on GitLab, which is refused at a commit the Inbox no longer names. */
+const ON_GITLAB = { mine: false, author: 'tomas', platform: 'gitlab', host: 'gitlab.com' } as const;
+
+test.skipIf(!hasDom)('GitLab: a dialog open over a new commit posts at the head its lines are on: refused, with what was typed kept, then rebuilt', async () => {
+  const { low, top } = layers(ON_GITLAB);
   await open([low, top], top);
   await work();
   await openPost();
@@ -674,8 +723,8 @@ test.skipIf(!hasDom)('a dialog open over a new commit posts at the head its line
   expect(String(reviews()[0]!.body.body)).toContain(GLOBAL.text);
 });
 
-test.skipIf(!hasDom)('a failed post, a new commit, then Retry Failed: the old lines never go at the new head', async () => {
-  const { low, top } = layers({ mine: false, author: 'tomas' });
+test.skipIf(!hasDom)('GitLab: a failed post, a new commit, then Retry Failed: the old lines never go at the new head', async () => {
+  const { low, top } = layers(ON_GITLAB);
   await open([low, top], top);
   await work();
   await openPost();
@@ -720,8 +769,8 @@ for (const [what, answer, button] of [
     expect(document.querySelector('[role="dialog"]')?.textContent).toContain(button);
   });
 
-  test.skipIf(!hasDom)(`a post ${what}, then a new commit: reopening builds a plan of the new head, without the old lines`, async () => {
-    const { low, top } = layers({ mine: false, author: 'tomas' });
+  test.skipIf(!hasDom)(`GitLab: a post ${what}, then a new commit: reopening builds a plan of the new head, without the old lines`, async () => {
+    const { low, top } = layers(ON_GITLAB);
     await open([low, top], top);
     await work();
     await openPost();
@@ -806,7 +855,7 @@ test.skipIf(!hasDom)('opened afresh while the list is still behind: work kept on
 });
 
 for (const fails of [true, false]) {
-  test.skipIf(!hasDom)(`a patch naming no head keeps its words while the list moves and the read ${fails ? 'fails' : 'waits'}; new words stay on it, and go with it when the read lands`, async () => {
+  test.skipIf(!hasDom)(`a patch naming no head keeps its words while the list moves and the read ${fails ? 'fails' : 'waits'}; when the read lands they are labelled, never placed on the new lines`, async () => {
     const { low, top } = layers();
     diffHead = null;
     await open([low, top], top);
@@ -821,20 +870,20 @@ for (const fails of [true, false]) {
     await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', lineStart: 20, lineEnd: 20 }));
     expect(stored(top, 'layer', A)?.comments).toEqual(['l1', 'l2']);
     expect(stored(top, 'layer', B)).toBeNull();
-    // The new head lands: nothing written on the old patch posts at it.
+    // The new head lands.
     diffFails = null;
     diffHead = B;
     diffCode = 'c';
     await act(async () => land());
     await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T10:00:00Z' })));
     await settle();
-    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 2');
     expect(stored(top, 'layer', A)).toBeNull();
-    expect(stored(top, 'layer', B)).toBeNull();
+    expect(outdatedIn(top, 'layer', B)).toEqual(['l1', 'l2']);
   });
 }
 
-test.skipIf(!hasDom)('other code naming no head after the list moved comes up under the list, and the old words wait under theirs', async () => {
+test.skipIf(!hasDom)('other code naming no head after the list moved comes up under the list; the old words stay in view, not on it', async () => {
   const { low, top } = layers();
   diffHead = null;
   await open([low, top], top);
@@ -842,10 +891,12 @@ test.skipIf(!hasDom)('other code naming no head after the list moved comes up un
   diffCode = 'c';
   await act(async () => reread((p) => moved(p, top, { head_sha: B })));
   await settle();
-  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 1');
   expect(stored(top, 'layer', A)?.comments).toEqual(['l1']);
+  expect(drawn()).toEqual([]);
   await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2' }));
-  expect(stored(top, 'layer', B)?.comments).toEqual(['l2']);
+  expect(stored(top, 'layer', B)?.comments).toEqual(['l1', 'l2']);
+  expect(drawn()).toEqual(['l2']);
 });
 
 for (const scope of ['layer', 'stack'] as const) {
@@ -1097,7 +1148,7 @@ test.skipIf(!hasDom)('a diff that cannot be read and a list that stops naming th
 
 /** A teammate's PR with a line comment and words typed, refused over a new commit whose patch is in. */
 async function refusedOverNewHead() {
-  const { low, top } = layers({ mine: false, author: 'tomas' });
+  const { low, top } = layers(ON_GITLAB);
   await open([low, top], top);
   await act(async () => void reader!.comments!.onSave(LINE));
   await openPost();
@@ -1114,7 +1165,7 @@ async function refusedOverNewHead() {
   posted = [];
 }
 
-test.skipIf(!hasDom)('reopened with no comments left, the words typed for a review stay that review: never an Approve', async () => {
+test.skipIf(!hasDom)('GitLab: reopened after a refusal, the words typed for a review stay that review, with the comments in its body', async () => {
   await refusedOverNewHead();
   await act(async () => inDialog('Cancel').click());
   await settle();
@@ -1125,7 +1176,7 @@ test.skipIf(!hasDom)('reopened with no comments left, the words typed for a revi
   expect(String(reviews()[0]!.body.body)).toContain('This needs a rethink.');
 });
 
-test.skipIf(!hasDom)('Retry on a refused plan, the new commit in: sends nothing, and shows the new plan to post', async () => {
+test.skipIf(!hasDom)('GitLab: Retry on a refused plan, the new commit in: sends nothing, and shows the new plan to post', async () => {
   await refusedOverNewHead();
   await act(async () => inDialog('Retry Failed').click());
   await settle();
@@ -1137,7 +1188,7 @@ test.skipIf(!hasDom)('Retry on a refused plan, the new commit in: sends nothing,
   expect(String(reviews()[0]!.body.body)).toContain('This needs a rethink.');
 });
 
-test.skipIf(!hasDom)('Retry on a refused plan, the new commit not read yet: refused again, no plan of a commit nobody read', async () => {
+test.skipIf(!hasDom)('GitLab: Retry on a refused plan, the new commit not read yet: refused again, no plan of a commit nobody read', async () => {
   const { low, top } = layers({ mine: false, author: 'tomas' });
   await open([low, top], top);
   await act(async () => void reader!.comments!.onSave(LINE));
@@ -1149,4 +1200,344 @@ test.skipIf(!hasDom)('Retry on a refused plan, the new commit not read yet: refu
   await settle();
   expect(reviews().map((r) => r.body.head_sha)).toEqual([A, A]);
   expect(document.querySelector('[role="dialog"]')?.textContent).toContain('new commits since you read it');
+});
+
+// What GitHub does with pending comments on a push: they stay, and post against the commit that was read.
+const note = () => document.querySelector('[data-code-annotation-note]')?.textContent ?? null;
+const TEAMMATE = { mine: false, author: 'tomas' } as const;
+/** A teammate's PR on the small GitHub, a line comment read at A, then a push to B. */
+async function pushedOver(change: () => void, fields: Partial<InboxPull> = TEAMMATE) {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(fields);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffHead = B;
+  change();
+  const after = { ...top, head_sha: B };
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  return { low, top, after };
+}
+const postIt = async () => {
+  await openPost();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+};
+
+test.skipIf(!hasDom)('a push that leaves the code: the comment stays drawn with no label, and posts at the commit read', async () => {
+  const { top } = await pushedOver(() => {});
+  expect(drawn()).toEqual(['l1']);
+  expect(note()).toBeNull();
+  expect(stored(top, 'layer', B)?.comments).toEqual(['l1']);
+  await postIt();
+  expect(forge!.landed).toEqual([{ commit: A, line: 12, body: LINE.text, code: 'b' }]);
+  expect(outdatedAtForge(B, forge!.landed[0]!)).toBe(false);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+});
+
+for (const [what, change] of [
+  ['changes the code at its line', () => (diffCode = 'c')],
+  ['takes its line out of the diff', () => (diffAt = 40)],
+] as const) {
+  test.skipIf(!hasDom)(`a push that ${what}: in the panel, labelled, not drawn; it lands on the code it was written on, and the forge calls it outdated`, async () => {
+    const { low, after, top } = await pushedOver(change);
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 1');
+    expect(drawn()).toEqual([]);
+    expect(note()).toBe('Written on older code');
+    // Still so after a reload: nothing is left to memory.
+    close();
+    await open([low, after], after);
+    expect(drawn()).toEqual([]);
+    expect(note()).toBe('Written on older code');
+    expect(stored(top, 'layer', B)?.comments).toEqual(['l1']);
+    await postIt();
+    expect(forge!.landed).toEqual([{ commit: A, line: 12, body: LINE.text, code: 'b' }]);
+    expect(outdatedAtForge(B, forge!.landed[0]!)).toBe(true);
+    expect(stored(top, 'layer', B)).toBeNull();
+  });
+}
+
+test.skipIf(!hasDom)('comments read on two commits, and words: each comment lands at its own commit, the words at the new head', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', text: 'On the new code.' }));
+  await openPost();
+  await typeInDialog('Close, two things.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge!.landed.map((c) => [c.commit, c.body, c.code])).toEqual([
+    [A, LINE.text, 'b'],
+    [B, 'On the new code.', 'c'],
+  ]);
+  expect(forge!.reviews.find((r) => r.commit === B)!.body).toContain('Close, two things.');
+  expect(forge!.reviews.find((r) => r.commit === A)!.body).not.toContain('Close, two things.');
+});
+
+test.skipIf(!hasDom)('an approval with a comment read on an older commit: the comment goes there as a comment, the approval at the head on screen', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await act(async () => document.querySelector<HTMLElement>('[data-review-posts] [data-decision-caret]')!.click());
+  await settle();
+  const choice = [...document.querySelectorAll<HTMLElement>('[data-decision-popover] button, [data-decision-popover] [role="menuitem"]')].find((b) => /approve/i.test(b.textContent ?? ''));
+  if (!choice) throw new Error(`no approve in: ${document.querySelector('[data-decision-popover]')?.textContent}`);
+  await act(async () => choice.click());
+  await settle();
+  await act(async () => inDialog('Approve').click());
+  await settle();
+  expect(forge!.reviews.map((r) => [r.action, r.commit])).toEqual([
+    ['comment', A],
+    ['approve', B],
+  ]);
+  expect(forge!.landed.map((c) => [c.commit, c.code])).toEqual([[A, 'b']]);
+});
+
+for (const [what, change, inline, inBody] of [
+  ['the same code', () => {}, [{ commit: B, line: 12, body: LINE.text, code: 'b' }], false],
+  ['other code', () => (diffCode = 'c'), [], true],
+] as const) {
+  test.skipIf(!hasDom)(`the commit read has gone (a force-push), ${what}: nothing lost, and nothing on a moved line`, async () => {
+    await pushedOver(change);
+    forge!.commits.delete(A);
+    await postIt();
+    expect(forge!.landed).toEqual(inline as unknown as Landed[]);
+    const review = forge!.reviews.at(-1)!;
+    expect(review.commit).toBe(B);
+    expect(review.body.includes('[Outdated')).toBe(inBody);
+    expect(review.body.includes(LINE.text)).toBe(inBody);
+    expect(document.querySelector('[role="dialog"]')?.textContent ?? null).toBeNull();
+    expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  });
+}
+
+for (const [what, change, inline, inBody] of [
+  ['the same code goes inline at the head', () => {}, [[B, 'b']], false],
+  ['other code goes in the body, labelled', () => (diffCode = 'c'), [], true],
+] as const) {
+  test.skipIf(!hasDom)(`GitLab, a push: ${what}, and nothing at the older commit`, async () => {
+    await pushedOver(change, ON_GITLAB);
+    await postIt();
+    expect(forge!.landed.map((c) => [c.commit, c.code])).toEqual(inline as unknown as [string, string][]);
+    expect(forge!.reviews.map((r) => r.commit)).toEqual([B]);
+    expect(forge!.reviews[0]!.body.includes('[Outdated')).toBe(inBody);
+  });
+}
+
+test.skipIf(!hasDom)('a retarget and a push while away: its lines cannot be vouched for at the commit read, so the body, labelled', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  close();
+  diffHead = B;
+  diffBase = 'trunk';
+  diffCode = 'c';
+  const after = { ...top, head_sha: B, base: 'trunk' };
+  await open([low, after], after);
+  expect(outdatedIn(top, 'layer', B)).toEqual(['l1']);
+  await postIt();
+  expect(forge!.landed).toEqual([]);
+  expect(forge!.reviews.map((r) => r.commit)).toEqual([B]);
+  expect(forge!.reviews[0]!.body).toContain('[Outdated');
+});
+
+test.skipIf(!hasDom)('a retarget that leaves the line alone, same head: it stays on its line and posts inline', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffFiles = 'extra';
+  diffBase = 'trunk';
+  await act(async () => reread((p) => moved(p, top, { base: 'trunk' })));
+  await settle();
+  expect(outdatedIn(top, 'layer', A)).toEqual([]);
+  expect(drawn()).toEqual(['l1']);
+  await postIt();
+  expect(forge!.landed.map((c) => [c.commit, c.line])).toEqual([[A, 12]]);
+});
+
+test.skipIf(!hasDom)('a dialog open over a push: no refusal, and what was read goes at the commit read', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  await typeInDialog('As read.');
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge!.landed.map((c) => [c.commit, c.code])).toEqual([[A, 'b']]);
+  expect(forge!.reviews.map((r) => r.commit)).toEqual([A]);
+  expect(document.querySelector('[role="dialog"]')?.textContent ?? null).toBeNull();
+});
+
+test.skipIf(!hasDom)('Approve in a dialog open over a push goes at the commit read, and the new head still offers it', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await openPost();
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await act(async () => inDialog('Approve').click());
+  await settle();
+  expect(forge!.reviews.map((r) => [r.action, r.commit])).toEqual([['approve', A]]);
+  expect(document.querySelector('[data-pull-review-posted]')?.textContent).toContain('Approved on GitHub');
+  // Approved what was read, not what is on screen now.
+  expect(document.querySelector('[data-review-posted-done]')?.textContent ?? null).toBeNull();
+  expect(document.querySelector('[data-review-posts] [data-decision-primary]')?.textContent).toContain('Approve');
+});
+
+test.skipIf(!hasDom)('a force-push under an open dialog: refused with the words kept; Retry shows the plan of the new head, nothing approved by itself', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  await typeInDialog('Kept words.');
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  forge.commits.delete(A);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge.reviews).toEqual([]);
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('no longer on this pull request');
+  await act(async () => inDialog('Retry Failed').click());
+  await settle();
+  expect(forge.reviews).toEqual([]);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge.reviews.map((r) => [r.action, r.commit])).toEqual([['comment', B]]);
+  expect(forge.reviews[0]!.body).toContain('Kept words.');
+  expect(forge.reviews[0]!.body).toContain('[Outdated');
+  expect(forge.reviews[0]!.body).toContain(LINE.text);
+});
+
+test.skipIf(!hasDom)('the older comment went and the review failed: it is not posted twice, and the words are still there to send', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await openPost();
+  await typeInDialog('The words.');
+  postAnswer = (body) => (body.head_sha === B ? Response.json({ error: 'GitHub refused it.', code: 'pull_review_failed' }, { status: 502 }) : null);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge!.landed.map((c) => c.commit)).toEqual([A]);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  postAnswer = null;
+  await act(async () => inDialog('Retry Failed').click());
+  await settle();
+  expect(forge!.landed.map((c) => c.commit)).toEqual([A]);
+  expect(forge!.reviews.map((r) => r.commit)).toEqual([A, B]);
+  expect(forge!.reviews[1]!.body).toContain('The words.');
+});
+
+test.skipIf(!hasDom)('the older commit fails for another reason: says so, nothing lost, nothing sent at the head, Retry goes again', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await openPost();
+  await typeInDialog('The words.');
+  postAnswer = () => Response.json({ error: 'GitHub is down.', code: 'pull_review_failed' }, { status: 502 });
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('GitHub is down.');
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 1');
+  postAnswer = null;
+  await act(async () => inDialog('Retry Failed').click());
+  await settle();
+  expect(forge!.reviews.map((r) => r.commit)).toEqual([A, B]);
+});
+
+test.skipIf(!hasDom)('after a push the agent reads a comment off this diff as outdated, and one still on it as is', async () => {
+  const { low, after } = await pushedOver(() => (diffCode = 'c'), {});
+  close();
+  await open([low, after], after);
+  await act(async () => document.querySelector<HTMLElement>('[data-review-decision] [data-decision-primary]')!.click());
+  await settle();
+  const reply = posted.find((p) => p.path === `/api/inbox/messages/${LAST}/reply`);
+  expect(String(reply?.body.feedback)).toContain('[Outdated');
+  expect(String(reply?.body.feedback)).toContain(LINE.text);
+});
+
+test.skipIf(!hasDom)('an older Inbox comment labelled stale is not drawn on the diff, and says so in the panel', async () => {
+  const { low, top } = layers();
+  window.localStorage.setItem(`${STORE}${top.key}:layer:2026-11-02T08:00:00Z`, JSON.stringify({ comments: [LINE], viewed: [] }));
+  await open([low, top], top);
+  expect(outdatedIn(top, 'layer', A)).toEqual(['l1']);
+  expect(drawn()).toEqual([]);
+  expect(note()).toBe('Written on older code');
+});
+
+test.skipIf(!hasDom)('written while no head was named, the same patch then named, then a push: it posts at the commit that patch named', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  // The person's own PR: its agent takes the comment while nothing can post.
+  const { low, top } = layers();
+  diffHead = null;
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffHead = A;
+  await act(async () => reread((p) => moved(p, top, { updated_at: '2026-11-03T10:00:00Z' })));
+  await settle();
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await act(async () => document.querySelector<HTMLElement>('[data-review-destination-choice="forge"]')?.click());
+  await settle();
+  await postIt();
+  expect(forge.landed).toEqual([{ commit: A, line: 12, body: LINE.text, code: 'b' }]);
+});
+
+test.skipIf(!hasDom)('comments on two older commits, one still there and one gone: one lands, the other is in the review, and neither twice', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', text: 'Read at B.' }));
+  const C = 'd'.repeat(40);
+  diffHead = C;
+  diffCode = 'e';
+  await act(async () => reread((p) => ({ ...p, head_sha: p.title.endsWith(String(p.number)) && p.base !== 'main' ? C : p.head_sha })));
+  await settle();
+  forge!.commits.delete(B);
+  await postIt();
+  expect(forge!.landed.map((c) => [c.commit, c.body])).toEqual([[A, LINE.text]]);
+  expect(forge!.reviews.map((r) => r.commit)).toEqual([A, C]);
+  expect(forge!.reviews[1]!.body).toContain('[Outdated');
+  expect(forge!.reviews[1]!.body).toContain('Read at B.');
+  expect(forge!.reviews[1]!.body).not.toContain(LINE.text);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+});
+
+test.skipIf(!hasDom)('the whole stack read before a push: its lines are of the stack, not of one commit, so nothing is posted at the older commit', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top, 'stack');
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await postIt();
+  expect(forge.reviews.some((r) => r.commit === A)).toBe(false);
+  expect(forge.landed.some((c) => c.commit === A)).toBe(false);
+  expect(document.body.textContent).not.toContain('read at aaaaaaa');
+});
+
+test.skipIf(!hasDom)('after a reload, other code at its line under the same head and base: labelled, and on no line of that commit', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  close();
+  // A reload forgets the diff it read. Another key is how a test forgets it: the kept words go with it.
+  const again = { ...top, key: `${top.key}-again` };
+  window.localStorage.setItem(`${STORE}${again.key}:layer:${A}`, window.localStorage.getItem(`${STORE}${top.key}:layer:${A}`)!);
+  diffCode = 'c';
+  await open([low, again], again);
+  expect(outdatedIn(again, 'layer', A)).toEqual(['l1']);
+  expect(drawn()).toEqual([]);
+  expect(note()).toBe('Written on older code');
+  await postIt();
+  expect(forge.landed).toEqual([]);
+  expect(forge.reviews.map((r) => r.commit)).toEqual([A]);
+  expect(forge.reviews[0]!.body).toContain('[Outdated');
+  expect(forge.reviews[0]!.body).toContain(LINE.text);
 });

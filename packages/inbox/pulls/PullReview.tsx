@@ -26,7 +26,9 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
+import { anchorStillMatches, captureAnchor } from '@plannotator/review-editor/utils/codeAnnotationAnchor';
+import type { KeptComment } from '../guide/platform-post-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -91,11 +93,11 @@ function stampOf(patch: string): string {
   return `${patch.length}:${(hash >>> 0).toString(36)}`;
 }
 
-function readKept(id: string): { comments: CodeAnnotation[]; viewed: string[] } {
+function readKept(id: string): { comments: KeptComment[]; viewed: string[] } {
   try {
     const raw = JSON.parse(window.localStorage.getItem(STORE + id) ?? 'null') as { comments?: unknown; viewed?: unknown } | null;
     return {
-      comments: Array.isArray(raw?.comments) ? (raw!.comments as CodeAnnotation[]) : [],
+      comments: Array.isArray(raw?.comments) ? (raw!.comments as KeptComment[]) : [],
       viewed: Array.isArray(raw?.viewed) ? (raw!.viewed as unknown[]).filter((v): v is string => typeof v === 'string') : [],
     };
   } catch {
@@ -103,7 +105,7 @@ function readKept(id: string): { comments: CodeAnnotation[]; viewed: string[] } 
   }
 }
 
-function keep(id: string, value: { comments: CodeAnnotation[]; viewed: string[] }): void {
+function keep(id: string, value: { comments: KeptComment[]; viewed: string[] }): void {
   try {
     if (value.comments.length === 0 && value.viewed.length === 0) window.localStorage.removeItem(STORE + id);
     else window.localStorage.setItem(STORE + id, JSON.stringify(value));
@@ -120,35 +122,62 @@ export function PullReview(props: PullReviewProps) {
   return <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />;
 }
 
+/** What the diff on screen is, for the kept comments: what is read of it, and what the list says. */
+interface OnScreen {
+  updatedAt: string | null;
+  listHead: string | null;
+  /** The patch's stamp, its base and its files; null, none yet. */
+  stamp: string | null;
+  base: string | null;
+  files: readonly DiffFile[];
+}
+
+const onLine = (c: CodeAnnotation) => (c.scope ?? 'line') === 'line';
+
+/** A line comment is drawn on this diff only if these are truly its lines: this patch, or the same code at the same place. */
+function isHere(c: KeptComment, screen: Pick<OnScreen, 'stamp' | 'files'>): boolean {
+  if (!onLine(c)) return true;
+  if (c.outdated) return false;
+  return !screen.stamp || c.anchorSnapshot === undefined || c.anchorSnapshot === screen.stamp || anchorStillMatches(c, screen.files);
+}
+
 /**
- * A review's words: this head's entry, with what the layer's other entries hold that must stay in view. One kept for
- * another head commit: its global comments, on no line (its line comments and Viewed may have moved), and until a patch
- * read here names a head, its line comments written on the patch on screen. One that names no commit (written before the
- * head was known, or by an older Inbox, which named the PR's last update): all of it.
+ * A review's words: this head's entry, with what the layer's other entries hold, all of it in view: a push loses no
+ * comment. Viewed ticks stay with their head, but for an entry that names no commit (written before the head was known,
+ * or by an older Inbox, which named the PR's last update).
  *
- * A line comment says which patch it was written on (`stamp`). One written on another is marked outdated, so it never
- * posts on whatever sits at those lines now. One with no stamp is an older Inbox's: outdated once the PR has updated
- * since, or a head is named that the list (`listHead`) does not name; otherwise it takes the stamp of the patch named.
+ * A line comment says what it was read on. One read on another commit, the PR on the same base, keeps its lines there
+ * and posts there. One whose lines no diff can vouch for is marked outdated, so it never posts on whatever sits at those
+ * lines now: read under this very head on another patch (a retarget), read with no head named, or on another base. The
+ * same code at the same place is left alone. One with nothing to say is an older Inbox's: outdated once the PR has updated
+ * since, or a head is named that the list (`listHead`) does not name; otherwise it was read on the patch named.
  *
  * `read` touches nothing, as an entry can be newer than what this window knows. `absorb` takes what is now in view out of
  * the other entries (the person wrote, so this entry speaks for them). `move`, once a patch read here names this head,
- * also removes the other heads' line comments and Viewed.
+ * also removes the other heads' Viewed.
  */
-function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, listHead: string | null, stamp: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
+function gather(layerKey: string, scope: string, keptId: string, screen: OnScreen, mode: 'read' | 'absorb' | 'move'): { comments: KeptComment[]; viewed: string[] } {
   const now = readKept(keptId);
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
     const head = keptId.slice(keptId.lastIndexOf(':') + 1);
     const named = HEAD_SHA.test(head);
-    const onLine = (c: CodeAnnotation) => (c.scope ?? 'line') === 'line';
-    const placed = (c: CodeAnnotation, stale: boolean): CodeAnnotation => {
-      if (!onLine(c) || c.outdated || c.anchorSnapshot === stamp) return c;
-      if (c.anchorSnapshot !== undefined ? stamp !== null || stale : stale) return { ...c, outdated: true };
-      return named && stamp && c.anchorSnapshot === undefined ? { ...c, anchorSnapshot: stamp } : c;
+    const { stamp, base, files, listHead, updatedAt } = screen;
+    const readHere = named && base ? { readHead: head, readBase: base } : {};
+    const placed = (c: KeptComment, stale: boolean): KeptComment => {
+      if (!onLine(c) || c.outdated) return c;
+      if (c.anchorSnapshot === undefined) {
+        if (stale) return { ...c, outdated: true };
+        return named && stamp ? { ...c, anchorSnapshot: stamp, ...readHere, ...captureAnchor(c, files) } : c;
+      }
+      if (!stamp) return c;
+      if (c.anchorSnapshot === stamp) return c.readHead || !named ? c : { ...c, ...readHere };
+      if (!named || anchorStillMatches(c, files)) return c;
+      return c.readHead === head || c.readBase !== base ? { ...c, outdated: true } : c;
     };
     const mine = now.comments.map((c) => placed(c, false));
     let changed = mine.some((c, i) => c !== now.comments[i]);
-    const carried: CodeAnnotation[] = [];
+    const carried: KeptComment[] = [];
     const ticks: string[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
@@ -156,13 +185,12 @@ function gather(layerKey: string, scope: string, keptId: string, updatedAt: stri
       const suffix = name.slice(prefix.length);
       const ofAHead = HEAD_SHA.test(suffix);
       const was = readKept(name.slice(STORE.length));
-      const stale = suffix !== updatedAt || (named && listHead !== head);
-      const inView = (c: CodeAnnotation) => c.scope === 'general' || (mode !== 'move' && !!stamp && onLine(c) && c.anchorSnapshot === stamp);
-      carried.push(...(ofAHead ? was.comments.filter(inView) : was.comments.map((c) => placed(c, stale))));
+      const stale = !ofAHead && (suffix !== updatedAt || (named && listHead !== head));
+      carried.push(...was.comments.map((c) => placed(c, stale)));
       if (!ofAHead) ticks.push(...was.viewed);
       if (mode === 'read') continue;
       if (!ofAHead || mode === 'move') window.localStorage.removeItem(name);
-      else keep(name.slice(STORE.length), { comments: was.comments.filter((c) => !inView(c)), viewed: was.viewed });
+      else keep(name.slice(STORE.length), { comments: [], viewed: was.viewed });
     }
     changed ||= carried.length > 0 || ticks.length > 0;
     const ids = new Set(mine.map((c) => c.id));
@@ -179,6 +207,20 @@ function gather(layerKey: string, scope: string, keptId: string, updatedAt: stri
     // Storage off.
     return now;
   }
+}
+
+/**
+ * The comments as a post takes them. On GitHub one read on an older commit goes at that commit, in that commit's lines,
+ * and GitHub marks it outdated if the code moved. GitLab's docs do not say a thread can be placed on an older version, so
+ * there, and on another base, it goes in the body with its label unless its lines still read the same here.
+ */
+function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp' | 'files' | 'base'>, head: string | null, platform: string | undefined, scope: string): KeptComment[] {
+  return comments.map((c) => {
+    if (!onLine(c) || c.outdated) return c;
+    const here = isHere(c, screen);
+    if (scope === 'layer' && platform === 'github' && c.readHead && head && c.readHead !== head && c.readBase === screen.base) return { ...c, postAt: c.readHead, postHere: here };
+    return here ? c : { ...c, outdated: true };
+  });
 }
 
 function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onBack, onSent }: PullReviewProps) {
@@ -268,8 +310,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const sure = read.current;
   const patch = diff?.patch;
   const stamp = useMemo(() => (patch === undefined ? null : stampOf(patch)), [patch]);
-  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, layer?.head_sha ?? null, stamp, mode);
-  const [comments, setComments] = useState<CodeAnnotation[]>(() => words('read').comments);
+  const files = useMemo(() => (patch === undefined ? [] : parseDiffToFiles(patch)), [patch]);
+  const screen: OnScreen = { updatedAt: layer?.updated_at ?? null, listHead: layer?.head_sha ?? null, stamp, base: diff?.base ?? null, files };
+  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, screen, mode);
+  const [comments, setComments] = useState<KeptComment[]>(() => words('read').comments);
   const [viewed, setViewed] = useState<string[]>(() => words('read').viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
@@ -281,11 +325,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     // The layer and scope are in `keptId`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptId, sure, stamp]);
-  const store = (value: { comments: CodeAnnotation[]; viewed: string[] }) => {
+  const store = (value: { comments: KeptComment[]; viewed: string[] }) => {
     if (!sure) words('absorb');
     keep(keptId, value);
   };
-  const write = (next: { comments?: CodeAnnotation[]; viewed?: string[] }) => {
+  const write = (next: { comments?: KeptComment[]; viewed?: string[] }) => {
     const value = { comments: next.comments ?? comments, viewed: next.viewed ?? viewed };
     if (next.comments) setComments(next.comments);
     if (next.viewed) setViewed(next.viewed);
@@ -304,15 +348,26 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
-  // A new line comment is on the patch on screen; an edited one stays on the patch it was written on.
+  // A new line comment is on the diff on screen: it says so, with the code at its lines. An edited one stays what it was.
   const save = (annotation: CodeAnnotation) => {
     const was = comments.find((c) => c.id === annotation.id);
-    const onPatch = (annotation.scope ?? 'line') !== 'line' ? annotation : { ...annotation, anchorSnapshot: was ? was.anchorSnapshot : (stamp ?? undefined) };
-    write({ comments: [...comments.filter((c) => c.id !== annotation.id), onPatch] });
+    const read: Partial<KeptComment> = was
+      ? { anchorSnapshot: was.anchorSnapshot, anchorText: was.anchorText, anchorContext: was.anchorContext, readHead: was.readHead, readBase: was.readBase, outdated: was.outdated }
+      : onLine(annotation) && stamp
+        ? { anchorSnapshot: stamp, ...captureAnchor(annotation, files), ...(diff?.head_sha ? { readHead: diff.head_sha, readBase: diff.base } : {}) }
+        : {};
+    write({ comments: [...comments.filter((c) => c.id !== annotation.id), { ...annotation, ...read }] });
   };
   const remove = (id: string) => write({ comments: comments.filter((c) => c.id !== id) });
+  const here = useMemo(() => comments.filter((c) => isHere(c, { stamp, files })), [comments, stamp, files]);
   const showComment = (id: string) => {
     setSelectedId(id);
+    const comment = comments.find((c) => c.id === id);
+    // Not drawn on this diff: its file, if it is still in it.
+    if (comment && !here.includes(comment)) {
+      if (byPath.has(comment.filePath)) move(comment.filePath);
+      return;
+    }
     setScrollTarget((current) => ({ id, token: (current?.token ?? 0) + 1 }));
   };
   // Both measured once the review is drawn: while the list is read, a loading pane stands in its place.
@@ -334,9 +389,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   // The unsaved global comment's words are named per layer and scope, not per push: they outlive a push, as the
   // global comments do.
-  const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
+  const readerComments = canDecide || canPost ? { annotations: here, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
-  const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
   const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
   const byPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
   const snapshot = useMemo(
@@ -372,7 +426,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     async (id: DecisionActionId, note?: string) => {
       if (sending || !layer || !link?.last || !stack) return;
       const plan = verdictOf(id, comments.length > 0);
-      const carried = plan.withComments && !plan.discard ? comments : [];
+      // What the agent reads names lines of the diff on screen: one not on it says so.
+      const carried = plan.withComments && !plan.discard ? comments.map((c) => (onLine(c) && !c.outdated && !isHere(c, { stamp, files }) ? { ...c, outdated: true } : c)) : [];
       const parts = pullVerdictReply(plan.verdict, { pull: layer, scope, base: stack.base }, carried.length, carried.length > 0 ? guideCommentSections(carried) : '', note);
       const input = { words: parts.words, questions: [], ...(parts.feedback ? { feedback: parts.feedback } : {}) };
       setSending(true);
@@ -392,7 +447,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         if (mounted.current) setSending(false);
       }
     },
-    [sending, layer, link, stack, comments, scope, keptId, sure, stamp, onSent],
+    [sending, layer, link, stack, comments, scope, keptId, sure, stamp, files, onSent],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),
@@ -501,12 +556,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                   }
                 : null
             }
-            comments={comments}
+            comments={forPost(comments, screen, postHead, layer.platform, scope)}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
             headSha={postHead}
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}
+            onWent={(ids) => {
+              const left = comments.filter((c) => !ids.includes(c.id));
+              store({ comments: left, viewed });
+              setComments(left);
+            }}
             onPosted={(result) => {
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
               const went = new Set(result.posted);
@@ -672,6 +732,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             annotations={NO_ANNOTATIONS}
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
+            codeAnnotationNote={(c) => (here.includes(c) ? null : 'Written on older code')}
             onSelect={showComment}
             onDelete={remove}
             selectedId={selectedId}

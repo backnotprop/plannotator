@@ -3686,13 +3686,20 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);
         if (!inboxPullIsOpen(pull)) return json({ error: "That pull request is no longer open.", code: "pull_closed" }, 409);
-        // Pinned to the commit the person read: a push since then is read again first, never reviewed blind.
-        // Pinned to a commit the Inbox read for this PR: the list's head, or the head of the layer patch the person
-        // read (the list can be a minute behind the forge). Anything else is a commit they never saw.
+        // Pinned to the commit the person read: the list's head, or the head of the patch they read (the list can be a
+        // minute behind the forge). On GitHub also an older commit of this PR, as GitHub takes a review there and marks
+        // what moved outdated; one no longer on the PR (a force-push) is refused for the page to put its words in the
+        // review's body. GitLab's docs do not say it takes one, so there a commit the Inbox no longer names is refused.
         const heads = [pull.head_sha, pulls.readHead(key)].filter((sha): sha is string => !!sha);
-        if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
-        const headSha = typeof body.head_sha === "string" && heads.includes(body.head_sha) ? body.head_sha : null;
-        if (!headSha) return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        const named = typeof body.head_sha === "string" && /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i.test(body.head_sha) ? body.head_sha : null;
+        const known = !!named && heads.includes(named);
+        if (!known && (!named || pull.platform !== "github")) {
+          if (heads.length === 0) return json({ error: "The forge did not say which commit this pull request is at. Refresh the list and try again.", code: "pull_head_unknown" }, 409);
+          return json({ error: "This pull request has new commits since you read it.", code: "pull_moved" }, 409);
+        }
+        const commitGone = () => json({ error: "The commit you read is no longer on this pull request.", code: "pull_commit_gone" }, 409);
+        if (!known && (await pulls.hasCommit(key, named!)) === false) return commitGone();
+        const headSha = named!;
         const ref: PRRef | null =
           pull.platform === "github"
             ? (() => {
@@ -3715,6 +3722,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           return json({ serverSession, ok: true, prUrl: pull.url, submission });
         } catch (cause) {
           const message = cause instanceof Error ? cause.message : "The review was not posted.";
+          // At an older commit, a refusal of its commit or lines (GitHub's 422): nothing went, and the words have a way.
+          if (!known && /\b422\b|unprocessable|validation failed|commit_id|not part of the pull request/i.test(message)) return commitGone();
           return json({ error: message, code: "pull_review_failed" }, 502);
         }
       }
