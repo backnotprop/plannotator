@@ -217,43 +217,46 @@ describe.skipIf(checkoutIsScratch)("resolveGlobalSkillRoots — test sandbox", (
     });
   }
 
-  test("sandbox set: a home that is not scratch is not read at all", () => {
-    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-    seedEveryDefaultRoot(outside);
-    useDefaultRootsOf(outside);
+  // Any non-empty value is on. The preload sets a path (tests/setup/feedback-archive-off.ts), specs mostly "1".
+  for (const value of ["1", "0", join(tmpdir(), "plannotator-test-marker")]) {
+    test(`sandbox ${value}: a home that is not scratch is not read at all`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(outside);
+      useDefaultRootsOf(outside);
 
-    expect(resolveGlobalSkillRoots()).toEqual([]);
-    expect(discoverSkills()).toEqual([]);
-    expect(listReferenceSkills()).toEqual([]);
-  });
+      expect(resolveGlobalSkillRoots()).toEqual([]);
+      expect(discoverSkills()).toEqual([]);
+      expect(listReferenceSkills()).toEqual([]);
+    });
 
-  test("sandbox set: a scratch HOME's seeded skills are all found", () => {
-    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-    seedEveryDefaultRoot(home);
-    useDefaultRootsOf(home);
+    test(`sandbox ${value}: a scratch HOME's seeded skills are all found`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(home);
+      useDefaultRootsOf(home);
 
-    expect(resolveGlobalSkillRoots()).toEqual(everyDefaultRoot(home));
-    expect(discoverSkills().map((s) => s.name)).toEqual(["in-claude", "in-codex", "in-agents", "in-config"]);
-  });
+      expect(resolveGlobalSkillRoots()).toEqual(everyDefaultRoot(home));
+      expect(discoverSkills().map((s) => s.name)).toEqual(["in-claude", "in-codex", "in-agents", "in-config"]);
+    });
 
-  test("sandbox set: judged folder by folder, as for a runner's HOME with scratch overrides", () => {
-    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-    seedEveryDefaultRoot(outside);
-    writeSkill(join(home, ".claude", "skills"), "scratch-skill");
-    setEnv("HOME", outside);
-    // CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME stay in the scratch home (beforeEach).
+    test(`sandbox ${value}: judged folder by folder, as for a runner's HOME with scratch overrides`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      seedEveryDefaultRoot(outside);
+      writeSkill(join(home, ".claude", "skills"), "scratch-skill");
+      setEnv("HOME", outside);
+      // CLAUDE_CONFIG_DIR, CODEX_HOME and XDG_CONFIG_HOME stay in the scratch home (beforeEach).
 
-    expect(discoverSkills().map((s) => s.name)).toEqual(["scratch-skill"]);
-  });
+      expect(discoverSkills().map((s) => s.name)).toEqual(["scratch-skill"]);
+    });
 
-  test("sandbox set: a scratch link to a folder that is not scratch is not read", () => {
-    setEnv("PLANNOTATOR_TEST_SANDBOX", "1");
-    writeSkill(join(outside, ".claude", "skills"), "through-the-link");
-    symlinkSync(join(outside, ".claude"), join(home, "claude-link"));
-    setEnv("CLAUDE_CONFIG_DIR", join(home, "claude-link"));
+    test(`sandbox ${value}: a scratch link to a folder that is not scratch is not read`, () => {
+      setEnv("PLANNOTATOR_TEST_SANDBOX", value);
+      writeSkill(join(outside, ".claude", "skills"), "through-the-link");
+      symlinkSync(join(outside, ".claude"), join(home, "claude-link"));
+      setEnv("CLAUDE_CONFIG_DIR", join(home, "claude-link"));
 
-    expect(discoverSkills()).toEqual([]);
-  });
+      expect(discoverSkills()).toEqual([]);
+    });
+  }
 });
 
 describe("discoverSkills — symlinked skill directories", () => {
