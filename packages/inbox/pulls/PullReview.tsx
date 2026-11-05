@@ -43,6 +43,7 @@ import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
@@ -448,15 +449,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
-  // A phone's sheet hides the page under it, the button that opened it too: focus goes to the sheet's close, and back.
-  useEffect(() => {
-    if (phone && sheet) sheetCloseRef.current?.focus({ preventScroll: true });
-  }, [phone, sheet]);
   const closeSheet = () => {
-    // At once: the button can take focus only once the page shows again.
+    // At once: on a phone the button can take focus only once the page shows again.
     flushSync(() => setSheet(false));
-    if (phone) sheetButtonRef.current?.focus({ preventScroll: true });
+    if (!phone) return;
+    sheetButtonRef.current?.focus({ preventScroll: true });
+    holdBarAfterClose(sheetButtonRef.current);
   };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
   const onSheetKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && phone && sheet && !event.defaultPrevented) {
       event.preventDefault();

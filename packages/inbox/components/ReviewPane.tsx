@@ -59,6 +59,7 @@ import { agentName } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from './phoneCommentsSheet';
 import { clearReviewNotes, readReviewNotes, saveReviewNotes, VerdictKeys, verdictOf, verdictReply } from '../reviewVerdict';
 import { useGuideState } from './GuidePane';
 import { PostEnding, reviewEnding, useReviewDestination } from '../pulls/PostEnding';
@@ -167,10 +168,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
-  // A phone's sheet hides the page under it, the button that opened it too: focus goes to the sheet's close.
-  useEffect(() => {
-    if (phone && sheet) sheetCloseRef.current?.focus({ preventScroll: true });
-  }, [phone, sheet]);
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
   const readerComments = useMemo(
     () =>
@@ -532,7 +529,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     // At once: on a phone the button can take focus only once the page shows again.
     flushSync(() => setSheet(false));
     sheetButtonRef.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButtonRef.current);
   };
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeSheet);
   const onSheetKey = (event: React.KeyboardEvent) => {
     if (event.key === 'Escape' && folded && sheet && !event.defaultPrevented) {
       event.preventDefault();
