@@ -7913,6 +7913,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Every width but a phone's, from the review app: a 37 px bar over the rail and the diff's column; the rail runs to the
    window's foot; the column opens on a 33 px --muted row (its tab row) holding the layers as tabs and the controls; the
    first file is 16 px under it. The foot is the Inbox's own: the bar's recipe and height. */
+/* This page covers the sidebar, which stays open underneath: its edge would catch the rail's right side and drag unseen. */
+.ib-shell:has(.ib-prr-wide) > .ib-edge-pos { display: none; }
 .ib-viewer.ib-prreview.ib-prr-wide { grid-template-rows: 37px minmax(0, 1fr); }
 .ib-prr-wide .ib-gbody > .w-full { padding-top: 8px; }
 .ib-prr-wide :is(.ib-vhead, .ib-prr-foot, .ib-rrail) { border-color: color-mix(in oklch, var(--border) 50%, transparent); }
