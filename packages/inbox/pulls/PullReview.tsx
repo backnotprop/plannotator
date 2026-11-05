@@ -336,7 +336,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
 
   if (!model || !stack || !layer) {
     return (
-      <section className="ib-viewer ib-review ib-prreview" aria-label="Review" data-pull-review="">
+      <section className="ib-viewer ib-wlayer ib-review ib-prreview" aria-label="Review" data-pull-review="">
         <div className="ib-vhead">
           <button type="button" className="ib-back" onClick={onBack}>
             <Icon name="back" size={15} />
@@ -366,7 +366,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}

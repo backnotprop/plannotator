@@ -466,7 +466,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-wlayer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}

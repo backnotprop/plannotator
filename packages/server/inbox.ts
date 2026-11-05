@@ -1222,6 +1222,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // Additive (linked machines, inbox-machines.ts): this Inbox's stable id and the link protocol it speaks.
     inbox_id: machines.selfId,
     machine_links: 1,
+    // Additive: the page honours --pn-window-controls-width and -height on :root (inbox.css, for a desktop host).
+    window_controls: 1,
   });
 
   /** Which list rows each window already holds, so a list read sends only the changed ones (#2593). */

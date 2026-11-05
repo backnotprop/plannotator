@@ -429,7 +429,7 @@ button.ib-mut { border-radius: 6px; }
 /* shell */
 .ib-shell { display: flex; height: 100%; width: 100%; overflow: hidden; }
 .ib-shell > * { min-height: 0; overflow: hidden; }
-.ib-side { --muted-foreground: var(--ib-side-mfg); --foreground: var(--ib-side-fg); color: var(--foreground); background: var(--ib-ground); border-right: 1px solid var(--ib-pane-line); display: flex; flex-direction: column; padding: 14px 10px 12px; }
+.ib-side { --muted-foreground: var(--ib-side-mfg); --foreground: var(--ib-side-fg); color: var(--foreground); background: var(--ib-ground); border-right: 1px solid var(--ib-pane-line); display: flex; flex-direction: column; padding: max(14px, var(--pn-window-controls-height, 0px)) 10px 12px; }
 /* Floating (the peek, a phone's sheet), the sidebar keeps room on its right; docked, the panes' gutter is that room. */
 .ib-brand { display: flex; align-items: center; gap: 9px; padding: 0 6px 10px; }
 /* Workspaces' TaterSpriteSidebar: 24 frames of 77x88 at 2x shown 44 px high
@@ -709,7 +709,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-wn { flex: 1; min-width: 0; overflow-y: auto; padding: 0 0 48px; outline: none; }
 /* Its own stacking context: the notes' Viewer lifts a layer (z-index 50) that must stay under the sticky bar. */
 .ib-wn-in { max-width: 760px; margin: 0 auto; padding: 0 40px; box-sizing: content-box; position: relative; z-index: 0; }
-.ib-wn-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 16px 0 12px; background: color-mix(in oklch, var(--card) 92%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
+.ib-wn-bar { position: sticky; top: 0; z-index: 5; display: flex; align-items: center; gap: 6px; height: 52px; padding: 0 16px 0 max(12px, var(--ib-controls-left, 0px)); background: color-mix(in oklch, var(--card) 92%, transparent); -webkit-backdrop-filter: blur(10px); backdrop-filter: blur(10px); border-bottom: 1px solid var(--border); }
 .ib-wn-bar .ib-pback { max-width: none; flex: none; }
 .ib-wn-div { width: 1px; height: 18px; background: var(--border); margin: 0 6px; flex: none; }
 .ib-wn-title { font-size: var(--ib-fs-14, 14px); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
@@ -760,7 +760,7 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-listedge .ib-handle-hit { left: calc(var(--ib-gutter) / -2); right: calc(-12px + var(--ib-gutter) / 2); }
 /* Its focus track stays centred on the line, but only draws: it never takes the pointer from the scrollbar. */
 .ib-listedge .ib-handle-track { pointer-events: none; }
-.ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; }
+.ib-lhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px 0 max(22px, var(--ib-controls-left, 0px)); flex: none; }
 /* One line each: a long project name and its folder are cut with "…" (the full text is their hover text), the folder first; neither wraps out of the 60 px header. */
 .ib-lhead h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0; letter-spacing: -0.01em; min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* Click Inbox to refresh: the title is a button that re-reads the list it names. ↻ beside it on hover
@@ -1151,7 +1151,7 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-pwait-held { width: 100%; max-width: 640px; margin-top: 20px; text-align: left; }
 /* A full-screen file covers the window: no card of its own. */
 .ib-main > .ib-view.ib-full { border-radius: 0; box-shadow: none; }
-.ib-phead { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 14px; border-bottom: 1px solid var(--ib-hair); }
+.ib-phead { height: 46px; flex: none; display: flex; align-items: center; gap: 2px; padding: 0 14px 0 max(14px, var(--ib-controls-left, 0px)); border-bottom: 1px solid var(--ib-hair); }
 .ib-phead .ib-sp { flex: 1; }
 .ib-pbody { flex: 1; min-height: 0; overflow-y: auto; padding: 18px 30px 18px; container: ib-thread / inline-size; }
 .ib-subject { font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; margin: 0 0 14px; line-height: 1.3; }
@@ -1817,7 +1817,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 
 /* A page beside the sidebar with a heading (Drafts) */
 .ib-dpage { padding: 28px 44px; flex: 1; min-width: 0; overflow-y: auto; }
-.ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
+.ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; padding-left: max(0px, var(--ib-controls-left, 0px) - 44px); }
 .ib-dh h1 { font-size: var(--ib-fs-22, 22px); font-weight: 650; margin: 0; letter-spacing: -0.01em; }
 .ib-drafts .ib-dh { margin-bottom: 18px; }
 
@@ -2431,7 +2431,7 @@ pre code.pn-code[data-keep-layout] {
   .ib-sb-scrim { backdrop-filter: none; background-color: rgb(0 0 0 / 0.65); }
 }
 /* The peek: a 20 px hover strip on the left edge, then the panel slides in (300 ms, enter easing). */
-.ib-peek-strip { position: fixed; top: 0; bottom: 0; left: 0; z-index: 10; width: 20px; }
+.ib-peek-strip { position: fixed; top: var(--pn-window-controls-height, 0px); bottom: 0; left: 0; z-index: 10; width: 20px; }
 .ib-peek { position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; width: var(--sidebar-width); box-shadow: var(--ib-shadow-sheet); transform: translateX(-100%); visibility: hidden; will-change: transform; transition: transform 300ms var(--ib-ease-enter), visibility 0s linear 300ms; }
 .ib-peek[data-visible] { transform: translateX(0); visibility: visible; transition: transform 300ms var(--ib-ease-enter); }
 .ib-peek-in { display: flex; flex-direction: column; height: 100%; overflow: hidden; }
@@ -3054,7 +3054,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   }
 
   /* the list: a compact header, sticky section bands, mail rows */
-  .ib-lhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 4px; border-bottom: 1px solid var(--ib-hair); }
+  .ib-lhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 max(4px, var(--ib-controls-left, 0px)); gap: 4px; border-bottom: 1px solid var(--ib-hair); }
   .ib-lhead h1 { font-size: var(--ib-fs-22, 22px); min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   .pn-inbox .ib-sb-trigger { width: 44px; height: 44px; }
   .ib-sb-trigger-dot { top: 11px; right: 11px; }
@@ -3099,7 +3099,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-mrow[data-lit] { animation: ib-lit 3000ms ease-in-out both; }
 
   /* a thread: Back on the left, the actions on the right, the reply at the foot above the keyboard */
-  .ib-phead { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 0; gap: 0; }
+  .ib-phead { height: calc(48px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 4px 0 max(0px, var(--ib-controls-left, 0px)); gap: 0; }
   .pn-inbox .ib-pback { display: inline-flex; align-items: center; gap: 0; flex: 0 1 auto; min-width: 44px; max-width: 46%; height: 44px; padding: 0 10px 0 4px; border-radius: 8px; color: var(--primary); font-size: var(--ib-fs-16-in, 16px); font-weight: 500; }
   .pn-inbox .ib-pback:active { background: color-mix(in oklch, var(--primary) 10%, transparent); }
   .pn-inbox .ib-pback svg.ib-ic { width: 22px; height: 22px; stroke-width: 2; }
@@ -3267,7 +3267,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
 
   /* Drafts */
   .ib-dpage { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
-  .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 6px; margin-bottom: 6px; }
+  .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 max(4px, var(--ib-controls-left, 0px)); gap: 6px; margin-bottom: 6px; }
   .ib-dh h1 { font-size: var(--ib-fs-22, 22px); flex: none; }
   .ib-drafts .ib-dh { margin-bottom: 6px; }
 
@@ -3326,7 +3326,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   /* What's new on a phone: the bar is one row of 44 px targets (no title, the GitHub mark alone). */
   .ib-wn { padding: 0 0 calc(40px + env(safe-area-inset-bottom)); }
   .ib-wn-in { padding: 0 16px; }
-  .ib-wn-bar { height: calc(60px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 2px; gap: 0; }
+  .ib-wn-bar { height: calc(60px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 max(2px, var(--ib-controls-left, 0px)); gap: 0; }
   .ib-wn-div, .ib-wn-title { display: none; }
   .pn-inbox .ib-wn-gh { width: 44px; height: 44px; padding: 0; justify-content: center; }
   .ib-wn-gh .ib-ic { width: 20px; height: 20px; }
@@ -5543,7 +5543,7 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 /* ───────────── Decision mode (approval "inbox-decision-mode", Queue; experimental) ─────────────
    One decision at a time in a large native <dialog>, the next peeking behind it, a strip of one chip
    per agent session. Every colour comes from the theme tokens; under reduced motion nothing moves. */
-dialog.ib-dm { position: fixed; inset: 0; margin: auto; width: min(1240px, calc(100vw - 48px)); height: calc(100vh - 48px); max-width: none; max-height: none; padding: 0; border: 0; border-radius: var(--ib-lr-xl, 12px); background: var(--ib-ground, var(--background)); color: var(--foreground); box-shadow: var(--ib-float-shadow); display: none; flex-direction: column; overflow: hidden; }
+dialog.ib-dm { position: fixed; inset: var(--pn-window-controls-height, 0px) 0 0; margin: auto; width: min(1240px, calc(100vw - 48px)); height: calc(100vh - 48px - var(--pn-window-controls-height, 0px)); max-width: none; max-height: none; padding: 0; border: 0; border-radius: var(--ib-lr-xl, 12px); background: var(--ib-ground, var(--background)); color: var(--foreground); box-shadow: var(--ib-float-shadow); display: none; flex-direction: column; overflow: hidden; }
 dialog.ib-dm[open] { display: flex; }
 dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-dm-head { display: flex; align-items: baseline; gap: 12px; padding: 18px 22px 6px; flex: none; }
@@ -5753,7 +5753,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .pn-inbox[data-tour] { --ib-tour-bar-h: 45px; display: grid; grid-template-rows: auto minmax(0, 1fr); height: 100%; }
 .pn-inbox[data-tour] > .ib-shell { min-height: 0; }
 .pn-inbox[data-tour] .ib-sb-panel { top: var(--ib-tour-bar-h); }
-.ib-tour-bar { display: flex; align-items: center; gap: 12px; height: var(--ib-tour-bar-h, 45px); box-sizing: border-box; position: relative; z-index: 20; padding: 6px 14px; background: color-mix(in oklch, var(--primary) 11%, var(--background)); border-bottom: 1px solid color-mix(in oklch, var(--primary) 30%, var(--border)); font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
+.ib-tour-bar { display: flex; align-items: center; gap: 12px; height: var(--ib-tour-bar-h, 45px); box-sizing: border-box; position: relative; z-index: 20; padding: 6px 14px 6px max(14px, var(--pn-window-controls-width, 0px)); background: color-mix(in oklch, var(--primary) 11%, var(--background)); border-bottom: 1px solid color-mix(in oklch, var(--primary) 30%, var(--border)); font-size: var(--ib-fs-13, 13px); color: var(--foreground); }
 .ib-tour-tag { display: inline-flex; align-items: center; gap: 6px; height: 22px; padding: 0 8px; border-radius: 999px; background: var(--primary); color: var(--primary-foreground); font-weight: 650; font-size: var(--ib-fs-12, 12px); flex: none; }
 .pn-inbox .ib-tour-tag svg.ib-ic { stroke-width: 2; }
 .ib-tour-what { min-width: 0; flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -5926,7 +5926,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 /* A phone (PHONE_QUERY in phone.ts): one screen at a time, 44 px targets, sheets that never cover their target. */
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox[data-tour] { --ib-tour-bar-h: 52px; }
-  .ib-tour-bar { padding: 4px 10px; gap: 8px; }
+  .ib-tour-bar { padding: 4px 10px 4px max(10px, var(--pn-window-controls-width, 0px)); gap: 8px; }
   .ib-tour-long { display: none; }
   .pn-inbox .ib-tour-exit, .pn-inbox .ib-tour-chip { height: 44px; }
   .pn-inbox .ib-tour-chip { padding: 0 10px; }
@@ -6013,7 +6013,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
   flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden;
 }
 :root:not(.light) .ib-bpage { --ib-bcard-edge: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); --ib-onyou-fg: color-mix(in oklab, var(--warning, oklch(0.75 0.15 85)) 80%, var(--foreground)); }
-.ib-bhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px; flex: none; min-width: 0; }
+.ib-bhead { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 22px 0 max(22px, var(--ib-controls-left, 0px)); flex: none; min-width: 0; }
 .ib-bhead h1 { font-size: var(--ib-fs-20, 20px); font-weight: 650; margin: 0; letter-spacing: -0.01em; white-space: nowrap; }
 .ib-bsp { flex: 1; }
 /* A narrow page: tighter gaps, so the links stay whole beside the Tidy ⋮ (the Project chip has its own row). */
@@ -6175,7 +6175,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-bgroup .ib-bcard { padding: 12px 16px; }
 .ib-bgroup .ib-bcard:has(.ib-bc-main:focus-visible) { border-radius: 10px; }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
-  .ib-bhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
+  .ib-bhead { height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 max(4px, var(--ib-controls-left, 0px)); gap: 8px; border-bottom: 1px solid var(--ib-hair); }
   .ib-bhead h1 { font-size: var(--ib-fs-22, 22px); }
   /* A bare "+" (the mock), its hit area still 44 px. */
   .pn-inbox .ib-bnew { width: 44px; height: 44px; padding: 0; justify-content: center; border-color: transparent; background: transparent; box-shadow: none; color: var(--foreground); }
@@ -8149,3 +8149,37 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
 .pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
 .ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }
+
+/* ─────────────── Window controls (a desktop host; inbox-window.md "Window controls") ───────────────
+   A host that draws the window's buttons over this page sets --pn-window-controls-width and -height on :root (health
+   says `window_controls: 1`). Unset, every value below is 0 and the drag rules do not apply: nothing moves. */
+/* The column against the window's left edge clears the width: the first one, while the sidebar is not docked open. */
+.ib-main { --ib-controls-left: var(--pn-window-controls-width, 0px); }
+.ib-sb[data-state="expanded"] ~ .ib-main, .ib-main > * + * { --ib-controls-left: 0px; }
+/* A column hidden under a stacked window or full screen hands the edge to the next one. */
+.pn-inbox[data-stack~="thread"][data-view="thread"] .ib-listcol + *, .pn-inbox[data-thread-full] .ib-listcol + * { --ib-controls-left: inherit; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox[data-view="thread"] .ib-listcol + * { --ib-controls-left: inherit; }
+}
+/* A full-window layer (its root has `ib-wlayer`) clears the height, with a border so that its sticky and absolute
+   children start below it too. Settings is a page in the column with the same room. */
+.ib-wlayer { --ib-controls-left: 0px; border-top: var(--pn-window-controls-height, 0px) solid transparent; }
+.ib-spage.ib-sframe { border-top: var(--pn-window-controls-height, 0px) solid transparent; }
+/* Dragging the window: only in a host that set the variable (a style query, so it also sees a sheet the host injects
+   after load). The band over the whole window and blank header space drag; every control and float does not. */
+@container style(--pn-window-controls-height) {
+  .pn-inbox::before { content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: -1; height: var(--pn-window-controls-height); -webkit-app-region: drag; }
+  /* Over the page, a layer's band drags and its body does not, whatever header lies under it. */
+  .ib-wlayer { -webkit-app-region: drag; }
+  .ib-wlayer > * { -webkit-app-region: no-drag; }
+  .ib-brand, :is(.ib-lhead, .ib-phead, .ib-bhead, .ib-vhead, .ib-dh, .ib-wn-bar, .ib-tour-bar, .shp-head) { -webkit-app-region: drag; }
+  /* Everything inside a header, but its spacers: a control added to one later still clicks. */
+  :is(.ib-lhead, .ib-phead, .ib-bhead, .ib-vhead, .ib-dh, .ib-wn-bar, .ib-tour-bar, .shp-head) *:not(.ib-sp, .ib-bsp),
+  :is(a, button, input, select, textarea, label, summary, iframe, [contenteditable], [tabindex]:not([tabindex="-1"])),
+  :is([role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [role="separator"], [role="textbox"], [role="combobox"]),
+  :is(dialog, [popover], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-chat-window]),
+  :is(.ib-peek, .ib-sb-sheet, .ib-sb-scrim, .ib-pm-scrim, .ib-oq-scrim, .ib-contents-scrim, .ib-contents-sheet, .ib-tour-coach, .ib-toast) { -webkit-app-region: no-drag; }
+  /* A layer's header reaches up behind the buttons, so the band reads as the header and not as a strip above it. */
+  .ib-wlayer > .ib-vhead { position: relative; }
+  .ib-wlayer > .ib-vhead::before { content: ''; position: absolute; left: 0; right: 0; bottom: 100%; height: var(--pn-window-controls-height); background: inherit; }
+}
