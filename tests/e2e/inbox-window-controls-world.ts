@@ -23,6 +23,8 @@ export interface ControlsWorld {
   thread: string;
   guide: string;
   board: string;
+  /** The thread with two open questions: Decision mode's way in. */
+  questions: string;
   agents: SimAgent[];
 }
 
@@ -34,7 +36,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   markTourDecided(dataDir);
   const configPath = join(dataDir, 'config.json');
   const config = JSON.parse(readFileSync(configPath, 'utf8')) as Record<string, unknown>;
-  writeFileSync(configPath, JSON.stringify({ ...config, inboxShape: true, inboxBoard: true, inboxCodeReview: true }));
+  writeFileSync(configPath, JSON.stringify({ ...config, inboxShape: true, inboxBoard: true, inboxCodeReview: true, experimental: { decisionMode: true } }));
   const forge = fakeForge(join(root, 'forge'));
   const env: Record<string, string> = {
     PATH: `${forge.dir}:${process.env.PATH ?? ''}`,
@@ -60,6 +62,8 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const pi = await SimAgent.connect({ binary, env, name: 'Pi', host: 'pi' });
   const sent = await claude.send({ project_path: project, subject: 'The ledger export is ready', thread: 'export', body: 'The ledger export is ready. The picture shows the new page.', attachments: ['shot.png'] });
+  const question = (prompt: string) => `:::question\n${prompt}\n\n- [ ] Yes\n- [ ] No\n:::`;
+  const asked = await claude.send({ project_path: project, subject: 'Two calls before the export ships', thread: 'calls', body: `Two calls.\n\n${question('Keep the CSV?')}\n\n${question('Keep the JSON?')}` });
   const { example } = await pi.guideBrief();
   const guided = await pi.submitGuide({ project_path: project, ...example });
 
@@ -71,6 +75,7 @@ export async function seedControlsWorld(binary: string, prefix: string): Promise
   return {
     url: started.stdout.trim(),
     picture: sent.thread_id as string,
+    questions: asked.thread_id as string,
     thread: guided.thread_id as string,
     guide: guided.message_id as string,
     board: (JSON.parse(shaped.stdout) as { id: string }).id,

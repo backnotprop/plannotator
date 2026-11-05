@@ -132,7 +132,7 @@ describe("startup, registry and health", () => {
     const health = await (await fetch(`http://127.0.0.1:${server.port}/api/inbox/health`)).json();
     expect(health).toMatchObject({ ok: true, app: "plannotator-inbox", serverSession: server.serverSession, pid: process.pid, update: null });
     // A desktop host reads this before it sets --pn-window-controls-*.
-    expect(health.window_controls).toBe(1);
+    expect(health.window_controls).toBe(2);
     expect((await inboxStatus(dataDir)).state).toBe("running");
 
     // Remote mode would have bound 0.0.0.0: no non-loopback address reaches it.

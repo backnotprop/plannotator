@@ -2,11 +2,13 @@
  * The window controls hook, in a real browser against the compiled binary: a
  * desktop host that draws the window's buttons over the page sets
  * `--pn-window-controls-width` and `-height` on `:root` (health says
- * `window_controls: 1`).
+ * `window_controls: 2`), and reads `--pn-window-controls-center-y` to place them.
  *
  *  - Set: the sidebar's first row clears the height, a header against the
  *    window's left edge clears the width (sidebar collapsed, peeking, a phone's
  *    width), and a full-window layer clears the height.
+ *  - Set: the toggle, the list's title and the thread toolbar share one line, the
+ *    one `--pn-window-controls-center-y` names, whatever the sidebar does.
  *  - Blank header space drags and every control a pointer can reach does not.
  *    Headless Chromium does not report drag regions, so `dragAt` works them out
  *    the way Blink does: each visible box in layout order, a later one over an
@@ -26,7 +28,7 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_WINDOW_CONTROLS_SHOTS ?? join(repo, '.local/proof/window-controls'));
 const W = 78;
-const H = 40;
+const H = 46;
 
 let world: ControlsWorld;
 let context: BrowserContext;
@@ -43,6 +45,15 @@ async function setControls(on: Page): Promise<void> {
 }
 
 const top = (on: Page, selector: string) => on.locator(selector).first().evaluate((el) => el.getBoundingClientRect().top);
+
+const boxOf = (on: Page, selector: string) =>
+  on.locator(selector).first().evaluate((el) => {
+    const { top, bottom, height } = el.getBoundingClientRect();
+    return { top, bottom, height, centre: top + height / 2 };
+  });
+
+/** The line the page says its heads sit on: a host reads a number. */
+const centerY = (on: Page) => on.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--pn-window-controls-center-y'));
 
 /** The left edge of the first thing in a header that holds something: a control, a title. */
 const firstContentLeft = (on: Page, selector: string) =>
@@ -180,12 +191,13 @@ test.afterAll(async () => {
 
 test('health declares the hook', async () => {
   const health = (await (await page.request.get(`${world.url}api/inbox/health`)).json()) as { window_controls?: unknown };
-  expect(health.window_controls).toBe(1);
+  expect(health.window_controls).toBe(2);
 });
 
 test('unset: nothing moves and nothing drags', async () => {
   await openRoute(page, world, '');
   expect(await top(page, '.ib-brand')).toBe(14);
+  expect((await boxOf(page, '.ib-lhead')).height).toBe(60);
   await nothingDrags(page);
 
   expect(await contentInset(page, '.ib-lhead')).toBe(22);
@@ -347,6 +359,56 @@ test('full-window layers clear the height, their controls click and their band d
   await openRoute(page, world, `#thread=${world.thread}&guide=${world.guide}`);
   await setControls(page);
   expect(await headerBlankDrags(page, '.ib-viewer .ib-vhead')).toBe(true);
+});
+
+test('the fixed row: the toggle, the title and the toolbar sit on the line the page names, sidebar open or closed', async () => {
+  for (const sidebar of ['collapsed', 'open'] as const) {
+    await openRoute(page, world, `#thread=${world.thread}`, sidebar);
+    await setControls(page);
+    expect(await centerY(page), sidebar).toBe('31px');
+    const line = parseFloat(await centerY(page));
+    expect((await boxOf(page, '.ib-lhead')).centre, sidebar).toBe(line);
+    expect((await boxOf(page, '.ib-lhead .ib-sb-trigger')).centre, sidebar).toBe(line);
+    expect((await boxOf(page, '.ib-lhead h1')).centre, sidebar).toBe(line);
+    expect((await boxOf(page, '.ib-phead')).centre, sidebar).toBe(line);
+    // The sidebar's first row starts where the buttons' room ends.
+    if (sidebar === 'open') expect((await boxOf(page, '.ib-brand')).top).toBe(H);
+  }
+  // A page whose head is its own comes up to the same line.
+  await openRoute(page, world, '#board', 'collapsed');
+  await setControls(page);
+  expect((await boxOf(page, '.ib-bhead')).centre).toBe(parseFloat(await centerY(page)));
+});
+
+test('the tour bar and Decision mode, with the variables set: clear of the buttons and every control clicks', async () => {
+  await page.goto(`${world.url}#tour=2`);
+  await page.locator('[data-tour-bar]').waitFor();
+  await setControls(page);
+  expect(await contentInset(page, '[data-tour-bar]')).toBeGreaterThanOrEqual(W);
+  expect((await controlsThatDrag(page)).dragging).toEqual([]);
+  await page.locator('[data-tour-exit="exit"]').click();
+  await page.locator('[data-tour-bar]').waitFor({ state: 'detached' });
+
+  await openRoute(page, world, `#thread=${world.questions}`, 'collapsed');
+  await setControls(page);
+  await page.locator('section.ib-pane [data-open-questions]').click();
+  await page.locator('[data-thread-decide]').click();
+  await page.locator('[data-decision-mode]').waitFor();
+  expect((await boxOf(page, '[data-decision-mode]')).top).toBeGreaterThanOrEqual(H);
+  expect((await controlsThatDrag(page)).dragging).toEqual([]);
+  await page.keyboard.press('Escape');
+
+  // At a phone's width it fills what the buttons leave, and its foot stays in the window.
+  await phone.goto(`${world.url}#thread=${world.questions}`);
+  await phone.locator('section.ib-pane [data-open-questions]').waitFor();
+  await setControls(phone);
+  await phone.locator('section.ib-pane [data-open-questions]').click();
+  await phone.locator('[data-thread-decide]').click();
+  await phone.locator('[data-decision-mode]').waitFor();
+  const dialog = await boxOf(phone, '[data-decision-mode]');
+  expect(dialog.top).toBe(H);
+  expect(dialog.bottom).toBe(844);
+  await phone.keyboard.press('Escape');
 });
 
 test('a phone-width window: the header holds the edge and the layer clears the height', async () => {

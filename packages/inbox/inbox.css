@@ -5722,7 +5722,7 @@ dialog.ib-dm::backdrop { background: oklch(0 0 0 / 0.45); }
 }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   /* Full screen down to the keyboard's top while it is up (`--ib-vvh`), so a note or an answer is never under it. */
-  dialog.ib-dm { width: 100vw; height: var(--ib-vvh, 100dvh); bottom: calc(100% - var(--ib-vvh, 100%)); border-radius: 0; }
+  dialog.ib-dm { width: 100vw; height: calc(var(--ib-vvh, 100dvh) - var(--pn-window-controls-height, 0px)); bottom: calc(100% - var(--ib-vvh, 100%)); border-radius: 0; }
   .ib-dm-head { padding: max(14px, env(safe-area-inset-top)) 16px 4px; }
   /* No room beside the count on a phone; the card names the thread under it. */
   .ib-dm-scope { display: none; }
@@ -8152,7 +8152,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* ─────────────── Window controls (a desktop host; inbox-window.md "Window controls") ───────────────
    A host that draws the window's buttons over this page sets --pn-window-controls-width and -height on :root (health
-   says `window_controls: 1`). Unset, every value below is 0 and the drag rules do not apply: nothing moves. */
+   says `window_controls: 2`). Unset, every value below is 0 and the drag rules do not apply: nothing moves. */
 /* The column against the window's left edge clears the width: the first one, while the sidebar is not docked open. */
 .ib-main { --ib-controls-left: var(--pn-window-controls-width, 0px); }
 .ib-sb[data-state="expanded"] ~ .ib-main, .ib-main > * + * { --ib-controls-left: 0px; }
@@ -8168,6 +8168,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Dragging the window: only in a host that set the variable (a style query, so it also sees a sheet the host injects
    after load). The band over the whole window and blank header space drag; every control and float does not. */
 @container style(--pn-window-controls-height) {
+  /* The list head comes up to the thread toolbar's height: one line, gutter + 23, whatever the sidebar does. */
+  .ib-lhead, .ib-bhead { height: 46px; }
   .pn-inbox::before { content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: -1; height: var(--pn-window-controls-height); -webkit-app-region: drag; }
   /* Over the page, a layer's band drags and its body does not, whatever header lies under it. */
   .ib-wlayer { -webkit-app-region: drag; }
