@@ -10,7 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPullCheck, InboxPullDetailsAnswer } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { CheckRows, DetailsStatus } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
+const { byState, CheckRows, DetailsStatus, reviewWords } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
 
 let host: HTMLDivElement;
 let root: Root;
@@ -57,4 +57,16 @@ test.if(hasDom)("an answer with no comments list, from an older server, leaves t
   const partial = { key: 'k', description: null, labels: [], reviewers: [], checks: [] } as unknown as InboxPullDetailsAnswer;
   act(() => root.render(<DetailsStatus data={partial} />));
   expect(host.querySelector('[data-pull-details-comments]')).toBeNull();
+});
+
+test.if(hasDom)("a bot that only commented neither leads the reviewers nor says where the review stands, as on a real next.js PR", () => {
+  const bot = { login: 'vercel-fleet-prod', state: 'commented' as const, bot: true };
+  const waiting = [{ login: 'ana', state: 'waiting' as const }, { login: 'kim', state: 'waiting' as const }];
+  expect(byState([bot, ...waiting]).map((r) => r.login)).toEqual(['ana', 'kim', 'vercel-fleet-prod']);
+  expect(reviewWords([bot, ...waiting])).toBe('Waiting');
+  // Alone, it is what there is; and a person's comment still counts.
+  expect(reviewWords([bot])).toBe('Commented');
+  expect(reviewWords([{ login: 'ana', state: 'commented' }, ...waiting])).toBe('Commented');
+  // A bot that asks for changes is heard.
+  expect(reviewWords([{ ...bot, state: 'changes' }, ...waiting])).toBe('Changes requested');
 });

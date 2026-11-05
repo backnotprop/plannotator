@@ -42,7 +42,10 @@ const DELETED = 'A deleted account';
 const initial = (login: string) => (login.includes('/') ? login.split('/')[1]! : login).replace(/\[bot\]$/, '').slice(0, 1).toUpperCase();
 const shortName = (login: string) => login.replace(/\[bot\]$/, '');
 const checkName = (check: InboxPullCheck) => (check.workflow ? `${check.workflow} / ${check.name}` : check.name);
-const byState = (rows: readonly InboxPullReviewer[]) => [...rows].sort((a, b) => REVIEW_ORDER.indexOf(a.state) - REVIEW_ORDER.indexOf(b.state));
+/** A bot that only commented says nothing about where the review stands: it follows the people who were asked. */
+const quietBot = (r: InboxPullReviewer) => !!r.bot && r.state === 'commented';
+export const byState = (rows: readonly InboxPullReviewer[]) =>
+  [...rows].sort((a, b) => (quietBot(a) ? REVIEW_ORDER.length : REVIEW_ORDER.indexOf(a.state)) - (quietBot(b) ? REVIEW_ORDER.length : REVIEW_ORDER.indexOf(b.state)));
 const worst = (checks: readonly InboxPullCheck[]): InboxPullCheckState => (checks.some((c) => c.state === 'fail') ? 'fail' : checks.some((c) => c.state === 'pending') ? 'pending' : 'pass');
 
 function checkWords(checks: readonly InboxPullCheck[]) {
@@ -50,7 +53,9 @@ function checkWords(checks: readonly InboxPullCheck[]) {
   const pending = checks.filter((c) => c.state === 'pending').length;
   return fail ? `${fail} failed` : pending ? `${pending} running` : 'All passed';
 }
-function reviewWords(reviewers: readonly InboxPullReviewer[]) {
+export function reviewWords(all: readonly InboxPullReviewer[]) {
+  const people = all.filter((r) => !quietBot(r));
+  const reviewers = people.length ? people : all;
   if (reviewers.some((r) => r.state === 'changes')) return 'Changes requested';
   const approved = reviewers.filter((r) => r.state === 'approved').length;
   return approved ? `${approved} approved` : reviewers.some((r) => r.state === 'commented') ? 'Commented' : 'Waiting';
