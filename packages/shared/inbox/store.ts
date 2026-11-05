@@ -607,7 +607,7 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   }
   const kept: Record<string, unknown> = { id: fields.id, type: fields.type, scope };
   if (fields.text !== undefined) kept.text = fields.text;
-  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText"];
+  const strings = scope === "general" ? ["author", "conventionalLabel"] : ["author", "conventionalLabel", "suggestedCode", "originalCode", "selectedText", "tokenText", "anchorText"];
   for (const field of strings) {
     const value = fields[field];
     if (value === undefined || value === null) continue;
@@ -615,6 +615,8 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
     kept[field] = value;
   }
   if (scope === "line") {
+    // On a line an expand arrow opened: a PR's review posts it in its main comment, never inline.
+    if (fields.outsideDiff === true) kept.outsideDiff = true;
     for (const field of ["charStart", "charEnd"]) {
       const value = fields[field];
       if (value === undefined || value === null) continue;

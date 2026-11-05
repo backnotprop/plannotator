@@ -211,6 +211,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // that could not be read (the header then offers Open on GitHub).
   const postHead = scope === 'layer' ? (diff?.head_sha ?? null) : (layer?.head_sha ?? null);
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // The expand arrows' whole files, at the commits this diff runs between.
+  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.pullFile(layerKey, scope, path, signal), [layerKey, scope]);
   const [picked, pick] = useReviewDestination();
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
@@ -550,7 +552,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           ) : snapshot ? (
             <Suspense fallback={null}>
-              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileContents={fileContents} />
             </Suspense>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">

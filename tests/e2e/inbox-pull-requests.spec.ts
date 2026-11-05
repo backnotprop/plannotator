@@ -142,6 +142,13 @@ function repoWith(parent: string, name: string, origin: string, base: Record<str
 const lines = (...parts: string[]) => `${parts.join('\n')}\n`;
 
 /** The fake gh / glab: canned answers by endpoint; each call one line in `calls` (`gh pulls`, `gh diff <endpoint>`, `glab pulls`, …). */
+/** The commit the fake forge's compare says a head left its base at. */
+const MERGE_BASE = 'b'.repeat(40);
+/** A file with lines far from its one change, in the teammate's PR: the expand arrows have somewhere to open. */
+const TOKENS_PATH = 'src/settings/tokens.ts';
+const TOKENS = Array.from({ length: 60 }, (_, i) => `export const SPACE_${i + 1} = ${i + 1};`);
+const TOKENS_CHANGED = TOKENS.map((line, i) => (i === 29 ? 'export const SPACE_30 = 32;' : line));
+
 function writeForge(dir: string) {
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'calls'), '');
@@ -167,6 +174,10 @@ function writeForge(dir: string) {
     '  cat > "$dir/gh-posted.json"',
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
+    'fi',
+    // Where a head left its base, for the expand arrows' old side.
+    'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$6" = .merge_base_commit.sha ]; then',
+    `  echo "gh merge-base $4" >> "$calls"; echo ${MERGE_BASE}; exit 0`,
     'fi',
     // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
@@ -404,9 +415,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     src,
     'web-app',
     'https://github.com/northwind/web-app.git',
-    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}') },
+    { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  return <div className="settings ml-6">{children}</div>;', '}'), 'package.json': lines('{', '  "devDependencies": { "vite": "7.2.0" }', '}'), [TOKENS_PATH]: lines(...TOKENS) },
     [
-      { name: 'tomas/rtl-settings', from: 'main', files: { 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
+      { name: 'tomas/rtl-settings', from: 'main', files: { [TOKENS_PATH]: lines(...TOKENS_CHANGED), 'src/settings/Layout.tsx': lines('export function Layout({ children }) {', '  // Logical margins, so the sidebar sits on the right in Arabic and Hebrew.', '  return <div className="settings ms-6" dir="auto">{children}</div>;', '}') } },
       { name: 'codex/vite-8', from: 'main', files: { 'package.json': lines('{', '  "devDependencies": { "vite": "8.0.1" }', '}') } },
       { name: 'locale-fallback', from: 'main', files: { 'src/i18n/fallback.ts': lines("export const FALLBACK = 'en';") } },
     ],
@@ -436,6 +447,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const vite = web.diff('main', 'codex/vite-8');
   const locale = web.diff('main', 'locale-fallback');
   forge.gh('repos/northwind/web-app/pulls/880', rtl);
+  // The teammate's head and base, on the forge only: this clone never fetched them.
+  forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${'880'.padStart(40, '0')}`, lines(...TOKENS_CHANGED));
+  forge.gh(`repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`, lines(...TOKENS));
   forge.gh('repos/northwind/web-app/pulls/872', vite);
   forge.gh('repos/northwind/web-app/pulls/869', locale);
   const csvPatch = ledger.diff('main', 'csv-export');
@@ -1147,6 +1161,43 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   } finally {
     rmSync(join(world.forge, 'gh-post-fail'), { force: true });
   }
+  expect(world.errors).toEqual([]);
+});
+
+test('the expand arrows on the PR page: read from the forge, opening a gap grows the box; a comment on an opened line posts in the main comment', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+  const review = page.locator('[data-pull-review]');
+  const shell = review.locator(`[data-guide-file-shell="${TOKENS_PATH}"]`);
+  const arrow = shell.locator('[data-expand-button]').first();
+  await expect(arrow).toBeVisible({ timeout: 30_000 });
+  expect(forgeCalls()).toContain(`gh diff repos/northwind/web-app/contents/${TOKENS_PATH}?ref=${MERGE_BASE}`);
+  // Layout.tsx is whole in its patch: nothing to open.
+  await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]')).toHaveCount(0);
+  const box = shell.locator('[data-guide-code-view-mounted]');
+  const height = async () => (await box.boundingBox())!.height;
+  await expect.poll(height).toBeLessThan(620);
+  const before = await height();
+  // The gap above the hunk: its arrow opens down from the file's first line.
+  await shell.locator('[data-expand-button][data-expand-down]').first().click();
+  await expect.poll(height).toBeGreaterThan(before);
+  // Line 20 was in no hunk: GitHub takes no inline comment on it, so it goes in the review's main comment, quoted.
+  const opened = shell.locator('[data-column-number="20"]').last();
+  await expect(opened).toBeVisible({ timeout: 10_000 });
+  await shell.hover();
+  await opened.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why 20 and not a named step?');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  await expect(review.locator('[data-review-posts] [data-decision-primary]')).toContainText('Post Comments');
+  await review.locator('[data-review-posts] [data-decision-primary]').click();
+  const dialog = page.getByRole('dialog');
+  await expect(dialog.locator('[data-outside-diff-note]')).toContainText('outside the diff');
+  await dialog.getByRole('button', { name: /Post/ }).last().click();
+  await expect(review.locator('[data-pull-review-posted]')).toBeVisible();
+  const sent = JSON.parse(readFileSync(join(world.forge, 'gh-posted.json'), 'utf8')) as { body: string; comments?: unknown[] };
+  expect(sent.comments ?? []).toEqual([]);
+  expect(sent.body).toContain('Why 20 and not a named step?');
+  expect(sent.body).toContain(TOKENS[19]!);
   expect(world.errors).toEqual([]);
 });
 

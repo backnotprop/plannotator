@@ -507,6 +507,7 @@ packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
+packages/inbox/guideExpandContext.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx

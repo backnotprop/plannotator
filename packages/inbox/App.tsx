@@ -6102,6 +6102,7 @@ function Inbox() {
           <GuidePane
             thread={thread}
             message={guideMessage}
+            codeReview={settings?.code_review?.on === true}
             onBack={() => close({ ...route, guide: null })}
             onClose={() => close({ ...route, thread: null, guide: null })}
           />

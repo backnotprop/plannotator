@@ -166,7 +166,7 @@ import { isAddressInUseError } from "./remote";
 import { createRequestHostGuard } from "./request-host-guard";
 import { markPlannotatorResponse, withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createInboxMcpServer, INBOX_BOARD_OFF_TEXT, INBOX_STEPS_OFF_TEXT } from "./inbox-mcp";
-import { inboxGuideRoute } from "./inbox-guides";
+import { guidePullKey, inboxGuideFileContents, inboxGuideRoute } from "./inbox-guides";
 import { createInboxRepoCache } from "./inbox-repos";
 import { createRefCards, type RefRunner } from "./ref-cards";
 import { createInboxProjectRoots, folderHoldsOtherWork, guessableProjects, isHomeOrRootFolder, nearestProjectHolding, type InboxGitRunner } from "./inbox-project-root";
@@ -207,12 +207,13 @@ import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
 import { createCardFavicons, type CardFaviconOptions } from "./inbox-card-favicons";
 import { createCardMarks } from "./inbox-card-marks";
+import { validateFilePath } from "@plannotator/shared/review-core";
 import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type InboxPullLinkStore, type InboxPullRepo } from "./inbox-pulls";
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen } from "@plannotator/core/inbox-types";
+import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullRepoKey } from "@plannotator/core/inbox-types";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
 import { createInboxStepsRoute, inboxStepsStale } from "./inbox-steps";
@@ -1020,6 +1021,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
     // An agent that sent with a wake and polls no more is marked ended in the stack view (`live` is set up below).
     sessionLive: (session) => live.isSessionLive(session),
+  };
+  // The folders of this computer's clones of a PR's repository.
+  const pullRoots = async (key: string): Promise<string[]> => {
+    const pull = pulls.find(key);
+    if (!pull) return [];
+    const ids = (await pullProjects()).projectsByRepo.get(inboxPullRepoKey(pull.host, pull.repo)) ?? [];
+    return ids.flatMap((id) => store.project(id)?.root ?? []);
+  };
+  // A file path a window asked to read: repository-relative, nothing that climbs out or could split a git spec.
+  const changedFilePath = (value: string | null): string => {
+    const candidate = value ?? "";
+    let safe = candidate.length > 0 && candidate.length <= 4096 && !/[\0\r\n]/.test(candidate);
+    if (safe) {
+      try {
+        validateFilePath(candidate);
+      } catch {
+        safe = false;
+      }
+    }
+    if (!safe) throw new InboxError("validation_error", "path: a file path in the repository.", { field: "path" });
+    return candidate;
   };
   // Every project on a repository (two clones are two projects), and the repositories to ask the forge about.
   // A project's origin is read once before its first list (the cache is read-behind), so the first open after a
@@ -3502,7 +3524,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/avatar") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -3538,6 +3560,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
             return json({ serverSession, ...(await pulls.diff(key, scope)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : cause.code === "pull_diff_fork" ? 409 : 502);
+            throw cause;
+          }
+        }
+        if (path === "/api/inbox/pulls/file") {
+          const key = url.searchParams.get("key") ?? "";
+          const scope = url.searchParams.get("scope") ?? "layer";
+          if (scope !== "layer" && scope !== "stack") throw new InboxError("validation_error", "scope: layer or stack.", { field: "scope" });
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const filePath = changedFilePath(url.searchParams.get("path"));
+          try {
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, await pullRoots(key))) });
+          } catch (cause) {
+            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
           }
         }
@@ -4408,6 +4443,28 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         rememberBatch(batchId, route, answer);
         return json({ ...answer, replayed: false });
+      }
+
+      // A guided review's expand arrows (packages/server/inbox-guides.ts): one changed file's whole text, under the
+      // Pull requests routes' own guards (it reads the project's git and working tree).
+      const guideFile = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/file$/.exec(path);
+      if (guideFile) {
+        if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        const filePath = changedFilePath(url.searchParams.get("path"));
+        const message = store.message(guideFile[1]!);
+        if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
+        if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
+        const { sha256 } = message.guide;
+        const contents = await inboxGuideFileContents(store, sha256, filePath, store.project(message.project_id)?.root ?? null, () => {
+          const pullKey = guidePullKey(store, sha256);
+          return pullKey && pulls.find(pullKey) ? pullRoots(pullKey).then((roots) => pulls.fileContents(pullKey, "layer", filePath, roots)) : null;
+        });
+        return json({ serverSession, ...contents });
       }
 
       // Guided reviews (step 5): the snapshot a message carries (packages/server/inbox-guides.ts).

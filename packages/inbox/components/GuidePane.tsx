@@ -33,6 +33,8 @@ const GuideReader = lazy(() => import('#guide-reader'));
 export interface GuidePaneProps {
   thread: InboxThread;
   message: InboxMessageWire;
+  /** Settings → Capabilities → Code review: its expand arrows read files (the route refuses, and nothing is asked, while it is off). */
+  codeReview?: boolean;
   /** Back to the thread. */
   onBack: () => void;
   /** Close the guide and the thread. */
@@ -171,11 +173,13 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
     [readOnly, comments, selectedId, save, remove, scrollTarget, message.id],
   );
 
-  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
+  // The expand arrows' whole files, as the guide's patch names them.
+  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.guideFile(message.id, path, signal), [message.id]);
+  return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
 
-export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
-  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
+export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
+  const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);
@@ -262,7 +266,15 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
             </div>
           ) : snapshot ? (
             <Suspense fallback={null}>
-              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
+              <GuideReader
+                // The switch can arrive after the first draw: a diff that drew without whole files reads them on a fresh mount.
+                key={codeReview ? 'expands' : 'as-sent'}
+                snapshot={snapshot}
+                reviewed={reviewed}
+                onReviewedChange={changeReviewed}
+                comments={readerComments}
+                {...(codeReview ? { fileContents } : {})}
+              />
             </Suspense>
           ) : null}
         </div>

@@ -38,6 +38,7 @@ import {
   inboxPullStacks,
   inboxPullUrlsIn,
   type InboxCard,
+  type InboxFileContents,
   type InboxMessage,
   type InboxPull,
   type InboxPullChecks,
@@ -54,6 +55,8 @@ import {
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes } from "@plannotator/shared/review-core";
+import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -64,6 +67,15 @@ export const INBOX_PULLS_REFRESH_MS = 20_000;
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
+
+/** One file's text larger than this is not read (the diff stays as it came): the review's own expansion cap. */
+export const INBOX_PULL_FILE_MAX_BYTES = MAX_REVIEW_FILE_CONTENT_BYTES;
+/** Texts kept in memory, across files: past this the oldest go. A commit's file never changes, so nothing else ages them. */
+export const INBOX_PULL_FILE_CACHE_BYTES = 64 * 1024 * 1024;
+/** And at most this many (a missing or binary file's answer weighs nothing). */
+const INBOX_PULL_FILE_CACHE_ENTRIES = 2048;
+/** At most this many reads at once: a PR's first screen asks for every file on it together. */
+const INBOX_PULL_FILE_READS_AT_ONCE = 6;
 
 /** A commit id as the forge answered it (40 or 64 hex digits), or null. */
 function shaOf(value: unknown): string | null {
@@ -382,7 +394,30 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /**
+   * One file's whole text at the commits this PR's diff runs between, for the viewer's expand arrows: read from the
+   * first of `roots` (local clones of the repository) that has the commit, else from the forge. Both sides null when
+   * either is missing, binary, too large or can't be read, and for a fork's layer. Throws InboxPullsError only for a
+   * PR the last list did not name.
+   */
+  fileContents(key: string, scope: InboxPullDiffScope, path: string, roots: readonly string[]): Promise<InboxFileContents>;
 }
+
+/** A local clone's read of one file at one commit (`<sha>:<path>`), capped. Null: this clone can't say. "none": it has the commit but no usable text. */
+export type PullFileGitReader = (root: string, sha: string, path: string, maxBytes: number) => Promise<string | "none" | null>;
+
+/** The text in these bytes, or null when they are binary (a NUL early on, git's own test). */
+export function textOfBytes(bytes: Uint8Array): string | null {
+  if (bytes.subarray(0, 8000).includes(0)) return null;
+  return Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString("utf8");
+}
+
+const pullFileGitRead: PullFileGitReader = async (root, sha, path, maxBytes) => {
+  const read = await readGitObjectBytes(gitRuntime, `${sha}:${path}`, maxBytes, root);
+  if (read.kind === "too-large") return "none";
+  if (read.kind !== "ok") return null;
+  return textOfBytes(read.bytes) ?? "none";
+};
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -453,9 +488,10 @@ function cappedDiffRunner(run: RefRunner): PullDiffRunner {
   };
 }
 
-export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; now?: () => number } = {}): InboxPulls {
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; now?: () => number } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
   const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
+  const gitRead = options.gitRead ?? pullFileGitRead;
   const now = options.now ?? Date.now;
   const hosts = new Map<string, HostState>();
   const holdUntil = new Map<string, number>();
@@ -465,6 +501,23 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
+  // A diff's base commit, by its head (a pushed head has its own), and each file's text by commit: a commit's file
+  // never changes, so a settled answer stays until the bound. A failed read is forgotten, for the next look to retry.
+  const mergeBases = new Map<string, Promise<string | null>>();
+  const fileTexts = new Map<string, { read: Promise<string | null>; bytes: number }>();
+  let fileTextBytes = 0;
+  let readsRunning = 0;
+  const readsWaiting: (() => void)[] = [];
+  const inTurn = async <T>(task: () => Promise<T>): Promise<T> => {
+    if (readsRunning >= INBOX_PULL_FILE_READS_AT_ONCE) await new Promise<void>((resolve) => readsWaiting.push(resolve));
+    readsRunning++;
+    try {
+      return await task();
+    } finally {
+      readsRunning--;
+      readsWaiting.shift()?.();
+    }
+  };
 
   const signedIn = (cli: RefCli): Promise<Set<string>> => {
     const hit = signed.get(cli);
@@ -715,6 +768,115 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // Bounded: only the last few diffs are kept.
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
       return answer;
+    },
+    async fileContents(key, scope, path, roots) {
+      const none: InboxFileContents = { oldContent: null, newContent: null };
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
+      // A fork's commits live in the fork; the diff stays as it came.
+      if (!!pull.head_repo && pull.head_repo.toLowerCase() !== pull.repo.toLowerCase()) return none;
+      // The commit the patch on screen was read at, when the Inbox read one; a stack's is the list's.
+      const head = shaOf(scope === "layer" ? (readHeads.get(key) ?? pull.head_sha) : pull.head_sha);
+      if (!head) return none;
+      const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
+      const parts = splitPath(pull.repo)!;
+      const project = encodeURIComponent(pull.repo);
+      /** A forge read: the command's output, null when the forge says there is none, and a throw for anything passing. */
+      const ask = async (endpoint: string, extra: string[] = []): Promise<string | null> => {
+        if (now() < (holdUntil.get(pull.host) ?? 0)) throw new InboxPullsError("pull_diff_failed", "rate limited");
+        const result = await diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...extra], INBOX_PULL_FILE_MAX_BYTES);
+        if (result.tooLarge) return null;
+        if (result.exitCode === 0) return result.stdout;
+        if (refErrorOf(cli, result) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+        else if (/\b404\b|not found/i.test(`${result.stderr}\n${result.stdout}`)) return null;
+        throw new InboxPullsError("pull_diff_failed", `${cli} could not read this file.`);
+      };
+      /** The commit the diff runs from: where the head left its base branch, not the branch's tip. */
+      const mergeBase = (): Promise<string | null> => {
+        const baseKey = `${key}\u0000${scope}\u0000${head}`;
+        const hit = mergeBases.get(baseKey);
+        if (hit) return hit;
+        const bases =
+          scope === "layer"
+            ? [pull.base]
+            : (() => {
+                const stack = inboxPullStacks([...known.values()].filter((p) => p.host === pull.host && p.repo === pull.repo)).find((s) => s.layers.some((l) => l.key === key));
+                return [...new Set([stack?.open_base ?? pull.base, stack?.base ?? pull.base])];
+              })();
+        const read = (async () => {
+          if (pull.platform === "gitlab" && scope === "layer") {
+            const answer = await ask(`projects/${project}/merge_requests/${pull.number}`);
+            return answer === null ? null : shaOf(obj(obj(JSON.parse(answer)).diff_refs).base_sha);
+          }
+          for (const base of bases) {
+            const answer =
+              pull.platform === "github"
+                ? await ask(`repos/${parts.owner}/${parts.repo}/compare/${compareRef(base)}...${head}?per_page=1`, ["--jq", ".merge_base_commit.sha"])
+                : await ask(`projects/${project}/repository/merge_base?refs%5B%5D=${encodeURIComponent(base)}&refs%5B%5D=${head}`);
+            if (answer === null) continue;
+            return pull.platform === "github" ? shaOf(answer.trim()) : shaOf(obj(JSON.parse(answer)).id);
+          }
+          return null;
+        })();
+        mergeBases.set(baseKey, read);
+        read.catch(() => mergeBases.delete(baseKey));
+        while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
+        return read;
+      };
+      const textAt = (sha: string): Promise<string | null> => {
+        const textKey = `${pull.host}/${pull.repo}\u0000${sha}\u0000${path}`;
+        const hit = fileTexts.get(textKey);
+        if (hit) {
+          // Used again: the last to go.
+          fileTexts.delete(textKey);
+          fileTexts.set(textKey, hit);
+          return hit.read;
+        }
+        const read = inTurn(async () => {
+          for (const root of roots) {
+            const local = await gitRead(root, sha, path, INBOX_PULL_FILE_MAX_BYTES).catch(() => null);
+            if (local === "none") return null;
+            if (local !== null) return local;
+          }
+          const endpoint =
+            pull.platform === "github"
+              ? `repos/${parts.owner}/${parts.repo}/contents/${compareRef(path)}?ref=${sha}`
+              : `projects/${project}/repository/files/${encodeURIComponent(path)}/raw?ref=${sha}`;
+          const text = await ask(endpoint, pull.platform === "github" ? ["-H", "Accept: application/vnd.github.v3.raw"] : []);
+          return text === null || text.slice(0, 8000).includes("\u0000") ? null : text;
+        });
+        const entry = { read, bytes: 0 };
+        fileTexts.set(textKey, entry);
+        read.then(
+          (text) => {
+            // Still the one kept (the bound may have dropped it while it ran).
+            if (fileTexts.get(textKey) !== entry) return;
+            entry.bytes = text === null ? 0 : Buffer.byteLength(text, "utf8");
+            fileTextBytes += entry.bytes;
+            for (const [oldest, kept] of fileTexts) {
+              if (fileTextBytes <= INBOX_PULL_FILE_CACHE_BYTES && fileTexts.size <= INBOX_PULL_FILE_CACHE_ENTRIES) break;
+              if (oldest === textKey) continue;
+              fileTexts.delete(oldest);
+              fileTextBytes -= kept.bytes;
+            }
+          },
+          () => {
+            if (fileTexts.get(textKey) === entry) fileTexts.delete(textKey);
+          },
+        );
+        return read;
+      };
+      try {
+        const newContent = await textAt(head);
+        if (newContent === null) return none;
+        const base = await mergeBase();
+        if (!base) return none;
+        const oldContent = await textAt(base);
+        return oldContent === null ? none : { oldContent, newContent };
+      } catch {
+        // A forge that did not answer (rate limited, offline, signed out, not JSON): no arrows, and the next look asks again.
+        return none;
+      }
     },
   };
 }

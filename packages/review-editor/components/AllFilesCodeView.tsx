@@ -210,6 +210,13 @@ export interface AllFilesCodeViewProps {
    *  firing a /api/file-content request the server answers 400. */
   contextExpansionAvailable?: boolean;
   /**
+   * Where a host with no review server reads a file's whole text from. Given,
+   * it replaces the `/api/file-content` request, and a read-only diff or
+   * `contextExpansionAvailable={false}` no longer stops expansion. Null, or a
+   * side left null, leaves the file as the patch shows it. Absent: as before.
+   */
+  fetchFileContent?: (file: DiffFile, signal: AbortSignal) => Promise<{ oldContent: string | null; newContent: string | null } | null>;
+  /**
    * Before/After image preview for a hunkless image chunk (#1598), rendered in
    * place of the binary notice. A render prop rather than a flag so the
    * preview (and its fetches) never enter hosts that leave it unset: the
@@ -680,6 +687,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewBase,
   reviewSnapshotId,
   contextExpansionAvailable = true,
+  fetchFileContent,
   renderImagePreview,
   renderPackageChanges,
   markdownPreview,
@@ -1570,6 +1578,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   reviewSnapshotIdRef.current = reviewSnapshotId;
   const contextExpansionAvailableRef = useRef(contextExpansionAvailable);
   contextExpansionAvailableRef.current = contextExpansionAvailable;
+  const fetchFileContentRef = useRef(fetchFileContent);
+  fetchFileContentRef.current = fetchFileContent;
   const itemIdToFileRef = useRef(itemIdToFile);
   itemIdToFileRef.current = itemIdToFile;
   const fileSetKeyRef = useRef(fileSetKey);
@@ -1685,7 +1695,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     // Read-only hosts have no review server: leave the raw-patch context in
     // place and mark the item done so it never re-fires (no dead requests,
     // no console noise from a CSP that blocks connect-src).
-    if (readOnlyRef.current || !contextExpansionAvailableRef.current) {
+    const hostFetch = fetchFileContentRef.current;
+    if (!hostFetch && (readOnlyRef.current || !contextExpansionAvailableRef.current)) {
       augmentState.set(itemId, { status: 'done', controller, generation });
       return;
     }
@@ -1711,8 +1722,9 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     const snapshot = reviewSnapshotIdRef.current;
     if (snapshot) params.set('snapshot', snapshot);
 
-    fetch(`/api/file-content?${params}`, { signal: controller.signal })
-      .then((res) => (res.ok ? res.json() : null))
+    (hostFetch
+      ? hostFetch(file, controller.signal)
+      : fetch(`/api/file-content?${params}`, { signal: controller.signal }).then((res) => (res.ok ? res.json() : null)))
       .then((data: { oldContent: string | null; newContent: string | null } | null) => {
         if (isStale()) return;
         if (!data || (data.oldContent == null && data.newContent == null)) {

@@ -1,4 +1,5 @@
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
+import type { InboxFileContents } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -43,6 +44,8 @@ export interface GuideReaderProps {
   viewed?: { files: ReadonlySet<string>; onToggle: (path: string) => void };
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
+  fileContents?: (path: string, signal: AbortSignal) => Promise<InboxFileContents>;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

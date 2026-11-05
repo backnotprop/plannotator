@@ -24,6 +24,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type FC } from 'react';
 import type { CodeGuideData } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
+import type { InboxFileContents } from '@plannotator/core/inbox-types';
 import type {
   CodeAnnotation,
   CodeAnnotationType,
@@ -38,7 +39,7 @@ import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
-import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
+import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { usePhone } from '../phone';
@@ -92,6 +93,8 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
+    fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
   }
 > = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
@@ -156,9 +159,23 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false }: GuideReaderProps) {
+export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false, fileContents }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
+  // Only a file changed in place has both sides to open: an added or deleted file is already whole, and a renamed one stays as it came.
+  const wholeFiles = useRef(new Map<string, InboxFileContents>());
+  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(
+    () =>
+      fileContents
+        ? async (file, signal) => {
+            if (file.status !== 'modified' || file.oldPath) return null;
+            const contents = await fileContents(file.path, signal);
+            wholeFiles.current.set(file.path, contents);
+            return contents;
+          }
+        : undefined,
+    [fileContents],
+  );
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -222,7 +239,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       const side = range.side === 'additions' ? 'new' : 'old';
       const file = files.find((f) => f.path === filePath);
       // The lines as the person read them, quoted in the reply.
-      const selectedText = file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
+      // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
+      const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
+      const whole = wholeFiles.current.get(filePath);
+      const wholeText = side === 'new' ? whole?.newContent : whole?.oldContent;
+      const openedCode = outsideDiff && wholeText ? wholeText.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
+      const selectedText = outsideDiff ? openedCode : file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
         type,
@@ -236,6 +258,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         originalCode,
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
+        ...(outsideDiff && { outsideDiff: true, ...(openedCode && { anchorText: openedCode }) }),
         createdAt: Date.now(),
         conventionalLabel,
         decorations,
@@ -300,8 +323,10 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
     } => ({
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fetchFileContent && { fetchFileContent }),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
         ? {
@@ -320,7 +345,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, fetchFileContent],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
