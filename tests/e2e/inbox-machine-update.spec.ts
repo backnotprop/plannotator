@@ -24,7 +24,7 @@ import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
-import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { inboxScratch, rememberInboxOf, removeInboxScratch, stopScratchInbox } from './inbox-scratch';
 import { NO_BROWSER } from '../helpers/no-browser';
 
 const repo = resolve(__dirname, '../..');
@@ -220,8 +220,7 @@ test('1. the word beside a machine that is behind opens the dialog, in the sideb
 });
 
 test('2. asleep: the word stays, the dialog says so, and there is nothing to press', async () => {
-  const before = registry(mini).pid;
-  process.kill(before, 'SIGTERM');
+  await stopScratchInbox(mini.dataDir);
   await expect.poll(async () => (await rowOf(mini))?.state, { timeout: 20_000 }).toBe('offline');
   await expect(word(mini)).toHaveText('Update');
   await word(mini).click();

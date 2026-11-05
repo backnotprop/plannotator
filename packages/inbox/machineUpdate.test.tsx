@@ -161,14 +161,17 @@ test('the PowerShell line takes no `&&` (a parse error in 5.1) and no path that 
 });
 
 test('an older door, in any state its own install left: never a press that gets machine_too_old, and never an empty Copy box', async () => {
-  answer = { too_old: true, current: '0.28.46' };
-  for (const phase of ['failed', 'ready', 'behind'] as const) {
-    await dialog(view(phase, { can_update: false }));
-    expect([phase, !!button('Try Again'), !!button('Restart'), !!button('Update now')]).toEqual([phase, false, false, false]);
-    expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
-    act(() => root?.unmount());
-    host?.remove();
-    root = null;
+  // Before and after its door answered: the row alone already knows.
+  for (const read of [{ too_old: true, current: '0.28.46' }, { current: '0.28.46' }]) {
+    answer = read;
+    for (const phase of ['failed', 'ready', 'behind'] as const) {
+      await dialog(view(phase, { can_update: false }));
+      expect([phase, !!button('Try Again'), !!button('Restart'), !!button('Update now')]).toEqual([phase, false, false, false]);
+      expect(commands()).toEqual([UPDATE_BY_HAND, UPDATE_BY_HAND_FULL_PATH, UPDATE_BY_HAND_POWERSHELL]);
+      act(() => root?.unmount());
+      host?.remove();
+      root = null;
+    }
   }
   expect(starts()).toEqual([]);
 });
