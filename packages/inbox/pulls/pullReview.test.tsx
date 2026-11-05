@@ -822,6 +822,33 @@ test.skipIf(!hasDom)("the box: the person's words make it a custom curation, and
   expect(sent[0]!.pullAsk).toBe('custom');
 });
 
+test.skipIf(!hasDom)('the box: the custom words typed for PR A are not sent with PR B, and are still there for PR A', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const pickOf = (id: string): ReviewBoxPull => ({ ...boxPick(), id });
+  const open = (pick: ReviewBoxPull) => mount(<ComposeDialog request={{ review: { pick } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  const closeIt = () => {
+    act(() => root!.unmount());
+    root = null;
+  };
+  open(pickOf('stack-a'));
+  await settle();
+  await act(async () => {
+    const input = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(input, 'just the retries');
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  closeIt();
+  open(pickOf('stack-b'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('');
+  closeIt();
+  open(pickOf('stack-a'));
+  await settle();
+  expect(el<HTMLTextAreaElement>('[data-compose-text] textarea').value).toBe('just the retries');
+  expect(sent).toHaveLength(0);
+});
+
 test.skipIf(!hasDom)('the box: words typed and left come back when it opens again, with no prompt, and a started review leaves nothing behind', async () => {
   const started: StartThreadInput[] = [];
   const sent: ComposeSent[] = [];

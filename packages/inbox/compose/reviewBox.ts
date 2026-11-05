@@ -7,6 +7,12 @@ import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle } f
  * /review-curate skill's.
  */
 
+/** What the box's Review row says it reviews. */
+export type ReviewKind = 'local' | 'pr';
+
+/** How the read behind the box's pull requests went. */
+export type ReviewPullsRead = 'reading' | 'read' | 'failed';
+
 /** What the box reviews: `pick` fills it in, from a pull request's own page. */
 export interface ReviewBoxRequest {
   pick?: ReviewBoxPull | null;
@@ -16,9 +22,16 @@ export interface ReviewBoxRequest {
  * The words in the box and a thread name typed there, kept in memory when it closes without starting, as the Feedback
  * dialog keeps its own. Opened again, they are there. Cleared once a review starts.
  */
-const NOTHING_TYPED = { body: '', threadName: null as string | null };
+const NOTHING_TYPED = { body: '', threadName: null as string | null, kind: 'local' as ReviewKind, pick: null as ReviewBoxPull | null };
 let unsent = NOTHING_TYPED;
-export const unsentReview = () => unsent;
+/**
+ * What comes back when the box opens, through `door`: the PR whose page opened it, if any. Words go only to what they
+ * were written for: another PR's door opens empty. The plain door reopens the same box, on what it was on.
+ */
+export const unsentReview = (door?: ReviewBoxPull | null): typeof NOTHING_TYPED => {
+  if (door ? unsent.pick?.id !== door.id : !unsent.body.trim() && !unsent.threadName) return NOTHING_TYPED;
+  return unsent;
+};
 export const keepUnsentReview = (typed: typeof NOTHING_TYPED) => {
   unsent = typed;
 };
@@ -70,7 +83,8 @@ export function reviewBoxPulls(answer: InboxReviewsAnswer | null, projectNames: 
 /** A stack as the box takes it. An agent that ended left no thread to go back to: a new one can start. */
 export function reviewBoxPull(stack: InboxPullStack, row: Pick<InboxReviewRow, 'reviewed' | 'thread_id' | 'link' | 'review'>, links: Parameters<typeof handoffStack>[1], projects: readonly string[]): ReviewBoxPull {
   const ended = row.link?.agent?.ended === true;
-  const inReview = !!row.thread_id && !ended;
+  // In review as the page says it: a thread that only named the PR, or was archived before its review, isn't.
+  const inReview = row.reviewed && !!row.thread_id && !ended;
   const handed = (row.link ? handoffStack(stack, links, row.link.thread_id) : null) ?? handoffStack(stack, links) ?? stack;
   return {
     id: stack.id,

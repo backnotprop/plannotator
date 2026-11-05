@@ -335,7 +335,7 @@ export function composeActions(query: string, targets: readonly ComposeTarget[],
     return [{ kind: 'new' }, ...(reviews ? [{ kind: 'review' as const }] : []), ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
   }
   const out: ComposeAction[] = [];
-  if (words.some(callsAction) && !words.some(callsReview)) out.push({ kind: 'new' });
+  if (words.some(callsAction) && !(reviews && words.some(callsReview))) out.push({ kind: 'new' });
   // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
   if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {

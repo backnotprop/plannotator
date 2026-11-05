@@ -3,9 +3,8 @@ import type { InboxReviewChanges } from '@plannotator/core/inbox-types';
 import { Icon } from '../icons';
 import { RefMarkIcon } from '../board/RefMark';
 import { plural } from '@plannotator/core/inbox-format';
-import type { ReviewBoxPull, ReviewSummary } from './reviewBox';
+import type { ReviewBoxPull, ReviewKind, ReviewPullsRead, ReviewSummary } from './reviewBox';
 
-export type ReviewKind = 'local' | 'pr';
 
 function Choices<T extends string>({ label, value, options, onChange, name }: { label: string; value: T; options: readonly (readonly [T, string])[]; onChange: (next: T) => void; name: string }) {
   const group = useId();
@@ -40,7 +39,7 @@ function SummaryLine({ summary }: { summary: ReviewSummary }) {
 }
 
 /** The picker over what Reviews lists: FolderMenu's look and keys. Not reviewed comes first; a PR in review opens its thread. */
-function PullMenu({ pulls, selected, phone, onPick, onClose }: { pulls: readonly ReviewBoxPull[]; selected: string | null; phone: boolean; onPick: (pull: ReviewBoxPull) => void; onClose: () => void }) {
+function PullMenu({ pulls, read, selected, phone, onPick, onClose }: { pulls: readonly ReviewBoxPull[]; read: ReviewPullsRead; selected: string | null; phone: boolean; onPick: (pull: ReviewBoxPull) => void; onClose: () => void }) {
   const [query, setQuery] = useState('');
   const options = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
@@ -100,7 +99,11 @@ function PullMenu({ pulls, selected, phone, onPick, onClose }: { pulls: readonly
         />
       </div>
       <div className="ib-cp-list" role="listbox" id={`ib-cp-plist-${uid}`} aria-label="Pull requests">
-        {options.length === 0 && <div className="ib-cp-none">{pulls.length === 0 ? 'No open pull requests.' : 'No pull request matches.'}</div>}
+        {options.length === 0 && (
+          <div className="ib-cp-none" data-review-pulls-none={read}>
+            {pulls.length > 0 ? 'No pull request matches.' : read === 'reading' ? 'Reading your pull requests…' : read === 'failed' ? "Couldn't read your pull requests." : 'No open pull requests.'}
+          </div>
+        )}
         {options.map((pull, i) => (
           <div key={pull.id}>
             {i === 0 && firstInReview !== 0 && <div className="ib-cp-cap">Not reviewed yet</div>}
@@ -139,6 +142,7 @@ export function ReviewRows(props: {
   onChanges: (changes: InboxReviewChanges) => void;
   summary: ReviewSummary;
   pulls: readonly ReviewBoxPull[];
+  pullsRead: ReviewPullsRead;
   pick: ReviewBoxPull | null;
   onPick: (pull: ReviewBoxPull) => void;
   phone: boolean;
@@ -174,6 +178,7 @@ export function ReviewRows(props: {
           {menu && (
             <PullMenu
               pulls={props.pulls}
+              read={props.pullsRead}
               selected={pick?.id ?? null}
               phone={props.phone}
               onPick={props.onPick}

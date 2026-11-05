@@ -767,18 +767,19 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
   await expect(pane.locator(`[data-pulls-layer="${STACK_ID}"]`)).toContainText('Draft');
   await expect(pane.locator('[data-pulls-layer="github.com/northwind/billing-svc#411"]')).toContainText('Merged');
   await expect(pane.locator('.ib-pr-base')).toContainText('main');
-  // Its review thread: the agent's line under the title (its last words under it), one button that opens the thread.
+  // Its agent's thread named the PR but holds no review of it: the agent's line under the title (its last words under
+  // it), the thread a button away, and a review can start.
   const line = pane.locator('[data-pulls-thread-line="live"]');
   await expect(line).toBeVisible();
-  await expect(line.locator('.ib-pr-thread-h')).toContainText('Review thread with Claude Code');
-  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Open review thread');
+  await expect(line.locator('.ib-pr-thread-h')).toContainText('Thread with Claude Code');
+  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Review with an agent');
+  await expect(pane.locator('[data-pulls-open-thread]')).toBeVisible();
   await expect(pane).not.toContainText(/\bhand/i);
   // The Board is off: no card chip, no Board words.
   await expect(pane.locator('[data-pulls-card]')).toHaveCount(0);
   await expect(pane).not.toContainText('Board');
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
-  // It has a review thread: no picker, and no way to add a second agent; the diff is one button away.
-  await expect(pane.locator('[data-pulls-primary="review"]')).toHaveCount(0);
+  // The diff is one button away.
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
   // The whole stack is the review's own switch: one Open the diff here.
   await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
@@ -947,7 +948,7 @@ test('the Board on, a card linking the stack: a quiet Board chip, its review thr
   await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
-  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Review thread with Claude Code');
+  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Thread with Claude Code');
   await shot(page, '6b-stack-board-on');
 });
 
@@ -1485,6 +1486,82 @@ test('New review: a local review with no card yet leaves the page when its threa
   expect(await rows()).not.toContain(off.thread_id);
 });
 
+test('New review: Code review turned off with the box open: it closes and says so, nothing is sent, and the words wait', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await box.locator('[data-compose-text] textarea').fill('Words for later.');
+  const sends: string[] = [];
+  page.on('request', (request) => {
+    if (request.method() === 'POST' && request.url().endsWith('/api/inbox/messages')) sends.push(request.url());
+  });
+  await setCodeReview(false);
+  await expect(box).toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByText('Code review is off').first()).toBeVisible();
+  expect(sends).toEqual([]);
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews`);
+  await page.locator('[data-reviews-new]').first().click({ timeout: 15_000 });
+  await expect(box.locator('[data-compose-text] textarea')).toHaveValue('Words for later.');
+  await box.locator('[data-compose-text] textarea').fill('');
+  await box.locator('[data-compose-cancel]').click();
+});
+
+test('New review: the picker says what it knows, and the summary never shows the last choice while the next is read', async () => {
+  const { page } = world;
+  const openPicker = async () => {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#reviews`);
+    await page.locator('[data-reviews-new]').first().click();
+    const box = page.locator('[data-review-box]');
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await box.locator('[data-review-pick]').click();
+    return box;
+  };
+  let letGo = () => {};
+  const held = new Promise<void>((resolve) => (letGo = resolve));
+  await page.route('**/api/inbox/reviews*', async (route) => {
+    await held;
+    await route.continue().catch(() => {});
+  });
+  const reading = await openPicker();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toBeVisible();
+  await expect(reading.locator('[data-review-pulls-none="reading"]')).toContainText('Reading your pull requests');
+  await shot(page, 'n-picker-reading');
+  letGo();
+  await page.waitForTimeout(100);
+  await page.unroute('**/api/inbox/reviews*');
+  await page.route('**/api/inbox/reviews*', (route) => route.abort());
+  await page.route('**/api/inbox/pulls?*', (route) => route.abort());
+  const failed = await openPicker();
+  await expect(failed.locator('[data-review-pulls-none="failed"]')).toBeVisible();
+  await shot(page, 'n-picker-failed');
+  await page.unroute('**/api/inbox/reviews*');
+  await page.unroute('**/api/inbox/pulls?*');
+  await failed.locator('[data-compose-cancel]').click();
+
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator('[data-reviews-new]').first().click();
+  const box = page.locator('[data-review-box]');
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  let again = () => {};
+  const slow = new Promise<void>((resolve) => (again = resolve));
+  await page.route('**/api/inbox/reviews/changes*', async (route) => {
+    await slow;
+    await route.continue().catch(() => {});
+  });
+  await box.locator('[data-review-choice="last"]').check({ force: true });
+  await expect(box.locator('[data-review-size]')).toHaveCount(0);
+  again();
+  await expect(box.locator('[data-review-size]')).toBeVisible();
+  await page.unroute('**/api/inbox/reviews/changes*');
+  await box.locator('[data-compose-cancel]').click();
+});
+
 test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
   const { page } = world;
   await page.goto(`${world.url}#reviews&new`);
@@ -1653,8 +1730,9 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   // A reply sent from the view takes nothing off the screen, even a message that was new when it opened.
   const replying = await claude.send({ project_path: world.projects.web, thread: 'replying', subject: 'Replying', body: 'New before the review.' });
   await reviewFor('replying', 'Replying review');
+  // Straight in, with no reload: a reload after the first open could land after that open marked it read.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&thread=${replying.thread_id}`);
-  await page.reload();
   await expect(page.getByText('New before the review.')).toBeVisible();
   await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const reply = page.getByRole('textbox', { name: 'Reply to Claude Code' });

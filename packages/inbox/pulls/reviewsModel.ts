@@ -44,7 +44,6 @@ export function reviewRowProjects(answer: InboxReviewsAnswer): Set<string> {
   return ids;
 }
 
-/** The row's title: its PR's, else its review's. */
 /** The project a thread's row is in; null for a PR row. */
 export function reviewRowProject(row: InboxReviewRow): string | null {
   return row.review?.project_id ?? row.started?.project_id ?? null;

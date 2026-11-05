@@ -218,7 +218,6 @@ export function inboxReviewLandingOf(
   return { key: pull.key, thread_id: threadId, state: pull.state, at: pull.at, url: pull.url, number: pull.number, title: pull.title, platform: pull.platform, head: pull.head, through_review: review && !newer ? review.latest_review_id : null };
 }
 
-/** One row of the Reviews page. */
 /** Which local changes a New review is of. */
 export type InboxReviewChanges = "uncommitted" | "last" | "branch";
 
@@ -275,6 +274,7 @@ export function inboxReviewPatchSize(patch: string): { files: number; additions:
   return { files, additions, deletions };
 }
 
+/** One row of the Reviews page. */
 export interface InboxReviewRow {
   /** The thread's id for a thread's row; the stack's id for a PR row. */
   id: string;

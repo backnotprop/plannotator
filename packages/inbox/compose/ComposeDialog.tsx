@@ -77,8 +77,8 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, unsentReview, type ReviewBoxPull, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
-import { ReviewRows, type ReviewKind } from './ReviewRows';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { ReviewRows } from './ReviewRows';
 
 /** A phone's picker shows at most 4½ rows of 44 px (the reply box's rule, inbox.css). */
 const PHONE_SKILL_LIST_HEIGHT = 198;
@@ -163,6 +163,8 @@ export interface ComposeDialogProps {
   board?: boolean;
   /** New review: the pull requests Reviews lists (`request.review`). */
   reviewPulls?: readonly ReviewBoxPull[];
+  /** How the read behind `reviewPulls` went: an empty list only means "none" once it was read. */
+  reviewPullsRead?: ReviewPullsRead;
   /** New review: a PR already in review was picked, so its thread opens rather than a second one starting. */
   onOpenReviewThread?: (threadId: string) => void;
 }
@@ -201,13 +203,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const statusId = `ib-cp-status-${uid}`;
 
   const [draft, setDraft] = useState<DraftView | null>(request.draft ?? null);
-  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : box ? unsentReview().body : ''));
+  const [typed] = useState(() => unsentReview(box?.pick));
+  const [body, setBody] = useState(request.draft?.body ?? request.body ?? (request.card ? `${request.card.title}\n\n` : box ? typed.body : ''));
   // The Board card this thread is for (Create thread), kept on its draft so a draft sent later still links it.
   const card = request.card ?? request.draft?.card ?? null;
   // The pull requests this thread is for (Launch an agent), kept on its draft: To offers only their projects' agents.
-  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : 'local');
+  const [reviewKind, setReviewKind] = useState<ReviewKind>(box?.pick ? 'pr' : typed.kind);
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
-  const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? null);
+  const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
   const [reviewMenu, setReviewMenu] = useState(false);
   const [reviewSummary, setReviewSummary] = useState<ReviewSummary>(null);
   const boxPull = box && reviewKind === 'pr' ? reviewPick : null;
@@ -218,7 +221,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   const boardChip = props.board === true && !card && !box;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
-  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ?? (box && unsentReview().threadName) ? { thread_name: request.threadName ?? unsentReview().threadName! } : null)));
+  const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ?? (box && typed.threadName) ? { thread_name: request.threadName ?? typed.threadName! } : null)));
   const [chosen, setChosen] = useState<string | null>(opening.chosen);
   // A paste is said in the dialog's own polite region (the window's is outside the modal dialog).
   const [pasteSaid, setPasteSaid] = useState('');
@@ -301,6 +304,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setReviewSummary(null);
       return;
     }
+    // Never the last project's: its branch would go into the message if Start came before this read.
+    setReviewSummary(null);
     const read = new AbortController();
     inboxApi.reviewChanges(reviewProject.id, reviewChanges, read.signal).then(setReviewSummary, () => setReviewSummary(null));
     return () => read.abort();
@@ -360,10 +365,14 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // New review names its thread from what it reviews, not from the words.
   const reviewName = !box ? null : boxPull ? pullHandoffThreadName(boxPull.stack, null) : reviewKind === 'pr' ? null : localReviewName(reviewChanges, reviewProject?.name ?? null, reviewSummary?.branch ?? null, reviewSummary?.base ?? null);
   const threadName = draftThreadName(nameState);
+  // Kept from the first change: opening the box on another PR doesn't wipe the words kept for this one.
+  const keptAny = useRef(false);
   useEffect(() => {
-    if (box) keepUnsentReview({ body, threadName: threadName || null });
+    if (!box) return;
+    if (keptAny.current) keepUnsentReview({ body, threadName: threadName || null, kind: reviewKind, pick: reviewKind === 'pr' ? reviewPick : null });
+    keptAny.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [!!box, body, nameState]);
+  }, [!!box, body, nameState, reviewKind, reviewPick]);
   useEffect(() => {
     sendKey.current = newUuid();
   }, [body, chosen, start?.agent, start?.project.id, threadName, nameState.edited ? '' : suggested, uploadIds.join(','), boardChip && boardRequest, reviewKind, reviewChanges, boxPull?.id]);
@@ -446,7 +455,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     }
     if (!target && !start) {
       // The error is an alert, which says it: no second announcement.
-      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : NOTHING_SENT_NO_AGENT);
+      setError(anyLive || canStart ? 'Nothing sent: choose a live agent first.' : box ? 'Nothing sent: no live agent is chosen.' : NOTHING_SENT_NO_AGENT);
       return;
     }
     if (box && reviewKind === 'pr' && !boxPull) {
@@ -779,6 +788,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
       onChanges={setReviewChanges}
       summary={reviewSummary}
       pulls={props.reviewPulls ?? []}
+      pullsRead={props.reviewPullsRead ?? 'read'}
       pick={reviewPick}
       onPick={(pull) => {
         setReviewMenu(false);
@@ -934,6 +944,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
         <ThreadNameChip
           state={nameState}
           suggested={reviewName ?? suggested}
+          hint={box ? 'Named from what it reviews until you type here.' : undefined}
           error={nameError}
           onChange={(next) => {
             setNameState(next);

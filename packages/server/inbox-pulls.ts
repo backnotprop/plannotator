@@ -1075,6 +1075,8 @@ export interface InboxPullLinkStore {
   threadProject(threadId: string): string | null;
   /** Whether an agent session polls now (the live sessions); absent: every agent is taken as live. */
   sessionLive?(session: string): boolean;
+  /** A launched thread whose start failed, or whose agent never connected. */
+  launchDead?(threadId: string): boolean;
 }
 
 /**
@@ -1133,8 +1135,8 @@ export function threadAgent(store: InboxPullLinkStore, threadId: string): InboxP
   const to = last ? null : (root?.to ?? null);
   const ended = (session: string | null, wakes: boolean): boolean => !!store.sessionLive && !!session && wakes && !store.sessionLive(session);
   if (last && last.author.kind === "agent") return { host: last.author.host, session: last.author.session, name: last.author.name, ...(ended(last.author.session, last.wakes === true) ? { ended: true } : {}) };
-  // A session the Inbox launched polls only once it has started: until it writes, not polling isn't ended.
-  return to ? { host: to.host, session: to.session, name: null, ...(!root?.launch && ended(to.session, true) ? { ended: true } : {}) } : null;
+  // A session the Inbox launched polls only once it has started: until it writes, not polling isn't ended, its run state is.
+  return to ? { host: to.host, session: to.session, name: null, ...((root?.launch ? store.launchDead?.(threadId) : ended(to.session, true)) ? { ended: true } : {}) } : null;
 }
 
 export function linkInboxPulls(

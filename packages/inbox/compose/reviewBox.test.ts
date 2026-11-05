@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import { inboxPullStacks, type InboxPull, type InboxReviewRow, type InboxReviewsAnswer } from '@plannotator/core/inbox-types';
 import { composeActions, type ComposeTarget } from './model';
-import { localReviewMessage, localReviewName, reviewBoxPulls, reviewDefaultTo } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewBoxPull, reviewBoxPulls, reviewDefaultTo, unsentReview, type ReviewBoxPull } from './reviewBox';
 
 const pull = (number: number, over: Partial<InboxPull> = {}): InboxPull =>
   ({
@@ -32,11 +32,44 @@ const row = (stack: ReturnType<typeof inboxPullStacks>[number], over: Partial<In
 
 const answerOf = (rows: InboxReviewRow[], projects: Record<string, string[]> = { 'github.com/o/web': ['prj_1'] }): InboxReviewsAnswer => ({ rows, projects }) as unknown as InboxReviewsAnswer;
 
+describe('what is kept when the box closes', () => {
+  const [one] = inboxPullStacks([pull(1)]);
+  const [two] = inboxPullStacks([pull(2)]);
+  const a = { id: one!.id } as ReviewBoxPull;
+  const b = { id: two!.id } as ReviewBoxPull;
+
+  test('words typed for one PR open with that PR and the plain door, never another PR', () => {
+    keepUnsentReview({ body: 'focus on the retries', threadName: 'My own name', kind: 'pr', pick: a });
+    try {
+      expect(unsentReview(a).body).toBe('focus on the retries');
+      expect(unsentReview(null)).toMatchObject({ body: 'focus on the retries', kind: 'pr', pick: a });
+      expect(unsentReview(b)).toMatchObject({ body: '', threadName: null, pick: null });
+    } finally {
+      forgetUnsentReview();
+    }
+  });
+
+  test("words typed on local changes stay away from a PR's door; a box left empty reopens as new", () => {
+    keepUnsentReview({ body: 'focus on the retries', threadName: null, kind: 'local', pick: null });
+    expect(unsentReview(a).body).toBe('');
+    expect(unsentReview(null).body).toBe('focus on the retries');
+    keepUnsentReview({ body: '  ', threadName: null, kind: 'pr', pick: a });
+    expect(unsentReview(null)).toMatchObject({ kind: 'local', pick: null });
+    forgetUnsentReview();
+  });
+});
+
 describe('the picker', () => {
   const [one] = inboxPullStacks([pull(1)]);
   const [two] = inboxPullStacks([pull(2)]);
   const agent = { host: 'claude-code', session: 's', name: 'Claude Code', ended: false };
   const names = new Map([['prj_1', 'web-app']]);
+
+  test('in review only as the page says it: a thread that merely named the PR is not, and picking starts one', () => {
+    const link = { thread_id: 't', via: 'url', agent } as never;
+    expect(reviewBoxPull(one!, row(one!, { reviewed: false, thread_id: 't', link }), {}, ['prj_1']).thread).toBeNull();
+    expect(reviewBoxPull(one!, row(one!, { reviewed: true, thread_id: 't', link }), {}, ['prj_1']).thread?.id).toBe('t');
+  });
 
   test('not reviewed comes first, whatever the order of the rows; one in review knows its thread, so it can open it', () => {
     const inReview = row(one!, { reviewed: true, thread_id: 't_1', link: { thread_id: 't_1', agent } as never });
