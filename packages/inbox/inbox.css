@@ -7718,7 +7718,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prr-wide .ib-prr-layer:not(:disabled):hover { background: color-mix(in oklab, var(--background) 50%, transparent); }
 .pn-inbox .ib-prr-wide .ib-prr-layer[aria-current], .pn-inbox .ib-prr-wide .ib-prr-layer[aria-current]:not(:disabled):hover { background: var(--background); }
 .ib-prr-wide .ib-prr-layers:has(+ .ib-prr-note) { margin-right: 0; }
-.ib-prreview.ib-prr-wide .ib-prr-note { flex: 0 1000 auto; min-width: 0; margin: 0 auto 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prreview.ib-prr-wide .ib-prr-strip .ib-prr-note { flex: 0 1000 auto; min-width: 0; margin: 0 auto 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .ib-prr-controls { display: flex; flex: none; align-items: center; gap: 8px; }
 .ib-prr-controls [data-guide-global-comment-add] { padding-block: 4px; }
 /* Where the row runs short the layers keep their room: Global comment keeps its globe and its tooltip. */

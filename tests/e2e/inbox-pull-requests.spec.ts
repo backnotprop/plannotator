@@ -1099,6 +1099,9 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     // With the rail folded the row is short: the words go above the files.
     await page.setViewportSize({ width: 800, height: 900 });
     await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toBeVisible();
+    // There it keeps the pane's margin and wraps.
+    await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCSS('margin-left', '16px');
+    await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCSS('white-space', 'normal');
     await page.setViewportSize({ width: 1440, height: 900 });
     await expect(review.locator('.ib-prr-strip [data-pull-review-readonly]')).toBeVisible();
     // A long name is cut on that row, never under the controls.
