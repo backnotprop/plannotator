@@ -1,7 +1,7 @@
 /**
  * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button"), in the window, with
  * the view and the project held the way App holds them (the address). What regresses:
- *  - the filter shown before the first answer, or anything but "PRs" and the mark in the head (a project's name, the
+ *  - the filter shown before the first answer, or anything but "Reviews" and the mark in the head (a project's name, the
  *    on-you count: the head must never grow);
  *  - a pick not narrowing the rows, the mark not saying it is narrowed, or the picks not named once over the list;
  *    × or Clear filters clearing one and not the other, or in two steps;
@@ -191,10 +191,10 @@ const menuRows = (selector: string) =>
     on: row.getAttribute('aria-checked') === 'true',
   }));
 
-test.if(hasDom)('at rest: "PRs" and the filter mark, nothing else in the head; nothing before the first answer', async () => {
+test.if(hasDom)('at rest: "Reviews" and the filter mark, nothing else in the head; nothing before the first answer', async () => {
   draw({ state: { model: null, error: null, loading: true, refresh: () => {}, reload: () => {} } });
   await settle();
-  expect($('[data-pulls-heading]')!.textContent).toBe('PRs');
+  expect($('[data-pulls-heading]')!.textContent).toBe('Reviews');
   expect($('[data-pulls-filter-trigger]')).toBeNull();
   act(() => root?.unmount());
   host?.remove();
@@ -202,7 +202,7 @@ test.if(hasDom)('at rest: "PRs" and the filter mark, nothing else in the head; n
   draw();
   await settle();
   const head = $('[data-pulls-list] .ib-lhead')!;
-  expect(head.textContent).toBe('PRs');
+  expect(head.textContent).toBe('Reviews');
   const trigger = head.querySelector<HTMLElement>('[data-pulls-filter-trigger]')!;
   expect(trigger.getAttribute('aria-label')).toBe('Filter');
   expect(trigger.hasAttribute('data-set')).toBe(false);
@@ -240,8 +240,8 @@ test.if(hasDom)('the menu: views and projects with counts and a tick; a pick nar
   expect(trigger.getAttribute('aria-label')).toBe('Filter: To review');
   expect($('[data-pulls-scope-view]')!.textContent).toBe('To review');
   expect($('[data-pulls-scope-project]')).toBeNull();
-  // The head never grows: still only "PRs".
-  expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('PRs');
+  // The head never grows: still only "Reviews".
+  expect($('[data-pulls-list] .ib-lhead')!.textContent).toBe('Reviews');
 
   // The projects' counts follow the view.
   await press(trigger);

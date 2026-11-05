@@ -70,6 +70,7 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -107,7 +108,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
   const postKey = !state.readOnly && thread.pull_keys?.length === 1 ? thread.pull_keys[0]! : null;
   const [postPull, setPostPull] = useState<InboxPull | null>(null);
-  // `pull_moved` on a post: the PR was pushed since it was read here. Read again from the forge, then offered at its new
+  // A post refused at its commit (`pull_commit_gone` on GitHub after a force-push, `pull_moved` on GitLab after any push;
+  // GitHub takes a commit still on the PR). Read again from the forge, then offered at its new
   // head (the review's comments ride the body, so they do not depend on the commit).
   const [moved, setMoved] = useState<'reading' | 'read' | 'failed' | null>(null);
   const [reread, setReread] = useState(0);
@@ -137,6 +139,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [message.id]);
   const phone = usePhone();
+  // This pane is Code review's own, so its diff headers offer Open in (the thread's project; nothing when the file is not there).
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [mode, setMode] = useState<RailMode>('walkthrough');
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const [current, setCurrent] = useState<number | null>(null);
@@ -703,6 +707,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -711,11 +716,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 mode={mode}
                 reveal={reveal}
                 viewed={viewedProp}
+                fileOpenIn={fileOpenIn}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
                 renderOverviewFigure={renderOverviewFigure}
                 highlight={highlight}
               />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : null}
         </div>

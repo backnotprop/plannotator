@@ -2750,6 +2750,18 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
 
+## Shape and links: a slot for a file's action (unreleased; additive)
+
+Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
+
+- `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
+- `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
+- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+- `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file, in `InlineMarkdown` and in a board's own text (`ShapeInline`). Without a provider the span draws as before. `ShapeSurface` stops passing it on while the board is annotating.
+- `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
+
+Two small changes come with them. Shape's diff popout gains a row above the patch when a host passes `fileAction`, which also clears the × from the patch's header. Esc on the board does nothing while a menu is open anywhere on the page, so the menu closes alone. Core's `ShapeRecord.project` is now `ShapeProject`, with an optional `worktree`; the JSON only gains that field, on boards written from a linked worktree.
+
 ## Shape: What to know (ui 0.62.0; not additive)
 
 Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.
