@@ -47,6 +47,7 @@ function machine(name: string): Machine {
   const dataDir = join(root, 'data');
   // A PATH of the stand-in and the system's git, never an agent; PLANNOTATOR_TEST_SANDBOX: no agent lookups at all.
   const env = {
+    HOME: root,
     PATH: `${bin}:/usr/bin:/bin`,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_TEST_SANDBOX: root,

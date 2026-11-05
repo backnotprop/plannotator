@@ -622,7 +622,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
     if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
-    // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
+    // Rule 8's table decides, by route: a write it has not classified, or calls `local`, never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     if (kind === "file") {
