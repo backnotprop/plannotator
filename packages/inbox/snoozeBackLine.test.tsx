@@ -20,6 +20,7 @@ const AGENT: InboxAuthor = { kind: 'agent', host: 'claude-code', session: 'ses_a
 const PERSON: InboxAuthor = { kind: 'person' };
 const ROOT = 'msg_1';
 const BACK = new Date(new Date().setHours(8, 0, 0, 0)).toISOString();
+/** Pinned on purpose: the approval names these exact words. */
 const WORDS = 'Back from snooze · 8:00 AM';
 
 function message(id: string, author: InboxAuthor, seq: number, extra: Partial<InboxMessageWire> = {}): InboxMessageWire {
@@ -194,20 +195,45 @@ test.skipIf(!hasDom)('the person replying during the visit ends "new", and the l
   expect(below(backLine(el)!)).toBe('msg_3');
 });
 
-test.skipIf(!hasDom)('the thread opens at the line, with nothing new too', async () => {
-  // happy-dom has no layout: the line sits far down the thread, with the message before it just above.
-  const offsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetTop');
-  Object.defineProperty(HTMLElement.prototype, 'offsetTop', {
-    configurable: true,
-    get(this: HTMLElement) {
-      if (this.hasAttribute('data-snooze-back-line')) return 900;
-      return this.nextElementSibling?.hasAttribute('data-snooze-back-line') ? 850 : 0;
-    },
+/**
+ * happy-dom has no layout. The line (the back line or the divider) sits at 900
+ * and the message above it at 850, `aboveHeight` tall, in a view 700 tall.
+ */
+function layout(aboveHeight: number) {
+  const isLine = (el: Element | null | undefined) => !!el && (el.hasAttribute('data-snooze-back-line') || el.hasAttribute('data-new-divider'));
+  const define = (target: object, key: string, get: (this: HTMLElement) => number) => {
+    const saved = Object.getOwnPropertyDescriptor(target, key);
+    Object.defineProperty(target, key, { configurable: true, get });
+    restore.push(() => {
+      if (saved) Object.defineProperty(target, key, saved);
+      else delete (target as Record<string, unknown>)[key];
+    });
+  };
+  define(HTMLElement.prototype, 'offsetTop', function () {
+    return isLine(this) ? 900 : isLine(this.nextElementSibling) ? 850 : 0;
   });
-  restore.push(() => {
-    if (offsetTop) Object.defineProperty(HTMLElement.prototype, 'offsetTop', offsetTop);
-    else delete (HTMLElement.prototype as unknown as Record<string, unknown>).offsetTop;
+  define(HTMLElement.prototype, 'offsetHeight', function () {
+    return isLine(this) ? 30 : isLine(this.nextElementSibling) ? aboveHeight : 0;
   });
-  const el = await render(agentLast());
-  expect(el.querySelector<HTMLElement>('.ib-pbody')!.scrollTop).toBe(844);
+  define(HTMLElement.prototype, 'clientHeight', () => 700);
+}
+
+const scrollTop = (el: HTMLElement) => el.querySelector<HTMLElement>('.ib-pbody')!.scrollTop;
+
+test.skipIf(!hasDom)('the thread opens at the back line, with the message above it while the line still fits below that message', async () => {
+  layout(400);
+  expect(scrollTop(await render(agentLast()))).toBe(844);
+});
+
+test.skipIf(!hasDom)('the message above too tall for the line to fit below it: the thread opens at the back line itself, with news too', async () => {
+  layout(680);
+  expect(scrollTop(await render(agentLast()))).toBe(894);
+  act(() => root!.unmount());
+  host!.remove();
+  expect(scrollTop(await render(withNews()))).toBe(894);
+});
+
+test.skipIf(!hasDom)('"New since you looked" with no return always opens at the message above it, however tall', async () => {
+  layout(5000);
+  expect(scrollTop(await render(withNews(), null))).toBe(844);
 });

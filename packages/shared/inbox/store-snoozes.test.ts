@@ -132,6 +132,36 @@ describe("snoozes in the store", () => {
     expect(store.snoozedThreads().has(root.thread_id)).toBe(true);
   });
 
+  test("an agent's archive and then its time: reopened or written in, the thread comes back with no return; while it runs, the snooze stays", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const make = (name: string) => {
+      const root = store.sendMessage({ project_id: project.id, author: agent(`ses_${name}`), body: "News", thread: name }).message;
+      store.setSnooze(root.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
+      store.resolveThread(root.id, true);
+      return root;
+    };
+    const reopened = make("reopened");
+    const written = make("written");
+    const running = make("running");
+    store.resolveThread(running.id, false, "person");
+    expect(store.snoozedThreads().has(running.thread_id)).toBe(true);
+    store.resolveThread(running.id, true);
+    t.go(2 * HOUR);
+    const entries = () => store.snoozes().map((s) => s.thread_id);
+    expect(entries()).toContain(reopened.thread_id);
+    store.resolveThread(reopened.id, false, "person");
+    expect(entries()).not.toContain(reopened.thread_id);
+    store.sendMessage({ project_id: project.id, author: agent("ses_written"), body: "One more thing", reply_to: written.id });
+    expect(entries()).not.toContain(written.thread_id);
+    // Not archived, past its time: the real return, and nothing an agent writes takes it away.
+    const plain = store.sendMessage({ project_id: project.id, author: agent("ses_plain"), body: "News", thread: "plain" }).message;
+    store.setSnooze(plain.thread_id, new Date(t.now().getTime() + HOUR).toISOString());
+    t.go(2 * HOUR);
+    store.sendMessage({ project_id: project.id, author: agent("ses_plain"), body: "More", reply_to: plain.id });
+    expect(entries()).toContain(plain.thread_id);
+  });
+
   test("`at` (Undo's earlier snooze) is a real time, not after now, and stored normalized", () => {
     const t = clock();
     const { store, project } = open(t.now);

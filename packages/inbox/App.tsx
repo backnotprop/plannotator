@@ -1046,6 +1046,7 @@ function Inbox() {
   const [replyFor, setReplyFor] = useState<string | null>(null);
   /** The thread pane on screen and whether anything covers it (ThreadPane's `onScreenChange`). */
   const threadOnScreenRef = useRef<{ threadId: string; covered: boolean } | null>(null);
+  const [openThreadCovered, setOpenThreadCovered] = useState(false);
   const notifications = useInboxNotifications({
     settings: settings?.notifications ?? null,
     // New questions ring the doorbell on their own rules (sound.ts), whatever notifications say.
@@ -4141,9 +4142,9 @@ function Inbox() {
   const [keptBack, setKeptBack] = useState<SnoozeBack | null>(null);
   const snoozeBack = snoozeBackAfter(keptBack, openThreadId, listedOpenRow);
   if (snoozeBack !== keptBack) setKeptBack(snoozeBack);
-  // The return under a thread already open (the opening look is on its way otherwise): the look comes once the
-  // window is in front, so a window in the background keeps the row's clock until the person is back.
-  const backUnderOpen = openThreadId && listedOpenRow?.snooze_back && !looking.has(openThreadId) ? openThreadId : null;
+  // The return under a thread already open (the opening look is on its way otherwise): the look comes once the window
+  // is in front and nothing covers the thread (seen on sight's rule), so until then the row keeps its clock.
+  const backUnderOpen = openThreadId && listedOpenRow?.snooze_back && !looking.has(openThreadId) && !openThreadCovered ? openThreadId : null;
   useEffect(() => {
     if (!backUnderOpen) return;
     let taken = false;
@@ -5756,6 +5757,7 @@ function Inbox() {
             covered={!!route.guide || updateDialog !== null || soundDialog === 'open' || agentNoteOpen || feedbackOpen || compose !== null}
             onScreenChange={(state) => {
               threadOnScreenRef.current = state;
+              setOpenThreadCovered(state?.covered ?? false);
             }}
             backLabel={fromCard ? 'Board' : listTitle}
             cardChip={fromCard ? <CardChip card={cards?.cards.find((c) => c.id === fromCard) ?? null} onOpen={backToCard} /> : undefined}

@@ -2967,8 +2967,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     if (!body) return;
     const divider = body.querySelector<HTMLElement>('[data-new-divider], [data-snooze-back-line]');
     const previous = divider?.previousElementSibling as HTMLElement | null | undefined;
-    // Not a long message held open just above (an unsent pick): opening at its top would leave the line off screen.
-    const above = previous && previous.offsetHeight <= body.clientHeight / 2 ? previous : null;
+    // The back line must be on screen: the message above it (held open by an unsent pick, say) stays in view only if the line still fits below it.
+    const above = previous && (!divider!.hasAttribute('data-snooze-back-line') || previous.offsetHeight + divider!.offsetHeight + 12 <= body.clientHeight) ? previous : null;
     body.scrollTop = divider ? Math.max(0, (above ? above.offsetTop : divider.offsetTop) - 6) : 0;
   }, [foldState, thread.thread_id]);
 

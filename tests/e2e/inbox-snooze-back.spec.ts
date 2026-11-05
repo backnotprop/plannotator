@@ -17,10 +17,9 @@
  *  - an agent archives a snoozed thread and the time passes: no stale
  *    "Snoozed until" line.
  *
- * Never sets HOME: the data dir, PLANNOTATOR_TEST_SANDBOX and the runner's
- * agent CLI stubs keep it off the real ones. PNGs land in
- * PLANNOTATOR_SNOOZE_BACK_SHOTS (default .local/proof/snooze-back). Build the
- * binary first (see inbox.spec.ts).
+ * HOME and the data dir are temp folders, as in inbox-snooze.spec.ts. PNGs land
+ * in PLANNOTATOR_SNOOZE_BACK_SHOTS (default .local/proof/snooze-back). Build
+ * the binary first (see inbox.spec.ts).
  */
 
 import { chromium, devices, expect, test, webkit, type Browser, type BrowserContext, type Page } from '@playwright/test';
@@ -35,6 +34,7 @@ const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
 const shots = resolve(process.env.PLANNOTATOR_SNOOZE_BACK_SHOTS ?? join(repo, '.local/proof/snooze-back'));
 
+/** Pinned on purpose: the approval names these exact words. */
 const WORDS = /^Back from snooze · \d{1,2}:\d{2} [AP]M$/;
 const LONG = ['The rollout, step by step.', ...Array.from({ length: 60 }, (_, i) => `Step ${i + 1}: the worker reads the event, checks the idempotency key, and writes the ledger row.`)].join('\n\n');
 
@@ -144,6 +144,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const dataDir = join(root, 'data');
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER,
@@ -458,21 +459,108 @@ test('an Unsnooze before its time is no return: no line', async () => {
   await close(page);
 });
 
-test('a long message held open above the last one (an unsent pick): the thread still opens at the line', async () => {
-  const { page } = world;
-  const asks = `${LONG}\n\n:::question\nShip it on Monday?\n\n- [ ] Yes\n- [ ] No\n:::`;
-  const t = await thread([asks, 'Staging is green.']);
+/** A first message with a question, its pick saved and not sent: it stays open however long it is. */
+function asking(steps: number): string {
+  return [...LONG.split('\n\n').slice(0, steps + 1), ':::question\nShip it on Monday?\n\n- [ ] Yes\n- [ ] No\n:::'].join('\n\n');
+}
+
+async function pickUnsent(t: { id: string; root: string }): Promise<void> {
   const read = (await (await fetch(`${world.url}/api/inbox/threads/${t.id}`)).json()) as { thread: { messages: { questions?: { key: string; kind: string; prompt: string; revision: number }[] }[] } };
   const question = read.thread.messages[0]!.questions![0]!;
   const picked = await post(`/api/inbox/messages/${t.root}/picks`, { questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: question.kind, prompt: question.prompt, selected: ['Yes'] } }] });
   expect(picked.status, await picked.clone().text()).toBe(200);
+}
+
+async function openBack(page: Page, t: { id: string }): Promise<void> {
   await snooze(t.id);
   await expect.poll(async () => Boolean((await storeRow(t.id)).snooze_back), { timeout: 20_000 }).toBe(true);
   await page.goto(`${world.url}/#thread=${t.id}`);
   await expect(line(page)).toHaveText(WORDS);
+}
+
+test('a held message too tall for the back line to fit below it: the thread opens at the line', async () => {
+  const { page } = world;
+  const t = await thread([asking(60), 'Staging is green.']);
+  await pickUnsent(t);
+  await openBack(page, t);
   expect(await messageBelow(page)).toBe(t.last);
   await expect(line(page)).toBeInViewport();
   await close(page);
+});
+
+test('a held message with room for the back line below it: the whole message and the line both show', async () => {
+  const { page } = world;
+  const t = await thread([asking(6), LONG]);
+  await pickUnsent(t);
+  await openBack(page, t);
+  await expect(line(page)).toBeInViewport();
+  await expect(page.locator(`[data-message-article="${t.root}"]`)).toBeInViewport({ ratio: 1 });
+  await shot(page, 'held-pick-with-room');
+  await close(page);
+});
+
+test('no snooze: "New since you looked" still opens at the top of the message above it, however tall', async () => {
+  const { page } = world;
+  for (const steps of [6, 60]) {
+    const t = await thread([asking(steps)]);
+    await pickUnsent(t);
+    await world.agent.send({ project_path: t.project, reply_to: t.root, body: LONG });
+    await page.goto(`${world.url}/#thread=${t.id}`);
+    const divider = page.locator('[data-new-divider]');
+    await expect(divider).toHaveText('New since you looked');
+    const { scrollTop, wanted } = await divider.evaluate((el) => ({ scrollTop: el.closest('.ib-pbody')!.scrollTop, wanted: (el.previousElementSibling as HTMLElement).offsetTop - 6 }));
+    expect(Math.abs(scrollTop - wanted)).toBeLessThanOrEqual(1);
+    await close(page);
+  }
+});
+
+test('New message open over the thread at the return: the look waits until it closes', async () => {
+  const { page } = world;
+  const t = await thread(['The rollout plan is ready.', 'Staging is green.']);
+  await page.goto(`${world.url}/#thread=${t.id}`);
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await snooze(t.id, 3000);
+  await page.getByRole('button', { name: 'New message' }).click();
+  await expect(page.locator('[data-snooze-line]')).toBeVisible();
+  await expect.poll(async () => Boolean((await storeRow(t.id)).snooze_back), { timeout: 20_000 }).toBe(true);
+  await expect(line(page)).toHaveCount(1, { timeout: 20_000 });
+  await page.waitForTimeout(1500);
+  expect((await storeRow(t.id)).snooze_back).toBeTruthy();
+  await page.keyboard.press('Escape');
+  await expect.poll(async () => (await storeRow(t.id)).snooze_back).toBeFalsy();
+  await expect(line(page)).toHaveText(WORDS);
+  await close(page);
+});
+
+test('a message waiting below the view at the return stays unread after the look', async () => {
+  const { page } = world;
+  const t = await thread(['The rollout plan is ready.', LONG]);
+  await page.goto(`${world.url}/#thread=${t.id}`);
+  await expect(page.locator('section.ib-pane')).toBeVisible();
+  await snooze(t.id, 3000);
+  const arrived = await world.agent.send({ project_path: t.project, reply_to: t.root, body: 'Production is at 10%.' });
+  await expect(page.locator(`[data-message-article="${arrived.message_id}"]`)).toBeAttached();
+  await expect(line(page)).toHaveText(WORDS, { timeout: 20_000 });
+  await expect.poll(async () => (await storeRow(t.id)).snooze_back).toBeFalsy();
+  await page.waitForTimeout(500);
+  expect((await storeRow(t.id)).unread).toBe(true);
+  await close(page);
+});
+
+test('a phone in WebKit: a held message taller than the view gives way to the back line', async () => {
+  test.setTimeout(120_000);
+  const browser = await webkit.launch();
+  const context = await browser.newContext({ ...devices['iPhone 15'], colorScheme: 'light' });
+  const phone = await context.newPage();
+  try {
+    const t = await thread([asking(6), LONG]);
+    await pickUnsent(t);
+    await openBack(phone, t);
+    await expect(line(phone)).toBeInViewport();
+    await shot(phone, 'phone-held-pick');
+  } finally {
+    await browser.close();
+  }
 });
 
 test('a phone in WebKit: on screen when the thread opens, with news, the agent last, the person last, a very long last message and one message', async () => {
@@ -541,5 +629,19 @@ test('an agent archives a snoozed thread and the time passes: no stale "Snoozed 
   const row2 = await storeRow(t.id);
   expect(row2.snoozed).toBeFalsy();
   expect(row2.snooze_back).toBeFalsy();
+  await close(page);
+});
+
+test('an agent archives a snoozed thread, the time passes, the person unarchives: no clock and no line', async () => {
+  const { page } = world;
+  const t = await thread(['The rollout plan is ready.', 'Staging is green.']);
+  await snooze(t.id, 1500);
+  await world.agent.resolve(t.root);
+  await page.waitForTimeout(2500);
+  expect((await post(`/api/inbox/messages/${t.root}/resolve`, { resolved: false })).status).toBe(200);
+  expect((await storeRow(t.id)).snooze_back).toBeFalsy();
+  await page.goto(`${world.url}/#thread=${t.id}`);
+  await expect(page.locator('section.ib-pane [data-message-article]').first()).toBeVisible();
+  await expect(line(page)).toHaveCount(0);
   await close(page);
 });

@@ -1309,6 +1309,16 @@ export class InboxStore {
     }
   }
 
+  /**
+   * Past its time, the entry goes: a look took the return, or an archived thread
+   * came back (reopened or written in) for that reason and not as a return, so
+   * no clock and no "Back from snooze". A snooze still running stays.
+   */
+  private endLapsedSnooze(threadId: string): void {
+    const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
+    if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
+  }
+
   /** A thread's reply draft was saved or deleted: its row's `unsent` (and section) changed with no store line. */
   onReplyDraftChange(listener: (threadId: string) => void): () => void {
     this.replyDraftListeners.add(listener);
@@ -3136,8 +3146,7 @@ export class InboxStore {
       this.appendMessage({ ...root, person_seen_seq: latestAgent }, at);
     }
     // A look reads a thread back from its snooze (its small clock goes); before the snooze's time it does nothing to it.
-    const snooze = this.snoozeList.find((entry) => entry.thread_id === threadId);
-    if (snooze && !inboxSnoozeRunning(snooze.until, this.now())) this.endSnooze(threadId);
+    this.endLapsedSnooze(threadId);
     const row = this.listRow(threadId);
     if (!row) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     return row;
@@ -3743,6 +3752,7 @@ export class InboxStore {
       );
     }
     // A reply from the agent reopens nothing: a resolved thread stays resolved.
+    if (this.messages.get(message.thread_id)?.resolved_at) this.endLapsedSnooze(message.thread_id);
     return { message: this.wire(message), replayed: false, ...(naming ? { naming } : {}), ...(doneIds.length > 0 ? { done: doneIds } : {}) };
   }
 
@@ -4800,6 +4810,7 @@ export class InboxStore {
       );
     }
     if (resolved && by === "person") this.endSnooze(root.id);
+    if (!resolved && isResolved) this.endLapsedSnooze(root.id);
     return this.threadSummary(root.id)!;
   }
 
