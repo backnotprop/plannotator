@@ -8179,9 +8179,17 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-layer .shp-head-start { display: flex; align-items: center; gap: 2px; }
 .ib-shape-back { flex: none; }
 [data-shape-boards-menu] .ib-rj-row { padding-left: calc(8px + min(var(--ib-board-depth, 0), 6) * 14px); }
+/* A phone with the way back or the list: they and the close share the top line, and the title takes the line under
+   them, the full width, two lines at most (the list has every title in full). */
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) { flex-wrap: wrap; row-gap: 6px; }
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) > h1 {
+  order: 3; flex-basis: 100%; overflow: hidden; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow-wrap: anywhere;
+}
+.ib-shape-layer .shp-root.phone .shp-title-row:has(.ib-shape-back, [data-shape-boards]) > .shp-head-side { margin-left: auto; }
+.ib-shape-layer .shp-root.phone .shp-head:has(.ib-shape-back, [data-shape-boards]) .shp-claim { margin-left: 0; }
 .ib-sm-h { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--ib-hair); font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-sm-h b { font-weight: 650; }
-.ib-sm-by { color: var(--muted-foreground); }
+.ib-sm-h b { font-weight: 650; flex: none; white-space: nowrap; }
+.ib-sm-by { color: var(--muted-foreground); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-sm-b { display: flex; flex-direction: column; gap: 10px; padding: 12px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; }
 .ib-sm-at { font: var(--ib-fs-11-5, 11.5px) var(--font-mono, ui-monospace, monospace); color: var(--muted-foreground); }
 .ib-sm-box[data-over-board] .ib-sm-at { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

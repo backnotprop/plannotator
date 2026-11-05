@@ -541,29 +541,49 @@ test('800 wide and on a phone: the arrow, the list, and a tap on a part offers t
   await page.keyboard.press('Escape');
   await page.setViewportSize({ width: 1440, height: 900 });
 
-  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, colorScheme: 'light', reducedMotion: 'reduce', baseURL: world.url });
-  const tab = await phone.newPage();
-  try {
-    await tab.goto(page.url());
-    await expect(board(tab)).toBeVisible({ timeout: 30_000 });
-    await shot(tab, '12-phone-board', ['light']);
-    await startAnnotating(tab);
-    await part(tab, 'next').tap();
-    await expect(showMeButton(tab)).toBeVisible();
-    for (const name of ['Ask', 'Change it', 'Show me']) await expect(tab.getByRole('button', { name, exact: true }).last()).toBeInViewport();
-    await shot(tab, '13-phone-box', ['light', 'dark']);
-    await showMeButton(tab).tap();
-    await expect(waitBox(tab)).toBeVisible();
-    await expect(waitBox(tab)).toBeInViewport();
-    await shot(tab, '14-phone-wait', ['light']);
-    await expect(boardBack(tab).or(boardsButton(tab)).first()).toBeVisible({ timeout: 30_000 });
-    await expect(waitBox(tab)).toHaveCount(0, { timeout: 30_000 });
-    await shot(tab, '15-phone-new-board', ['light']);
-    await boardsButton(tab).tap();
-    await expect(boardsMenu(tab).locator('[data-on]')).toBeInViewport();
-    await shot(tab, '16-phone-list', ['light']);
-  } finally {
-    await phone.close();
+  for (const width of [390, 320]) {
+    const phone = await browser.newContext({ viewport: { width, height: 844 }, deviceScaleFactor: 2, hasTouch: true, isMobile: true, colorScheme: 'light', reducedMotion: 'reduce', baseURL: world.url });
+    const tab = await phone.newPage();
+    try {
+      await tab.goto(page.url());
+      await expect(board(tab)).toBeVisible({ timeout: 30_000 });
+      if (width === 390) await shot(tab, '12-phone-board', ['light']);
+      await startAnnotating(tab);
+      await part(tab, 'next').tap();
+      await expect(showMeButton(tab)).toBeVisible();
+      for (const name of ['Ask', 'Change it', 'Show me']) await expect(tab.getByRole('button', { name, exact: true }).last()).toBeInViewport();
+      if (width === 390) await shot(tab, '13-phone-box', ['light', 'dark']);
+      world.hold = gate();
+      await showMeButton(tab).tap();
+      await expect(waitBox(tab)).toBeVisible();
+      await expect(waitBox(tab)).toBeInViewport();
+      await shot(tab, `14-phone-wait-${width}`, ['light', 'dark']);
+      world.hold.release();
+      world.hold = null;
+      await expect(waitBox(tab)).toHaveCount(0, { timeout: 30_000 });
+      // The way back, the list and the close share the top line; the title is under them, never behind them.
+      await expect(boardBack(tab)).toBeVisible();
+      const head = board(tab).locator('.shp-title-row');
+      let heading = { x: 0, y: 0, width: 0, height: 0 };
+      await expect(async () => {
+        heading = (await head.locator('h1').boundingBox())!;
+        for (const control of [boardBack(tab), boardsButton(tab), board(tab).locator('.shp-close')]) {
+          const box = (await control.boundingBox())!;
+          expect(box.y + box.height).toBeLessThanOrEqual(heading.y + 1);
+        }
+        expect(heading.height).toBeLessThan(2 * 27 * 1.1 + 4);
+      }).toPass({ timeout: 10_000 });
+      await shot(tab, `15-phone-new-board-${width}`, ['light', 'dark']);
+      await boardsButton(tab).tap();
+      await expect(boardsMenu(tab).locator('[data-on]')).toBeInViewport();
+      // The open list is under the title, not over it.
+      const menu = (await boardsMenu(tab).boundingBox())!;
+      expect(menu.y).toBeGreaterThanOrEqual(heading.y + heading.height - 1);
+      await shot(tab, `16-phone-list-${width}`, ['light', 'dark']);
+      await tab.keyboard.press('Escape');
+    } finally {
+      await phone.close();
+    }
   }
 });
 

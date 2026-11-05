@@ -14,6 +14,9 @@ import { boardRows, type BoardRow } from '../review-drawing/showMeModel';
 function BoardsMenu({ rows, current, onGo }: { rows: readonly BoardRow[]; current: string; onGo: (id: string) => void }) {
   const [open, setOpen] = useState(false);
   const list = useRef<HTMLDivElement>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  // On the board's phone layout the list opens under the title, not over it (the review has no sidebar to ask).
+  const anchor = () => (trigger.current?.closest('.shp-root.phone') ? trigger.current.closest<HTMLElement>('.shp-title-row') : null) ?? trigger.current;
   const at = rows.findIndex((row) => row.id === current);
   // Many boards: the menu opens with this one in view.
   useEffect(() => {
@@ -23,13 +26,13 @@ function BoardsMenu({ rows, current, onGo }: { rows: readonly BoardRow[]; curren
   }, [open]);
   return (
     <DropdownMenu modal={false} open={open} onOpenChange={setOpen}>
-      <DropdownMenuTrigger render={<button type="button" className="ib-rj-btn" aria-label={`Boards: ${at + 1} of ${rows.length}`} data-shape-boards="" />}>
+      <DropdownMenuTrigger render={<button ref={trigger} type="button" className="ib-rj-btn" aria-label={`Boards: ${at + 1} of ${rows.length}`} data-shape-boards="" />}>
         <span className="ib-rj-lead">
           {at + 1} of {rows.length}
         </span>
         <Icon name="chevD" size={13} className="ib-rj-chev" />
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" sideOffset={6} className="ib-rj-menu" aria-label="Boards" data-review-jump-menu="boards" data-shape-boards-menu="">
+      <DropdownMenuContent align="end" sideOffset={6} anchor={anchor} className="ib-rj-menu" aria-label="Boards" data-review-jump-menu="boards" data-shape-boards-menu="">
         <div ref={list} className="ib-rj-list">
           {rows.map((row) => (
             <DropdownMenuItem
