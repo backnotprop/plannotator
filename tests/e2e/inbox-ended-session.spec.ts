@@ -417,3 +417,41 @@ test('handed on, the new owner took it and ended without writing: a later reply 
   await shot('8-next-reply-after-move');
   expect(world.errors).toEqual([]);
 });
+
+test('handed on, the new owner still there, the asker ended: a reply to the asker aimed at a third session stays one reply, and the next goes to the new owner', async () => {
+  test.setTimeout(240_000);
+  const { page } = world;
+  const pane = page.locator('section.ib-pane');
+  const third = world.connections.find((c) => c.session === 'pi-session-late')!;
+  const asker = new Connection('pi-session-asker-2', Date.now() - 30_000);
+  const owner = new Connection('pi-session-owner', Date.now() - 30_000, 'Ledger retry owner');
+  world.connections.push(owner);
+  await page.waitForTimeout(1_500);
+  const asked = await world.pi.send({ project_path: world.ledger, agent_session: asker.session, subject: 'Who keeps the ledger sync', body: 'Who should keep this?' } as never, { wakes: true });
+  const { port } = registry();
+  const inbox = `http://127.0.0.1:${port}/api/inbox`;
+  const { serverSession } = (await (await fetch(`${inbox}/health`)).json()) as { serverSession: string };
+  const post = async (path: string, body: unknown) => {
+    const response = await fetch(`${inbox}${path}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ serverSession, ...(body as object) }) });
+    expect(response.status, await response.clone().text()).toBe(200);
+    return response.json() as Promise<{ reply: { id: string; took_over?: boolean } }>;
+  };
+  const handed = await post(`/messages/${asked.message_id}/reply`, { idempotency_key: 'keep-1', words: 'Yours now.', tags: [{ host: 'pi', session: owner.session, mode: 'handoff', label: 'Ledger retry owner' }] });
+  await owner.deliver((await waitFor('the hand-off to reach the new owner', () => owner.commands.find((c) => c.id === handed.reply.id), 30_000)).id);
+  await asker.stop();
+  await expect.poll(async () => ((await (await fetch(`${inbox}/sessions?session=${asker.session}`)).json()) as { session: { live: boolean } }).session.live, { timeout: 100_000, intervals: [2_000] }).toBe(false);
+
+  const aimed = await post(`/messages/${asked.message_id}/reply`, { idempotency_key: 'keep-2', words: 'A word for the third session.', to: { host: 'pi', session: third.session } });
+  expect(aimed.reply.took_over).toBeUndefined();
+  await waitFor('the aimed reply handed to the third session', () => third.commands.find((c) => c.id === aimed.reply.id));
+
+  await page.goto(`${world.url}#thread=${asked.thread_id as string}`);
+  await expect(pane.locator('[data-thread-owner]')).toContainText('Ledger retry owner');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Reply', exact: true }).click();
+  await pane.locator('textarea').first().fill('Thanks, carry on.');
+  await shot('9-owner-keeps-it');
+  await pane.locator('.ib-pfoot').getByRole('button', { name: 'Send', exact: true }).click();
+  await waitFor('the next reply handed to the new owner', () => owner.commands.find((c) => c.body.includes('Thanks, carry on.')));
+  expect(third.commands.some((c) => c.body.includes('Thanks, carry on.'))).toBe(false);
+  expect(world.errors).toEqual([]);
+});
