@@ -76,7 +76,7 @@ export const KindIcon = ({ kind }: { kind: ShapeRefKind }) => (
 );
 
 /** The References tab: the board's references, by number. */
-export function RefList({ onShow, canOpen }: { onShow: (n: number) => void; canOpen: (ref: ShapeRef) => boolean }) {
+export function RefList({ onShow, canOpen, fileAction }: { onShow: (n: number) => void; canOpen: (ref: ShapeRef) => boolean; fileAction?: (ref: ShapeRef) => React.ReactNode }) {
   const r = useContext(RefsCtx);
   if (!r.refs.length) return <p className="shp-empty-note">This board cites nothing yet.</p>;
   return (
@@ -96,6 +96,7 @@ export function RefList({ onShow, canOpen }: { onShow: (n: number) => void; canO
           ) : canOpen(ref) ? (
             <button type="button" className="shp-ref-open" onClick={() => r.onOpen(ref.n)}>Open</button>
           ) : null}
+          {fileAction?.(ref)}
         </li>
       ))}
     </ol>
@@ -128,6 +129,7 @@ export function RefPeek({
   onOpenLink,
   onEnter,
   onLeave,
+  fileAction,
 }: {
   reference: ShapeRef;
   anchor: DOMRect;
@@ -143,6 +145,8 @@ export function RefPeek({
   onOpenLink?: () => void;
   onEnter: () => void;
   onLeave: () => void;
+  /** The host's control beside the file this reference names. */
+  fileAction?: React.ReactNode;
 }) {
   const box = useRef<HTMLDivElement>(null);
   const [place, setPlace] = useState<{ left: number; top: number; origin: string; side: string; dot: number } | null>(null);
@@ -241,6 +245,7 @@ export function RefPeek({
           {!isLink && canOpen && <button type="button" tabIndex={-1} onClick={onOpen}>{OPEN_WORD[reference.kind]}</button>}
           {isLink && picture && <button type="button" tabIndex={-1} onClick={onOpen}>View</button>}
           {isLink && <button type="button" tabIndex={-1} onClick={onOpenLink}>{reference.kind === 'pr' ? 'Open pull request' : 'Open link'} ↗</button>}
+          {fileAction}
         </div>
       </div>
     </div>
