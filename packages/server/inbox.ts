@@ -3911,7 +3911,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const submission = await submitForgeReview(options.prRuntime ?? prCommandRuntime, ref, headSha, action, text, fileComments, fileLevelComments);
           if (submission.status === "complete") {
             postedReviews.add(fingerprint);
-            pullOwners.markPosted(pull.key);
+            pullOwners.markPosted(pull.key, headSha);
             while (postedReviews.size > PULL_REVIEW_POSTED_MAX) postedReviews.delete(postedReviews.values().next().value!);
           }
           // The list reads the forge again on its next look: the review moved the PR's state there.

@@ -312,12 +312,30 @@ describe("a teammate's PR assigned to the person", () => {
     const pull = pr({ number: 1, mine: false, assigned: true });
     const stacks = inboxPullStacks([pull]);
     const link = { via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent: null, last: null, guide: null } as InboxPullLink;
-    const threaded = (at: string) => inboxReviewRows({ threads: [review({ thread_id: "t", reviewed_at: "2026-11-04T10:00:00.000Z" })], stacks, links: { [pull.key]: link }, pulls: [pull], posted: new Map([[pull.key, at]]) })[0]!;
+    const threaded = (at: string) => inboxReviewRows({ threads: [review({ thread_id: "t", reviewed_at: "2026-11-04T10:00:00.000Z" })], stacks, links: { [pull.key]: link }, pulls: [pull], posted: new Map([[pull.key, { at, head: null }]]) })[0]!;
     expect(threaded("2026-11-04T11:00:00.000Z").move).toBe("waiting");
     expect(threaded("2026-11-04T09:00:00.000Z")).toMatchObject({ move: "on_you", reason: "review_ready" });
-    const bare = (p: InboxPull) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([p]), links: {}, pulls: [p], posted: new Map([[p.key, "2026-11-04T11:00:00.000Z"]]) })[0]!;
+    const bare = (p: InboxPull) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([p]), links: {}, pulls: [p], posted: new Map([[p.key, { at: "2026-11-04T11:00:00.000Z", head: null }]]) })[0]!;
     expect(bare(pull)).toMatchObject({ reviewed: false, move: "waiting", reason: "others" });
     expect(bare({ ...pull, requested: true })).toMatchObject({ move: "on_you", reason: "requested" });
+  });
+
+  test("a thread on two of them leaves On you only once both are posted", () => {
+    const one = pr({ number: 1, mine: false, assigned: true });
+    const two = pr({ number: 2, mine: false, assigned: true, head: "other" });
+    const link = { via: "owner", thread_id: "t", thread_subject: null, project_id: "p", agent: null, last: null, guide: null } as InboxPullLink;
+    const at = { at: "2026-11-04T11:00:00.000Z", head: null };
+    const rowOf = (posted: [string, typeof at][]) => inboxReviewRows({ threads: [review({ thread_id: "t", reviewed_at: "2026-11-04T10:00:00.000Z" })], stacks: inboxPullStacks([one, two]), links: { [one.key]: link, [two.key]: link }, pulls: [one, two], posted: new Map(posted) }).find((row) => row.id === "t")!;
+    expect(rowOf([[one.key, at]])).toMatchObject({ move: "on_you", reason: "review_ready" });
+    expect(rowOf([[one.key, at], [two.key, at]])).toMatchObject({ move: "waiting" });
+  });
+
+  test("with no thread, a push past the posted review puts it back on the person; a record with no head still counts", () => {
+    const pull = pr({ number: 1, mine: false, assigned: true, head_sha: "new" });
+    const rowOf = (head: string | null) => inboxReviewRows({ threads: [], stacks: inboxPullStacks([pull]), links: {}, pulls: [pull], posted: new Map([[pull.key, { at: "2026-11-04T11:00:00.000Z", head }]]) })[0]!;
+    expect(rowOf("old")).toMatchObject({ move: "on_you", reason: "assigned" });
+    expect(rowOf("new")).toMatchObject({ move: "waiting", reason: "others" });
+    expect(rowOf(null)).toMatchObject({ move: "waiting", reason: "others" });
   });
 });
 

@@ -1533,8 +1533,9 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   // A reply sent from the view takes nothing off the screen, even a message that was new when it opened.
   const replying = await claude.send({ project_path: world.projects.web, thread: 'replying', subject: 'Replying', body: 'New before the review.' });
   await reviewFor('replying', 'Replying review');
+  // Straight in, with no reload: a reload after the first open could land after that open marked it read.
+  await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&thread=${replying.thread_id}`);
-  await page.reload();
   await expect(page.getByText('New before the review.')).toBeVisible();
   await page.getByRole('button', { name: 'Reply', exact: true }).last().click();
   const reply = page.getByRole('textbox', { name: 'Reply to Claude Code' });
