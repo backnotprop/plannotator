@@ -2379,6 +2379,8 @@ pre code.pn-code[data-keep-layout] {
 .ib-esc { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-esc kbd { font-family: var(--font-sans); font-size: var(--ib-fs-11, 11px); border: 1px solid var(--border); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; }
 @media (max-width: 560px), (pointer: coarse) { .ib-esc { display: none; } }
+.ib-route-acts { flex-wrap: wrap; }
+.ib-route-acts .ib-btn { max-width: 100%; }
 @media (max-width: 560px) { .pn-inbox .ib-route-acts .ib-btn.ib-pri { flex: 1; justify-content: center; } }
 @media (prefers-reduced-motion: no-preference) {
   .ib-route { animation: ib-route-in 140ms ease-out; }
@@ -8162,6 +8164,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-shape-find { width: 46vw; }
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
+}
+
+/* "Session ended" on a row: quiet, beside the row's own words. */
+.ib-rended { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
+.ib-row .ib-cw:has(.ib-rended) { gap: 10px; }
+.ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
+.ib-rended + .ib-c { margin-left: 8px; }
+
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+.ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
 }
 
 /* Show me in the code review (approval "shape-in-code-review", mock ac2; packages/inbox/review-drawing). The box, the

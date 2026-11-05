@@ -137,6 +137,14 @@ export function laidOutChildren(row: Element): HTMLElement[] {
 }
 
 /**
+ * The children that must share a line: not one that always takes its own (`flex-basis: 100%`, a phone's Send to
+ * another session and Archive), so those two never cost the open questions their words.
+ */
+function sameLineChildren(row: Element): HTMLElement[] {
+  return laidOutChildren(row).filter((el) => getComputedStyle(el).flexBasis !== '100%');
+}
+
+/**
  * Tries each way in turn on the page itself (before paint: the caller runs in
  * a layout effect) and leaves the button drawn the first way that keeps the
  * row on one line; none does: the last. `apply` draws one way on the button.
@@ -148,7 +156,7 @@ export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], ap
   if (buttons.getBoundingClientRect().width <= 0 || candidates.length === 0) return null;
   for (const fit of candidates) {
     apply(fit);
-    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
+    if (onOneLine(sameLineChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
   }
   return candidates[candidates.length - 1]!;
 }
@@ -204,7 +212,7 @@ export function onOneRow(mids: readonly number[]): boolean {
 }
 
 function rowMids(row: Element): number[] {
-  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => laidOutChildren(group));
+  const parts = [...row.querySelectorAll<HTMLElement>('[data-foot-buttons], [data-foot-status]')].flatMap((group) => sameLineChildren(group));
   return parts
     .map((el) => el.getBoundingClientRect())
     .filter((r) => r.width > 0)
