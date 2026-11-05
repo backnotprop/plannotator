@@ -45,7 +45,7 @@ export function SendToAnotherSession({
 }: {
   messageId: string;
   ended: { host: string; session: string };
-  /** The sessions this message already reaches (its tags): moving it to one would deliver it twice. */
+  /** The sessions that already took this message through a tag: moving it to one would deliver it twice. */
   taken?: readonly string[];
   project: string;
   live: LiveSessionsModel | null;
@@ -104,7 +104,7 @@ export function SendToAnotherSession({
       focusAfterMove(messageId);
     } catch (cause) {
       // The session came back as the person moved it: nothing to move, and the thread's line says where it is now.
-      if (cause instanceof InboxApiError && cause.code === 'not_addressed') {
+      if (cause instanceof InboxApiError && cause.code === 'session_still_live') {
         setOpen(false);
         await onMoved();
         focusAfterMove(messageId);

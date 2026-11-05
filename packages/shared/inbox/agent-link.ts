@@ -41,6 +41,8 @@ import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   INBOX_SEND_NOW_POLL_FIELD,
+  INBOX_STEER_POLLS_POLL_FIELD,
+  inboxClaimName,
   INBOX_TAGS_POLL_FIELD,
   INBOX_TOOL_NAME,
   inboxHealthPeeks,
@@ -93,13 +95,12 @@ function rememberedToolsFileOf(dataDir: string): string {
 }
 
 /**
- * The claim folder of one delivery. A reply that tags agents goes to several
- * sessions, which may share this data dir (two Pi sessions, Pi and OpenCode):
- * a tagged session's claim names its session too, so each is delivered once.
+ * The claim folder of one delivery. A reply can go to several sessions, which may share this data dir (two Pi
+ * sessions, Pi and OpenCode): a reply that tags agents, or one moved after its session stopped holding the claim. So
+ * the claim names the session too, and each is delivered once.
  */
-function claimDirOf(dataDir: string, replyId: string, taggedSession?: string | null): string {
-  const name = taggedSession ? `${replyId}.${taggedSession.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}` : replyId;
-  return join(dataDir, "inbox", "claims", name);
+function claimDirOf(dataDir: string, replyId: string, session: string): string {
+  return join(dataDir, "inbox", "claims", inboxClaimName(replyId, session));
 }
 
 /** One session's lease on one host: which of its processes polls and delivers. */
@@ -734,6 +735,7 @@ export class InboxWake {
         started_at: this.startedAt,
         ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
         ...(this.steerable ? { [INBOX_SEND_NOW_POLL_FIELD]: true } : {}),
+        [INBOX_STEER_POLLS_POLL_FIELD]: true,
         // Tags (approval "inbox-tag-agents"): this connection words a reply it was tagged in truthfully.
         [INBOX_TAGS_POLL_FIELD]: true,
         // What this process loaded (additive): the Inbox says when the session runs an older one.
@@ -796,7 +798,12 @@ export class InboxWake {
     }
     // The person may have moved to another process since the last tick.
     if (this.disposed || !this.holdLease(Date.now())) return;
-    const claim = claimDirOf(this.connection.dataDir, command.id, command.tagged ? this.sessionId : null);
+    // An older version's claim, by the reply id alone: that process took it (the Inbox removes it when it moves the reply).
+    if (!command.tagged && existsSync(join(this.connection.dataDir, "inbox", "claims", command.id))) {
+      this.settle(command.id);
+      return;
+    }
+    const claim = claimDirOf(this.connection.dataDir, command.id, this.sessionId);
     try {
       mkdirSync(join(claim, ".."), { recursive: true, mode: 0o700 });
       mkdirSync(claim, { mode: 0o700 });

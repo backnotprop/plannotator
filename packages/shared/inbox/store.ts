@@ -106,7 +106,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
-import { inboxAckLine } from "./connection";
+import { inboxAckLine, inboxClaimName } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -6005,51 +6005,61 @@ export class InboxStore {
    * Refused once delivered (`already_delivered`); `to` null means the chosen
    * session is not live (`session_not_live`). The same session writes nothing.
    *
-   * `targetEnded`: the server read that the session it waits on has ended (only a waking session can be known to). A
-   * plain reply moves only then, and an addressed one is refused when it reads false: a session still there has it on
-   * its way (`not_addressed`). A plain reply a read already settled, or a session it already tags, is refused as taken.
-   * A plain reply takes the earlier ones saved for that session with it, so none stays owed to it with no line saying so.
-   * `tookOver`: the session the reply answers had ended, so the moved reply takes its place (`took_over`).
+   * `targetLive`: the server read that the session it waits on is still there, so it stays on its way
+   * (`session_still_live`). `tookOver`: the session the reply answers has ended (only a waking session can be known to),
+   * so the moved reply takes its place (`took_over`); a plain reply moves only then. A plain reply a read already
+   * settled, or a session that already took it through a tag, is refused as taken. What was saved earlier for the same
+   * session goes with it, so none stays owed there with no line saying so. A move is a new delivery for the session it
+   * reaches: an old claim on it does not stand.
    */
-  readdressMessage(messageId: string, to: InboxAddressee | null, options: { targetEnded?: boolean; tookOver?: boolean } = {}): InboxMessage {
+  readdressMessage(messageId: string, to: InboxAddressee | null, options: { targetLive?: boolean; tookOver?: boolean } = {}): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    if (message.author.kind !== "person" || (!message.to && options.targetEnded !== true) || isInboxNote(message)) {
-      throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
-    }
+    const notAddressed = () => new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
+    if (message.author.kind !== "person" || isInboxNote(message)) throw notAddressed();
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
     const taken = () => new InboxError("already_delivered", "That session already took this message.");
     const checkedSeq = this.messages.get(message.thread_id)?.agent_checked_seq ?? 0;
     if (!message.to && checkedSeq >= (this.messageSeq.get(message.id) ?? 0)) throw taken();
     if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
-    if (tagOf(message, to.session)) throw taken();
+    const tag = tagOf(message, to.session);
+    if (tag?.delivery && !tag.handed_away) throw taken();
     if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
-    if (message.to && options.targetEnded === false) {
-      throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
-    }
+    if (options.targetLive) throw new InboxError("session_still_live", "That session is still running, so it still gets this. Nothing was changed.");
+    if (!message.to && !options.tookOver) throw notAddressed();
     const at = this.stamp();
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
-    const moved = (m: InboxMessage): InboxMessage => ({
-      ...m,
-      to: { host: to.host, session: to.session },
-      deliver_now_at: null,
-      deliver_now_by: null,
-      wait_started_at: null,
-      ...(options.tookOver ? { took_over: true } : {}),
-    });
-    if (!message.to) {
-      const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
-      const askedSession = asked?.author.kind === "agent" ? asked.author.session : null;
-      for (const earlier of this.threadMessages(message.thread_id)) {
-        if (earlier.id === message.id) break;
-        if (earlier.author.kind !== "person" || earlier.to || earlier.delivery || hasTags(earlier) || isInboxNote(earlier) || earlier.tidy) continue;
-        const answers = earlier.reply_to ? this.messages.get(earlier.reply_to) : undefined;
-        if (!askedSession || answers?.author.kind !== "agent" || answers.author.session !== askedSession) continue;
-        if (checkedSeq >= (this.messageSeq.get(earlier.id) ?? 0)) continue;
-        this.appendMessage(moved(earlier), at);
+    const moved = (m: InboxMessage): InboxMessage => {
+      for (const name of [m.id, inboxClaimName(m.id, to.session)]) {
+        try {
+          rmSync(join(this.dir, "claims", name), { recursive: true, force: true });
+        } catch {
+          // A leftover claim: that session reports the reply instead of delivering it.
+        }
       }
+      return {
+        ...m,
+        to: { host: to.host, session: to.session },
+        deliver_now_at: null,
+        deliver_now_by: null,
+        wait_started_at: null,
+        ...(options.tookOver ? { took_over: true } : {}),
+      };
+    };
+    const owedTo = (m: InboxMessage): string | null => {
+      if (m.to) return m.to.session;
+      const asked = m.reply_to ? this.messages.get(m.reply_to) : undefined;
+      return asked?.author.kind === "agent" ? (asked.author.session ?? null) : null;
+    };
+    const from = owedTo(message);
+    for (const earlier of this.threadMessages(message.thread_id)) {
+      if (earlier.id === message.id) break;
+      if (earlier.author.kind !== "person" || earlier.delivery || hasTags(earlier) || isInboxNote(earlier) || earlier.tidy) continue;
+      if (!from || owedTo(earlier) !== from) continue;
+      if (!earlier.to && checkedSeq >= (this.messageSeq.get(earlier.id) ?? 0)) continue;
+      this.appendMessage(moved(earlier), at);
     }
     const next = moved(message);
     this.appendMessage(next, at);

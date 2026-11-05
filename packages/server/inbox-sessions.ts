@@ -194,8 +194,9 @@ export const INBOX_ASKER_GRACE_MS = 60_000;
 export const INBOX_ASKER_RESTART_GRACE_MS = 90_000;
 
 /**
- * How long a session handed an item to go into its running turn counts as there with no poll. A connection from before
- * the tick stopped waiting on a steer does not poll until the steer goes in, which a long tool call can hold for minutes.
+ * How long a session handed an item to go into its running turn counts as there with no poll, on a connection from
+ * before its tick stopped waiting on a steer (no `steer_polls`): it does not poll until the steer goes in, which a long
+ * tool call can hold for minutes.
  */
 export const INBOX_ASKER_STEER_GRACE_MS = 10 * 60_000;
 

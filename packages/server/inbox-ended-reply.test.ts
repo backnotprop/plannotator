@@ -7,7 +7,7 @@
  * data dir.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -494,7 +494,7 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
     const refused = await move(written.id, "ses-other");
     expect(refused.status).toBe(422);
-    expect(((await refused.json()) as { code: string }).code).toBe("not_addressed");
+    expect(((await refused.json()) as { code: string }).code).toBe("session_still_live");
     expect((await thread(server, asked.thread_id)).messages.at(-1)?.to ?? null).toBeNull();
     expect((await poll(server, "ses-other", project)).map((c) => c.id)).toEqual([]);
     expect((await poll(server, "ses-asker", project)).map((c) => c.id)).toEqual([written.id]);
@@ -587,7 +587,7 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     expect((await move(written.id, "ses-b")).status).toBe(200);
     const stale = await move(written.id, "ses-c");
     expect(stale.status).toBe(422);
-    expect(((await stale.json()) as { code: string }).code).toBe("not_addressed");
+    expect(((await stale.json()) as { code: string }).code).toBe("session_still_live");
     expect(await poll(server, "ses-c", project)).toEqual([]);
     expect((await poll(server, "ses-b", project)).map((c) => c.id)).toEqual([written.id]);
 
@@ -617,6 +617,209 @@ describe("a session that has ended: the row's mark, moving a saved reply, and wh
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-asker", host: "claude-code", type: "send_now_failed", id: written.id });
     expect((await row()).session_ended).toBe(true);
     expect((await move(written.id, "ses-other")).status).toBe(200);
+  });
+
+  test("a connection from before the tick stopped waiting on a steer: once it reports the reply in, the plain rule holds again", async () => {
+    const { server, project, asked, pass } = await ended();
+    const oldPoll = () => bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-asker", host: "pi", project_path: project, waitMs: 0, [INBOX_SEND_NOW_POLL_FIELD]: true, busy: true });
+    const askerLive = async () => ((await (await fetch(`${base(server)}/api/inbox/threads/${asked.thread_id}/sessions?asker=ses-asker`)).json()) as { asker: { live: boolean } }).asker.live;
+    await oldPoll();
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    await fetch(`${base(server)}/api/inbox/messages/${written.id}/send-now`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: server.serverSession }) });
+    await oldPoll();
+    pass();
+    expect(await askerLive()).toBe(true);
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-asker", host: "pi", type: "delivered", id: written.id });
+    expect(await askerLive()).toBe(false);
+  });
+
+  test("moving a reply whose session ended, when the one it answers is still there: no take over", async () => {
+    const { server, project, asked, move, pass } = await ended();
+    await poll(server, "ses-asker", project);
+    await poll(server, "ses-b", project);
+    const aimed = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One.", to: { session: "ses-b" } })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await poll(server, "ses-asker", project);
+    await poll(server, "ses-c", project);
+    const moved = await move(aimed.id, "ses-c");
+    expect(moved.status).toBe(200);
+    expect(((await moved.json()) as { message: { to: unknown; took_over?: boolean } }).message).toMatchObject({ to: { session: "ses-c" } });
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === aimed.id)?.took_over).toBeUndefined();
+  });
+
+  test("a second move takes the earlier reply along too; a reply owed to another session stays with it", async () => {
+    const { server, client, project, asked, move, pass } = await ended();
+    await client.callTool({ name: "send_message", arguments: { body: "And the region?", project_path: project, agent_session: "ses-x", agent_host: "claude-code", agent_name: "Claude Code", reply_to: asked.message_id }, _meta: { [INBOX_WAKES_META_KEY]: true } });
+    const x = (await thread(server, asked.thread_id)).messages.find((m) => m.author.kind === "agent" && m.author.session === "ses-x")!;
+    const toX = ((await (await reply(server, x.id, { idempotency_key: "kx", words: "For x." })).json()) as { reply: { id: string } }).reply;
+    const first = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One." })).json()) as { reply: { id: string } }).reply;
+    const second = ((await (await reply(server, asked.message_id, { idempotency_key: "k2", words: "Two." })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await poll(server, "ses-x", project);
+    await poll(server, "ses-two", project);
+    expect((await move(second.id, "ses-two")).status).toBe(200);
+    expect((await poll(server, "ses-two", project)).map((c) => c.id)).toEqual([first.id, second.id]);
+
+    // ses-two stopped before it took them.
+    pass();
+    await poll(server, "ses-x", project);
+    await poll(server, "ses-three", project);
+    expect((await move(second.id, "ses-three")).status).toBe(200);
+    expect((await poll(server, "ses-three", project)).map((c) => c.id)).toEqual([first.id, second.id]);
+    expect(await poll(server, "ses-two", project)).toEqual([]);
+    expect((await poll(server, "ses-x", project)).map((c) => c.id)).toEqual([toX.id]);
+  });
+
+  test("a tag the session has not taken yet: moving the reply there reaches it once", async () => {
+    const { server, project, asked, move, pass } = await ended();
+    const taggedPoll = async (session: string) =>
+      parseInboxBridgeCommands(await (await bridge(server, INBOX_BRIDGE_POLL_PATH, { session, host: "pi", project_path: project, waitMs: 0, [INBOX_TAGS_POLL_FIELD]: true })).text());
+    await taggedPoll("ses-other");
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one.", tags: [{ host: "pi", session: "ses-other" }] })).json()) as { reply: { id: string } }).reply;
+    pass();
+    expect((await taggedPoll("ses-other")).map((c) => c.id)).toEqual([written.id]);
+    expect((await move(written.id, "ses-other")).status).toBe(200);
+    expect((await taggedPoll("ses-other")).map((c) => c.id)).toEqual([written.id]);
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-other", host: "pi", type: "delivered", id: written.id });
+    expect(await taggedPoll("ses-other")).toEqual([]);
+  });
+
+  describe("a real wake killed while a steer waits for the running turn", () => {
+    /** A reply on its way into `ses-asker`'s running turn through a real wake, which is then killed. */
+    async function killedMidSteer() {
+      const world = await ended();
+      const dataDir = join(roots.at(-1)!, "data");
+      const connection = new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] });
+      let steered = 0;
+      const stuck = new InboxWake(connection, "ses-asker", { isBusy: () => true, canSteer: () => true, deliver: async () => {}, steer: () => { steered += 1; return new Promise<void>(() => {}); }, notify: () => {}, projectPath: () => world.project }, 20);
+      stuck.start();
+      await Bun.sleep(60);
+      const written = ((await (await reply(world.server, world.asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+      const pressed = await fetch(`${base(world.server)}/api/inbox/messages/${written.id}/send-now`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ serverSession: world.server.serverSession }) });
+      expect(pressed.status).toBe(200);
+      for (let i = 0; i < 200 && steered === 0; i++) await Bun.sleep(20);
+      expect(steered).toBe(1);
+      stuck.dispose();
+      const wakes: InboxWake[] = [];
+      /** A session that starts now and goes idle: what it was delivered. */
+      const session = (id: string, host = "opencode") => {
+        const delivered: string[] = [];
+        const wake = new InboxWake(new InboxAgentConnection({ dataDir, host, agentName: host, tools: [] }), id, { isBusy: () => false, deliver: async (_text, command) => void delivered.push(command.id), notify: () => {}, projectPath: () => world.project }, 20);
+        wake.start();
+        wakes.push(wake);
+        return { delivered, wake };
+      };
+      const until = async (check: () => boolean | Promise<boolean>) => {
+        for (let i = 0; i < 200 && !(await check()); i++) await Bun.sleep(20);
+      };
+      const isLive = async (id: string) => ((await (await fetch(`${base(world.server)}/api/inbox/threads/${world.asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === id);
+      return { ...world, dataDir, written, session, until, isLive, stopAll: () => wakes.forEach((wake) => wake.dispose()) };
+    }
+
+    test("no grace for a wake that goes on polling: it reads as ended, and the session the reply moves to delivers it once", async () => {
+      const { server, asked, written, row, move, pass, session, until, isLive, stopAll } = await killedMidSteer();
+      try {
+        // Its held poll ends as the killed process's connection closes, which counts as heard from: time goes on past that.
+        await until(async () => {
+          pass();
+          return (await row()).session_ended === true;
+        });
+        expect((await row()).session_ended).toBe(true);
+        const next = session("ses-next");
+        await until(() => isLive("ses-next"));
+        expect((await move(written.id, "ses-next")).status).toBe(200);
+        await until(() => next.delivered.length > 0);
+        expect(next.delivered).toEqual([written.id]);
+        await until(async () => !!(await thread(server, asked.thread_id)).messages.find((m) => m.id === written.id)?.delivery);
+        expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === written.id)?.delivery).toMatchObject({ session: "ses-next" });
+      } finally {
+        stopAll();
+      }
+    });
+
+    test("the same session restarted does not deliver it a second time: its claim stands", async () => {
+      const { written, session, stopAll } = await killedMidSteer();
+      try {
+        const again = session("ses-asker", "pi");
+        await Bun.sleep(300);
+        expect(again.delivered).toEqual([]);
+        expect(readdirSync(join(roots.at(-1)!, "data", "inbox", "claims"))).toEqual([`${written.id}.ses-asker`]);
+      } finally {
+        stopAll();
+      }
+    });
+
+    test("moved away and back to the same session, resumed: the move is a new delivery, so it gets it", async () => {
+      const { written, row, move, pass, session, until, isLive, stopAll } = await killedMidSteer();
+      try {
+        // Its held poll ends as the killed process's connection closes, which counts as heard from: time goes on past that.
+        await until(async () => {
+          pass();
+          return (await row()).session_ended === true;
+        });
+        const between = session("ses-between");
+        await until(() => isLive("ses-between"));
+        // It stops before it takes the reply.
+        between.wake.dispose();
+        expect((await move(written.id, "ses-between")).status).toBe(200);
+        pass();
+        const resumed = session("ses-asker", "pi");
+        await until(() => isLive("ses-asker"));
+        expect((await move(written.id, "ses-asker")).status).toBe(200);
+        await until(() => resumed.delivered.length > 0);
+        expect(resumed.delivered).toEqual([written.id]);
+      } finally {
+        stopAll();
+      }
+    });
+  });
+
+  test("a claim from an older version is the owner's: a session the reply tags still gets it", async () => {
+    const { server, project, asked } = await ended();
+    const dataDir = join(roots.at(-1)!, "data");
+    await bridge(server, INBOX_BRIDGE_POLL_PATH, { session: "ses-tagged", host: "pi", project_path: project, waitMs: 0, [INBOX_TAGS_POLL_FIELD]: true });
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one.", tags: [{ host: "pi", session: "ses-tagged" }] })).json()) as { reply: { id: string } }).reply;
+    mkdirSync(join(dataDir, "inbox", "claims", written.id), { recursive: true });
+    const delivered: string[] = [];
+    const wake = new InboxWake(new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] }), "ses-tagged", { isBusy: () => false, deliver: async (_text, command) => void delivered.push(command.id), notify: () => {}, projectPath: () => project }, 20);
+    wake.start();
+    try {
+      for (let i = 0; i < 200 && delivered.length === 0; i++) await Bun.sleep(20);
+      expect(delivered).toEqual([written.id]);
+    } finally {
+      wake.dispose();
+    }
+  });
+
+  test("a claim from an older version stands for the session it was for, and a move drops it", async () => {
+    const { server, project, asked, move, pass } = await ended();
+    const dataDir = join(roots.at(-1)!, "data");
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    mkdirSync(join(dataDir, "inbox", "claims", written.id), { recursive: true });
+    const delivered: string[] = [];
+    const idleWake = (session: string) => {
+      const wake = new InboxWake(new InboxAgentConnection({ dataDir, host: "pi", agentName: "Pi", tools: [] }), session, { isBusy: () => false, deliver: async (_text, command) => void delivered.push(`${session}:${command.id}`), notify: () => {}, projectPath: () => project }, 20);
+      wake.start();
+      return wake;
+    };
+    const own = idleWake("ses-asker");
+    try {
+      await Bun.sleep(300);
+      expect(delivered).toEqual([]);
+    } finally {
+      own.dispose();
+    }
+    pass();
+    const next = idleWake("ses-next");
+    try {
+      const listed = async () => ((await (await fetch(`${base(server)}/api/inbox/threads/${asked.thread_id}/sessions`)).json()) as { sessions: { session: string }[] }).sessions.some((s) => s.session === "ses-next");
+      for (let i = 0; i < 200 && !(await listed()); i++) await Bun.sleep(20);
+      expect((await move(written.id, "ses-next")).status).toBe(200);
+      for (let i = 0; i < 200 && delivered.length === 0; i++) await Bun.sleep(20);
+      expect(delivered).toEqual([`ses-next:${written.id}`]);
+    } finally {
+      next.dispose();
+    }
   });
 
   test("the next reply stays with the session that took over, until an agent writes", async () => {

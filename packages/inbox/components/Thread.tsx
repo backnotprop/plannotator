@@ -274,11 +274,9 @@ function emptyAnswerFor(message: InboxMessageWire, q: { key: string; prompt: str
 function askingSessionOf(thread: InboxThread, options: { skip: ReadonlySet<string>; carries: boolean }): AskingSession | null {
   // Nothing rides on the latest message: the shared rule the list row's delivery uses too (core
   // inbox-delivery), plus the questions the person chose to skip, when any.
-  const answered = options.carries
+  const message = options.carries
     ? sendTargetsOf(thread, options.skip).at(-1)!.message
     : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false));
-  // A session took over from the one that ended: nothing asks about the old one any more, unless a pick still answers it.
-  const message = answered && !questionStatesOf(answered).includes('picked') && tookOverReply(thread) ? null : answered;
   if (!message) return null;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };
@@ -5807,7 +5805,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
-                    taken={lastTags.map((tag) => tag.session)}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
                     live={live}
                     onReload={loadLive}
@@ -5818,7 +5816,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={lastTo}
-                    taken={lastTags.map((tag) => tag.session)}
+                    taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
                     live={pendingLive}
                     onReload={loadPendingLive}

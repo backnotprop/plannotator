@@ -774,6 +774,21 @@ test.skipIf(!hasDom)('a session the reply already tags is not offered; with no o
   expect(!!only.querySelector('[data-readdress-open]')).toBe(false);
 });
 
+test.skipIf(!hasDom)('a tag not delivered yet, or a session the reply was handed away from, is still offered', async () => {
+  sessions = { sessions: [live('ses_b', 'pi'), live('ses_c', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const at = '2026-10-11T10:51:00.000Z';
+  const reply = personReply({
+    tags: [
+      { host: 'pi', session: 'ses_b', wakes: true },
+      { host: 'pi', session: 'ses_c', wakes: true, handed_away: true, delivery: { host: 'pi', session: 'ses_c', state: 'delivered', at } },
+    ],
+  });
+  const el = await render(threadOf(asking(), reply), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  expect([...el.querySelectorAll('[data-readdress-session]')].map((row) => row.getAttribute('data-readdress-session'))).toEqual(['ses_b', 'ses_c']);
+});
+
 test.skipIf(!hasDom)('a reply the session itself already read is not offered', async () => {
   sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
   const opened = asking();
@@ -784,7 +799,7 @@ test.skipIf(!hasDom)('a reply the session itself already read is not offered', a
 
 test.skipIf(!hasDom)('the session came back as the person moved the reply: the form closes, with no refusal to read', async () => {
   sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
-  moveRefusal = 'not_addressed';
+  moveRefusal = 'session_still_live';
   const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
   await settle();
@@ -794,13 +809,24 @@ test.skipIf(!hasDom)('the session came back as the person moved the reply: the f
   expect(!!el.querySelector('.ib-route-error')).toBe(false);
 });
 
-test.skipIf(!hasDom)('after a move: no ended note, the next reply answers the moved one, and it is to the new session', async () => {
-  // The session that asked reads as ended, as it does in the window: only the move keeps the note away.
+test.skipIf(!hasDom)('an older linked machine refuses a plain move: the form stays open and says so', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  moveRefusal = 'not_addressed';
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(!!el.querySelector('[data-readdress-choice]')).toBe(true);
+  expect(el.querySelector('.ib-route-error')?.textContent).toBe('Refused.');
+});
+
+test.skipIf(!hasDom)('after a move: the next reply answers the moved one, and it is to the new session', async () => {
+  // The session that asked reads as ended, as it does in the window.
   sessions = { sessions: [live('ses_other', 'pi')] };
   liveness = { ses_asker: false, ses_other: true };
   const moved = personReply({ to: { host: 'pi', session: 'ses_other' }, took_over: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:53:00.000Z' } });
   const el = await render(threadOf(asking(), moved), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
-  expect(el.querySelector('[data-asker-ended]')).toBeNull();
   await writeReply(el);
   expect(pill(el)?.getAttribute('aria-label')).toContain('To Pi');
   expect(pill(el)?.getAttribute('aria-label')).not.toContain('ended');

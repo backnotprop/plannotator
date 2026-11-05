@@ -14,6 +14,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { InboxMessageWire, InboxThread } from "@plannotator/core/inbox-types";
 import {
   INBOX_ADDED_INSTRUCTION,
+  INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
   INBOX_HANDOFF_INSTRUCTION,
   INBOX_TAGGED_INSTRUCTION,
@@ -25,6 +26,7 @@ import {
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -38,14 +40,14 @@ afterEach(async () => {
 });
 
 /** `undoMs`: the Undo window (the set-aside delay). */
-async function setup(undoMs: number) {
+async function setup(undoMs: number, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-handoff-")));
   roots.push(root);
   const project = join(root, "plannotator");
   const herdr = join(root, "herdr");
   mkdirSync(project, { recursive: true });
   mkdirSync(herdr, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data"), setAsideDelayMs: undoMs });
+  const server = await startInboxServer({ dataDir: join(root, "data"), setAsideDelayMs: undoMs, ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-handoff-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -107,8 +109,8 @@ async function until(check: () => Promise<boolean>, what: string) {
 }
 
 /** The owner asked in plannotator; both sessions are live with the tag capability. */
-async function world(undoMs: number) {
-  const env = await setup(undoMs);
+async function world(undoMs: number, sessionsNow?: () => number) {
+  const env = await setup(undoMs, sessionsNow);
   const asked = await agentSends(env.client, env.project, OWNER, "The pane title is herdr's. Should I add `plannotator inbox whoami --json`?");
   await poll(env.server, OWNER, env.project);
   await poll(env.server, HERDR, env.herdr);
@@ -238,6 +240,29 @@ describe("Hand off", () => {
     // Undo can no longer send the thread back past a reply the new owner has.
     expect((await post(server, `/api/inbox/messages/${id}/handoff/undo`, {})).status).toBe(409);
     expect(await owner(server, asked.thread_id)).toBe(HERDR);
+  });
+
+  test("the new owner stops before it takes the thread: the reply moves back to the former owner, who gets it", async () => {
+    let now = 1_000_000;
+    const { server, project, herdr, asked } = await world(100, () => now);
+    const stored = (await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
+    // The former owner took its notice.
+    const notice = await poll(server, OWNER, project);
+    expect(notice.map((c) => c.id)).toEqual([stored.id]);
+    const taken = await fetch(`${base(server)}${INBOX_BRIDGE_EVENT_PATH}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
+      body: JSON.stringify({ session: OWNER, host: "claude-code", type: "delivered", id: stored.id }),
+    });
+    expect(taken.status).toBe(200);
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(server, OWNER, project);
+    const moved = await post(server, `/api/inbox/messages/${stored.id}/to`, { to: { host: "claude-code", session: OWNER } });
+    expect(moved.status).toBe(200);
+    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.to).toEqual({ host: "claude-code", session: OWNER });
+    expect((await poll(server, OWNER, project)).map((c) => c.id)).toEqual([stored.id]);
+    expect(await poll(server, HERDR, herdr)).toEqual([]);
   });
 
   test("Undo after the window is refused, and the thread stays handed off", async () => {

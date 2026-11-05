@@ -191,11 +191,14 @@ export function createInboxCompose(options: {
     const message = store.message(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const target = live.replyTarget(message.thread_id, body.to);
-    // The reply's move needs the session it waits on to have ended; it takes over only from the one it answers.
+    // A move needs the session it waits on to have ended; it takes over only from the one it answers.
     const asked = message.reply_to ? store.message(message.reply_to) : null;
-    const askerEnded = replacesEndedAsker(asked, live);
-    const targetEnded = message.to ? !live.askerLive(message.to.session) : askerEnded;
-    const next = store.readdressMessage(messageId, target, { targetEnded, tookOver: askerEnded });
+    const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
+    const waitsOn = message.to?.session ?? askedWakes;
+    const next = store.readdressMessage(messageId, target, {
+      targetLive: !!waitsOn && live.askerLive(waitsOn),
+      tookOver: replacesEndedAsker(asked, live),
+    });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
