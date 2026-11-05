@@ -4333,11 +4333,11 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .pn-inbox [data-code-snippet-scrim]:has(+ [data-code-hover-raised]) { z-index: 44; }
 /* Its header's controls take a line of small text. */
 .code-snippet-preview-window .ib-split { height: 22px; font-family: var(--font-sans, inherit); }
-.pn-inbox .code-snippet-preview-window .ib-split .ib-sa { font-size: 11px; }
-.ib-code-hover-forge { font-family: var(--font-sans, inherit); font-size: 11px; color: var(--primary); white-space: nowrap; }
+.pn-inbox .code-snippet-preview-window .ib-split .ib-sa { font-size: var(--ib-fs-11, 11px); }
+.ib-code-hover-forge { font-family: var(--font-sans, inherit); font-size: var(--ib-fs-11, 11px); color: var(--primary); white-space: nowrap; }
 .ib-code-hover-forge:hover { text-decoration: underline; }
-.pn-inbox .ib-code-hover-close { font-family: var(--font-sans, inherit); font-size: 13px; min-height: 44px; padding: 0 8px; color: var(--foreground); }
-[data-code-snippet-sheet] .ib-code-hover-forge { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
+.pn-inbox .ib-code-hover-close { font-family: var(--font-sans, inherit); font-size: var(--ib-fs-13, 13px); min-height: 44px; padding: 0 8px; color: var(--foreground); }
+[data-code-snippet-sheet] .ib-code-hover-forge { display: inline-flex; align-items: center; min-height: 44px; font-size: var(--ib-fs-13, 13px); }
 .light .code-snippet-preview { color: oklch(0.25 0.02 260); }
 /* A menu portals out of .pn-inbox (Open in, full screen's ⋯): its line glyphs keep their stroke there too, never a filled shape. */
 svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted-foreground); }
