@@ -506,6 +506,32 @@ describe("stopping or deleting an agent is the owner's (a guest never ends the o
     expect(respawned(a)).toBe(false);
   });
 
+  test("a guest's New message to a session just stopped is marked the guest's and never starts it again; the owner's does", async () => {
+    const w = await launchedWorld();
+    // New message goes only to a live session: each polled once, and after Stop its last polls still list it for a while.
+    const stoppedJustNow = async (key: string) => {
+      const a = w.stopped(key);
+      const poll = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/bridge/poll`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${w.inbox.token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ session: `sess-${key}`, host: "claude-code", project_path: w.project.root, waitMs: 0, busy: false, started_at: new Date().toISOString() }),
+      });
+      expect(poll.status).toBe(200);
+      expect((await call(w, "local", { path: `/api/inbox/launch/${a.id}/stop`, body: {} })).status).toBe(200);
+      return a;
+    };
+    const a = await stoppedJustNow("a");
+    const b = await stoppedJustNow("b");
+    const message = (caller: Caller, launch: Launched, session: string) =>
+      call(w, caller, { path: `/api/inbox/threads/${launch.messageId}/message`, body: { idempotency_key: `m-${session}`, body: "One more thing.", session } });
+    const guests = await message("guest", a, "sess-a");
+    expect(guests.status).toBe(200);
+    expect((await message("owner", b, "sess-b")).status).toBe(200);
+    expect(await waitFor(() => respawned(b))).toBe(true);
+    expect(respawned(a)).toBe(false);
+    expect(w.inbox.store.message(((await guests.json()) as { message: { id: string } }).message.id)!.by_guest).toBe(true);
+  });
+
   test("a guest's reply to a deleted launch writes nothing in the launch's folder", async () => {
     const w = await launchedWorld();
     const a = w.stopped("a");
