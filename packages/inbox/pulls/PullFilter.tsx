@@ -2,7 +2,7 @@
  * The Pull requests list's filter (approval "pr-list-filters", round 7 take B "One filter button", with the owner's
  * "highlights when open"; `.product/approved/pr-list-filters/`).
  *
- * - The head holds "PRs" and the filter mark alone; narrowed, the mark is in full ink with a dot. No project name
+ * - The head holds "Reviews" and the filter mark alone; narrowed, the mark is in full ink with a dot. No project name
  *   and no "N on you" in the head (the list's "On you N" band already says it), so nothing there grows.
  * - The menu, drawn like Linear's: the views (All, Mine, To review, Others), then the projects (only when more than
  *   one has PRs here), each with its icon, its count and a tick; the picked rows are tinted as the sidebar's
