@@ -38,16 +38,16 @@ export function placeChooser(
   return { top: within(top, highest, lowest), left: within(lines.left, bounds.left + EDGE, bounds.right - EDGE - bar.width) };
 }
 
-/** One diff's selected lines, on the side the selection ends on. */
-function boxOf(painted: HTMLElement[], range: SelectionRange, exact: boolean): SelectedLinesBox | null {
+/** One diff's selected lines, on the side the selection ends on; `own` says whether they hold this selection's last line. */
+function boxOf(painted: HTMLElement[], range: SelectionRange): SelectedLinesBox & { own: boolean } {
   const side = range.endSide ?? range.side ?? 'additions';
   const onSide = painted.filter((el) => el.closest('[data-code]')?.hasAttribute(`data-${side}`));
   const lines = onSide.length ? onSide : painted;
-  if (exact && !lines.some((el) => el.getAttribute('data-line') === String(range.end))) return null;
   const rects = lines.map((el) => el.getBoundingClientRect());
   // The gutter stays put when the code scrolls sideways; the code's own left does not.
   const gutter = lines.find((el) => el.hasAttribute('data-column-number'));
   return {
+    own: lines.some((el) => el.getAttribute('data-line') === String(range.end)),
     top: Math.min(...rects.map((r) => r.top)),
     bottom: Math.max(...rects.map((r) => r.bottom)),
     left: gutter ? gutter.getBoundingClientRect().right : Math.min(...rects.map((r) => r.left)),
@@ -56,17 +56,20 @@ function boxOf(painted: HTMLElement[], range: SelectionRange, exact: boolean): S
 
 /**
  * The selected lines from the diff's shadow DOM. Another diff may have lines
- * painted too (a picture's part landed there): `exact` asks for this selection's
- * own last line, as a new selection paints a frame or two after it opens, and the
- * nearest to the pointer settles the rest.
+ * painted too (a picture's part landed there), so a diff holding this selection's
+ * last line comes first, and the nearest to the pointer settles the rest. With
+ * none holding it, `ownOnly` gives nothing (a new selection is painted a frame or
+ * two after it opens), and otherwise the nearest of what is painted (the diff
+ * draws only some of a long selection).
  */
-export function readSelectedLines(range: SelectionRange, pointer: { top: number }, exact = true): SelectedLinesBox | null {
-  let nearest: SelectedLinesBox | null = null;
+export function readSelectedLines(range: SelectionRange, pointer: { top: number }, ownOnly = true): SelectedLinesBox | null {
   const away = (box: SelectedLinesBox) => Math.abs((box.top + box.bottom) / 2 - pointer.top);
+  const boxes: (SelectedLinesBox & { own: boolean })[] = [];
   for (const host of document.querySelectorAll('diffs-container')) {
     const painted = [...(host.shadowRoot?.querySelectorAll<HTMLElement>('[data-selected-line]') ?? [])];
-    const box = painted.length ? boxOf(painted, range, exact) : null;
-    if (box && (!nearest || away(box) < away(nearest))) nearest = box;
+    if (painted.length) boxes.push(boxOf(painted, range));
   }
-  return nearest;
+  const own = boxes.filter((box) => box.own);
+  const from = own.length || ownOnly ? own : boxes;
+  return from.reduce<SelectedLinesBox | null>((nearest, box) => (!nearest || away(box) < away(nearest) ? box : nearest), null);
 }

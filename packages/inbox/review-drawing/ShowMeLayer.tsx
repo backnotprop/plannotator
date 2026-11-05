@@ -27,13 +27,15 @@ const EMPTY = new Set<string>();
 /** The width the corner card draws a picture at before it scales it down: about the board's. */
 const CORNER_DRAWN_WIDTH = 960;
 
+const linesWord = (lines: readonly [number, number]) => `${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}`;
+
 function Place({ place }: { place: ShowMePlace }) {
   return (
     <div className="ib-sm-at" data-show-me-place="">
       {place.file ? (
         <>
           {baseName(place.file)}
-          {place.lines && ` · lines ${inboxReviewLines(place.lines)}`}
+          {place.lines && ` · ${linesWord(place.lines)}`}
         </>
       ) : (
         'The whole review'
@@ -218,7 +220,7 @@ export function ShowMeCorner({
         )}
       </div>
       <div className="ib-sm-pip-f">
-        <b>{part.name}</b> <span>· {baseName(part.file)}{part.lines ? ` lines ${inboxReviewLines(part.lines)}` : ''}</span>
+        <b>{part.name}</b> <span>· {baseName(part.file)}{part.lines ? ` ${linesWord(part.lines)}` : ''}</span>
         {!part.lines && (
           <div className="ib-sm-pip-n" data-show-me-changed="">
             This code changed after the picture was drawn.

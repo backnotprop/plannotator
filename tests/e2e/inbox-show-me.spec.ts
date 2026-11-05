@@ -28,8 +28,10 @@
  *  9. The agent failing or gone: the box goes back to its words with the Ask
  *     window's note.
  * 10. A board drawn on an earlier review lands where its code is now, says so when
- *     it cannot, and never paints its old numbers; lines the diff can't show open in
- *     the board's own viewer; leaving the review closes the board.
+ *     it cannot, and never paints its old numbers, stored through a reply too; nothing
+ *     saying which review: the note, nothing painted; lines the diff can't show open in
+ *     the board's own viewer; a deleted file and a rename's old name: the file and the
+ *     note, never a dead click; leaving the review closes the board.
  *
  * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents.
  * gh and glab are traps. Build the binary first (see inbox.spec.ts), then
@@ -838,6 +840,8 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await expect(board(page)).toHaveCount(0);
   await expect(corner(page)).toHaveCount(0);
 
+  // A reply in the thread, read before the later review: a board stored through it counts in this review's lines.
+  const between = await call('send_message', { project_path: world.project, body: 'Noted, one more pass.', reply_to: first.message_id });
   // The agent sends a later review: a line added above, the else branch rewritten.
   const second = await call('submit_guide', { project_path: world.project, guide: guide(2, false), patch: world.round2, review: true, reply_to: first.message_id, body: 'The row is removed, one email, jitter.' });
   expect(second.thread_id).toBe(first.thread_id);
@@ -852,6 +856,40 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await expect(painted(WORKER).first()).toContainText('} else {');
   await expect(corner(page).locator('[data-show-me-changed]')).toHaveCount(0);
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+
+  // Stored through a reply that came after the first review: that review's numbers, so where the code is now, not 16–18.
+  const openBoard = async (id: string, title: string) => {
+    await page.evaluate((shape) => { location.hash = `${location.hash.replace(/&shape=[^&]*/, '')}&shape=${encodeURIComponent(shape)}`; }, id);
+    await expect(board(page)).toContainText(title);
+  };
+  const storeBoard = (name: string, code: string, flags: string[]) => {
+    const path = join(world.boardDir, `${name}.json`);
+    writeFileSync(path, JSON.stringify({ title: name, claim: `The board ${name}.`, views: { picture: { width: 800, height: 300, html: `<div data-mark="it" data-code="${code}" style="padding:16px">it</div>`, css: '' } } }));
+    const run = world.shape(['update', '--file', path, '--thread', first.thread_id, ...flags]);
+    expect(run.status, run.stderr).toBe(0);
+    return (JSON.parse(run.stdout) as { id: string }).id;
+  };
+  const closeBoard = async () => {
+    await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+    await board(page).getByRole('button', { name: 'Close Shape' }).click();
+  };
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
+  await openBoard(storeBoard('through-reply', `${WORKER}#L16-L18`, ['--through', between.message_id]), 'The board through-reply.');
+  await part(board(page), 'it').click();
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 17–20/);
+  await expect(painted(WORKER).first()).toContainText('} else {');
+  await closeBoard();
+
+  // Stored through nothing, and no Show me made it: nothing says which review, so the note, and nothing painted.
+  await openBoard(storeBoard('through-nothing', `${WORKER}#L16-L18`, []), 'The board through-nothing.');
+  await part(board(page), 'it').click();
+  await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
+  await expect(corner(page).locator('.ib-sm-pip-f')).not.toContainText('lines');
+  await expect(painted(WORKER)).toHaveCount(0);
+  await closeBoard();
+
+  // Back on the first board.
+  await open();
 
   // Code that changed: its file, nothing painted there, and the corner says so.
   await part(board(page), 'rewritten').click();
@@ -882,6 +920,40 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await page.getByRole('button', { name: 'Close Show me' }).click();
   expect(world.agent.asked.length).toBe(asked);
   expect(world.errors).toEqual([]);
+});
+
+test("a part on a deleted file or a rename's old name: the file and the note, never a dead click", async () => {
+  const { page } = world;
+  const GONE = 'src/gone.ts';
+  const patch = [
+    `diff --git a/${GONE} b/${GONE}`, 'deleted file mode 100644', 'index 1111111..0000000', `--- a/${GONE}`, '+++ /dev/null', '@@ -1,2 +0,0 @@', '-one', '-two',
+    'diff --git a/src/old-name.ts b/src/new-name.ts', 'similarity index 60%', 'rename from src/old-name.ts', 'rename to src/new-name.ts', 'index 2222222..3333333 100644', '--- a/src/old-name.ts', '+++ b/src/new-name.ts', '@@ -1,2 +1,2 @@', ' keep', '-old', '+new', '',
+  ].join('\n');
+  const sent = await call('submit_guide', {
+    project_path: world.project,
+    guide: { ...guide(1, false), sections: [{ title: 'Gone and moved', overview: 'One deleted, one renamed.', diffs: [{ file: GONE, summary: 'Deleted.' }, { file: 'src/new-name.ts', summary: 'Renamed.' }] }] },
+    patch, review: true, thread: 'odd-files', subject: 'Odd files', body: 'Ready for review.',
+  });
+  const path = join(world.boardDir, 'odd-files.json');
+  const box = (mark: string, code: string) => `<div data-mark="${mark}" data-code="${code}" style="padding:16px">${mark}</div>`;
+  writeFileSync(path, JSON.stringify({ title: 'Odd files', claim: 'Odd files.', views: { picture: { width: 800, height: 300, html: `<div>${box('gone', `${GONE}#L2`)}${box('renamed', 'src/old-name.ts#L1')}</div>`, css: '' } } }));
+  const stored = world.shape(['update', '--file', path, '--thread', sent.thread_id, '--through', sent.message_id]);
+  expect(stored.status, stored.stderr).toBe(0);
+  const id = (JSON.parse(stored.stdout) as { id: string }).id;
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}&shape=${encodeURIComponent(id)}`);
+  await page.reload();
+  await expect(board(page)).toContainText('Odd files.');
+  await part(board(page), 'gone').click();
+  await expect(corner(page).locator('.ib-sm-pip-f')).toContainText('gone.ts');
+  await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
+  await expect(page.locator(`[data-guide-file-shell="${GONE}"]`).first()).toBeVisible();
+  await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+  await part(board(page), 'renamed').click();
+  await expect(corner(page).locator('.ib-sm-pip-f')).toContainText('new-name.ts');
+  await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
+  await expect(page.locator('[data-guide-file-shell="src/new-name.ts"]').first()).toBeVisible();
+  await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
 test("reloaded while it draws, and the agent ends with no words: the box goes back to its words with the Ask window's note", async () => {

@@ -7,7 +7,7 @@
 import { describe, expect, test } from 'bun:test';
 import { askShownQuestion } from '../ask/askModel';
 import { FIXTURE_V2_HTML } from '@plannotator/core/guide-format-fixtures';
-import { anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
+import { reviewDrawnOn, reviewLines, anchorLines, anchorPart, overviewPicture, changedMarks, chapterOf, earlierLinesNow, newSideLines, partLanding, showMeEnded, showMeSamePlace, shiftLines, waitingShowMe } from './showMeModel';
 
 describe('Show me model', () => {
   test("a part drawn on this review lands on lines its diff shows; lines it does not show go to the board's own viewer", () => {
@@ -146,5 +146,46 @@ describe('Show me model', () => {
     expect(showMeEnded({}, { running: true, busy: false })).toBe(false);
     expect(showMeEnded({ answer: 'words' }, idle)).toBe(false);
     expect(showMeEnded({ stopped: true }, idle)).toBe(false);
+  });
+});
+
+describe('which review a version counts its lines in', () => {
+  const messages = [
+    { id: 'ask' },
+    { id: 'r1', guide: { review: {} } },
+    { id: 'reply1' },
+    { id: 'r2', guide: { review: {} } },
+    { id: 'reply2' },
+  ];
+  test('the newest review at or before the message it was stored through', () => {
+    expect(reviewDrawnOn('r1', messages, undefined)).toBe('r1');
+    expect(reviewDrawnOn('reply1', messages, undefined)).toBe('r1');
+    expect(reviewDrawnOn('r2', messages, 'r1')).toBe('r2');
+    expect(reviewDrawnOn('reply2', messages, undefined)).toBe('r2');
+  });
+  test('through a message before any review, or one not here: nothing says', () => {
+    expect(reviewDrawnOn('ask', messages, 'r1')).toBeNull();
+    expect(reviewDrawnOn('elsewhere', messages, 'r1')).toBeNull();
+  });
+  test('stored through nothing: the review its Show me names, else nothing says', () => {
+    expect(reviewDrawnOn(null, messages, 'r1')).toBe('r1');
+    expect(reviewDrawnOn(undefined, messages, undefined)).toBeNull();
+    expect(reviewDrawnOn(null, messages, undefined)).toBeNull();
+  });
+});
+
+describe('a part whose lines mean nothing here', () => {
+  const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])], ['gone.ts', new Map<number, string>()]]);
+  test('nothing says which review it was drawn on: the note, never its numbers, even when this diff has those lines', () => {
+    expect(partLanding({ path: 'w.ts', line: 16 }, now, null)).toBe('changed');
+    expect(partLanding({ path: 'other.ts', line: 16 }, now, null)).toBeNull();
+  });
+  test('a file the review deletes: the note, in any review', () => {
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now)).toBe('changed');
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now, { lines: new Map() })).toBe('changed');
+  });
+  test('a file with no hunks shows no lines and hides none: the board opens it', () => {
+    const lines = reviewLines([{ path: 'moved.ts', patch: 'diff --git a/o.ts b/moved.ts\nsimilarity index 100%\nrename from o.ts\nrename to moved.ts\n' }]);
+    expect(partLanding({ path: 'moved.ts', line: 2 }, lines)).toBeNull();
   });
 });

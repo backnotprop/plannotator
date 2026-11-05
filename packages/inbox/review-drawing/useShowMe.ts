@@ -340,5 +340,7 @@ export function useShowMe({
     /** This review's lines by file, and another review's (undefined until read). */
     nowLines,
     linesOf: (review: string): ReviewLines | undefined => otherLines[review],
+    /** The review the newest Show me that made this board was asked on. */
+    askedOn: (board: string): string | undefined => [...turns].reverse().find((turn) => turn.shape === board)?.show_me?.review,
   };
 }

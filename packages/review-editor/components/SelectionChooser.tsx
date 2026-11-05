@@ -62,12 +62,12 @@ export function SelectionChooser({
     let frames = 0;
     let id = 0;
     const look = () => {
-      const exact = frames < LOOK_FRAMES;
-      const found = readSelectedLines(now, position, exact);
+      const waiting = frames < LOOK_FRAMES;
+      const found = readSelectedLines(now, position, waiting);
       const el = toolbarRef.current;
       if (el) setBar((was) => (was.width === el.offsetWidth && was.height === el.offsetHeight ? was : { width: el.offsetWidth, height: el.offsetHeight }));
       if (found) setLines((was) => (was && was.top === found.top && was.bottom === found.bottom && was.left === found.left ? was : found));
-      if (found || !exact) setLooked(true);
+      if (found || !waiting) setLooked(true);
       frames += 1;
       id = requestAnimationFrame(look);
     };

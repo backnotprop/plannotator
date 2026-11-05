@@ -112,7 +112,7 @@ export function createInboxAsk(options: {
   /** A conversation as the window reads it: each Show me names the board it made (`showMeShapes`). */
   const withShapes = <T extends InboxAskConversation | null>(conversation: T, threadId: string): T => {
     if (!conversation?.turns.some((turn) => turn.kind === "show_me")) return conversation;
-    const shapes = showMeShapes(conversation.turns, options.boardsOf?.(threadId) ?? []);
+    const shapes = showMeShapes(conversation.turns, options.boardsOf?.(threadId) ?? [], live.running(threadId));
     return { ...conversation, turns: conversation.turns.map((turn) => (shapes.has(turn.id) ? { ...turn, shape: shapes.get(turn.id)! } : turn)) };
   };
 

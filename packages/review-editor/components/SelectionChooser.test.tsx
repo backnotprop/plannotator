@@ -30,6 +30,8 @@ afterEach(() => {
 
 const PATCH = ['--- a/src/retry-worker.ts', '+++ b/src/retry-worker.ts', '@@ -14,3 +14,5 @@', ' a', '+b', '+c', '+d', ' e', ''].join('\n');
 
+let lastRef: ToolbarHostHandle | null = null;
+
 function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectionActions']) {
   const ref = createRef<ToolbarHostHandle>();
   const el = document.createElement('div');
@@ -50,6 +52,7 @@ function mount(actions?: React.ComponentProps<typeof host.ToolbarHost>['selectio
     ),
   );
   act(() => ref.current!.handleLineSelectionEnd({ start: 16, end: 18, side: 'additions' }));
+  lastRef = ref.current;
   return ref;
 }
 
@@ -162,6 +165,38 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       mount({ onShowMe: () => {} });
       await frames();
       expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+    });
+
+    /** The pointer is at this height when the lines are picked. */
+    const pickedAt = (ref: React.RefObject<ToolbarHostHandle | null>, y: number) => {
+      act(() => window.dispatchEvent(new MouseEvent('mousemove', { clientX: 100, clientY: y })));
+      act(() => ref.current!.handleLineSelectionEnd({ start: 17, end: 18, side: 'additions' }));
+    };
+
+    test("a diff nearer the pointer with other lines painted waits behind this selection's own", async () => {
+      paintedDiff([{ line: 5, top: 120, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      pickedAt(mount({ onShowMe: () => {} }), 120);
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+    });
+
+    test('the same line painted in two diffs: the one by the pointer', async () => {
+      paintedDiff([{ line: 18, top: 100, left: 300 }]);
+      paintedDiff([{ line: 18, top: 500, left: 803 }]);
+      pickedAt(mount({ onShowMe: () => {} }), 480);
+      await frames();
+      expect(placed()).toMatchObject({ top: '526px', left: '803px' });
+      pickedAt({ current: lastRef }, 90);
+      await frames();
+      expect(placed()).toMatchObject({ top: '126px', left: '300px' });
+    });
+
+    test("only another selection's lines to read, once it has waited: those, not the pointer", async () => {
+      paintedDiff([{ line: 5, top: 200, left: 300 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed()).toMatchObject({ top: '226px', left: '300px', transform: '' });
     });
 
     test('nothing on the diff to read: the pointer, centred, on screen', async () => {

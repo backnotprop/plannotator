@@ -43,7 +43,7 @@ import type { ShapeCodeTarget, ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
-import { partLanding, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
+import { partLanding, reviewDrawnOn, overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
 import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import type { InboxShapes } from '../shape/useInboxShapes';
@@ -260,15 +260,24 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
   };
   /**
    * A click on a part of the board: it lands on the code and the board shrinks. Drawn on another review, the lines
-   * where that code is now; found nowhere, the file, unpainted, with the corner's note. Lines this diff can't show:
-   * the board's own viewer.
+   * where that code is now; found nowhere, a file gone from the new side, a rename's old name, or nothing saying which
+   * review it was drawn on: the file, unpainted, with the corner's note. Lines this diff can't show: the board's own viewer.
    */
   const landOnCode = (target: ShapeCodeTarget, el: HTMLElement, version?: ShapeVersion | null): boolean => {
-    const drawnOn = version?.through;
-    const landing = partLanding(target, showMe.nowLines, drawnOn && otherReviews.includes(drawnOn) ? { lines: showMe.linesOf(drawnOn) } : undefined);
+    const renamed = files.some((file) => file.path === target.path) ? undefined : files.find((file) => file.oldPath === target.path);
+    if (renamed) {
+      showFile(renamed.path);
+      setHighlight(null);
+      setLanded({ name: partName(el), mark: markOf(el), file: renamed.path, lines: null });
+      return true;
+    }
+    const drawnOn = reviewDrawnOn(version?.through, thread.messages, board ? showMe.askedOn(board) : undefined);
+    const landing = partLanding(target, showMe.nowLines, drawnOn === message.id ? undefined : drawnOn ? { lines: showMe.linesOf(drawnOn) } : null);
     if (landing === null) return false;
-    if (landing === 'changed') showFile(target.path);
-    else openCode({ ...target, line: landing[0], lineEnd: landing[1] });
+    if (landing === 'changed') {
+      showFile(target.path);
+      setHighlight(null);
+    } else openCode({ ...target, line: landing[0], lineEnd: landing[1] });
     setLanded({ name: partName(el), mark: markOf(el), file: target.path, lines: landing === 'changed' ? null : landing });
     return true;
   };
@@ -291,8 +300,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
         : undefined,
     [showMe.state.canAsk, onAsk],
   );
-  // The Overview's picture, and in a later round which of its parts the agent redrew.
-  // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the guide viewer's own.
+  // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the
+  // guide viewer's own. In a later round, which of its parts the agent redrew.
   const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
   const earlierReview = earlierReviews.at(-1) ?? null;
   const [earlierOverview, setEarlierOverview] = useState<GuideOverviewDiagram | null>(null);

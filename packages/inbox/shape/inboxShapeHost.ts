@@ -33,6 +33,8 @@ export interface InboxShapeHostOptions {
   command?: string | null;
   /** A Change it wakes the thread's live session (Code review on). Absent: it waits for the agent's next turn. */
   wakeOnChange?: () => boolean;
+  /** How long a refused Change it waits for news before it tries again (`BUSY_RETRY_MS`). */
+  busyRetryMs?: number;
   /** The fetch the Ask stream uses (tests). */
   fetch?: typeof fetch;
 }
@@ -79,6 +81,9 @@ async function readAnswer(response: Response, onText: (text: string) => void): P
   return text.trim();
 }
 
+/** How long a refused Change it waits for news before it tries again. */
+const BUSY_RETRY_MS = 5_000;
+
 export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost {
   const doFetch = options.fetch ?? ((...args: Parameters<typeof fetch>) => fetch(...args));
   const last = new Map<string, ShapeLoadedWire>();
@@ -119,26 +124,35 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
 
   /**
    * A Change it wakes the session once; one that comes while it is being woken wakes it once more, after, if the
-   * agent has not read it by then. Another turn holding the thread's Ask: it tries again once that turn is over.
+   * agent has not read it by then. Refused because a turn holds the session (this thread's, or another thread's,
+   * which this thread's read can't see): it tries again at the Ask's next news from any thread, or after a pause
+   * if none comes. Never straight away: a refusal changes nothing, so a retry at once is a loop.
    */
   const waking = new Map<string, boolean>();
   const untilFree = new Set<string>();
   const wakeWhenFree = (id: string, thread: string) => {
     if (untilFree.has(id)) return;
     untilFree.add(id);
-    const look = () =>
+    let looking = false;
+    const look = () => {
+      if (looking) return;
+      looking = true;
       inboxApi.askRead(thread).then(
         (model) => {
+          looking = false;
           if (model.running || !untilFree.delete(id)) return;
+          clearInterval(pause);
           stop();
           void wake(id);
         },
-        () => {},
+        () => {
+          looking = false;
+        },
       );
-    const stop = onAskChange((changed) => {
-      if (changed === null || changed === thread) void look();
-    });
-    void look();
+    };
+    const stop = onAskChange(look);
+    const pause = setInterval(look, options.busyRetryMs ?? BUSY_RETRY_MS);
+    (pause as { unref?: () => void }).unref?.();
   };
   const wake = async (id: string): Promise<void> => {
     if (waking.has(id)) {

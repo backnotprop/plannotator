@@ -39,7 +39,7 @@
  * No CORS headers anywhere, so another site cannot read an answer.
  */
 
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
@@ -3262,12 +3262,6 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       for (const listener of draftListeners) listener(threadId);
     },
   });
-  // Show me's old drawings: nothing reads them since Show me makes a Shape, so they go, deleted threads' too.
-  try {
-    rmSync(join(store.dir, "review-drawings"), { recursive: true, force: true });
-  } catch {
-    // Left for the next start.
-  }
   // Ask AI: the conversation a thread keeps with its agent (packages/server/inbox-ask.ts).
   const ask = createInboxAsk({
     on: askOnNow,

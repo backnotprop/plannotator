@@ -280,21 +280,42 @@ export function earlierLinesNow(
 /** A review's new-side lines by file (`newSideLines`). */
 export type ReviewLines = ReadonlyMap<string, ReadonlyMap<number, string>>;
 
-/** A review's files as `ReviewLines`. */
+/** A review's files as `ReviewLines`. One with no hunks (a pure rename, a binary) shows no lines and hides none: absent. */
 export function reviewLines(files: readonly { path: string; patch: string }[]): ReviewLines {
-  return new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const));
+  return new Map(files.filter((file) => file.patch.includes('@@')).map((file) => [file.path, newSideLines(file.patch)] as const));
+}
+
+/**
+ * The review a board's version counts its lines in: the newest review at or
+ * before the message it was stored through (agents pass the latest id they read,
+ * often a reply). Stored through nothing: the review the Show me that made the
+ * board names (`askedOn`). Null when neither says, and then its numbers mean nothing here.
+ */
+export function reviewDrawnOn(
+  through: string | null | undefined,
+  messages: readonly { id: string; guide?: { review?: unknown } | null }[],
+  askedOn: string | undefined,
+): string | null {
+  if (!through) return askedOn ?? null;
+  const at = messages.findIndex((message) => message.id === through);
+  for (let i = at; i >= 0; i -= 1) {
+    if (messages[i]!.guide?.review) return messages[i]!.id;
+  }
+  return null;
 }
 
 /**
  * Where a click on a board's part lands in this review's diff: the lines; null
  * when the diff does not show them (the board's own viewer opens the code);
- * 'changed' when the part was drawn on another review and these lines can't be
- * found here (never its old numbers: they hold other code now). `earlier`: the
- * review it was drawn on, when not this one; `lines` undefined until it is read.
+ * 'changed' when these lines can't be found here (never old numbers: they hold
+ * other code now), or the file is gone from the new side. `earlier`: the review
+ * it was drawn on, when not this one, with `lines` undefined until it is read;
+ * null when nothing says which review it was drawn on.
  */
-export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined }): [number, number] | 'changed' | null {
+export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined } | null): [number, number] | 'changed' | null {
   const after = now.get(target.path);
   if (!after) return null;
+  if (after.size === 0 || earlier === null) return 'changed';
   const asked = targetLines(target);
   const numbers = Array.from({ length: asked[1] - asked[0] + 1 }, (_, i) => asked[0] + i);
   if (!earlier) return numbers.some((n) => after.has(n)) ? asked : null;

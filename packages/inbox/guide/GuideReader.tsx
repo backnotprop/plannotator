@@ -206,7 +206,11 @@ export default function GuideReader({
   const [pendingSelection, setPendingSelection] = useState<SelectedLineRange | null>(null);
   // A host's highlight (a picture's part opened its code): those lines are painted on that file's card, which takes focus.
   useEffect(() => {
-    if (!highlight) return;
+    if (!highlight) {
+      // The host took it back (a part landed where nothing may be painted).
+      setPendingSelection(null);
+      return;
+    }
     setFocusedFile(highlight.path);
     setPendingSelection({ start: highlight.start, end: highlight.end, side: 'additions' });
   }, [highlight?.token]); // eslint-disable-line react-hooks/exhaustive-deps

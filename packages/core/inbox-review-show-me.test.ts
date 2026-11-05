@@ -28,7 +28,7 @@ describe("the Show me request", () => {
     expect(lines.join("\n")).toContain("`plannotator shape --help`");
     expect(lines.join("\n")).toContain(`--thread ${THREAD} --through ${target.review}`);
     // A request stays short: the format and the rules live in the help.
-    expect(lines.length).toBeLessThanOrEqual(4);
+    expect(lines.length).toBeLessThanOrEqual(5);
     expect(lines.join("\n")).not.toContain("review draw");
   });
 

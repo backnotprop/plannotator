@@ -242,10 +242,12 @@ export interface ShowMeBoardVersion {
  *  - A Show me: a new board through its review. Only when the turn has ended
  *    with none does it take another board moved through that review (the agent
  *    chose to update one), or a new one stored with no `--through`.
- *  - Stopped or failed with no end kept: nothing.
+ *  - No end kept and not the turn running now (`running`): nothing. A session
+ *    that goes away with no words writes nothing at all, so the turn alone can't
+ *    say it is over.
  * By turn id; a Show me with no board yet is absent.
  */
-export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly ShowMeBoardVersion[] }[]): Map<string, string> {
+export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { id: string; versions: readonly ShowMeBoardVersion[] }[], running: string | null): Map<string, string> {
   const out = new Map<string, string>();
   const asked = turns.filter((turn) => turn.kind === "show_me");
   asked.forEach((turn, at) => {
@@ -253,7 +255,7 @@ export function showMeShapes(turns: readonly InboxAskTurn[], boards: readonly { 
     const ended = Date.parse(turn.answered_at ?? "");
     const hasEnd = Number.isFinite(ended);
     const cut = turn.stopped === true || turn.failure !== undefined;
-    if (cut && !hasEnd) return;
+    if (!hasEnd && (cut || turn.id !== running)) return;
     const next = asked[at + 1];
     const until = Math.min(hasEnd ? ended : Infinity, next ? Date.parse(next.at) : Infinity);
     const firstOf = (fits: (board: string, version: ShowMeBoardVersion) => boolean): string | undefined => {

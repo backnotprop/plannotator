@@ -23,7 +23,7 @@ import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import { inboxShowMeRequest, type InboxShowMeTarget } from "@plannotator/core/inbox-review";
 import { INBOX_ASK_POLL_FIELD, INBOX_BRIDGE_POLL_PATH } from "@plannotator/shared/inbox/connection";
-import { showMeShapes, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
+import { showMeShapes, updateInboxAskTurn, type InboxAskTurn } from "@plannotator/shared/inbox/ask";
 import { createShapeStore } from "@plannotator/shared/shape/store";
 import { GUIDE_BRIEF_EXAMPLE } from "./inbox-guides";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -102,7 +102,9 @@ async function world() {
     return made.id;
   };
   const turnsOf = async (threadId: string) => (await json(await fromWindow(askPath(threadId)))).conversation?.turns ?? [];
-  return { project, dataDir, server, call, fromWindow, setCodeReview, sendReview, askPath, showMe, drawBoard, turnsOf };
+  /** The agent's answer reaches the Inbox: the turn has its end. (No connection here, so none of these turns is running.) */
+  const answer = (threadId: string, turnId: string) => updateInboxAskTurn(join(dataDir, "inbox"), threadId, turnId, { answer: "Drew it.", answered_at: new Date().toISOString() });
+  return { project, dataDir, server, call, fromWindow, setCodeReview, sendReview, askPath, showMe, drawBoard, turnsOf, answer };
 }
 
 const json = async (response: Response) => (await response.json()) as Record<string, any>;
@@ -142,6 +144,10 @@ describe("Show me while Code review is on", () => {
 
     await pause();
     const board = w.drawBoard(review.thread_id, review.message_id);
+    // Not running and no end kept (the session went away with no words): the board is not this turn's.
+    expect((await w.turnsOf(review.thread_id))[0].shape).toBeUndefined();
+    await pause();
+    w.answer(review.thread_id, "turn-0001");
     expect((await w.turnsOf(review.thread_id))[0].shape).toBe(board);
 
     await pause();
@@ -152,6 +158,8 @@ describe("Show me while Code review is on", () => {
 
     await pause();
     const second = w.drawBoard(review.thread_id, review.message_id);
+    await pause();
+    w.answer(review.thread_id, "turn-0002");
     turns = await w.turnsOf(review.thread_id);
     expect(turns.map((t: { shape?: string }) => t.shape)).toEqual([board, second]);
   });
@@ -167,6 +175,8 @@ describe("Show me while Code review is on", () => {
     await w.showMe(review.thread_id, "turn-0002", { ...target, file: null, lines: null }, title);
     await pause();
     const board = w.drawBoard(review.thread_id, review.message_id);
+    await pause();
+    w.answer(review.thread_id, "turn-0002");
     expect((await w.turnsOf(review.thread_id)).map((t: { shape?: string }) => t.shape)).toEqual([undefined, board]);
   });
 
@@ -179,6 +189,8 @@ describe("Show me while Code review is on", () => {
     await w.showMe(review.thread_id, "turn-0001", target, title);
     await pause();
     const board = w.drawBoard(review.thread_id, review.message_id);
+    await pause();
+    w.answer(review.thread_id, "turn-0001");
     await pause();
 
     const again = await w.showMe(review.thread_id, "turn-0002", target, title, board);
@@ -194,6 +206,8 @@ describe("Show me while Code review is on", () => {
 
     await pause();
     expect(w.drawBoard(review.thread_id, review.message_id, board, 1)).toBe(board);
+    await pause();
+    w.answer(review.thread_id, "turn-0002");
     expect((await w.turnsOf(review.thread_id)).map((t: { shape?: string }) => t.shape)).toEqual([board, board]);
   });
 
@@ -246,21 +260,21 @@ describe("Show me while Code review is on", () => {
     expect((await w.showMe(review.thread_id, "turn-0002", target, review.guide.title, mine)).status).toBe(200);
   });
 
-  test("old drawings are gone from disk once the Inbox starts", async () => {
+  test("old drawings stay on disk: a downgrade to the version that wrote them finds them", async () => {
     const dir = join(realpathSync(mkdtempSync(join(tmpdir(), "plannotator-old-drawings-"))), "data");
     const drawn = join(dir, "inbox", "review-drawings");
     mkdirSync(drawn, { recursive: true });
-    writeFileSync(join(drawn, "msg_01M6N63CT5DREP6REKGQPAEXNA.json"), "{}");
+    const file = join(drawn, "msg_01M6N63CT5DREP6REKGQPAEXNA.json");
+    writeFileSync(file, "{}");
     const saved = process.env.PLANNOTATOR_DATA_DIR;
     process.env.PLANNOTATOR_DATA_DIR = dir;
     const server = await startInboxServer({ dataDir: dir, codeReview: false, phones: false });
     try {
-      expect(existsSync(drawn)).toBe(false);
+      expect(existsSync(file)).toBe(true);
     } finally {
       server.stop();
       if (saved === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
       else process.env.PLANNOTATOR_DATA_DIR = saved;
-      rmSync(join(dir, ".."), { recursive: true, force: true });
     }
   });
 
@@ -286,7 +300,7 @@ describe("which board a Show me made (other work on the thread's boards is never
   const turn = (id: string, s: number, extra: Partial<InboxAskTurn> = {}): InboxAskTurn =>
     ({ id, at: at(s), question: "q", kind: "show_me", show_me: { review: REVIEW, file: "a.ts", lines: [1, 2], round: 1 }, ...extra }) as InboxAskTurn;
   const v = (n: number, s: number, through: string | null = REVIEW) => ({ n, at: at(s), through });
-  const link = (turns: InboxAskTurn[], boards: { id: string; versions: ReturnType<typeof v>[] }[]) => Object.fromEntries(showMeShapes(turns, boards));
+  const link = (turns: InboxAskTurn[], boards: { id: string; versions: ReturnType<typeof v>[] }[], running: string | null = turns.at(-1)?.answered_at ? null : (turns.at(-1)?.id ?? null)) => Object.fromEntries(showMeShapes(turns, boards, running));
 
   test("an unrelated board moving during the Show me is not its answer; the board it asked for is", () => {
     const older = { id: "older", versions: [v(1, 1), v(2, 11)] };
@@ -328,7 +342,15 @@ describe("which board a Show me made (other work on the thread's boards is never
   test("two Show mes: each keeps to its own stretch", () => {
     const first = { id: "first", versions: [v(1, 12)] };
     const second = { id: "second", versions: [v(1, 22)] };
-    expect(link([turn("a", 10), turn("b", 20)], [second, first])).toEqual({ a: "first", b: "second" });
+    const earlier = turn("a", 10, { answer: "done", answered_at: at(15) });
+    expect(link([earlier, turn("b", 20)], [second, first], "b")).toEqual({ a: "first", b: "second" });
+  });
+
+  test("a Show me that ended with no words and no end kept names nothing, however late a board comes; running, it does", () => {
+    const later = { id: "later", versions: [v(1, 59)] };
+    expect(link([turn("t", 10)], [later], null)).toEqual({});
+    expect(link([turn("t", 10)], [later], "another-turn")).toEqual({});
+    expect(link([turn("t", 10)], [later], "t")).toEqual({ t: "later" });
   });
 });
 
