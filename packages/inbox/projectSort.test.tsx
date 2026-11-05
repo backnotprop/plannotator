@@ -1,7 +1,8 @@
 /**
  * The order of the sidebar's Projects, on the window's own Sidebar: no choice
- * draws the server's order and writes nothing; one button goes A to Z, most
- * recent and back; the choice survives a remount; A to Z ignores case and
+ * draws the server's order and writes nothing; the first press goes A to Z, then
+ * one button goes between most recent and A to Z, never back to the first order;
+ * the choice survives a remount; A to Z ignores case and
  * accents and counts numbers; most recent reads the list's rows and puts a
  * project with none last; no toggle with one project or none, or while the
  * section is closed. tests/e2e/inbox-projects-sort.spec.ts proves the real
@@ -103,26 +104,35 @@ test("a cookie it does not know is the server's order", () => {
   expect(names()).toEqual(['zephyr', 'Atlas', 'billing-svc']);
 });
 
-test('one button goes A to Z, most recent and back, keeps focus, and has a name that changes with the order', () => {
+test('the first press goes A to Z, then one button goes between most recent and A to Z, never back to the first order', () => {
   draw();
-  const before = toggle()!.getAttribute('aria-label');
-  expect(before).toBeTruthy();
+  const first = toggle()!.getAttribute('aria-label');
+  expect(first).toBeTruthy();
   act(() => toggle()!.focus());
 
   press();
   expect(names()).toEqual(['Atlas', 'billing-svc', 'zephyr']);
   expect(stored.get(PROJECTS_SORT_COOKIE)).toBe('name');
-  expect(toggle()!.getAttribute('aria-label')).not.toBe(before);
+  const az = toggle()!.getAttribute('aria-label');
+  expect(az).not.toBe(first);
   expect(document.activeElement).toBe(toggle());
 
   press();
   expect(names()).toEqual(['billing-svc', 'Atlas', 'zephyr']);
   expect(stored.get(PROJECTS_SORT_COOKIE)).toBe('recent');
+  expect(toggle()!.getAttribute('aria-label')).not.toBe(az);
 
   press();
-  expect(names()).toEqual(['zephyr', 'Atlas', 'billing-svc']);
-  expect(stored.has(PROJECTS_SORT_COOKIE)).toBe(false);
-  expect(toggle()!.getAttribute('aria-label')).toBe(before);
+  expect(names()).toEqual(['Atlas', 'billing-svc', 'zephyr']);
+  expect(stored.get(PROJECTS_SORT_COOKIE)).toBe('name');
+  expect(toggle()!.getAttribute('aria-label')).toBe(az);
+});
+
+test('most recent also survives a remount', () => {
+  storage.setItem(PROJECTS_SORT_COOKIE, 'recent');
+  draw();
+  expect(names()).toEqual(['billing-svc', 'Atlas', 'zephyr']);
+  expect(toggle()?.dataset.projectsSort).toBe('recent');
 });
 
 test('the choice survives a remount, and a press says the new order and never closes the section', () => {

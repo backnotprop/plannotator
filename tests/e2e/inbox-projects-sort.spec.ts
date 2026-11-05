@@ -2,8 +2,9 @@
  * The order of the sidebar's Projects (packages/inbox/projectSort.ts), proved in
  * a real Chromium against the compiled binary under a temp HOME and data dir:
  * the default is the order the projects came in; the icon hides until the
- * header is hovered; a press goes A to Z, most recent and back; each choice
- * survives a real reload; a new message moves its project up in most recent; a
+ * header is hovered; the first press goes A to Z, then the icon goes between most
+ * recent and A to Z, never back to the first order; each choice survives a real
+ * reload; a new message moves its project up in most recent; a
  * phone's sheet always shows it as a 44 px target and a tap keeps the sheet open.
  *
  * Build the binary first (see inbox.spec.ts). The PNGs land in
@@ -105,7 +106,7 @@ test.afterAll(async () => {
   }
 });
 
-test('desktop: the default is the order they came in, and the icon goes A to Z, most recent and back, across reloads', async () => {
+test('desktop: the default is the order they came in, and the icon goes A to Z, most recent and A to Z again, across reloads', async () => {
   const { page, url } = world;
   await page.goto(url);
   const nav = side(page);
@@ -152,11 +153,12 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
   await world.agent.send({ project_path: world.paths.get('Zephyr')!, subject: 'Another one on Zephyr', body: 'A later change.' });
   await expect(names(nav).first()).toHaveText('Zephyr');
 
+  // From most recent a press goes back to A to Z, never to the order they came in.
   await toggle(nav).click();
-  await expect(names(nav)).toHaveText(ADDED);
-  expect(await cookie(page)).toBeUndefined();
+  await expect(names(nav)).toHaveText(AZ);
+  expect(await cookie(page)).toBe('name');
   await page.reload();
-  await expect(names(nav)).toHaveText(ADDED);
+  await expect(names(nav)).toHaveText(AZ);
 
   // A closed section has no toggle.
   await header(nav).click();
@@ -167,6 +169,8 @@ test('desktop: the default is the order they came in, and the icon goes A to Z, 
 
 test('a phone: the sheet always shows it, a 44 px target beside the chevron, and a tap keeps the sheet open', async () => {
   const { page, url } = world;
+  // A browser that has not chosen, as a phone decides on its own.
+  await page.context().clearCookies({ name: 'plannotator-inbox-projects-sort' });
   await page.setViewportSize({ width: 390, height: 844 });
   await page.goto(url);
   await page.locator('.ib-lhead').getByRole('button', { name: 'Toggle Sidebar' }).click();
@@ -174,6 +178,7 @@ test('a phone: the sheet always shows it, a 44 px target beside the chevron, and
   // Away from the row, as a finger is: nothing hovers on a phone.
   const away = () => page.mouse.move(100, 680);
   await expect(toggle(sheet)).toBeVisible();
+  await expect(names(sheet)).toHaveText(ADDED);
   await expect(toggle(sheet)).toHaveCSS('opacity', '1');
   const box = (await toggle(sheet).boundingBox())!;
   expect([box.width, box.height]).toEqual([44, 44]);
@@ -195,5 +200,6 @@ test('a phone: the sheet always shows it, a 44 px target beside the chevron, and
   await shot(page, 'phone-3-recent');
 
   await toggle(sheet).click();
-  await expect(names(sheet)).toHaveText(ADDED);
+  await expect(sheet).toBeVisible();
+  await expect(names(sheet)).toHaveText(AZ);
 });

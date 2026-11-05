@@ -1,9 +1,11 @@
 /**
  * The order of the sidebar's Projects (a person's feedback, the owner's "either
  * alphabetically or most recent ... an elegant toggle"). No cookie is today's
- * order, the server's: oldest project first, a new one at the bottom. Nothing
- * else reads this: the project pickers and the Board's filter keep their own
- * orders. Which order is this browser's own choice, kept like the sections'
+ * order, the server's: oldest project first, a new one at the bottom, so nobody's
+ * list changes until they press. The first press goes A to Z, and from then on
+ * the button goes between A to Z and most recent, never back to today's order.
+ * Nothing else reads this: the project pickers and the Board's filter keep their
+ * own orders. Which order is this browser's own choice, kept like the sections'
  * open state (sidebarSections.ts): a cookie through `storage`, never synced, and
  * every sidebar on the page follows it (the docked one, the peek, the phone sheet).
  */
@@ -16,17 +18,20 @@ export const PROJECTS_SORT_COOKIE = 'plannotator-inbox-projects-sort';
 
 export type ProjectSort = 'added' | 'name' | 'recent';
 
-const SORTS: Readonly<Record<ProjectSort, { icon: IconName; now: string; press: string; next: ProjectSort }>> = {
-  // One button goes round all three: today's order stays one press away, so trying the toggle loses nothing.
-  added: { icon: 'sortList', now: 'Sorted by when added', press: 'Sort by when added', next: 'name' },
-  name: { icon: 'sortAZ', now: 'Sorted A to Z', press: 'Sort A to Z', next: 'recent' },
-  recent: { icon: 'sortRecent', now: 'Sorted by most recent', press: 'Sort by most recent', next: 'added' },
+/** What a press can choose: the owner's "either alphabetically or most recent". Today's order is only where a list starts. */
+export type ChosenProjectSort = Exclude<ProjectSort, 'added'>;
+
+const SORTS: Readonly<Record<ProjectSort, { icon: IconName; now: string; next: ChosenProjectSort }>> = {
+  added: { icon: 'sortList', now: 'Sorted by when added', next: 'name' },
+  name: { icon: 'sortAZ', now: 'Sorted A to Z', next: 'recent' },
+  recent: { icon: 'sortRecent', now: 'Sorted by most recent', next: 'name' },
 };
+const PRESS: Readonly<Record<ChosenProjectSort, string>> = { name: 'Sort A to Z', recent: 'Sort by most recent' };
 
 /** The toggle: its icon (the order on screen), its name and tooltip (that order, then what a press does), the next order and what a press says. */
-export function projectSortControl(sort: ProjectSort): { icon: IconName; label: string; next: ProjectSort; said: string } {
+export function projectSortControl(sort: ProjectSort): { icon: IconName; label: string; next: ChosenProjectSort; said: string } {
   const { icon, now, next } = SORTS[sort];
-  return { icon, label: `${now}. ${SORTS[next].press}`, next, said: `Projects: ${SORTS[next].now}.` };
+  return { icon, label: `${now}. ${PRESS[next]}`, next, said: `Projects: ${SORTS[next].now}.` };
 }
 
 /** The cookie's value as an order; anything else is today's. */
@@ -73,10 +78,9 @@ const subscribe = (listener: () => void) => {
   return () => void listeners.delete(listener);
 };
 
-/** Chooses the order in every sidebar on the page and remembers it; today's order leaves no cookie. */
-export function setProjectSort(sort: ProjectSort): void {
-  if (sort === 'added') storage.removeItem(PROJECTS_SORT_COOKIE);
-  else storage.setItem(PROJECTS_SORT_COOKIE, sort);
+/** Chooses the order in every sidebar on the page and remembers it. */
+export function setProjectSort(sort: ChosenProjectSort): void {
+  storage.setItem(PROJECTS_SORT_COOKIE, sort);
   for (const listener of [...listeners]) listener();
 }
 
