@@ -9,10 +9,9 @@
  * server); without, they are read-only, as on guides.show and the phone.
  *
  * Mounted only through GuidePane's dynamic import (`#guide-reader`,
- * tests/entry-assets.test.ts). The single-file build inlines it: its bytes
- * ship in inbox.html and its modules (the guide chain, the diff renderer) run
- * at page load; what waits for Open is the mount, the diff render and the
- * highlighter, as with every lazy runtime in Plannotator's single-file apps.
+ * tests/entry-assets.test.ts). It is its own chunk, packed in inbox.html and
+ * served by the Inbox (build/pack-inbox.ts, #2593): its modules (the guide
+ * chain, the diff renderer) load and run on the first Open, never at page load.
  * The first section card carries the Split | Unified tab (DiffStyleSwitch,
  * through the chain's `renderSectionTab`); a phone draws every diff Unified
  * and has no tab. No new Tailwind classes here or in the chain. The comment cards, toolbar
@@ -157,6 +156,7 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
 }
 
 export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false }: GuideReaderProps) {
+  const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
@@ -356,8 +356,10 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       ...(revealFile ? { revealFile } : {}),
       ...(phone ? {} : { renderSectionTab }),
       ...(globalComments ? { globalComments } : {}),
+      // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
+      diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments, savedDiffStyle],
   );
 
   return (
@@ -371,6 +373,8 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
         bare={bare}
+        // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
+        fitFileHeights
       />
       {globalAnchor && globalDraftKey && (
         <CommentPopover
