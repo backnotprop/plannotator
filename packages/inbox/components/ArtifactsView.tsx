@@ -22,7 +22,7 @@ import {
   type InboxAttachmentKind,
   type InboxAttachmentState,
 } from '@plannotator/core/inbox-types';
-import { artifactKey, artifactMessageCount, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
+import { artifactKey, artifactsNewestFirst, type Artifact, type FileArtifact, type GuideArtifact } from '../artifacts';
 import { readableVersion } from '../attachments';
 import { useInboxFileSource, type InboxFileSource } from '../fileSource';
 import { formatBytes, formatCount, fullTime, plural } from '../format';
@@ -442,16 +442,14 @@ export interface ArtifactsViewProps {
   onOpenGuide: (artifact: GuideArtifact) => void;
   /** A tile's ⋯ "Open side by side" / "Open full screen" (absent on a phone or a stacked window). */
   onOpenAs?: (artifact: FileArtifact, view: 'full' | 'side') => void;
-  /** "Back to the thread" (desktop; a phone's header has its own Back). */
-  onBack?: () => void;
   openIn?: OpenInSurface;
-  /** A phone: the header names the view, so the heading here is for a screen reader only. */
+  /** A phone: a tile has no "Open in". */
   phone?: boolean;
 }
 
 /** The grid itself, with its heading ("Artifacts") as the region's name and the focus target when it opens. */
 export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(function ArtifactsView(
-  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, onBack, openIn, phone = false },
+  { artifacts, annotationCounts, openId, onOpen, onOpenGuide, onOpenAs, openIn, phone = false },
   headingRef,
 ) {
   const ordered = artifacts ? artifactsNewestFirst(artifacts) : [];
@@ -464,23 +462,10 @@ export const ArtifactsView = forwardRef<HTMLHeadingElement, ArtifactsViewProps>(
   }, [openId, count]);
   return (
     <section ref={section} className="ib-art" aria-labelledby="ib-art-h" data-artifacts-view="">
-      <div className="ib-art-top">
-        {onBack && (
-          <button type="button" className="ib-art-back" onClick={onBack} data-artifacts-back="">
-            <Icon name="chevL" size={15} />
-            <span>Back to the thread</span>
-          </button>
-        )}
-        <h2 id="ib-art-h" ref={headingRef} className={phone ? 'ib-sr' : 'ib-art-h'} tabIndex={-1}>
-          Artifacts
-        </h2>
-        {artifacts !== null && count > 0 && (
-          <span className="ib-art-sum" data-artifacts-summary="">
-            {count === 1 ? '1 artifact' : `${formatCount(count)} from ${plural(artifactMessageCount(ordered), 'message')}`}
-            {count > 1 ? ' · newest first' : ''}
-          </span>
-        )}
-      </div>
+      {/* For a screen reader and for focus: the view's switch is what the eye reads. */}
+      <h2 id="ib-art-h" ref={headingRef} className="ib-sr" tabIndex={-1}>
+        Artifacts
+      </h2>
       {artifacts === null ? (
         <p className="ib-art-load" aria-busy="true">
           Loading the artifacts…

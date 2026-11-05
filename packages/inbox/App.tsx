@@ -354,6 +354,8 @@ interface Route {
    * artifact in place of the messages. A file or a guided review opened from it keeps it, so their Back returns to it.
    */
   artifacts?: boolean;
+  /** The Artifacts view on its links (`#thread=…&artifacts&links`). Means nothing without `artifacts`. */
+  links?: boolean;
   /**
    * A message to land on (`#thread=…&msg=msg_…`, a search result): the thread
    * opens there, the message unfolded, centred, focused and ringed. Dropped
@@ -409,6 +411,7 @@ function routeOf(fullHash: string): Route {
     shape: thread ? params.get('shape') : null,
     msg: thread ? params.get('msg') : null,
     artifacts: thread ? params.has('artifacts') : false,
+    links: thread ? params.has('artifacts') && params.has('links') : false,
     card: thread ? params.get('card') : null,
     // The Board list the card was opened from (Done, Cancelled): the way back goes there.
     board: thread && params.get('card') ? boardViewOf(params.get('from')) : undefined,
@@ -445,6 +448,7 @@ function hashOf(route: Route): string {
     if (route.thread) params.set('thread', route.thread);
     if (route.thread && route.msg) params.set('msg', route.msg);
     if (route.thread && route.artifacts) params.set('artifacts', '');
+    if (route.thread && route.artifacts && route.links) params.set('links', '');
     if (route.thread && route.file) {
       params.set('file', route.file.id);
       if (route.file.version === 'sent') params.set('v', 'sent');
@@ -462,8 +466,8 @@ function hashOf(route: Route): string {
     if (route.thread && route.card && route.board && route.board !== 'lanes') params.set('from', route.board);
     if (route.thread && route.card && route.boardProject) params.set('board-project', route.boardProject);
     if (route.thread && route.card && route.boardInitiative) params.set('board-initiative', route.boardInitiative);
-    // `&artifacts`, a flag: written without its empty `=`.
-    hash = params.toString().replace(/(^|&)artifacts=(?=&|$)/, '$1artifacts');
+    // `&artifacts`, `&links`, flags: written without their empty `=`.
+    hash = params.toString().replace(/(^|&)(artifacts|links)=(?=&|$)/g, '$1$2');
   }
   return hash ? `#${hash}` : '';
 }
@@ -5721,7 +5725,10 @@ function Inbox() {
             fullExitFile={fullExitFile(window.history.state)}
             onOpenGuide={(messageId) => go({ ...route, guide: messageId })}
             artifacts={route.artifacts === true}
-            onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, msg: null }) : close({ ...routeRef.current, artifacts: false }))}
+            onArtifacts={(open) => (open ? go({ ...routeRef.current, artifacts: true, links: false, msg: null }) : close({ ...routeRef.current, artifacts: false, links: false }))}
+            links={route.artifacts === true && route.links === true}
+            // Between the view's two sides: the same screen, so Back still returns to the thread.
+            onLinks={(on) => writeRoute({ ...routeRef.current, links: on }, { replace: true })}
             // Decision mode's one way in (thread only): from two of this thread's decisions up, and not while a
             // sitting is tucked into its pill (the pill's Resume is the way back to it).
             decide={decideInThread(thread.thread_id)}

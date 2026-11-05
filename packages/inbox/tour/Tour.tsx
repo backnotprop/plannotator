@@ -24,6 +24,7 @@ import { Tip } from '../components/Tip';
 import { AttachmentTiles } from '../components/AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from '../components/AttachmentPane';
 import { ArtifactsView } from '../components/ArtifactsView';
+import { ArtifactsBar, ThreadViewSwitch } from '../components/ThreadLinksView';
 import { ReplyAnswers, draftAnswerWords, type DraftAnswer } from '../components/ReplyAnswers';
 import { AnnotationsChip } from '../components/AnnotationsChip';
 import { ComposeDialog, type ComposeTransport } from '../compose/ComposeDialog';
@@ -1579,6 +1580,11 @@ function TourThreadPane({
           </>
         )}
       </div>
+      {state.artifactsOpen && !phone && (
+        <ArtifactsBar onBack={() => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}>
+          <ThreadViewSwitch links={0} artifacts={artifacts.length} linksOn={false} onLinks={noop} />
+        </ArtifactsBar>
+      )}
       {state.artifactsOpen ? (
         <div className="ib-pbody ib-artbody">
           <ArtifactsView
@@ -1587,7 +1593,6 @@ function TourThreadPane({
             openId={state.file?.id ?? null}
             onOpen={(artifact) => onOpenFile(artifact.attachment)}
             onOpenGuide={noop}
-            onBack={phone ? undefined : () => dispatch({ type: 'artifacts', open: false }, { focusCoach: true })}
             phone={phone}
           />
         </div>
