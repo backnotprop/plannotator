@@ -210,7 +210,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const root = inboxScratch('plannotator-inbox-code-review-e2e-');
   const dataDir = join(root, 'data');
   markTourDecided(dataDir);
-  // The skill roots (review-skill-loader.ts) in scratch folders; HOME stays the runner's.
+  // The skill roots (review-skill-loader.ts) in scratch folders, like HOME.
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
