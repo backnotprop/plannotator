@@ -518,6 +518,8 @@ packages/inbox/pulls/usePulls.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx
 packages/inbox/shapeEndedLabel.test.tsx
+packages/inbox/lazyChunkFailure.test.tsx
+packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
@@ -527,4 +529,6 @@ packages/ui/components/html-viewer/HtmlViewer.globalCommentDraft.test.tsx
 packages/ui/components/CodeFilePopout.commentDraft.test.tsx
 packages/ui/components/ImageLightbox.regionDraft.test.tsx
 packages/review-editor/components/MarkdownBody.prImages.test.tsx
+packages/inbox/attachmentDrawReady.test.tsx
+packages/inbox/lazyRecovery.test.tsx
 packages/review-editor/components/guide/GuideGlobalCommentPopover.test.tsx

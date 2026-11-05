@@ -16,6 +16,9 @@ import type { ActionMark } from './components/ActionChecklist';
 import { isMootNoteRefusal } from './actionSaves';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type ReactNode } from 'react';
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
+import { WarmCodeHighlight } from './components/WarmCodeHighlight';
+import { threadDrawReady } from './threadDrawReady';
+import { WarmWindowParts } from './lazyParts';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
@@ -1405,6 +1408,9 @@ function Inbox() {
     const askedOwner = machineOf(threadId);
     try {
       const next = await inboxApi.thread(threadId, THREAD_READ_TIMEOUT_MS);
+      // Its code fences' grammars and KaTeX are chunks loaded on first use (#2593): the thread draws once
+      // they are in, so its code paints highlighted and its math typeset, never plain first.
+      await threadDrawReady(next.thread);
       if (unlistedSince.current?.threadId === threadId) unlistedSince.current = null;
       if (routeRef.current.thread === threadId && mine > threadReadApplied.current) {
         threadReadApplied.current = mine;
@@ -6186,6 +6192,8 @@ function Inbox() {
 export function InboxApp() {
   return (
     <ThemeProvider defaultTheme="system">
+      <WarmCodeHighlight />
+      <WarmWindowParts />
       {/* Every tooltip in the window (Tip): 150 ms to open, and the next one at once within 400 ms. */}
       <TooltipProvider delayDuration={TIP_DELAY_MS} skipDelayDuration={TOOLTIP_SKIP_DELAY_MS} disableHoverableContent>
         <AccountsProvider>

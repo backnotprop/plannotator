@@ -247,6 +247,18 @@ export function ensureHighlight(lang: string, theme: string): Promise<boolean> {
   return load;
 }
 
+/**
+ * Let a pair that failed to attach try again on its next `ensureHighlight`.
+ *
+ * A host whose grammars are fetched on first use (a code-split build) can lose
+ * one to a server that was away for a moment; without this the pair stays
+ * plain for the life of the page. Nothing in ui calls it: a pair that failed
+ * stays rejected unless the host asks.
+ */
+export function forgetHighlightRejection(lang: string, theme: string): void {
+  rejected.delete(pairKey(lang, theme));
+}
+
 /** Monotonic stamp per element so a slow async highlight from a previous
  *  content/theme never lands on top of a newer one. */
 const renderSeq = new WeakMap<HTMLElement, number>();
