@@ -1122,8 +1122,15 @@ export function createInboxLaunch(options: {
       if (state.lastAvailable === null) state.lastAvailable = await available(host);
       if (hostStale(host) && needsHost(host, root)) await refreshHost(host);
       const runLine = runOfRoot(store.message(threadId)!);
-      // The home folder is never trusted: the how-to then says to start in a folder inside it.
-      const line = runLine?.untrusted && samePlace(root.launch.folder, options.homeDir) ? { ...runLine, home_folder: true as const } : runLine;
+      // Trust that would cover home, or `/`: the how-to says to start in a project with its own repository.
+      // The home folder otherwise is never trusted: the how-to says to start in a folder inside it.
+      const line = !runLine?.untrusted
+        ? runLine
+        : host.trustCoversHome?.(root.launch)
+          ? { ...runLine, trust_covers_home: true as const }
+          : samePlace(root.launch.folder, options.homeDir)
+            ? { ...runLine, home_folder: true as const }
+            : runLine;
       const offer = owner && line?.untrusted ? host.trustOffer?.(root.launch) : null;
       return offer ? { ...line!, trust: { warning: offer.read().warning } } : line;
     },

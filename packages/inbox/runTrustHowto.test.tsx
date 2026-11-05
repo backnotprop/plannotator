@@ -5,7 +5,10 @@
  * would be wrong; anywhere else, running the agent there is the way. The failure this catches: both
  * sentences shown together, or the wrong one for the folder, or another agent named as Claude Code.
  *
- * The two sentences are pinned on purpose: the owner chose their exact words.
+ * A folder whose trust would land on a repository rooted at home, and `/`, get a third sentence: running the agent
+ * there can't help, and in that repository "a folder inside it" can't either.
+ *
+ * The three sentences are pinned on purpose: the owner chose their exact words.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -18,6 +21,7 @@ const hasDom = typeof document !== 'undefined';
 const { RunLine } = (hasDom ? await import('./components/RunLine') : {}) as typeof import('./components/RunLine');
 
 const HOME = "Your home folder can't be trusted. Start in a folder inside it.";
+const COVERS_HOME = "This folder can't be trusted because trust would cover your home folder. Start in a project folder with its own git repo.";
 const elsewhere = (name: string) => `To trust it, run ${name} here in a terminal on the Inbox's computer.`;
 
 function failedUntrusted(extra: Omit<Partial<InboxRun>, 'agent'> & { agent?: string } = {}): InboxRun {
@@ -65,4 +69,11 @@ test.skipIf(!hasDom)("any other folder: only the sentence that says to run the a
   act(() => root?.unmount());
   host?.remove();
   expect(howto(failedUntrusted({ agent: 'opencode' }))).toBe(elsewhere('OpenCode'));
+});
+
+test.skipIf(!hasDom)('trust that would cover home, or `/`: only the sentence that says to start in a project with its own repo', () => {
+  expect(howto(failedUntrusted({ folder: '/Users/me/projects/foo', trust_covers_home: true }))).toBe(COVERS_HOME);
+  act(() => root?.unmount());
+  host?.remove();
+  expect(howto(failedUntrusted({ folder: '/', trust_covers_home: true }))).toBe(COVERS_HOME);
 });
