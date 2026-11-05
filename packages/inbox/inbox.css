@@ -7870,3 +7870,61 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
 }
+
+/*
+ * Hashtags (approval "board-hashtags"): the skill list's own menu (ui SkillReferenceMenu, unchanged), restyled here
+ * for `#` only. A light popover as wide as its names, hung under the `#` (`--ib-hash-x`, hashtags.ts), not a slab
+ * across the box. No icon per row (the `#` typed is the context), the count a quiet number, and the row Enter picks
+ * shows itself: an accent wash with a hairline and an Enter keycap. Nothing is active until arrowed onto (the skill
+ * list's rule), so no row looks picked before that.
+ */
+.ib-hashwrap { position: relative; display: flex; flex-direction: column; }
+.ib-hashwrap-notes { flex: 1 1 auto; }
+.ib-hashwrap-notes > .ib-ncd-notes { flex: 1 1 auto; }
+.ib-hashanchor { position: absolute; left: -8px; right: -8px; z-index: 5; }
+[data-hashtag-menu] [data-skill-menu] {
+  left: var(--ib-hash-x, 0px); right: auto; width: max-content; min-width: 180px; max-width: min(300px, 100%);
+  border-radius: 10px; border-color: color-mix(in oklch, var(--foreground) 10%, transparent);
+  box-shadow: 0 10px 28px -12px rgb(0 0 0 / 0.22), 0 2px 6px -2px rgb(0 0 0 / 0.08);
+}
+:root.dark [data-hashtag-menu] [data-skill-menu], .dark [data-hashtag-menu] [data-skill-menu] { box-shadow: 0 12px 32px -12px rgb(0 0 0 / 0.6), 0 0 0 1px rgb(255 255 255 / 0.04); }
+[data-hashtag-menu] [data-skill-menu-list] { padding: 4px; gap: 2px; }
+[data-hashtag-menu] [data-skill-item] { min-height: 32px; padding: 0 8px 0 10px; gap: 16px; border-radius: 6px; font-size: var(--ib-fs-13-5, 13.5px); flex-wrap: nowrap; }
+[data-hashtag-menu] [data-skill-item] > svg { display: none; }
+[data-hashtag-menu] [data-skill-item-part="root"] { display: none; }
+[data-hashtag-menu] [data-skill-item-part="name"] { flex: 1 1 auto; min-width: 0; font-weight: 500; }
+[data-hashtag-menu] [data-skill-item-part="description"] {
+  order: 0; flex: 0 0 auto; flex-basis: auto; padding-left: 0; margin-left: auto;
+  font-size: var(--ib-fs-12, 12px); font-variant-numeric: tabular-nums; color: color-mix(in oklch, var(--muted-foreground) 85%, transparent);
+}
+/* The Enter keycap: room kept on every row (no width jump while arrowing), shown on the active one. */
+[data-hashtag-menu] [data-skill-item]::after {
+  content: '\21B5'; flex: 0 0 auto; width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center;
+  font-size: var(--ib-fs-11, 11px); line-height: 1; color: var(--muted-foreground); border: 1px solid color-mix(in oklch, var(--foreground) 12%, transparent);
+  border-radius: 4px; opacity: 0; margin-left: -8px;
+}
+[data-hashtag-menu] [data-skill-item][data-skill-item-active="true"] {
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--primary) 22%, transparent);
+}
+[data-hashtag-menu] [data-skill-item][data-skill-item-active="true"] [data-skill-item-part="name"] { color: var(--primary); }
+[data-hashtag-menu] [data-skill-item][data-skill-item-active="true"]::after { opacity: 1; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  /* A finger: 44 px rows, the list still as wide as its names, under the `#`, above the reply box. */
+  [data-hashtag-menu] [data-skill-item] { min-height: 44px; font-size: var(--ib-fs-15, 15px); padding: 0 10px; }
+  [data-hashtag-menu] [data-skill-item-part="description"] { font-size: var(--ib-fs-13, 13px); }
+  [data-hashtag-menu] [data-skill-menu] { min-width: 200px; max-width: min(300px, 100%); }
+  /* A tap picks: no Enter keycap, and no room kept for it. */
+  [data-hashtag-menu] [data-skill-item]::after { display: none; }
+}
+/* Sent: `#Shape` in the app's accent, as the composer painted it; no underline until hover (no pill, no chip). */
+.pn-inbox .ib-body a[href^="#board&initiative="] { color: var(--primary); text-decoration-line: none; font-weight: 500; }
+.pn-inbox .ib-body a[href^="#board&initiative="]:hover { text-decoration-line: underline; text-underline-offset: 3px; text-decoration-thickness: 1px; text-decoration-color: color-mix(in oklch, var(--primary) 45%, transparent); }
+/* A sent tag's preview (approval "board-hashtags", InitiativePeek): RefHoverCard's surface and type, drawn in Tailwind
+   in the component. Here only what the Inbox's own marks need inside it: a thread's agent mark, quiet. */
+.ib-tagpeek a { text-decoration: none; }
+.ib-tagpeek .ib-tagpeek-agent .ib-mk { opacity: 0.7; }
+.ib-tagpeek-row:hover .ib-tagpeek-agent .ib-mk, .ib-tagpeek-row:focus-visible .ib-tagpeek-agent .ib-mk { opacity: 0.9; }
+/* The Inbox's own neutral badge (.ib-badge.ib-b-mut), a size down in the preview; a column's count after its name. */
+.pn-inbox .ib-tagpeek .ib-badge.ib-tagpeek-badge { height: 20px; padding: 0 6px; gap: 0; font-size: var(--ib-fs-12, 12px); font-weight: 500; border-color: color-mix(in oklch, var(--foreground) 18%, transparent); }
+.ib-tagpeek .ib-tagpeek-n { color: var(--foreground); font-variant-numeric: tabular-nums; margin-left: 2px; }

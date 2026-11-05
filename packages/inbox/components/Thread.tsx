@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
 import { useRefHoverCards } from '@plannotator/ui/components/RefHoverCard';
+import { useInitiativePeek } from './InitiativePeek';
 import type { Annotation, Block } from '@plannotator/ui/types';
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { ImageLightbox } from '@plannotator/ui/components/ImageLightbox';
@@ -143,6 +144,7 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
+import { linkHashtags, useInitiativeTags } from '../hashtags';
 import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
@@ -492,12 +494,17 @@ export function MessageBody({
   const ownReply = message.author.kind === 'person';
   const replyFileList = ownReply ? replyFiles?.files : undefined;
   const replyPeople = ownReply ? replyFiles?.personMessageIds : undefined;
+  // `#Shape` naming a live initiative links to the Board filtered to it (approval "board-hashtags"; display only).
+  const { initiatives: tagInitiatives } = useInitiativeTags();
   const linkFiles = useCallback(
     (text: string) =>
-      replyFileList && replyPeople
-        ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
-        : text,
-    [replyFileList, replyPeople, projectRoot, message.created_at],
+      linkHashtags(
+        replyFileList && replyPeople
+          ? linkReplyFeedback(text, { files: replyFileList, projectRoot, personMessageIds: replyPeople, replyAt: message.created_at })
+          : text,
+        tagInitiatives,
+      ),
+    [replyFileList, replyPeople, projectRoot, message.created_at, tagInitiatives],
   );
   // The feedback the Send wrote after the person's words ("# Feedback on the attached files"…): a block of
   // its own, its headings at text size (replyFeedback.ts; display only). The person's own message only.
@@ -530,6 +537,24 @@ export function MessageBody({
   // (inbox.css); a click still opens it whole.
   const bodyRef = useRef<HTMLDivElement>(null);
   const pressSelected = useRef(false);
+  // A sent tag's preview: hover or focus, or a first tap on a touch screen (InitiativePeek).
+  const tagPeek = useInitiativePeek(bodyRef);
+  const { tapOpens } = tagPeek;
+  // A hashtag's link opens the Board in this window (the markdown renderer opens links in a new tab).
+  const openHashtag = useCallback(
+    (event: ReactMouseEvent<HTMLDivElement>) => {
+      const target = event.target as Element | null;
+      // The preview is portaled: its own links are plain in-app links.
+      if (target?.closest?.('[data-tag-peek]')) return;
+      const link = target?.closest?.('a[href^="#board&initiative="]');
+      if (!link || event.metaKey || event.ctrlKey || event.shiftKey || event.button !== 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (tapOpens(link)) return;
+      window.location.hash = link.getAttribute('href')!;
+    },
+    [tapOpens],
+  );
   // Hover cards for issue, PR and MR links in the body (ui RefHoverCard).
   const refCard = useRefHoverCards(bodyRef);
   useEffect(() => {
@@ -879,8 +904,9 @@ export function MessageBody({
   return (
     <ImageResolverContext.Provider value={resolveImage}>
     <SoftLineBreaksContext.Provider value={ownReply}>
-    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClick={comments?.onOpen ? openHighlight : undefined}>
+    <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
+      {tagPeek.node}
       {(!(replyParts || actionsSent || feedbackShown) || shown !== '') && (
       <Viewer
         ref={viewerRef}
@@ -5004,7 +5030,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       });
   };
   // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
-  // tooltip ("Mark read" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
+  // tooltip ("Mark read / quiet" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
   // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
   const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const markReadButton = phone ? null : markUnreadOffered ? (
@@ -5032,7 +5058,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             <span className="text-muted-foreground">Move it back to the top</span>
           </span>
         ) : markReadEnabled ? (
-          withShortcut('Mark read', { scope: inboxThreadShortcuts, action: 'markRead' })
+          withShortcut('Mark read / quiet', { scope: inboxThreadShortcuts, action: 'markRead' })
         ) : (
           <span className="flex flex-col gap-1">
             <span>Mark read</span>
