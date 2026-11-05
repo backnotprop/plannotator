@@ -31,7 +31,7 @@ import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { farVersion, MACHINE_LINKS_PROTOCOL, parseFarUpdate, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { installCommandFor, isNewerStableVersion, normalizeStableVersion } from "@plannotator/shared/update-check";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
@@ -146,7 +146,7 @@ const UPDATE_ASKED_GRACE_MS = 10_000;
  * Inbox never offers an update to a machine that is ahead of it or level with the newest known.
  */
 export function machineUpdateView(
-  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "updated" | "canUpdate" | "selfUpdate">,
+  peer: Pick<PeerLink, "state" | "since" | "version" | "farUpdate" | "noChange" | "asked" | "saidUpToDate" | "updated" | "canUpdate" | "selfUpdate">,
   own: { current: string; latest: string | null } | null,
   now: number,
   clocks: { updatedShownMs: number; restartBackMs: number },
@@ -157,6 +157,9 @@ export function machineUpdateView(
   if (peer.updated && now - peer.updated.at < clocks.updatedShownMs) return { phase: "updated", target: peer.updated.to, from: peer.updated.from, ...can };
   const far = peer.farUpdate;
   if (peer.state === "online") {
+    // During a press, `ready` is still that press: the install script runs on after it swaps the binary (skills,
+    // plugins), and that machine restarts itself when the script ends. There is nothing to press.
+    if (far?.state === "ready" && peer.asked) return { phase: "updating", target: far.version, from: version, ...can };
     if (far?.state === "updating" || far?.state === "failed" || far?.state === "ready") return { phase: far.state, target: far.version, from: version, ...can };
     if (peer.noChange) return { phase: "failed", target: peer.noChange, from: version, ...can };
     if (peer.asked && now - peer.asked.at < UPDATE_ASKED_GRACE_MS) return { phase: "updating", target: far?.version ?? null, from: version, ...can };
@@ -166,7 +169,41 @@ export function machineUpdateView(
   const candidates = [far?.version, own?.current, own?.latest].filter((v): v is string => !!v && !!normalizeStableVersion(v));
   const newest = candidates.reduce<string | null>((best, v) => (!best || isNewerStableVersion(v, best) ? v : best), null);
   if (!version || !normalizeStableVersion(version) || !newest || !isNewerStableVersion(newest, version)) return null;
+  // This Inbox runs ahead of GitHub's latest, and that machine said so when pressed: Update would only say it again.
+  // A release past that, or that machine's own answer, brings the word back.
+  if (peer.saidUpToDate && far?.state !== "available" && !isNewerStableVersion(newest, peer.saidUpToDate)) return null;
   return { phase: "behind", target: newest, from: version, ...can };
+}
+
+/** Where that machine's update.log is, as `machinePath` sends it: a file name, or under `~` or the data folder. Never a command. */
+const FAR_LOG = /^(?:(?:~|\$PLANNOTATOR_DATA_DIR)[/\\][\p{L}\p{N} ._@+\-/\\]*)?update\.log$/u;
+
+/**
+ * The far door's answer to `GET update`, picked by name again: this window never shows a URL or a command a machine
+ * sent. The install command is this Inbox's own table, by that machine's platform and its remembered flags.
+ */
+export function parseFarDetails(raw: unknown) {
+  const body = (raw ?? {}) as Record<string, any>;
+  const platform = ["darwin", "linux", "win32"].includes(body.platform) ? (body.platform as "darwin" | "linux" | "win32") : "linux";
+  const failure = body.failure && typeof body.failure === "object" ? body.failure : null;
+  return {
+    current: farVersion(body.current),
+    update: parseFarUpdate(body.update),
+    platform,
+    // `installCommandFor` keeps only the flags on its own allowlist.
+    command: installCommandFor(platform, Array.isArray(body.flags) ? body.flags : []),
+    log: typeof body.log === "string" && FAR_LOG.test(body.log) ? body.log : "",
+    open_reviews: typeof body.open_reviews === "number" ? Math.max(0, Math.min(body.open_reviews, 9999)) : 0,
+    failure: failure
+      ? {
+          exit_code: typeof failure.exit_code === "number" ? failure.exit_code : 1,
+          ...(failure.tls === "untrusted" || failure.tls === "revoked" ? { tls: failure.tls } : {}),
+          ...(failure.release_first === true ? { release_first: true } : {}),
+          ...(typeof failure.prepare === "string" ? { prepare: failure.prepare.slice(0, 300) } : {}),
+          ...(failure.unchanged === true ? { unchanged: true } : {}),
+        }
+      : null,
+  };
 }
 
 export interface MachineView {
@@ -313,31 +350,6 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   const updateView = (peer: PeerLink): MachineUpdateView | null =>
     machineUpdateView(peer, context.ownVersions?.() ?? null, Date.now(), { updatedShownMs, restartBackMs });
-
-  /** The far door's answer to `GET update`, picked by name again: this window never shows a URL or a command a machine sent. */
-  const parseFarDetails = (raw: unknown) => {
-    const body = (raw ?? {}) as Record<string, any>;
-    const platform = ["darwin", "linux", "win32"].includes(body.platform) ? (body.platform as "darwin" | "linux" | "win32") : "linux";
-    const failure = body.failure && typeof body.failure === "object" ? body.failure : null;
-    return {
-      current: typeof body.current === "string" ? body.current.slice(0, 40) : null,
-      update: parseFarUpdate(body.update),
-      platform,
-      // The install command is this Inbox's own table, by that machine's platform.
-      command: installCommandFor(platform, []),
-      log: typeof body.log === "string" ? body.log.slice(0, 400) : "",
-      open_reviews: typeof body.open_reviews === "number" ? Math.max(0, Math.min(body.open_reviews, 9999)) : 0,
-      failure: failure
-        ? {
-            exit_code: typeof failure.exit_code === "number" ? failure.exit_code : 1,
-            ...(failure.tls === "untrusted" || failure.tls === "revoked" ? { tls: failure.tls } : {}),
-            ...(failure.release_first === true ? { release_first: true } : {}),
-            ...(typeof failure.prepare === "string" ? { prepare: failure.prepare.slice(0, 300) } : {}),
-            ...(failure.unchanged === true ? { unchanged: true } : {}),
-          }
-        : null,
-    };
-  };
 
   const machinesView = (): MachineView[] => [
     {
@@ -874,6 +886,10 @@ export function createInboxMachines(context: InboxMachinesContext) {
           peer.asked = { from: peer.version, at: Date.now() };
           machinesChanged();
           return json({ ok: true, outcome });
+        }
+        if (outcome === "up-to-date") {
+          peer.saidUpToDate = updateView(peer)?.target ?? peer.saidUpToDate;
+          machinesChanged();
         }
         const words: Record<string, string> = {
           unmanaged: `${name}'s copy of Plannotator was not installed by the install script, so it can't update itself.`,

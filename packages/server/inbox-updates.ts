@@ -54,6 +54,7 @@ import {
   runReleaseCheck,
   UPDATE_SNOOZE_MS,
   type FetchReleaseResult,
+  type InstallFlagId,
   type ReleaseHighlight,
 } from "@plannotator/shared/update-check";
 import {
@@ -205,6 +206,8 @@ export interface MachineUpdateAnswer {
   platform: NodeJS.Platform;
   /** Where update.log is, as `~/…` (machinePath). */
   log: string;
+  /** The install flags it remembers, as neutral ids: the other machine's own table spells its install command. */
+  flags: readonly InstallFlagId[];
   /** Open reviews, counted: which projects they are in stays here. */
   open_reviews: number;
   /** `unchanged`: the install ended without an error and this machine still runs the same version. */
@@ -744,13 +747,19 @@ export function createInboxUpdates(options: InboxUpdatesOptions) {
     machineRead(): MachineUpdateAnswer {
       const d = details();
       const home = options.home ?? homedir();
-      const private_ = (text: string) => (home ? text.split(home).join("~") : text);
+      // A reason can name the temp folder (update-prepare.ts), and that path can hold a username: under the home
+      // folder it reads `~/…`, anywhere else it stays on this machine.
+      const private_ = (text: string) =>
+        (home ? text.split(home).join("~") : text)
+          .replace(/temp folder (?!~)\S.*?(?= is full \(| can't be written \(| does not exist \(| \()/, "temp folder")
+          .replace(/(^|[\s'"(])\/[^\s'")]+/g, "$1…");
       const failure = d.failure;
       return {
         current: d.current,
         update: d.update,
         platform: process.platform,
         log: machinePath(d.log, home, options.dataDir),
+        flags: readInstallFlags(options.dataDir).flags,
         open_reviews: d.sessions.length,
         failure: failure
           ? {

