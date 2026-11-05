@@ -8173,6 +8173,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-dpage { padding-top: 0; }
   /* The tour's bar is at the window's top, with no gutter: twice the line, and its 1 px rule, put its content on it. */
   .pn-inbox[data-tour] { --ib-tour-bar-h: calc(2 * var(--pn-window-controls-center-y, 31px) + 1px); }
+  /* In the tour the buttons sit in its bar, so what starts below the bar has nothing to clear. Its viewer covers the bar: it keeps its room. */
+  .pn-inbox[data-tour] .ib-side { padding-top: 14px; }
+  .pn-inbox[data-tour] .ib-view.ib-full { border-top-width: 0; }
   .pn-inbox::before { content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: -1; height: var(--pn-window-controls-height); -webkit-app-region: drag; }
   /* Over the page, a layer's band drags and its body does not, whatever header lies under it. */
   .ib-wlayer { -webkit-app-region: drag; }
@@ -8180,8 +8183,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-brand, :is(.ib-lhead, .ib-phead, .ib-bhead, .ib-vhead, .ib-dh, .ib-wn-bar, .ib-tour-bar, .shp-head) { -webkit-app-region: drag; }
   /* Everything inside a header, but its spacers: a control added to one later still clicks. */
   :is(.ib-lhead, .ib-phead, .ib-bhead, .ib-vhead, .ib-dh, .ib-wn-bar, .ib-tour-bar, .shp-head) *:not(.ib-sp, .ib-bsp),
-  :is(a, button, input, select, textarea, label, summary, iframe, [contenteditable], [tabindex]:not([tabindex="-1"])),
-  :is([role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [role="separator"], [role="textbox"], [role="combobox"]),
+  .pn-inbox :is(a, button, input, select, textarea, label, summary, iframe, [contenteditable], [tabindex]:not([tabindex="-1"])),
+  .pn-inbox :is([role="button"], [role="link"], [role="tab"], [role="menuitem"], [role="option"], [role="checkbox"], [role="radio"], [role="switch"], [role="slider"], [role="separator"], [role="textbox"], [role="combobox"]),
   :is(dialog, [popover], [role="dialog"], [role="alertdialog"], [role="menu"], [role="listbox"], [role="tooltip"], [data-chat-window]),
   :is(.ib-peek, .ib-sb-sheet, .ib-sb-scrim, .ib-pm-scrim, .ib-oq-scrim, .ib-contents-scrim, .ib-contents-sheet, .ib-tour-coach, .ib-toast) { -webkit-app-region: no-drag; }
   /* A layer's header reaches up behind the buttons, so the band reads as the header and not as a strip above it. */

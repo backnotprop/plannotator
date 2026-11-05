@@ -349,6 +349,7 @@ test('full-window layers clear the height, their controls click and their band d
     { name: 'settings-sidebar-open', open: () => openRoute(page, world, '#settings', 'open'), first: '.ib-sback' },
     { name: 'pr-page', open: () => openRoute(page, world, '#reviews&stack=none&layer=none', 'collapsed'), first: '.ib-prreview .ib-vhead' },
     { name: 'guided-review', open: () => openRoute(page, world, `#thread=${world.thread}&guide=${world.guide}`), first: '.ib-viewer .ib-vhead' },
+    { name: 'code-review', open: () => openRoute(page, world, `#thread=${world.review.thread}&guide=${world.review.message}`, 'collapsed'), first: '.ib-review .ib-vhead' },
     { name: 'shape-board', open: () => openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed'), first: '.ib-shape-layer .shp-head' },
   ];
   for (const layer of layers) {
@@ -383,6 +384,11 @@ test('the fixed row: the toggle, the title and the toolbar sit on the line the p
     // The sidebar's first row starts where the buttons' room ends.
     if (sidebar === 'open') expect((await boxOf(page, '.ib-brand')).top).toBe(H);
   }
+  // A Shape board keeps its toggle on its title's line, below the buttons' room.
+  await openRoute(page, world, `#thread=${world.picture}&shape=${world.board}`, 'collapsed');
+  await page.locator('.ib-shape-layer .shp-head-start .ib-sb-trigger').waitFor();
+  await setControls(page);
+  expect((await boxOf(page, '.ib-shape-layer .shp-head-start .ib-sb-trigger')).top).toBeGreaterThanOrEqual(H);
   // A page whose head is its own comes up to the same line, and its toggle clears the buttons.
   for (const [hash, head] of [['#board', '.ib-bhead'], ['#whats-new=', '.ib-wn-bar'], ['#drafts', '.ib-dh']] as const) {
     await openRoute(page, world, hash, 'collapsed');
@@ -403,8 +409,28 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   // Its content on the line, and the sidebar below the bar, wherever the bar ends.
   const line = parseFloat(await centerY(page));
   expect((await boxOf(page, '[data-tour-bar] .ib-tour-tag')).centre).toBe(line);
-  expect((await boxOf(page, '.ib-sb-panel')).top).toBe((await boxOf(page, '[data-tour-bar]')).bottom);
+  const barBottom = (await boxOf(page, '[data-tour-bar]')).bottom;
+  expect((await boxOf(page, '.ib-sb-panel')).top).toBe(barBottom);
+  // What starts below the bar has nothing to clear: no empty room above the sidebar's first row or a file.
+  expect((await boxOf(page, '.ib-brand')).top).toBe(barBottom + 14);
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#tour=3`);
+  await page.locator('[data-question-tiles]').first().waitFor();
+  await setControls(page);
+  await page.locator('[data-tour-message="ask"] .ib-att-t').first().click({ force: true });
+  await page.locator('.ib-view.ib-full').waitFor();
+  expect(await page.locator('.ib-view.ib-full > *').first().evaluate((el) => el.getBoundingClientRect().top)).toBe((await boxOf(page, '[data-tour-bar]')).bottom);
+  // The viewer covers the bar, so it keeps its room under the buttons.
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#tour=3`);
+  await page.locator('[data-question-tiles]').first().waitFor();
+  await setControls(page);
+  await page.locator('[data-question-tiles] button').first().click({ force: true });
+  await page.locator('.ib-tour-viewer').waitFor();
+  expect(await page.locator('.ib-tour-viewer > *').first().evaluate((el) => el.getBoundingClientRect().top)).toBeGreaterThanOrEqual(H);
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
+  await page.locator('[data-tour-viewer-close]').click();
+  await page.locator('.ib-tour-viewer').waitFor({ state: 'detached' });
   await page.locator('[data-tour-exit="exit"]').click();
   await page.locator('[data-tour-bar]').waitFor({ state: 'detached' });
 
@@ -464,6 +490,19 @@ test('a control added later clicks: a button over the band, and anything inside 
     document.querySelector('.pn-inbox')!.append(button);
   });
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
+
+  // A host's own control, outside the page, is the host's to mark.
+  const hostControls = await page.evaluate(() => {
+    const button = document.createElement('button');
+    const role = document.createElement('div');
+    role.setAttribute('role', 'button');
+    document.body.append(button, role);
+    const modes = [button, role].map((el) => getComputedStyle(el).getPropertyValue('-webkit-app-region'));
+    button.remove();
+    role.remove();
+    return modes;
+  });
+  expect(hostControls).toEqual(['none', 'none']);
 
   const insideHeader = await page.evaluate(() => {
     const head = document.querySelector('.ib-lhead')!;
