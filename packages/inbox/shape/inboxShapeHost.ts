@@ -13,13 +13,17 @@
  *   up now, through the same Ask, so the redraw comes while the person looks.
  * - Files and hover: the shape's project folder, through code-nav.
  * - Copy prompt: the command any session runs to pick up what waits.
+ * - Open in: with Code review on, a referenced file gets the window's Open in
+ *   (components/OpenIn.tsx), by the shape's id: the server holds the path to its project.
  */
+import { createElement } from 'react';
 import { shapeNoteWaits, type ShapeNote, type ShapeNoteInput, type ShapeVersion } from '@plannotator/core/shape';
 import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { InboxApiError, inboxApi, type ShapeLoadedWire } from '../api';
 import { onAskChange } from '../ask/askEvents';
+import { OpenInFile } from '../components/OpenIn';
 import { shapeEventsBetween } from './events';
 
 export { shapeEventsBetween };
@@ -37,6 +41,8 @@ export interface InboxShapeHostOptions {
   busyRetryMs?: number;
   /** The fetch the Ask stream uses (tests). */
   fetch?: typeof fetch;
+  /** Offer Open in on a board's file references and code (Settings → Capabilities → Code review). */
+  openIn?: boolean;
 }
 
 /** The words the session gets for a question on a board. */
@@ -236,6 +242,7 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
     async copy(text) {
       await copyTextToClipboard(text);
     },
+    ...(options.openIn ? { fileAction: (id: string, file: { path: string; line?: number }) => createElement(OpenInFile, { scope: { shape: id }, path: file.path, line: file.line }) } : {}),
     // No Ask AI fallback here: with the session gone, a question waits for the agent's `shape answer`.
     askWaitsWhenEnded: true,
   };

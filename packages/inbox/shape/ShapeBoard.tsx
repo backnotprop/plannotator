@@ -4,8 +4,12 @@
  * hover card. Checked under tsconfig.guide.json (it imports review-editor);
  * the window sees its shape in board-module.d.ts.
  */
-import { ShapeSurface, type ShapeCodeHoverCardProps } from '@plannotator/ui/components/shape';
+import { useContext } from 'react';
+import { ShapeSurface, type ShapeCodeGuideProps, type ShapeCodeHoverCardProps } from '@plannotator/ui/components/shape';
+import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
+import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { ShapeCodeGuide } from '@plannotator/guide-viewer/ShapeCodeGuide';
+import { OpenInCodeSpans } from '../components/OpenIn';
 import { TokenHoverCard } from '@plannotator/review-editor/components/TokenHoverCard';
 import type { ShapeBoardProps } from './types';
 import type BoardShape from './board-module';
@@ -21,15 +25,25 @@ function HoverCard(props: ShapeCodeHoverCardProps) {
   );
 }
 
+/** The Code view's source line: inside the surface, so its spans follow the board's (only words while annotating). */
+function CodeGuide(props: ShapeCodeGuideProps) {
+  return (
+    <GuideCodeSpanContext.Provider value={useContext(CodeSpanContext)}>
+      <ShapeCodeGuide {...props} />
+    </GuideCodeSpanContext.Provider>
+  );
+}
+
 export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate, headStart }: ShapeBoardProps) {
   return (
+    <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
       key={id}
       host={host}
       id={id}
       onClose={onClose}
       onCode={onCode}
-      CodeGuide={ShapeCodeGuide}
+      CodeGuide={CodeGuide}
       CodeHoverCard={HoverCard}
       renderThread={renderThread}
       readFirst
@@ -38,6 +52,7 @@ export default function ShapeBoard({ host, id, onClose, onCode, renderThread, in
       onNavigate={onNavigate}
       headStart={headStart}
     />
+    </OpenInCodeSpans>
   );
 }
 
