@@ -243,6 +243,12 @@ export function handoffStack(stack: InboxPullStack, links: Readonly<Record<strin
     : { ...stack, layers, base: layers[0]!.base, open_base: layers[0]!.base };
 }
 
+/** " on dana/web-app (a fork)" after a branch whose head is on a fork, so the agent knows where it lives; else nothing. */
+function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
+  const fork = pull.head_repo;
+  return fork && REPO.test(fork) && fork.toLowerCase() !== pull.repo.toLowerCase() ? ` on ${fork} (a fork)` : '';
+}
+
 /**
  * Step 1 of the hand-off, one line: the guided review through phase 1's `/review-curate` (its approved instructions
  * go with the message as the skills block). One PR: its diff against its base, the person's words (custom curation)
@@ -269,10 +275,12 @@ const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform 
 
 /**
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
- * text (`.product/approved/pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the rest of a stack's wording
- * awaits approval): help me review and understand it, and change no code unless I say so; what it is; then the
- * guided review (`pullHandoffAskLine`) and the discussion, with no push, comment, approval or merge. One version for
- * every PR, the person's own or a teammate's. Everything from the forge is its author's: titles through
+ * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the
+ * rest of a stack's wording awaits approval): help me review and understand it; what it is; then the guided review
+ * (`pullHandoffAskLine`) and the discussion. On the person's own PRs, feedback is made and pushed where the agent can, and
+ * the next round comes in the same thread, as a local review's does (`localReviewMessage`). On a PR with any teammate's
+ * layer, no code changes unless the person says so and no push. Never a comment, approval or merge. A head on a fork is
+ * named (`forkWords`). Everything from the forge is its author's: titles through
  * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
  * narrowed first (`handoffStack`).
  */
@@ -284,9 +292,14 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const where = REPO.test(stack.repo) ? (stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`) : null;
   const repository = where ? `- Repository: ${where}` : null;
   const heading = `${noun[0]!.toUpperCase()}${nouns.slice(1)}`;
-  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}. Don't change any code unless I explicitly tell you to.`;
+  const mine = layers.every((l) => l.mine);
+  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${mine ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
-  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. Don't push to the ${many ? 'branches' : 'branch'}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
+  const branch = many ? 'branches' : 'branch';
+  const feedback = mine
+    ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
+    : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
+  const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${feedback}`;
   if (!many) {
     const pull = layers[0]!;
     const url = pullUrl(pull);
@@ -298,7 +311,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
       `- Number: ${inboxPullLabel(pull)}`,
       repository,
       url ? `- Link: ${url}` : null,
-      base ? `- Branch: ${head ? `${head}, ` : ''}into ${base}` : null,
+      base ? `- Branch: ${head ? `${head}${forkWords(pull)}, ` : ''}into ${base}` : null,
       `- Author: ${pull.mine ? 'me' : authorOf(pull)}`,
     ];
     return [opening, facts.filter(Boolean).join('\n'), whatToDo].join('\n\n');
@@ -306,7 +319,7 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const list = layers.map((l) => {
     const url = pullUrl(l);
     const branch = safeBranch(l.head);
-    return `- ${inboxPullLabel(l)} ${pullTitleLine(l.title)}${url ? ` · ${url}` : ''}${branch ? ` · branch ${branch}` : ''}`;
+    return `- ${inboxPullLabel(l)} ${pullTitleLine(l.title)}${url ? ` · ${url}` : ''}${branch ? ` · branch ${branch}${forkWords(l)}` : ''}`;
   });
   const base = safeBranch(stack.open_base);
   const about = ['Stack', repository, base ? `- Lands into: ${base}, in list order` : null, stackAuthors(layers)];
