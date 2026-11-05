@@ -156,7 +156,7 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false }: GuideReaderProps) {
+export default function GuideReader({ snapshot, reviewed, onReviewedChange, comments, mode = 'walkthrough', reveal = null, viewed, bare = false, controlsHost = null }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
@@ -355,12 +355,12 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone ? {} : { renderSectionTab }),
+      ...(phone || controlsHost ? {} : { renderSectionTab }),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, controlsHost, renderSectionTab, globalComments, savedDiffStyle],
   );
 
   return (
@@ -374,6 +374,8 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
         bare={bare}
+        actionsHost={controlsHost}
+        {...(controlsHost ? { headerActions: <DiffStyleSwitch /> } : {})}
         // Every file's box as tall as its diff, in the readers built on this one (a thread's guided review, the review, the PR page).
         fitFileHeights
       />

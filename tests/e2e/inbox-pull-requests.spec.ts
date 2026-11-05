@@ -46,11 +46,12 @@
  *     loopback server, tests/helpers/fake-avatars.ts); the window never asks
  *     another origin for anything. A long title is cut in the review header,
  *     whose controls stay in the window from 1280 down to 760 wide.
- * 11. The flat PR view (parity with the code review app's layering of
- *     background colours): no card around a file, a hairline between files,
- *     one row for Global comment and Split | Unified from 800 wide, quiet
- *     words on it, the comments column's fill, and a file's scrollbar only
- *     under the pointer.
+ * 11. The flat PR view (the code review app's layering, measured against it
+ *     on one diff): a 37 px bar, the rail to the window's foot, the column
+ *     opening on a 33 px --muted row with the layers as tabs and the controls,
+ *     the first file 16 px under it, no card around a file, one hairline
+ *     between files, quiet words on that row, the comments column's fill, and
+ *     a file's scrollbar only under the pointer.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -907,34 +908,39 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
   const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
   expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
-  // The Global comment button sits on the Split | Unified tab's row (owner, q-bfcf3a4a B), left of it, not over it.
-  const addGlobal = (await review.locator('[data-guide-section-tab] [data-guide-global-comment-add]').boundingBox())!;
-  const layoutSwitch = (await review.locator('[data-guide-section-tab] [data-diff-style-switch]').boundingBox())!;
+  // Global comment sits on Split | Unified's row (owner, q-bfcf3a4a B), left of it, not over it: the strip, above the files.
+  await expect(review.locator('[data-guide-section-tab]')).toHaveCount(0);
+  const addGlobal = (await review.locator('.ib-prr-strip [data-guide-global-comment-add]').boundingBox())!;
+  const layoutSwitch = (await review.locator('.ib-prr-strip [data-diff-style-switch]').boundingBox())!;
   expect(Math.abs(addGlobal.y + addGlobal.height / 2 - (layoutSwitch.y + layoutSwitch.height / 2))).toBeLessThan(3);
   expect(addGlobal.x + addGlobal.width).toBeLessThan(layoutSwitch.x);
-  // Flat (the owner: parity with the code review app's layering of background colours): the review area is one
-  // surface, a file its header, its code and a hairline, edge to edge, with no card around it.
+  // Flat, as the code review app is on one diff: the review area is one surface and a file its header and code, edge
+  // to edge, with no card around it and one hairline between files.
   const frame = await review.evaluate((root) => {
     const read = (el: Element) => { const s = getComputedStyle(el); return { border: s.borderTopWidth, radius: s.borderTopLeftRadius, fill: s.backgroundColor }; };
     const none = { border: '0px', radius: '0px', fill: 'rgba(0, 0, 0, 0)' };
-    const shells = [...root.querySelectorAll('[data-guide-file-shell]')];
+    const [first, second] = [...root.querySelectorAll('[data-guide-file-shell]')];
+    const code = first!.querySelector('diffs-container')!.getBoundingClientRect();
+    const header = second!.querySelector('[slot="header-custom"]')!.getBoundingClientRect();
     return {
       none,
       section: read(root.querySelector('[data-guide-section]')!),
       box: read(root.querySelector('[data-guide-code-view-mounted]')!),
-      hairlines: shells.map((shell) => getComputedStyle(shell).borderBottomWidth),
-      tabShape: getComputedStyle(root.querySelector('[data-guide-section-tab] > svg')!).display,
+      seam: header.top - code.bottom,
+      hairline: getComputedStyle(second!, '::before').height,
     };
   });
   expect(frame.section).toEqual(frame.none);
   expect(frame.box).toEqual(frame.none);
-  expect(frame.hairlines).toEqual([...frame.hairlines.slice(1).map(() => '1px'), '0px']);
-  expect(frame.tabShape).toBe('none');
+  expect(frame.seam).toBe(1);
+  expect(frame.hairline).toBe('1px');
   const pane = (await review.locator('.ib-gbody').boundingBox())!;
   const edge = (await sqlShell.boundingBox())!;
   expect([edge.x, edge.width]).toEqual([pane.x, pane.width]);
-  // The header, strip and foot share one fill, neither the card's nor the review area's.
-  const fills = await review.evaluate((root) => {
+  // The frame: a 37 px bar over everything, the rail beside the strip, the files and the foot and down to the window's
+  // foot, the strip a 33 px row of the app's --muted, the first file's header 16 px under it.
+  const layers = await review.evaluate((root) => {
+    const box = (selector: string) => root.querySelector(selector)!.getBoundingClientRect();
     const fill = (selector: string) => getComputedStyle(root.querySelector(selector)!).backgroundColor;
     const token = (name: string) => {
       const probe = root.appendChild(document.createElement('div'));
@@ -943,11 +949,22 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
       probe.remove();
       return value;
     };
-    return { head: fill('.ib-vhead'), strip: fill('.ib-prr-strip'), foot: fill('.ib-prr-foot'), card: token('--card'), ground: token('--background') };
+    const [bar, rail, strip, body, foot] = ['.ib-vhead', '.ib-rrail', '.ib-prr-strip', '.ib-gbody', '.ib-prr-foot'].map(box) as [DOMRect, DOMRect, DOMRect, DOMRect, DOMRect];
+    return {
+      barHeight: bar.height,
+      railTop: rail.top - bar.bottom,
+      railFoot: root.getBoundingClientRect().bottom - rail.bottom,
+      besideRail: [strip.left, body.left, foot.left].map((left) => left - rail.right),
+      stripHeight: strip.height,
+      underStrip: box('[data-guide-file-shell] [slot="header-custom"]').top - strip.bottom,
+      footHeight: foot.height,
+      head: fill('.ib-vhead'), strip: fill('.ib-prr-strip'), foot: fill('.ib-prr-foot'), card: token('--card'), ground: token('--background'), muted: token('--muted'),
+    };
   });
-  expect(fills.strip).toBe(fills.head);
-  expect(fills.foot).toBe(fills.head);
-  expect([fills.card, fills.ground]).not.toContain(fills.head);
+  expect(layers).toMatchObject({ barHeight: 37, railTop: 0, railFoot: 0, besideRail: [0, 0, 0], stripHeight: 33, underStrip: 16, footHeight: 37 });
+  expect(layers.strip).toBe(layers.muted);
+  expect(layers.foot).toBe(layers.head);
+  expect([layers.card, layers.ground]).not.toContain(layers.head);
   // One row holds Global comment and Split | Unified at every width from 800 up, both inside the pane.
   for (const width of [800, 1024, 1440]) {
     await page.setViewportSize({ width, height: 900 });
@@ -1056,7 +1073,7 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const box = shell.locator('[data-guide-code-view-mounted="true"]');
     await expect(box).toBeVisible({ timeout: 30_000 });
 
-    // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, at 800 and up.
+    // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, while the rail is out.
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
     const onRow = async (width: number) => {
@@ -1072,14 +1089,19 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
         )
         .toBe(true);
     };
-    for (const width of [800, 1024, 1440]) await onRow(width);
+    for (const width of [1280, 1440]) await onRow(width);
+    // With the rail folded the row is short: the words go above the files.
+    await page.setViewportSize({ width: 800, height: 900 });
+    await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toBeVisible();
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await expect(review.locator('.ib-prr-strip [data-pull-review-readonly]')).toBeVisible();
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
       const before = node.textContent;
       node.textContent = `${'a-very-long-name-'.repeat(20)}'s pull request`;
       return before;
     });
-    for (const width of [800, 1440]) await onRow(width);
+    for (const width of [1280, 1440]) await onRow(width);
     await note.evaluate((node, text) => (node.textContent = text), words);
 
     // From 1500 wide the comments are a column beside the diff, with neither the card's fill nor the diff's; folded, a card.

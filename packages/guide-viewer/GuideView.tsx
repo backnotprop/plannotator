@@ -1,3 +1,4 @@
+import { createPortal } from 'react-dom';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { CodeGuideData, GuideSection } from '@plannotator/core/guide';
 import type { DiffFile } from './types';
@@ -28,6 +29,8 @@ interface GuideViewProps {
    * counts, source line) and the host's 16px page margins, so the width goes to the code.
    */
   bare?: boolean;
+  /** Bare: draw the actions (Global comment, `headerActions`) in this element of the host's, not on a row of their own. */
+  actionsHost?: HTMLElement | null;
   /**
    * Each file's box as tall as its diff (an estimate from the hunks' rows, then the height the renderer reports;
    * capped as before). Opt-in for a host whose renderer reports it (the Inbox's AllFilesCodeView). Default: on in
@@ -84,6 +87,7 @@ export const GuideView: React.FC<GuideViewProps> = ({
   onRegenerate,
   sourceLine,
   headerActions,
+  actionsHost,
   bare = false,
   fitFileHeights,
 }) => {
@@ -213,7 +217,8 @@ export const GuideView: React.FC<GuideViewProps> = ({
       {/* The host's global comments add their button to the same row, ahead of the host's own controls. Bare (no title
           to float beside), the row stays above the content at every width. */}
       {/* Bare, with a tab on the first card (the Inbox's Split | Unified), the actions sit on the tab's row instead. */}
-      {actions && !actionsOnTab && (
+      {actions && !actionsOnTab && actionsHost && createPortal(actions, actionsHost)}
+      {actions && !actionsOnTab && !actionsHost && (
         <div className={bare ? 'mb-3 flex items-center justify-end gap-2' : 'mb-3 flex items-center justify-end gap-2 md:float-right md:mb-0 md:ml-6'}>
           {actions}
         </div>

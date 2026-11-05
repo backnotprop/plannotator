@@ -7656,7 +7656,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 
 /* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. One title, the
    header's (approval "pr-page-review-with-agent"): the reader draws none (GuideReader `bare`), the strip numbers. */
-.ib-viewer.ib-prreview { grid-template-rows: 46px auto minmax(0, 1fr) auto; }
+.ib-viewer.ib-prreview { grid-template-rows: 46px minmax(0, 1fr); }
+.ib-prreview .ib-rsplit { grid-template-rows: auto minmax(0, 1fr) auto; }
 /* A PR layer has no curated chapters: the reader's one "Every changed file" card would only repeat the rail's
    files, so its narrative column goes and the diffs take the width (the rail, as phase 1's All files, navigates). */
 .ib-prreview [data-guide-section-grid] { display: block; }
@@ -7676,34 +7677,62 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* The flat PR view (the owner: parity with the code review app's layering of background colours). The review area is
-   --background; the header, strip and foot are the review app's half-card. The reader's section and file cards draw
-   nothing: each file is its header, its code and a hairline, edge to edge. */
+/* The flat PR view: the code review app's layering, measured against it on one diff (the owner: "Plannotator is the
+   baseline you have to meet"). The review area is --background; a file is its header and code, edge to edge, with no
+   card, and a hairline at the seam (the approved mock's, diffshub's). The bars are the review app's half-card. */
 .ib-viewer.ib-prreview :is(.ib-vhead, .ib-prr-strip, .ib-prr-foot) { background: color-mix(in oklab, var(--card) 50%, var(--background)); }
 .ib-prreview .ib-gbody > .w-full { padding-inline: 0; padding-bottom: 0; }
 .ib-prreview [data-guide-section] { border: 0; border-radius: 0; background: transparent; overflow: visible; }
 .ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) { background: transparent; padding: 0; }
 .ib-prreview [data-guide-section-grid] > :not([data-guide-section-narrative]) > * { margin: 0; }
-.ib-prreview [data-guide-file-shell] { scroll-margin-top: 0; border-bottom: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); }
-.ib-prreview [data-guide-file-shell]:last-child { border-bottom: 0; }
+.ib-prreview [data-guide-file-shell] { scroll-margin-top: 0; }
 .ib-prreview [data-guide-code-view-mounted] { border: 0; border-radius: 0; background: transparent; }
+/* A file's box keeps 8 px of its own above the header and 10 below the code (GuideFileCard's room): between files the
+   next one rides up over them, so the hairline is the only thing between one file's code and the next one's header. */
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell] { position: relative; margin-top: -17px; }
+.ib-prreview [data-guide-file-shell] + [data-guide-file-shell]::before { content: ''; position: absolute; inset: 7px 0 auto; height: 1px; background: color-mix(in oklch, var(--border) 50%, transparent); }
 /* From REVIEW_FOLD_PANEL_BELOW up the comments are a column beside the diff: the review app's sidebar fill (bg-card/30). Folded, the sheet stays a card over the diff. */
 .ib-prreview:not(.ib-fold) :is(.ib-gpanel, .ib-gpanel > [data-annotation-panel]) { background: color-mix(in oklab, var(--card) 30%, var(--background)); }
-/* The tab that rose out of the section card goes with the card: its controls stay, on a plain row. */
+/* What else sits in the pane keeps a row's margin. */
 .ib-prreview [data-guide-section-tab] { margin-inline: 12px; }
 .ib-prreview [data-guide-section-tab] > svg { display: none; }
-/* What else sits in the pane keeps the row's margin. A phone's Global comment has no tab: its own row. */
 .ib-prreview .ib-gbody > .w-full > div:has(> [data-guide-global-comment-add]) { margin-inline: 16px; }
 .ib-prreview [data-guide-global-comments] { margin-inline: 16px; }
 .ib-prreview .ib-prr-posted { margin-inline: 16px; }
 .ib-prreview .ib-gerror { padding-inline: 16px; }
-/* No band: quiet words, on the controls' row when one follows and the pane has room (34 px: the tab's height; 14 px:
-   the reader's top padding; the controls' width kept clear), else on their own line. */
-.ib-prreview .ib-gbody { container-type: inline-size; }
 .ib-prreview .ib-prr-note { margin: 10px 16px 0; padding: 0; border-radius: 0; background: none; overflow-wrap: anywhere; }
-@container (min-width: 520px) {
-  .ib-prreview .ib-prr-note[data-pull-review-readonly]:has(+ .w-full [data-guide-section-tab]):not(:has(+ .w-full [data-guide-global-comments])) { position: relative; z-index: 1; width: fit-content; max-width: calc(100% - 340px); height: 34px; margin: 14px 0 -48px 16px; line-height: 34px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* Every width but a phone's, from the review app: a 37 px bar over the rail and the diff's column; the rail runs to the
+   window's foot; the column opens on a 33 px --muted row (its tab row) holding the layers as tabs and the controls; the
+   first file is 16 px under it. The foot is the Inbox's own: the bar's recipe and height. */
+.ib-viewer.ib-prreview.ib-prr-wide { grid-template-rows: 37px minmax(0, 1fr); }
+.ib-prr-wide .ib-gbody > .w-full { padding-top: 8px; }
+.ib-prr-wide :is(.ib-vhead, .ib-prr-foot, .ib-rrail) { border-color: color-mix(in oklch, var(--border) 50%, transparent); }
+.ib-prr-wide .ib-vhead { padding-right: 16px; }
+.pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-foot) .ib-btn { height: 28px; }
+.pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) :is(.ib-seg, .ib-gtab) { height: 29px; box-sizing: border-box; border: 0; background: var(--muted); align-items: stretch; }
+.pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) .ib-seg-o { height: auto; padding: 0 8px; font-size: var(--ib-fs-13, 13px); font-weight: 400; }
+.pn-inbox .ib-prr-wide :is(.ib-vhead, .ib-prr-strip) .ib-seg-o[data-on] { background: var(--background); box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1), 0 1px 2px -1px rgba(0, 0, 0, 0.1); }
+.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-strip { container: prr-strip / inline-size; height: 33px; padding: 0 8px 0 6px; gap: 8px; background: var(--muted); border-bottom: 0; }
+.ib-prr-wide .ib-prr-layers { flex: 0 1 auto; align-self: flex-end; margin-right: auto; }
+.pn-inbox .ib-prr-wide .ib-prr-layer { height: 28px; padding: 0 12px; border-radius: 8px 8px 0 0; font-weight: 400; }
+.pn-inbox .ib-prr-wide .ib-prr-layer:not(:disabled):hover { background: color-mix(in oklab, var(--background) 50%, transparent); }
+.pn-inbox .ib-prr-wide .ib-prr-layer[aria-current], .pn-inbox .ib-prr-wide .ib-prr-layer[aria-current]:not(:disabled):hover { background: var(--background); }
+.ib-prr-wide .ib-prr-layers:has(+ .ib-prr-note) { margin-right: 0; }
+.ib-prreview.ib-prr-wide .ib-prr-note { flex: 0 1000 auto; min-width: 0; margin: 0 auto 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prr-controls { display: flex; flex: none; align-items: center; gap: 8px; }
+.ib-prr-controls [data-guide-global-comment-add] { padding-block: 4px; }
+/* Where the row runs short the layers keep their room: Global comment keeps its globe and its tooltip. */
+@container prr-strip (max-width: 760px) {
+  .ib-prr-controls [data-guide-global-comment-add] > span { display: none; }
 }
+.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-foot { height: 37px; padding-block: 0; }
+.ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr) 300px; }
+.ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr); }
+.ib-prr-wide:not(.ib-railfold) .ib-rrail { grid-column: 1; grid-row: 1 / -1; }
+.ib-prr-wide:not(.ib-railfold) .ib-prr-strip { grid-column: 2; grid-row: 1; }
+.ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
+.ib-prr-wide:not(.ib-railfold) .ib-prr-foot { grid-column: 2; grid-row: 3; }
+.ib-prr-wide:not(.ib-railfold):not(.ib-fold) .ib-gpanel { grid-column: 3; grid-row: 1 / -1; }
 
 /* Fixes from the worst-case stress test (break-ui on #2590). */
 /* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments

@@ -228,6 +228,8 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // the diff keeps the room.
   const [splitRef, railFolded] = useNarrowerThan<HTMLDivElement>(RAIL_FOLD_BELOW, false, drawn);
   const filesPicker = phone || railFolded;
+  // Global comment and Split | Unified sit on the strip, as on the review app's tab row. A phone keeps them above the files.
+  const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
   useEffect(() => {
@@ -357,10 +359,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     </div>
   );
 
+  const readOnlyNote = !canDecide && !posted && !diffError && (
+    <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'} title={layer.mine ? undefined : `${layer.author ?? 'A teammate'}'s ${noun}`}>
+      {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
+    </p>
+  );
+
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${railFolded ? ' ib-railfold' : ''}`}
+      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${railFolded ? ' ib-railfold' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
@@ -433,32 +441,34 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </a>
         )}
       </div>
-      <div className="ib-prr-strip">
-        <nav ref={stripRef} className="ib-prr-layers" aria-label="Layers, bottom first">
-          {stack.layers.map((l, i) => {
-            const here = l.key === layer.key;
-            const reviewable = isOpen(l);
-            return (
-              <span key={l.key} className="ib-prr-lstep">
-                {i > 0 && <Icon name="chevR" size={12} />}
-                <button
-                  type="button"
-                  className="ib-prr-layer"
-                  aria-current={here ? 'step' : undefined}
-                  disabled={!reviewable}
-                  onClick={() => onLayer(l.key, scope)}
-                  data-pull-layer-step={l.key}
-                >
-                  <RefMarkIcon kind="pr" state={l.state} size={13} />
-                  <span>{inboxPullLabel(l)}</span>
-                </button>
-              </span>
-            );
-          })}
-        </nav>
-        {scopeSwitch}
-      </div>
       <div className="ib-rsplit" ref={splitRef}>
+        <div className="ib-prr-strip">
+          <nav ref={stripRef} className="ib-prr-layers" aria-label="Layers, bottom first">
+            {stack.layers.map((l, i) => {
+              const here = l.key === layer.key;
+              const reviewable = isOpen(l);
+              return (
+                <span key={l.key} className="ib-prr-lstep">
+                  {i > 0 && <Icon name="chevR" size={12} />}
+                  <button
+                    type="button"
+                    className="ib-prr-layer"
+                    aria-current={here ? 'step' : undefined}
+                    disabled={!reviewable}
+                    onClick={() => onLayer(l.key, scope)}
+                    data-pull-layer-step={l.key}
+                  >
+                    <RefMarkIcon kind="pr" state={l.state} size={13} />
+                    <span>{inboxPullLabel(l)}</span>
+                  </button>
+                </span>
+              );
+            })}
+          </nav>
+          {!filesPicker && readOnlyNote}
+          {scopeSwitch}
+          {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
+        </div>
         <nav className="ib-rrail" aria-label="Changed files">
           {/* The files, then a folder heading over each group when names repeat in deep folders (`railRows`). */}
           <ul className="ib-rv-list" data-review-files="">
@@ -527,11 +537,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {!canDecide && !posted && !diffError && (
-            <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'} title={layer.mine ? undefined : `${layer.author ?? 'A teammate'}'s ${noun}`}>
-              {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
-            </p>
-          )}
+          {filesPicker && readOnlyNote}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}
@@ -550,7 +556,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           ) : snapshot ? (
             <Suspense fallback={null}>
-              <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
+              <GuideReader bare controlsHost={controlsHost} snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
             </Suspense>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
@@ -589,23 +595,23 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             readOnly={!readerComments}
           />
         </div>
-      </div>
-      <div className="ib-prr-foot" data-pull-review-foot="">
-        <span className="ib-prr-where">
-          {scope === 'stack'
-            ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
-            : position && position.of > 1
-              ? `Layer ${position.at} of ${position.of} · only what this layer changes`
-              : `Only what this ${noun} changes`}
-          {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
-        </span>
-        <span className="ib-sp" />
-        {next && (
-          <button type="button" className="ib-btn" onClick={() => onLayer(next.key, 'layer')} data-pull-next-layer={next.key}>
-            Next layer: {inboxPullLabel(next)}
-            <Icon name="chevR" size={14} />
-          </button>
-        )}
+        <div className="ib-prr-foot" data-pull-review-foot="">
+          <span className="ib-prr-where">
+            {scope === 'stack'
+              ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
+              : position && position.of > 1
+                ? `Layer ${position.at} of ${position.of} · only what this layer changes`
+                : `Only what this ${noun} changes`}
+            {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
+          </span>
+          <span className="ib-sp" />
+          {next && (
+            <button type="button" className="ib-btn" onClick={() => onLayer(next.key, 'layer')} data-pull-next-layer={next.key}>
+              Next layer: {inboxPullLabel(next)}
+              <Icon name="chevR" size={14} />
+            </button>
+          )}
+        </div>
       </div>
     </section>
   );
