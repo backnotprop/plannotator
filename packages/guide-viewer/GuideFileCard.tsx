@@ -100,11 +100,10 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
 }) => {
   const { DiffRenderer, getDiffRendererProps, renderFileActions, diffStyle } = useGuideHost();
   const actions = renderFileActions?.(file) ?? null;
-  const shellRef = useRef<HTMLDivElement | null>(null);
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(kind === 'generated');
   const fileList = useMemo(() => [file], [file]);
-  const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
+  const { mounted, register, requestMount, jumpTo } = useGuideFileWindow(file.path, focused);
   const diffHeight = useMemo(
     () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle) : estimateDiffHeight(file.patch)),
     [fitContent, file.patch, diffStyle],
@@ -162,16 +161,14 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       : diffHeight;
 
   // A navigation target can live far outside the current outer window or in a
-  // chapter that was just reopened. Force its CodeView first, then move the
-  // lightweight shell into view; the tokenized inner target completes the jump.
+  // chapter that was just reopened. Force its CodeView first, then take the
+  // lightweight shell there; the tokenized inner target completes the jump.
   useEffect(() => {
     if (!target) return;
     setCollapsed(false);
     requestMount();
     onActivate(file.path);
-    const raf = requestAnimationFrame(() => {
-      shellRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    });
+    const raf = requestAnimationFrame(jumpTo);
     return () => cancelAnimationFrame(raf);
     // Token identifies the navigation event; callback identity must not replay it.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -183,14 +180,9 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     if (focused) requestMount();
   }, [focused, requestMount]);
 
-  const attachShell = useCallback((element: HTMLDivElement | null) => {
-    shellRef.current = element;
-    register(element);
-  }, [register]);
-
   return (
     <div
-      ref={attachShell}
+      ref={register}
       data-guide-file-shell={file.path}
       className="scroll-mt-4"
       onPointerEnter={() => {

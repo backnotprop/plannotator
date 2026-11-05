@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react';
 import type { WorkerInitializationRenderOptions, WorkerPoolOptions } from '@pierre/diffs/react';
+import { getOrCreateWorkerPoolSingleton, type WorkerPoolManager } from '@pierre/diffs/worker';
 // Vite-inlined worker (base64 blob) — required by the single-file HTML build:
 // the review UI ships as one self-contained file, so there is no separate
 // asset URL to load a worker script from.
@@ -41,6 +42,14 @@ export function ReviewWorkerPoolProvider({ children }: { children: ReactNode }) 
       {children}
     </WorkerPoolContextProvider>
   );
+}
+
+/**
+ * The same pool, for a host that highlights only some diffs in it (the Inbox: only the very large ones, see GuideDiff).
+ * It starts on first use and stays for the life of the page.
+ */
+export function getSharedWorkerPool(): WorkerPoolManager {
+  return getOrCreateWorkerPoolSingleton({ poolOptions, highlighterOptions });
 }
 
 // If the pool never reaches 'initialized' (e.g. worker spawn blocked), stop

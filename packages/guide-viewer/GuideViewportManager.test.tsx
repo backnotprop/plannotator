@@ -178,6 +178,11 @@ class DrivenIntersectionObserver {
 
 describe('GuideViewportProvider window', () => {
   const ids = Array.from({ length: 40 }, (_, index) => `src/file-${index}.ts`);
+  let restoreFrames = () => {};
+  afterEach(() => {
+    restoreFrames();
+    restoreFrames = () => {};
+  });
 
   async function deliver(near: (id: string) => boolean) {
     await act(async () => {
@@ -204,7 +209,8 @@ describe('GuideViewportProvider window', () => {
     expect(mountedIds()).toEqual(further);
   });
 
-  test.skipIf(!hasDom)('a flick draws the files it lands on at once, not when the scroll stops', async () => {
+  /** The manager's scroller, with a real height (the test DOM has no layout). */
+  async function renderInScroller() {
     await render(
       <div data-scroller="" style={{ overflowY: 'auto' }}>
         <GuideViewportProvider>
@@ -214,15 +220,209 @@ describe('GuideViewportProvider window', () => {
       DrivenIntersectionObserver,
     );
     const scroller = host!.querySelector<HTMLElement>('[data-scroller]')!;
-    await deliver((id) => ids.slice(0, 5).includes(id));
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 1_000 });
+    return scroller;
+  }
 
-    const landed = ids.slice(30, 35);
-    await act(async () => {
-      scroller.scrollTop = 100_000;
+  const scrollTo = (scroller: HTMLElement, top: number) =>
+    act(async () => {
+      scroller.scrollTop = top;
       scroller.dispatchEvent(new Event('scroll'));
     });
+
+  /** From here on frames run only when the test says, one per call. */
+  function manualFrames(): () => Promise<void> {
+    const queued = new Map<number, FrameRequestCallback>();
+    let nextHandle = 1;
+    const realRequest = globalThis.requestAnimationFrame;
+    const realCancel = globalThis.cancelAnimationFrame;
+    globalThis.requestAnimationFrame = (callback) => {
+      queued.set(nextHandle, callback);
+      return nextHandle++;
+    };
+    globalThis.cancelAnimationFrame = (handle) => void queued.delete(handle);
+    restoreFrames = () => {
+      globalThis.requestAnimationFrame = realRequest;
+      globalThis.cancelAnimationFrame = realCancel;
+    };
+    return () =>
+      act(async () => {
+        const callbacks = [...queued.values()];
+        queued.clear();
+        for (const callback of callbacks) callback(performance.now());
+      });
+  }
+
+  /** Far enough apart that the step between them is never read as a fast one. */
+  const frames = (count: number) =>
+    act(async () => {
+      for (let i = 0; i < count; i++) await new Promise((done) => setTimeout(done, 20));
+    });
+
+  test.skipIf(!hasDom)('a flick draws the files it lands on at once, not when the scroll stops', async () => {
+    const scroller = await renderInScroller();
+    await deliver((id) => ids.slice(0, 5).includes(id));
+    await frames(2);
+
+    const landed = ids.slice(4, 9);
+    await frames(1);
+    await scrollTo(scroller, 400);
     await deliver((id) => landed.includes(id));
     expect(mountedIds()).toEqual(landed);
+  });
+
+  test.skipIf(!hasDom)('a scroll passing a whole view each frame mounts nothing until it stops, then draws where it stopped', async () => {
+    const scroller = await renderInScroller();
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 5));
+
+    let top = 0;
+    for (const passing of [10, 20, 30]) {
+      top += 5_000;
+      await scrollTo(scroller, top);
+      DrivenIntersectionObserver.current!.deliver((id) => ids.slice(passing, passing + 5).includes(id));
+      await frame();
+      // Still what it was: nothing it passes mounts, and what it left is not torn down on the way.
+      expect(mountedIds()).toEqual(ids.slice(0, 5));
+    }
+
+    // One still frame may be a gap in the input; the second is the stop.
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 5));
+    await frame();
+    expect(mountedIds()).toEqual(expect.arrayContaining(ids.slice(30, 35)));
+    expect(mountedIds()).not.toContain(ids[10]);
+    expect(mountedIds()).not.toContain(ids[20]);
+  });
+
+  test.skipIf(!hasDom)('End mounts nothing on its way, however short the way, and draws where it ends', async () => {
+    const scroller = await renderInScroller();
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    for (const [step, passing] of [[100, 5], [200, 10]] as const) {
+      await scrollTo(scroller, step);
+      DrivenIntersectionObserver.current!.deliver((id) => ids.slice(passing, passing + 5).includes(id));
+      await frame();
+      expect(mountedIds()).toEqual(ids.slice(0, 5));
+    }
+
+    await frame();
+    await frame();
+    expect(mountedIds()).toEqual(expect.arrayContaining(ids.slice(10, 15)));
+    expect(mountedIds()).not.toContain(ids[5]);
+  });
+
+  test.skipIf(!hasDom)('End that moves nothing (a text field has it) does not hold the window up', async () => {
+    await renderInScroller();
+    const frame = manualFrames();
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'End' }));
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    for (let i = 0; i < 12; i++) await frame();
+    expect(mountedIds()).toEqual(expect.arrayContaining(ids.slice(0, 5)));
+  });
+
+  test.skipIf(!hasDom)('the pointer does not mount each file a fast scroll carries under it', async () => {
+    let hover: () => void = () => {};
+    function Hovered({ id, target }: { id: string; target?: boolean }) {
+      const { mounted, register, requestMount } = useGuideFileWindow(id);
+      if (target) hover = requestMount;
+      return <div ref={register} data-shell={id}>{mounted && <span data-shell-mounted={id} />}</div>;
+    }
+    await render(
+      <div data-scroller="" style={{ overflowY: 'auto' }}>
+        <GuideViewportProvider>
+          {ids.map((id, index) => <Hovered key={id} id={id} target={index === 20} />)}
+        </GuideViewportProvider>
+      </div>,
+      DrivenIntersectionObserver,
+    );
+    const scroller = host!.querySelector<HTMLElement>('[data-scroller]')!;
+    Object.defineProperty(scroller, 'clientHeight', { configurable: true, value: 1_000 });
+    const frame = manualFrames();
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 5).includes(id));
+    await frame();
+
+    await scrollTo(scroller, 5_000);
+    await frame();
+    await act(async () => hover());
+    expect(mountedIds()).not.toContain(ids[20]);
+
+    // Still under the pointer when the scroll stops, it draws.
+    await frame();
+    await frame();
+    expect(mountedIds()).toContain(ids[20]);
+  });
+
+  test.skipIf(!hasDom)('at rest, what is on screen draws at once and the rest of the window follows one file a frame, nearest first', async () => {
+    const scroller = await renderInScroller();
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    for (const [index, id] of ids.entries()) {
+      scroller.querySelector<HTMLElement>(`[data-shell="${id}"]`)!.getBoundingClientRect = () => new DOMRectReadOnly(0, index * 400, 1_000, 300);
+    }
+    const frame = manualFrames();
+
+    DrivenIntersectionObserver.current!.deliver((id) => ids.slice(0, 6).includes(id));
+    await frame();
+    // On screen: tops 0, 400 and 800. The next nearest, top 1,200, comes along in the same step.
+    expect(mountedIds()).toEqual(ids.slice(0, 4));
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 5));
+    await frame();
+    expect(mountedIds()).toEqual(ids.slice(0, 6));
+  });
+
+  test.skipIf(!hasDom)('before the observer first reports, a scroll keeps the first files instead of flashing them away', async () => {
+    const scroller = await renderInScroller();
+    const seeded = mountedIds();
+    expect(seeded).toEqual(ids.slice(0, 2));
+
+    await scrollTo(scroller, 50);
+    await frames(3);
+    expect(mountedIds()).toEqual(seeded);
+  });
+
+  test.skipIf(!hasDom)('a jump target stays drawn while the window moves on, for as long as the jump needs it', async () => {
+    let jump: () => void = () => {};
+    function Far({ id, target }: { id: string; target?: boolean }) {
+      const { mounted, register, requestMount } = useGuideFileWindow(id);
+      if (target) jump = requestMount;
+      return <div ref={register} data-shell={id}>{mounted && <span data-shell-mounted={id} />}</div>;
+    }
+    await render(
+      <GuideViewportProvider>
+        {ids.map((id, index) => <Far key={id} id={id} target={index === 39} />)}
+      </GuideViewportProvider>,
+      DrivenIntersectionObserver,
+    );
+    await deliver((id) => ids.slice(0, 5).includes(id));
+
+    await act(async () => jump());
+    await deliver((id) => ids.slice(5, 10).includes(id));
+    await frames(3);
+    expect(mountedIds()).toContain(ids[39]);
+  });
+
+  test.skipIf(!hasDom)('focusing a file far off draws it right away, with no help from the observer', async () => {
+    function Pinnable({ id, pinned }: { id: string; pinned: boolean }) {
+      const { mounted, register } = useGuideFileWindow(id, pinned);
+      return <div ref={register} data-shell={id}>{mounted && <span data-shell-mounted={id} />}</div>;
+    }
+    const tree = (pinnedIndex: number) => (
+      <GuideViewportProvider>
+        {ids.map((id, index) => <Pinnable key={id} id={id} pinned={index === pinnedIndex} />)}
+      </GuideViewportProvider>
+    );
+    await render(tree(-1), DrivenIntersectionObserver);
+    await deliver((id) => ids.slice(0, 5).includes(id));
+    expect(mountedIds()).not.toContain(ids[30]);
+
+    await act(async () => root!.render(tree(30)));
+    expect(mountedIds()).toContain(ids[30]);
   });
 
   test.skipIf(!hasDom)('a focused file and a jump target far off draw beside the window, taking nothing from it', async () => {
@@ -249,6 +449,124 @@ describe('GuideViewportProvider window', () => {
 
     await act(async () => jump());
     expect(mountedIds()).toEqual([ids[0], ...inWindow, ids[39]]);
+  });
+});
+
+describe('a jump', () => {
+  const ids = Array.from({ length: 40 }, (_, index) => `src/file-${index}.ts`);
+  const originalScrollIntoView = hasDom ? HTMLElement.prototype.scrollIntoView : undefined;
+  afterEach(() => {
+    if (hasDom) HTMLElement.prototype.scrollIntoView = originalScrollIntoView!;
+  });
+
+  /**
+   * A view 1,000 px tall over shells with a settable place. Its scrollIntoView does what the browser's does at once: it
+   * puts the shell at 16 px from the top (its scroll margin). A smooth one is left to `finishSmooth`.
+   */
+  async function setup(startTop: number) {
+    const calls: string[] = [];
+    let targetTop = startTop;
+    HTMLElement.prototype.scrollIntoView = function (this: HTMLElement, options?: boolean | ScrollIntoViewOptions) {
+      const behavior = typeof options === 'object' ? options.behavior ?? 'auto' : 'auto';
+      calls.push(behavior);
+      if (behavior === 'instant') targetTop = 16;
+    };
+    let jump: () => void = () => {};
+    function Target({ id, target }: { id: string; target?: boolean }) {
+      const { mounted, register, jumpTo } = useGuideFileWindow(id);
+      if (target) jump = jumpTo;
+      return <div ref={register} data-shell={id} style={{ scrollMarginTop: 16 }}>{mounted && <span data-shell-mounted={id} />}</div>;
+    }
+    await render(
+      <div data-scroller="" style={{ overflowY: 'auto' }}>
+        <GuideViewportProvider>
+          {ids.map((id, index) => <Target key={id} id={id} target={index === 20} />)}
+        </GuideViewportProvider>
+      </div>,
+      DrivenIntersectionObserver,
+    );
+    const scroller = host!.querySelector<HTMLElement>('[data-scroller]')!;
+    scroller.getBoundingClientRect = () => new DOMRectReadOnly(0, 0, 1_000, 1_000);
+    const shell = scroller.querySelector<HTMLElement>(`[data-shell="${ids[20]}"]`)!;
+    shell.getBoundingClientRect = () => new DOMRectReadOnly(0, targetTop, 1_000, 300);
+    return {
+      calls,
+      jump: () => act(async () => jump()),
+      moveTarget: (top: number) => {
+        targetTop = top;
+      },
+      top: () => targetTop,
+      frames: (count: number) =>
+        act(async () => {
+          for (let i = 0; i < count; i++) await new Promise((done) => requestAnimationFrame(done));
+        }),
+    };
+  }
+
+  test.skipIf(!hasDom)('more than two views away goes at once, and what it lands on draws in the same frame', async () => {
+    const view = await setup(2_100);
+    await view.jump();
+    expect(view.calls).toEqual(['instant']);
+    expect(mountedIds()).toContain(ids[20]);
+  });
+
+  test.skipIf(!hasDom)('within two views stays smooth', async () => {
+    const view = await setup(1_900);
+    await view.jump();
+    expect(view.calls).toEqual(['smooth']);
+  });
+
+  test.skipIf(!hasDom)('files above swapping their height do not move the target off its place', async () => {
+    const view = await setup(5_000);
+    await view.jump();
+    await view.frames(2);
+
+    view.moveTarget(-599);
+    await view.frames(2);
+    expect(view.top()).toBe(16);
+  });
+
+  test.skipIf(!hasDom)('a smooth jump is left alone while it runs, then corrected where it stopped', async () => {
+    const view = await setup(1_000);
+    await view.jump();
+
+    // Still on its way: moving every frame, and no instant scroll cuts it short.
+    for (const top of [800, 500, 200]) {
+      view.moveTarget(top);
+      await view.frames(1);
+    }
+    expect(view.calls).toEqual(['smooth']);
+
+    // It ended on the old estimate, short of the place.
+    view.moveTarget(-90);
+    await view.frames(5);
+    expect(view.top()).toBe(16);
+    expect(view.calls.at(-1)).toBe('instant');
+  });
+
+  test.skipIf(!hasDom)('the person scrolling first takes the view back', async () => {
+    const view = await setup(5_000);
+    await view.jump();
+    await view.frames(1);
+
+    await act(async () => {
+      window.dispatchEvent(new Event('wheel'));
+    });
+    view.moveTarget(300);
+    await view.frames(4);
+    expect(view.top()).toBe(300);
+  });
+
+  test.skipIf(!hasDom)('once settled the jump lets go: a later height change is not pulled back', async () => {
+    const view = await setup(5_000);
+    await view.jump();
+    await view.frames(12);
+    const scrolls = view.calls.length;
+
+    view.moveTarget(300);
+    await view.frames(4);
+    expect(view.top()).toBe(300);
+    expect(view.calls.length).toBe(scrolls);
   });
 });
 

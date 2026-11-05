@@ -43,6 +43,7 @@ plugin({
 mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => ({
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
+  getSharedWorkerPool: () => undefined,
 }));
 
 const hasDom = typeof document !== 'undefined';

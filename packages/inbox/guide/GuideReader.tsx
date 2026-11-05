@@ -38,7 +38,9 @@ import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
+import { WorkerPoolContext } from '@pierre/diffs/react';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
+import { getSharedWorkerPool } from '@plannotator/review-editor/worker-pool';
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
@@ -47,6 +49,14 @@ import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
 type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
+
+/**
+ * A diff past this size highlights in a worker. The Inbox highlights on the main thread so no line paints plain first,
+ * at about 100 ms per 50,000 characters: a far larger diff would freeze the window for seconds, so it paints plain for
+ * a moment instead.
+ */
+const LARGE_DIFF_CHARS = 50_000;
+const isLargeDiff = (file: { patch: string }) => file.patch.length > LARGE_DIFF_CHARS;
 
 const NO_ANNOTATIONS: never[] = [];
 const noop = () => {};
@@ -97,8 +107,10 @@ export const GuideDiff: FC<
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
     fileOpenIn?: (filePath: string) => ReactNode;
+    /** Highlight a very large diff in a worker (the window; the phone's surface page keeps its main thread). */
+    largeDiffsInWorker?: boolean;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, largeDiffsInWorker, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -109,34 +121,37 @@ export const GuideDiff: FC<
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const fontFamily = useConfigValue('diffFontFamily');
   const fontSize = useConfigValue('diffFontSize');
+  const pool = largeDiffsInWorker && props.files.some(isLargeDiff) ? getSharedWorkerPool() : undefined;
   return (
-    <AllFilesCodeView
-      {...props}
-      readOnly={!comments}
-      commentOnly={!!comments}
-      fileOpenIn={fileOpenIn}
-      contextExpansionAvailable={false}
-      diffStyle={diffStyle}
-      diffOverflow={diffOverflow}
-      diffIndicators={diffIndicators}
-      lineDiffType={lineDiffType}
-      disableLineNumbers={!showLineNumbers}
-      disableBackground={!showBackground}
-      expandUnchanged={expandUnchanged}
-      fontFamily={fontFamily || undefined}
-      fontSize={fontSize || undefined}
-      annotations={comments?.annotations ?? NO_ANNOTATIONS}
-      selectedAnnotationId={comments?.selectedAnnotationId ?? null}
-      scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
-      pendingSelection={comments?.pendingSelection ?? null}
-      onLineSelection={comments?.onLineSelection ?? noop}
-      onAddAnnotationForFile={comments?.onAddAnnotationForFile ?? noop}
-      onEditAnnotation={comments?.onEditAnnotation ?? noop}
-      onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
-      onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
-      {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
-      {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
-    />
+    <WorkerPoolContext.Provider value={pool}>
+      <AllFilesCodeView
+        {...props}
+        readOnly={!comments}
+        commentOnly={!!comments}
+        fileOpenIn={fileOpenIn}
+        contextExpansionAvailable={false}
+        diffStyle={diffStyle}
+        diffOverflow={diffOverflow}
+        diffIndicators={diffIndicators}
+        lineDiffType={lineDiffType}
+        disableLineNumbers={!showLineNumbers}
+        disableBackground={!showBackground}
+        expandUnchanged={expandUnchanged}
+        fontFamily={fontFamily || undefined}
+        fontSize={fontSize || undefined}
+        annotations={comments?.annotations ?? NO_ANNOTATIONS}
+        selectedAnnotationId={comments?.selectedAnnotationId ?? null}
+        scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
+        pendingSelection={comments?.pendingSelection ?? null}
+        onLineSelection={comments?.onLineSelection ?? noop}
+        onAddAnnotationForFile={comments?.onAddAnnotationForFile ?? noop}
+        onEditAnnotation={comments?.onEditAnnotation ?? noop}
+        onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
+        onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
+        {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
+        {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
+      />
+    </WorkerPoolContext.Provider>
   );
 };
 
@@ -180,6 +195,10 @@ export default function GuideReader({
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
+  // Started now so a very large diff is not left waiting for its worker when the reader reaches it.
+  useEffect(() => {
+    if (files.some(isLargeDiff)) getSharedWorkerPool();
+  }, [files]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -328,7 +347,9 @@ export default function GuideReader({
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fileOpenIn?: (filePath: string) => ReactNode;
+      largeDiffsInWorker: boolean;
     } => ({
+      largeDiffsInWorker: true,
       ...(phone && { diffStyleOverride: 'unified' as const }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
