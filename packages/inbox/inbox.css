@@ -6906,7 +6906,8 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 /* An HTML page's card sits on the pane, not inside the file as an image's or a film's does, so it does not narrow with the drawer: it keeps to the page beside the drawer (320 px, as the chip above it), and a phone's sheet hides it, as the sheet covers an image's card and hides the toolbar. */
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) > :is(.ib-fcomp, .ib-fcomp-pillwrap) { left: calc((100% - 320px) / 2); }
 .ib-view.ib-fullview.ib-drawer:not(.ib-phone) > .ib-fcomp { width: min(680px, calc(100% - 352px)); }
-.ib-view.ib-fullview.ib-phone.ib-panel-open > :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
+/* The comments sheet covers the file, and its foot holds Write the reply: the card and its pill step aside with the dock, on the pane (an HTML page) or inside the file (an image, a film). */
+.ib-view.ib-fullview.ib-phone.ib-panel-open :is(.ib-fcomp, .ib-fcomp-pillwrap) { visibility: hidden; }
 .pn-inbox .ib-fcomp-pill { --fc-accent: var(--primary); display: inline-flex; align-items: center; gap: 6px; height: 30px; max-width: min(320px, calc(100vw - 32px)); padding: 0 9px 0 11px; border-radius: 15px; border: 1px solid color-mix(in oklch, var(--border) 85%, transparent); background: color-mix(in oklch, var(--popover) 92%, transparent); -webkit-backdrop-filter: blur(14px); backdrop-filter: blur(14px); color: var(--popover-foreground); box-shadow: 0 6px 18px rgba(0, 0, 0, 0.28); font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; white-space: nowrap; cursor: pointer; }
 :root.light .pn-inbox .ib-fcomp-pill { box-shadow: 0 6px 18px rgba(0, 0, 0, 0.1); }
 .pn-inbox .ib-fcomp-pill.ib-mode-comment { --fc-accent: var(--warning, #d79b3a); }
@@ -6982,7 +6983,42 @@ dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100v
 .pn-inbox .ib-fcomp.ib-phone .ib-ccard .ib-btn { height: 40px; min-width: 40px; margin-bottom: 2px; }
 .pn-inbox .ib-fcomp.ib-phone .ib-fcomp-send { width: 40px; height: 40px; padding: 0; justify-content: center; margin-bottom: 2px; }
 .ib-fcomp.ib-phone .ib-fcomp-foot { min-height: 32px; font-size: var(--ib-fs-13, 13px); }
+/* The foot is one row at 320 px and up. The mic takes its own room, not half the row's, so the chips get what is left;
+   a chip never wraps or shrinks. When the row runs short, what yields is decided in footFit.ts (`cardFootFitCandidates`)
+   and drawn from `data-fit`: the words go, into visually hidden text, so names stay whole. */
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot { flex: none; margin-left: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-dtfoot:has(.ib-vline) { flex: 1 1 0; }
+/* Dictating, the status has the row: the link or "Sent to …" would squeeze Cancel and the clock out of it at 320. */
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot:has(.ib-vline) > :is(.ib-fcomp-link, .ib-fcomp-sent) { display: none; }
+.ib-fcomp.ib-phone .ib-fcomp-chips { flex-wrap: nowrap; min-width: 44px; }
+.ib-fcomp.ib-phone .ib-fcomp-chip { flex: none; height: auto; min-height: 22px; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-q { height: auto; min-height: 22px; }
+.pn-inbox .ib-fcomp.ib-phone :is(button.ib-fcomp-chip, .ib-fcomp-q) { justify-content: center; min-width: 44px; box-sizing: border-box; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="chips"] .ib-fcomp-w,
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lo { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="link"] .ib-fcomp-lt { display: inline-block; text-transform: capitalize; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] { flex-wrap: wrap; row-gap: 2px; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-fcomp-chips { order: -1; flex: 1 0 100%; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot { margin-left: auto; }
+.pn-inbox .ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="stack"] > .ib-dtfoot ~ .ib-fcomp-link { margin-left: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-foot[data-fit~="wrap"] > .ib-fcomp-chips { flex-wrap: wrap; }
+/* What stands in for the chips stays in the row: a long agent's name is cut, and the note takes its own line. */
+.ib-fcomp.ib-phone .ib-fcomp-sent { min-width: 0; }
+.ib-fcomp.ib-phone .ib-fcomp-sentl { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-foot:has(> .ib-fcomp-note) { flex-wrap: wrap; row-gap: 2px; }
+.ib-fcomp.ib-phone .ib-fcomp-foot > .ib-fcomp-note { order: -1; flex: 1 0 100%; }
+/* A long agent's name: "Reply to" keeps its line and the name is cut. An empty field's words are cut too: the field is
+   one line tall, and a second line of placeholder showed cut through. */
+.ib-fcomp.ib-phone .ib-fcomp-solo { min-width: 0; white-space: nowrap; }
+.ib-fcomp.ib-phone .ib-fcomp-solo b { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.ib-fcomp.ib-phone :is(.ib-rtext, .ib-ta)::placeholder { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* 44 px to press, drawn on an overlay: the card's controls stay the size they are, and nothing moves. The top row's
+   reach over the field's first pixels, so it is painted over the field (its textarea is positioned). */
+.ib-fcomp.ib-phone .ib-fcomp-top { position: relative; z-index: 1; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink) { position: relative; }
+.pn-inbox .ib-fcomp.ib-phone :is(.ib-fcomp-tabs button, .ib-fcomp-min, .ib-fcomp-clip, .ib-fcomp-send, .ib-ccard .ib-btn, .ib-vmic, .ib-fcomp-link, button.ib-fcomp-chip, .ib-fcomp-q, .ib-dtlink)::after { content: ''; position: absolute; inset: auto; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
 .ib-fcomp-pillwrap.ib-phone { left: calc(12px + env(safe-area-inset-left)); bottom: calc(14px + env(safe-area-inset-bottom)); transform: none; }
+.ib-fcomp-pillwrap.ib-phone[data-fcomp-pill-above] { bottom: calc(14px + 52px + 8px + env(safe-area-inset-bottom)); }
 .pn-inbox .ib-fcomp-pillwrap.ib-phone .ib-fcomp-pill { height: 52px; min-width: 52px; justify-content: center; border-radius: 14px; padding: 0 14px; gap: 7px; font-size: var(--ib-fs-14, 14px); }
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .pn-inbox:has(.ib-fcomp) .ib-toast { bottom: calc(148px + env(safe-area-inset-bottom)); }
