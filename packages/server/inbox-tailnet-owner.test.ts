@@ -584,6 +584,94 @@ describe("launch settings are the owner's, on their phone too", () => {
   });
 });
 
+describe("a launched agent's permission prompt over the tailnet: the owner's rule is that a guest can answer it, marked as the guest's", () => {
+  const PERM_SESSION = "0d6c2f1e-5b7a-4c8e-9f00-cccccccccccc";
+  const PERM_CARD = [
+    "```",
+    "rm -rf build",
+    "```",
+    "",
+    "in `~/app`",
+    "",
+    ":::question",
+    "Claude Code wants to run a command",
+    "",
+    "- [ ] Allow once",
+    "- [ ] Deny",
+    "- [ ] Auto mode",
+    "- [ ] Full permissions",
+    ":::",
+  ].join("\n");
+  /** A permission question, written as the launch's permission route writes it. */
+  const ask = (w: World, key: string) => {
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    const author = { kind: "agent" as const, host: "claude-code", session: `perm:${PERM_SESSION}`, name: "Claude Code" };
+    return w.inbox.store.sendMessage({ project_id: project.id, author, permission: true, body: PERM_CARD, idempotency_key: `perm-${key}` }).message.id;
+  };
+  const stateOf = (w: World, id: string) => w.inbox.store.questionsOf(id)[0]!.state;
+  const answer = (selected: string) => (w: World, id: string) => {
+    const q = w.inbox.store.questionsOf(id)[0]!;
+    return { key: q.key, revision: q.revision, answer: { v: 1, key: q.key, kind: "single", prompt: q.prompt, selected: [selected] } };
+  };
+  const picks = (w: World, caller: Caller, id: string, selected: string) =>
+    call(w, caller, { path: `/api/inbox/messages/${id}/picks`, body: { questions: [answer(selected)(w, id)], unsent_only: true, ...(selected === "Full permissions" ? { confirm_full: true } : {}) } });
+  const send = (w: World, caller: Caller, id: string, key: string, selected: string) =>
+    call(w, caller, { path: `/api/inbox/messages/${id}/reply`, body: { idempotency_key: key, words: "", questions: [answer(selected)(w, id)] } });
+  const repliesOf = (w: World, id: string) =>
+    w.inbox.store
+      .threadMessageIds(w.inbox.store.message(id)!.thread_id)
+      .map((m) => w.inbox.store.message(m)!)
+      .filter((m) => m.author.kind === "person" && m.reply_to === id);
+
+  test("a guest's Allow once, Deny, Auto mode and Full permissions each answer the card (picks and reply), with one by_guest message", async () => {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    for (const [n, selected] of ["Allow once", "Deny", "Auto mode", "Full permissions"].entries()) {
+      const id = ask(w, `guest-${n}`);
+      expect([selected, (await picks(w, "guest", id, selected)).status]).toEqual([selected, 200]);
+      expect([selected, (await send(w, "guest", id, `00000000-0000-4000-8000-00000000020${n}`, selected)).status]).toEqual([selected, 200]);
+      expect([selected, stateOf(w, id)]).toEqual([selected, "sent"]);
+      expect(repliesOf(w, id).map((m) => m.by_guest)).toEqual([true]);
+    }
+  });
+
+  const ANSWERS_AS_THE_OWNER: { who: string; caller: Caller; tagged?: boolean }[] = [
+    { who: "this computer's window", caller: "local" },
+    { who: "the owner over the tailnet", caller: "owner" },
+    { who: "a tagged machine's allowed login", caller: "guest", tagged: true },
+  ];
+  for (const { who, caller, tagged } of ANSWERS_AS_THE_OWNER) {
+    test(`${who} answers the card, not marked a guest's`, async () => {
+      const w = await world({ tagged, config: { inboxLaunch: { enabled: true } } });
+      const id = ask(w, "owner");
+      expect((await picks(w, caller, id, "Full permissions")).status).toBe(200);
+      expect((await send(w, caller, id, "00000000-0000-4000-8000-000000000301", "Full permissions")).status).toBe(200);
+      expect(stateOf(w, id)).toBe("sent");
+      expect(repliesOf(w, id).map((m) => m.by_guest)).toEqual([undefined]);
+    });
+  }
+
+  test("the owner's answer through the forward to a linked machine reaches the card there", async () => {
+    setEnv("PLANNOTATOR_TEST_SANDBOX", process.env.PLANNOTATOR_TEST_SANDBOX ?? "1");
+    const peer = await world({ phones: false, config: { inboxLaunch: { enabled: true } } });
+    const w = await world({ phones: false });
+    const bearer = (inbox: InboxServer) => ({ Authorization: `Bearer ${inbox.token}`, "Content-Type": "application/json" });
+    const offer = (await (await fetch(`http://127.0.0.1:${peer.inbox.port}/api/inbox/control/machines/offer`, { method: "POST", headers: bearer(peer.inbox), body: "{}" })).json()) as Json;
+    const linked = await fetch(`http://127.0.0.1:${w.inbox.port}/api/inbox/control/machines/link`, {
+      method: "POST",
+      headers: bearer(w.inbox),
+      body: JSON.stringify({ link: offer.link, address: `http://127.0.0.1:${peer.inbox.port}`, one_way: true }),
+    });
+    expect(linked.status).toBe(201);
+    const machine = ((await linked.json()) as Json).machine.id as string;
+    await waitOnline(w, machine);
+    const id = ask(peer, "far");
+    const forwarded = (path: string, body: Json) => call(w, "owner", { path: `/api/inbox/m/${machine}/messages/${id}/${path}`, body: { seen_through_seq: Number.MAX_SAFE_INTEGER, ...body } });
+    expect((await forwarded("picks", { idempotency_key: "00000000-0000-4000-8000-000000000306", questions: [answer("Allow once")(peer, id)], unsent_only: true })).status).toBe(200);
+    expect((await forwarded("reply", { idempotency_key: "00000000-0000-4000-8000-000000000305", words: "", questions: [answer("Allow once")(peer, id)] })).status).toBe(200);
+    expect(stateOf(peer, id)).toBe("sent");
+  });
+});
+
 describe("a tagged machine: the login its allowlist names has every route the owner has", () => {
   for (const row of OPENED) {
     test(row.name, async () => {
