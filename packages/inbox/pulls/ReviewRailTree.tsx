@@ -15,6 +15,7 @@ import {
   CountColumns,
   ViewedControl,
 } from '@plannotator/review-editor/components/FileRowBits';
+import { Tip } from '../components/Tip';
 
 /** The Changes tree's indent: 12 px a level from the row's 8 px, 4 px a level past what the 256 px rail can give. */
 function indent(depth: number): number {
@@ -22,8 +23,21 @@ function indent(depth: number): number {
   return 8 + full * 12 + (depth - full) * 4;
 }
 
-export function ReviewRailTree({ tree, files, viewed, commentCount, onSelect, onToggleViewed }: {
+/** A row's name: cut at its start, so names that share a long beginning still differ; its whole path on hover when cut. */
+function RowName({ name, path }: { name: string; path: string }) {
+  return (
+    <Tip cut content={path}>
+      <span className="truncate ib-rv-name">
+        <bdi>{name}</bdi>
+      </span>
+    </Tip>
+  );
+}
+
+export function ReviewRailTree({ tree, loose, files, viewed, commentCount, onSelect, onToggleViewed }: {
   tree: DiffFileTreeNode<DiffFile>[];
+  /** Files the tree has no row for (reviewFiles.ts): drawn after it with their full path. */
+  loose: readonly DiffFile[];
   files: readonly DiffFile[];
   viewed: ReadonlySet<string>;
   commentCount: (path: string) => number;
@@ -37,37 +51,39 @@ export function ReviewRailTree({ tree, files, viewed, commentCount, onSelect, on
     return countColumnVars(add, del);
   }, [files]);
 
+  const fileRow = (file: DiffFile, name: string, depth: number, key: string) => {
+    const seen = viewed.has(file.path);
+    return (
+      <li key={key}>
+        <button type="button" className="file-tree-item ib-rv-file" style={{ paddingLeft: indent(depth) }} aria-label={`${file.path}${seen ? ', viewed' : ''}`} data-review-file={file.path} onClick={() => onSelect(file.path)}>
+          <span className="ib-rv-file-main">
+            <ViewedControl isViewed={seen} name={file.path} onToggle={() => onToggleViewed(file.path)} />
+            <span className="ib-rv-letter">
+              <ChangeTypeLetter status={file.status} oldPath={file.oldPath} />
+            </span>
+            <RowName name={name} path={file.path} />
+            <AnnotationBadge count={commentCount(file.path)} />
+          </span>
+          <CountColumns additions={file.additions} deletions={file.deletions} />
+        </button>
+      </li>
+    );
+  };
+
   const rows = (nodes: DiffFileTreeNode<DiffFile>[]): React.ReactNode =>
     nodes.map((node) => {
-      if (node.type === 'folder') {
-        const open = expandedFolders.has(node.path);
-        return (
-          <li key={`dir:${node.path}`} data-review-folder={node.path}>
-            <button type="button" className="ib-rv-tree-folder" style={{ paddingLeft: indent(node.depth) }} aria-expanded={open} title={node.path} onClick={() => toggleFolder(node.path)}>
-              <svg className={`w-3 h-3 flex-shrink-0 ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
-                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-              </svg>
-              <span className="truncate">{node.name}</span>
-              <CountColumns additions={node.additions} deletions={node.deletions} tone="quiet" />
-            </button>
-            {open && node.children && <ul className="ib-rv-list">{rows(node.children)}</ul>}
-          </li>
-        );
-      }
-      const seen = viewed.has(node.path);
+      if (node.type === 'file') return fileRow(node.file!, node.name, node.depth, node.path);
+      const open = expandedFolders.has(node.path);
       return (
-        <li key={node.path}>
-          <button type="button" className="file-tree-item ib-rv-file" style={{ paddingLeft: indent(node.depth) }} title={node.path} aria-label={`${node.path}${seen ? ', viewed' : ''}`} data-review-file={node.path} onClick={() => onSelect(node.path)}>
-            <span className="ib-rv-file-main">
-              <ViewedControl isViewed={seen} onToggle={() => onToggleViewed(node.path)} />
-              <span className="ib-rv-letter">
-                <ChangeTypeLetter status={node.file!.status} oldPath={node.file!.oldPath} />
-              </span>
-              <span className="truncate">{node.name}</span>
-              <AnnotationBadge count={commentCount(node.path)} />
-            </span>
-            <CountColumns additions={node.file!.additions} deletions={node.file!.deletions} />
+        <li key={`dir:${node.path}`} data-review-folder={node.path}>
+          <button type="button" className="ib-rv-tree-folder" style={{ paddingLeft: indent(node.depth) }} aria-expanded={open} aria-label={node.path} onClick={() => toggleFolder(node.path)}>
+            <svg className={`w-3 h-3 flex-shrink-0 ${open ? 'rotate-90' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} aria-hidden="true">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+            <RowName name={node.name} path={node.path} />
+            <CountColumns additions={node.additions} deletions={node.deletions} tone="quiet" />
           </button>
+          {open && node.children && <ul className="ib-rv-list">{rows(node.children)}</ul>}
         </li>
       );
     });
@@ -75,6 +91,7 @@ export function ReviewRailTree({ tree, files, viewed, commentCount, onSelect, on
   return (
     <ul className="ib-rv-list" data-review-files="" style={columns}>
       {rows(tree)}
+      {loose.map((file, index) => fileRow(file, file.path, 0, `loose:${index}:${file.path}`))}
     </ul>
   );
 }

@@ -7738,15 +7738,31 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prr-wide .ib-prr-layer { height: 28px; padding: 0 12px; border-radius: 8px 8px 0 0; font-weight: 400; }
 .pn-inbox .ib-prr-wide .ib-prr-layer:not(:disabled):hover { background: color-mix(in oklab, var(--background) 50%, transparent); }
 .pn-inbox .ib-prr-wide .ib-prr-layer[aria-current], .pn-inbox .ib-prr-wide .ib-prr-layer[aria-current]:not(:disabled):hover { background: var(--background); }
-.ib-prr-wide .ib-prr-layers:has(+ .ib-prr-note) { margin-right: 0; }
-.ib-prreview.ib-prr-wide .ib-prr-strip .ib-prr-note { flex: 0 1000 auto; min-width: 0; margin: 0 auto 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prr-wide .ib-prr-layers:has(+ .ib-prr-note) { flex-shrink: 1000; min-width: 120px; margin-right: 0; }
+/* More layers than fit: the edges fade as on a phone, the layers scroll under them. */
+.ib-prr-wide .ib-prr-layers[data-over] { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
+.ib-prreview.ib-prr-wide .ib-prr-strip .ib-prr-note { flex: 0 1 auto; min-width: 0; margin: 0 auto 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* The controls' row is short (PullReview's NOTE_ON_STRIP_FROM): the note leads the foot. */
+.ib-prreview.ib-prr-wide .ib-prr-foot .ib-prr-note { flex: none; max-width: 40%; margin: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ib-prr-foot .ib-prr-note:has(+ .ib-prr-where)::after { content: ' ·'; }
+.ib-prr-wide .ib-prr-foot .ib-prr-note + .ib-prr-where { margin-left: -8px; }
 .ib-prr-controls { display: flex; flex: none; align-items: center; gap: 8px; }
 .ib-prr-controls [data-guide-global-comment-add] { padding-block: 4px; }
 /* Where the row runs short the layers keep their room: Global comment keeps its globe and its tooltip. */
 @container ib-prr-strip (max-width: 760px) {
   .ib-prr-controls [data-guide-global-comment-add] > span { display: none; }
 }
-.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-foot { height: 37px; padding-block: 0; }
+.ib-viewer.ib-prreview.ib-prr-wide .ib-prr-foot { container: ib-prr-foot / inline-size; height: 37px; padding-block: 0; }
+/* Two parts that give way in turn: the branch names first, then where the review goes. */
+.ib-prr-wide .ib-prr-where { display: flex; }
+.ib-prr-wide .ib-prr-where > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: pre; }
+.ib-prr-wide .ib-prr-where-at { flex: 0 1000 auto; }
+.ib-prr-wide .ib-prr-where-sep { flex: none; }
+.ib-prr-wide .ib-prr-where-to { flex: 0 1 auto; }
+/* A short foot says where the review goes; the layer is on the tabs above, and the whole line in the tooltip. */
+@container ib-prr-foot (max-width: 640px) {
+  .ib-prr-where-at:has(+ .ib-prr-where-sep), .ib-prr-where-sep { display: none; }
+}
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr); }
 .ib-prr-wide:not(.ib-railfold) .ib-rrail { grid-column: 1; grid-row: 1 / -1; }
@@ -7754,7 +7770,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    px and touching, sans 13/500, its 14 px circle, its letter, its folder rows and its two +/- columns. */
 .ib-prreview .ib-rrail { --ib-rail-fill: color-mix(in oklab, var(--foreground) 6%, transparent); --ib-rail-quiet: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); padding: 8px 8px 12px; gap: 0; }
 .ib-prreview .ib-rrail .ib-rv-list { gap: 0; }
-.pn-inbox .ib-prreview .ib-rrail .file-tree-item { width: 100%; min-height: 28px; padding-block: 0; padding-right: 8px; gap: 6px; border-radius: 6px; font-size: 13px; font-weight: 500; text-align: left; color: var(--muted-foreground); }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item { width: 100%; min-height: 28px; padding-block: 0; padding-right: 8px; gap: 6px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 500; text-align: left; color: var(--muted-foreground); }
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item:hover { background: var(--ib-rail-fill); color: var(--foreground); }
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-rv-file-main { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; }
@@ -7762,10 +7778,13 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rv-file-main [role="checkbox"]::after { content: ""; position: absolute; inset: -4px; }
 .ib-rv-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
 .ib-rv-file-main > .truncate ~ * { margin-left: -2px; }
-.pn-inbox .ib-rv-tree-folder { display: flex; width: 100%; min-width: 0; height: 28px; align-items: center; gap: 6px; padding-right: 8px; border-radius: 6px; font-size: 13px; font-weight: 500; text-align: left; color: var(--ib-rail-quiet); transition: background-color 120ms, color 120ms; }
+/* A long name is cut at its start, as the rail's paths were: 200 files in one folder still differ by their ends. */
+.ib-rv-name { direction: rtl; text-align: left; }
+.ib-rv-name > bdi { direction: ltr; }
+.pn-inbox .ib-rv-tree-folder { display: flex; width: 100%; min-width: 0; height: 28px; align-items: center; gap: 6px; padding-right: 8px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 500; text-align: left; color: var(--ib-rail-quiet); transition: background-color 120ms, color 120ms; }
 .pn-inbox .ib-rv-tree-folder:hover { background: var(--ib-rail-fill); color: var(--foreground); }
 .pn-inbox .ib-rv-tree-folder:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.ib-rrail .review-count-columns { display: grid; flex-shrink: 0; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; margin-left: auto; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-rrail .review-count-columns { display: grid; flex-shrink: 0; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; margin-left: auto; font-size: var(--ib-fs-11, 11px); font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .ib-rrail .review-count-columns[data-count-columns="quiet"], .ib-rrail .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: var(--ib-rail-quiet); }
 .ib-prr-wide:not(.ib-railfold) .ib-prr-strip { grid-column: 2; grid-row: 1; }
 .ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
@@ -7786,15 +7805,18 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 @media (max-width: 1100px) {
   .pn-inbox .ib-prreview .ib-vhead .ib-back { font-size: 0; gap: 0; padding-inline: 8px; }
 }
-/* A review under 900px wide (PullReview's RAIL_FOLD_BELOW): the file rail folds into the Files picker over the diff,
-   as on a phone, and the diff takes the width. */
-.ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+/* A review under RAIL_FOLD_BELOW: the rail folds, the diff takes the width, and the header's Files button opens the
+   same tree as a sheet over the diff. */
+.ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
 .ib-prreview.ib-railfold .ib-rrail { display: none; }
-/* Past the phone layout (which keeps its own 44px picker). */
-@media (min-width: 768px) {
-  .ib-prreview.ib-railfold .ib-rv-phonebar { display: grid; gap: 8px; padding: 10px 16px 0; }
-  .pn-inbox .ib-prreview.ib-railfold .ib-rv-jump { height: 34px; width: 100%; max-width: 520px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
-}
+.ib-prreview.ib-prr-wide.ib-railfold.ib-files-open .ib-rrail { display: flex; position: absolute; top: 0; left: 0; bottom: 0; grid-column: 1 / 2; grid-row: 2 / 3; width: min(280px, 100%); z-index: 6; background: var(--background); box-shadow: 16px 0 48px rgba(0, 0, 0, 0.18); }
+/* A folded sheet covers the diff and nothing else: its containing block is the diff's grid area, so the layers, the
+   scope, Split | Unified, Global comment and Next layer stay on screen and in reach, on a phone too. */
+.ib-review.ib-prreview.ib-fold.ib-panel-open .ib-gpanel { grid-column: -2 / -1; grid-row: 2 / 3; padding-bottom: 0; }
+.pn-inbox .ib-prreview .ib-vhead .ib-vfiles { flex: none; white-space: nowrap; }
+/* Sidebar and page apart, on this page only (the owner on the 800 px picture): the review app's rows of layers sit on
+   --muted, so the Inbox's sidebar takes that fill over its own ground, and its line the page's half strength. */
+.pn-inbox:has(.ib-prreview.ib-prr-wide) .ib-side { background: color-mix(in oklab, var(--muted) 60%, var(--ib-ground)); border-right-color: color-mix(in oklch, var(--border) 50%, transparent); }
 /* What the list could not read, or read only in part: a quiet line over the groups. */
 .ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
 .ib-pr-notice { display: flex; align-items: flex-start; gap: 8px; margin: 0; padding: 8px 10px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; overflow-wrap: anywhere; }
@@ -7815,7 +7837,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
 /* A branch named in a layer's line can be long and unbroken. */
 .ib-pr-basew { min-width: 0; overflow-wrap: anywhere; }
-/* The review rail grouped by folder (names repeat in deep folders): a quiet heading over each group. */
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }

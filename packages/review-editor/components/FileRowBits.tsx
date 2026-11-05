@@ -20,14 +20,16 @@ export { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
 export const ViewedControl: React.FC<{
   isViewed: boolean;
   onToggle?: () => void;
+  /** The file, for a screen reader's name; a host's rows pass it. */
+  name?: string;
   /** Deprecated no-op — the control is always visible now. */
   forceVisible?: boolean;
-}> = ({ isViewed, onToggle }) => (
+}> = ({ isViewed, onToggle, name }) => (
   <Tooltip content={isViewed ? 'Viewed — click to unmark' : 'Mark as viewed'} side="bottom">
     <span
       role="checkbox"
       aria-checked={isViewed}
-      aria-label={isViewed ? 'Viewed — unmark' : 'Mark as viewed'}
+      aria-label={name ? (isViewed ? `${name}: viewed, unmark` : `Mark ${name} as viewed`) : isViewed ? 'Viewed — unmark' : 'Mark as viewed'}
       // tabIndex + key handling: these controls live INSIDE the row <button>
       // (a real nested <button> is invalid HTML), so they need their own
       // focus stop and Enter/Space activation to be keyboard-operable.

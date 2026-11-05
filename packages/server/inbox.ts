@@ -1799,6 +1799,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * the Inbox's type ramp scales from, 12 to 15; 14 (the window as it has
    * always been drawn) while unset or unreadable.
    */
+  const displayNameState = (): string | null => {
+    const name = loadConfig().displayName;
+    return typeof name === 'string' && name ? name : null;
+  };
   const textSizeState = (): InboxTextSize => {
     const value = loadConfig().inboxTextSize;
     return isInboxTextSize(value) ? value : INBOX_TEXT_SIZE_DEFAULT;
@@ -2356,6 +2360,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
     theme: themeState(),
+    /** The name on this person's comments (config.json `displayName`), shared with plan and code review; null when never set. Not for a guest. */
+    ...(guest ? {} : { display_name: displayNameState() }),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */

@@ -9,8 +9,9 @@
  *   reader draws none of its own (`GuideReader` `bare`), and the strip under
  *   the header names every layer by its number, bottom to top, the one on
  *   screen marked, with "This layer | Whole stack" (native radios).
- * - Under 900 px of review the file rail folds into the "Files · N files"
- *   picker over the diff (`RAIL_FOLD_BELOW`), so the diff keeps the width.
+ * - Under `RAIL_FOLD_BELOW` of review the file rail folds: the header's Files
+ *   button opens the same tree as a sheet over the diff, the comments' sheet's
+ *   mirror. A phone keeps its picker.
  * - "This layer" is the PR's own diff; "Whole stack" is the compare from the
  *   stack's base branch to this layer's head (inbox-pulls.ts `diff`).
  * - The foot says which layer this is, and "Next layer" moves up the stack.
@@ -26,8 +27,6 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { buildDiffFileTree, getVisualFileOrder } from '@plannotator/ui/utils/diffFileTree';
 import { plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -38,6 +37,7 @@ import { InboxApiError, inboxApi } from '../api';
 import { guideCommentSections } from '../attachments';
 import { RefMarkIcon } from '../board/RefMark';
 import { Icon } from '../icons';
+import { isTextCut, Tip } from '../components/Tip';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
@@ -47,11 +47,14 @@ import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { ReviewRailTree } from './ReviewRailTree';
+import { reviewFiles } from './reviewFiles';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-/** The review's width (px) under which its file rail folds into the Files picker over the diff. */
-const RAIL_FOLD_BELOW = 900;
+/** The review's width (px) under which its file rail folds into a sheet: the diff would have under 504 px beside it (the review app, in an 800 px window, leaves 544). */
+const RAIL_FOLD_BELOW = 760;
+/** The review's width (px) under which the controls' row has no room for the read-only note: it moves to the foot. */
+const NOTE_ON_STRIP_FROM = 900;
 const GuideReader = lazy(() => import('#guide-reader'));
 
 export interface PullReviewProps {
@@ -224,10 +227,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // Both measured once the review is drawn: while the list is read, a loading pane stands in its place.
   const drawn = !!(model && stack && layer);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true, drawn);
-  // Under RAIL_FOLD_BELOW of review width the file rail folds into the Files picker over the diff (as on a phone), so
-  // the diff keeps the room.
+  // Under RAIL_FOLD_BELOW of review width the file rail folds into a sheet, so the diff keeps the room.
   const [splitRef, railFolded] = useNarrowerThan<HTMLDivElement>(RAIL_FOLD_BELOW, false, drawn);
-  const filesPicker = phone || railFolded;
+  const [headRef, noteOffStrip] = useNarrowerThan<HTMLDivElement>(NOTE_ON_STRIP_FROM, false, drawn);
   // Global comment and Split | Unified sit on the strip, as on the review app's tab row. A phone keeps them above the files.
   const [controlsHost, setControlsHost] = useState<HTMLDivElement | null>(null);
   const [sheet, setSheet] = useState(false);
@@ -235,6 +237,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // The folded rail's sheet, the comments' mirror on the other side: one of the two is open at a time.
+  const [filesSheet, setFilesSheet] = useState(false);
+  const filesSheetId = useId();
+  const filesButton = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!railFolded) setFilesSheet(false);
+  }, [railFolded]);
+  useEffect(() => {
+    if (sheet) setFilesSheet(false);
+  }, [sheet]);
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -245,12 +257,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
   // The files in the rail's order, as the review app has them: the diffs below follow it.
-  const { files, tree, patch } = useMemo(() => {
-    const parsed = diff ? parseDiffToFiles(diff.patch) : [];
-    const built = buildDiffFileTree(parsed);
-    const ordered = getVisualFileOrder(built).map((index) => parsed[index]!);
-    return { files: ordered, tree: built, patch: ordered.map((file) => (file.patch.endsWith('\n') ? file.patch : `${file.patch}\n`)).join('') };
-  }, [diff]);
+  const { files, tree, loose, patch } = useMemo(() => reviewFiles(diff?.patch ?? ''), [diff]);
   const snapshot = useMemo(
     () =>
       diff && layer
@@ -267,6 +274,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const toggleViewed = useCallback((path: string) => write({ viewed: viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path] }), [viewed, comments]); // eslint-disable-line react-hooks/exhaustive-deps
   const [reveal, setReveal] = useState<{ path: string; token: number } | null>(null);
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // A file picked in the rail. From the sheet it closes, showing the file, and focus goes back to its button.
+  const pickFile = (path: string) => {
+    move(path);
+    if (!filesSheet) return;
+    setFilesSheet(false);
+    filesButton.current?.focus();
+  };
 
   // The verdict: one reply to the agent's last message in its thread.
   const [sending, setSending] = useState(false);
@@ -332,6 +346,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     const at = here.getBoundingClientRect();
     strip.scrollLeft += at.left + at.width / 2 - (box.left + box.width / 2);
   }, [layerKey, phone, stack?.layers.length]);
+  // More layers than fit: the strip's edges fade as on a phone (`data-over` in inbox.css).
+  const [layersOver, setLayersOver] = useState(false);
+  useEffect(() => {
+    const strip = stripRef.current;
+    if (!strip || phone || typeof ResizeObserver === 'undefined') return;
+    const read = () => setLayersOver(strip.scrollWidth > strip.clientWidth);
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [drawn, phone, stack?.layers.length]);
   const scopeName = useId();
 
   if (!model || !stack || !layer) {
@@ -363,26 +388,54 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     </div>
   );
 
+  const readOnlyWords = layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`;
   const readOnlyNote = !canDecide && !posted && !diffError && (
-    <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'} title={layer.mine ? undefined : `${layer.author ?? 'A teammate'}'s ${noun}`}>
-      {layer.mine ? 'No review thread yet' : `${layer.author ?? 'A teammate'}'s ${noun}`}
-    </p>
+    <Tip cut content={readOnlyWords}>
+      <p className="ib-prr-note" data-pull-review-readonly={layer.mine ? 'unlinked' : 'teammate'}>
+        {readOnlyWords}
+      </p>
+    </Tip>
   );
+  const whereWords =
+    scope === 'stack'
+      ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
+      : position && position.of > 1
+        ? `Layer ${position.at} of ${position.of} · only what this layer changes`
+        : `Only what this ${noun} changes`;
+  const whereEnd = phone ? '' : ending === 'forge' ? `your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? `your verdict goes to ${agent}` : '';
 
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${railFolded ? ' ib-railfold' : ''}`}
+      className={`ib-viewer ib-review ib-prreview${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}${phone ? '' : ' ib-prr-wide'}${railFolded ? ' ib-railfold' : ''}${filesSheet ? ' ib-files-open' : ''}`}
       aria-label={`Review ${label}`}
       data-pull-review={layer.key}
       data-pull-scope={scope}
     >
-      <div className="ib-vhead">
+      <div className="ib-vhead" ref={headRef}>
         <button type="button" className="ib-back" onClick={onBack}>
           <Icon name="back" size={15} />
           {phone ? <span className="ib-sr">Pull requests</span> : 'Pull requests'}
         </button>
         <span className="ib-vsep" />
+        {!phone && railFolded && files.length > 0 && (
+          <button
+            ref={filesButton}
+            type="button"
+            className={`ib-btn ib-sm ib-vfiles${filesSheet ? ' ib-on' : ''}`}
+            onClick={() => {
+              setFilesSheet((open) => !open);
+              setSheet(false);
+            }}
+            aria-expanded={filesSheet}
+            aria-controls={filesSheetId}
+            aria-label={`Files, ${files.length}`}
+            data-pull-review-files-button=""
+          >
+            <Icon name="folder" size={15} />
+            Files {files.length}
+          </button>
+        )}
         {/* The review's one title (the reader draws none of its own): cut with "…", whole on hover; the verdict stays on screen. */}
         <span className="ib-fn ib-prr-fn" title={`${label} ${layer.title}`} data-pull-review-title="">
           <RefMarkIcon kind="pr" state={layer.state} size={15} />
@@ -447,7 +500,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       </div>
       <div className="ib-rsplit" ref={splitRef}>
         <div className="ib-prr-strip">
-          <nav ref={stripRef} className="ib-prr-layers" aria-label="Layers, bottom first">
+          {/* No other scroller is under the strip: a mouse wheel moves the layers sideways. */}
+          <nav
+            ref={stripRef}
+            className="ib-prr-layers"
+            aria-label="Layers, bottom first"
+            data-over={layersOver ? '' : undefined}
+            onWheel={(event) => {
+              if (event.deltaX === 0) event.currentTarget.scrollLeft += event.deltaY;
+            }}
+          >
             {stack.layers.map((l, i) => {
               const here = l.key === layer.key;
               const reviewable = isOpen(l);
@@ -469,25 +531,26 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               );
             })}
           </nav>
-          {!filesPicker && readOnlyNote}
+          {!phone && !noteOffStrip && readOnlyNote}
           {scopeSwitch}
           {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         </div>
-        <nav className="ib-rrail" aria-label="Changed files">
+        <nav className="ib-rrail" id={filesSheetId} aria-label="Changed files">
           <ReviewRailTree
             tree={tree}
+            loose={loose}
             files={files}
             viewed={viewedSet}
             commentCount={(path) => comments.filter((comment) => comment.filePath === path).length}
-            onSelect={move}
+            onSelect={pickFile}
             onToggleViewed={toggleViewed}
           />
           <div className="ib-rv-progress" aria-live="polite">
-            {diff ? `${viewed.filter((path) => files.some((file) => file.path === path)).length} of ${plural(files.length, 'file')} viewed` : ''}
+            {diff ? `${files.filter((file) => viewedSet.has(file.path)).length} of ${plural(files.length, 'file')} viewed` : ''}
           </div>
         </nav>
         <div className="ib-gbody">
-          {filesPicker && files.length > 0 && (
+          {phone && files.length > 0 && (
             <div className="ib-rv-phonebar" data-review-phonebar="">
               <select className="ib-rv-jump" aria-label="Go to a file" value="" onChange={(event) => event.target.value && move(event.target.value)}>
                 <option value="" disabled>
@@ -513,7 +576,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               </a>
             </div>
           )}
-          {filesPicker && readOnlyNote}
+          {phone && readOnlyNote}
           {sendError && (
             <div className="ib-error ib-gerror" role="alert">
               {sendError}
@@ -572,14 +635,19 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           />
         </div>
         <div className="ib-prr-foot" data-pull-review-foot="">
-          <span className="ib-prr-where">
-            {scope === 'stack'
-              ? `Whole stack · ${diff ? `${diff.base}…${diff.head}` : `${stack.base} up to ${label}`}`
-              : position && position.of > 1
-                ? `Layer ${position.at} of ${position.of} · only what this layer changes`
-                : `Only what this ${noun} changes`}
-            {phone ? '' : ending === 'forge' ? ` · your review goes on the ${forgeName(stack)} ${layer.platform === 'gitlab' ? 'MR' : 'PR'}` : agent && canDecide ? ` · your verdict goes to ${agent}` : ''}
-          </span>
+          {!phone && noteOffStrip && readOnlyNote}
+          {/* A long branch name gives way before where the review goes; the whole line on hover when either is cut. */}
+          <Tip content={whereEnd ? `${whereWords} · ${whereEnd}` : whereWords} when={(line) => Array.from(line.children).some((part) => isTextCut(part) || part.getClientRects().length === 0)}>
+            <span className="ib-prr-where">
+              <span className="ib-prr-where-at">{whereWords}</span>
+              {whereEnd && (
+                <>
+                  <span className="ib-prr-where-sep"> · </span>
+                  <span className="ib-prr-where-to">{whereEnd}</span>
+                </>
+              )}
+            </span>
+          </Tip>
           <span className="ib-sp" />
           {next && (
             <button type="button" className="ib-btn" onClick={() => onLayer(next.key, 'layer')} data-pull-next-layer={next.key}>

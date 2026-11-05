@@ -405,6 +405,8 @@ export interface SettingsModel {
   rows?: InboxRowsOption[] | null;
   /** How many times `rows` was saved (config.json `inboxRowsRev`): a window takes a look only when it is newer. */
   rows_rev?: number;
+  /** The name on this person's comments (config.json `displayName`): null when never set. Absent for a guest and from an older Inbox. */
+  display_name?: string | null;
   /**
    * The diff layout guided reviews draw (config.json `diffOptions.diffStyle`),
    * shared with code review: null when never chosen. Absent from an older Inbox.

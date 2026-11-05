@@ -257,6 +257,19 @@ describe("what the approval opened, by caller", () => {
     }
   }
 
+  test("the settings model gives the person's own name to the owner, never to a guest", async () => {
+    const w = await world({ config: { displayName: "Dana" } });
+    const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;
+    expect((await read("local")).display_name).toBe("Dana");
+    expect((await read("owner")).display_name).toBe("Dana");
+    expect((await read("guest")).display_name).toBeUndefined();
+  });
+
+  test("the settings model has no name until one is set", async () => {
+    const w = await world();
+    expect(((await (await call(w, "local", { path: "/api/inbox/settings" })).json()) as Json).display_name).toBeNull();
+  });
+
   test("the settings model tells the page who it is, and shows a guest nothing of what closed", async () => {
     const w = await world();
     const read = async (caller: Caller) => (await (await call(w, caller, { path: "/api/inbox/settings" })).json()) as Json;

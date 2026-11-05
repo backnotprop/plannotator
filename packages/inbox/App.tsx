@@ -18,6 +18,7 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, u
 import { ThemeProvider } from '@plannotator/ui/components/ThemeProvider';
 import { TooltipProvider, TOOLTIP_SKIP_DELAY_MS } from '@plannotator/ui/components/Tooltip';
 import { TIP_DELAY_MS } from './components/Tip';
+import { configStore } from '@plannotator/ui/config';
 import { configurePlannotatorUI } from '@plannotator/ui/configure';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { selectionToolbarShowing } from './selectionToolbar';
@@ -1461,6 +1462,8 @@ function Inbox() {
       adoptSavedTextSize(next.text_size);
       adoptSavedRows(next.rows, next.rows_rev, mark);
       adoptSavedDiffStyle(next.diff_style);
+      // The name on the person's comments, as plan and code review read it; nothing posted carries it.
+      if (next.display_name) configStore.init({ displayName: next.display_name });
       adoptVoiceSettings(next.voice);
       setSettings(next);
       setSettingsReadFailed(false);
