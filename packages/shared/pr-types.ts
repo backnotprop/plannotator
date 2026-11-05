@@ -251,8 +251,8 @@ export interface PRReviewFileComment {
 }
 
 /**
- * The review event a platform submission carries (#1611). GitHub maps these
- * to `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab posts a note plus
+ * The review event a platform submission carries. GitHub maps these to
+ * `APPROVE` / `COMMENT` / `REQUEST_CHANGES`. GitLab posts a note plus
  * discussions, then `approve` or `request_changes` sets the decision separately.
  */
 export type PRReviewAction = "approve" | "comment" | "request_changes";
@@ -394,11 +394,7 @@ export interface PRPlatformCapabilities {
   changeLabel: "PR" | "MR";
   /** Prefix of the change number in labels: "#" or "!". */
   numberPrefix: "#" | "!";
-  /**
-   * The platform records a real request-changes decision (#1611). GitHub:
-   * REQUEST_CHANGES review; GitLab: `mergeRequestRequestChanges`; Bitbucket:
-   * `POST /request-changes`.
-   */
+  /** The platform records a real request-changes decision. */
   requestChanges: boolean;
   /** The platform refuses approve / request-changes from the PR author. */
   selfReviewBlocked: boolean;

@@ -40,7 +40,6 @@ export function platformRules(pull: PlatformPostPull): PlatformRules {
   };
 }
 
-/** The posted confirmation's words. */
 export function postedWords(posted: { label: string; action: string }): string {
   if (posted.action === 'approve') return `Approved on ${posted.label}`;
   if (posted.action === 'request_changes') return `Changes requested on ${posted.label}`;

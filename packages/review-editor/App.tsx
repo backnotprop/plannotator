@@ -955,7 +955,7 @@ const ReviewApp: React.FC = () => {
   const mrLabel = prMetadata ? getMRLabel(prMetadata) : 'PR';
   const mrNumberLabel = prMetadata ? getMRNumberLabel(prMetadata) : '';
   const displayRepo = prMetadata ? getDisplayRepo(prMetadata) : '';
-  // #1611: GitHub refuses request changes on your own PR, like approve.
+  // GitHub refuses request changes on your own PR, like approve.
   const requestChangesSupported = prCapabilities?.requestChanges === true;
   const requestChangesUnavailableReason = !requestChangesSupported
     ? `${platformLabel} has no request-changes review; this posts as a comment.`

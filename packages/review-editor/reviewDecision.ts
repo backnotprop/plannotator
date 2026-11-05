@@ -65,8 +65,8 @@ export function resolveReviewDecisionAction(id: DecisionActionId): ReviewDecisio
 }
 
 /**
- * The mode the ReviewSubmissionDialog opens in: the review event it posts
- * (#1611) and whether the dialog offers the Comment / Request changes choice.
+ * The mode the ReviewSubmissionDialog opens in: the review event it posts and
+ * whether it offers the Comment / Request changes choice.
  */
 export interface PlatformDialogMode {
   action: PRReviewAction;
