@@ -6,7 +6,7 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, expect, mock, test } from 'bun:test';
+import { afterEach, expect, mock, setSystemTime, spyOn, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
@@ -49,7 +49,11 @@ function row(id: string, machine?: string): InboxListRow {
 let host: HTMLElement | null = null;
 let root: Root | null = null;
 
+// A press on a star is remembered for a moment: each test starts well after the last one's.
+let clock = Date.parse('2026-11-05T10:00:00.000Z');
+
 afterEach(() => {
+  setSystemTime();
   if (!hasDom) return;
   act(() => root?.unmount());
   host?.remove();
@@ -88,7 +92,39 @@ function draw(rows: InboxListRow[], opts: { pinned?: string[]; narrow?: boolean;
       </SidebarProvider>,
     );
   });
+  lastDraw = { sections, opts, onOpen, onUnstar };
   return { onOpen, onUnstar };
+}
+
+let lastDraw: { sections: InboxListSection[]; opts: { narrow?: boolean; phone?: boolean; machines?: MachinesModel }; onOpen: (row: InboxListRow) => void; onUnstar: (row: InboxListRow) => void } | null = null;
+
+/** The list as last drawn, with its rows anew and nothing starred. */
+function draw2(ids: string[]) {
+  const { opts, onOpen, onUnstar } = lastDraw!;
+  const sections: InboxListSection[] = [{ id: 'waiting', label: 'Waiting on you', threads: ids.map((id) => row(id)) }];
+  act(() => {
+    root!.render(
+      <SidebarProvider>
+        <div className="pn-inbox">
+          <InboxList
+            title="Inbox"
+            path={null}
+            sections={sections}
+            filtered={false}
+            narrow={opts.narrow ?? false}
+            phone={opts.phone}
+            selectedThreadId={null}
+            notice={null}
+            onShowNew={() => {}}
+            onOpen={onOpen}
+            onUnstar={onUnstar}
+            pinned={new Set()}
+            machines={opts.machines}
+          />
+        </div>
+      </SidebarProvider>,
+    );
+  });
 }
 
 const rowEl = (id: string) => host!.querySelector<HTMLElement>(`[data-thread-id="${id}"]`)!;
@@ -98,6 +134,8 @@ const ids = (fn: ReturnType<typeof mock>) => fn.mock.calls.map(([r]) => (r as In
 
 for (const [shape, opts] of [['wide', {}], ['three-line', { narrow: true }], ['phone', { phone: true }]] as const) {
   test.skipIf(!hasDom)(`${shape} row: its star unstars; the rest of the row and its Enter open; an unstarred row has no star`, () => {
+    setSystemTime(new Date(clock));
+    clock += 10_000;
     const { onOpen, onUnstar } = draw([row('plain'), row('starred')], { ...opts, pinned: ['starred'] });
     expect(star('plain')).toBeNull();
     expect(rowEl('plain').querySelector('[data-star-press]')).toBeNull();
@@ -119,6 +157,8 @@ test.skipIf(!hasDom)('a list with no star draws no star column', () => {
 });
 
 test.skipIf(!hasDom)("linked machines: this machine's own star unstars; a star on another machine's row is a mark, and a press there opens", () => {
+  setSystemTime(new Date(clock));
+  clock += 10_000;
   // The merged list stamps this machine's id on its own rows too, so "has a machine" is not "another machine's".
   const { onOpen, onUnstar } = draw([row('mine', SELF), row('theirs', OTHER)], { machines: MACHINES, pinned: ['mine', 'theirs'] });
   pointerClick(star('mine')!);
@@ -127,4 +167,76 @@ test.skipIf(!hasDom)("linked machines: this machine's own star unstars; a star o
   pointerClick(star('theirs')!);
   expect(ids(onUnstar)).toEqual(['mine']);
   expect(ids(onOpen)).toEqual(['theirs']);
+});
+
+/** The star at x 100..113, y 100..113. */
+function placeStar(id: string) {
+  spyOn(star(id)!, 'getBoundingClientRect').mockImplementation(() => ({ left: 100, right: 113, top: 100, bottom: 113, x: 100, y: 100, width: 13, height: 13, toJSON: () => ({}) }) as DOMRect);
+}
+
+/** A real press: its pointerdown, then its click, on the row (not the star) at this place. */
+function pressAt(target: Element, x: number, y: number, pointerType: 'mouse' | 'touch' = 'mouse') {
+  act(() => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType, clientX: x, clientY: y }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: x, clientY: y }));
+  });
+}
+
+for (const [pointer, reach] of [['mouse', 7], ['touch', 16]] as const) {
+  for (const [shape, opts] of [['wide', {}], ['phone', { phone: true }]] as const) {
+    test.skipIf(!hasDom)(`a ${pointer} on a ${shape} row reaches ${reach} px past the star, whatever the row's shape, and no further`, () => {
+      setSystemTime(new Date(clock));
+      clock += 10_000;
+      const { onOpen, onUnstar } = draw([row('s')], { ...opts, pinned: ['s'] });
+      placeStar('s');
+      pressAt(rowEl('s'), 113 + reach + 1, 106, pointer);
+      expect(onOpen.mock.calls.length).toBe(1);
+      expect(onUnstar).not.toHaveBeenCalled();
+      pressAt(rowEl('s'), 106, 100 - reach - 1, pointer);
+      expect(onOpen.mock.calls.length).toBe(2);
+      expect(onUnstar).not.toHaveBeenCalled();
+      pressAt(rowEl('s'), 113 + reach, 106, pointer);
+      expect(onUnstar.mock.calls.length).toBe(1);
+      expect(onOpen.mock.calls.length).toBe(2);
+    });
+  }
+}
+
+test.skipIf(!hasDom)('a press on the star itself unstars wherever the box reads; the same place on the row opens', () => {
+  setSystemTime(new Date(clock));
+  clock += 10_000;
+  const { onOpen, onUnstar } = draw([row('s')], { pinned: ['s'] });
+  placeStar('s');
+  pressAt(rowEl('s'), 500, 500);
+  expect(onOpen.mock.calls.length).toBe(1);
+  expect(onUnstar).not.toHaveBeenCalled();
+  pressAt(star('s')!, 500, 500);
+  expect(onUnstar.mock.calls.length).toBe(1);
+  expect(onOpen.mock.calls.length).toBe(1);
+});
+
+test.skipIf(!hasDom)('a double press on the star: the second does nothing, even with the star gone; later, elsewhere or by Enter it opens', () => {
+  const start = clock;
+  clock += 10_000;
+  setSystemTime(new Date(start));
+  const { onOpen, onUnstar } = draw([row('s')], { pinned: ['s'] });
+  placeStar('s');
+  pressAt(star('s')!, 106, 106);
+  expect(onUnstar.mock.calls.length).toBe(1);
+  // The list has read the unstar: the row is drawn again with no star.
+  draw2(['s']);
+  setSystemTime(new Date(start + 400));
+  pressAt(rowEl('s'), 108, 104);
+  expect(onOpen).not.toHaveBeenCalled();
+  expect(onUnstar.mock.calls.length).toBe(1);
+  // Enter, inside the moment: a real open.
+  act(() => rowEl('s').click());
+  expect(onOpen.mock.calls.length).toBe(1);
+  // Elsewhere on the row, inside the moment.
+  pressAt(rowEl('s'), 106 + 25, 106);
+  expect(onOpen.mock.calls.length).toBe(2);
+  // Past the moment, on the same place.
+  setSystemTime(new Date(start + 401));
+  pressAt(rowEl('s'), 106, 106);
+  expect(onOpen.mock.calls.length).toBe(3);
 });

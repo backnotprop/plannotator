@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
@@ -14,6 +14,7 @@ import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
 import { starPopping } from '../starPop';
+import { notePressPointer, pressRow } from '../starPress';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
@@ -562,38 +563,11 @@ function TitleCell({ row, pill = false, noPreview = false }: { row: InboxListRow
  * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
 function PinMark({ threadId, press = false }: { threadId: string; press?: boolean }) {
-  const mark = (
+  return (
     <span className="ib-pinmark" data-pin-mark="" data-star-press={press ? '' : undefined} data-pop={starPopping(threadId) ? '' : undefined} aria-hidden="true">
       <Icon name="star" size={13} />
     </span>
   );
-  // To the star's left, its top level with the star's: never over Mark read, which is right of it or above it, and never
-  // past the list's edge.
-  return press ? (
-    <RowTip content="Unstar thread" side="left" align="start">
-      {mark}
-    </RowTip>
-  ) : (
-    mark
-  );
-}
-
-/** How far past the 13 px star a press still counts: a 45 px target on a phone, a forgiving one under a mouse. */
-const STAR_REACH = { pointer: 7, phone: 16 } as const;
-
-/**
- * Whether a press on a row lands on its star (the owner, 2026-11-05: a star showing can be clicked to unstar). The star
- * is drawn inside the row's own button (a button cannot hold a button), so the row's click decides: by the target, and by
- * where the press fell for the reach around the star. Enter and Space (a click with no pointer) always open the thread:
- * the keyboard unstars from the row's menu.
- */
-function pressedStar(event: ReactMouseEvent<HTMLElement>, reach: number): boolean {
-  const star = event.currentTarget.querySelector<HTMLElement>('[data-star-press]');
-  if (!star) return false;
-  if (event.target instanceof Element && event.target.closest('[data-star-press]')) return true;
-  if (event.detail === 0) return false;
-  const box = star.getBoundingClientRect();
-  return event.clientX >= box.left - reach && event.clientX <= box.right + reach && event.clientY >= box.top - reach && event.clientY <= box.bottom + reach;
 }
 
 /** The end of a pinned row's accessible name. */
@@ -714,7 +688,8 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
     <button
       type="button"
       className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.pointer) ? onUnstar() : onOpen())}
+      onPointerDown={notePressPointer}
+      onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
@@ -883,7 +858,8 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
     <button
       type="button"
       className={`ib-nrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.pointer) ? onUnstar() : onOpen())}
+      onPointerDown={notePressPointer}
+      onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
@@ -962,7 +938,8 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
     <button
       type="button"
       className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
-      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.phone) ? onUnstar() : onOpen())}
+      onPointerDown={notePressPointer}
+      onClick={(event) => pressRow(event, row.thread_id, onOpen, onUnstar)}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
       aria-keyshortcuts={keys}

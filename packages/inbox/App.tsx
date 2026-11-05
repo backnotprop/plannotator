@@ -3362,6 +3362,7 @@ function Inbox() {
     try {
       await inboxApi.pin(row.thread_id, pinned);
     } catch (cause) {
+      if (pinned) noteStarred(null);
       showError(cause);
       return;
     }
@@ -3392,6 +3393,7 @@ function Inbox() {
     try {
       await inboxApi.pinRestore(restore);
     } catch (cause) {
+      noteStarred(null);
       showError(cause);
       return;
     }
