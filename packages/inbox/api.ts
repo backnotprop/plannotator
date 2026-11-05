@@ -1033,6 +1033,8 @@ export interface StartThreadInput {
   thread_name_auto?: true;
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
+  /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
+  decision_ask?: true;
 }
 
 /**
