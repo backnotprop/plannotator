@@ -1292,6 +1292,22 @@ test('every changed file stays in the review: rows for what the tree cannot hold
   }
 });
 
+test("the covered sidebar's edge never catches the rail: its right side is the rail's, and the page's edge comes back on leaving", async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
+  try {
+    await expect(page.locator('[data-pull-review] .ib-rrail')).toBeVisible();
+    const box = (await page.locator('[data-pull-review] .ib-rrail').boundingBox())!;
+    for (const x of [box.x + box.width - 28, box.x + box.width - 20, box.x + box.width - 12]) {
+      const inRail = await page.evaluate(([px, py]) => !!document.elementFromPoint(px!, py!)?.closest('.ib-rrail'), [x, box.y + box.height / 2]);
+      expect(inRail).toBe(true);
+    }
+    await page.goto(new URL(page.url()).origin);
+    await expect(page.locator('.ib-edge-pos')).toHaveCSS('display', 'flex');
+  } finally {
+    await context.close();
+  }
+});
+
 test('the folded sheets cover the diff and nothing else, at 390, 800 and 1100; under the rail\'s fold the Files sheet opens the same tree', async ({ browser }) => {
   for (const width of [1100, 800, 390]) {
     const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF);
