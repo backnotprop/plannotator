@@ -394,7 +394,11 @@ export interface PRPlatformCapabilities {
   changeLabel: "PR" | "MR";
   /** Prefix of the change number in labels: "#" or "!". */
   numberPrefix: "#" | "!";
-  /** The platform records a real request-changes decision. */
+  /**
+   * The platform records a real request-changes decision. GitHub:
+   * REQUEST_CHANGES review; GitLab: `mergeRequestRequestChanges`; Bitbucket:
+   * `POST /request-changes`.
+   */
   requestChanges: boolean;
   /** The platform refuses approve / request-changes from the PR author. */
   selfReviewBlocked: boolean;
