@@ -158,7 +158,7 @@ import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
-import { pullGroups } from './pulls/model';
+import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
@@ -303,6 +303,8 @@ interface Route {
   stack?: string | null;
   layer?: string | null;
   scope?: 'layer' | 'stack';
+  /** Pull requests' view (`&view=mine|review|others`; absent: All), beside `project`. */
+  view?: PullFilter;
   /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
@@ -380,7 +382,7 @@ function routeOf(fullHash: string): Route {
   if (params.has('pulls')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+    return { page: 'pulls', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
   }
   if (params.has('board'))
     return {
@@ -427,6 +429,7 @@ function hashOf(route: Route): string {
     hash =
       'pulls' +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
@@ -3203,13 +3206,19 @@ function Inbox() {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
     snoozedThisLoad.current = true;
+    let answer: Awaited<ReturnType<typeof inboxApi.snooze>>;
     try {
-      await inboxApi.snooze(threadId, until);
+      answer = await inboxApi.snooze(threadId, until);
     } catch (cause) {
       showError(cause);
       return;
     }
     await afterWrite();
+    // A home machine whose clock is ahead of this one: the time has passed there, so the thread is not snoozed.
+    if (answer.snoozed === null) {
+      showError(new InboxApiError(409, 'snooze_past', 'That time has passed.'));
+      return;
+    }
     const drawnBefore = moveSnoozedRow(threadId);
     if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
     const when = inboxSnoozeWhen(until);
@@ -4394,7 +4403,7 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown, route.page === 'pulls' && route.view === 'others');
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
@@ -4425,10 +4434,11 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
-  // Ask AI (PLANNOTATOR_INBOX_ASK_AI): off, this reads nothing and draws nothing. A linked machine's thread has no chat here.
+  // Ask AI (PLANNOTATOR_INBOX_ASK_AI, and always while Code review is on: approval "shape-in-code-review"): off, this
+  // reads nothing and draws nothing. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
   const ask = useInboxAsk({
-    on: settings?.ask_ai === true && !tourOn,
+    on: (settings?.ask_ai === true || settings?.code_review?.on === true) && !tourOn,
     threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
     phone,
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
@@ -5351,11 +5361,12 @@ function Inbox() {
         state={pulls}
         stackId={route.stack ?? null}
         project={route.project}
+        filter={route.view ?? 'all'}
         projects={projects}
         projectNames={projectNames}
         phone={phone}
         onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
-        onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
+        onScope={({ filter, project }) => go({ page: 'pulls', project, view: filter, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
@@ -6182,6 +6193,7 @@ function Inbox() {
             }}
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
+            onAsk={ask.askWith}
           />
         ) : (
           <GuidePane

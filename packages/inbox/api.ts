@@ -5,10 +5,12 @@
  * writing into a store it did not read.
  */
 
+import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
   InboxInitiative,
@@ -755,7 +757,6 @@ export class InboxHeldError extends InboxApiError {
 /** What a held write says, by its machine's state. */
 export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
   const name = machine?.name ?? 'the other machine';
-  if (machine?.state === 'revoked') return `Not sent: ${name} removed the link. Link it again to send.`;
   return machine && machine.state !== 'online' && machine.state !== 'connecting'
     ? `Waiting for ${name}: this applies when ${name} is back.`
     : `Sending to ${name}: this applies once ${name} confirms.`;
@@ -1254,6 +1255,8 @@ export const inboxApi = {
       questions: { message_id?: string; key: string; revision: number }[];
       feedback?: string;
       annotation_ids?: string[];
+      /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
+      viewing?: ReplyViewing;
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host?: string; session: string };
       /**
@@ -1446,7 +1449,7 @@ export const inboxApi = {
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
   /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' }) =>
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
     post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
@@ -1462,7 +1465,11 @@ export const inboxApi = {
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
-  pulls: (refresh = false, signal?: AbortSignal) => get<InboxPullsAnswer>(inboxUrl(`/pulls${refresh ? '?refresh=1' : ''}`), signal),
+  /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
+  pulls: (refresh = false, signal?: AbortSignal, others = false) => {
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
+    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
+  },
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
@@ -1596,7 +1603,10 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
+  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
+  /** Show me's pictures of one review (code review in the Inbox; packages/server/inbox-review-drawings.ts). */
+  reviewDrawings: (messageId: string) => get<InboxReviewDrawingsRead>(inboxUrl(`/reviews/${encodeURIComponent(messageId)}/drawings`)),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -1614,6 +1624,28 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
+  /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
+  kind?: 'show_me';
+  show_me?: InboxShowMeTarget;
+  /** Show me again: the round of the picture it asked to redraw. */
+  again_of_round?: number;
+  /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
+  drawing?: string;
+}
+
+/** What a Show me sends beside its question on `POST …/ask`. */
+export interface InboxShowMeAsk {
+  kind: 'show_me';
+  show_me: InboxShowMeTarget;
+  again_of_round?: number;
+}
+
+/** `GET /api/inbox/reviews/:msg/drawings`. */
+export interface InboxReviewDrawingsRead {
+  title?: string;
+  round?: number;
+  overview?: { round: number; codes: string[] } | null;
+  drawings: InboxReviewDrawing[];
 }
 
 export interface InboxAskConversationWire {

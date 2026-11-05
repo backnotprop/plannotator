@@ -370,6 +370,23 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
   return "An agent";
 }
 
+/**
+ * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
+ * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
+ */
+export interface InboxReplyViewing {
+  /** The open file's name. */
+  name: string;
+  /** The message that carries the file. */
+  message_id: string;
+  /** That message's time, in the person's own time zone. */
+  time?: string;
+  /** A page the attached HTML page links to, when that page is the one on screen. */
+  page?: string;
+  /** They had the version sent open, and the file has changed since. */
+  as_sent?: true;
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -626,6 +643,8 @@ export interface InboxMessage {
    * other message.
    */
   board_request?: true;
+  /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
+  viewing?: InboxReplyViewing;
   /**
    * On the root of a thread the person started by launching an agent (To:
    * "New Claude Code session"). Absent on every other message.
@@ -2355,10 +2374,26 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
  * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
  * inbox-board-switch.test.ts).
+ * Agents and initiatives (the card action's `initiative` field, carrying
+ * INBOX_CARD_INITIATIVE_RULE; approval "board-initiatives"): measured on Pi
+ * with the cost test, main 11,581 → 12,005 bytes (+424); the description
+ * stays 1,940 characters; Board off unchanged. Tokens scaled at about 4
+ * bytes a token for the added prose (+137 from the stated 11,456), so 3,273.
+ * With the op `initiative_delete` (its name in the enum, +20 bytes): 12,025
+ * bytes, tokens scaled the same way (+5), so 3,278. The sentence on clearing
+ * out is not in the tool: `plannotator card --help` and a per-call nudge.
+ * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
+ * its `until` field; no line in the description): 10,095 → 10,248 bytes with
+ * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
+ * Both landed together (snooze_thread above, 11,779 bytes, plus the +444 of initiatives above): 12,223 bytes,
+ * tokens +142, so 3,366; the board-switch test checks the bytes within 5%.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

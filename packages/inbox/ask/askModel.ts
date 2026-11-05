@@ -10,6 +10,7 @@
  * the Inbox kept.
  */
 import type { ChatMessage, ChatTextPart } from '@plannotator/ui/components/chat';
+import { inboxReviewLines } from '@plannotator/core/inbox-review';
 import type { InboxAskChat, InboxAskConversationWire, InboxAskTurnWire } from '../api';
 
 export const ASK_RECENT_MAX = 20;
@@ -60,6 +61,18 @@ export interface AskLiveText {
   streaming: boolean;
 }
 
+/**
+ * A turn's question as the person reads it. A Show me (code review) sent the
+ * agent its request to draw; the person sees what they asked: "Show me on
+ * retry-worker.ts lines 16–18", and their words.
+ */
+export function askShownQuestion(turn: Pick<InboxAskTurnWire, 'question' | 'kind' | 'show_me'>): string {
+  if (turn.kind !== 'show_me' || !turn.show_me) return turn.question;
+  const { file, lines, words } = turn.show_me;
+  const where = file ? `${file.slice(file.lastIndexOf('/') + 1)}${lines ? ` ${lines[0] === lines[1] ? 'line' : 'lines'} ${inboxReviewLines(lines)}` : ''}` : 'the whole review';
+  return `Show me on ${where}${words?.trim() ? `: ${words.trim()}` : ''}`;
+}
+
 export const askUserId = (turnId: string): string => `q-${turnId}`;
 export const askAnswerId = (turnId: string): string => `a-${turnId}`;
 
@@ -67,7 +80,7 @@ export const askAnswerId = (turnId: string): string => `a-${turnId}`;
 export function askMessages(conversation: InboxAskConversationWire | null, live: AskLiveText | null): ChatMessage<ChatTextPart>[] {
   const messages: ChatMessage<ChatTextPart>[] = [];
   for (const turn of conversation?.turns ?? []) {
-    messages.push({ id: askUserId(turn.id), role: 'user', parts: [{ type: 'text', text: turn.question }] });
+    messages.push({ id: askUserId(turn.id), role: 'user', parts: [{ type: 'text', text: askShownQuestion(turn) }] });
     const streamed = live?.turnId === turn.id && turn.answer === undefined ? live : null;
     const text = turn.answer ?? streamed?.text ?? '';
     if (text) messages.push({ id: askAnswerId(turn.id), role: 'assistant', parts: [{ type: 'text', text, state: streamed?.streaming ? 'streaming' : 'done' }] });

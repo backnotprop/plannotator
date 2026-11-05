@@ -14,6 +14,8 @@
 /* Shape (the living board, packages/ui/components/shape) and its Inbox parts (packages/inbox/shape). */
 @source "../../packages/ui/components/shape/**/*.tsx";
 @source "../../packages/inbox/shape/**/*.tsx";
+/* Show me in the code review: the box, the picture over the diff and the Overview's picture (packages/inbox/review-drawing). */
+@source "../../packages/inbox/review-drawing/**/*.tsx";
 
 @import "../../packages/ui/theme.css";
 /* The board's own sheet (shp- classes). */
