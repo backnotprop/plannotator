@@ -1,7 +1,7 @@
 /**
  * A stack's shape and who owns which layer, read from core's tree (`InboxPullStack.parents`, the one source of it):
- * what lands next, what each layer sits on, the next layer up, and which agent's thread a verdict on a layer (or on
- * the stack up to it) goes to. Never from the layers' order in the list: a fork's second branch comes after the
+ * what lands next, what each layer sits on, the next layer up, and which review thread a verdict on a layer (or on
+ * the whole stack) goes to. Never from the layers' order in the list: a fork's second branch comes after the
  * first's upper layers there.
  */
 import {
@@ -122,50 +122,14 @@ export function layerVerdictLink(layer: InboxPull, stack: InboxPullStack, links:
 }
 
 /**
- * Where a "Whole stack" verdict up to a layer goes: the compare covers that layer and the open layers it sits on, so
- * the verdict goes to an agent only when every one of the person's layers in it is that agent's (a layer of no agent
- * goes with it). Several agents: `agents` names them and `link` is null (no agent takes a verdict on another's
- * layers; posting to the forge still can).
+ * Where a "Whole stack" verdict goes: the thread of the person's own lowest open linked layer, so a stack whose layers
+ * several agents linked still sends it to one thread. A teammate's layers are skipped (their thread is not the
+ * person's), so with a teammate's lower layer linked this can differ from `stackLink`, the thread the page names; in a
+ * fork it can be a sibling branch's thread. With none of the person's layers linked, the layer's own
+ * (`layerVerdictLink`), if any. Null for a teammate's PR, which never takes a verdict here.
  */
-export function stackVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Links): { link: InboxPullLink | null; agents: InboxPullLink[] } {
-  const own = layerVerdictLink(layer, stack, links);
-  if (!own) return { link: null, agents: [] };
-  // Bottom first: the agents are named in landing order.
-  const range = [...inboxPullAncestors(stack, layer.key).filter(isOpen).reverse(), layer];
-  const byThread = new Map<string, InboxPullLink>();
-  for (const l of range) {
-    const link = layerVerdictLink(l, stack, links);
-    if (link) byThread.set(link.thread_id, link);
-  }
-  return byThread.size > 1 ? { link: null, agents: [...byThread.values()] } : { link: own, agents: [own] };
-}
-
-/**
- * Why a "Whole stack" verdict cannot go to an agent (`stackVerdictLink` found several): "Claude Code and Codex each
- * have layers here. Send to an agent from This layer." Agents of one name are counted ("2 Claude Code threads").
- */
-export function stackAgentsWords(names: readonly string[]): string {
-  const distinct = [...new Set(names)];
-  const who =
-    distinct.length === 1
-      ? `${names.length} ${distinct[0]} threads`
-      : distinct.length === 2
-        ? `${distinct[0]} and ${distinct[1]}`
-        : `${distinct.slice(0, -1).join(', ')} and ${distinct[distinct.length - 1]}`;
-  return `${who} each have layers here. Send to an agent from This layer.`;
-}
-
-/** The agents with a layer of the stack other than the stack's own (`stackLink`): one entry per thread. */
-export function otherLayerAgents(stack: InboxPullStack, links: Links): { link: InboxPullLink; layers: InboxPull[] }[] {
-  const main = stackLink(stack, links);
-  const out = new Map<string, { link: InboxPullLink; layers: InboxPull[] }>();
-  for (const layer of stack.layers) {
-    if (!isOpen(layer)) continue;
-    const link = layerVerdictLink(layer, stack, links);
-    if (!link || link.thread_id === main?.thread_id) continue;
-    const entry = out.get(link.thread_id) ?? { link, layers: [] };
-    entry.layers.push(layer);
-    out.set(link.thread_id, entry);
-  }
-  return [...out.values()];
+export function stackVerdictLink(layer: InboxPull, stack: InboxPullStack, links: Links): InboxPullLink | null {
+  if (!layer.mine) return null;
+  const owned = stack.layers.find((l) => l.mine && isOpen(l) && !!links[l.key]);
+  return (owned ? links[owned.key]! : null) ?? layerVerdictLink(layer, stack, links);
 }
