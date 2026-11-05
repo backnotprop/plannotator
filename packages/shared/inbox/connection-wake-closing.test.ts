@@ -145,33 +145,51 @@ const STILL_OPEN = "You have 1 other question open in this thread. It stays open
 
 test("the still-open sentence comes out of the wake only when the Inbox named it, and the rest of the body stays whole", () => {
   const body = `Answered 1 question.\n\nGo ahead.\n\n${STILL_OPEN}\n\n## Answers to your questions\n\nQ1: yes`;
-  const text = wake({ body, context: context({ open_questions: 1, still_open_line: STILL_OPEN }) });
+  const text = wake({ body, context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: body.indexOf(STILL_OPEN) }) });
   expect(text).not.toContain("You have 1 other question");
   expect(text).toContain("\n\nAnswered 1 question.\n\nGo ahead.\n\n## Answers to your questions\n\nQ1: yes\n\n");
   // An older Inbox: no context, so the body is still the only place it is said.
   expect(wake({ body })).toContain(STILL_OPEN);
 });
 
-test("the person's own words that look like the sentence stay: only the paragraph the store wrote goes", () => {
-  const body = `I read "${STILL_OPEN}" and it is fine.\n\n${STILL_OPEN}`;
-  const { body: words } = inboxWakeCommand({ body, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) });
-  expect(words).toBe(`I read "${STILL_OPEN}" and it is fine.`);
-  // Not a paragraph of its own: nothing to take out.
+test("the person's own words that read the same as the sentence stay: only the paragraph at the store's position goes", () => {
+  const strip = (body: string, at?: number) => inboxWakeCommand({ body, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN, ...(at === undefined ? {} : { still_open_at: at }) }) }).body;
+  // Typed before the store's, and typed after it: the store's goes, the typed stays.
+  expect(strip(`${STILL_OPEN}\n\nGo.\n\n${STILL_OPEN}`, `${STILL_OPEN}\n\nGo.\n\n`.length)).toBe(`${STILL_OPEN}\n\nGo.`);
+  expect(strip(`Go.\n\n${STILL_OPEN}\n\n${STILL_OPEN}`, "Go.\n\n".length)).toBe(`Go.\n\n${STILL_OPEN}`);
+  // No position, a position elsewhere, or not a paragraph of its own: nothing is taken out.
+  const typed = `Go.\n\n${STILL_OPEN}`;
+  expect(strip(typed)).toBe(typed);
+  expect(strip(typed, 0)).toBe(typed);
+  expect(strip(typed, -1)).toBe(typed);
+  expect(strip(typed, 1.5)).toBe(typed);
+  // A paragraph of the same length at that position, other words: it stays.
+  const same = `${"x".repeat(STILL_OPEN.length)}\n\nGo.`;
+  expect(strip(same, 0)).toBe(same);
   const inline = `I read "${STILL_OPEN}" and it is fine.`;
-  expect(inboxWakeCommand({ body: inline, thread_id: "msg_01THREAD", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) }).body).toBe(inline);
+  expect(strip(inline, inline.indexOf(STILL_OPEN))).toBe(inline);
+});
+
+test("a lone surrogate in a quote does not reach the prompt; an emoji stays whole", () => {
+  const text = wake({ context: context({ replying_to: { id: "msg_01OLD", at: before(HOUR), quote: "a\uD83D b 🎉 \uDC00c" } }) });
+  const line = text.split("\n").find((l) => l.startsWith("[Replying to "))!;
+  expect(line.isWellFormed()).toBe(true);
+  expect(line).toContain('"a b 🎉 c"');
 });
 
 test("the sentence stays unless the details line says it instead: no details printed, or no question counted", () => {
   const body = `Go ahead.\n\n${STILL_OPEN}`;
+  const at = body.indexOf(STILL_OPEN);
+  expect(wake({ body, context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).not.toContain(STILL_OPEN);
   // Details that do not print: a bad count, a bad thread id.
-  expect(wake({ body, context: context({ messages: "14", open_questions: 1, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
-  expect(wake({ body, thread_id: "not-an-id", context: context({ open_questions: 1, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
+  expect(wake({ body, context: context({ messages: "14", open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
+  expect(wake({ body, thread_id: "not-an-id", context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
   // Details with no question open say nothing of "don't re-ask" (a thread archived since it was asked).
-  expect(wake({ body, context: context({ open_questions: 0, still_open_line: STILL_OPEN }) })).toContain(STILL_OPEN);
+  expect(wake({ body, context: context({ open_questions: 0, still_open_line: STILL_OPEN, still_open_at: at }) })).toContain(STILL_OPEN);
 });
 
 test("a body that is only the sentence keeps it: a wake never has no body", () => {
-  expect(wake({ body: STILL_OPEN, context: context({ open_questions: 1, still_open_line: STILL_OPEN }) })).toContain(`\n\n${STILL_OPEN}\n\n`);
+  expect(wake({ body: STILL_OPEN, context: context({ open_questions: 1, still_open_line: STILL_OPEN, still_open_at: 0 }) })).toContain(`\n\n${STILL_OPEN}\n\n`);
 });
 
 test("an older connection reads the same command: the words are in `body`, and context is a field it never looks at", () => {

@@ -569,7 +569,7 @@ function exportItem(record: InboxQuestionRecord, number: number): QuestionExport
  * 2026-10-21): every question it neither answers nor skips stays open, and
  * the reply says so, so the agent does not guess or ask again.
  */
-export function composeInboxReplyBody(input: {
+function composeReplyParts(input: {
   questions: readonly InboxQuestionRecord[];
   sent: readonly QuestionAnswer[];
   earlier: readonly QuestionAnswer[];
@@ -593,7 +593,7 @@ export function composeInboxReplyBody(input: {
   messages?: readonly InboxReplyMessageAnswers[];
   /** The message the reply answers (`reply_to`), for `messages`. */
   replyTo?: string;
-}): string {
+}): { head: string; stillOpen: string; section: string } {
   // Action items (`kind: "action"`) are reported in their own section ("Actions
   // you asked for"), never numbered or counted as questions here.
   const questionsOnly = <T extends { kind: string }>(list: readonly T[]): T[] => list.filter((q) => q.kind !== "action");
@@ -636,7 +636,18 @@ export function composeInboxReplyBody(input: {
   const sentIds = new Set(groups.flatMap((g) => g.sent.map((a) => `${g.message_id}/${a.key}`)));
   const pool = questionsOnly(input.stillOpen ?? groups.flatMap((g) => g.questions)).filter((q) => !sentIds.has(`${q.message_id ?? ""}/${q.key}`));
   const stillOpen = sentGroups.length === 0 ? inboxStillOpenLine(pool) : inboxOtherStillOpenLine(pool);
-  return [sentence, words, stillOpen, section].filter((part) => part !== "").join("\n\n");
+  return { head: [sentence, words].filter((part) => part !== "").join("\n\n"), stillOpen, section };
+}
+
+export function composeInboxReplyBody(input: Parameters<typeof composeReplyParts>[0]): string {
+  const { head, stillOpen, section } = composeReplyParts(input);
+  return [head, stillOpen, section].filter((part) => part !== "").join("\n\n");
+}
+
+/** What `composeInboxReplyBody` puts before its still-open sentence, and that sentence ('' with none): how the store knows it wrote it, whatever the person typed. */
+export function inboxReplyStillOpenOf(input: Parameters<typeof composeReplyParts>[0]): { head: string; stillOpen: string } {
+  const { head, stillOpen } = composeReplyParts(input);
+  return { head, stillOpen };
 }
 
 /** One message a reply answers questions on (`composeInboxReplyBody`'s `messages`). */
@@ -771,15 +782,6 @@ export function inboxOtherStillOpenLine(questions: readonly InboxQuestionRecord[
 /** Matches `inboxStillOpenLine`'s and `inboxOtherStillOpenLine`'s line (one line of a reply body). */
 export const INBOX_STILL_OPEN_LINE =
   /^(?:(?:No questions? answered yet|No new answers in this reply); .* still open\. Don't re-ask (?:it|them); the person will answer in the Inbox\.|You have \d+ other questions? open in this thread\. (?:It stays|They stay) open; the person will answer (?:it|them) in the Inbox\. Don't re-ask (?:it|them)\.)$/;
-
-/** The still-open line `body` carries, a paragraph of its own (the last, as the store writes it after the words); '' with none. */
-export function inboxStillOpenLineOf(body: string): string {
-  const lines = body.split("\n");
-  for (let at = lines.length - 1; at >= 0; at--) {
-    if (INBOX_STILL_OPEN_LINE.test(lines[at]!) && (at === 0 || lines[at - 1] === "") && (at === lines.length - 1 || lines[at + 1] === "")) return lines[at]!;
-  }
-  return "";
-}
 
 const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
 

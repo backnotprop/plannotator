@@ -19,9 +19,10 @@
  *    session works and whether a turn runs (`project_path`, `started_at`,
  *    `busy`, `idle_since`), and a `state` event says when that changes: the
  *    Inbox's list of live sessions, the ones New message can reach.
- *  - The wake text: a stable first line, a stable fixed instruction line, then
- *    the person's words verbatim, framed as their answer or their message,
- *    then a closing line naming the thread, read_thread and --help.
+ *  - The wake text: a stable first line, a stable fixed instruction line, the
+ *    line naming the thread, then the person's words verbatim, framed as their
+ *    answer or their message, then a closing line naming read_thread, search
+ *    and --help.
  *
  * The CONTRACT section below is pure (no imports, no runtime APIs beyond the
  * language) because the Claude Code mod can import only its own folder: it
@@ -1011,6 +1012,8 @@ export interface InboxWakeContext {
    * `body` stays as stored, so an older connection still says it.
    */
   still_open_line?: string
+  /** Where in `body` the store wrote it: the wake takes out that paragraph only, never words the person typed. */
+  still_open_at?: number
 }
 
 export interface InboxWakeReplyingTo {
@@ -1337,7 +1340,7 @@ export function inboxWakeDetailsLine(threadId: unknown, context: unknown, option
 function wakeQuote(value: unknown): string {
   if (typeof value !== 'string') return ''
   const flat = value
-    .replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]+/gu, ' ')
     .replace(/\p{Cf}+/gu, '')
     .replace(/[[\]]/g, '')
     .replace(/"/g, "'")
@@ -1374,12 +1377,12 @@ export function inboxWakeReplyingLine(target: unknown, now: number): string {
  */
 export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; context?: unknown }>(command: T): T {
   if (!command.context || typeof command.context !== 'object') return command
-  const { still_open_line: line, ...context } = command.context as Record<string, unknown>
+  const { still_open_line: line, still_open_at: at, ...context } = command.context as Record<string, unknown>
   if (typeof line !== 'string' || line === '') return command
   if (!inboxWakeDetailsLine(command.thread_id, context, { now: 0 }) || !wakeCount(context.open_questions)) return { ...command, context }
-  const at = command.body.lastIndexOf(line)
+  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !command.body.startsWith(line, at)) return { ...command, context }
   const end = at + line.length
-  const alone = at >= 0 && (at === 0 || command.body.slice(at - 2, at) === '\n\n') && (end === command.body.length || command.body.slice(end, end + 2) === '\n\n')
+  const alone = (at === 0 || command.body.slice(at - 2, at) === '\n\n') && (end === command.body.length || command.body.slice(end, end + 2) === '\n\n')
   if (!alone) return { ...command, context }
   const body = [command.body.slice(0, Math.max(0, at - 2)), command.body.slice(end + 2)].filter((part) => part !== '').join('\n\n')
   return { ...command, context, body: body === '' ? command.body : body }

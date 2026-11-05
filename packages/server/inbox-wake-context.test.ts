@@ -139,6 +139,50 @@ describe("the details line", () => {
     expect(text).toContain("One for now.");
   });
 
+  test("a paragraph the person typed that reads exactly like the sentence stays: another session's question open, the store wrote none", async () => {
+    const w = await setup();
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const sent = await w.send("Quota is climbing.");
+    await w.send(QUESTION, { reply_to: sent.message_id }, "ses-other");
+    const reply = await w.reply(sent.message_id, `Noted.\n\n${typed}`);
+    expect(reply.body).toBe(`Noted.\n\n${typed}`);
+    const [command] = await w.poll();
+    expect(command!.context!.open_questions).toBe(1);
+    expect(command!.context!.still_open_line).toBeUndefined();
+    for (const wake of [inboxWakeText(command!), modWakeText(command!), codexQueueMessage(command!)]) expect(wake).toContain(`\n\nNoted.\n\n${typed}\n\n`);
+  });
+
+  test("typed and written both: the store's goes, the person's stays, with an action result moving the first line", async () => {
+    const w = await setup({ setAsideDelayMs: 60_000 });
+    const typed = "No question answered yet; it is still open. Don't re-ask it; the person will answer in the Inbox.";
+    const sent = (await w.send(`${ACTION}\n\n${QUESTION}`)) as unknown as { message_id: string; actions: { key: string }[] };
+    const key = sent.actions[0]!.key;
+    await w.post(`/api/inbox/messages/${sent.message_id}/actions/${key}`, { outcome: "done", staged: true });
+    const reply = await w.reply(sent.message_id, `One done.\n\n${typed}`, { actions: [{ key }] });
+    expect(reply.body.split(typed)).toHaveLength(3);
+    const [command] = await w.poll();
+    const text = inboxWakeText(command!);
+    expect(text.split(typed)).toHaveLength(2);
+    expect(text).toContain(`One done.\n\n${typed}`);
+    expect(text).toContain("Did 1 action item.");
+  });
+
+  test("a reply that waits through a restart keeps its sentence: nothing is lost, and the details line says it too", async () => {
+    const w = await setup();
+    const sent = await w.send(QUESTION);
+    const reply = await w.reply(sent.message_id, "Not yet.");
+    w.server.stop();
+    const fresh = await startInboxServer({ dataDir: w.dataDir });
+    servers.push(fresh);
+    const stored = fresh.store.message(reply.id)!;
+    const context = fresh.store.wakeContext(stored, OWNER);
+    expect(context.still_open_line).toBeUndefined();
+    const text = inboxWakeText({ id: reply.id, thread_id: sent.thread_id, subject: null, body: stored.body, context });
+    expect(text).toContain("1 question open, don't re-ask it");
+    expect(text).toContain("it is still open");
+    expect(text).toContain("Not yet.");
+  });
+
   test("an action item open reads as open, with no word about re-asking; one the agent cleared reads as nothing open", async () => {
     const w = await setup();
     const sent = await w.send(ACTION);

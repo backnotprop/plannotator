@@ -37,7 +37,7 @@ import {
   deriveInboxSubject,
   derivePersonThreadSubject,
   inboxQuestionState,
-  inboxStillOpenLineOf,
+  inboxReplyStillOpenOf,
   inboxQuestionWaitsOnPerson,
   inboxRowWaits,
   isInboxQuestionSupersedable,
@@ -1637,6 +1637,13 @@ export class InboxStore {
   }
 
   /**
+   * The still-open sentences this process wrote, by reply. In memory: a reply
+   * that waits through a restart keeps its sentence in the wake, as well as
+   * the details line, and nothing is lost.
+   */
+  private readonly stillOpenWritten = new Map<string, { line: string; at: number }>();
+
+  /**
    * What a wake's details line says about the thread `message` is in, for the
    * session it goes to (approval "inbox-wake-context"): one pass over the
    * thread's own messages, since this runs for each reply a poll hands out.
@@ -1671,14 +1678,14 @@ export class InboxStore {
       return target && latest && target.id !== latest.id && target.author.kind === "agent" && target.author.session === session ? target : null;
     };
     const target = (message.reask?.length ?? 0) > 0 ? null : (own(message.reply_to) ?? (answered.size === 1 ? own([...answered][0]) : null));
-    const stillOpen = inboxStillOpenLineOf(message.body);
+    const stillOpen = this.stillOpenWritten.get(message.id);
     return {
       messages,
       open_questions,
       open_actions,
       ...(latest ? { last_agent_at: latest.created_at } : {}),
       ...(target ? { replying_to: { id: target.id, at: target.created_at, ...inboxWakeQuote(target.body, this.questionRecords(target.id)) } } : {}),
-      ...(stillOpen ? { still_open_line: stillOpen } : {}),
+      ...(stillOpen ? { still_open_line: stillOpen.line, still_open_at: stillOpen.at } : {}),
     };
   }
 
@@ -4408,18 +4415,16 @@ export class InboxStore {
           .flatMap((m) => this.questionRecords(m.id))
       : this.questionRecords(message.id);
     // The picks first, then the annotations as Plannotator's feedback text.
-    const replyBody = composeInboxReplyBody({
-      questions: [],
-      sent: [],
-      earlier: [],
-      messages: groups,
-      replyTo: message.id,
-      words,
-      stillOpen,
-    });
-    const body = [withInboxActionsSection(replyBody, this.stagedActionsSection(message, actionsSent, stillOpen)), feedback]
+    const replyParts = { questions: [], sent: [], earlier: [], messages: groups, replyTo: message.id, words, stillOpen };
+    const replyBody = composeInboxReplyBody(replyParts);
+    const actionsSection = this.stagedActionsSection(message, actionsSent, stillOpen);
+    const body = [withInboxActionsSection(replyBody, actionsSection), feedback]
       .filter((part) => part !== "")
       .join("\n\n");
+    // Where the store wrote the still-open sentence: a wake may leave out that paragraph, never one the person typed.
+    const composed = inboxReplyStillOpenOf(replyParts);
+    const opened = withInboxActionsSection(composed.head, actionsSection.split("\n\n")[0] ?? "");
+    const stillOpenAt = opened === "" ? 0 : opened.length + 2;
 
     // The questions first, so whoever reads the reply finds them already sent.
     // If any of these writes fails, the questions written so far are put back
@@ -4447,6 +4452,7 @@ export class InboxStore {
         )
       : [];
     const tags = [...typed, ...members, ...notice];
+    if (composed.stillOpen && body.startsWith(composed.stillOpen, stillOpenAt)) this.stillOpenWritten.set(replyId, { line: composed.stillOpen, at: stillOpenAt });
     const reply: InboxMessage = {
       id: replyId,
       project_id: message.project_id,

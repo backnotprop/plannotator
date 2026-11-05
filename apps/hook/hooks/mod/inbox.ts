@@ -1278,14 +1278,16 @@ export class InboxLink {
    * the running turn while one runs (`appendUserRow`), else as a turn.
    */
   private async deliverNext(urgent = false): Promise<void> {
-    const command = this.pending.values().next().value as InboxReplyCommand | undefined
-    if (!command) return
+    const waiting = this.pending.values().next().value as InboxReplyCommand | undefined
+    if (!waiting) return
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0)
     if (fresh === null) return
-    if (!fresh.some((candidate) => candidate.id === command.id)) {
-      this.settle(command.id)
+    // The same reply as this poll words it: a reply that waited through a turn says what the thread holds now.
+    const command = fresh.find((candidate) => candidate.id === waiting.id)
+    if (!command) {
+      this.settle(waiting.id)
       return
     }
     if (this.disposed || !(await this.holdLease(await this.host.now()))) return

@@ -12,9 +12,9 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxStillOpenLineOf } from '../../../../packages/core/inbox-questions'
+import { INBOX_STILL_OPEN_LINE } from '../../../../packages/core/inbox-questions'
 import { inboxAckLine, inboxAgentTool, inboxSentNowFollowUpText, INBOX_MESSAGE_INSTRUCTION, INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_CLOSING_LINE, INBOX_WAKE_INSTRUCTION, INBOX_TAGGED_INSTRUCTION, inboxAlsoTaggedLine, inboxRedirectedLine, inboxTaggedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
-import { CLAUDE_INBOX_TOOL_NAME, ClaudeSession } from './testing/claude-session'
+import { ClaudeSession } from './testing/claude-session'
 import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
 import { stubbedAgentClis } from '../../../../tests/helpers/agent-cli-guard'
 import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
@@ -178,7 +178,7 @@ const withoutContext = (text: string) =>
 const bodyInWake = (body: string) =>
   body
     .split('\n\n')
-    .filter((part) => part !== inboxStillOpenLineOf(body))
+    .filter((part) => !INBOX_STILL_OPEN_LINE.test(part))
     .join('\n\n')
 
 const QUESTION = [
@@ -577,6 +577,25 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
   // Plan step 8, record 5.x: New message. The failure this guards: the person
   // writes to a live session of the project and it never arrives, arrives
   // twice, or lands in a session the person did not pick.
+  test('a reply that waited through a turn says what the thread holds at delivery: once, with the fresher words', async () => {
+    const w = world('03a-waited-through-a-turn')
+    startInbox(w)
+    const session = await open(w, 'session-waits')
+    const update = await send(session, w, 'Run finished. The export now streams rows to the file.')
+    await session.startTurn('Refactor the webhook handler.')
+    const replyId = await personSends(w, update.message_id, 'Keep going.')
+    // The link polls while the turn runs, so it already holds the reply as the thread was then.
+    await Bun.sleep(3_000)
+    expect(session.host.submits).toEqual([])
+    const asked = await session.callInbox({ action: 'send_message', body: QUESTION, reply_to: update.message_id }, w.project)
+    expect('deny' in asked).toBe(false)
+    await session.endTurn('Done.')
+    await waitFor('the wake turn', () => session.turns.find((t) => t.text.includes(replyId)))
+    await Bun.sleep(3_000)
+    expect(session.host.submits).toHaveLength(1)
+    expect(session.host.submits[0]!.split('\n')[2]).toBe(`[Thread ${update.thread_id}: 3 messages, 1 question open, don't re-ask it. Your last message was just now]`)
+  }, 120_000)
+
   test('New message: the polls make both sessions of the project live (the writer first); the message reaches the picked session once, as a turn; a gone session is refused', async () => {
     const w = world('09-new-message')
     startInbox(w)
