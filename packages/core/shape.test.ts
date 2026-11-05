@@ -6,6 +6,7 @@ import {
   isShapeProjectPath,
   parseShapeCodeTarget,
   shapeCssProblems,
+  shapeHtmlDataCodes,
   shapeHtmlProblems,
   shapeHtmlMarks,
   shapeParts,
@@ -172,6 +173,20 @@ describe('data-code', () => {
     if (!r.ok) expect(r.errors.join('\n')).toContain('views.picture');
     b.views.picture = { html: '<div data-mark="p" data-code="src/kettle.ts#L3">Kettle</div>' };
     expect(checkShapeBoard(b).ok).toBe(true);
+  });
+});
+
+describe('character references in a data-code', () => {
+  test('decoded once, as a browser reads the attribute: nbsp, NULL, and 128–159 as windows-1252', () => {
+    const codes = (value: string) => shapeHtmlDataCodes(`<div data-code="${value}">x</div>`);
+    expect(codes('a&#38;#x2F;b')).toEqual(['a&#x2F;b']);
+    expect(codes('a&amp;lt;b')).toEqual(['a&lt;b']);
+    expect(codes('a&#x2F;b&#47c&lt;')).toEqual(['a/b/c<']);
+    expect(codes('a.ts&nbsp;#L1')).toEqual(['a.ts\u00a0#L1']);
+    expect(codes('a&#0;b\u0000c&#xD800;')).toEqual(['a\ufffdb\ufffdc\ufffd']);
+    expect(codes('a&#150;b&#x80;&#159;&#129;&#160;')).toEqual(['a\u2013b\u20ac\u0178\u0081\u00a0']);
+    // What the check reads is what is drawn: an en dash, not a C1 control in the path.
+    expect(parseShapeCodeTarget(codes('a&#150;b.ts#L1')[0]!)).toEqual({ path: 'a\u2013b.ts', line: 1 });
   });
 });
 
