@@ -320,7 +320,7 @@ export function formatInboxHelp(options: InboxHelpOptions): string {
     "- A question you cannot settle from the code or the conversation, which can wait for an answer.",
     "- A blocker: say what stops you (a `Stopped:` line, below). When you can go on with other work, leave `Stopped:` out and name what waits in `Holds up:`; a question that stops you can carry both.",
     "- A true blocker only the person can clear, outside this conversation (approve a deploy, sign in, touch a security key, merge a pull request you cannot merge): one `:::action` action item (see \"Action items only the person can do\").",
-    "- Long work you finished: one short summary with its pictures in place (`![alt](path)` in `body`, where you write about each), and the files to look at in `attachments`.",
+    "- Long work you finished: one short summary with its pictures in place (`![alt](path)` in `body`, where you write about each), and the files to look at in `attachments`. You can send a video in `attachments` too. Use your judgment on when one helps.",
     "- A decision that needs pictures or files, even while the person writes in the chat.",
     "- A plan, document, HTML prototype or diagram the person should read and annotate (`attachments`).",
     "- A guided review of a finished code change (get_guide_brief, then submit_guide).",
