@@ -814,8 +814,21 @@ describe('the field goes while the words are on their way', () => {
     gone.w.detach();
     gone.answer({ code: 'voice_refused' });
     await settle();
-    expect(gone.late).toEqual([{ failed: true }]);
+    expect(gone.late).toEqual([{ failed: true, retry: expect.any(Function) }]);
     expect(gone.w.session.view().trouble).toBeNull();
+    // Retry resends the clip it kept, and the words go the same way.
+    gone.w.answer({ text: 'second try' });
+    (gone.late[0] as { retry: () => void }).retry();
+    await settle();
+    expect(gone.w.posted).toHaveLength(2);
+    expect(gone.late[1]).toEqual({ text: 'second try' });
+
+    // A clip that cannot be sent again: nothing to retry.
+    const empty = await taken();
+    empty.w.detach();
+    empty.answer({ code: 'voice_empty' });
+    await settle();
+    expect(empty.late).toEqual([{ failed: true, retry: null }]);
 
     const drawn = await taken();
     const stopListening = drawn.w.session.subscribe(() => {});

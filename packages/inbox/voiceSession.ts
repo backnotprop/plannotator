@@ -111,7 +111,7 @@ export interface VoiceDeps {
 }
 
 /** What became of a take whose field went while it was being transcribed: its words, or nothing to show for it. */
-export type VoiceLate = { text: string } | { failed: true };
+export type VoiceLate = { text: string } | { failed: true; retry: (() => void) | null };
 
 export interface VoiceSession extends VoicePressTarget {
   view(): VoiceView;
@@ -254,11 +254,11 @@ export function createVoiceSession(deps: VoiceDeps, late?: (outcome: VoiceLate) 
   };
 
   /** A failed answer whose field and host have both gone has no line to show it on, so the host's `late` says it. */
-  const failedUnseen = () => {
+  const failedUnseen = (keeps: boolean) => {
     if (field || listeners.size > 0) return false;
-    clip = null;
+    if (!keeps) clip = null;
     set({ ...IDLE });
-    late?.({ failed: true });
+    late?.({ failed: true, retry: keeps ? () => session.retry() : null });
     return true;
   };
 
@@ -413,7 +413,7 @@ export function createVoiceSession(deps: VoiceDeps, late?: (outcome: VoiceLate) 
         run++;
         release();
         clip = null;
-        if (!failedUnseen()) set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
+        if (!failedUnseen(false)) set({ ...IDLE, trouble: 'badclip', said: 'Dictation failed' });
       });
   };
 
@@ -454,9 +454,9 @@ export function createVoiceSession(deps: VoiceDeps, late?: (outcome: VoiceLate) 
     }
     // Not one of this route's codes: the answer came from something other than a working Inbox, a restarted one among them.
     const known = answer.code ? TROUBLE[answer.code] : { trouble: 'inboxgone' as const, keeps: true };
-    if (!known.keeps) clip = null;
     if (answer.code === 'voice_not_ready' && answer.reason) deps.notReady(answer.reason);
-    if (failedUnseen()) return;
+    if (failedUnseen(known.keeps)) return;
+    if (!known.keeps) clip = null;
     set({ ...IDLE, trouble: known.trouble, engine: answer.engine ?? null, kept: known.keeps, clipMs: view.clipMs, said: 'Dictation failed' });
   };
 

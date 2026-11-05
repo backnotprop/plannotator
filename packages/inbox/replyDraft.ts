@@ -50,6 +50,7 @@
  * `ReplyDraftStore`); this Inbox's is HTTP (replyDraftHttp.ts).
  */
 import { machineOf } from './inboxUrl';
+import { clearLateVoiceMiss, noteLateVoiceMiss } from './lateVoice';
 import { spaced } from './voiceField';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { INBOX_DRAFT_BODY_MAX, type InboxReplyDraft, type InboxUpload } from '@plannotator/core/inbox-types';
@@ -191,19 +192,49 @@ export function landInReplyDraft(threadId: string, upload: Promise<InboxUpload |
   });
 }
 
+/** Per thread: the Sends on their way. A draft read meanwhile may hold words the Send is carrying. */
+const sendsOut = new Map<string, Set<Promise<void>>>();
+
+/** A Send of this thread starts: words landing in its draft wait for it. Returns what ends the wait. */
+export function replySendStarts(threadId: string): () => void {
+  const sends = sendsOut.get(threadId) ?? new Set<Promise<void>>();
+  sendsOut.set(threadId, sends);
+  let end = () => {};
+  const send = new Promise<void>((done) => (end = done));
+  sends.add(send);
+  return () => {
+    sends.delete(send);
+    end();
+  };
+}
+
+/** This window discarded the thread's draft: a file or words already landing there stop. */
+export function replyDraftDiscarded(threadId: string): void {
+  discards.set(threadId, discardsOf(threadId) + 1);
+}
+
 /**
- * Dictated words whose thread is no longer open (the person moved on while they were being transcribed): they join the
- * end of that thread's draft, as `landInReplyDraft` does a file, never the box of the thread now open.
+ * Dictated words whose box is not open (the person closed it or moved on while they were being transcribed): they join
+ * the end of that thread's draft as the Inbox holds it then, as `landInReplyDraft` does a file, never the box of the
+ * thread now open. They wait for a Send of that thread on its way, so they are never added to the words it carries. A
+ * discard after this starts stops it (one before it threw away other words, not these). Words that could not be saved
+ * stay for the thread to offer again (lateVoice.ts).
  */
 export function landWordsInReplyDraft(threadId: string, words: string, store: ReplyDraftStore = httpReplyDraftStore): Promise<void> {
   landing += 1;
   unsavedChanged();
   const discarded = discardsOf(threadId);
+  const retry = () => {
+    clearLateVoiceMiss(threadId);
+    void landWordsInReplyDraft(threadId, words, store);
+  };
   return (async () => {
+    for (let sends = sendsOut.get(threadId); sends?.size; sends = sendsOut.get(threadId)) await Promise.all(sends);
     for (let attempt = 0; attempt < 4; attempt += 1) {
       if (discardsOf(threadId) !== discarded) return;
       const latest = await store.read(threadId).catch(() => undefined);
-      if (latest === undefined || discardsOf(threadId) !== discarded) return;
+      if (discardsOf(threadId) !== discarded) return;
+      if (latest === undefined) break;
       const body = latest?.body ?? '';
       try {
         await store.save(
@@ -213,9 +244,10 @@ export function landWordsInReplyDraft(threadId: string, words: string, store: Re
         );
         return;
       } catch (cause) {
-        if (codeOf(cause) !== 'draft_conflict') return;
+        if (codeOf(cause) !== 'draft_conflict') break;
       }
     }
+    noteLateVoiceMiss(threadId, retry);
   })().finally(() => {
     landing -= 1;
     unsavedChanged();
@@ -725,7 +757,7 @@ export function useReplyDraft(threadId: string, options: ReplyDraftOptions = {})
     const target = current.current;
     bump(target);
     // A file still landing from an earlier Cancel or thread switch was thrown away with the rest.
-    discards.set(target, discardsOf(target) + 1);
+    replyDraftDiscarded(target);
     setConflict(target, null);
     takeCarried(target);
     held.current.set(target, []);

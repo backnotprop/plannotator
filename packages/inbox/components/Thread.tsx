@@ -52,7 +52,8 @@ import { threadLink } from '../rowMenu';
 import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../images';
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
-import { landInReplyDraft, landWordsInReplyDraft, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
+import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -1653,9 +1654,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   const [error, setError] = useState<string | null>(null);
   const voice = useVoiceSession();
   /** Words a take left in full screen's card brought back, waiting for the box (`changeReply` waits for a Send). */
-  const lateVoice = useRef<{ threadId: string; text: string }[]>([]);
+  const lateVoice = useRef<string[]>([]);
   const [lateVoiceTick, setLateVoiceTick] = useState(0);
   const paneMounted = useRef(true);
+  const lateMiss = useLateVoiceMiss(thread.thread_id);
   /** When a Send from full screen's composer last went: the card says "Sent to …" for a moment. */
   const [composerSentAt, setComposerSentAt] = useState<number | null>(null);
   /**
@@ -3627,33 +3629,47 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     replyDraft.save(text, files);
   };
 
-  /** A take that outlived the card's field: its words go to the reply of the thread it was said in, open or not. */
-  const onLateVoice = useCallback((threadId: string, outcome: VoiceLate) => {
+  /** A take that outlived the card's field: its words go to this thread's reply. The pane gone with it, to its draft. */
+  const onLateVoice = useCallback((outcome: VoiceLate) => {
+    const threadId = threadRef.current.thread_id;
     if ('failed' in outcome) {
-      if (paneMounted.current && threadRef.current.thread_id === threadId) setError('Dictation failed, so those words are not in the reply.');
+      noteLateVoiceMiss(threadId, outcome.retry && (() => {
+        clearLateVoiceMiss(threadId);
+        outcome.retry?.();
+      }));
     } else if (paneMounted.current) {
-      lateVoice.current.push({ threadId, text: outcome.text });
+      lateVoice.current.push(outcome.text);
       setLateVoiceTick((tick) => tick + 1);
     } else void landWordsInReplyDraft(threadId, outcome.text);
   }, []);
   useEffect(() => {
-    const away = lateVoice.current.filter((late) => late.threadId !== thread.thread_id);
-    for (const late of away) void landWordsInReplyDraft(late.threadId, late.text);
-    const waiting = lateVoice.current.filter((late) => late.threadId === thread.thread_id);
-    lateVoice.current = waiting;
-    if (waiting.length === 0 || sending || (!boxRef.current.open && replyDraft.loadedFor !== thread.thread_id)) return;
+    // While a Send is on its way the box takes no words: these wait for it to end.
+    if (lateVoice.current.length === 0 || sending) return;
+    const waiting = lateVoice.current;
     lateVoice.current = [];
-    let text = boxRef.current.open ? boxRef.current.text : (replyDraft.conflict ?? replyDraft.draft?.body ?? '');
-    for (const late of waiting) text += spaced(text.at(-1), undefined, late.text);
+    if (!boxRef.current.open) {
+      // What this pane knows of the draft can be behind a save still on its way (Cancel's): the Inbox's copy decides.
+      for (const words of waiting) void landWordsInReplyDraft(thread.thread_id, words);
+      return;
+    }
+    let text = boxRef.current.text;
+    for (const words of waiting) text += spaced(text.at(-1), undefined, words);
+    // They go after the words, so someone typing keeps their place: the field holds them first, and React finds nothing to set.
+    const field = textRef.current;
+    if (field && document.activeElement === field) {
+      const { selectionStart, selectionEnd } = field;
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')?.set?.call(field, text);
+      field.setSelectionRange(selectionStart, selectionEnd);
+    }
     changeReply(text, true);
     // changeReply reads this render's Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lateVoiceTick, sending, replyDraft.loadedFor, thread.thread_id]);
+  }, [lateVoiceTick, sending]);
   useEffect(() => {
     paneMounted.current = true;
     return () => {
       paneMounted.current = false;
-      for (const late of lateVoice.current) void landWordsInReplyDraft(late.threadId, late.text);
+      for (const words of lateVoice.current) void landWordsInReplyDraft(threadRef.current.thread_id, words);
       lateVoice.current = [];
     };
   }, []);
@@ -3923,6 +3939,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     sendingFromComposer.current = options.stayFull === true;
     sendStarts.current += 1;
     setSending(true);
+    const sendEnds = replySendStarts(thread.thread_id);
     setError(null);
     /** Replies of this Send that went (or were already there, a retry's replays). */
     let went = 0;
@@ -4267,6 +4284,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       }
       releasePicks?.();
       setSending(false);
+      sendEnds();
       if (sendingFromComposer.current) {
         // Back in the card's field once it is drawn (a Send button that went disabled let focus go).
         requestAnimationFrame(() => {
@@ -4671,6 +4689,20 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
    * writes through `changeReply`, so typing in either is the one draft; Send is this thread's Send.
    */
   const composerShown = !!file && shownFull && !resolved;
+  const lineError = error ?? (lateMiss ? LATE_VOICE_MISSED : null);
+  const lateMissActions = lateMiss && (
+    <>
+      {' '}
+      {lateMiss.retry && (
+        <button type="button" className="ib-dtlink ib-vstrong" data-late-voice-retry="" onClick={lateMiss.retry}>
+          Retry
+        </button>
+      )}{' '}
+      <button type="button" className="ib-dtlink" data-late-voice-discard="" onClick={() => clearLateVoiceMiss(thread.thread_id)}>
+        Discard
+      </button>
+    </>
+  );
   // The card draws the words, so while it shows, this pane follows them key by key (as the field does).
   const composerText = useReplyTextWhile(replyText, composerShown);
   const composer: FullScreenComposerValue | null =
@@ -4710,7 +4742,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             openQuestions: unanswered.length,
             openActions: openActions.length,
             conflict: replyDraft.conflict !== null,
-            error,
+            error: lineError,
+            errorActions: error ? undefined : lateMissActions,
             sentAt: composerSentAt,
             onOpenThread: replyInThread,
             tags: composerTags,
@@ -4720,7 +4753,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       : null;
   const errorLine = (
     <div className="ib-error" role="alert" data-foot-error={errorAbove ? 'above' : undefined}>
-      {error}
+      {lineError}
+      {!error && lateMissActions}
     </div>
   );
   // The closed foot's status (draft note, skip chip) describes Send and Edit draft: read with them, though drawn at the row's end.
@@ -6131,7 +6165,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
               routeChoice
             ) : (
               <>
-              {error && errorLine}
+              {lineError && errorLine}
               {/* Send's row (approval "inbox-reply-recipient"): Send and Cancel, then at the right "Draft  Saved 4:51 PM
                   Discard" and, with more than one agent, who gets the reply. On a phone the pill sits after Cancel and
                   the Draft line is above the box (the owner, 2026-11-03), so the first save grows the foot upward and
@@ -6161,7 +6195,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           routeChoice
         ) : (
           <>
-          {error && errorLine}
+          {lineError && errorLine}
           {/* Buttons on the left in today's order, the draft status and the skip chip at the right end (approval
               "thread-foot-status-right", option A). Too narrow for one line, the status takes its own line ABOVE the
               buttons (wrap-reverse; one item per line aligns to the start), so it never wraps between them. */}
@@ -6295,7 +6329,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             onClose={() => setNewMessage(null)}
           />
         )}
-        {error && !errorAbove && errorLine}
+        {lineError && !errorAbove && errorLine}
       </div>
     </section>
     {openAttachment && (

@@ -59,8 +59,10 @@ export interface FullScreenReply {
   value: string;
   /** The reply box's own change: the box takes the words and the draft saves them. */
   onChange: (text: string) => void;
+  /** What can be done about `error`, drawn after its words. */
+  errorActions?: ReactNode;
   /** A take this card's field left behind while it was being transcribed: the thread's reply takes the words. Can run after the card has gone. */
-  onLateVoice: (threadId: string, outcome: VoiceLate) => void;
+  onLateVoice: (outcome: VoiceLate) => void;
   /** The thread's Send, kept in full screen. */
   onSend: () => void;
   sending: boolean;
@@ -272,7 +274,7 @@ export function FullScreenComposer({
   const commentsRef = useRef<HTMLButtonElement | null>(null);
   /** The card's height when the list opened: the list sits just above the card. */
   const [cardHeight, setCardHeight] = useState(0);
-  const voice = useVoiceSession(!value.covered && mode === 'reply' && !state.minimized, (outcome) => reply.onLateVoice(threadId, outcome));
+  const voice = useVoiceSession(!value.covered && mode === 'reply' && !state.minimized, reply.onLateVoice);
   // The sheet hides the status and Stop, so no microphone stays open behind it. What was said still lands in the reply.
   const covered = value.covered === true;
   useEffect(() => {
@@ -576,6 +578,7 @@ export function FullScreenComposer({
         // The thread's own error line (role="alert") says it; here it is shown where the person is looking.
         <p className="ib-fcomp-err" id={errorId} data-fcomp-error="">
           {reply.error}
+          {reply.errorActions}
         </p>
       )}
       {mode === 'reply' && reply.files.length > 0 && (

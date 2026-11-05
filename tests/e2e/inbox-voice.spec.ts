@@ -1037,30 +1037,172 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         await finish(page, context);
       });
 
-      test('a Send from the box while the take is on its way: the words wait for it, and stay as a new draft', async () => {
+      /** Replies held until `go`; `answer` what the Send then meets. */
+      const holdSend = async (page: Page, answer: 'goes' | 'refused' = 'goes') => {
+        let go = () => {};
+        const held = new Promise<void>((done) => (go = done));
+        await page.route('**/reply**', async (route) => {
+          await held;
+          if (answer === 'goes') await route.continue();
+          else await route.fulfill({ status: 400, contentType: 'application/json', body: '{"error":"refused","code":"validation_error"}' });
+        });
+        return go;
+      };
+      /** Back on the thread's foot: the words kept as its draft. */
+      const editDraft = async (page: Page) => {
+        await page.locator('.ib-pfoot').getByRole('button', { name: 'Edit draft' }).click();
+        return box(page);
+      };
+
+      test('a Send from the box while the take is on its way: the words wait for it, and are the next draft', async () => {
         const { w, context, page } = await start();
         await page.goto(`${w.url}${fileHash(w)}`);
         await listening(page, w);
         await openTheSheet(page);
         await writeTheReply(page);
         await expect(box(page)).toHaveValue('Before.');
-        let letGo = () => {};
-        const held = new Promise<void>((done) => (letGo = done));
-        await page.route('**/reply**', async (route) => {
-          await held;
-          await route.continue();
-        });
+        const go = await holdSend(page);
         await sendButton(page).click();
         w.send({ release: true });
         await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
         await page.waitForTimeout(300);
-        letGo();
-        await expect(box(page)).toHaveValue('Landed.');
+        go();
         await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Landed.');
+        await expect(await editDraft(page)).toHaveValue('Landed.');
         await finish(page, context);
       });
 
-      test('the answer fails with nothing left to show it: the thread says so', async () => {
+      for (const order of ['the words wait for the Send, then the person leaves', 'the person leaves, then the words come'] as const) {
+        test(`a Send on its way, ${order}: only the new words stay, so a later Send cannot repeat the first`, async () => {
+          const { w, context, page } = await start();
+          await page.goto(`${w.url}${fileHash(w)}`);
+          await listening(page, w);
+          await openTheSheet(page);
+          await writeTheReply(page);
+          await expect(box(page)).toHaveValue('Before.');
+          await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+          const go = await holdSend(page);
+          await sendButton(page).click();
+          const leave = () => page.evaluate(() => (location.hash = ''));
+          const answered = async () => {
+            w.send({ release: true });
+            await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+            await page.waitForTimeout(300);
+          };
+          if (order.startsWith('the words')) {
+            await answered();
+            await leave();
+          } else {
+            await leave();
+            await answered();
+          }
+          await expect(pane(page)).toHaveCount(0);
+          expect(await draftOf(w, w.filed.thread)).toBe('Before.');
+          go();
+          await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Landed.');
+          await finish(page, context);
+        });
+      }
+
+      test('a Send refused after the person left: its words stay, with the new ones after them', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await listening(page, w);
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(box(page)).toHaveValue('Before.');
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+        const go = await holdSend(page, 'refused');
+        await sendButton(page).click();
+        await page.evaluate(() => (location.hash = ''));
+        w.send({ release: true });
+        await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+        await page.waitForTimeout(300);
+        go();
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
+        await finish(page, context);
+      });
+
+      test('Cancel with its save still on the way when the words come: both stay, the typed words first', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await listening(page, w);
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(box(page)).toHaveValue('Before.');
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+        // Saves reach the Inbox one at a time, as they went out, and the first waits to be let go.
+        let go = () => {};
+        const first = new Promise<void>((done) => (go = done));
+        let turn: Promise<unknown> = first;
+        await page.route('**/draft', async (route) => {
+          if (route.request().method() === 'GET') return route.continue();
+          const mine = turn;
+          let done = () => {};
+          turn = new Promise<void>((next) => (done = next));
+          await mine;
+          await route.fulfill({ response: await route.fetch() });
+          done();
+        });
+        await box(page).focus();
+        await page.keyboard.type(' Typed.');
+        await pane(page).getByRole('button', { name: 'Cancel', exact: true }).first().click();
+        await expect(box(page)).toHaveCount(0);
+        w.send({ release: true });
+        await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+        await page.waitForTimeout(300);
+        go();
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Typed. Landed.');
+        await expect(await editDraft(page)).toHaveValue('Before. Typed. Landed.');
+        await finish(page, context);
+      });
+
+      test('someone typing in the box when the words come: they go at the end, and the caret stays', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await listening(page, w);
+        await openTheSheet(page);
+        await writeTheReply(page);
+        await expect(box(page)).toHaveValue('Before.');
+        await box(page).evaluate((el: HTMLTextAreaElement) => el.setSelectionRange(3, 3));
+        await page.keyboard.type('X');
+        await expect(box(page)).toHaveValue('BefXore.');
+        w.send({ release: true });
+        await expect(box(page)).toHaveValue('BefXore. Landed.');
+        await page.keyboard.type('Y');
+        await expect(box(page)).toHaveValue('BefXYore. Landed.');
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('BefXYore. Landed.');
+        await finish(page, context);
+      });
+
+      for (const focus of ['the mic', 'nowhere'] as const) {
+        test(`words landing with focus on ${focus} go in as one undo step`, async () => {
+          const { w, context, page } = await start({ phone: false, width: 1440, height: 900 });
+          const field = await openReply(page, w, w.threads[1]!);
+          await field.fill('Cards.');
+          w.send({ upstream: [{ text: 'One step.', hold: true }] });
+          await mic(pane(page)).focus();
+          await page.keyboard.press('Enter');
+          await expect(line(pane(page), 'tap')).toBeVisible();
+          await page.waitForTimeout(1200);
+          await page.keyboard.press('Enter');
+          await expect(line(pane(page), 'sending')).toBeVisible();
+          if (focus === 'nowhere') await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+          w.send({ release: true });
+          await expect(field).toHaveValue('Cards. One step.');
+          // Where focus went stays where it went.
+          if (focus === 'the mic') await expect(mic(pane(page))).toBeFocused();
+          await expect(pane(page).locator('mark.ib-vmark')).toHaveCount(0, { timeout: 5_000 });
+          await field.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+          // WebKit's step takes the filled words too; what counts is that the dictated ones go.
+          await expect(field).not.toHaveValue(/One step/);
+          await finish(page, context);
+        });
+      }
+
+      const missed = (page: Page) => pane(page).locator('.ib-error').filter({ hasText: 'Dictation failed' });
+
+      test('the answer fails with nothing left to show it: the thread says so, and Retry sends it again', async () => {
         const { w, context, page } = await start();
         await page.goto(`${w.url}${fileHash(w)}`);
         await listening(page, w, { status: 403, html: '<html>blocked</html>', hold: true });
@@ -1068,8 +1210,51 @@ test.describe('a take being transcribed outlives full screen’s card', () => {
         await writeTheReply(page);
         await expect(box(page)).toHaveValue('Before.');
         w.send({ release: true });
-        await expect(pane(page).locator('.ib-error')).toContainText('Dictation failed');
+        await expect(missed(page)).toBeVisible();
         await expect(box(page)).toHaveValue('Before.');
+        w.send({ upstream: [{ text: 'Second try.' }] });
+        await missed(page).locator('[data-late-voice-retry]').click();
+        await expect(box(page)).toHaveValue('Before. Second try.');
+        await expect(missed(page)).toHaveCount(0);
+        await finish(page, context);
+      });
+
+      test('the answer fails after the person moved on: coming back, the thread says so, and Discard ends it', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await transcribing(page, w, { status: 403, html: '<html>blocked</html>', hold: true });
+        await page.evaluate((hash) => (location.hash = hash), `#thread=${w.threads[0]}`);
+        await expect(pane(page)).toContainText('Voice thread 0');
+        w.send({ release: true });
+        await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+        await page.waitForTimeout(300);
+        await expect(missed(page)).toHaveCount(0);
+        await page.evaluate((hash) => (location.hash = hash), `#thread=${w.filed.thread}`);
+        await expect(missed(page)).toBeVisible();
+        await missed(page).locator('[data-late-voice-discard]').click();
+        await expect(missed(page)).toHaveCount(0);
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+        await finish(page, context);
+      });
+
+      test('the draft will not take the words after the person moved on: coming back, Retry lands them', async () => {
+        const { w, context, page } = await start();
+        await page.goto(`${w.url}${fileHash(w)}`);
+        await transcribing(page, w);
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before.');
+        await page.evaluate(() => (location.hash = ''));
+        await expect(pane(page)).toHaveCount(0);
+        await page.route('**/draft', (route) => (route.request().method() === 'GET' ? route.continue() : route.fulfill({ status: 500, contentType: 'application/json', body: '{"error":"down"}' })));
+        w.send({ release: true });
+        await expect.poll(() => w.upstreamCalls().length).toBeGreaterThan(0);
+        await page.waitForTimeout(500);
+        await page.unroute('**/draft');
+        expect(await draftOf(w, w.filed.thread)).toBe('Before.');
+        await page.evaluate((hash) => (location.hash = hash), `#thread=${w.filed.thread}`);
+        await expect(missed(page)).toBeVisible();
+        await missed(page).locator('[data-late-voice-retry]').click();
+        await expect(missed(page)).toHaveCount(0);
+        await expect.poll(() => draftOf(w, w.filed.thread)).toBe('Before. Landed.');
         await finish(page, context);
       });
 

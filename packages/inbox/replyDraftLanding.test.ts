@@ -1,11 +1,19 @@
 /**
- * Dictated words whose thread is no longer open join that thread's draft (`landWordsInReplyDraft`): after what the
- * draft holds then, read again if another save got there first, and not at all once this window discarded it.
+ * Dictated words whose box is not open join that thread's draft (`landWordsInReplyDraft`): after what the draft holds
+ * then, read again if another save got there first, after a Send on its way, and not at all if this window discards the
+ * draft once they have started. Words that could not be saved stay on offer (lateVoice.ts).
  */
-import { expect, test } from 'bun:test';
+import { beforeEach, expect, test } from 'bun:test';
 import type { ReplyDraftStore, ReplyDraftSaveInput } from '@plannotator/core/inbox-reply-draft';
 import type { InboxReplyDraft } from '@plannotator/core/inbox-types';
-import { landWordsInReplyDraft } from './replyDraft';
+import { clearLateVoiceMiss, lateVoiceMissOf } from './lateVoice';
+import { landWordsInReplyDraft, replyDraftDiscarded, replySendStarts } from './replyDraft';
+
+beforeEach(() => clearLateVoiceMiss('thr_a'));
+
+const settle = async () => {
+  for (let i = 0; i < 12; i++) await Promise.resolve();
+};
 
 const draft = (body: string, updated_at: string) => ({ body, updated_at }) as InboxReplyDraft;
 
@@ -42,4 +50,74 @@ test('another save got there first: read again, and the words join that one', as
   const { store, saves } = storeOver([draft('Before.', 't1'), draft('Before. Typed.', 't2')], 1);
   await landWordsInReplyDraft('thr_a', 'Landed.', store);
   expect(saves[0]!.input).toMatchObject({ body: 'Before. Typed. Landed.', base: 't2' });
+});
+
+test('a Send on its way: nothing is read until it ends, so the words never join what it carries', async () => {
+  let reads = 0;
+  const { store, saves } = storeOver([null]);
+  const counted: ReplyDraftStore = {
+    ...store,
+    read: (thread) => {
+      reads += 1;
+      return store.read(thread);
+    },
+  };
+  const firstEnds = replySendStarts('thr_a');
+  const secondEnds = replySendStarts('thr_a');
+  const landed = landWordsInReplyDraft('thr_a', 'Landed.', counted);
+  await settle();
+  firstEnds();
+  await settle();
+  expect(reads).toBe(0);
+  secondEnds();
+  await landed;
+  expect(saves[0]!.input).toMatchObject({ body: 'Landed.' });
+});
+
+test('a discard once they have started stops them, and one before does not', async () => {
+  const before = storeOver([draft('Before.', 't1')]);
+  replyDraftDiscarded('thr_a');
+  await landWordsInReplyDraft('thr_a', 'Landed.', before.store);
+  expect(before.saves).toHaveLength(1);
+
+  const after = storeOver([draft('Before.', 't1')]);
+  let answer: (value: InboxReplyDraft | null) => void = () => {};
+  const held: ReplyDraftStore = { ...after.store, read: () => new Promise((done) => (answer = done)) };
+  const landed = landWordsInReplyDraft('thr_a', 'Landed.', held);
+  await settle();
+  replyDraftDiscarded('thr_a');
+  answer(draft('Before.', 't1'));
+  await landed;
+  expect(after.saves).toHaveLength(0);
+  expect(lateVoiceMissOf('thr_a')).toBeNull();
+});
+
+test('a read or a save that fails stays on offer, and Retry lands the same words', async () => {
+  for (const broken of ['read', 'save'] as const) {
+    clearLateVoiceMiss('thr_a');
+    const { store, saves } = storeOver([draft('Before.', 't1')]);
+    const failing: ReplyDraftStore = {
+      ...store,
+      [broken]: () => Promise.reject(Object.assign(new Error('down'), { code: 'internal' })),
+    };
+    await landWordsInReplyDraft('thr_a', 'Landed.', failing);
+    expect(saves).toHaveLength(0);
+    const miss = lateVoiceMissOf('thr_a');
+    expect(miss?.retry).toBeFunction();
+    // Back up: Retry goes through the store it was given.
+    if (broken === 'read') failing.read = store.read;
+    else failing.save = store.save;
+    miss!.retry!();
+    await settle();
+    await settle();
+    expect(lateVoiceMissOf('thr_a')).toBeNull();
+    expect(saves[0]!.input).toMatchObject({ body: 'Before. Landed.' });
+  }
+});
+
+test('refused every time: it stays on offer rather than going quiet', async () => {
+  const { store, saves } = storeOver([draft('Before.', 't1')], 99);
+  await landWordsInReplyDraft('thr_a', 'Landed.', store);
+  expect(saves).toHaveLength(0);
+  expect(lateVoiceMissOf('thr_a')?.retry).toBeFunction();
 });
