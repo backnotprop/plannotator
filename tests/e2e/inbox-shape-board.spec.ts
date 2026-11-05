@@ -8,7 +8,7 @@
  *  - a nested SVG clips (a crop stays cropped), and a lone `class="dash"` is an outline, not a solid box;
  *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
  *  - a number shows its bubble on hover, with its picture and line;
- *  - What to know reads as paragraphs; a board saved with Requirements still opens, its words all there;
+ *  - `views.know` reads as paragraphs under the drawing, with no tab of its own; a board saved with Requirements still opens, its words all there;
  *  - a phone pans a canvas with no tall drawing.
  *
  * Build first: see inbox.spec.ts.
@@ -151,7 +151,7 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   expect(styles.href).toContain('/files/');
   expect((await page.request.get(new URL(styles.href!, w.url).href)).status()).toBe(200);
 
-  await page.locator('.shp-view:not(.leaving) [data-ref="1"]').hover();
+  await page.locator('.shp-view:not(.leaving) .shp-drawn [data-ref="1"]').hover();
   const peek = page.locator('.shp-peek');
   await expect(peek).toContainText('One line about it.');
   await expect(peek.locator('.shp-peek-crop')).toBeVisible();
@@ -170,14 +170,24 @@ test('a nested svg clips, a lone dash is an outline, a kept picture loads, a num
   await context.close();
 });
 
-test('What to know is paragraphs; a board saved with Requirements still opens with all its words', async ({ browser }) => {
+test('The words are paragraphs under the drawing, in its scroll, with no tab; a board saved with Requirements still opens with all its words', async ({ browser }) => {
   const { context, page, problems } = await openBoard(browser, store('know', board));
-  await view(page, 'What to know');
-  const know = page.locator('.shp-know');
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'Shape', exact: true })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.shp-dock').getByRole('button', { name: 'What to know', exact: true })).toHaveCount(0);
+  const know = page.locator('.shp-view:not(.leaving) > .shp-drawn + .shp-know');
   await expect(know.locator('p')).toHaveCount(2);
   await expect(know.locator('p').first()).toContainText('The first thing to know');
   await expect(know.locator('.shp-rb')).toHaveText('1');
   expect(await know.locator('p').first().evaluate((p) => parseFloat(getComputedStyle(p).fontSize))).toBeGreaterThanOrEqual(16);
+  // Under the drawing itself, not a screen below it, and the view is what scrolls.
+  const place = await know.evaluate((el) => {
+    const frame = el.previousElementSibling!.getBoundingClientRect();
+    const view = el.closest('.shp-view')!.getBoundingClientRect();
+    return { gap: el.getBoundingClientRect().top - frame.bottom, framed: frame.height, room: view.height };
+  });
+  expect(place.gap).toBeGreaterThanOrEqual(0);
+  expect(place.gap).toBeLessThan(48);
+  expect(place.framed).toBeLessThan(place.room);
   await context.close();
   expect(problems).toEqual([]);
 
@@ -191,8 +201,7 @@ test('What to know is paragraphs; a board saved with Requirements still opens wi
   writeFileSync(file, `${JSON.stringify(v)}\n`);
 
   const old = await openBoard(browser, id);
-  await view(old.page, 'What to know');
-  const words = old.page.locator('.shp-know');
+  const words = old.page.locator('.shp-view:not(.leaving) > .shp-drawn + .shp-know');
   for (const line of ['What I understand', 'Who gets it', 'At least 2 days', 'Never a guest', 'Open:', 'Nothing waits.']) await expect(words).toContainText(line);
   expect(old.problems).toEqual([]);
   await old.context.close();

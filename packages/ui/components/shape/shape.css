@@ -125,8 +125,14 @@
 .shp-tstrip > div { flex-wrap: nowrap !important; }
 .shp-tstrip button { flex-shrink: 0; }
 
-/* ── What to know: prose, set for reading ── */
+/* ── views.know: prose, set for reading, under the drawing or (with none) as the view ── */
 .shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
+.shp-drawn.followed { min-height: 0; }
+.shp-drawn.canvas.followed:not(.tall) { height: auto; }
+.shp-drawn.followed + .shp-know { margin-top: 18px; scroll-margin-top: 14px; font-size: 16px; }
+.shp-drawn.canvas.followed:not(.tall) + .shp-know { margin-inline: auto; }
+/* A scrollbar that comes and goes would rescale the canvas that made it come and go. */
+.shp-view:has(> .shp-drawn.followed) { scrollbar-gutter: stable; }
 .shp-know p { margin: 0 0 1em; padding: 2px 0; }
 .shp-know p:last-child { margin-bottom: 0; }
 /* An old board's Requirements: plain lines under their group's name. */

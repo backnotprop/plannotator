@@ -28,7 +28,7 @@ export const SHAPE_FORMAT_VERSION = 1;
 
 export type ShapeViewId = 'picture' | 'how' | 'know' | 'code';
 
-/** The four views, in the dock's order. Their labels are the product's words. */
+/** The views a board holds. Their labels are the words `shape update` reports to the agent; the bar's words are ShapeSurface's. */
 export const SHAPE_VIEWS: readonly { id: ShapeViewId; label: string }[] = [
   { id: 'picture', label: 'Picture' },
   { id: 'how', label: 'How it works' },

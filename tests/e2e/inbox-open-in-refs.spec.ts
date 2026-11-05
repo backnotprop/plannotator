@@ -382,10 +382,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
       await expect(popout).toBeVisible();
 
-      // What to know: a code span opens the list at its line. One that is not a file stays a plain span.
+      // The words under the drawing: a code span opens the list at its line. One that is not a file stays a plain span.
       await page.reload();
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-      await expect(page.locator('.shp-view.v-know.drawn')).toBeVisible(); // its fade in has finished, for the picture
+      await expect(page.locator('.shp-view.v-picture.drawn')).toBeVisible(); // its fade in has finished, for the picture
       const knowSpan = page.locator('.shp-know [data-open-in-span="src/ledger.ts"]');
       await knowSpan.click();
       const knowMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
@@ -407,7 +406,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await page.keyboard.press('Escape');
       await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
       // Annotating, a click on the words picks them: no menu.
-      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+      await page.locator('.shp-tbtn', { hasText: 'Shape' }).first().click();
       await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
       await expect(page.locator('.shp-know [data-open-in-span]')).toHaveCount(0);
       await page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }).click();
@@ -569,7 +568,6 @@ test('an agent in a linked worktree: its message, review and board open the work
 
     // The board's and the review's own words start in the worktree too. (With the panel open, a click on the board only closes the panel.)
     await page.reload();
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
     await page.locator('.shp-know [data-open-in-span="src/ledger.ts"]').click();
     expect(await pick('src/ledger.ts')).toBe(revealed(inTree('src/ledger.ts')));
     await page.goto(`${world.url}#thread=${world.treeReviewThread}`);
@@ -622,7 +620,7 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
-    await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
+    await page.locator('.shp-sidep .shp-icon-btn').click();
     await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
     await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
     // A guide opens as a plain guide with Code review off, and its words stay words.
