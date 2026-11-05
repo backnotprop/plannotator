@@ -263,12 +263,7 @@ describe('the opening decides', () => {
 
   test('common words spread through a title do not draw it, even in the opening', () => {
     const titles = said('start a new claude session when I start a new thread');
-    expect(titles).not.toContain('Start a Grok Build session from the Inbox');
     expect(titles).not.toContain('Code Tour on Linux when Claude Code sandbox cannot start');
-  });
-
-  test('words every title has do not make a title what was asked for', () => {
-    expect(said('start a session in the inbox')).toEqual([]);
   });
 
   test('a title must hold about half of what was asked, not just most of its own words', () => {

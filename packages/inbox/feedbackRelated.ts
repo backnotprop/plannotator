@@ -224,12 +224,9 @@ function matches(index: RelatedIndex, text: string, later: boolean): { entry: En
     }
     // The gate: a word in common is not enough.
     const realInTitle = real.filter((term) => entry.terms.includes(term)).length;
-    // Words every title has do not make a title what was asked for: "start a session" is not "Start a Grok Build session".
-    const titleWords = entry.terms.filter((term) => !WEAK.has(term));
-    const askedOf = (terms: string[]) => (terms.length ? terms.filter((term) => query.includes(term)).length / terms.length : 1);
-    const titleAsked = entry.terms.length ? askedOf(entry.terms) : 0;
+    const titleAsked = entry.terms.length ? entry.terms.filter((term) => query.includes(term)).length / entry.terms.length : 0;
     // "Mark unread": the title is what they asked for, in its own words and in about half of theirs.
-    const snug = new Set(entry.terms).size >= 2 && titleAsked >= 0.6 && askedOf(titleWords) >= 0.5 && realInTitle >= 1 && query.filter((term) => entry.terms.includes(term)).length >= query.length / 2;
+    const snug = new Set(entry.terms).size >= 2 && titleAsked >= 0.6 && realInTitle >= 1 && query.filter((term) => entry.terms.includes(term)).length >= query.length / 2;
     // Two of three words through a long title, in the other order, are a coincidence.
     const firsts = real.map((term) => entry.terms.indexOf(term)).filter((at) => at >= 0);
     const sameOrder = firsts.every((at, n) => n === 0 || at > firsts[n - 1]!);
