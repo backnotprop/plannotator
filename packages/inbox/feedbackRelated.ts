@@ -10,10 +10,12 @@
  * real requests gets a line, and most of those are right.
  */
 
-/** A feature people ask for by another name. Whole phrases only: a single word fires under praise and bug reports ("this tool is trash"), and then says "Already there". */
+/** A feature people ask for by another name. Whole phrases only: a single word fires under praise and bug reports ("this tool is trash"), and then show up as an answer. */
 export interface RelatedFeature {
   title: string;
   phrases: string[];
+  /** One line under "These might help": what it is or where it lives, never that it answers what was asked. */
+  reason: string;
   url: string;
 }
 export interface RelatedRelease {
@@ -36,7 +38,10 @@ export interface RelatedData {
 export interface RelatedLink {
   /** Whole: the row cuts it to one line, and the window offers the rest on hover. */
   title: string;
+  reason: string;
   href: string;
+  /** A feature shows its reason beside its name; a release note or issue is whole in its title, and says its reason to a screen reader and on the Tip. */
+  kind: Kind;
 }
 
 const REPO_URL = 'https://github.com/backnotprop/plannotator';
@@ -79,7 +84,7 @@ function stem(word: string): string {
   return word;
 }
 
-const words = (text: string): string[] => text.toLowerCase().normalize('NFKD').match(/[\p{L}\p{N}]+/gu) ?? [];
+const words = (text: string): string[] => text.toLowerCase().normalize('NFKD').replace(/\p{M}/gu, '').match(/[\p{L}\p{N}]+/gu) ?? [];
 
 function tokens(text: string): string[] {
   return words(text)
@@ -100,7 +105,7 @@ export function isPublicRelatedUrl(url: string): boolean {
   }
 }
 
-type Kind = 'feature' | 'release' | 'issue';
+export type Kind = 'feature' | 'release' | 'issue';
 
 interface Entry {
   kind: Kind;
@@ -118,16 +123,16 @@ export interface RelatedIndex {
 
 export function relatedIndex(data: RelatedData): RelatedIndex {
   const entries: Entry[] = [];
-  const add = (kind: Kind, title: string, href: string, extra = '', phrases: string[][] = []) => {
+  const add = (kind: Kind, title: string, reason: string, href: string, extra = '', phrases: string[][] = []) => {
     if (!isPublicRelatedUrl(href)) return;
-    entries.push({ kind, link: { title: title.replace(/\.$/, ''), href }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
+    entries.push({ kind, link: { title: title.replace(/\.$/, ''), reason, href, kind }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
   };
-  for (const feature of data.features) add('feature', feature.title, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
+  for (const feature of data.features) add('feature', feature.title, feature.reason, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
   for (const release of data.releases) {
-    if (/^v\d+\.\d+\.\d+$/.test(release.version)) add('release', release.title, `${REPO_URL}/releases/tag/${release.version}`);
+    if (/^v\d+\.\d+\.\d+$/.test(release.version)) add('release', release.title, `Release note, ${release.version}`, `${REPO_URL}/releases/tag/${release.version}`);
   }
   for (const issue of data.issues) {
-    if (Number.isSafeInteger(issue.number) && issue.number > 0) add('issue', issue.title, `${REPO_URL}/issues/${issue.number}`, issue.prWords);
+    if (Number.isSafeInteger(issue.number) && issue.number > 0) add('issue', issue.title, `Open issue #${issue.number}`, `${REPO_URL}/issues/${issue.number}`, issue.prWords);
   }
   const documents = new Map<string, number>();
   let length = 0;

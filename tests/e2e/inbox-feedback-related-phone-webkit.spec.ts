@@ -142,6 +142,16 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     await showsInSheet(page, '[data-feedback-send]');
   });
 
+  test("a feature's sentence over the keyboard: the same one row, and Send still shows", async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    await page.keyboard.type('need a done button', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    await page.locator('[data-feedback-related] .ib-fbk-rel-line').evaluate((line) => line.append('A sentence far too long for any row of this form, '.repeat(6)));
+    expect((await page.locator('[data-feedback-related] li').boundingBox())!.height).toBe(24);
+    await showsInSheet(page, '[data-feedback-send]');
+  });
+
   test('over the keyboard the small row is still a 44 px target, and the tap opens the link', async ({ page }) => {
     await openSheet(page);
     await keyboardUp(page);

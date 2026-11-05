@@ -71,6 +71,21 @@ describe('release notes', () => {
     expect(data.releases.map((line) => line.title)).toEqual(['A real feature']);
   });
 
+  test('newest first by version number, and a title is plain words', () => {
+    const data = buildRelatedData({
+      releases: [
+        { tag: 'v0.28.9', body: notes('### [Quick **labels**](https://example.com) `now`') },
+        { tag: 'v0.28.10', body: notes('### A later thing') },
+      ],
+      issues: [],
+      pulls: [],
+    });
+    expect(data.releases).toEqual([
+      { title: 'A later thing', version: 'v0.28.10' },
+      { title: 'Quick labels now', version: 'v0.28.9' },
+    ]);
+  });
+
   test('a repeated heading keeps the newest release that has it', () => {
     const data = buildRelatedData({
       releases: [

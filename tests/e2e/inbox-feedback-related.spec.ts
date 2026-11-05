@@ -124,13 +124,13 @@ test('no match leaves the form laid out exactly as it was', async ({ page }) => 
 
 const LONG = 'A title far too long for any row of this form, '.repeat(6);
 
-/** Every row and its link: what a long title could push out of shape. */
+/** Every row and its one line: what long words could push out of shape. */
 const rows = (page: Page) =>
   page.locator('[data-feedback-related] li').evaluateAll((items) =>
     items.map((li) => {
-      const a = li.querySelector('a')!;
+      const line = li.querySelector('.ib-fbk-rel-line')!;
       const row = li.getBoundingClientRect();
-      return { height: row.height, inside: a.getBoundingClientRect().right <= row.right + 0.5, cut: a.scrollWidth > a.clientWidth };
+      return { height: row.height, inside: line.getBoundingClientRect().right <= row.right + 0.5, cut: line.scrollWidth > line.clientWidth };
     }),
   );
 
@@ -186,17 +186,55 @@ test('a click in the instant the list appears opens no page', async ({ page, con
   expect(opened).toEqual([]);
 });
 
-test('a name that is cut offers the rest on hover; one that fits does not', async ({ page }) => {
+test('the list is parsed at the first open, not when the page loads, and only once', async ({ page }) => {
+  await page.addInitScript(() => {
+    const parse = JSON.parse;
+    (window as unknown as { parsed: number }).parsed = 0;
+    JSON.parse = (text: string, ...rest: []) => {
+      if (typeof text === 'string' && text.includes('"features"') && text.includes('"releases"')) (window as unknown as { parsed: number }).parsed += 1;
+      return parse(text, ...rest);
+    };
+  });
+  const parsed = () => page.evaluate(() => (window as unknown as { parsed: number }).parsed);
+  await page.goto(url);
+  await page.locator('[data-feedback-nav]').waitFor();
+  await page.waitForTimeout(500);
+  expect(await parsed()).toBe(0);
+  await page.locator('[data-feedback-nav]').click();
+  await box(page).focus();
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  expect(await parsed()).toBe(1);
+  await page.keyboard.press('Escape');
+  await page.locator('[data-feedback-nav]').click();
+  await box(page).focus();
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  expect(await parsed()).toBe(1);
+});
+
+test('a line that is cut offers the rest on hover; one that fits does not', async ({ page }) => {
   await openForm(page);
   await page.keyboard.type('need a done button', { delay: 15 });
   await expect(lines(page).first()).toBeVisible();
-  await lines(page).first().hover();
+  const line = page.locator('[data-feedback-related] .ib-fbk-rel-line');
+  await line.hover();
   await page.waitForTimeout(400);
   await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
   await page.mouse.move(0, 0);
-  await lines(page).first().evaluate((a) => (a.style.maxWidth = '24px'));
-  await lines(page).first().hover();
-  await expect(page.locator('[data-pn-tooltip]')).toContainText('Archive');
+  await line.evaluate((el) => (el.style.maxWidth = '80px'));
+  await line.hover();
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('Archive. In a thread');
+});
+
+test("a feature's sentence stays on the one line: long words only move where it is cut", async ({ page }) => {
+  await openForm(page);
+  await page.keyboard.type('need a done button', { delay: 15 });
+  await expect(lines(page).first()).toBeVisible();
+  const row = page.locator('[data-feedback-related] li');
+  const before = (await row.boundingBox())!.height;
+  await row.locator('.ib-fbk-rel-line').evaluate((line, long) => line.append(long), LONG);
+  expect((await row.boundingBox())!.height).toBe(before);
 });
 
 test('a line shows under the box: the box stays put and the dialog grows down only', async ({ page }) => {

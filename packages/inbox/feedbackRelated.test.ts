@@ -15,10 +15,10 @@ const DOC = 'https://plannotator.ai/docs/reference/inbox/#what-you-see';
 const release = (title: string, version = 'v0.28.40') => ({ title, version });
 const FROZEN: RelatedData = {
   features: [
-    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'move to trash'], url: DOC },
-    { title: 'Dictate your replies', phrases: ['by voice', 'use microphone'], url: DOC },
-    { title: 'Settings, Rows', phrases: ['compact row', 'row too cramped'], url: DOC },
-    { title: 'Over your tailnet', phrases: ['use on my phone', 'mobile app'], url: DOC },
+    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'move to trash'], reason: 'In the window.', url: DOC },
+    { title: 'Dictate your replies', phrases: ['by voice', 'use microphone'], reason: 'In the window.', url: DOC },
+    { title: 'Settings, Rows', phrases: ['compact row', 'row too cramped'], reason: 'In the window.', url: DOC },
+    { title: 'Over your tailnet', phrases: ['use on my phone', 'mobile app'], reason: 'In the window.', url: DOC },
   ],
   releases: [
     release('Mark unread'),
@@ -125,13 +125,14 @@ describe('it finds what it is for', () => {
   test('an open bug, also through the words of an open PR that cites it', () => {
     expect(relatedLinks(index, 'the inbox uses too much memory').map((link) => link.href)).toEqual([expect.stringMatching(/\/issues\/2593$/)]);
     expect(relatedLinks(index, 'blank page after update').map((link) => link.href)).toEqual([expect.stringMatching(/\/issues\/2594$/)]);
+    expect(relatedLinks(index, 'blank page after update').map((link) => link.reason)).toEqual(['Open issue #2594']);
   });
 
   test('notes, issues and features each have their limit: two, one and one', () => {
     const many: RelatedData = {
       features: [
-        { title: 'One feature', phrases: ['snooze a thread'], url: DOC },
-        { title: 'Another feature', phrases: ['snooze a thread'], url: DOC },
+        { title: 'One feature', phrases: ['snooze a thread'], reason: 'In the window.', url: DOC },
+        { title: 'Another feature', phrases: ['snooze a thread'], reason: 'In the window.', url: DOC },
       ],
       releases: [...Array.from({ length: 9 }, (_, n) => release(`Snooze a thread ${n + 10}`)), ...FROZEN.releases],
       issues: Array.from({ length: 9 }, (_, n) => ({ title: `Snooze a thread ${n + 20}`, number: n + 20 })),
@@ -163,7 +164,7 @@ describe('the opening decides', () => {
     ...FROZEN,
     features: [
       ...FROZEN.features,
-      { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread'], url: DOC },
+      { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread'], reason: 'In the window.', url: DOC },
     ],
     releases: [
       release('Snoozing the thread you have open moves its row out of the list right away.'),
@@ -186,9 +187,9 @@ describe('the opening decides', () => {
   const loose = relatedIndex(LOOSE);
   const said = (text: string) => relatedLinks(loose, text).map((link) => link.title);
 
-  const ASK = 'Please let threads be marked as unread, or set aside as waiting on me. I read through plenty of threads each morning and by noon I no longer know which replies I owe. Replies staying at the top is fine and snoozing is close, but picking a time is too much, and the thread you have open should stay in the list too.';
-  const DONE = 'I need a done button on each thread. My agents leave questions open and the open-questions list keeps growing, so I skip questions or ask again later. I only want to say that I am finished from my side.';
-  const BUG = 'A thread left open stops refreshing when something new comes in. Going back to the list and in again brings it up. Seen with question cards and with large messages through the mcp, after the window has been idle for a while. A right-click on the thread does not help.';
+  const ASK = "Could I mark a thread as unread, so it waits for me? Mornings go by and I lose track of who is owed an answer. Snoozing is near, but a date is more than I want, and the one in front of me should stay in its list.";
+  const DONE = "A done button per thread would be nice. Agents ask things, the open-questions list gets long, and questions end up skipped or asked over again. One press to say finished is all.";
+  const BUG = "A thread stays stale while it is open. Leaving for the list and coming back shows what is new. Question cards do it, large messages through the mcp do it, mostly once the window sits idle. Right-click does nothing for it.";
 
   test('a long ask keeps the answer in its opening line, whatever follows', () => {
     expect(said(ASK)).toEqual(['Mark unread']);
@@ -250,7 +251,7 @@ describe('the opening decides', () => {
   });
 
   test('a title named whole holds however long its line gets', () => {
-    const message = 'Support Jira links on Board cards as references so the planning stays in one place and I can follow my tickets from there';
+    const message = 'Jira links on Board cards would spare my whole team from copying tickets across two separate tools every morning and keep each plan nearer its source';
     const typed = message.split(' ');
     const shown = typed.map((_, n) => said(typed.slice(0, n + 1).join(' ')).includes('Jira links on Board cards'));
     expect(shown.indexOf(true)).toBeGreaterThan(-1);
@@ -259,13 +260,11 @@ describe('the opening decides', () => {
 
   test('an opening ended by "/ /": what it found holds through a long tail, word by word', () => {
     const message =
-      "Support Jira ticket URLs as Board card references / / The Board presently rejects those URLs in the reference field, and the docs only mention GitHub and GitLab. We plan every piece of work in Jira, so most of what a card should point to lives there and not in a repository. When I paste a ticket address the field turns red and says it does not recognize the host, and nothing is saved. I have tried the short ticket key and the long address with the project in it, and neither one gets through. It would help a lot if the card showed the ticket and its status beside the title, the way it does for a pull request, and if an agent could read the ticket when it picks up the card.";
+      "Let Board cards point at Jira tickets / / Pasting one into a card gets refused at the moment, while GitHub ones work. Our planning happens over there, so most cards need a pointer to something outside any repository. The error turns up as soon as the address goes in, and the card keeps nothing. Short keys and long addresses both fail the same way. For now the address sits in the notes as plain text, where neither people nor agents ever follow it. Showing the ticket and how far along it is would be ideal, much as a pull request does on a card, and an agent picking the card up could then read it too.";
     const typed = message.split(' ');
     const lines = typed.map((_, n) => said(typed.slice(0, n + 1).join(' ')).join(' | '));
-    const from = lines.indexOf('Jira links on Board cards');
-    expect(from).toBeGreaterThan(-1);
-    expect(from).toBeLessThan(10);
-    expect(lines.slice(from).every((line) => line === 'Jira links on Board cards')).toBe(true);
+    // From the last word of the opening to the end.
+    expect(lines.slice(typed.indexOf('/') - 1).every((line) => line === 'Jira links on Board cards')).toBe(true);
   });
 
   test('a first line with no full stop is the opening too', () => {
@@ -308,6 +307,17 @@ describe('the opening decides', () => {
     expect(said('my agents write all day and by the evening I have lost track of what they wanted and mark unread')).toEqual(['Mark unread']);
   });
 
+  test('naming a title of common words is not enough in a later part: it must also score', () => {
+    const common = Array.from({ length: 200 }, (_, n) => release(`Review agent file list number ${n}`));
+    const index = relatedIndex({ ...LOOSE, releases: [release('Review agent file list'), ...common, ...LOOSE.releases] });
+    expect(relatedLinks(index, 'Review agent file list').map((link) => link.title)).toContain('Review agent file list');
+    expect(relatedLinks(index, 'The sidebar is fine and works well. Can we review agent file list').map((link) => link.title)).toEqual([]);
+  });
+
+  test('accents fold: an accented word is the same word', () => {
+    expect(said('need a dóne button')).toEqual(['Archive']);
+  });
+
   test('a later part never replaces, and never adds a second line', () => {
     const text = 'I need a done button on each thread. It would help with replying when the agent session has ended. And a code tour on linux when claude code sandbox cannot start.';
     expect(said(text)).toEqual(['Archive']);
@@ -341,6 +351,8 @@ describe('a link goes only to a public address', () => {
     ['https://plannotator.ai/docs/reference/inbox/#what-you-see', true],
     ['http://github.com/backnotprop/plannotator/issues/1', false],
     ['https://github.com/someone-else/plannotator/issues/1', false],
+    ['https://github.com:8443/backnotprop/plannotator/issues/1', false],
+    ['https://plannotator.ai:8443/docs/reference/inbox/', false],
     ['https://github.com.evil.example/backnotprop/plannotator/', false],
     ['https://user:secret@github.com/backnotprop/plannotator/', false],
     ['https://plannotator.ai/somewhere', false],
@@ -354,7 +366,7 @@ describe('a link goes only to a public address', () => {
 
   test('a bad address, version or number in the file draws no link at all', () => {
     const bad = relatedIndex({
-      features: [{ title: 'Snooze a thread', phrases: ['snooze'], url: 'https://evil.example/' }],
+      features: [{ title: 'Snooze a thread', phrases: ['snooze'], reason: 'In the window.', url: 'https://evil.example/' }],
       releases: [{ title: 'Snooze a thread', version: '../../evil' }, ...FROZEN.releases.filter((line) => line.title !== 'Snooze a thread')],
       issues: [{ title: 'Snooze a thread', number: -1 }],
     });
@@ -371,7 +383,11 @@ describe('a link goes only to a public address', () => {
 describe('the shipped file holds public titles and nothing else', () => {
   const data = shipped as RelatedData;
   test('only these fields: no bodies, authors, dates or labels', () => {
-    for (const row of data.features) expect(Object.keys(row).sort()).toEqual(['phrases', 'title', 'url']);
+    for (const row of data.features) {
+      expect(Object.keys(row).sort()).toEqual(['phrases', 'reason', 'title', 'url']);
+      // A word match cannot back a claim that this is what they asked for.
+      expect(row.reason).not.toMatch(/already there/i);
+    }
     for (const row of data.releases) expect(Object.keys(row).sort()).toEqual(['title', 'version']);
     for (const row of data.issues) expect(Object.keys(row).sort().filter((key) => key !== 'prWords')).toEqual(['number', 'title']);
   });

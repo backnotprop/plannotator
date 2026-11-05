@@ -424,17 +424,27 @@ describe.skipIf(!hasDom)('These might help under the box', () => {
     expect(document.activeElement === dialog.box()).toBe(true);
   });
 
-  test('every line, whatever its kind, is only its name: a link and nothing beside it', async () => {
-    for (const words of ['quick labels please', 'need a done button']) {
-      await typeAndPause(words);
-      const rows = [...list().querySelectorAll('li')];
-      expect(rows.length).toBeGreaterThan(0);
-      for (const row of rows) {
-        const link = row.querySelector('a')!;
-        expect(row.textContent).toBe(link.textContent);
-        expect(row.querySelector('svg') === null).toBe(true);
-        expect(row.hasAttribute('title') || link.hasAttribute('title')).toBe(false);
-      }
+  test('a feature: its name is the link and its sentence follows; no mark, and no native title', async () => {
+    await typeAndPause('need a done button');
+    const row = list().querySelector('li')!;
+    const link = row.querySelector('a')!;
+    expect(link.textContent).toBe('Archive');
+    expect(row.textContent!.startsWith('Archive. ')).toBe(true);
+    expect(row.textContent!.length).toBeGreaterThan('Archive. '.length);
+    expect(row.querySelector('svg') === null).toBe(true);
+    expect(row.querySelector('[title]') === null).toBe(true);
+  });
+
+  test('a release note or an issue: only its title shows, and a screen reader hears what it is', async () => {
+    await typeAndPause('quick labels please');
+    const rows = [...list().querySelectorAll('li')];
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const link = row.querySelector('a')!;
+      expect(row.textContent).toBe(link.textContent);
+      expect(link.getAttribute('aria-label')).toMatch(/(Release note, v[\d.]+|Open issue #\d+)$/);
+      expect(row.querySelector('svg') === null).toBe(true);
+      expect(row.querySelector('[title]') === null).toBe(true);
     }
   });
 

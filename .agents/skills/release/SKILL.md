@@ -139,7 +139,7 @@ The DeepSeek Harness plugin is checked like the other packages: the release work
 
 Do not bump the VS Code extension (`apps/vscode-extension/package.json`) — it has independent versioning. The Droid manifest (`apps/droid-plugin/.factory-plugin/plugin.json`) is exempt too: Droid tracks the plugin by the marketplace's git commit and treats `version` as metadata.
 
-### Refresh the Feedback form's "Might be related" list
+### Refresh the Feedback form's "These might help" list
 
 After the bump, and with `RELEASE_NOTES_v<VERSION>.md` in the repo root, run:
 

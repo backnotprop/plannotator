@@ -195,10 +195,13 @@ export function useFeedbackRelated(options: {
   return shown;
 }
 
+/** A line's words in full: the rest when it is cut, and a release note's or issue's name for a screen reader. */
+const whole = (link: RelatedLink) => `${link.title}${/[…?!]$/.test(link.title) ? ' ' : '. '}${link.reason}`;
+
 /**
- * Each line is only a name, a link, cut at its end: the height never depends on
- * the title. Always in the DOM so a screen reader hears the lines arrive; empty,
- * it takes no room.
+ * One line each, cut at its end, so the height never depends on the words: the
+ * name is the link, and a feature's one sentence follows it. Always in the DOM
+ * so a screen reader hears the lines arrive; empty, it takes no room.
  */
 export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; listRef: RefObject<HTMLDivElement | null> }) {
   const changedAt = useRef<number | null>(null);
@@ -229,10 +232,13 @@ export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; list
           <ul>
             {links.map((link) => (
               <li key={link.href + link.title}>
-                <Tip content={link.title} cut>
-                  <a href={link.href} target="_blank" rel="noopener noreferrer">
-                    {link.title}
-                  </a>
+                <Tip content={whole(link)} cut>
+                  <span className="ib-fbk-rel-line">
+                    <a href={link.href} target="_blank" rel="noopener noreferrer" aria-label={link.kind === 'feature' ? undefined : whole(link)}>
+                      {link.title}
+                    </a>
+                    {link.kind === 'feature' && `. ${link.reason}`}
+                  </span>
                 </Tip>
               </li>
             ))}
