@@ -693,10 +693,9 @@ const ERROR_STATUS: Record<string, number> = {
   card_backlog_person_only: 409,
   card_dropped_by_person: 409,
   card_person_only: 403,
-  // The Board's initiatives (approval "board-initiatives"): only the person's; one name each.
+  // The Board's initiatives (approval "board-initiatives"): one name each.
   initiative_not_found: 404,
   initiative_exists: 409,
-  initiative_limit: 409,
   initiative_person_only: 403,
   // Over your tailnet (packages/server/inbox-tailscale.ts).
   tailscale_env_decides: 409,
@@ -4223,7 +4222,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         return json({ initiative: store.createInitiative({ name: body.name, by: { kind: "person" } }) });
       }
-      // One initiative: `op` rename (`name`) or delete (its cards read as in none; no card is written).
+      // One initiative: `op` rename (`name`), delete (its cards read as in none; no card is written) or restore (the window's Undo).
       const initiativeAt = /^\/api\/inbox\/initiatives\/([^/]+)$/.exec(path);
       if (initiativeAt) {
         if (req.method !== "POST") return json({ error: "Use POST." }, 405);
@@ -4233,7 +4232,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         if (body.op === "rename") return json({ initiative: store.renameInitiative(id, body.name) });
         if (body.op === "delete") return json({ initiative: store.deleteInitiative(id) });
-        throw new InboxError("validation_error", "op: rename or delete.", { field: "op" });
+        // The window's Undo of a delete: the name taken since answers 409 initiative_exists.
+        if (body.op === "restore") return json({ initiative: store.restoreInitiative(id) });
+        throw new InboxError("validation_error", "op: rename, delete or restore.", { field: "op" });
       }
       // The person opened the Board: the look runs through the store's cursor when that Board was read (never back, never ahead).
       if (path === "/api/inbox/cards/seen") {

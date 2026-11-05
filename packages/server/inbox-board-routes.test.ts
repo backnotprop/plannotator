@@ -371,6 +371,10 @@ describe("the Board's initiatives over the routes (approval \"board-initiatives\
     expect(model.initiatives.map((i) => i.name)).toEqual(["Shape v2"]);
     expect(model.cards.filter((c) => c.initiative === id).length).toBe(2);
     expect((await post(`/api/inbox/initiatives/${id}`, { op: "delete" })).status).toBe(200);
+    // The toast's Undo: the initiative and its cards back; deleted again for what follows.
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "restore" })).status).toBe(200);
+    expect(((await (await fetch(`${base}/api/inbox/cards`)).json()) as Read).cards.filter((c) => c.initiative === id).length).toBe(2);
+    expect((await post(`/api/inbox/initiatives/${id}`, { op: "delete" })).status).toBe(200);
     model = await read();
     expect(model.initiatives[0]!.deleted_at).not.toBeNull();
     expect(model.cards.map((c) => c.initiative)).toEqual([null, null]);
