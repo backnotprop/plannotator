@@ -10,7 +10,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullCheck, InboxPullDetailsAnswer } from '@plannotator/core/inbox-types';
 
 const hasDom = typeof document !== 'undefined';
-const { byState, checkLabels, CheckRows, DetailsStatus, PullDetails, reviewWords, usePullDetails } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
+const { byState, checkLabels, CheckRows, cutMiddle, DetailsStatus, PullDetails, reviewWords, usePullDetails } = (hasDom ? await import('./PullDetails') : {}) as typeof import('./PullDetails');
 const { inboxApi, InboxApiError } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 
 let host: HTMLDivElement;
@@ -159,4 +159,17 @@ test.if(hasDom)('the details are read again when the PR moves (a new head), and 
   } finally {
     inboxApi.pullDetails = keep;
   }
+});
+
+test.if(hasDom)('a check name cut in its middle keeps more of its end, so two that share a long start stay apart', () => {
+  const start = 'Test new and changed tests when deployed to the preview environment with the adapter and the cache';
+  const linux = cutMiddle(`${start} (linux, 1/5)`, 40);
+  const windows = cutMiddle(`${start} (windows, 1/5)`, 40);
+  expect(linux).not.toBe(windows);
+  expect(linux.startsWith('Test new and')).toBe(true);
+  expect(linux.endsWith('(linux, 1/5)')).toBe(true);
+  expect(Array.from(linux.replace('…', '')).length).toBeLessThanOrEqual(40);
+  // Short enough, it is whole; never half of a character.
+  expect(cutMiddle('lint', 40)).toBe('lint');
+  expect(cutMiddle('🎉'.repeat(30), 10)).not.toMatch(/[\ud800-\udbff](?![\udc00-\udfff])/);
 });

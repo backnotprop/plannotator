@@ -8622,7 +8622,13 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prd-rows { list-style: none; margin: 0; padding: 0; display: grid; gap: 2px; }
 .ib-prd-rows li { display: flex; align-items: center; gap: 10px; min-height: 30px; min-width: 0; }
 .ib-prd-rname { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
-/* A check is one line: its own name, cut at its end (its tip has the whole one), and a failure's word. */
+/* A check's name takes up to two lines; past them it gives way in its middle (CheckName), so the end that tells checks
+   apart shows. Its tip has the whole name; a failure's word sits on its first line. */
+.ib-prd-checks li { align-items: flex-start; }
+.ib-prd-checks .ib-prd-rlink { align-items: flex-start; padding-block: 5px; }
+.ib-prd-checks .ib-prd-cmark { margin-top: 2px; }
+.ib-prd-rname.ib-prd-cname { white-space: normal; text-overflow: clip; overflow-wrap: anywhere; line-height: 18px; max-height: calc(18px * 2); }
+.ib-prd-cfit { display: block; }
 .ib-prd-cmark[data-state="quiet"] { color: var(--muted-foreground); }
 .ib-prd-rstate { flex: none; margin-left: auto; font-size: 12.5px; color: var(--muted-foreground); }
 .ib-prd-rstate[data-state="approved"] { color: var(--success, #0a7f33); }

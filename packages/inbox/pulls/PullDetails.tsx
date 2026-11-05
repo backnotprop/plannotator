@@ -4,7 +4,7 @@
  * line each that opens in place. Everything comes from the forge through `GET /api/inbox/pulls/details` (the diff's
  * description first, as it is already read); pictures through the Inbox's own avatar route.
  */
-import { useEffect, useId, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from 'react';
 import type { InboxPull, InboxPullCheck, InboxPullCheckState, InboxPullDetailComment, InboxPullDetailsAnswer, InboxPullReviewer, InboxPullReviewState } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi } from '../api';
 import { Icon } from '../icons';
@@ -178,7 +178,58 @@ export function checkLabels(checks: readonly InboxPullCheck[]): Map<InboxPullChe
   return new Map(checks.map((check) => [check, seen.get(short(check))! > 1 ? check.name : short(check)]));
 }
 
-/** One line: its mark, its own name cut at the end (the whole one in its tip), and a failure's word; a link to its run. */
+/** `text` kept to `keep` characters around a "…": a little more of its end, where checks differ (matrix, shard, OS). */
+export function cutMiddle(text: string, keep: number): string {
+  const chars = Array.from(text);
+  if (keep >= chars.length) return text;
+  const head = Math.ceil(keep * 0.4);
+  return `${chars.slice(0, head).join('').trimEnd()}…${chars.slice(chars.length - (keep - head)).join('').trimStart()}`;
+}
+
+/** Lines a check's name may take before it gives way in its middle. */
+const NAME_LINES = 2;
+
+/**
+ * A check's name: whole on up to two lines; longer, cut in its middle to two lines, so the start and the end that
+ * tells checks apart both show. Measured in the row as drawn, and again when the row's width changes.
+ */
+function CheckName({ text }: { text: string }) {
+  const ref = useRef<HTMLSpanElement>(null);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    let width = -1;
+    const fit = () => {
+      const now = el.clientWidth;
+      if (now === width) return;
+      width = now;
+      el.textContent = text;
+      const room = parseFloat(getComputedStyle(el).lineHeight) * NAME_LINES + 1;
+      if (!(room > 0) || el.scrollHeight <= room) return;
+      let lo = 1;
+      let hi = Array.from(text).length - 1;
+      let best = cutMiddle(text, 1);
+      while (lo <= hi) {
+        const keep = (lo + hi) >> 1;
+        el.textContent = cutMiddle(text, keep);
+        if (el.scrollHeight <= room) {
+          best = el.textContent;
+          lo = keep + 1;
+        } else hi = keep - 1;
+      }
+      el.textContent = best;
+    };
+    fit();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(fit);
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [text]);
+  // The words are written by the measure, so React never owns a text node it would later miss.
+  return <span ref={ref} className="ib-prd-cfit" data-name={text} />;
+}
+
+/** A check: its mark, its own name on up to two lines (the whole one in its tip), a failure's word; a link to its run. */
 function CheckRow({ check, label }: { check: InboxPullCheck; label: string }) {
   const whole = checkName(check);
   const quiet = check.state === 'pass' && !!check.note;
@@ -186,7 +237,7 @@ function CheckRow({ check, label }: { check: InboxPullCheck; label: string }) {
     <>
       <CheckMark state={check.state} quiet={quiet} />
       <Tip content={whole}>
-        <span className="ib-prd-rname">{label}</span>
+        <span className="ib-prd-rname ib-prd-cname"><CheckName text={label} /></span>
       </Tip>
       {check.state === 'fail' && check.note && <span className="ib-prd-rstate" data-state="fail">{check.note}</span>}
     </>

@@ -1253,6 +1253,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
   const number = TEAMMATE.split('#')[1]!;
   const pic = (login: string) => world.avatars.url(login);
   const longCheck = 'e2e (chromium, shard 3 of 8, retry the flaky ones) on the release branch after the migration step';
+  // Real jobs share most of their words and differ at the end (matrix, shard, OS).
+  const twinPrefix = 'Test new and changed tests when deployed to the preview environment with the adapter and the cache';
   const dir = world.forge;
   const write = (name: string, value: unknown) => writeFileSync(join(dir, name), JSON.stringify(value));
   write(`ctx-${number}.json`, {
@@ -1266,6 +1268,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     reviews: [{ id: 'r1', author: { login: 'mei' }, state: 'CHANGES_REQUESTED', body: '', submittedAt: '2026-11-01T08:00:00Z' }],
     statusCheckRollup: [
       { name: longCheck, workflowName: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://ci.example/1' },
+      { name: `${twinPrefix} (linux, 1/5)`, workflowName: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://ci.example/3' },
+      { name: `${twinPrefix} (windows, 1/5)`, workflowName: 'test', status: 'COMPLETED', conclusion: 'TIMED_OUT', detailsUrl: 'https://ci.example/4' },
       { name: 'lint', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci.example/2' },
     ],
   });
@@ -1302,16 +1306,26 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await expect(panel.locator('[data-pull-details-reviewer="northwind/billing-platform"] .ib-prd-face')).toHaveAttribute('data-square', '');
     // Round, as on the Reviews list.
     expect(await face.evaluate((img) => getComputedStyle(img.closest('.ib-prd-pic')!).borderRadius)).toBe('50%');
-    // A check is one line: the job's own name (no workflow before it), cut at its end, its state after it, the whole
-    // name in its tip; the passed ones behind a line.
-    const failed = panel.locator('[data-pull-details-check="fail"]');
+    // A check's name takes up to two lines, then gives way in its middle: two jobs that share a long start still read
+    // apart by their ends. The job's own name (no workflow before it), its state on its first line, the whole name in
+    // its tip; the passed ones behind a line.
+    const failed = panel.locator('[data-pull-details-check="fail"]', { has: page.locator(`.ib-prd-cfit[data-name="${longCheck}"]`) });
     const name = failed.locator('.ib-prd-rname');
-    await expect(name).toHaveText(longCheck);
     await expect(failed.locator('.ib-prd-rstate')).toHaveText('Failed');
-    expect(await name.evaluate((el) => [el.scrollWidth > el.clientWidth, getComputedStyle(el).textOverflow, getComputedStyle(el).whiteSpace])).toEqual([true, 'ellipsis', 'nowrap']);
-    const line = parseFloat(await name.evaluate((el) => getComputedStyle(el).lineHeight));
-    expect((await failed.boundingBox())!.height).toBeLessThan(line * 2);
-    expect((await failed.locator('.ib-prd-rstate').boundingBox())!.x).toBeGreaterThan((await name.boundingBox())!.x);
+    const twin = (end: string) => panel.locator(`.ib-prd-cfit[data-name="${twinPrefix} (${end}, 1/5)"]`);
+    const looks = async (el: Locator) => el.evaluate((box) => ({ text: box.textContent!, lines: Math.round(box.getBoundingClientRect().height / parseFloat(getComputedStyle(box).lineHeight)) }));
+    const linux = await looks(twin('linux'));
+    const windows = await looks(twin('windows'));
+    expect(linux.text).not.toBe(windows.text);
+    expect(linux.text).toContain('…');
+    expect(linux.text.endsWith('(linux, 1/5)')).toBe(true);
+    expect(windows.text.endsWith('(windows, 1/5)')).toBe(true);
+    expect([linux.lines, windows.lines]).toEqual([2, 2]);
+    // A long name is two lines at most, its end in view; a failure's word on its first line.
+    const long = await looks(failed.locator('.ib-prd-cfit'));
+    expect(long.lines).toBeLessThanOrEqual(2);
+    expect(long.text.endsWith('after the migration step')).toBe(true);
+    expect(Math.abs((await failed.locator('.ib-prd-rstate').boundingBox())!.y - (await name.boundingBox())!.y)).toBeLessThan(4);
     await name.hover();
     await expect(page.locator('[data-pn-tooltip]')).toHaveText(`test / ${longCheck}`);
     await page.mouse.move(0, 0);
@@ -1358,7 +1372,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await context.close();
   }
 
-  // On a phone: one column, people and checks a line each, a long name on its one line, the title's row is the way in.
+  // On a phone: one column, people and checks a line each, a long name on two lines at most, the title's row is the way in.
   const phone = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
   try {
     const review = phone.page.locator('[data-pull-review]');
@@ -1367,9 +1381,9 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     const box = (await panel.boundingBox())!;
     expect([box.x, box.width]).toEqual([0, 390]);
     await panel.locator('.ib-prd-sum').last().click();
-    const name = panel.locator('[data-pull-details-check="fail"] .ib-prd-rname');
+    const name = panel.locator(`.ib-prd-cfit[data-name="${longCheck}"]`);
     await expect(name).toBeVisible();
-    expect((await panel.locator('[data-pull-details-check="fail"]').boundingBox())!.height).toBeLessThan(parseFloat(await name.evaluate((el) => getComputedStyle(el).lineHeight)) * 2);
+    expect(await name.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))).toBeLessThanOrEqual(2);
     await expect(phone.page.evaluate(() => document.documentElement.scrollWidth)).resolves.toBeLessThanOrEqual(390);
     await panel.locator('[data-pull-details-close]').click();
     await expect(panel).toHaveCount(0);
