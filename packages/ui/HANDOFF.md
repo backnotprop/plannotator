@@ -2791,6 +2791,10 @@ Plannotator's board reads first now, and What to know replaces Requirements. A h
 - `<image href="files/…">` in a drawing now loads through `resolveSrc`. Before, the bare name stayed and the picture was broken.
 - Clicking a part inside an SVG now opens the comment box. Before, it threw and opened nothing.
 
+## Shape: a board's colours hold contrast in every palette (no seam; colours change only where they fell short)
+
+`ShapeDrawn` reads the board's colours as the page resolved them (`readThemeTokenValues` on the `.board`) and runs `shapeContrastFixes` (`components/shape/shapeContrast.ts`, pure): the zone colours `--blue` `--green` `--amber` `--plum` reach 4.5:1 on the paper, the surface and their own `-soft` fill, and `--mark`, `--alert`, `--grey`, `--ink2` on every one of those (the accent on its `--mark-soft` chip too); the ink reaches 4.5:1 on every `-soft` fill; on a dark board a logo's own colour reaches 3:1. A colour that falls short is set inline on the `.board`, made darker (light board) or lighter (dark board) with its hue kept; a `-soft` fill moves away from the ink. Nothing is asked to beat the palette's own ink. A colour that holds is left to `SHAPE_FRAME_CSS`, so a palette that passes draws as before; logos on a light board keep their colours. It runs again when `<html>`'s `class` or `style` changes (a theme switch). A host whose tokens cannot be read gets nothing changed. Guard: `shapeContrast.test.ts`, every file in `themes/`, light and dark.
+
 ## Shape: the board header (ui 0.62.0; not additive)
 
 `ShapeSurface`'s header no longer has the eyebrow row above the title (owner feedback 2026-11-04, approval `shape-board-look`, q-a9a1bf61). The title comes first; the group at its right holds, in order: "<agent> is drawing v<n>…" with a small reshaping Pebble while the agent draws (`.shp-drawing`, `role="status"`; the Pebble only on a phone, the words for screen readers), "Finished" (`.shp-finished`), the global comment button, Bring it up to date (a host with `refresh`) and, only when the host passes `onClose`, a × button (`.shp-close`, `aria-label` "Close Shape").

@@ -25,6 +25,38 @@ import {
   type ShapeRef,
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
+import { parseCssColor } from '../../utils/cssColor';
+import { readThemeTokenValues } from '../../utils/themeTokens';
+import { SHAPE_COLOR_NAMES, shapeContrastFixes, shapeLogoFill, type ShapeColors } from './shapeContrast';
+
+/**
+ * Holds a board's colours to contrast in the palette on screen (`shapeContrast.ts`): the frame's
+ * own colours where they hold, a darker or lighter one (hue kept) where not, and a dark logo lifted on a dark board.
+ * Returns the undo. Nothing changes where the palette's tokens cannot be read.
+ */
+function holdShapeContrast(board: HTMLElement): () => void {
+  const undo: (() => void)[] = [];
+  const read = readThemeTokenValues(SHAPE_COLOR_NAMES, board);
+  const colors = {} as ShapeColors;
+  for (const name of SHAPE_COLOR_NAMES) {
+    const c = parseCssColor(read?.[name]);
+    if (!c) return () => {};
+    colors[name] = c;
+  }
+  const fixes = shapeContrastFixes(colors);
+  for (const [name, value] of Object.entries(fixes)) {
+    board.style.setProperty(name, value);
+    undo.push(() => board.style.removeProperty(name));
+  }
+  for (const el of board.querySelectorAll<SVGElement>('svg[data-brand] [fill]')) {
+    const logo = parseCssColor(el.getAttribute('fill'));
+    const fill = logo && logo.a > 0 ? shapeLogoFill(logo, colors, fixes) : null;
+    if (!fill) continue;
+    el.style.setProperty('fill', fill);
+    undo.push(() => el.style.removeProperty('fill'));
+  }
+  return () => undo.forEach((u) => u());
+}
 
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
@@ -368,6 +400,23 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     board.classList.toggle('reduce', reduce);
     board.classList.toggle('pinpointing', pinpoint);
   }, [phase, skip, reduce, pinpoint, contentKey]);
+
+  // Contrast in the palette on screen, again when the page's theme or mode changes (classes or style on <html>).
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board) return;
+    let undo = holdShapeContrast(board);
+    if (typeof MutationObserver === 'undefined') return undo;
+    const watch = new MutationObserver(() => {
+      undo();
+      undo = holdShapeContrast(board);
+    });
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    return () => {
+      watch.disconnect();
+      undo();
+    };
+  }, [contentKey]);
 
   // Marks, and a host's tags on them.
   const stale = props.stale;
