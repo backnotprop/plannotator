@@ -12,7 +12,8 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { appendFileSync, chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
-import { inboxAckLine, inboxAgentTool, inboxSentNowFollowUpText, INBOX_MESSAGE_INSTRUCTION, INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, INBOX_TAGGED_INSTRUCTION, inboxAlsoTaggedLine, inboxRedirectedLine, inboxTaggedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
+import { inboxStillOpenLineOf } from '../../../../packages/core/inbox-questions'
+import { inboxAckLine, inboxAgentTool, inboxSentNowFollowUpText, INBOX_MESSAGE_INSTRUCTION, INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_CLOSING_LINE, INBOX_WAKE_INSTRUCTION, INBOX_TAGGED_INSTRUCTION, inboxAlsoTaggedLine, inboxRedirectedLine, inboxTaggedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { CLAUDE_INBOX_TOOL_NAME, ClaudeSession } from './testing/claude-session'
 import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
 import { stubbedAgentClis } from '../../../../tests/helpers/agent-cli-guard'
@@ -166,6 +167,19 @@ async function personSends(w: World, messageId: string, words: string): Promise<
   return reply.id
 }
 
+/** A wake without what the Inbox's context adds to an older Inbox's wake: its lines under the first ones. */
+const withoutContext = (text: string) =>
+  text
+    .split('\n')
+    .filter((line) => !line.startsWith('[Thread ') && !line.startsWith('[Replying to '))
+    .join('\n')
+/** A reply's stored body as the wake carries it: without the still-open sentence the details line replaces. */
+const bodyInWake = (body: string) =>
+  body
+    .split('\n\n')
+    .filter((part) => part !== inboxStillOpenLineOf(body))
+    .join('\n\n')
+
 const QUESTION = [
   'The refund webhook retries forever on a 409.',
   '',
@@ -287,11 +301,12 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`)
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(text).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
-    // The closing line names the thread and the tool by the full name the engine registered.
-    expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: mcp__plannotator__plannotator_inbox read_thread · how it works: plannotator inbox --help]`)
+    expect(withoutContext(text)).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: bodyInWake(reply.body) }))
+    // The details line names the thread; the closing line ends the wake.
+    expect(lines[2]).toBe(`[Thread ${asked.thread_id}: 2 messages, 1 question open, don't re-ask it. Your last message was just now]`)
+    expect(lines.at(-1)).toBe(INBOX_WAKE_CLOSING_LINE)
     // The body sits whole above the closing line, after the first lines.
-    expect(text.endsWith(`\n\n${reply.body}\n\n${lines.at(-1)}`)).toBe(true)
+    expect(text.endsWith(`\n\n${bodyInWake(reply.body)}\n\n${lines.at(-1)}`)).toBe(true)
     expect(text).toContain(words)
     w.proof(`turn.start ${turn.id}:\n${turn.text}\n`)
 
@@ -340,7 +355,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const subject = (await thread(w, sent.thread_id)).subject
     expect(lines[0]).toBe(`Plannotator Inbox: ${subject} (${noteId})`)
     expect(lines[1]).toBe(`The person marked your message 👍 Looks good (${sent.message_id}). No reply needed unless you have a question.`)
-    expect(text).toBe(inboxWakeText({ id: noteId, thread_id: sent.thread_id, subject, body: lines[1]!, ack_of: sent.message_id }, CLAUDE_INBOX_TOOL_NAME))
+    expect(text).toBe(inboxWakeText({ id: noteId, thread_id: sent.thread_id, subject, body: lines[1]!, ack_of: sent.message_id }))
     w.proof(`turn.start ${turn.id}:\n${turn.text}\n`)
 
     const ack = await waitFor('the delivered 👍', async () => {
@@ -597,11 +612,11 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
 
     const turn = await waitFor('the New message turn', () => other.turns.find((t) => t.text.includes(message.id)))
     await Bun.sleep(3_000)
-    expect(other.host.submits).toEqual([inboxWakeText({ type: 'message', id: message.id, thread_id: asked.thread_id, subject: 'Run finished. The export now streams rows to the file.', body: words }, CLAUDE_INBOX_TOOL_NAME)])
+    expect(other.host.submits.map(withoutContext)).toEqual([inboxWakeText({ type: 'message', id: message.id, thread_id: asked.thread_id, subject: 'Run finished. The export now streams rows to the file.', body: words })])
     const lines = other.host.submits[0]!.split('\n')
     expect(lines[0]).toBe(`Plannotator Inbox: Run finished. The export now streams rows to the file. (${message.id})`)
     expect(lines[1]).toBe(INBOX_MESSAGE_INSTRUCTION)
-    expect(other.host.submits[0]!.endsWith(`\n\n${words}\n\n[thread ${asked.thread_id} · more: ${CLAUDE_INBOX_TOOL_NAME} read_thread · how it works: plannotator inbox --help]`)).toBe(true)
+    expect(other.host.submits[0]!.endsWith(`\n\n${words}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true)
     expect(writer.host.submits).toEqual([])
     w.proof(`turn.start ${turn.id} in session-other:\n${turn.text}\n\nsession-writer submits: ${writer.host.submits.length}`)
 
@@ -655,8 +670,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
 
     const turn = await waitFor('the redirected reply turn', () => taker.turns.find((t) => t.text.includes(reply.id)))
     await Bun.sleep(3_000)
-    expect(taker.host.submits).toEqual([
-      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: reply.body, redirected_from: 'Claude Code' }, CLAUDE_INBOX_TOOL_NAME),
+    expect(taker.host.submits.map(withoutContext)).toEqual([
+      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: bodyInWake(reply.body), redirected_from: 'Claude Code' }),
     ])
     const lines = taker.host.submits[0]!.split('\n')
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
@@ -699,8 +714,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`> the person tags session-tagged in the reply to session-owner\n${reply.body}\n`)
 
     const tagTurn = await waitFor('the tagged turn', () => tagged.turns.find((t) => t.text.includes(reply.id)))
-    expect(tagged.host.submits).toEqual([
-      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: reply.body, tagged: { owner: 'Claude Code' } }, CLAUDE_INBOX_TOOL_NAME),
+    expect(tagged.host.submits.map(withoutContext)).toEqual([
+      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: bodyInWake(reply.body), tagged: { owner: 'Claude Code' } }),
     ])
     const tagLines = tagged.host.submits[0]!.split('\n')
     expect(tagLines[1]).toBe(INBOX_TAGGED_INSTRUCTION)
@@ -714,8 +729,8 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     await owner.endTurn('Done.')
     const ownerTurn = await waitFor('the owner turn', () => owner.turns.find((t) => t.text.includes(reply.id)))
     await Bun.sleep(3_000)
-    expect(owner.host.submits).toEqual([
-      inboxWakeText({ id: reply.id, subject: null, thread_id: asked.thread_id, body: reply.body, also_tagged: ['Claude Code'] }, CLAUDE_INBOX_TOOL_NAME),
+    expect(owner.host.submits.map(withoutContext)).toEqual([
+      inboxWakeText({ id: reply.id, subject: null, thread_id: asked.thread_id, body: bodyInWake(reply.body), also_tagged: ['Claude Code'] }),
     ])
     expect(owner.host.submits[0]!.split('\n')[2]).toBe(inboxAlsoTaggedLine(['Claude Code']))
     // Each woken once, no more.
@@ -760,7 +775,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const turn = await waitFor('the new-thread turn', () => session.turns.find((t) => t.text.includes(message.id)))
     await Bun.sleep(3_000)
     // The thread's subject is its short name; the wake asks the session to name the thread (its chip).
-    expect(session.host.submits).toEqual([inboxWakeText({ type: 'message', new_thread: true, name_thread: true, id: message.id, subject: 'Idea: show which session wrote each thread', thread_id: message.thread_id, body: words }, CLAUDE_INBOX_TOOL_NAME)])
+    expect(session.host.submits).toEqual([inboxWakeText({ type: 'message', new_thread: true, name_thread: true, id: message.id, subject: 'Idea: show which session wrote each thread', thread_id: message.thread_id, body: words })])
     expect(session.host.submits[0]!.split('\n').slice(1, 3)).toEqual([INBOX_NEW_THREAD_INSTRUCTION, INBOX_NAME_THREAD_LINE])
     w.proof(`turn.start ${turn.id} in session-compose:\n${turn.text}\n`)
     const delivered = await waitFor('the delivery record', async () => (await thread(w, message.thread_id)).messages[0]?.delivery)
@@ -814,7 +829,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`> the person presses Send now on ${replyId}`)
     const row = await waitFor('the row in the running turn', () => session.host.appended[0])
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(row).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
+    expect(withoutContext(row)).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: bodyInWake(reply.body) }))
     expect(session.host.notices).toHaveLength(1)
     expect(session.host.submits).toEqual([])
     w.proof(`$.session.append (user row, into the running turn):\n${row}\n`)

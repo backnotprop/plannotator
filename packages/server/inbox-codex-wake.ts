@@ -59,7 +59,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
-import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { INBOX_TOOL_NAME, inboxWakeCommand, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
@@ -291,12 +291,15 @@ const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
  * connections). The person's words are never touched.
  */
 export function codexWakeText(command: InboxReplyCommand): string {
+  const { body } = inboxWakeCommand(command);
   const template = inboxWakeText({ ...command, body: BODY_SLOT }).split(`${INBOX_TOOL_NAME} `).join("");
-  return template.replace(BODY_SLOT, () => command.body);
+  return template.replace(BODY_SLOT, () => body);
 }
 
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
-export function codexQueueMessage(command: InboxReplyCommand): string {
+export function codexQueueMessage(input: InboxReplyCommand): string {
+  // What the wake says of the body, once: the cut below counts only that.
+  const command = inboxWakeCommand(input);
   const clean = (text: string) => text.replace(/\u0000/g, "");
   const whole = clean(command.body);
   const full = codexWakeText({ ...command, body: whole });

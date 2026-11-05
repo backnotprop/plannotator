@@ -10,6 +10,7 @@ import {
   INBOX_REDIRECTED_NAME_MAX,
   INBOX_WAKE_AGENT_NAMES,
   INBOX_TAGGED_INSTRUCTION,
+  INBOX_WAKE_CLOSING_LINE,
   INBOX_WAKE_INSTRUCTION,
   inboxAlsoTaggedLine,
   inboxTaggedLine,
@@ -29,7 +30,7 @@ test("a tagged session's wake: its own instruction, whose thread it is, read fir
       "",
       "@Pi raise it to 30 s.",
       "",
-      "[thread msg_T · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]",
+      INBOX_WAKE_CLOSING_LINE,
     ].join("\n"),
   );
   expect(text).not.toContain(INBOX_WAKE_INSTRUCTION);

@@ -772,6 +772,15 @@ export function inboxOtherStillOpenLine(questions: readonly InboxQuestionRecord[
 export const INBOX_STILL_OPEN_LINE =
   /^(?:(?:No questions? answered yet|No new answers in this reply); .* still open\. Don't re-ask (?:it|them); the person will answer in the Inbox\.|You have \d+ other questions? open in this thread\. (?:It stays|They stay) open; the person will answer (?:it|them) in the Inbox\. Don't re-ask (?:it|them)\.)$/;
 
+/** The still-open line `body` carries, a paragraph of its own (the last, as the store writes it after the words); '' with none. */
+export function inboxStillOpenLineOf(body: string): string {
+  const lines = body.split("\n");
+  for (let at = lines.length - 1; at >= 0; at--) {
+    if (INBOX_STILL_OPEN_LINE.test(lines[at]!) && (at === 0 || lines[at - 1] === "") && (at === lines.length - 1 || lines[at + 1] === "")) return lines[at]!;
+  }
+  return "";
+}
+
 const questionsWord = (n: number): string => `${n} question${n === 1 ? "" : "s"}`;
 
 /** The reply's first line as `composeInboxReplyBody` writes it ("Answered 2 questions.", "Skipped 1 question.", "Answered 1 question, skipped 2."). */

@@ -724,11 +724,6 @@ export interface InboxLinkOptions {
   dataDir: string
   sessionId: string
   tools: readonly InboxToolInfo[]
-  /**
-   * The name the engine registered the tool under (`mcp__<server>__plannotator_inbox`),
-   * named in the wake's closing line so the model can find the tool. Absent: `plannotator_inbox`.
-   */
-  toolName?: string
   /** A turn is running (or a question of Ask this session is in flight). */
   isBusy: () => boolean
   /**
@@ -1321,7 +1316,7 @@ export class InboxLink {
       if (turn) {
         // Send now while Claude works: a user row in the running turn, read at its next model request.
         try {
-          await this.host.appendUserRow!(inboxWakeText(command, this.options.toolName))
+          await this.host.appendUserRow!(inboxWakeText(command))
         } catch (error) {
           // Refused: nothing entered, so the claim is given back and it is delivered when the session is idle
           // (here or in the process the person moves to), the window reads it as queued again, and Send now
@@ -1343,7 +1338,7 @@ export class InboxLink {
           .catch(() => undefined)
       } else {
         // Resolves once Claude is idle and took the turn.
-        await this.host.submit(inboxWakeText(command, this.options.toolName))
+        await this.host.submit(inboxWakeText(command))
       }
     } catch (error) {
       this.submitting = null

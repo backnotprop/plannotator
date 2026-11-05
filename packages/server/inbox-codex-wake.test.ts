@@ -153,7 +153,7 @@ describe("the pure parts", () => {
     const text = codexWakeText(command);
     expect(text.split("\n")[1]).toBe(asCodex(INBOX_WAKE_INSTRUCTION));
     expect(text).toContain("answer in the same thread: send_message with reply_to");
-    expect(text).toContain("more: read_thread");
+    expect(text).toContain("[for context: read_thread");
     expect(text).toContain("Ask plannotator_inbox send_message to do it.");
     expect(text.replace(command.body, "")).not.toContain("plannotator_inbox");
   });
