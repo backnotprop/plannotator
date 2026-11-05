@@ -609,3 +609,41 @@ test('a phone: » or ⌄ gathers, then one tap on the corner control brings the 
     await context.close();
   }
 });
+
+test('an HTML page: the reply box never runs over the drawer’s foot, at any width, with one line or many, and a phone’s sheet hides it', async ({ browser }: { browser: Browser }) => {
+  const res = await fetch(new URL('/api/inbox/annotations', world.url), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ attachment_id: world.ids['checkout.html'], version: 'current', annotation: { id: 'foot-guard', type: 'COMMENT', text: 'A thought', originalText: 'Almost yours.', blockId: '', startOffset: 0, endOffset: 0, createdA: Date.now() } }),
+  });
+  expect(res.status).toBe(200);
+  const long = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n');
+  for (const width of [1440, 1280, 1100, 900, 390]) {
+    const phone = width === 390;
+    const context = await browser.newContext({ viewport: { width, height: phone ? 844 : 800 }, hasTouch: phone, isMobile: phone, reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      await page.goto(fileUrl('checkout.html'));
+      await expect(pane(page)).toHaveAttribute('data-full-view', '');
+      if (await pill(page).isVisible()) await pill(page).click();
+      await replyField(page).fill(WORDS);
+      await page.locator('[data-full-view-comments]').first().click();
+      const foot = page.locator('[data-full-view-foot]');
+      await expect(foot).toContainText('your next Send');
+      for (const words of [WORDS, long]) {
+        if (await replyField(page).isVisible()) await replyField(page).fill(words);
+        // Hidden under a phone's sheet is fine; a box that shows must clear the foot.
+        if (!(await card(page).isVisible())) {
+          expect(phone, `${width}: a computer keeps its reply box beside the drawer`).toBe(true);
+          continue;
+        }
+        expect(phone, `${width}: a phone's sheet hides the reply box`).toBe(false);
+        const box = (await card(page).boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(box.x + box.width, `${width}: the reply box ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+      }
+    } finally {
+      await context.close();
+    }
+  }
+});
