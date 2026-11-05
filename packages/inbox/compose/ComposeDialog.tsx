@@ -842,8 +842,6 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setReviewPick(pull);
-        setReviewLink('');
-        setLinkChosen(false);
         toFollowsReview();
         textRef.current?.focus();
       }}
