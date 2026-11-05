@@ -111,6 +111,9 @@ async function renderView(
     onFocusFile?: (path: string) => void;
     bare?: boolean;
     actionsHost?: HTMLElement | null;
+    threadHeading?: boolean;
+    sourceLine?: string;
+    engineLabel?: string;
     fitFileHeights?: boolean;
   } = {},
 ) {
@@ -131,6 +134,9 @@ async function renderView(
           onRegenerate={options.onRegenerate}
           bare={options.bare}
           actionsHost={options.actionsHost}
+          threadHeading={options.threadHeading}
+          sourceLine={options.sourceLine}
+          engineLabel={options.engineLabel}
           fitFileHeights={options.fitFileHeights}
         />
       </GuideHostProvider>
@@ -529,6 +535,43 @@ function addedFile(path: string, rows: number): DiffFile {
 
 const boxHeight = (path: string) =>
   host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.height;
+
+describe('GuideView threadHeading (the Inbox review, under its top bar)', () => {
+  const overview = { overview: { text: 'How the change fits together.' } };
+  const headActions = () => <button data-testid="head-action">Show me</button>;
+
+  // Guards the seam reaching the hosts that did not ask for it: the review app, guides.show and VS Code draw this path.
+  test.skipIf(!hasDom)('off: the heading, its Overview label and its counts as before, and no head actions', async () => {
+    await renderView(makeGuide(overview), { state: { ...makeState(), renderHeadActions: headActions }, engineLabel: 'Claude Code', sourceLine: 'repo · main' });
+    expect(host!.querySelector('[data-guide-heading]')).toBeNull();
+    expect(host!.querySelector('h1')?.textContent).toBe('Persisted guide');
+    expect(host!.textContent).toContain('1 section');
+    expect(host!.querySelector('[data-guide-overview] h2')?.textContent).toBe('Overview');
+    expect(host!.querySelector('[data-testid="head-action"]')).toBeNull();
+  });
+
+  // Guards the owner's order (Show me, then Global comment) and the one line of facts that says what is being reviewed.
+  test.skipIf(!hasDom)('on: the intent is the title, the facts sit on one line with the branch, and the actions sit on the title row in order', async () => {
+    const state: GuideHostValue<Record<string, unknown>> = { ...makeState(), renderHeadActions: headActions, globalComments: { comments: [], onAdd: () => {} } };
+    await renderView(makeGuide(overview), { threadHeading: true, state, engineLabel: 'Claude Code · claude-opus-5', sourceLine: 'charges · master · main...HEAD' });
+    const heading = host!.querySelector('[data-guide-heading]')!;
+    expect(heading.querySelector('h1')?.textContent).toBe('Test intent.');
+    expect([...heading.querySelectorAll('[data-guide-facts] > span:not([aria-hidden])')].map((fact) => fact.textContent)).toEqual(['Written by Claude Code', 'claude-opus-5', 'charges', 'master', 'main...HEAD']);
+    const buttons = [...heading.querySelectorAll('.gv-tools button')].map((button) => button.textContent?.trim());
+    expect(buttons).toEqual(['Show me', 'Global comment']);
+    // One Global comment: the row above the old title is not drawn as well.
+    expect(host!.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
+    // The menu in the host's top bar names the overview: no label over the prose, no counts line.
+    expect(host!.querySelector('[data-guide-overview] h2')).toBeNull();
+    expect(host!.querySelector('[data-guide-overview]')?.textContent).toContain('How the change fits together.');
+    expect(host!.textContent).not.toContain('1 section');
+  });
+
+  test.skipIf(!hasDom)('a guide moved since it was written says so among the facts', async () => {
+    await renderView(makeGuide({ moved: true }), { threadHeading: true });
+    expect(host!.querySelector('[data-guide-facts]')?.textContent).toContain('Generated on a different version of this branch');
+  });
+});
 
 describe('GuideView bare (the Inbox PR page)', () => {
   // Guards the empty band under a short file on the PR page (#2615): the box was sized by an estimate that counted
