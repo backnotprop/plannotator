@@ -57,7 +57,7 @@ function compileReleaseBinary(): string {
 
 /**
  * An Inbox three days into use: the seeded log, every other one-time dialog and the tour already behind the person (so
- * nothing else shows on these loads), and every agent's home a temp folder. HOME is left as it is (never set).
+ * nothing else shows on these loads), and every agent's home a temp folder. HOME is the world's temp folder.
  */
 async function world(): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));

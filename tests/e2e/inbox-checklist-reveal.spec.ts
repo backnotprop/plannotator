@@ -60,7 +60,7 @@ function compileReleaseBinary(): string {
 /**
  * An Inbox eight days into use: the seeded log, Snooze shown 5.5 days ago and the Board revealed (and on) 3 days ago,
  * every other one-time dialog and the tour behind the person, and every agent's home a temp folder. `steps`: the
- * person's own Checklist setting (absent: never set). HOME is left as it is (never set).
+ * person's own Checklist setting (absent: never set). HOME is the world's temp folder.
  */
 async function world(steps?: boolean): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));

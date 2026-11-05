@@ -62,7 +62,7 @@ function compileReleaseBinary(): string {
 /**
  * An Inbox four days into use: the seeded log, Snooze's announcement shown two and a half days ago (so the 48 h spacing
  * holds), every other one-time dialog and the tour behind the person, the Board never decided, and every agent's home
- * a temp folder. HOME is left as it is (never set).
+ * a temp folder. HOME is the world's temp folder.
  */
 async function world(): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));

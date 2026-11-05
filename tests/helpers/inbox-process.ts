@@ -31,9 +31,10 @@ import { join, resolve, sep } from "node:path";
 import { accountHome, isScratchDataDir } from "./real-data-dir";
 
 /**
- * Throw unless `home` is a scratch folder, before an Inbox starts with it. An
- * env with no HOME, or an empty one, is the real home too: `os.homedir()` then
- * falls back to the account's. Returns `home`.
+ * Throw unless `home` is a scratch folder, before a spec's agent starts an Inbox
+ * with it. An env with no HOME, or an empty one, is the real home too. The servers
+ * refuse this themselves only under PLANNOTATOR_TEST_SANDBOX (test-home-guard.ts),
+ * and many specs' envs do not set it. Returns `home`.
  */
 export function refuseRealHome(home: string | undefined, what: string): string {
   const value = home?.trim();

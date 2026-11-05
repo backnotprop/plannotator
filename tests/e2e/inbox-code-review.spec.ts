@@ -268,7 +268,7 @@ test('off by default: no review sent, today\'s guided-review tile, no Plannotato
   await box.click();
   await box.pressSequentially('/review-', { delay: 30 });
   await page.waitForTimeout(500);
-  // The person's own skills may match (the runner's ~/.agents/skills); none of Plannotator's does.
+  // None of Plannotator's skills matches.
   await expect(plannotatorOptions(page)).toHaveCount(0);
   await box.fill('');
 });
