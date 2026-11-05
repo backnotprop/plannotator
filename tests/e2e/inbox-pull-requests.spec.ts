@@ -1903,15 +1903,18 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   // Open: the code once, not side by side, and no verdict to give.
   await card.locator('[data-review-start]').click();
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
-  await expect(page.getByRole('button', { name: 'Unified', exact: true })).toHaveCount(0);
+  await expect(page.locator('[data-diff-style-switch]')).toHaveCount(0);
   await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
   await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
   await page.waitForTimeout(1200);
   await shot(page, 'w-pane');
-  await page.getByRole('button', { name: 'All files', exact: true }).first().click().catch(() => page.getByText('All files').first().click());
-  await expect(page.getByText('Every file', { exact: true }).first()).toBeVisible();
-  await expect(page.locator('.ib-rrail .ib-add')).toHaveCount(0);
+  // All files: the same code, nothing counted, and no words about changes.
+  await page.getByRole('radio', { name: 'All files' }).first().check({ force: true });
+  await expect(page.locator('[data-guide-file-shell="src/i18n/fallback.ts"]').first()).toBeVisible();
+  await expect(page.getByText('Every changed file')).toHaveCount(0);
+  await expect(page.getByText(/^\+0/)).toHaveCount(0);
+  await shot(page, 'w-pane-files');
   await page.setViewportSize({ width: 390, height: 844 });
   await page.waitForTimeout(600);
   await shot(page, 'w-pane-phone');
