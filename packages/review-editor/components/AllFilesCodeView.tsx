@@ -196,6 +196,8 @@ export interface AllFilesCodeViewProps {
   disableLineNumbers?: boolean;
   disableBackground?: boolean;
   expandUnchanged?: boolean;
+  /** 'simple': no "N unmodified lines" row between hunks, for code that isn't a change. */
+  hunkSeparators?: 'line-info' | 'simple';
   fontFamily?: string;
   fontSize?: string;
   // Annotation state (P4). Mirrors AllFilesDiffView's annotation surface so
@@ -680,6 +682,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   disableLineNumbers,
   disableBackground,
   expandUnchanged,
+  hunkSeparators = 'line-info',
   fontFamily,
   fontSize,
   annotations,
@@ -3208,7 +3211,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       expandUnchanged,
       enableLineSelection: !readOnly,
       enableGutterUtility: !readOnly,
-      hunkSeparators: 'line-info',
+      hunkSeparators,
       stickyHeaders: true,
       // Flush files together (no inter-file gap) — file boundaries already read
       // via the sticky header. Keep Pierre's default 8px list edge padding.
@@ -3271,6 +3274,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       disableLineNumbers,
       disableBackground,
       expandUnchanged,
+      hunkSeparators,
       readOnly,
       itemMetrics,
       leadingHeight,

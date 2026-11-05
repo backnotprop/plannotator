@@ -1872,6 +1872,8 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await shot(page, 'w-curating');
 
   // The agent names files and lines, and sends its own patch too: it isn't looked at.
+  const longFile = join(world.projects.web, 'src/walk-long.ts');
+  writeFileSync(longFile, Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
   await claude.submitGuide({
     project_path: world.projects.web,
     reply_to: threadId,
@@ -1883,10 +1885,12 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
       sections: [
         { title: 'Where it starts', overview: 'The webhook takes the event.', diffs: [{ file: 'src/i18n/fallback.ts', lines: '1-2', summary: 'The first lines.' }] },
         { title: 'Between', overview: 'Words with no code beside them.', diffs: [] },
+        { title: 'Further down', overview: 'Two places in a long file.', diffs: [{ file: 'src/walk-long.ts', lines: '30-32, 50-51', summary: 'Those lines.' }] },
       ],
       generator: { engine: 'claude-code', model: 'claude-opus-5' },
     },
   } as never);
+  rmSync(longFile);
   const reviewed = page.locator(`[data-reviews-kind="reviewed"][data-row="${threadId}"]`);
   await expect(reviewed).toContainText('Ready', { timeout: 15_000 });
   await expect(reviewed).toContainText('Walkthrough');
@@ -1897,7 +1901,7 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(card).toContainText('Walkthrough');
   await expect(card).not.toContainText('Waiting on you');
   await expect(card).not.toContainText('+0');
-  await expect(card).toContainText('1 file');
+  await expect(card).toContainText('2 files');
   await shot(page, 'w-card');
 
   // Open: the code once, not side by side, and no verdict to give.
@@ -1907,6 +1911,8 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
   await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
+  await expect(page.getByText('export const line30 = 30;').first()).toBeVisible();
+  await expect(page.getByText('unmodified line')).toHaveCount(0);
   await page.waitForTimeout(1200);
   await shot(page, 'w-pane');
   // All files: the same code, nothing counted, and no words about changes.

@@ -93,12 +93,14 @@ export const GuideDiff: FC<
     comments?: GuideDiffComments;
     /** Draw this layout whatever the setting says, leaving the setting as it is (a phone: always Unified). */
     diffStyleOverride?: 'split' | 'unified';
+    /** A walkthrough's code isn't a change: no "N unmodified lines" between its ranges. */
+    plainSeparators?: boolean;
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
     fileOpenIn?: (filePath: string) => ReactNode;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
+> = ({ comments, diffStyleOverride, plainSeparators, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -123,6 +125,7 @@ export const GuideDiff: FC<
       disableLineNumbers={!showLineNumbers}
       disableBackground={!showBackground}
       expandUnchanged={expandUnchanged}
+      hunkSeparators={plainSeparators ? 'simple' : 'line-info'}
       fontFamily={fontFamily || undefined}
       fontSize={fontSize || undefined}
       annotations={comments?.annotations ?? NO_ANNOTATIONS}
@@ -328,11 +331,13 @@ export default function GuideReader({
     ({ file, focused }: GuideDiffRendererContext): {
       comments?: GuideDiffComments;
       diffStyleOverride?: 'unified';
+      plainSeparators?: boolean;
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
       fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
       ...((phone || asItIs) && { diffStyleOverride: 'unified' as const }),
+      ...(asItIs && { plainSeparators: true }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
