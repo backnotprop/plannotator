@@ -18,7 +18,7 @@ import { isRemoteSession, getServerHostname, startBunServerOnAvailablePort, buil
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { isSameOriginRequest, refuseCrossOriginWrite } from "./request-origin-guard";
-import { getRepoInfo } from "./repo";
+import { getSourceRepoInfo } from "./repo";
 import { createRefCards, refCardRouteResponse, refCardsTailnetAllowed, type RefRunner } from "./ref-cards";
 import type { Origin } from "@plannotator/shared/agents";
 import { handleImage, handleUpload, handleServerReady, handleApiNotFound, handleFavicon, handleReferenceSkills, handleReferenceSkillContent, handleSaveNotes, readDraftGenerationFromBody, readDraftGenerationFromUrl } from "./shared-handlers";
@@ -793,13 +793,14 @@ export async function startAnnotateServer(
     bundlePaths,
   });
 
-  // Repo identity follows the annotated source when it is on disk. Rootless
-  // sessions (URLs, agent messages, live apps) keep the launch directory.
+  // Repo identity follows the annotated source when it is on disk and in a repo.
+  // A source outside any repo and rootless sessions (URLs, agent messages, live
+  // apps) keep the launch directory.
   const repoInfoCwd =
     mode === "annotate-folder" && folderPath
       ? folderPath
       : bundleRoot ?? (draftFilePath ? dirname(draftFilePath) : undefined);
-  const repoInfo = await getRepoInfo(repoInfoCwd);
+  const repoInfo = await getSourceRepoInfo(repoInfoCwd);
 
   // Decision promise
   let resolveDecision: (result: {
