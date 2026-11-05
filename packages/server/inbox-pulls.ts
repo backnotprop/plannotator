@@ -57,7 +57,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
-import { MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes } from "@plannotator/shared/review-core";
+import { MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
@@ -788,6 +788,14 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const none: InboxFileContents = { oldContent: null, newContent: null };
       // Nothing to check a text against (GitLab's whole-stack patches carry no index line): no arrows, and nothing runs.
       if (!ids) return none;
+      // A rename's old path comes from the patch, which a guide's author wrote: it must not walk out of the forge's route.
+      if (oldPath !== undefined) {
+        try {
+          validateFilePath(oldPath);
+        } catch {
+          return none;
+        }
+      }
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       // The commit the patch on screen was read at, when the Inbox read one, else the list's. A patch whose head moved
@@ -837,7 +845,13 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           return null;
         })();
         mergeBases.set(baseKey, read);
-        read.catch(() => mergeBases.delete(baseKey));
+        // Only a commit is kept: "no base" can be a passing sign-in problem, and the next click asks again.
+        const drop = () => {
+          if (mergeBases.get(baseKey) === read) mergeBases.delete(baseKey);
+        };
+        read.then((base) => {
+          if (!base) drop();
+        }, drop);
         while (mergeBases.size > 64) mergeBases.delete(mergeBases.keys().next().value!);
         return read;
       };
@@ -869,7 +883,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           (text) => {
             // Still the one kept (the bound may have dropped it while it ran).
             if (fileTexts.get(textKey) !== entry) return;
-            entry.bytes = text === null ? 0 : Buffer.byteLength(text, "utf8");
+            // Only a text is kept: an empty answer or a 404 can be a passing sign-in problem, and the next click asks again.
+            if (!text) {
+              fileTexts.delete(textKey);
+              return;
+            }
+            entry.bytes = Buffer.byteLength(text, "utf8");
             fileTextBytes += entry.bytes;
             for (const [oldest, kept] of fileTexts) {
               if (fileTextBytes <= INBOX_PULL_FILE_CACHE_BYTES && fileTexts.size <= INBOX_PULL_FILE_CACHE_ENTRIES) break;

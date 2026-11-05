@@ -286,6 +286,84 @@ describe("a PR's file", () => {
     expect(await pulls.fileContents(KEY, "layer", "src/new-name.ts", [], IDS, "src/old-name.ts")).toEqual({ oldContent: "old\n", newContent: "new\n" });
   });
 
+  test("a rename's old path that leaves the repository: nothing is read, whatever it names", async () => {
+    const f = scripted();
+    f.files.set(fileAt("after.ts", HEAD), "new\n");
+    const pulls = await listed(f);
+    f.reads.length = 0;
+    for (const oldPath of ["../../../../user", "/etc/passwd", "src/../../x", "..\\..\\user"]) {
+      expect(await pulls.fileContents(KEY, "layer", "after.ts", [], IDS, oldPath)).toEqual({ oldContent: null, newContent: null });
+    }
+    expect(f.reads).toEqual([]);
+  });
+
+  describe("an answer of nothing is not kept: the next click opens the file", () => {
+    const opens = { oldContent: "old\n", newContent: "new\n" };
+    const nothing = { oldContent: null, newContent: null };
+
+    test("the head's text: a 404", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      const pulls = await listed(f);
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(nothing);
+      f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(opens);
+    });
+
+    test("the head's text: an empty answer with exit 0", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", HEAD), "");
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      const pulls = await listed(f);
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(nothing);
+      f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(opens);
+    });
+
+    test("the old side's text: a 404, then an empty answer", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+      const pulls = await listed(f);
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(nothing);
+      f.files.set(fileAt("src/a.ts", BASE), "");
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(nothing);
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(opens);
+    });
+
+    test("where the head left its base: an empty answer with exit 0", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      f.mergeBase = "";
+      const pulls = await listed(f);
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(nothing);
+      f.mergeBase = BASE;
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual(opens);
+    });
+
+    test("where the head left its base: a 404", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      // The clone has the head, so the compare is the first thing the forge is asked.
+      const pulls = await listed(f, async (_root, sha) => (sha === HEAD ? "new\n" : null));
+      f.failWith = { stderr: "gh: Not Found (HTTP 404)" };
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual(nothing);
+      f.failWith = null;
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual(opens);
+    });
+
+    test("a text that came back is still kept", async () => {
+      const f = scripted();
+      f.files.set(fileAt("src/a.ts", BASE), "old\n");
+      const pulls = await listed(f, async (_root, sha) => (sha === HEAD ? "new\n" : null));
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual(opens);
+      f.reads.length = 0;
+      expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual(opens);
+      expect(f.reads).toEqual([]);
+    });
+  });
+
   test("an unknown PR: nothing runs", async () => {
     const f = scripted();
     const pulls = await listed(f);
@@ -589,6 +667,17 @@ describe("a guide's file", () => {
     const id = await prGuide(w, "after.ts", undefined, patch);
     expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
     expect(await contentsOf(await w.askGuide(id, "after.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
+  });
+
+  test("a guide whose patch renames from outside the repository sends no forge read there", async () => {
+    const w = await world({ codeReview: true });
+    w.forge.files.set(fileAt("after.ts", HEAD), "new\n");
+    const patch = `diff --git a/before.ts b/after.ts\nsimilarity index 90%\nrename from ../../../../user\nrename to after.ts\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/../../../../user\n+++ b/after.ts\n@@ -1 +1 @@\n-old\n+new\n`;
+    const id = await prGuide(w, "after.ts", undefined, patch);
+    expect((await fetch(`${w.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    w.forge.reads.length = 0;
+    expect(await contentsOf(await w.askGuide(id, "after.ts"))).toEqual({ oldContent: null, newContent: null });
+    expect(w.forge.reads.filter((endpoint) => endpoint.includes(".."))).toEqual([]);
   });
 
   test("a guide in another project naming this PR reads nothing of it", async () => {

@@ -30,6 +30,7 @@ import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
 import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
+import { newLineOf } from '../utils/newLineOf';
 import { fileKind } from '@plannotator/core/file-kind';
 import { packageFileKind } from '@plannotator/core/package-changes';
 import { getFileKindOrder } from '../utils/fileKindTree';
@@ -689,16 +690,6 @@ const AUGMENT_APPLY_IDLE_MS = 150;
 // How long revealing a comment on a closed line waits for its file's whole text.
 const REVEAL_WAIT_MS = 30_000;
 
-/** `line`'s number on the new side, for a line outside every hunk (where both sides read the same). */
-function newLineOf(fileDiff: FileDiffMetadata, line: number, side: 'old' | 'new'): number {
-  if (side === 'new') return line;
-  let offset = 0;
-  for (const hunk of fileDiff.hunks) {
-    if (line < hunk.deletionStart) break;
-    offset = hunk.additionStart + hunk.additionCount - (hunk.deletionStart + hunk.deletionCount);
-  }
-  return line + offset;
-}
 const EMPTY_AI_MESSAGES: AIChatEntry[] = [];
 const noopAIMarkerClick = () => {};
 
