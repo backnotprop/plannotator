@@ -7625,49 +7625,50 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-ext:hover { background: var(--ib-hover-s, var(--muted)); }
 .pn-inbox .ib-pr-ext:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 .ib-pr-body { flex: 1; min-height: 0; overflow-y: auto; padding: 22px 28px 28px; }
-.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; }
+.ib-pr-h { margin: 0; font-size: var(--ib-fs-20, 20px); font-weight: 650; letter-spacing: -0.01em; line-height: 1.3; overflow-wrap: anywhere; outline: none; text-wrap: balance; }
 .ib-pr-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
 .ib-pr-meta > * { min-width: 0; }
-.ib-pr-agent { display: inline-flex; align-items: center; gap: 6px; color: var(--foreground); }
 .pn-inbox .ib-pr-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; height: 26px; padding: 0 9px; border-radius: 999px; background: var(--muted); color: var(--foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .pn-inbox .ib-pr-chip > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pn-inbox .ib-pr-chip > .ib-pr-chip-k { flex: none; color: var(--muted-foreground); font-weight: 600; }
 .pn-inbox button.ib-pr-chip:hover { background: color-mix(in oklch, var(--muted) 60%, var(--border)); }
 .pn-inbox button.ib-pr-chip:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* The agent that has the PR: one status line, no box (take B), its last words under it. */
-.ib-pr-status { margin-top: 18px; }
-/* Focus lands here after a hand-off: a ring only for the keyboard. */
-.ib-pr-status:focus { outline: none; }
-.ib-pr-status:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 6px; }
-.ib-pr-status-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 7px; font-size: var(--ib-fs-13-5, 13.5px); }
-.ib-pr-status-p { margin: 6px 0 0 25px; font-size: var(--ib-fs-14, 14px); line-height: 1.5; overflow-wrap: anywhere; }
-.pn-inbox .ib-pr-quietlink { padding: 0; border: 0; background: transparent; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); text-decoration: underline; text-underline-offset: 3px; text-decoration-color: color-mix(in oklch, var(--muted-foreground) 40%, transparent); cursor: pointer; }
-.pn-inbox .ib-pr-quietlink:hover { color: var(--foreground); }
-.pn-inbox .ib-pr-quietlink:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
-/* The hand-off, inline (take B): "Ask for" then "Hand to", the agents as pills, "+ New agent" dashed and last. */
-.ib-pr-hgrid { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px 14px; margin-top: 18px; }
-.ib-pr-lab { font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
-.ib-pr-hline { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
 .ib-seg.ib-seg-sm .ib-seg-o { height: 26px; padding: 0 9px; font-size: var(--ib-fs-12-5, 12.5px); }
-.pn-inbox .ib-pr-askin { flex: 1; min-width: 220px; max-width: 360px; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
+/* The review thread's agent (approval "pr-page-review-with-agent"): its tile, then words; no box, no side tab, no
+   status dot. Its last words under it, two lines at most. Focus lands here when a thread has just started. */
+.ib-pr-thread { margin-top: 14px; min-width: 0; }
+.ib-pr-thread:focus { outline: none; }
+.ib-pr-thread:focus-visible { outline: 2px solid var(--ring); outline-offset: 4px; border-radius: 6px; }
+.ib-pr-thread-h { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; font-size: var(--ib-fs-14, 14px); }
+.ib-pr-thread-h b { font-weight: 600; }
+.ib-pr-thread[data-pulls-thread-line="ended"] .ib-pr-thread-h { color: var(--muted-foreground); }
+.ib-pr-thread[data-pulls-thread-line="ended"] .ib-pr-thread-h b { color: var(--foreground); }
+.ib-pr-thread[data-pulls-thread-line="ended"] .ib-atile { opacity: 0.55; }
+.ib-pr-thread-p { margin: 6px 0 0 28px; max-width: 68ch; font-size: var(--ib-fs-14, 14px); line-height: 1.5; color: var(--muted-foreground); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+/* "Review with an agent": inline under the actions (nothing covers the page). The ask, then one list of agents (a
+   radio each, the picked one tinted as an on button is), then Start review thread. */
+.ib-pr-pick { display: grid; gap: 12px; max-width: 520px; margin-top: 12px; padding: 14px; border: 1px solid var(--border); border-radius: 10px; background: var(--card); }
+.ib-pr-pick-ask { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ib-pr-pick-lab { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.pn-inbox .ib-pr-askin { width: 100%; height: 32px; padding: 0 10px; border-radius: 7px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-pr-askin:focus-visible { outline: 2px solid color-mix(in oklch, var(--ring) 25%, transparent); border-color: var(--ring); }
-.pn-inbox .ib-pr-agbtn { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px 0 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; white-space: nowrap; }
-.pn-inbox .ib-pr-agbtn:hover:not(:disabled):not([data-disabled]) { border-color: color-mix(in oklch, var(--primary) 50%, var(--border)); background: color-mix(in oklch, var(--primary) 6%, var(--card)); }
-.pn-inbox .ib-pr-agbtn:focus-visible, .pn-inbox .ib-pr-agbtn:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
-.pn-inbox .ib-pr-agbtn:disabled, .pn-inbox .ib-pr-agbtn[data-disabled] { opacity: 0.55; cursor: default; }
-/* The agent pills are a radio group (one is picked): the group adds no box, each pill holds its own radio. */
-.ib-pr-agents { display: contents; }
-.pn-inbox label.ib-pr-agbtn { position: relative; cursor: pointer; }
-.pn-inbox .ib-pr-agbtn input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
-.pn-inbox .ib-pr-agbtn input:focus-visible { outline: none; }
-.pn-inbox .ib-pr-agbtn.ib-new { padding-left: 10px; border-style: dashed; color: var(--muted-foreground); }
-/* The picked agent, the one Review hands it to: tinted as an on button is (oklab, so light mode stays violet). */
-.pn-inbox .ib-pr-agbtn[data-on], .pn-inbox .ib-pr-agbtn[data-on]:hover:not([data-disabled]) { border-color: color-mix(in oklab, var(--primary) 55%, transparent); background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--primary); }
-.ib-pr-busy { width: 6px; height: 6px; border-radius: 50%; background: var(--success, #16a34a); }
-.ib-pr-hgrid-err { grid-column: 1 / -1; }
-.pn-inbox .ib-pr-guide { display: inline-flex; align-items: center; gap: 7px; margin-top: 10px; height: 32px; padding: 0 11px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); font-size: var(--ib-fs-13-5, 13.5px); font-weight: 500; }
-.pn-inbox .ib-pr-guide:hover { background: var(--ib-hover-s, var(--muted)); }
-.ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 20px; }
+.ib-pr-pick-list { display: grid; gap: 2px; }
+.ib-pr-pick-sub { padding: 2px 2px 4px; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); }
+.ib-pr-pick-none { padding: 4px 2px; font-size: var(--ib-fs-13-5, 13.5px); color: var(--muted-foreground); }
+.pn-inbox .ib-pr-opt { position: relative; display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 6px 10px; border-radius: 8px; border: 1px solid transparent; cursor: pointer; }
+.pn-inbox .ib-pr-opt input { position: absolute; inset: 0; margin: 0; opacity: 0; cursor: inherit; }
+.pn-inbox .ib-pr-opt:hover { background: var(--ib-hover-s, var(--muted)); }
+.pn-inbox .ib-pr-opt[data-on] { border-color: color-mix(in oklab, var(--primary) 45%, transparent); background: color-mix(in oklab, var(--primary) 8%, var(--card)); }
+.pn-inbox .ib-pr-opt:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 1px; }
+.pn-inbox .ib-pr-opt:has(input:disabled) { cursor: default; opacity: 0.7; }
+.ib-pr-opt > :not(.ib-pr-opt-t):not(input) { flex: none; }
+.ib-pr-opt-t { display: grid; flex: 1; min-width: 0; line-height: 1.3; }
+.ib-pr-opt-t b { font-size: var(--ib-fs-14, 14px); font-weight: 600; }
+.ib-pr-opt-s { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
+.ib-pr-opt-k { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); white-space: nowrap; }
+.ib-pr-opt-plus { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: 6px; border: 1px dashed var(--border); color: var(--muted-foreground); }
+.ib-pr-pick-go { display: flex; flex-wrap: wrap; gap: 8px; }
+.ib-pr-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-top: 16px; }
 .pn-inbox .ib-pr-actions .ib-btn { height: 36px; padding: 0 15px; font-size: var(--ib-fs-14, 14px); }
 .ib-pr-note { font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-pr-order { margin-top: 26px; }
@@ -7722,7 +7723,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-pr-replyin:focus-visible { outline: 2px solid var(--ring); outline-offset: -1px; }
 .ib-pr-replyacts { display: flex; align-items: center; gap: 8px; font-size: var(--ib-fs-12-5, 12.5px); }
 
-/* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. */
+/* "Review layer by layer": phase 1's review frame with the layers strip under its header and a foot. One title, the
+   header's (approval "pr-page-review-with-agent"): the reader draws none (GuideReader `bare`), the strip numbers. */
 .ib-viewer.ib-prreview { grid-template-rows: 46px auto minmax(0, 1fr) auto; }
 /* A PR layer has no curated chapters: the reader's one "Every changed file" card would only repeat the rail's
    files, so its narrative column goes and the diffs take the width (the rail, as phase 1's All files, navigates). */
@@ -7739,22 +7741,33 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prr-layer[aria-current] { background: color-mix(in oklab, var(--primary) 10%, var(--card)); color: var(--foreground); font-weight: 600; }
 .pn-inbox .ib-prr-layer:disabled { cursor: default; }
 .pn-inbox .ib-prr-layer:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-.ib-prr-lt { max-width: 34ch; overflow: hidden; text-overflow: ellipsis; }
 .ib-prr-scope { flex: none; }
 .ib-prr-note { margin: 14px 18px 0; padding: 10px 12px; border-radius: 8px; background: var(--muted); color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .ib-prr-foot { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 10px 16px; background: var(--card); border-top: 1px solid var(--ib-sep-s, color-mix(in oklch, var(--border) 60%, transparent)); font-size: var(--ib-fs-13, 13px); color: var(--muted-foreground); }
 .ib-prr-where { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 /* Fixes from the worst-case stress test (break-ui on #2590). */
-/* A long title gives way in the review header (cut with "…", whole in its title and the diff's heading): the back
-   label, the comments button and the verdict never leave the window. The repository gives way first. */
+/* A long title gives way in the review header (cut with "…", whole in its tooltip): the back label, the comments
+   button and the verdict never leave the window. */
 .ib-review .ib-vhead .ib-prr-fn { flex: 0 1 auto; min-width: 0; }
-.ib-prreview .ib-vhead .ib-from { flex: 0 100 auto; }
 .pn-inbox .ib-prreview .ib-vhead .ib-back, .ib-prreview .ib-vhead .ib-vsep, .ib-prreview .ib-vhead .ib-vcomments, .ib-prreview .ib-vhead [data-pull-review-forge] { flex: none; white-space: nowrap; }
 /* A narrow window short of the phone layout: the destination's names drop, as on a phone (each keeps its mark and
    its words in the tooltip), so the verdict fits by 760. */
 @media (max-width: 959px) {
   .ib-prreview .ib-vhead .ib-rv-dest .ib-seg-o > span[aria-hidden] { display: none; }
+}
+/* Under 1100px Back keeps its arrow (its name for a screen reader) and gives its width to the title. */
+@media (max-width: 1100px) {
+  .pn-inbox .ib-prreview .ib-vhead .ib-back { font-size: 0; gap: 0; padding-inline: 8px; }
+}
+/* A review under 900px wide (PullReview's RAIL_FOLD_BELOW): the file rail folds into the Files picker over the diff,
+   as on a phone, and the diff takes the width. */
+.ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); }
+.ib-prreview.ib-railfold .ib-rrail { display: none; }
+/* Past the phone layout (which keeps its own 44px picker). */
+@media (min-width: 768px) {
+  .ib-prreview.ib-railfold .ib-rv-phonebar { display: grid; gap: 8px; padding: 10px 16px 0; }
+  .pn-inbox .ib-prreview.ib-railfold .ib-rv-jump { height: 34px; width: 100%; max-width: 520px; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 }
 /* What the list could not read, or read only in part: a quiet line over the groups. */
 .ib-pr-notices { display: grid; gap: 6px; margin: 4px 2px 10px; }
@@ -7774,17 +7787,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
    bottom, it is centred on the name and the line keeps the height of a row with no agent. */
 .ib-pr-magent > .ib-mk { display: inline-flex; vertical-align: text-bottom; margin-right: 4px; width: var(--ib-mark-16); height: var(--ib-mark-16); border-radius: var(--ib-mark-16-r); }
 .ib-pr-magent > .ib-mk > svg, .ib-pr-magent > .ib-mk > img { width: var(--ib-mark-16-g); height: var(--ib-mark-16-g); }
-/* "Send to the agent" when a Whole stack covers several agents' layers: shown off, its tooltip says why. */
-.ib-rv-dest .ib-seg-o[data-off] { opacity: 0.45; cursor: not-allowed; }
-.ib-rv-dest .ib-seg-o[data-off] input { cursor: not-allowed; }
 /* A branch named in a layer's line can be long and unbroken. */
 .ib-pr-basew { min-width: 0; overflow-wrap: anywhere; }
-/* An agent whose session ended: named, its tile quieter. */
-[data-pulls-agent-ended] .ib-atile { opacity: 0.55; }
-/* An agent pill with a long session label is cut, never wider than its line. */
-.pn-inbox .ib-pr-agbtn { max-width: 100%; min-width: 0; }
-.ib-pr-agbtn > :not(.ib-pr-agbtn-t):not(input) { flex: none; }
-.ib-pr-agbtn-t { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* The review rail grouped by folder (names repeat in deep folders): a quiet heading over each group. */
 .ib-rv-folder { padding: 8px 8px 2px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
 .ib-rv-folder:first-child { padding-top: 0; }
@@ -7799,17 +7803,14 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .ib-pr-h { font-size: var(--ib-fs-22, 22px); }
   .ib-pr-actions .ib-pr-note { flex-basis: 100%; }
   .pn-inbox .ib-pr-actions .ib-btn { height: 44px; }
-  /* The hand-off on a phone: each label over its line, the pills wrapping, the words a full line. */
-  .ib-pr-hgrid { grid-template-columns: minmax(0, 1fr); gap: 6px; }
-  .ib-pr-hgrid > .ib-pr-lab:nth-of-type(2) { margin-top: 6px; }
-  .pn-inbox .ib-pr-askin { flex-basis: 100%; max-width: none; min-width: 0; font-size: var(--ib-fs-16-in, 16px); height: 44px; }
-  .pn-inbox .ib-pr-agbtn { height: 44px; }
-  .ib-pr-hline .ib-seg-sm .ib-seg-o { height: 40px; }
+  /* The picker on a phone: the ask's words a full line at 16px (no zoom), each agent a 52px row. */
+  .pn-inbox .ib-pr-askin { font-size: var(--ib-fs-16-in, 16px); height: 44px; }
+  .pn-inbox .ib-pr-pick-ask .ib-seg-sm .ib-seg-o { height: 44px; }
+  .pn-inbox .ib-pr-opt { min-height: 52px; }
+  .pn-inbox .ib-pr-pick-go .ib-btn { height: 44px; }
   .pn-inbox .ib-pr-lrow { flex-wrap: wrap; padding: 12px 6px 12px 8px; }
   .ib-pr-lrow > .ib-pr-pill { margin-left: 32px; }
   .ib-pr-lgo { flex-basis: calc(100% - 32px); margin-left: 32px; min-height: 24px; }
-  /* Review and Open the diff, each a full line, as the hand-off lines above them. */
-  .ib-pr-handoff .ib-pr-actions > .ib-btn { flex: 1 1 100%; justify-content: center; }
   /* The layer strip scrolls with no scrollbar: its edges fade, so a layer past them reads as more to scroll to. */
   .ib-prr-layers { padding-inline: 10px; -webkit-mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); mask-image: linear-gradient(to right, transparent, #000 12px, #000 calc(100% - 12px), transparent); }
   .ib-pr-replyfoot { padding: 10px 14px calc(12px + env(safe-area-inset-bottom)); }
