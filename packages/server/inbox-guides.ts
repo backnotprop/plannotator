@@ -37,7 +37,7 @@ import {
   type GuideSnapshot,
 } from "@plannotator/core/guide-format";
 import type { GuideOverviewDiagram } from "@plannotator/core/guide";
-import { displayInboxSubject, type InboxGuideRef } from "@plannotator/core/inbox-types";
+import { displayInboxSubject, inboxReviewSourceOf, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
 import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
@@ -226,6 +226,9 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string,
     deletions: files.reduce((n, f) => n + f.deletions, 0),
     ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => inboxReviewTitleLine(section.title)) } : {}),
   };
+  // Reviews (approval "inbox-reviews-page") lists a review by where its changes came from.
+  const source = review ? inboxReviewSourceOf(snapshot) : null;
+  if (source) ref.source = source;
   return { text, ref };
 }
 

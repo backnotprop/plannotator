@@ -172,6 +172,7 @@ export default function GuideReader({
   renderOverviewDiagram,
   renderOverviewFigure,
   highlight = null,
+  bare = false,
 }: GuideReaderProps) {
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   const walkthrough = useMemo<CodeGuideData>(
@@ -395,6 +396,7 @@ export default function GuideReader({
         focusedFile={focusedFile}
         onFocusFile={setFocusedFile}
         sourceLine={sourceLine(snapshot)}
+        bare={bare}
       />
       {globalAnchor && globalDraftKey && (
         <CommentPopover

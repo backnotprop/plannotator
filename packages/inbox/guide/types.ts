@@ -55,6 +55,8 @@ export interface GuideReaderProps {
   renderOverviewFigure?: () => ReactNode | null;
   /** Paint these lines (new side) and bring them into view; a new token moves again. */
   highlight?: { path: string; start: number; end: number; token: number } | null;
+  /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
+  bare?: boolean;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */
