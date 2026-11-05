@@ -213,6 +213,7 @@ import { createInboxPulls, InboxPullsError, linkInboxPulls, pullCards, type Inbo
 import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitForgeReview, type PRRef, type PRReviewFileComment, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
+import { createPullRisk, type PullRiskOptions } from "./inbox-pull-risk";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
 import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
 import { createInboxReviewIndex } from "./inbox-reviews";
@@ -448,6 +449,8 @@ export interface InboxServerOptions {
   cardFavicons?: CardFaviconOptions;
   /** Tests: how a PR author's picture is fetched (inbox-pull-avatars.ts): a scripted fetch and DNS, never the network. */
   pullAvatars?: Partial<PullAvatarOptions>;
+  /** Tests: the risk agent and the CLIs found (inbox-pull-risk.ts): a scripted answer, never a real agent. */
+  pullRisk?: Pick<PullRiskOptions, "run" | "agents" | "listModels">;
   /** Tests: the git that decides a path's project (default `inboxGitRunner`, inbox-project-root.ts). */
   projectRootGit?: InboxGitRunner;
   /** Tests: the home folder no repository project is made at (default this user's, inbox-project-root.ts `isHomeOrRootFolder`). */
@@ -1014,6 +1017,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // Pull requests (inbox-pulls.ts): read only while the page is open and Code review is on; the route refuses first otherwise.
   // The project roots whose origin the Pull requests list has waited for once.
   const pullRepoRead = new Set<string>();
+  const pullRepoReading = new Map<string, Promise<InboxProjectRepo | null>>();
   const pulls = createInboxPulls(options.refRunner ? { run: options.refRunner } : {});
   // The PR authors' pictures (inbox-pull-avatars.ts): only for logins the last list showed, served from this origin.
   const pullAvatars = createPullAvatars({ ...options.pullAvatars, dir: options.pullAvatars?.dir ?? join(inboxDir(dataDir), "pull-avatars") });
@@ -1021,6 +1025,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const postedReviews = new Set<string>();
   // Which agent thread owns a PR, as the person chose it (Hand to an agent, Launch an agent): inbox/pull-links.json.
   const pullOwners = createInboxPullLinks(dataDir);
+  // PR risk ranking (inbox-pull-risk.ts): judged in the background from the list reads below, while Code review is on and rules exist.
+  const pullRisk = createPullRisk({ dataDir, pulls, isOn: () => codeReviewOn(), ...options.pullRisk });
   // Reviews (inbox-reviews.ts): every thread with a review card, derived from the store's messages on read.
   const reviewIndex = createInboxReviewIndex(store);
   const pullLinkStore: InboxPullLinkStore = {
@@ -1045,9 +1051,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const reposNow = await Promise.all(
       projectsNow.map(async (project) => {
         const repo = repos.get(project.root);
-        if (repo || pullRepoRead.has(project.root)) return repo;
+        // A second list read while the first waits on git waits too: it must not answer "no project is on a forge".
+        if (repo || pullRepoRead.has(project.root)) return repo ?? pullRepoReading.get(project.root);
         pullRepoRead.add(project.root);
-        return repos.refresh(project.root);
+        const reading = repos.refresh(project.root).finally(() => pullRepoReading.delete(project.root));
+        pullRepoReading.set(project.root, reading);
+        return reading;
       }),
     );
     for (const [i, project] of projectsNow.entries()) {
@@ -3571,6 +3580,27 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
+      // PR risk ranking (inbox-pull-risk.ts): the rules, the agent and the judgments; the same guards as the list, so a
+      // guest or a web page can neither read the rules nor change them. Inbox-only (Bun).
+      if (path === "/api/inbox/pulls/risk" || path === "/api/inbox/pulls/risk/models") {
+        if (req.method !== "GET" && !(req.method === "POST" && path === "/api/inbox/pulls/risk")) return json({ error: "Use GET or POST." }, 405);
+        if (!ownerOrLocal(req, via)) return localOnly();
+        if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
+          return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
+        }
+        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+        if (path === "/api/inbox/pulls/risk/models") {
+          const provider = url.searchParams.get("provider") ?? "";
+          if (!pullRisk.answer().agents.some((agent) => agent.id === provider)) throw new InboxError("validation_error", "provider: an agent from the list.", { field: "provider" });
+          return json({ serverSession, ...(await pullRisk.models(provider)) });
+        }
+        if (req.method === "POST") {
+          const body = await readBody(req);
+          if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
+          pullRisk.save(body);
+        }
+        return json({ serverSession, ...pullRisk.answer() });
+      }
       if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/avatar") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
@@ -3612,6 +3642,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         }
         const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        pullRisk.assess(listed.pulls);
         // Only this list's authors: a host it did not list (project removed, CLI signed out) keeps no login.
         pullAvatars.allowOnly(listed.hosts.map(({ host }) => ({ host, avatars: pulls.avatarUrls(host) })));
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
@@ -3632,6 +3663,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         const { projectsByRepo, wanted } = await pullProjects();
         const listed = await pulls.list(wanted, { refresh: url.searchParams.get("refresh") === "1" });
+        pullRisk.assess(listed.pulls);
         const links = linkInboxPulls(listed.pulls, pullLinkStore, projectsByRepo, pullOwners.all());
         const stacks = inboxPullStacks(listed.pulls);
         const pullReasons = new Map<string, InboxPullReason>(inboxPullItems(stacks, (pull) => !!links[pull.key]).map((item) => [item.stack.id, item.reason]));

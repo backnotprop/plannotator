@@ -675,12 +675,13 @@ export class CodexAppServerProvider implements AIProvider {
 
   async createSession(options: CreateSessionOptions): Promise<AISession> {
     const session = new CodexAppServerSession({
-      systemPrompt: buildSystemPrompt(options.context),
+      systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
       cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: null,
       codexExecutablePath: this.config.codexExecutablePath ?? "codex",
       model: options.model ?? this.config.model ?? DEFAULT_MODEL,
       reasoningEffort: options.reasoningEffort,
+      oneShot: !!options.oneShot,
       onClosed: (s) => this.sessions.delete(s),
     });
     this.sessions.add(session);
@@ -726,6 +727,8 @@ interface SessionConfig {
   model: string;
   reasoningEffort?: string;
   resumeThreadId?: string;
+  /** A single judgment (`CreateSessionOptions.oneShot`): the thread is not kept. */
+  oneShot?: boolean;
   onClosed: (session: CodexAppServerSession) => void;
 }
 
@@ -948,7 +951,7 @@ class CodexAppServerSession extends BaseSession {
   private threadStartParams(): RpcMessage {
     return {
       method: "thread/start",
-      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only" },
+      params: { model: this.config.model, cwd: this.config.cwd, sandbox: "read-only", ...(this.config.oneShot && { ephemeral: true }) },
     };
   }
 

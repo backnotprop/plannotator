@@ -7747,6 +7747,34 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-pr-notice > .ib-ic { flex: none; margin-top: 2px; }
 .ib-pr-notice a { color: var(--primary); font-weight: 550; text-decoration: none; white-space: nowrap; }
 .ib-pr-notice a:hover { text-decoration: underline; }
+
+/* PR risk ranking (pulls/RiskMark.tsx, RiskFilter.tsx, RiskRulesDialog.tsx): high stands out, medium is quiet, low is quietest. */
+.ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
+.ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
+.ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
+.ib-pr-riskhint { display: block; width: 100%; margin: 2px 0 6px; padding: 4px 10px; border: 0; background: none; text-align: left; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); cursor: pointer; }
+.ib-pr-riskhint:hover { color: var(--foreground); text-decoration: underline; }
+.ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
+.ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }
+.ib-pr-l1 .ib-risk { margin-left: 2px; }
+.ib-vhead .ib-risk { margin-left: 4px; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) .ib-bpf-l { position: static; width: auto; height: auto; clip-path: none; }
+.ib-prlist .ib-lhead .ib-pr-riskf:not([data-set]) { flex: none; }
+.ib-prlist .ib-lhead:has(.ib-pr-riskf) .ib-sp { margin-left: -10px; }
+.ib-prlist .ib-lhead:has(.ib-pr-riskf[data-set]) .ib-pr-onyou { display: none; }
+.ib-riskd-l { display: block; margin-top: 6px; line-height: 1.45; }
+.ib-riskd-t { display: block; width: 100%; margin-top: 12px; padding: 8px 10px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; line-height: 1.5; resize: vertical; }
+.ib-riskd-t::placeholder { color: color-mix(in oklch, var(--muted-foreground) 70%, transparent); }
+.ib-riskd-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 14px; }
+.ib-riskd-row label { display: grid; gap: 4px; min-width: 0; font-size: var(--ib-fs-12-5, 12.5px); font-weight: 550; }
+.ib-riskd-s { width: 100%; min-width: 0; height: 32px; padding: 0 8px; border: 1px solid var(--border); border-radius: 8px; background: var(--background); color: var(--foreground); font: inherit; font-weight: 400; font-size: var(--ib-fs-13, 13px); }
+.ib-riskd-acts { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+@media (max-width: 640px) {
+  .ib-riskd-row { grid-template-columns: 1fr; }
+  .ib-riskd-s { height: 44px; font-size: 16px; }
+  .ib-riskd-t { font-size: 16px; }
+}
 /* A long chain: the first two marks, "+N", the last two. */
 .ib-pr-more { font-size: var(--ib-fs-11-5, 11.5px); font-weight: 600; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The author's picture (the owner on #2608) over their initials, which show while it loads and stay when it cannot. */

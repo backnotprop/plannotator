@@ -350,6 +350,25 @@ describe("OpenCode Ask AI event stream", () => {
 		return messages;
 	}
 
+	test("a one-shot prompt turns every tool off and carries its own system prompt; a normal question does neither", async () => {
+		const bodies: Record<string, unknown>[] = [];
+		const made = fakeClient((push) => push({ type: "server.connected", properties: {} }));
+		const client = made.client as { session: { promptAsync: (args: { body: Record<string, unknown> }) => Promise<unknown> } };
+		const answer = client.session.promptAsync as unknown as () => Promise<unknown>;
+		client.session.promptAsync = (args) => {
+			bodies.push(args.body);
+			return answer();
+		};
+		clientFactory = () => made.client;
+		const provider = new OpenCodeProvider({ type: "opencode-sdk" });
+		const context = { mode: "plan-review", plan: { plan: "# Plan" } };
+		for await (const _ of (await provider.createSession({ context, oneShot: { systemPrompt: "JUDGE" } } as never)).query("x")) void _;
+		for await (const _ of (await provider.createSession({ context } as never)).query("x")) void _;
+		provider.dispose();
+		expect(bodies[0]).toMatchObject({ system: "JUDGE", tools: { "*": false } });
+		expect(bodies[1]!.tools).toBeUndefined();
+	});
+
 	test("sends the question only after the first frame, then streams the answer", async () => {
 		const { client, log, signals } = fakeClient((push) => {
 			setTimeout(() => push({ type: "server.connected", properties: {} }), 20);

@@ -148,6 +148,8 @@ interface ClaudeSDKQueryOptions {
   model?: string;
   maxTurns: number;
   allowedTools: string[];
+  /** The built-in tools on offer; `[]` turns them all off. */
+  tools?: string[];
   cwd: string;
   abortController: AbortController;
   includePartialMessages: boolean;
@@ -204,10 +206,11 @@ export class ClaudeAgentSDKProvider implements AIProvider {
   async createSession(options: CreateSessionOptions): Promise<AISession> {
     return new ClaudeAgentSDKSession({
       ...this.baseConfig(options),
-      systemPrompt: buildSystemPrompt(options.context),
+      systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
       cwd: options.cwd ?? this.config.cwd ?? process.cwd(),
       parentSessionId: null,
       forkFromSession: null,
+      oneShot: !!options.oneShot,
     });
   }
 
@@ -379,6 +382,8 @@ interface SessionConfig {
   resumeSessionId?: string;
   claudeExecutablePath?: string;
   settingSources?: string[];
+  /** A single judgment (`CreateSessionOptions.oneShot`). */
+  oneShot?: boolean;
 }
 
 class ClaudeAgentSDKSession extends BaseSession {
@@ -494,6 +499,20 @@ class ClaudeAgentSDKSession extends BaseSession {
 
     if (this.config.maxBudgetUsd) {
       opts.maxBudgetUsd = this.config.maxBudgetUsd;
+    }
+
+    // A single judgment: only this prompt, no tools, no MCP servers, nothing of
+    // the person's settings or folder, and no session left behind.
+    if (this.config.oneShot) {
+      return {
+        ...opts,
+        systemPrompt: this.config.systemPrompt ?? "",
+        tools: [],
+        allowedTools: [],
+        settingSources: [],
+        strictMcpConfig: true,
+        persistSession: false,
+      };
     }
 
     // After the first query resolves a real session ID, all subsequent

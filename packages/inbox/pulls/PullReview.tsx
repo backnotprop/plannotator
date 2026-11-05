@@ -49,6 +49,8 @@ import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pul
 import { forgeName } from './labels';
 import { railRows } from './rail';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
+import { RiskMark } from './RiskMark';
+import { usePullRisk } from './usePullRisk';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The review's width (px) under which its file rail folds into the Files picker over the diff. */
@@ -205,6 +207,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   // A diff that could not be read (too large, a refused compare) takes no verdict: there is nothing on screen to judge.
   const canDecide = !!link?.last && !diffError;
+  const judged = usePullRisk(model).answer?.judgments[layer?.key ?? ''];
   // Post to GitHub/GitLab (the owner's answer C): any open PR whose head the list read, the person's or a
   // teammate's, with or without an agent. The person chooses at the end where the review goes.
   // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
@@ -378,6 +381,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           <span className="ib-prr-num">{label}</span>
           <bdi>{layer.title}</bdi>
         </span>
+        {judged && <RiskMark judgment={judged} />}
         <span className="ib-sp" />
         {folded && readerComments && (
           <button

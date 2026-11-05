@@ -208,6 +208,13 @@ export interface CreateSessionOptions {
    * Controls how much thinking the model does before responding.
    */
   reasoningEffort?: string;
+  /**
+   * A single judgment, not a conversation (the Inbox's PR risk agent): this
+   * text is the whole system prompt, and the provider gives the agent no tools
+   * and keeps no session wherever its agent allows that. The context's prompt
+   * is not used.
+   */
+  oneShot?: { systemPrompt: string };
 }
 
 /**

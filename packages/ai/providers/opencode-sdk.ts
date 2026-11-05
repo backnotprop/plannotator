@@ -189,11 +189,12 @@ export class OpenCodeProvider implements AIProvider {
 
 		const session = new OpenCodeSession({
 			sessionId: sessionData.id,
-			systemPrompt: buildSystemPrompt(options.context),
+			systemPrompt: options.oneShot?.systemPrompt ?? buildSystemPrompt(options.context),
 			client,
 			model: options.model,
 			parentSessionId: null,
 			firstEventTimeoutMs: this.config.firstEventTimeoutMs,
+			noTools: !!options.oneShot,
 		});
 		return session;
 	}
@@ -314,6 +315,8 @@ interface SessionConfig {
 	parentSessionId: string | null;
 	/** How long to wait for the event stream's first frame before prompting. */
 	firstEventTimeoutMs?: number;
+	/** A single judgment (`CreateSessionOptions.oneShot`): every tool off for this prompt. */
+	noTools?: boolean;
 }
 
 class OpenCodeSession extends BaseSession {
@@ -407,6 +410,7 @@ class OpenCodeSession extends BaseSession {
 									system: this.config.systemPrompt,
 								}),
 							...(modelParam && { model: modelParam }),
+							...(this.config.noTools && { tools: { "*": false } }),
 							parts: [{ type: "text", text: prompt }],
 						},
 					});

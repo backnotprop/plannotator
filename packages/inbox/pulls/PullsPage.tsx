@@ -25,7 +25,7 @@
  * Read only while the page is open (usePulls). No new keyboard shortcuts.
  */
 import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
+import { inboxPullRepoKey, type InboxPull, type InboxPullItem, type InboxPullLink, type InboxPullRiskJudgment, type InboxPullsAnswer, type InboxPullStack } from '@plannotator/core/inbox-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import { InboxApiError, inboxApi, type ProjectFolder } from '../api';
 import { HostMark, Icon } from '../icons';
@@ -62,6 +62,11 @@ import {
 import { forgeName, initials, repoLabels, repoName } from './labels';
 import { answeredClis, pullsEmptyWords, pullsNotices } from './notices';
 import { ReviewPicker } from './ReviewPicker';
+import { filterPullGroups, readRiskFilter, riskLevelWord, saveRiskFilter, stackRisk, type RiskFilterValue, type RiskJudgments } from './risk';
+import { RiskFilter } from './RiskFilter';
+import { RiskMark } from './RiskMark';
+import { RiskRulesDialog } from './RiskRulesDialog';
+import { usePullRisk } from './usePullRisk';
 import { chainMarks, landsNextLayer, layerBaseWords, stackLink, startLayer } from './topology';
 import type { PullsState } from './usePulls';
 
@@ -89,6 +94,8 @@ export interface PullsPageProps {
   onStarted: (session: string) => void;
 }
 
+const NO_JUDGMENTS: RiskJudgments = {};
+
 /** A layer's state as the Board's mark draws it. */
 function markState(pull: InboxPull): 'open' | 'draft' | 'merged' | 'closed' {
   return pull.state;
@@ -99,6 +106,14 @@ export function PullsPage(props: PullsPageProps) {
   const model = state.model;
   const groups = useMemo(() => (model ? pullGroups(model, props.project) : null), [model, props.project]);
   const open = groups && props.stackId ? findStack(groups, props.stackId) : null;
+  // Risk ranking (inbox-pull-risk.ts). The filter acts only once rules exist, and never closes the stack open beside the list.
+  const risk = usePullRisk(model);
+  const rulesSet = !!risk.answer?.rules;
+  const judgments: RiskJudgments = risk.answer?.judgments ?? NO_JUDGMENTS;
+  const [riskFilter, setRiskFilter] = useState<RiskFilterValue>(readRiskFilter);
+  const [rulesOpen, setRulesOpen] = useState(false);
+  const activeFilter = rulesSet ? riskFilter : 'all';
+  const filtered = useMemo(() => (groups ? filterPullGroups(groups, activeFilter, judgments) : null), [groups, activeFilter, judgments]);
   // The filter offers the projects that have a GitHub or GitLab remote here.
   const offered = useMemo(() => {
     const ids = new Set(Object.values(model?.projects ?? {}).flat());
@@ -112,13 +127,24 @@ export function PullsPage(props: PullsPageProps) {
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
           Pull requests
         </h1>
-        {groups && groups.on_you.length > 0 && (
-          <span className="ib-pr-onyou" data-pulls-on-you={groups.on_you.length}>
-            {formatCount(groups.on_you.length)} on you
+        {filtered && filtered.groups.on_you.length > 0 && (
+          <span className="ib-pr-onyou" data-pulls-on-you={filtered.groups.on_you.length}>
+            {formatCount(filtered.groups.on_you.length)} on you
           </span>
         )}
         <span className="ib-sp" />
         {offered.length > 1 && <ProjectFilter projects={offered} names={props.projectNames} value={props.project} phone={phone} onChange={props.onProject} />}
+        {rulesSet && (
+          <RiskFilter
+            value={riskFilter}
+            phone={phone}
+            onChange={(next) => {
+              setRiskFilter(next);
+              saveRiskFilter(next);
+            }}
+            onRules={() => setRulesOpen(true)}
+          />
+        )}
       </div>
       <div className="ib-lbody" aria-busy={state.loading && !model ? true : undefined}>
         {!model && state.error && (
@@ -127,22 +153,39 @@ export function PullsPage(props: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && groups && <PullList model={model} groups={groups} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && risk.answer && !rulesSet && groups && pullRows(groups).length > 0 && (
+          <button type="button" className="ib-pr-riskhint" onClick={() => setRulesOpen(true)} data-pulls-risk-hint="">
+            Rank pull requests by risk: set your no slop rules.
+          </button>
+        )}
+        {model && filtered && <PullList model={model} groups={filtered.groups} filter={activeFilter} notJudged={filtered.notJudged} judgments={judgments} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
+      {rulesOpen && risk.answer && (
+        <RiskRulesDialog
+          answer={risk.answer}
+          onClose={() => setRulesOpen(false)}
+          onSaved={(next) => {
+            risk.setAnswer(next);
+            setRulesOpen(false);
+            // A list read is what starts the judgments of the new rules.
+            state.reload();
+          }}
+        />
+      )}
     </section>
   );
 
   if (phone && open && model) {
-    return <StackView key={open.stack.id} {...props} item={open} model={model} phone onClose={() => props.onOpenStack(null)} />;
+    return <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} phone onClose={() => props.onOpenStack(null)} />;
   }
   return (
     <>
       {list}
       {!phone &&
         (open && model ? (
-          <StackView key={open.stack.id} {...props} item={open} model={model} phone={false} onClose={() => props.onOpenStack(null)} />
+          <StackView key={open.stack.id} {...props} item={open} model={model} judgments={judgments} phone={false} onClose={() => props.onOpenStack(null)} />
         ) : (
           <div className="ib-pane ib-pempty" data-pulls-pane-empty="">
             {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
@@ -152,8 +195,28 @@ export function PullsPage(props: PullsPageProps) {
   );
 }
 
-function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPullsAnswer; groups: ReturnType<typeof pullGroups>; selected: string | null; phone: boolean; onOpen: (id: string) => void }) {
-  const [waitingOpen, setWaitingOpen] = useState(false);
+function PullList({
+  model,
+  groups,
+  filter,
+  notJudged,
+  judgments,
+  selected,
+  phone,
+  onOpen,
+}: {
+  model: InboxPullsAnswer;
+  groups: ReturnType<typeof pullGroups>;
+  filter: RiskFilterValue;
+  notJudged: number;
+  judgments: RiskJudgments;
+  selected: string | null;
+  phone: boolean;
+  onOpen: (id: string) => void;
+}) {
+  const [waitingFolded, setWaitingOpen] = useState(false);
+  // With the risk filter on, nothing it kept stays folded away.
+  const waitingOpen = waitingFolded || filter !== 'all';
   const now = useRelativeClock(true);
   const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
   // A stack opened from the folded group keeps it open.
@@ -161,6 +224,20 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
   }, [selected, groups.waiting]);
   const notices = pullsNotices(model);
+  const notJudgedLine =
+    notJudged > 0 ? (
+      <p className="ib-pr-risknote" data-pulls-risk-not-judged={notJudged}>
+        {plural(notJudged, 'pull request')} not checked yet.
+      </p>
+    ) : null;
+  if (total === 0 && filter !== 'all') {
+    return (
+      <div className="ib-pr-empty" data-pulls-empty="risk">
+        <p className="ib-pr-empty-h">{filter === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
+        {notJudgedLine}
+      </div>
+    );
+  }
   if (total === 0) {
     const empty = pullsEmptyWords(model, notices);
     return (
@@ -183,6 +260,7 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
       selected={item.stack.id === selected}
       phone={phone}
       now={now}
+      judgments={judgments}
       onOpen={() => onOpen(item.stack.id)}
     />
   );
@@ -239,6 +317,7 @@ function PullList({ model, groups, selected, phone, onOpen }: { model: InboxPull
           {waitingOpen && groups.waiting.map(row)}
         </div>
       )}
+      {notJudgedLine}
     </>
   );
 }
@@ -334,6 +413,7 @@ function PullRow({
   selected,
   phone,
   now,
+  judgments,
   onOpen,
 }: {
   item: InboxPullItem;
@@ -343,8 +423,10 @@ function PullRow({
   selected: boolean;
   phone: boolean;
   now: number;
+  judgments: RiskJudgments;
   onOpen: () => void;
 }) {
+  const judged = stackRisk(item.stack, judgments);
   const title = stackTitle(item.stack, links);
   const meta = rowMeta(item, link);
   const layers = item.stack.layers.length;
@@ -365,6 +447,7 @@ function PullRow({
             {repoLabel}
           </span>
         </span>
+        {judged && <RiskMark judgment={judged} />}
         <span className="ib-t">
           <span aria-hidden="true">{relativeTime(item.updated_at, now)}</span>
           <span className="ib-sr">{relativeWords(item.updated_at, now)}</span>
@@ -437,8 +520,8 @@ function PullsFoot({ model, loading, error, onRefresh }: { model: InboxPullsAnsw
 /** How long the primary waits for a just-started thread's link before it comes back anyway. */
 const AWAIT_LINK_MS = 15_000;
 
-function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; phone: boolean; onClose: () => void }) {
-  const { item, model, phone } = props;
+function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPullsAnswer; judgments: RiskJudgments; phone: boolean; onClose: () => void }) {
+  const { item, model, phone, judgments } = props;
   const stack = item.stack;
   // The stack's one review thread: its lowest open linked layer's (`stackLink`), whoever else linked a layer above.
   const link = stackLink(stack, model.links);
@@ -529,6 +612,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
   ) : null;
   const projects = stackProjects(model, stack);
   const threadName = pullHandoffThreadName(handed, model.links, stack);
+  const judged = stackRisk(stack, judgments);
   return (
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
@@ -572,6 +656,14 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
             </Tip>
           )}
         </div>
+        {judged && (
+          <p className="ib-pr-riskline" data-pulls-risk-line={judged.level}>
+            <span className="ib-risk" data-risk={judged.level}>
+              {riskLevelWord[judged.level]} risk
+            </span>{' '}
+            <span dir="auto">{judged.why}</span>
+          </p>
+        )}
         {link && <ThreadLine ref={said} link={link} ended={ended} now={now} />}
         {(primary || openDiff) && (
           <div className="ib-pr-actions">
@@ -609,7 +701,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
           </div>
           <ol className="ib-pr-ladder" reversed>
             {[...stack.layers].reverse().map((layer) => (
-              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
+              <Layer key={layer.key} layer={layer} stack={stack} next={next?.key === layer.key} now={now} layerRisk={stack.layers.length > 1 ? judgments[layer.key] : undefined} onReview={() => props.onReview(stack.id, layer.key, 'layer')} />
             ))}
             <li className="ib-pr-base" aria-label={`Base branch ${stack.base}`}>
               <span className="ib-pr-dot" aria-hidden="true" />
@@ -660,7 +752,7 @@ const ThreadLine = forwardRef<HTMLDivElement, { link: InboxPullLink; ended: bool
   );
 });
 
-function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; onReview: () => void }) {
+function Layer({ layer, stack, next, now, layerRisk, onReview }: { layer: InboxPull; stack: InboxPullStack; next: boolean; now: number; layerRisk?: InboxPullRiskJudgment; onReview: () => void }) {
   const pill = layerPill(layer);
   const checks = checksWords(layer);
   const base = layerBaseWords(layer, stack);
@@ -681,6 +773,7 @@ function Layer({ layer, stack, next, now, onReview }: { layer: InboxPull; stack:
               Lands next
             </span>
           )}
+          {layerRisk && <RiskMark judgment={layerRisk} />}
         </span>
         <span className="ib-pr-l2">
           {merged ? (
