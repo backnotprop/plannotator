@@ -492,6 +492,47 @@ describe("a reply to an older message while the thread's owner is there", () => 
   });
 });
 
+describe("a reply to an older message when an agent that reads through MCP wrote last", () => {
+  const MCP_ONLY = "mcp-only";
+  const C = "cc-third";
+  /** The asker wakes and has ended; `MCP_ONLY` wrote last, and a connection cannot say if it ended. */
+  async function askerEndedAfterMcpWrote() {
+    let now = Date.now();
+    const w = await world(100, () => now);
+    const wrote = (await w.client.callTool({ name: "send_message", arguments: { body: "Noted.", reply_to: w.asked.message_id, agent_session: MCP_ONLY, agent_host: "cursor", agent_name: "Cursor" } })).structuredContent as { message_id: string };
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(w.server, C, w.project);
+    /** Server and window both keep it with the MCP agent: the person's next reply answers its message, not `C`. */
+    const staysWithIt = async () => {
+      expect(await owner(w.server, w.asked.thread_id)).toBe(MCP_ONLY);
+      const words = wordsMessage(await thread(w.server, w.asked.thread_id));
+      expect(words.id).toBe(wrote.message_id);
+      const next = (await reply(w.server, words.id, { idempotency_key: "k9", words: "Next." })).json.reply as InboxMessageWire;
+      expect(next.to).toBeUndefined();
+      expect((await poll(w.server, C, w.project)).map((c) => c.id)).not.toContain(next.id);
+    };
+    return { ...w, staysWithIt };
+  }
+
+  test("aimed at another session: that session gets it, and the thread stays with the MCP agent", async () => {
+    const w = await askerEndedAfterMcpWrote();
+    const aimed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For you.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([aimed.id]);
+    await w.staysWithIt();
+  });
+
+  test("plain, then moved: it moves, and the thread stays with the MCP agent", async () => {
+    const w = await askerEndedAfterMcpWrote();
+    const plain = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For the one that asked." })).json.reply as InboxMessageWire;
+    const moved = await post(w.server, `/api/inbox/messages/${plain.id}/to`, { to: { host: "claude-code", session: C } });
+    expect(moved.status).toBe(200);
+    expect((moved.json.message as InboxMessageWire).took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([plain.id]);
+    await w.staysWithIt();
+  });
+});
+
 describe("Add", () => {
   test("the added session gets the added wake, then every later reply with the person's words, while the owner keeps the thread", async () => {
     const { server, client, project, herdr, asked } = await world(60_000);

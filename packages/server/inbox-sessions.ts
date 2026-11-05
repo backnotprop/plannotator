@@ -202,7 +202,7 @@ export const INBOX_ASKER_STEER_GRACE_MS = 10 * 60_000;
 
 /**
  * Whether the agent message a reply answers came from a session that has ended: one that can be known to (its
- * connection wakes it) and that the Inbox has not heard from, with the grace. A reply going elsewhere takes its place.
+ * connection wakes it) and that the Inbox has not heard from, with the grace.
  */
 export function replacesEndedAsker(asked: InboxMessage | null | undefined, live: { askerLive(session: string): boolean }): boolean {
   if (asked?.author.kind !== "agent" || asked.wakes !== true || !asked.author.session) return false;
@@ -210,17 +210,19 @@ export function replacesEndedAsker(asked: InboxMessage | null | undefined, live:
 }
 
 /**
- * Whether a reply aimed away from `leaving` (the session it waits on, if any) takes the thread (`took_over`): never
- * while its owner is there, so answering an older message cannot take a thread from a hand-off's new owner; otherwise
- * when it leaves that owner, or answers a session read as ended.
+ * Whether a reply aimed away from `leaving` (the session it waits on, if any) takes the thread (`took_over`): only from
+ * an owner known to have ended (`ownerCanEnd`), so answering an older message cannot take a thread from a hand-off's new
+ * owner or from an agent that reads through MCP; then when it leaves that owner, or answers a session read as ended.
  */
 export function takesOver(
-  owner: { session: string } | null,
+  store: { threadOwner(threadId: string): { session: string } | null; ownerCanEnd(threadId: string, session: string): boolean },
+  threadId: string,
   asked: InboxMessage | null | undefined,
   leaving: string | null | undefined,
   live: { askerLive(session: string): boolean },
 ): boolean {
-  if (!owner || live.askerLive(owner.session)) return false;
+  const owner = store.threadOwner(threadId);
+  if (!owner || !store.ownerCanEnd(threadId, owner.session) || live.askerLive(owner.session)) return false;
   return owner.session === leaving || replacesEndedAsker(asked, live);
 }
 

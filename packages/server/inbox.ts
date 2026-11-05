@@ -4638,7 +4638,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               result = store.sendReply(messageId, {
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(to === undefined ? {} : { to }),
-                ...(to && asked && takesOver(store.threadOwner(asked.thread_id), asked, asked.to?.session, live) ? { took_over: true } : {}),
+                ...(to && asked && takesOver(store, asked.thread_id, asked, asked.to?.session, live) ? { took_over: true } : {}),
                 ...(tags && tags.length > 0 ? { tags } : {}),
                 ...(handoff ? { handoff } : {}),
                 words: typeof body.words === "string" ? body.words : undefined,

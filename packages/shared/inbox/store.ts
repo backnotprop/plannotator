@@ -2925,6 +2925,14 @@ export class InboxStore {
   }
 
   /**
+   * Whether a thread's owner can be known to have ended: it has a waking message, or it holds the thread by address
+   * (only a connection can be addressed) and wrote nothing here. An agent that only reads through MCP cannot.
+   */
+  ownerCanEnd(threadId: string, session: string): boolean {
+    return this.hasWakingMessage(session) || !this.threadMessages(threadId).some((message) => message.author.kind === "agent" && message.author.session === session);
+  }
+
+  /**
    * The session that owns a thread now (the one the person's plain reply
    * goes to): the new owner of its latest hand-off that was not taken back
    * and that no later reply took over from (window: `activeHandoff`), else

@@ -200,7 +200,7 @@ export function createInboxCompose(options: {
     const next = store.readdressMessage(messageId, target, {
       targetLive: !!waitsOn && live.askerLive(waitsOn),
       askerEnded: replacesEndedAsker(asked, live),
-      tookOver: takesOver(store.threadOwner(message.thread_id), asked, waitsOn, live),
+      tookOver: takesOver(store, message.thread_id, asked, waitsOn, live),
     });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
