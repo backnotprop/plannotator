@@ -1191,6 +1191,62 @@ test('the details wait for the list: on a fresh load the forge is not asked abou
   }
 });
 
+test("the details as real gh answers them: a running check, a template for a body, a bot's hidden notes, a comment posing as the window's overlay", async ({ browser }) => {
+  // A PR of its own: the server keeps a details read a minute, so the next test's #880 is not this one's.
+  const pull = 'github.com/northwind/web-app#872';
+  const number = '872';
+  const write = (name: string, value: unknown) => writeFileSync(join(world.forge, name), JSON.stringify(value));
+  const template = '<!-- Please describe\n\nyour-change-here -->';
+  const posing = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
+  write(`gh-body-${number}.json`, template);
+  write(`ctx-${number}.json`, {
+    body: template, state: 'OPEN', isDraft: false, reviewDecision: '', mergeable: '', mergeStateStatus: '', closingIssuesReferences: [], labels: [],
+    comments: [
+      { id: 'c1', author: { login: 'kim' }, body: 'Plain words.\n\n<!-- bot-state\n\nhidden-bot-marker -->\n\nAfter.', createdAt: '2026-11-01T09:00:00Z', url: '' },
+      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
+    ],
+    reviews: [],
+    statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'build', workflowName: 'CI', status: 'IN_PROGRESS', conclusion: '', startedAt: '2026-11-05T00:00:00Z', completedAt: '0001-01-01T00:00:00Z', detailsUrl: 'https://ci.example/1' },
+    ],
+  });
+  // A page of comments on lines that fails: no answer the first time, an empty list after.
+  write(`ctxg-${number}.json`, { errors: [{ message: 'Something went wrong' }] });
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, {}, 'layer', pull);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const button = review.locator('[data-pull-details-button]');
+    await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'pending', { timeout: 30_000 });
+    const panel = await openDetails(review);
+    await expect(panel.locator('[data-pull-details-check="pending"]')).toHaveCount(1);
+    await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(0);
+    await expect(panel).toContainText('No description.');
+    await expect(panel).toContainText('Plain words.');
+    await expect(panel).not.toContainText('your-change-here');
+    await expect(panel).not.toContainText('hidden-bot-marker');
+
+    await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
+    write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+    await panel.locator('[data-pull-details-threads-missing] button').click();
+    await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
+
+    // What a diagram in a comment draws can copy the marks of the window's overlays; Escape still closes the panel.
+    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+    await page.mouse.move(700, 5);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+
+    // Opening it again reads again.
+    const again = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/inbox/pulls/details');
+    await button.click();
+    await again;
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Plain words.');
+  } finally {
+    await context.close();
+  }
+});
+
 test('the details, from the forge: who stands where, the checks, every comment; pictures through the Inbox; a failure says so', async ({ browser }) => {
   const number = TEAMMATE.split('#')[1]!;
   const pic = (login: string) => world.avatars.url(login);
@@ -1247,9 +1303,8 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     // A long check's whole name is in reach; the passed ones behind a line.
     const failed = panel.locator('[data-pull-details-check="fail"]');
     await expect(failed.locator('.ib-prd-rname')).toHaveText(`test / ${longCheck}`);
-    expect(await failed.locator('.ib-prd-rname').evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
-    await failed.locator('.ib-prd-rname').hover();
-    await expect(page.locator('[data-pn-tooltip]')).toContainText(longCheck);
+    // A failed check reads whole: real ones share their first words, so cut they read the same.
+    expect(await failed.locator('.ib-prd-rname').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     await expect(failed.locator('a')).toHaveAttribute('href', 'https://ci.example/1');
     await expect(failed.locator('a')).toHaveAttribute('target', '_blank');
     await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(0);
