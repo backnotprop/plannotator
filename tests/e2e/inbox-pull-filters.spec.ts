@@ -544,7 +544,8 @@ test('390 (a phone): the sheet titled Filter, modal, open while narrowed; its pi
     await expect(menu.locator('.ib-pm-title')).toHaveText('Filter');
     await expect(page.locator('.ib-pm-pos[data-phone]')).toBeVisible();
     for (const box of await menu.locator('[role="menuitemradio"], [role="menuitem"]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) {
-      expect(box).toBeGreaterThanOrEqual(48);
+      // A row's measured height can land a sliver under 48 from subpixel layout.
+      expect(Math.round(box)).toBeGreaterThanOrEqual(48);
     }
     await expect(menu.locator('[data-pulls-filter-clear-item]')).toBeVisible();
     // Modal: a scrim over the page, and the page behind does not scroll.
