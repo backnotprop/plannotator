@@ -151,6 +151,23 @@ test.describe('a mouse', () => {
     });
   }
 
+  test("a slow double click, 500 ms apart and counted as one by the system, is one unstar and does not open the thread", async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+    const page = await context.newPage();
+    await load(page, [ids.b]);
+    const before = await serverUnread(page, ids.b);
+    const box = (await star(page, ids.b).boundingBox())!;
+    const [x, y] = [box.x + box.width / 2, box.y + box.height / 2];
+    await page.mouse.click(x, y);
+    await page.waitForTimeout(500);
+    await page.mouse.click(x, y, { clickCount: 2 });
+    await page.waitForTimeout(500);
+    expect(await threadOpen(page)).toBe(false);
+    expect(await serverPins(page)).toEqual([]);
+    expect(await serverUnread(page, ids.b)).toEqual(before);
+    await context.close();
+  });
+
   test('after a press on the star, a later click and a click elsewhere on the row both open the thread', async ({ browser }) => {
     const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
     const page = await context.newPage();

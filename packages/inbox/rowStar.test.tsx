@@ -175,10 +175,10 @@ function placeStar(id: string) {
 }
 
 /** A real press: its pointerdown, then its click, on the row (not the star) at this place. */
-function pressAt(target: Element, x: number, y: number, pointerType: 'mouse' | 'touch' = 'mouse') {
+function pressAt(target: Element, x: number, y: number, pointerType: 'mouse' | 'touch' = 'mouse', detail = 1) {
   act(() => {
     target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true, pointerType, clientX: x, clientY: y }));
-    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1, clientX: x, clientY: y }));
+    target.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail, clientX: x, clientY: y }));
   });
 }
 
@@ -239,4 +239,24 @@ test.skipIf(!hasDom)('a double press on the star: the second does nothing, even 
   setSystemTime(new Date(start + 401));
   pressAt(rowEl('s'), 106, 106);
   expect(onOpen.mock.calls.length).toBe(3);
+});
+
+test.skipIf(!hasDom)("a slow double click, at the person's own speed: the system's count swallows it past 400 ms, on that spot only", () => {
+  const start = clock;
+  clock += 10_000;
+  setSystemTime(new Date(start));
+  const { onOpen, onUnstar } = draw([row('s')], { pinned: ['s'] });
+  placeStar('s');
+  pressAt(star('s')!, 106, 106);
+  expect(onUnstar.mock.calls.length).toBe(1);
+  draw2(['s']);
+  setSystemTime(new Date(start + 500));
+  pressAt(rowEl('s'), 106, 106, 'mouse', 2);
+  expect(onOpen).not.toHaveBeenCalled();
+  // Counted as a double, but elsewhere on the row.
+  pressAt(rowEl('s'), 106 + 25, 106, 'mouse', 2);
+  expect(onOpen.mock.calls.length).toBe(1);
+  // The same spot, not counted as a double, past the 400 ms.
+  pressAt(rowEl('s'), 106, 106, 'mouse', 1);
+  expect(onOpen.mock.calls.length).toBe(2);
 });

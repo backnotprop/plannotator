@@ -8,7 +8,10 @@ import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent }
 
 /** How far past the 13 px star a press still counts, by the pointer's type: a 45 px target for a touch. */
 const STAR_REACH = { mouse: 7, touch: 16 } as const;
-/** A double click or double tap: the second press of one is this soon and this near the first. */
+/**
+ * A double click or double tap: the second press of one is this near the first, and either counted as a double by the
+ * system (`detail`, at the person's own double-click speed) or this soon, for presses the system does not count.
+ */
 const SECOND_PRESS_MS = 400;
 const SECOND_PRESS_PX = 24;
 
@@ -34,7 +37,7 @@ function pressedStar(event: ReactMouseEvent<HTMLElement>): boolean {
 function secondPress(event: ReactMouseEvent<HTMLElement>, threadId: string): boolean {
   if (event.detail === 0 || lastStarPress?.threadId !== threadId) return false;
   return (
-    Date.now() - lastStarPress.at <= SECOND_PRESS_MS &&
+    (event.detail >= 2 || Date.now() - lastStarPress.at <= SECOND_PRESS_MS) &&
     Math.abs(event.clientX - lastStarPress.x) <= SECOND_PRESS_PX &&
     Math.abs(event.clientY - lastStarPress.y) <= SECOND_PRESS_PX
   );
