@@ -1224,7 +1224,10 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
   const short = 'ui.md';
   const long = 'guides-and-shared-ui.md';
   const deep = 'test/e2e/app-dir/turbopack-worker-self-reference-and-its-fixtures';
-  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts'), file(`${deep}/a.ts`), file(`${deep}/b.ts`)].join('');
+  // A file of a thousand deletions widens the rail's biggest numbers, so a small pair beside it shows any gap.
+  const wide = 'src/wide.ts';
+  const wideFile = `diff --git a/${wide} b/${wide}\n--- a/${wide}\n+++ b/${wide}\n@@ -1,1000 +1,1 @@\n${'-a\n'.repeat(1000)}+b\n`;
+  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts'), file(`${deep}/a.ts`), file(`${deep}/b.ts`), wideFile].join('');
   const { context, page } = await stubbedReview(browser, 1440, patch);
   try {
     const rail = page.locator('[data-pull-review] [data-review-files]');
@@ -1282,6 +1285,19 @@ test('the rail: a long path gives way in its middle, on one line, its name whole
       };
     });
     expect(anatomy).toEqual({ order: true, gap: '6px', end: 8, letter: 'M' });
+    // A row's +/- are one pair at its end: the − number's right edge on the row's end padding, the + at most 6 px before
+    // it, beside a far wider number elsewhere on the rail; a folder's sums the same.
+    const pair = (el: Locator) => el.evaluate((box) => {
+      const row = box.getBoundingClientRect();
+      const add = box.querySelector('.review-count-columns .additions')!.getBoundingClientRect();
+      const del = box.querySelector('.review-count-columns .deletions')!.getBoundingClientRect();
+      return { end: Math.round(row.right - del.right), gap: Math.round(del.left - add.right) };
+    });
+    for (const one of [await pair(row(short)), await pair(rail.locator(`[data-review-folder="${deep}"] .ib-prp-folder`))]) {
+      expect(one.end).toBe(8);
+      expect(one.gap).toBeLessThanOrEqual(6);
+    }
+    await expect(row('wide.ts').locator('.review-count-columns')).toHaveText('+1-1000');
     await row(long).hover();
     await expect(page.locator('[data-pn-tooltip]')).toContainText(`notes/agent-guides/with-a-long-folder-name/${long}`);
   } finally {

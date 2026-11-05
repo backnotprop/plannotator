@@ -1,14 +1,14 @@
 /**
  * The PR page's file rail: one column of names. A folder holding one thing merges into it
- * (charges/client.ts), indent is small, each row has its +/- in the review app's number columns, M leaves the row; A, D,
- * R stay, a check once viewed, the circle on hover. A name is whole on one line: what does not fit gives way in the
+ * (charges/client.ts), indent is small, each row is the review app's ([viewed][letter] name) with its +/- as one pair at
+ * its end. A name is whole on one line: what does not fit gives way in the
  * middle of the folder first, then of the name, and the tip has the path. The code review app's own tree is not touched.
  */
 import { useMemo, useState, type ReactNode } from 'react';
 import type { DiffFile } from '@plannotator/core/diff-files';
 import type { DiffFileTreeNode } from '@plannotator/ui/utils/diffFileTree';
 import { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
-import { CountColumns, countColumnVars, ViewedControl } from '@plannotator/ui/components/FileRowAtoms';
+import { CountColumns, ViewedControl } from '@plannotator/ui/components/FileRowAtoms';
 import { splitFileName } from '../components/FileName';
 import { Tip } from '../components/Tip';
 
@@ -75,17 +75,6 @@ function Cut({ text, className }: { text: string; className: string }) {
   );
 }
 
-/** The widest numbers on the rail, so its columns line up from the top row down. */
-function widest(rows: Row[], into = { additions: 0, deletions: 0 }) {
-  for (const row of rows) {
-    const { additions, deletions } = row.kind === 'file' ? row.file : row;
-    into.additions = Math.max(into.additions, additions);
-    into.deletions = Math.max(into.deletions, deletions);
-    if (row.kind === 'dir') widest(row.rows, into);
-  }
-  return into;
-}
-
 export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, onToggleViewed, head }: {
   tree: DiffFileTreeNode<DiffFile>[];
   loose: readonly DiffFile[];
@@ -98,14 +87,6 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
   head?: ReactNode;
 }) {
   const rows = useMemo(() => compact(tree, 0), [tree]);
-  const columns = useMemo(() => {
-    const most = widest(rows);
-    for (const file of loose) {
-      most.additions = Math.max(most.additions, file.additions);
-      most.deletions = Math.max(most.deletions, file.deletions);
-    }
-    return countColumnVars(most.additions, most.deletions);
-  }, [rows, loose]);
   const [shut, setShut] = useState<ReadonlySet<string>>(new Set());
   const seenCount = files.filter((f) => viewed.has(f.path)).length;
   // A path changed twice (a symlink turned into a file) has two rows: a screen reader tells them apart by the change.
@@ -154,7 +135,7 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
       );
     });
   return (
-    <div className="ib-prp-files" style={columns}>
+    <div className="ib-prp-files">
       <div className="ib-prp-fileshead" aria-live="polite">
         {head ?? <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>}
         <span className="ib-sp" />

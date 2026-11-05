@@ -8493,6 +8493,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prp-files .review-count-columns .additions { color: var(--success, #0a7f33); }
 .ib-prp-files .review-count-columns .deletions { color: var(--destructive); }
 .ib-prp-files .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
+/* A row's (and a folder's) +/- are one pair at the row's end, 4 px apart, as on GitHub's file tree: the − number's
+   right edge on the row's end padding, the + number just before it, an add-only row's + on that same edge. Tabular
+   digits, so equal numbers line up row to row. */
+.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns { display: inline-flex; justify-content: flex-end; gap: 4px; }
+.ib-prp-files :is(.ib-prp-file, .ib-prp-folder) > .review-count-columns > span:empty { display: none; }
 .ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
 .ib-prp-c { flex: none; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 /* The review app's file row spacing (review-editor index.css `.review-sidebar .file-tree-item`, `.review-change-letter`):
