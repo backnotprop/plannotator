@@ -68,10 +68,76 @@ export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
 /** The longest description kept: over GitHub's own limit, so only a GitLab description past it is cut. */
 export const INBOX_PULL_DESCRIPTION_MAX_CHARS = 66_000;
 
-/** A PR's description as the forge answered it, or null when it has none. */
+/**
+ * The body as a reader of it on the forge sees it: no HTML comments (an unfilled PR template is mostly these, and one
+ * with a blank line in it would otherwise draw as text), outside code. A comment that starts a line and never closes
+ * runs to the end, as it does on the forge; one that starts mid-line and never closes is plain text.
+ */
+function withoutHtmlComments(text: string): string {
+  const lines = text.split("\n");
+  const lastClose = lines.reduce((last, line, index) => (line.includes("-->") ? index : last), -1);
+  const out: string[] = [];
+  let fence: string | null = null;
+  let inComment = false;
+  lines.forEach((whole, index) => {
+    let line = whole;
+    if (inComment) {
+      const end = line.indexOf("-->");
+      if (end < 0) return;
+      line = line.slice(end + 3);
+      inComment = false;
+    }
+    const marker = /^ {0,3}(`{3,}|~{3,})/.exec(line)?.[1];
+    if (fence) {
+      if (marker && marker[0] === fence[0] && marker.length >= fence.length && !line.trim().slice(marker.length)) fence = null;
+      out.push(line);
+      return;
+    }
+    if (marker) {
+      fence = marker;
+      out.push(line);
+      return;
+    }
+    if (/^(?: {4}|\t)/.test(line) && !out[out.length - 1]?.trim()) {
+      out.push(line);
+      return;
+    }
+    let kept = "";
+    let at = 0;
+    while (at < line.length) {
+      if (line[at] === "`") {
+        let run = at;
+        while (line[run] === "`") run++;
+        const tick = line.slice(at, run);
+        const close = line.indexOf(tick, run);
+        const end = close < 0 ? run : close + tick.length;
+        kept += line.slice(at, end);
+        at = end;
+      } else if (line.startsWith("<!--", at)) {
+        const close = line.indexOf("-->", at + 4);
+        if (close >= 0) {
+          at = close + 3;
+        } else if (!kept.trim() || index < lastClose) {
+          inComment = true;
+          at = line.length;
+        } else {
+          kept += line.slice(at);
+          at = line.length;
+        }
+      } else {
+        kept += line[at];
+        at++;
+      }
+    }
+    out.push(kept.trim() ? kept : "");
+  });
+  return out.join("\n");
+}
+
+/** A PR's description as the forge answered it, or null when it has none: no words left is none, a lone rule too. */
 function descriptionOf(value: unknown): string | null {
-  const text = typeof value === "string" ? value.trim() : "";
-  if (!text) return null;
+  const text = typeof value === "string" ? withoutHtmlComments(value).trim() : "";
+  if (text.split("\n").every((line) => !line.trim() || /^ {0,3}([-*_])(?: *\1){2,} *$/.test(line))) return null;
   return text.length > INBOX_PULL_DESCRIPTION_MAX_CHARS ? `${text.slice(0, INBOX_PULL_DESCRIPTION_MAX_CHARS)}\n\n…` : text;
 }
 
@@ -681,9 +747,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       };
       // The PR as the forge has it now, one call: its head commit (read around a layer's patch: a push between the two
       // reads leaves it unknown, no post) and its description.
+      // `tojson`: gh colours an object answer under CLICOLOR_FORCE, whatever NO_COLOR says, and prints a string raw.
       const pullNow = async (): Promise<{ sha: string | null; description: string | null } | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
-        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body}"] : [])]).catch(() => null);
+        const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", "{sha: .head.sha, body: .body} | tojson"] : [])]).catch(() => null);
         if (!read || read.exitCode !== 0) return null;
         try {
           const answer = obj(JSON.parse(read.stdout));

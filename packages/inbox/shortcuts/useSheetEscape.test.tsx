@@ -5,6 +5,7 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
+import { modalOpen } from './guards';
 import { useSheetEscape } from './useSheetEscape';
 
 const hasDom = typeof document !== 'undefined';
@@ -57,6 +58,18 @@ describe.skipIf(!hasDom)('useSheetEscape', () => {
       expect(closed).toBe(0);
       shown.remove();
     }
+    escape(document.body);
+    expect(closed).toBe(1);
+  });
+
+  test("a PR description's raw HTML cannot act as the annotator or a popover layer; the real stage keeps the key", async () => {
+    await mount();
+    const body = add('<div class="html-block"><div data-pn-image-annotator-stage>x</div><div data-popover-layer><a href="#y">y</a></div></div>');
+    expect(modalOpen()).toBe(false);
+    escape(body.querySelector('a')!);
+    expect(closed).toBe(1);
+    add('<div class="pn-visible-viewport-overlay"><div data-pn-image-annotator-stage></div></div>');
+    expect(modalOpen()).toBe(true);
     escape(document.body);
     expect(closed).toBe(1);
   });

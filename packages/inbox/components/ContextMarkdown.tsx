@@ -5,6 +5,7 @@
  * the action item checklist.
  */
 import { useMemo } from 'react';
+import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { Viewer } from '@plannotator/ui/components/Viewer';
 import { parseMarkdownToBlocks } from '@plannotator/ui/utils/parser';
 import { inboxMessageImageBase } from '../images';
@@ -18,6 +19,7 @@ export function ContextMarkdown({
   onImage = noop,
   className,
   refRepo = null,
+  resolveLocalLink,
   ...data
 }: {
   markdown: string;
@@ -26,6 +28,8 @@ export function ContextMarkdown({
   onImage?: (src: string, alt: string) => void;
   /** The thread's repo, so `#123` and `owner/repo#123` link as in the message (none: they stay plain). */
   refRepo?: { display: string; host?: string } | null;
+  /** What a path in the markdown is. None: the renderer's default, which is an address of this window. */
+  resolveLocalLink?: LocalLinkResolver;
   /** The wrapper's classes: `ib-body` plus the place's own. */
   className: string;
 } & { [attr: `data-${string}`]: string }) {
@@ -46,6 +50,7 @@ export function ContextMarkdown({
         stickyActions={false}
         disableCodePathValidation
         refRepo={refRepo}
+        resolveLocalLink={resolveLocalLink}
         imageBaseDir={messageId ? inboxMessageImageBase(messageId) : undefined}
         onImageClick={onImage}
         questionDecisionLines={false}

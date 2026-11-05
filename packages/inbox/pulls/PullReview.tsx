@@ -614,7 +614,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           </div>
         </nav>
         <div className="ib-gbody">
-          <PullDescription markdown={diff?.description} repo={layer.repo} host={layer.host} />
+          <PullDescription markdown={diff?.description} layer={layer} headSha={diff?.head_sha} />
           {phone && files.length > 0 && (
             <div className="ib-rv-phonebar" data-review-phonebar="">
               <select className="ib-rv-jump" aria-label="Go to a file" value="" onChange={(event) => event.target.value && move(event.target.value)}>

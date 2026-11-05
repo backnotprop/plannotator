@@ -99,6 +99,17 @@ const GH_ANSWER = {
   },
 };
 
+/**
+ * `gh api --jq` as a person's shell may have it: the program picks what it names, and under CLICOLOR_FORCE an object
+ * answer comes out coloured (real gh 2.99, whatever NO_COLOR says) while a string comes out raw.
+ */
+function ghJq(args: string[], pull: { sha: string; body: string | null }): { stdout: string; stderr: string; exitCode: number } {
+  const program = args[args.indexOf("--jq") + 1] ?? "";
+  const picked = { ...(/\bsha: \.head\.sha\b/.test(program) ? { sha: pull.sha } : {}), ...(/\bbody: \.body\b/.test(program) ? { body: pull.body } : {}) };
+  const json = JSON.stringify(picked);
+  return { stdout: `${/\| *tojson *$/.test(program) ? json : `\u001b[1;38m${json}\u001b[m`}\n`, stderr: "", exitCode: 0 };
+}
+
 interface Forge {
   run: RefRunner;
   calls: { cli: string; args: string[] }[];
@@ -122,7 +133,7 @@ function forge(answer: unknown = GH_ANSWER): Forge {
       f.calls.push({ cli, args });
       if (cli === "gh" && args.includes("--jq")) {
         const number = String(args[3]!.split("/").at(-1));
-        return { stdout: `${JSON.stringify({ sha: f.heads ? f.heads.shift() ?? "" : number.padStart(40, "a"), body: f.bodies[number] ?? null })}\n`, stderr: "", exitCode: 0 };
+        return ghJq(args, { sha: f.heads ? f.heads.shift() ?? "" : number.padStart(40, "a"), body: f.bodies[number] ?? null });
       }
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
@@ -699,13 +710,34 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
       expect(f.calls.length).toBe(before + 3);
     });
 
-    test("none, or only whitespace, is null", async () => {
-      for (const body of [null, "", "  \n\t "]) {
+    test("none, or only whitespace, comments or a rule, is null", async () => {
+      for (const body of [null, "", "  \n\t ", "<!-- one -->\n\n<!-- two -->", "<!-- Describe your change.\n\nFixes #: -->", "---", "<!-- x -->\n\n***\n"]) {
         const f = forge();
         f.bodies["412"] = body;
         const pulls = createInboxPulls({ run: f.run });
         await pulls.list(repos);
         expect((await pulls.diff(KEY, "layer")).description).toBeNull();
+      }
+    });
+
+    test("an HTML comment is gone wherever it starts, a blank line in it or not; in code it is the code", async () => {
+      const cases: [string, string][] = [
+        ["<!-- Describe your change here.\n\nFixes #: -->\n\nThe schedule.", "The schedule."],
+        ["Before <!-- one line --> after.", "Before  after."],
+        ["Before <!-- spans\nlines --> after.", "Before \n after."],
+        ["The schedule.\n\n<!-- never closed\n\nnor seen", "The schedule."],
+        ["Use `<!-- this -->` here.", "Use `<!-- this -->` here."],
+        ["```html\n<!-- kept -->\n```\n\n<!-- gone -->\nThe end.", "```html\n<!-- kept -->\n```\n\n\nThe end."],
+        ["~~~\n```\n<!-- kept -->\n~~~", "~~~\n```\n<!-- kept -->\n~~~"],
+        ["Text.\n\n    <!-- indented code -->", "Text.\n\n    <!-- indented code -->"],
+        ["A stray <!-- mid-line, never closed.", "A stray <!-- mid-line, never closed."],
+      ];
+      for (const [body, shown] of cases) {
+        const f = forge();
+        f.bodies["412"] = body;
+        const pulls = createInboxPulls({ run: f.run });
+        await pulls.list(repos);
+        expect((await pulls.diff(KEY, "layer")).description).toBe(shown);
       }
     });
 

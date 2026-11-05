@@ -1201,6 +1201,84 @@ test("the PR's description at the head of its diff: a short one whole, a long on
   }
 });
 
+test("a stranger's description: paths open on the forge, only the web's links are links, it can't reach the window's keys or width", async ({ browser }) => {
+  const body = [
+    '[guide](docs/guide.md) [api](/api/inbox/settings) [launch](vscode://file/etc/passwd) [ssh](ssh://a.example) [anchor](#why) [web](https://a.example/x)',
+    '',
+    '<div><a href="docs/raw" target="_top">raw</a> <a href="https://a.example/y" target="_top">top</a> <a href="#why">raw anchor</a></div>',
+    '',
+    '<div data-pn-image-annotator-stage>stage</div>',
+    '',
+    '<table width="5000"><tr><td>wide</td></tr></table>',
+    '',
+    '![pixel](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==)',
+  ].join('\n');
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: body });
+  try {
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
+    const route = page.url();
+    const link = (name: string) => section.getByRole('link', { name, exact: true });
+    await section.getByRole('button', { name: 'Show more' }).click();
+    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    // A path is the file on the forge, in a new tab; this window stays, Markdown and raw HTML alike, whatever its target says.
+    for (const [name, path] of [['guide', '/docs/guide.md'], ['api', '/api/inbox/settings'], ['raw', '/docs/raw']] as const) {
+      await expect(link(name)).toHaveAttribute('href', new RegExp(`^https://github\\.com/[^/]+/[^/]+/blob/[^/]+${path}$`));
+      const opened = context.waitForEvent('page');
+      await link(name).click();
+      await (await opened).close();
+      expect(page.url()).toBe(route);
+    }
+    await expect(link('raw')).not.toHaveAttribute('target', '_top');
+    await expect(link('top')).toHaveAttribute('target', '_blank');
+    // A scheme that launches an app is its words: no pointer, and a key or script click goes nowhere.
+    for (const name of ['launch', 'ssh']) {
+      const words = section.locator('a', { hasText: new RegExp(`^${name}$`) });
+      expect(await words.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+      expect(await words.evaluate((el) => !el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })))).toBe(true);
+    }
+    // An anchor never moves the window's route, which is its hash.
+    for (const name of ['anchor', 'raw anchor']) {
+      await link(name).click();
+      expect(page.url()).toBe(route);
+    }
+    // A data: image draws; a wide table scrolls in its own box, never the review.
+    await expect(section.locator('img[alt="pixel"]')).toHaveCount(1);
+    expect(await review.locator('.ib-gbody').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+    // Its `data-pn-image-annotator-stage` is no modal: Escape still closes the sheet.
+    await page.locator('.ib-vhead .ib-vcomments').click();
+    await expect(page.locator('.ib-panel-open')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ib-panel-open')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+  // A long one is parsed only to its start while folded, and all of it on Show more.
+  const tail = 'THE-LAST-WORDS';
+  const long = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: `${Array.from({ length: 700 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\n${tail}` });
+  try {
+    const section = long.page.locator('[data-pull-review] [data-pull-description]');
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+    await expect(section).not.toContainText(tail);
+    await section.getByRole('button', { name: 'Show more' }).click();
+    await expect(section).toContainText(tail);
+  } finally {
+    await long.context.close();
+  }
+  // A <details> opened in a short one stays open under the click, though it grew past the fold.
+  const details = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: `<details><summary>More</summary>\n\n${Array.from({ length: 40 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\n</details>` });
+  try {
+    const section = details.page.locator('[data-pull-review] [data-pull-description]');
+    await expect(section).toHaveAttribute('data-pull-description', 'whole');
+    await section.locator('summary').click();
+    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    await expect(section.locator('details')).toHaveAttribute('open', '');
+    await expect(section.getByText('Line 39.', { exact: true })).toBeAttached();
+  } finally {
+    await details.context.close();
+  }
+});
+
 test('each layer shows its own description, through the forge read: Next layer changes it, Whole stack keeps it, none is none', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();

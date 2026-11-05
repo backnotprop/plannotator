@@ -7794,7 +7794,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* The PR's own description at the head of its diff (PullDescription): the review app's compact Markdown, 13 px. Long,
    it starts folded and opens into a box of its own height, so the diff stays near. */
 .ib-prr-desc { padding: 12px 16px; border-bottom: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
-.ib-prr-desc-body { --ib-desc-fold: 112px; }
+.ib-prr-desc-body { --ib-desc-fold: 112px; overflow-x: auto; }
+/* Only the web's links look like links (descriptionLinks.ts stops the click, keys too): the words of the rest stay. */
+.ib-prr-desc-body a[href]:not([href^="http:" i], [href^="https:" i], [href^="mailto:" i], [href^="#"], [href^="//"]) { color: inherit; text-decoration: none; cursor: inherit; pointer-events: none; }
 .ib-prr-desc[data-pull-description="folded"] { cursor: pointer; }
 .ib-prr-desc[data-pull-description="folded"] .ib-prr-desc-body { max-height: var(--ib-desc-fold); overflow: hidden; -webkit-mask-image: linear-gradient(to bottom, #000 55%, transparent); mask-image: linear-gradient(to bottom, #000 55%, transparent); }
 .ib-prr-desc[data-pull-description="open"] .ib-prr-desc-body { max-height: min(55vh, 560px); overflow-y: auto; overscroll-behavior: auto; }
