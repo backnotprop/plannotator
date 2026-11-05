@@ -28,7 +28,8 @@
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -72,7 +73,7 @@ import {
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface ReviewPaneProps {
   thread: InboxThread;
@@ -700,7 +701,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
               {error}
             </div>
           ) : snapshot ? (
-            <Suspense fallback={null}>
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <ReaderPart diff={snapshot.review.rawPatch}>
               <GuideReader
                 snapshot={snapshot}
                 reviewed={reviewed}
@@ -714,7 +716,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 renderOverviewFigure={renderOverviewFigure}
                 highlight={highlight}
               />
-            </Suspense>
+            </ReaderPart>
           ) : null}
         </div>
         <div
