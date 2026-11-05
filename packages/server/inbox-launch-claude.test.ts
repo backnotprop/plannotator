@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
@@ -105,20 +105,29 @@ describe("the person's shared Claude supervisor survives our calls", () => {
       pids.push(pid);
       return pid;
     };
-    return { cli, env, daemonPid };
+    /** The call, ended by its own timeout path once the CLI has written its daemon's pid: no fixed window on a busy machine. */
+    const runThenTimeOut = async (options: { killGroup?: boolean }) => {
+      const abort = new AbortController();
+      const running = env.run([cli], { timeoutMs: 30_000, signal: abort.signal, ...options });
+      const started = () => existsSync(join(dir, "daemon.pid")) && /^[1-9]\d*\n$/.test(readFileSync(join(dir, "daemon.pid"), "utf8"));
+      for (let i = 0; i < 1000 && !started(); i++) await Bun.sleep(10);
+      abort.abort();
+      return running;
+    };
+    return { cli, env, daemonPid, runThenTimeOut };
   };
 
   test.skipIf(process.platform === "win32")("a launch call that times out ends only itself; the daemon it started lives (a group kill would end it)", async () => {
     const own = hangingCli();
-    const timedOut = await own.env.run([own.cli], { timeoutMs: 400, killGroup: false });
+    const timedOut = await own.runThenTimeOut({ killGroup: false });
     expect(timedOut.timedOut).toBe(true);
     expect(alive(own.daemonPid())).toBe(true);
 
     // The default (every other agent CLI) still kills the whole group: the contrast this guards.
     const grouped = hangingCli();
-    await grouped.env.run([grouped.cli], { timeoutMs: 400 });
+    await grouped.runThenTimeOut({});
     const pid = grouped.daemonPid();
-    for (let i = 0; i < 20 && alive(pid); i++) await Bun.sleep(50);
+    for (let i = 0; i < 200 && alive(pid); i++) await Bun.sleep(50);
     expect(alive(pid)).toBe(false);
   });
 
