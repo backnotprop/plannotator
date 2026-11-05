@@ -4976,11 +4976,14 @@ function Inbox() {
   const awayWait = openWaits && (((!!threadAway || !!threadLoad?.waiting) && threadLoad?.state === 'failed') || threadLoad?.state === 'refused');
   // The screen on top, which a phone shows alone (inbox.css): the list, a thread, a file.
   // A thread is on top once it has loaded, so a phone keeps the list until there is a thread to show (or its machine is away).
+  // A link into a thread in Reviews waits for the rows: drawn before them, the whole thread would show and then fold.
+  const reviewRowsPending = !!route.reviews && ((settings === null && !settingsReadFailed) || (pullsShown && !pulls.reviews && !pulls.error));
+  const threadReady = !!thread && thread.thread_id === route.thread && !reviewRowsPending;
   const view =
     route.page === 'inbox'
       ? fileOpen
         ? 'file'
-        : route.thread && (thread?.thread_id === route.thread || awayWait)
+        : route.thread && (threadReady || awayWait)
           ? 'thread'
           : 'list'
       : route.page;
@@ -5212,8 +5215,6 @@ function Inbox() {
   );
 
   // A thread opened from Reviews starts at its review (`reviewViewOf`); it is the same thread, and links back to the Inbox's view of it.
-  // A link into a thread in Reviews waits for the rows: drawn before them, the whole thread would show and then fold.
-  const reviewRowsPending = !!route.reviews && ((settings === null && !settingsReadFailed) || (pullsShown && !pulls.reviews && !pulls.error));
   const reviewRow = route.reviews && route.thread && pullsShown ? (pulls.reviews?.rows.find((row) => row.reviewed && row.thread_id === route.thread) ?? null) : null;
   const reviewView =
     reviewRow && thread && thread.thread_id === route.thread
@@ -5461,6 +5462,7 @@ function Inbox() {
         scope={route.scope ?? 'layer'}
         onLayer={(layer, scope) => writeRoute({ ...route, layer, scope }, { replace: true })}
         onBack={() => close({ ...route, layer: null, scope: 'layer' })}
+        onPosted={pullsReloadRows}
         onSent={() => {
           close({ ...route, layer: null, scope: 'layer' });
           showToast({ icon: 'check', lead: 'Verdict sent', detail: 'in the agent’s thread', speech: 'Your verdict was sent into the agent’s thread.' }, 5000);
@@ -5621,7 +5623,7 @@ function Inbox() {
         )}
         {/* Beside the list, the thread's place says it is opening (or why not) until its read lands; a phone
             and a stacked window keep the list until there is a thread to show, or the thread's machine is away. */}
-        {route.thread && !(thread && thread.thread_id === route.thread) && ((!phone && !stack.thread) || awayWait) && (
+        {route.thread && !threadReady && ((!phone && !stack.thread) || awayWait) && (
           <ThreadWait
             key={route.thread}
             load={threadLoad?.threadId === route.thread ? threadLoad : null}
@@ -5634,7 +5636,7 @@ function Inbox() {
             onClose={fromCard ? backToCard : () => close({ ...route, thread: null, file: null })}
           />
         )}
-        {route.thread && thread && thread.thread_id === route.thread && !reviewRowsPending && (
+        {route.thread && thread && threadReady && (
           <ThreadPane
             notice={
               <>
@@ -6293,6 +6295,7 @@ function Inbox() {
             }}
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
+            onPosted={pullsReloadRows}
             onAsk={ask.askWith}
           />
         ) : (

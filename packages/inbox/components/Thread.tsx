@@ -975,9 +975,9 @@ export function MessageBody({
 }
 
 export interface ThreadPaneProps {
-  /** Opened from Reviews: the line and title over the messages, and what came before the review folded. */
   /** The thread is open in Reviews (the address), whatever its row says from one read to the next. */
   inReviews?: boolean;
+  /** Its row in Reviews: the line and title over the messages, and what came before the review folded. */
   reviewView?: ReviewView | null;
   /** The review card's quiet link to this thread in Reviews; absent where there is no such page, or already on it. */
   onInReviews?: () => void;
@@ -1815,6 +1815,8 @@ export function ThreadPane({ inReviews = false, reviewView = null, onInReviews, 
       setFoldState(fold);
     }
   }
+  // The row went while the person is here: the link to what was left out went with it, so nothing stays left out.
+  if (!reviewView && reviewPlan.current.left.size > 0) reviewPlan.current = { ...reviewPlan.current, left: NO_IDS };
   const foldRef = useRef(fold);
   foldRef.current = fold;
   // Opened from Reviews: what came before the first review stays out of this view (the link over the messages opens the

@@ -88,7 +88,7 @@ const GH_ANSWER = {
 };
 const MERGED_URL = "https://github.com/northwind/billing-svc/pull/300";
 
-function forge() {
+function forge(answer: unknown = GH_ANSWER) {
   const calls: { cli: string; args: string[] }[] = [];
   /** What `gh api repos/…/pulls/N` answers; null: it fails. */
   const prState: { answer: Record<string, unknown> | null } = { answer: null };
@@ -96,14 +96,14 @@ function forge() {
     calls.push({ cli, args });
     if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
     if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
-    if (cli === "gh" && args.includes("graphql")) return { stdout: JSON.stringify(GH_ANSWER), stderr: "", exitCode: 0 };
+    if (cli === "gh" && args.includes("graphql")) return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
     if (cli === "gh" && args[0] === "api" && prState.answer) return { stdout: JSON.stringify(prState.answer), stderr: "", exitCode: 0 };
     return { stdout: "", stderr: "unexpected", exitCode: 1 };
   };
   return { run, calls, prState };
 }
 
-async function world(options: { repoDelayMs?: number } = {}) {
+async function world(options: { repoDelayMs?: number; answer?: unknown } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reviews-")));
   roots.push(root);
   const project = join(root, "billing-svc");
@@ -113,12 +113,18 @@ async function world(options: { repoDelayMs?: number } = {}) {
   mkdirSync(dataDir, { recursive: true });
   // The switch is config.json's: this test's own data dir.
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const f = forge();
+  const f = forge(options.answer);
   let originReads = 0;
+  const posts: string[][] = [];
   const server = await startInboxServer({
     dataDir,
     phones: false,
     refRunner: f.run,
+    // A posted review stops here: nothing reaches a forge.
+    prRuntime: {
+      runCommand: async (_cmd, args) => (posts.push(args), { stdout: "{}", stderr: "", exitCode: 0 }),
+      runCommandWithInput: async (_cmd, args) => (posts.push(args), { stdout: "{}", stderr: "", exitCode: 0 }),
+    },
     readProjectRepo: async () => {
       originReads += 1;
       if (options.repoDelayMs) await Bun.sleep(options.repoDelayMs);
@@ -147,10 +153,88 @@ async function world(options: { repoDelayMs?: number } = {}) {
     expect(res.status).toBe(200);
     return (await res.json()) as InboxReviewsAnswer;
   };
-  return { project, dataDir, base, forge: f, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
+  return { project, dataDir, base, forge: f, posts, originReads: () => originReads, call, post, setCodeReview, sendReview, prGuide, say, verdict, reviews };
 }
 
 const rowsOf = (answer: InboxReviewsAnswer, threadId: string): InboxReviewRow[] => answer.rows.filter((row) => row.thread_id === threadId);
+
+const key = (number: number) => `github.com/northwind/billing-svc#${number}`;
+
+describe("a thread handed a PR, archived before its review", () => {
+  test("gives the PR back: listed as not reviewed, with no owner, so a review can start; unarchived, it owns it again", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.reviews();
+    const { thread_id } = await w.call("send_message", { thread: "handed", subject: "Review #869", body: "On it." });
+    expect((await w.post("/api/inbox/pulls/owner", { keys: [key(869)], thread_id, ask: "guide" })).status).toBe(200);
+    const pr869 = (answer: InboxReviewsAnswer) => answer.rows.filter((row) => row.stacks.some((stack) => stack.layers.some((layer) => layer.number === 869)));
+    const links = async () => ((await (await fetch(`${w.base}/api/inbox/pulls`)).json()) as { links: Record<string, { thread_id: string }> }).links;
+
+    expect(pr869(await w.reviews())).toMatchObject([{ reviewed: true, reason: "curating", thread_id }]);
+    expect((await links())[key(869)]?.thread_id).toBe(thread_id);
+
+    expect((await w.post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(pr869(await w.reviews())).toMatchObject([{ reviewed: false, move: "not_reviewed", thread_id: null, link: null }]);
+    expect((await links())[key(869)]).toBeUndefined();
+
+    expect((await w.post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: false })).status).toBe(200);
+    expect(pr869(await w.reviews())).toMatchObject([{ reviewed: true, reason: "curating", thread_id }]);
+    expect((await links())[key(869)]?.thread_id).toBe(thread_id);
+  });
+
+  test("one with a review keeps the PR: the archive is not the agent giving up", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    await w.reviews();
+    const { thread_id } = await w.sendReview("kept", "r1");
+    expect((await w.post("/api/inbox/pulls/owner", { keys: [key(869)], thread_id, ask: "guide" })).status).toBe(200);
+    expect((await w.post(`/api/inbox/messages/${thread_id}/resolve`, { resolved: true })).status).toBe(200);
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ reviewed: true, move: "on_you", pull_keys: [key(869)] }]);
+  });
+});
+
+describe("a teammate's PR assigned to the person, reviewed by their agent", () => {
+  const TEAMMATE = 891;
+  const answer = { data: { ...GH_ANSWER.data, assigned: { nodes: [ghPull(TEAMMATE, { author: { login: "jun" } })] } } };
+  const handed = async () => {
+    const w = await world({ answer });
+    await w.setCodeReview(true);
+    await w.reviews();
+    const { thread_id } = await w.call("send_message", { thread: "theirs", subject: "Review #891", body: "On it." });
+    expect((await w.post("/api/inbox/pulls/owner", { keys: [key(TEAMMATE)], thread_id, ask: "guide", theirs: true })).status).toBe(200);
+    const r1 = await w.sendReview("theirs", "r1");
+    return { w, thread_id, r1 };
+  };
+  const postReview = (w: Awaited<ReturnType<typeof world>>, action: string) =>
+    w.post("/api/inbox/pulls/review", { key: key(TEAMMATE), head_sha: String(TEAMMATE).padStart(40, "a"), action, body: "Looks right." });
+
+  test("posting Approve from here takes it off the person, kept across a restart of the store; a new review puts it back", async () => {
+    const { w, thread_id } = await handed();
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+    const res = await postReview(w, "approve");
+    expect(res.status).toBe(200);
+    expect(w.posts.length).toBeGreaterThan(0);
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "waiting", reason: "others" }]);
+    expect(createInboxPullLinks(w.dataDir).posted().has(key(TEAMMATE))).toBe(true);
+
+    await Bun.sleep(5);
+    await w.sendReview("theirs", "r2");
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+  });
+
+  test("words in the thread do too", async () => {
+    const { w, thread_id, r1 } = await handed();
+    expect((await w.say(r1.message_id, "words", "Thanks, I'll tell jun.")).status).toBe(200);
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "waiting", reason: "others" }]);
+  });
+
+  test("a post that fails answers nothing", async () => {
+    const { w, thread_id } = await handed();
+    const res = await w.post("/api/inbox/pulls/review", { key: key(TEAMMATE), head_sha: "b".repeat(40), action: "approve", body: "Old commit." });
+    expect(res.status).toBe(409);
+    expect(rowsOf(await w.reviews(), thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+  });
+});
 
 describe("the read that follows the store (?cached=1)", () => {
   test("never calls a forge, cold or warm", async () => {

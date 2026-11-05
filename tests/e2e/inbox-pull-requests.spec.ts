@@ -4,7 +4,7 @@
  * the compiled binary. The binary runs `plannotator inbox --background` under
  * a temp PLANNOTATOR_DATA_DIR; simulated agents write through `plannotator
  * inbox mcp` (scripts/inbox-sim.ts); Chromium drives the window. HOME is
- * never changed. `gh` and `glab` are sh fakes first on PATH: nothing reaches
+ * a scratch folder: the Inbox reads skills and agent config from it. `gh` and `glab` are sh fakes first on PATH: nothing reaches
  * GitHub or GitLab, and the real CLIs never run. The diffs they answer are
  * real `git diff`s of scratch repositories with invented names.
  *
@@ -512,7 +512,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
 
   const env: Record<string, string> = {
     PATH: `${forgeDir}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -1554,14 +1554,44 @@ test('Reviews: what waits on the person is never hidden, every row shows what it
   await page.goto('about:blank');
   await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
   await expect(page.locator('[data-pulls-nav]')).toBeVisible();
+  await expect(page.locator('[data-thread-wait="loading"]')).toBeVisible();
+  await shot(page, 'r-pending');
   await page.waitForTimeout(400);
   await expect(page.getByText('Before one.')).toHaveCount(0);
+  // A phone has no pane beside the list: it keeps the list, saying it is reading, never a white page.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto('about:blank');
+  await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
+  await expect(page.locator('[data-pulls-list]').getByText('Reading your pull requests')).toBeVisible();
+  await expect(page.locator('[data-thread-wait]')).toHaveCount(0);
+  await shot(page, 'r-pending-phone');
   letGo();
   await expect(page.locator('[data-review-card]')).toHaveCount(1);
+  await page.setViewportSize({ width: 1440, height: 900 });
   await expect(page.getByText('Before one.')).toHaveCount(0);
   await page.unroute('**/api/inbox/reviews*');
 
-  // Code review off: the thread's view is the off page, live and on a fresh link, and the thread itself loses nothing.
+  // The row goes while the person is in the thread (archived from another window): the link to what was left out went
+  // with it, so the thread shows whole, and stays whole if the row comes back.
+  const archive = (threadId: string, resolved: boolean) => page.request.post(`${world.url}api/inbox/messages/${threadId}/resolve`, { data: { resolved } });
+  await fresh(long.thread_id);
+  await expect(page.getByText('Before one.')).toHaveCount(0);
+  await archive(long.thread_id, true);
+  await expect(page.getByText('Before one.')).toBeVisible({ timeout: 15_000 });
+  await archive(long.thread_id, false);
+  await expect(page.locator('[data-review-context]')).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText('Before one.')).toBeVisible();
+
+  // A thread handed a PR and archived before its review: the PR is back to Review with an agent, not "on the way".
+  const handed = await claude.send({ project_path: world.projects.web, thread: 'handed-off', subject: 'Handed', body: 'On it.' });
+  expect((await page.request.post(`${world.url}api/inbox/pulls/owner`, { data: { keys: [LOCALE], thread_id: handed.thread_id, ask: 'guide' } })).status()).toBe(200);
+  await archive(handed.thread_id, true);
+  await page.goto(`${world.url}#reviews`);
+  await page.reload();
+  await page.locator(`[data-pulls-row="${LOCALE}"], [data-pulls-row]`).filter({ hasText: '#869' }).first().click();
+  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Review with an agent');
+
+  // Code review off: the thread's view is the off page on a fresh link, and the thread itself loses nothing.
   await setCodeReview(false);
   await page.goto(`${world.url}#reviews&thread=${long.thread_id}`);
   await page.reload();
