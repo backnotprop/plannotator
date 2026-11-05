@@ -24,6 +24,7 @@ import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types'
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
 import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { attachmentDrawReady } from '../threadDrawReady';
 import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
@@ -422,7 +423,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!readsText) return;
     source
       .view(attachment, effectiveVersion)
-      .then((next) => {
+      .then(async (next) => {
+        // Its code's grammars and KaTeX are chunks loaded on first use (#2593): the file draws once they are in,
+        // so its code paints highlighted and its math typeset, never plain first (threadDrawReady.ts).
+        await attachmentDrawReady(kind, attachment.name, next.text, next.text.length <= CODE_HIGHLIGHT_MAX_CHARS);
         if (!cancelled) setView(next);
       })
       .catch((cause) => {
@@ -1297,7 +1301,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     let cancelled = false;
     source
       .linkedPage(attachment, relative)
-      .then((page) => {
+      .then(async (page) => {
+        // A linked Markdown page waits for its code and math as the file does.
+        if (page.html === null) await attachmentDrawReady('markdown', page.name, page.text);
         if (cancelled) return;
         setLinkedStack((stack) => [...stack.filter((p) => p.attachmentId === attachment.id), { ...page, relative, hash, attachmentId: attachment.id }]);
         announce(`${page.name}. It is not attached, so comments are off.`);
