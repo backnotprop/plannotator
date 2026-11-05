@@ -231,6 +231,8 @@ export interface DeliveryLineInput {
   connection: RecipientConnection | null | undefined;
   /** The asking session ended (a reply), with the asker's name for the line. */
   askerEnded?: { name: string } | null;
+  /** Delivered, but what settled it was another agent's read: that agent's name ("Read by Claude Code, 6:25 PM"). */
+  readBy?: string | null;
   /** A message addressed to a session that stopped before it took it (compose). */
   undelivered?: { host: string } | null;
   /** When it began to wait on the busy session (the server's clock): the line says how long. */
@@ -268,6 +270,7 @@ export function deliveryLine(input: DeliveryLineInput): DeliveryLine {
   const text = deliveryText(decision.reason, {
     name,
     at: input.deliveredAt,
+    readBy: input.readBy,
     time: input.time,
     undeliveredHost: input.undelivered?.host ?? name,
     endedName: input.askerEnded?.name ?? name,
@@ -295,6 +298,8 @@ export function deliveryText(
     at: string | null;
     time: (iso: string) => string;
     undeliveredHost: string;
+    /** Delivered by another agent's read: its name. */
+    readBy?: string | null;
     endedName: string;
     /** It waits on a busy session (approval "inbox-busy-agent-reply"): "Undelivered 3 min · …". */
     wait?: DeliveryLine['wait'];
@@ -308,6 +313,8 @@ export function deliveryText(
   const { name } = words;
   switch (reason) {
     case 'delivered': {
+      // Honest about a reply no connection wakes: another agent read it, which is not the agent it was for taking it.
+      if (words.readBy && words.at) return `Read by ${words.readBy}, ${words.time(words.at)}`;
       const base = words.at ? `Delivered to ${name}, ${words.time(words.at)}` : `Delivered to ${name}`;
       if (words.autoAfterMin !== undefined) return `${base} · ${autoAfterText(words.autoAfterMin)}`;
       return words.turnEnded ? `${base} · ${TURN_ENDED_TEXT}` : base;

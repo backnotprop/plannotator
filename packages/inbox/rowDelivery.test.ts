@@ -214,3 +214,12 @@ describe('a thread with two sessions: the row and the thread line agree on who a
   }
 });
 
+describe('the row names who read it', () => {
+  const delivered: InboxRowDelivery = { kind: 'reply', state: 'delivered', reason: 'delivered', send_now: false, message_id: 'm', at: '2026-10-20T15:00:00.000Z', host: 'cursor', name: null };
+  const time = () => '6:25 PM';
+
+  test('the same words as the thread: read by another agent, or delivered', () => {
+    expect(rowDeliveryLine({ ...delivered, read_by: 'claude-code' }, time)).toBe('Read by Claude Code, 6:25 PM');
+    expect(rowDeliveryLine(delivered, time)).toBe('Delivered to Cursor, 6:25 PM');
+  });
+});

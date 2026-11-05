@@ -1156,6 +1156,7 @@ export function createInboxLiveSessions(options: {
     presenceSignature,
     steerHanded,
     steerDone,
+    hostOf: (session: string): string | null => sessions.get(session)?.host ?? mcpSeen.get(session)?.host ?? null,
     hostSessions,
     restartCount,
     restartAgents,

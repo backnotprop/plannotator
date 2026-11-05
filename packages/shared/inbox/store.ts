@@ -572,6 +572,8 @@ function legacySeqFloor(path: string): number {
 export interface InboxDeliveryPresence {
   /** How a session is connected now (no grace), or null when it does not poll. */
   connection(session: string): InboxDeliveryConnection | null;
+  /** The host a live session said it is (its poll, or an MCP call that named one). Absent or null: not known. */
+  hostOf?(session: string): string | null;
   /** Whether the session that asked is still there, with the sessions route's grace (`askerLive`). */
   askerLive(session: string): boolean;
   /**
@@ -1858,6 +1860,8 @@ export class InboxStore {
       if (awaited.some((r) => r.delivered_at === null)) return null;
       return awaited.reduce<string | null>((latest, r) => (latest === null || r.delivered_at! > latest ? r.delivered_at : latest), null) ?? lastReal.created_at;
     };
+    // Who settled it, when that was not the agent it was for: the mark's read, else its own delivery's.
+    const readBy = recipients ? null : (root.agent_checked_seq ?? 0) >= seqOf(lastReal) ? root.agent_checked_by : lastReal.delivery?.read_by;
     const sent =
       lastReal.author.kind === "person"
         ? {
@@ -1870,6 +1874,7 @@ export class InboxStore {
                   (lastReal.delivery?.at ?? null),
             wakes: this.wakesRecipient(lastReal),
             ...(recipients ? { recipients } : {}),
+            ...(readBy ? { read_by: readBy } : {}),
           }
         : null;
     const participants = this.participantsOf(messages);
@@ -1983,7 +1988,7 @@ export class InboxStore {
     lastReal: InboxMessage,
     /** The agent message whose session asked (`inboxAskingMessage`, the thread's rule), when a person's item is last. */
     asking: InboxMessage | null,
-    sent: { checked_at: string | null } | null,
+    sent: { checked_at: string | null; read_by?: string } | null,
     recipients: InboxSentRecipient[] | null,
     resolved: boolean,
   ): InboxRowDelivery | null {
@@ -2092,6 +2097,7 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
       };
@@ -3142,15 +3148,44 @@ export class InboxStore {
     let newcomer: boolean | undefined;
     const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader ?? null));
     let checked = 0;
+    let lastChecked: InboxMessage | null = null;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
       const message = this.messages.get(id);
       if (seq > upToSeq || message?.author.kind !== "person") continue;
       if (reader !== undefined && seq > from && this.owedToAnother(message, reader, isNewcomer)) break;
       checked = Math.max(checked, seq);
+      lastChecked = message;
     }
-    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
-    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
+    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) {
+      // The agent it was for read it after another did: it has it now, so the line goes back to Delivered.
+      const asked = lastChecked?.reply_to ? this.messages.get(lastChecked.reply_to) : undefined;
+      if (root.agent_checked_by && reader && asked?.author.kind === "agent" && asked.author.session === reader) {
+        this.appendMessage({ ...root, agent_checked_at: at, agent_checked_by: undefined }, at);
+      }
+      return;
+    }
+    // Undefined when no other agent read it: an earlier read's name goes with the mark it moved.
+    const by = (lastChecked && this.readByAnother(lastChecked, reader)) || undefined;
+    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at, agent_checked_by: by }, at);
+  }
+
+  /**
+   * The host of `reader`, when its read of this reply is known not to be the agent the reply was for: another host
+   * than the session it answers. Null when it may be that agent: its own session, the same host (a raw MCP client
+   * takes a new `ses_` id each time it restarts, `owedToAnother`), a host not known, or one the Inbox has no name for.
+   */
+  private readByAnother(message: InboxMessage, reader: string | null | undefined): string | null {
+    if (!reader || message.to || hasTags(message)) return null;
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (asked?.author.kind !== "agent" || !asked.author.host || asked.author.session === reader) return null;
+    // Both from the names the Inbox knows: an agent's host is free text, "Cursor" and "cursor" are one agent, and so
+    // are `claude` and `claude-code`, so the names are what differ.
+    if (!Object.hasOwn(INBOX_HOST_NAMES, asked.author.host)) return null;
+    const known = this.deliveryPresence?.hostOf?.(reader);
+    const wrote = known ? null : this.latestAgentMessages().get(reader)?.author;
+    const host = known ?? (wrote?.kind === "agent" ? wrote.host : null);
+    return host && Object.hasOwn(INBOX_HOST_NAMES, host) && INBOX_HOST_NAMES[host] !== INBOX_HOST_NAMES[asked.author.host] ? host : null;
   }
 
   /**
@@ -3215,7 +3250,8 @@ export class InboxStore {
       const at = this.stamp();
       // A session it answers when it had one; else the reader's (a message and a read that both name none: "").
       const session = asked.author.session ?? reader ?? "";
-      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at } }, at);
+      const readBy = this.readByAnother(message, reader);
+      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at, ...(readBy ? { read_by: readBy } : {}) } }, at);
     }
   }
 
