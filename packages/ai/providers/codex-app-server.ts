@@ -150,8 +150,8 @@ export function classifyRpcMessage(msg: RpcMessage): RpcClassification {
   return { kind: "unknown" };
 }
 
-/** What a turn of plain writing is made of. Any other item is a tool of some kind, known or new. */
-const CODEX_ONE_SHOT_ITEMS: ReadonlySet<unknown> = new Set(["userMessage", "agentMessage", "reasoning"]);
+/** The items that don't act: writing, and what a person's own hook or a long context adds. Any other is a tool of some kind, known or new. */
+const CODEX_ONE_SHOT_ITEMS: ReadonlySet<unknown> = new Set(["userMessage", "agentMessage", "reasoning", "plan", "contextCompaction", "hookPrompt"]);
 
 /**
  * In a single judgment (`oneShot`), an item that isn't plain writing counts as a tool use, not only the shell:

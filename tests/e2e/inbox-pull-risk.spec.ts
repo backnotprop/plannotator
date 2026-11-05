@@ -6,7 +6,7 @@
  *
  * Proved, in order:
  *  1. Code review off: the route refuses and nothing shows.
- *  2. On with no rules: one quiet line that opens the dialog, no filter, no agent run.
+ *  2. On with no rules: the Risk chip holds only the way to the dialog; no agent run.
  *  3. The dialog: Pi is the installed agent, its models come from Pi, the cheap one is picked; saving starts the judgments.
  *  4. The rows' marks, all three levels; an answer that makes no sense shows no mark; the agent ran with no tools, no
  *     saved session, its model by flag, and got the rules and the diff.

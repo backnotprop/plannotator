@@ -118,13 +118,16 @@ export function codexAskAiConfigArgs(configTexts: string | null | readonly strin
 /**
  * What a single judgment (`CreateSessionOptions.oneShot`) adds to those: web search off, and each MCP server
  * named in the config Codex reads off. The servers already have their transport, so `enabled=false` alone is valid.
- * Names only as Codex allows them, and literal strings, for the same cmd.exe line. A server this can't see (a
- * plugin's, say) is left to the provider's own rule: any tool use ends the run.
+ * Names only as Codex allows them, and literal strings, for the same cmd.exe line. A name `-c` can't address (a
+ * quoted `"a.b"`) and a server this can't see (a plugin's, say) are left to the provider's own rule: any tool use ends the run.
  */
 export function codexOneShotConfigArgs(configTexts: readonly string[]): string[] {
   const names = new Set<string>();
   for (const text of configTexts) {
-    for (const m of text.matchAll(/^\s*\[\s*mcp_servers\.["']?([A-Za-z0-9_-]+)["']?/gm)) names.add(m[1]!);
+    for (const m of text.matchAll(/^\s*\[\s*mcp_servers\.(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_-]+))\s*[.\]]/gm)) {
+      const name = m[1] ?? m[2] ?? m[3]!;
+      if (/^[A-Za-z0-9_-]+$/.test(name)) names.add(name);
+    }
   }
   return ["-c", "web_search='disabled'", ...[...names].flatMap((name) => ["-c", `mcp_servers.${name}.enabled=false`])];
 }

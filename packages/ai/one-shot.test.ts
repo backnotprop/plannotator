@@ -8,7 +8,7 @@ import { chmodSync, existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { ClaudeAgentSDKProvider } from "./providers/claude-agent-sdk.ts";
-import { codexOneShotConfigArgs } from "./providers/ask-ai-env.ts";
+import { codexAskAiConfigArgs, codexOneShotConfigArgs } from "./providers/ask-ai-env.ts";
 import { CodexAppServerProvider, codexOneShotToolUse } from "./providers/codex-app-server.ts";
 import { PiSDKProvider, piOneShotArgs } from "./providers/pi-sdk.ts";
 import type { AIMessage, AISession } from "./types.ts";
@@ -109,6 +109,27 @@ require("readline").createInterface({input:process.stdin}).on("line",(l)=>{
     expect(piOneShotArgs("sonnet", undefined)).not.toContain("--model");
   });
 
+  test.skipIf(process.platform === "win32")("dispose ends a model read still running", async () => {
+    const pids = join(dir, `pi-pid-${Math.random().toString(36).slice(2)}`);
+    const path = script(`pi-${Math.random().toString(36).slice(2)}`, `#!/bin/sh\n[ "$1" = "--version" ] && { echo 0.84.4; exit 0; }\necho $$ > '${pids}'\nexec sleep 30\n`);
+    const provider = new PiSDKProvider({ type: "pi-sdk", cwd: dir, piExecutablePath: path });
+    void provider.fetchModels();
+    const alive = (pid: number) => {
+      try {
+        process.kill(pid, 0);
+        return true;
+      } catch {
+        return false;
+      }
+    };
+    while (!existsSync(pids) || !readFileSync(pids, "utf8").trim()) await Bun.sleep(10);
+    const pid = Number(readFileSync(pids, "utf8"));
+    expect(alive(pid)).toBe(true);
+    provider.dispose();
+    for (let i = 0; i < 100 && alive(pid); i++) await Bun.sleep(20);
+    expect(alive(pid)).toBe(false);
+  }, 15_000);
+
   test("with no effort named, it thinks low, not at the person's default", () => {
     const args = piOneShotArgs("anthropic/claude-sonnet-5", undefined);
     expect(args.slice(args.indexOf("--thinking"))).toEqual(["--thinking", "low"]);
@@ -132,7 +153,7 @@ describe("Codex", () => {
     expect(codexOneShotToolUse({ method: "item/started", params: { item: { type, id: "i" } } })?.type).toBe("tool_use");
   });
 
-  test.each([["userMessage"], ["agentMessage"], ["reasoning"]])("an item of %s is plain writing", (type) => {
+  test.each([["userMessage"], ["agentMessage"], ["reasoning"], ["plan"], ["contextCompaction"], ["hookPrompt"]])("an item of %s doesn't act", (type) => {
     expect(codexOneShotToolUse({ method: "item/started", params: { item: { type, id: "i" } } })).toBeNull();
     expect(codexOneShotToolUse({ method: "item/completed", params: { item: { type: "mcpToolCall", id: "i" } } })).toBeNull();
   });
@@ -140,6 +161,17 @@ describe("Codex", () => {
   test("web search goes off, and each MCP server the config names, once", () => {
     const args = codexOneShotConfigArgs(['[mcp_servers.slack]\ncommand = "x"\n[mcp_servers.slack.env]\nA = "1"\n', '  [mcp_servers."linear-1"]\nurl = "y"\n[other]\n']);
     expect(args).toEqual(["-c", "web_search='disabled'", "-c", "mcp_servers.slack.enabled=false", "-c", "mcp_servers.linear-1.enabled=false"]);
+  });
+
+  test("a quoted name stays whole: one with a dot can't be addressed, so it gets no half-name; an ordinary one, quoted or not, is as before", () => {
+    const args = codexOneShotConfigArgs(['[mcp_servers."a.b"]\nurl = "x"\n[mcp_servers."a.b".env]\n', "[mcp_servers.'c-1']\n[mcp_servers.d_2]\n[mcp_servers.d_2.env]\n# [mcp_servers.commented]\n"]);
+    expect(args).toEqual(["-c", "web_search='disabled'", "-c", "mcp_servers.c-1.enabled=false", "-c", "mcp_servers.d_2.enabled=false"]);
+  });
+
+  test("what Ask AI itself launches with is untouched by a judgment's overrides", () => {
+    const config = '[mcp_servers.slack]\ncommand = "x"\n';
+    expect(codexAskAiConfigArgs([config]).join(" ")).not.toContain("slack");
+    expect(codexAskAiConfigArgs([config]).join(" ")).not.toContain("web_search");
   });
 
   /** A `codex` that answers every request, then does what the test says in the turn. */

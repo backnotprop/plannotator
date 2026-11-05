@@ -130,8 +130,8 @@ export type RiskRunner = (run: RiskRun) => Promise<{ text: string } | null>;
 /** Ask a provider that reads its models only on request (Pi, OpenCode). */
 const readModels = (provider: AIProvider) => (provider as AIProvider & { fetchModels?: () => Promise<void> }).fetchModels?.().catch(() => {});
 
-/** Run one answer on an AI provider. Any tool use or permission ask ends the run with no answer, and so does the timeout, from the first step. */
-export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "provider">, timeoutMs = RISK_RUN_TIMEOUT_MS): Promise<{ text: string } | null> {
+/** Run one answer on an AI provider. Any tool use or permission ask ends the run with no answer, and so do the timeout and `signal`, from the first step. */
+export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "provider">, timeoutMs = RISK_RUN_TIMEOUT_MS, signal?: AbortSignal): Promise<{ text: string } | null> {
   let session: AISession | null = null;
   let over = false;
   const close = (open: AISession) => {
@@ -141,6 +141,8 @@ export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "pro
   const read = async (): Promise<{ text: string } | null> => {
     // No model saved, and none known yet: find the cheap one instead of running on the person's default.
     if (!run.model && !provider.models?.length) await readModels(provider);
+    // Ended during that: no agent starts (OpenCode would start a new server for it).
+    if (over) return null;
     const model = run.model ?? defaultRiskModel(provider.models ?? []);
     const opened = await provider.createSession({
       context: NO_CONTEXT,
@@ -150,7 +152,7 @@ export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "pro
       maxTurns: 1,
       oneShot: { systemPrompt: run.system },
     });
-    // It came back after the timeout: nobody is waiting for it.
+    // It came back after the end: nobody is waiting for it.
     if (over) {
       close(opened);
       return null;
@@ -171,12 +173,16 @@ export async function runRiskAgent(provider: AIProvider, run: Omit<RiskRun, "pro
     const text = final || whole.join("") || deltas.join("");
     return text ? { text } : null;
   };
-  let timer: ReturnType<typeof setTimeout> | undefined;
+  let end = () => {};
+  const ended = new Promise<null>((resolve) => (end = () => resolve(null)));
+  const timer = setTimeout(end, timeoutMs);
+  signal?.addEventListener("abort", end);
   try {
-    return await Promise.race([read(), new Promise<null>((resolve) => (timer = setTimeout(() => resolve(null), timeoutMs)))]);
+    return await Promise.race([read(), ended]);
   } finally {
     over = true;
     clearTimeout(timer);
+    signal?.removeEventListener("abort", end);
     if (session) close(session);
   }
 }
@@ -260,7 +266,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; judgments?: Record<string, Kept> };
       if (parsed.v !== 1 || !parsed.judgments || typeof parsed.judgments !== "object") throw new Error("not a risk file");
       for (const [key, value] of Object.entries(parsed.judgments)) {
-        if (typeof value?.head === "string" && typeof value.rules === "string" && parseRiskAnswer(JSON.stringify({ risk: value.level, why: value.why }))) kept.set(key, value);
+        const clean = parseRiskAnswer(JSON.stringify({ risk: value?.level, why: value?.why }));
+        if (typeof value?.head === "string" && typeof value.rules === "string" && clean) kept.set(key, { head: value.head, rules: value.rules, ...clean });
       }
     } catch {
       try {
@@ -293,20 +300,21 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
   let agentFailed = false;
   let failuresInARow = 0;
   let agentPausedUntil = 0;
-  let stopped = false;
+  /** Aborted when the Inbox stops. */
+  const stopping = new AbortController();
 
   const run: RiskRunner =
     options.run ??
     (async (one) => {
       const provider = await startProvider(one.provider, one.cwd);
       if (!provider) return null;
-      if (stopped) {
+      if (stopping.signal.aborted) {
         provider.dispose();
         return null;
       }
       live.add(provider);
       try {
-        return await runRiskAgent(provider, one);
+        return await runRiskAgent(provider, one, RISK_RUN_TIMEOUT_MS, stopping.signal);
       } finally {
         live.delete(provider);
         provider.dispose();
@@ -334,7 +342,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       return;
     }
     // The Inbox stopped during that read: no agent starts now.
-    if (stopped) return;
+    if (stopping.signal.aborted) return;
     mkdirSync(agentDir, { recursive: true });
     let answer: Awaited<ReturnType<RiskRunner>> = null;
     try {
@@ -348,7 +356,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     } catch {
       // Below: the same as no answer.
     }
-    if (stopped) return;
+    if (stopping.signal.aborted) return;
     const judgment = parseRiskAnswer(answer?.text);
     agentFailed = !judgment;
     if (!judgment) {
@@ -392,7 +400,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     },
     assess(pulls) {
       listed = pulls;
-      if (stopped || now() < agentPausedUntil) return;
+      if (stopping.signal.aborted || now() < agentPausedUntil) return;
       try {
         const { rules, provider } = settings();
         if (!rules || !provider || !options.isOn() || !agents().some((a) => a.id === provider)) return;
@@ -439,7 +447,7 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
       return { models: models.map(({ id, label }) => ({ id, label })), default_model: defaultRiskModel(models) };
     },
     stop() {
-      stopped = true;
+      stopping.abort();
       queue.length = 0;
       queued.clear();
       for (const provider of live) provider.dispose();

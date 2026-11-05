@@ -447,6 +447,26 @@ describe("no cost repeats", () => {
   });
 });
 
+describe("the sentence", () => {
+  test("characters that reorder text on screen are taken out, from an answer and from what was kept", async () => {
+    const tricky = "It changes \u202Eetirw\u202C the \u2066billing\u2069 webhook\u200F.";
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: tricky }))).toEqual({ level: "high", why: "It changes etirw the billing webhook." });
+    expect(parseRiskAnswer(JSON.stringify({ risk: "high", why: "\u202E\u2066" }))).toBeNull();
+
+    setRules();
+    const { risk } = engine();
+    risk.assess([pull(1)]);
+    await settled();
+    const file = join(dataDir, "inbox", INBOX_PULL_RISK_FILE);
+    const stored = JSON.parse(readFileSync(file, "utf8"));
+    stored.judgments["github.com/n/b#1"].why = tricky;
+    writeFileSync(file, JSON.stringify(stored));
+    const restarted = engine();
+    restarted.risk.assess([pull(1)]);
+    expect(restarted.risk.answer().judgments["github.com/n/b#1"]?.why).toBe("It changes etirw the billing webhook.");
+  });
+});
+
 describe("the person's rules", () => {
   test("stay out of the judgments' file", async () => {
     setRules("Anything about the secret merger.");
@@ -520,6 +540,35 @@ describe("one run on a provider", () => {
       await new Promise(() => {});
     });
     expect(await runRiskAgent(hung, run, 5)).toBeNull();
+  });
+
+  test("a stop ends a running agent at once, and closes it", async () => {
+    const seen: { aborted?: boolean } = {};
+    const hung = provider(async function* () {
+      await new Promise(() => {});
+    }, seen);
+    const stopping = new AbortController();
+    const answer = runRiskAgent(hung, run, 60_000, stopping.signal);
+    await Bun.sleep(5);
+    stopping.abort();
+    expect(await answer).toBeNull();
+    expect(seen.aborted).toBe(true);
+  });
+
+  test("a stop during the model read: no agent starts after it", async () => {
+    const seen: { options?: CreateSessionOptions } = {};
+    let finish = () => {};
+    const stub = provider([], seen) as unknown as { models: unknown[]; fetchModels: () => Promise<void> };
+    stub.models = [];
+    stub.fetchModels = () => new Promise<void>((resolve) => (finish = resolve));
+    const stopping = new AbortController();
+    const answer = runRiskAgent(stub as unknown as AIProvider, run, 60_000, stopping.signal);
+    await Bun.sleep(5);
+    stopping.abort();
+    expect(await answer).toBeNull();
+    finish();
+    await Bun.sleep(5);
+    expect(seen.options).toBeUndefined();
   });
 
   test("an agent that never opens its session ends at the timeout too, and the session is closed if it comes late", async () => {

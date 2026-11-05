@@ -309,11 +309,15 @@ export class PiSDKProvider implements AIProvider {
 		throw new Error("Pi does not support session resuming.");
 	}
 
+	/** The process reading the models, for `dispose`. */
+	private discovery: PiProcess | undefined;
+
 	dispose(): void {
 		for (const session of this.sessions.values()) {
 			session.killProcess();
 		}
 		this.sessions.clear();
+		this.discovery?.kill();
 	}
 
 	/** Fetch available models from Pi. Call before registering the provider. */
@@ -327,6 +331,7 @@ export class PiSDKProvider implements AIProvider {
 
 		try {
 			proc = new PiProcess();
+			this.discovery = proc;
 			await proc.spawn(piPath, this.config.cwd ?? process.cwd());
 
 			const data = await Promise.race([

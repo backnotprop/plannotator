@@ -132,6 +132,9 @@ export function riskFence(): string {
   return `DATA-${crypto.randomUUID()}`;
 }
 
+/** Characters that reorder text on screen: a sentence from a diff's reader has no use for them, and they can make it read as something else. */
+const BIDI_CONTROLS = /[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/g;
+
 /**
  * The agent's answer as a judgment, or null. The whole answer must be the one
  * object (a single code fence around it is forgiven, since models add those), with
@@ -155,7 +158,7 @@ export function parseRiskAnswer(text: string | null | undefined): InboxPullRiskJ
   const { risk, why } = answer;
   if (typeof risk !== "string" || !INBOX_PULL_RISK_LEVELS.includes(risk as InboxPullRiskLevel)) return null;
   if (typeof why !== "string") return null;
-  const sentence = why.trim();
+  const sentence = why.replace(BIDI_CONTROLS, "").trim();
   if (!sentence || sentence.length > INBOX_PULL_RISK_WHY_MAX || /[\r\n]/.test(sentence)) return null;
   return { level: risk as InboxPullRiskLevel, why: sentence };
 }
