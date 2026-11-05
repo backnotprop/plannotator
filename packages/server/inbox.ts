@@ -200,7 +200,7 @@ import {
 import { createInboxCompose, INBOX_UPLOAD_SWEEP_MS } from "./inbox-compose";
 import { isWindowRequest } from "./inbox-cross-site";
 import { createInboxLaunch } from "./inbox-launch";
-import type { LaunchHost, LaunchHostContext } from "./inbox-launch-host";
+import type { LaunchDelivery, LaunchHost, LaunchHostContext } from "./inbox-launch-host";
 import { createLoginEnv } from "./inbox-launch-env";
 import { createInboxReplyDrafts } from "./inbox-reply-drafts";
 import { createInboxAsk } from "./inbox-ask";
@@ -490,7 +490,8 @@ export interface InboxServerOptions {
    * Codex CLI besides `agentEnvironment`'s PATH (default: the ChatGPT app's,
    * never under the test sandbox), and how often to look for replies to queue.
    */
-  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number };
+  /** `deliver`: tests stand in for the launch engine's (what a launched thread's host answers). */
+  codexWake?: { extraClis?: readonly string[]; now?: () => number; queueTimeoutMs?: number; deliver?: (session: string, text: string) => Promise<LaunchDelivery> };
   /** Tests: voice dictation's endpoints, and where to look for a Codex CLI besides PATH (packages/server/inbox-voice.ts). */
   voice?: { chatgptUrl?: string; openaiUrl?: string; extraClis?: readonly string[] };
   /** Tests: where a read of `cswap list --json` looks, how long it waits, when a stuck run is killed, and how long an answer serves (packages/server/inbox-accounts.ts). */
@@ -3087,12 +3088,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     },
   });
 
+  /** The launch engine exists (the Codex wake is made before it, and its first sweep may already run). */
+  let launchReady = false;
   // The Codex wake: the person's items for a Codex thread go in as a new turn through `codex queue`,
   // once each (inbox-codex-wake.ts). Worded like any bridge command.
   const codexWake = createInboxCodexWake({
     store,
     environment: agentEnvironment,
     commandOf: (item, session) => replyCommand(item, false, session),
+    // A Codex session the Inbox launched: its host puts the item in as a turn (launch is made below; until then, the queue).
+    deliver: options.codexWake?.deliver ?? ((session, text) => (launchReady ? launch.deliver(INBOX_CODEX_HOST, session, text) : Promise.resolve("queue" as const))),
     // A steps-only Tidy wake with steps off is withdrawn, never handed (a switch turned off in config.json by hand).
     skip: (item) => withdrawnTidy(item),
     ...(options.codexWake?.extraClis ? { extraClis: options.codexWake.extraClis } : {}),
@@ -3232,6 +3237,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hosts: options.launchHosts,
     isGuest,
   });
+  launchReady = true;
   // The login shell read ahead, off any request's path (launch on only).
   launch.warm();
 

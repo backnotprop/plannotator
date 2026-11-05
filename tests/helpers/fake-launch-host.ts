@@ -14,9 +14,24 @@ export const FAKE = "fake-agent" as InboxLaunchAgent;
 export function fakeLaunchHost() {
   const calls: string[] = [];
   /** What the test makes go wrong. `trusted`: the folders it does not trust are the ones `trusted` says no to. */
-  const faults: { resumeThrows: boolean; gate: Promise<void> | null; untrusted: boolean; resumeUntrusted: boolean; offer: LaunchTrustOffer | null; trusted: (folder: string) => boolean } = {
+  const faults: {
+    resumeThrows: boolean;
+    gate: Promise<void> | null;
+    untrusted: boolean;
+    resumeUntrusted: boolean;
+    offer: LaunchTrustOffer | null;
+    trusted: (folder: string) => boolean;
+    deliverGate: Promise<void> | null;
+    /** The turn had gone before the Stop's signal came (Codex's `turn/start` sent). */
+    lateTurn: boolean;
+    /** The wake records the delivery as soon as the turn took it. */
+    delivered: ((text: string) => void) | null;
+  } = {
     resumeThrows: false,
     gate: null,
+    deliverGate: null,
+    lateTurn: false,
+    delivered: null,
     untrusted: false,
     resumeUntrusted: false,
     offer: null,
@@ -67,6 +82,15 @@ export function fakeLaunchHost() {
       return { exitCode: 0, text: "" };
     },
     purge: async (folder) => (calls.push(`purge ${folder}`), { exitCode: 0, text: "" }),
+    // As Codex's: the wake's text goes in as a turn; it takes a while (`deliverGate`), and starts none once stopped.
+    async deliver(_launch, text, signal) {
+      calls.push(`deliver ${text}`);
+      await faults.deliverGate;
+      if (signal.aborted && !faults.lateTurn) return { failed: "stopped" };
+      calls.push(`turn ${text}`);
+      faults.delivered?.(text);
+      return "delivered";
+    },
     attach: (launch) => (launch.session_ref ? `fake attach ${launch.session_ref}` : null),
     terminal: (launch) => (calls.push(`terminal ${launch.session_ref}`), `fake attach ${launch.session_ref}`),
     // Pushed prompts: no hook route; its questions are written by the shared question code.
