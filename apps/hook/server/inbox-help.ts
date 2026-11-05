@@ -24,6 +24,7 @@
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
+import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
@@ -137,6 +138,13 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     args: ["message_id", "resolved"],
     lines: [
       "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed.",
+    ],
+  },
+  snooze_thread: {
+    args: ["thread_id", "until"],
+    lines: [
+      `Only when the person asks. Snoozes a thread until \`until\` (ISO 8601 with zone, within ${INBOX_SNOOZE_MAX_DAYS} days); it then returns by itself. \`null\` ends it. Sends nothing.`,
+      "- A linked machine's thread works the same, by its thread id. If that machine is away, it applies when it is back. One too old answers `machine_needs_update`.",
     ],
   },
   get_guide_brief: {

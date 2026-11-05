@@ -4,7 +4,9 @@
  * KaTeX are chunks the Inbox serves on first use. What regresses without the
  * gate: a Markdown file paints its fence plain (or its math as TeX) for a frame
  * or two before ui swaps the finished markup in, a code file paints its lines
- * plain in Pierre's view, and a review's diff paints its lines plain.
+ * plain in Pierre's view, and a review's diff paints its lines plain. And a
+ * grammar chunk the Inbox no longer has (a tab older than its build) fetched
+ * again on every open.
  *
  * `@pierre/diffs` and the KaTeX loader are stood in for through ui's seams, so
  * a test holds a grammar or KaTeX "in flight" and sees what is on screen.
@@ -13,7 +15,7 @@
 import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { InboxAttachmentState } from '@plannotator/core/inbox-types';
+import type { InboxAttachmentState, InboxThread } from '@plannotator/core/inbox-types';
 import { __resetCodeHighlightCacheForTests, __setCodeHighlightModuleForTests, onCodeHighlightSwap } from '@plannotator/ui/utils/codeHighlight';
 import { resetMathRenderer, setMathRendererLoader, type MathRenderer } from '@plannotator/ui/utils/math';
 import { resolveFenceTheme } from '@plannotator/ui/utils/syntaxTheme';
@@ -190,3 +192,44 @@ test.skipIf(!hasDom)("a review's diff draws once its files' grammars are in, in 
   await ticks();
   expect(host!.querySelector('[data-reader]') !== null).toBe(true);
 });
+
+test.skipIf(!hasDom)('a grammar chunk the Inbox answers 404 for is not fetched again on the next open; one a dropped link lost is', async () => {
+  // A page served by the Inbox, so the failed chunk is on this page's origin.
+  const happy = (window as unknown as { happyDOM: { setURL(url: string): void } }).happyDOM;
+  const was = window.location.href;
+  happy.setURL('http://localhost:4000/');
+  try {
+    await grammarGone();
+  } finally {
+    happy.setURL(was);
+  }
+});
+
+async function grammarGone() {
+  const asked: string[] = [];
+  const chunk = (lang: string) => new URL(`/assets/lang-${lang}-x1.js`, window.location.href).href;
+  __setCodeHighlightModuleForTests({
+    getSharedHighlighter: ({ langs }: { langs: string[] }) => {
+      asked.push(...langs);
+      return Promise.reject(new TypeError(`Failed to fetch dynamically imported module: ${chunk(langs[0]!)}`));
+    },
+    getHighlighterIfLoaded: () => undefined,
+  } as unknown as typeof import('@pierre/diffs'));
+  // The Inbox: elixir's chunk is not in its build; haskell's is (its first fetch was lost on the way).
+  const heads: string[] = [];
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    heads.push(`${init?.method} ${url}`);
+    return new Response(null, { status: url.includes('elixir') ? 404 : 200 });
+  }) as unknown as typeof fetch;
+  const open = async (lang: string) => {
+    await drawReady.threadDrawReady({ thread_id: 'msg_0', messages: [{ id: 'msg_0', body: '```' + lang + '\nx\n```' }] } as InboxThread);
+    await ticks(3);
+  };
+  await open('elixir');
+  await open('elixir');
+  expect(asked).toEqual(['elixir']);
+  expect(heads).toEqual([`HEAD ${chunk('elixir')}`]);
+  await open('haskell');
+  await open('haskell');
+  expect(asked).toEqual(['elixir', 'haskell', 'haskell']);
+}

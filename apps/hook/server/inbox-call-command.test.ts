@@ -7,7 +7,8 @@
  * What can regress: a script writing as another agent, a script's writes not
  * counting for the Tidy that asked for them, a double post on a rerun, a
  * failure a script reads as a result, and a result cut short in a pipe. Every
- * process gets a temp HOME and data dir, and no agent CLI ever runs.
+ * process gets a temp HOME and data dir, and a PATH of agent stubs
+ * (tests/helpers/agent-cli-guard.ts): no real agent CLI ever runs.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -22,6 +23,7 @@ import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { codexRolloutDayFolders } from "@plannotator/server/inbox-codex-wake";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { createFakeAgents, type FakeAgents } from "../../../tests/helpers/fake-agents";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
@@ -57,6 +59,8 @@ afterEach(async () => {
   await stopProvenInboxes(detached.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 function sandbox() {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-call-")));
@@ -68,7 +72,7 @@ function sandbox() {
   // The Board and thread steps are things the person turns on: on here, so every action the command takes is served.
   writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxBoard: true, inboxSteps: true }));
   const env: Record<string, string> = {
-    PATH: process.env.PATH ?? "/usr/bin:/bin",
+    ...agents.env,
     HOME: join(root, "home"),
     TMPDIR: tmpdir(),
     PLANNOTATOR_DATA_DIR: dataDir,
@@ -77,7 +81,6 @@ function sandbox() {
     PLANNOTATOR_UPDATE_CHECK: "0",
     GIT_CONFIG_GLOBAL: "/dev/null",
     GIT_CONFIG_NOSYSTEM: "1",
-    ...(process.env.PLANNOTATOR_TEST_SANDBOX ? { PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX } : {}),
   };
   return { root, dataDir, project, env };
 }
@@ -87,7 +90,17 @@ type Box = ReturnType<typeof sandbox>;
 async function world() {
   const box = sandbox();
   const clock = { behind: 0 };
-  const server = await startInboxServer({ dataDir: box.dataDir, binaryPath: null, board: true, steps: true, storeNow: () => new Date(Date.now() - clock.behind) });
+  // This Inbox runs in the test's process: named here, so a run the preload missed still has no agents, on PATH or in /Applications.
+  const agentsHome = join(box.dataDir, "agents-home");
+  const server = await startInboxServer({
+    dataDir: box.dataDir,
+    binaryPath: null,
+    board: true,
+    steps: true,
+    storeNow: () => new Date(Date.now() - clock.behind),
+    agentEnvironment: createAgentEnvironmentFor({ platform: process.platform, homeDir: agentsHome, env: { HOME: agentsHome, PATH: "" } }),
+    codexWake: { extraClis: [] },
+  });
   servers.push(server);
   const client = new Client({ name: "inbox-call-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -157,6 +170,19 @@ describe("what a script gets", () => {
     expect(unknown.stderr).toStartWith("invalid_arguments: ");
   });
 
+  test("snooze_thread from a script: it snoozes, says until when as JSON, and until: null ends it", async () => {
+    const box = await world();
+    const sent = JSON.parse((await cli(box, ["send_message", '{"body":"News.","subject":"Ledger"}'], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses_call" } })).stdout);
+    const until = new Date(Date.now() + 3_600_000).toISOString();
+    const snoozed = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until })]);
+    expect(snoozed.code).toBe(0);
+    expect(JSON.parse(snoozed.stdout).snoozed.until).toBe(until);
+    expect(box.server.store.snoozes().map((s) => s.thread_id)).toEqual([sent.thread_id]);
+    const ended = await cli(box, ["snooze_thread", JSON.stringify({ thread_id: sent.thread_id, until: null })]);
+    expect(JSON.parse(ended.stdout)).toEqual({ thread_id: sent.thread_id, snoozed: null, ended: `Thread ${sent.thread_id}: snooze ended.` });
+    expect(box.server.store.snoozes()).toEqual([]);
+  });
+
   // Review of #2567, finding 2: with thread steps off an agent reads no word of them, so the error's list leaves out
   // `steps` (as the usage does); the action itself still goes through (the Inbox answers steps_off while off).
   test("an unknown action's list never names steps; steps itself is an action", () => {
@@ -185,6 +211,16 @@ describe("what a script gets", () => {
     // None of these reached for an Inbox, so none started one.
     expect(existsSync(join(box.dataDir, "inbox", "inbox.json"))).toBe(false);
   });
+
+  test("an Inbox started without the test sandbox still reaches only a stub", async () => {
+    const box = sandbox();
+    const { PLANNOTATOR_TEST_SANDBOX: _sandbox, ...env } = box.env;
+    const sent = await cli({ ...box, env }, ["send_message", '{"body":"From a Codex thread."}'], { env: { CODEX_THREAD_ID: CODEX_THREAD } });
+    const inbox = inboxEntryOf(box.dataDir);
+    if (inbox) detached.push({ entry: inbox, root: box.root });
+    expect(sent.code).toBe(0);
+    expect(agents.takeCalls()).toEqual(["codex --version"]);
+  }, 30_000);
 
   test("a stopped Inbox starts in the background with no browser, as `inbox mcp` does", async () => {
     const box = sandbox();
@@ -337,6 +373,7 @@ describe("who is calling", () => {
     expect(mine.cards.map((c: { title: string }) => c.title)).toEqual(["My lane"]);
   });
 
+  // Twelve CLI starts in a row and no waiting between them: about 4.5 s alone, so the default 5 s fails under load.
   test("an agent started from another agent's shell never writes as that agent", async () => {
     const box = await world();
     const seen = await tool(box.client, "send_message", { body: "Outer.", subject: "Outer", thread: "Outer", project_path: box.project, agent_session: "ses-outer", agent_host: "claude-code" });
@@ -370,7 +407,7 @@ describe("who is calling", () => {
     // OpenCode inside Claude Code: its shell names only the outer session, and its Tidy says who it is.
     const nested = await cli(box, ["--session", "opencode:ses_nested", "read_thread", "{}"], { env: { PLANNOTATOR_SESSION_TAG: "claude-code:ses-outer", OPENCODE: "1" } });
     expect(nested.code).toBe(0);
-  });
+  }, 30_000);
 
   test("the rules alone: what each shell and value resolve to", () => {
     const caller = (flag: string | null, env: Record<string, string>) => {

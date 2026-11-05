@@ -165,7 +165,7 @@ async function settle() {
   });
 }
 
-async function render(thread: InboxThread, sent: { at: string; checked_at: string | null } | null = null) {
+async function render(thread: InboxThread, sent: { at: string; checked_at: string | null; read_by?: string } | null = null) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -702,4 +702,15 @@ test.skipIf(!hasDom)('a comment only, Send from the foot with the list of commen
   expect(el.querySelector('[data-route-choice]')).toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(list()).toBeNull();
+});
+
+test.skipIf(!hasDom)('a reply no connection wakes, settled by another agent\'s read: the line says who read it; with no record, Delivered', async () => {
+  const at = '2026-10-11T18:25:00.000Z';
+  const noWake = threadOf({ ...asking(false, false), author: { ...ASKER, host: 'cursor', session: 'cursor-1' } }, personReply());
+  const read = await render(noWake, { at: '2026-10-11T10:52:00.000Z', checked_at: at, read_by: 'claude-code' });
+  expect(read.querySelector('[data-delivery]')?.textContent).toBe(`Read by Claude Code, ${whenTime(at)}`);
+  act(() => root?.unmount());
+  host?.remove();
+  const old = await render(noWake, { at: '2026-10-11T10:52:00.000Z', checked_at: at });
+  expect(old.querySelector('[data-delivery]')?.textContent).toBe(`Delivered to Cursor, ${whenTime(at)}`);
 });

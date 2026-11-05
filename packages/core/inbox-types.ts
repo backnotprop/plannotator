@@ -454,6 +454,12 @@ export interface InboxMessage {
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
   /**
+   * The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was
+   * for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a
+   * thread from before this was recorded: those keep "Delivered".
+   */
+  agent_checked_by?: string | null;
+  /**
    * The files an agent attached (send_message's `attachments`), recorded at
    * send time and read only by their ids (see inbox-attachments.ts). Added in
    * step 2: older records lack it.
@@ -876,6 +882,8 @@ export interface InboxAddressee {
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
+  /** Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`). */
+  read_by?: string | null;
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
@@ -1390,6 +1398,11 @@ export interface InboxListRow extends InboxThreadSummary {
      * Absent from an older Inbox.
      */
     wakes?: boolean;
+    /**
+     * Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM").
+     * Absent otherwise, and on a thread from before this was recorded.
+     */
+    read_by?: string;
     /**
      * When the reply tags agents (`InboxMessage.tags`): every session it goes
      * to, the owner first, each with its own delivery ("1 of 3 delivered").
@@ -2268,10 +2281,18 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * With the op `initiative_delete` (its name in the enum, +20 bytes): 12,025
  * bytes, tokens scaled the same way (+5), so 3,278. The sentence on clearing
  * out is not in the tool: `plannotator card --help` and a per-call nudge.
+ * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
+ * its `until` field; no line in the description): 10,095 → 10,248 bytes with
+ * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
+ * Both landed together (snooze_thread above, 11,779 bytes, plus the +444 of initiatives above): 12,223 bytes,
+ * tokens +142, so 3,366; the board-switch test checks the bytes within 5%.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12025, tokens: 3278 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval

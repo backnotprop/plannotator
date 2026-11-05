@@ -8,7 +8,7 @@
  * snoozed thread, a project batch ending one, and a past time accepted.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -59,6 +59,116 @@ const list = async (server: InboxServer, query = "?archived=exclude&snoozed=excl
 const sectionOf = (model: ListModel, threadId: string) => model.sections.find((s) => s.threads.some((r) => r.thread_id === threadId))?.id ?? null;
 const later = (ms: number) => new Date(Date.now() + ms).toISOString();
 const ASK = "Which index?\n\n:::question\nWhich index?\n\n- [ ] Pagefind\n- [ ] Orama\n:::";
+
+describe("snooze_thread, the agent's call", () => {
+  const call = async (client: Client, args: Record<string, unknown>) =>
+    (await client.callTool({ name: "snooze_thread", arguments: args })) as { isError?: boolean; content: { text: string }[]; structuredContent?: { snoozed: { until: string } | null } };
+
+  test("an agent the person asked snoozes a thread: it leaves the list, writes no message, comes back at its time; until: null ends it", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const cursor = server.store.cursor();
+    const until = later(1_200);
+    const snoozed = await call(client, { thread_id: a.thread_id, until });
+    expect(snoozed.structuredContent!.snoozed!.until).toBe(new Date(until).toISOString());
+    expect(snoozed.content[0]!.text).toContain("is snoozed until");
+    expect(server.store.cursor()).toBe(cursor);
+    const away = await list(server);
+    expect(sectionOf(away, a.thread_id)).toBeNull();
+    expect(away.snoozed!.map((r) => r.thread_id)).toEqual([a.thread_id]);
+    expect(server.store.listRow(a.thread_id)!.questions.open).toBe(1);
+    // By a message in the thread too, and the read says nothing of it.
+    await call(client, { thread_id: a.message_id, until: later(3_600_000) });
+    expect(server.store.snoozes().map((s) => s.thread_id)).toEqual([a.thread_id]);
+    expect(JSON.stringify(await client.callTool({ name: "read_thread", arguments: { thread_id: a.thread_id, agent_session: "ses_a" } }))).not.toMatch(/snooz/i);
+    // Ended: back in its section at once.
+    const ended = await call(client, { thread_id: a.thread_id, until: null });
+    expect(ended.content[0]!.text).toBe(`Thread ${a.thread_id}: snooze ended.`);
+    // In the structured result too: an MCP client may show the agent only that.
+    expect(ended.structuredContent).toEqual({ thread_id: a.thread_id, snoozed: null, ended: `Thread ${a.thread_id}: snooze ended.` });
+    expect((await list(server)).snoozed).toEqual([]);
+    // Nothing to take off: not "ended".
+    const none = await call(client, { thread_id: a.thread_id, until: null });
+    expect(none.content[0]!.text).toBe(`Thread ${a.thread_id} is not snoozed.`);
+    expect(none.structuredContent).toEqual({ thread_id: a.thread_id, snoozed: null });
+    expect(sectionOf(await list(server), a.thread_id)).toBe("waiting");
+    // Its time: back by itself, with the return's mark.
+    await call(client, { thread_id: a.thread_id, until: later(600) });
+    await Bun.sleep(700);
+    const back = await list(server);
+    expect(back.snoozed).toEqual([]);
+    expect(back.sections.flatMap((s) => s.threads).find((r) => r.thread_id === a.thread_id)!.snooze_back).toEqual(expect.any(String));
+  });
+
+  test("any message of a thread names that thread: a reply's id, not only the root's", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const later1 = await send("Plain news", "ses_a");
+    expect(later1.thread_id).toBe(a.thread_id);
+    expect(later1.message_id).not.toBe(a.thread_id);
+    const answer = await call(client, { thread_id: later1.message_id, until: later(3_600_000) });
+    expect(answer.isError).toBeUndefined();
+    expect(server.store.snoozes().map((s) => s.thread_id)).toEqual([a.thread_id]);
+  });
+
+  test("an agent's time must be ISO 8601 with its zone; a time Date.parse would guess at is refused and names the format", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const year = new Date().getUTCFullYear() + 1;
+    for (const until of [`${year}-06-01T09:00:00`, `06/25/${year}`, String(year), "Nov 12", `${year}-02-31T08:00:00Z`, `${year}-06-01`, `${year}-06-01t09:00:00z`, "tomorrow"]) {
+      const refused = await call(client, { thread_id: a.thread_id, until });
+      expect([until, refused.isError]).toEqual([until, true]);
+      expect(refused.content[0]!.text).toStartWith("validation_error: until: an ISO 8601 time with its zone");
+    }
+    expect(server.store.snoozes()).toEqual([]);
+    for (const until of [`${year}-06-01T09:00:00-05:00`, `${year}-06-01T09:00:00Z`, `${year}-06-01T09:00+01:00`, `${year}-06-01T09:00:00.250Z`]) {
+      expect([until, (await call(client, { thread_id: a.thread_id, until })).isError]).toEqual([until, undefined]);
+    }
+  });
+
+  test("the window's own route still takes what it always took", async () => {
+    const { server, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const year = new Date().getUTCFullYear() + 1;
+    expect((await snooze(server, a.thread_id, `${year}-06-01T09:00:00`)).status).toBe(200);
+  });
+
+  test("a snooze that went through marks the person as having used Snooze; ending one or a refusal does not", async () => {
+    const was = process.env.PLANNOTATOR_DATA_DIR;
+    const configDir = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-zz-config-")));
+    roots.push(configDir);
+    process.env.PLANNOTATOR_DATA_DIR = configDir;
+    try {
+      const { client, send } = await setup();
+      const a = await send(ASK, "ses_a");
+      const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+      await call(client, { thread_id: a.thread_id, until: null });
+      await call(client, { thread_id: a.thread_id, until: later(-60_000) });
+      expect(mark()).toBeUndefined();
+      await call(client, { thread_id: a.thread_id, until: later(3_600_000) });
+      expect(mark()).toEqual(expect.any(String));
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = was;
+    }
+  });
+
+  test("the store's rules hold: a past time and an unknown thread are refused, and nothing is snoozed", async () => {
+    const { server, client, send } = await setup();
+    const a = await send(ASK, "ses_a");
+    const past = await call(client, { thread_id: a.thread_id, until: later(-60_000) });
+    expect(past.isError).toBe(true);
+    expect(past.content[0]!.text).toStartWith("snooze_past: ");
+    const unknown = await call(client, { thread_id: "msg_nope", until: later(60_000) });
+    expect(unknown.isError).toBe(true);
+    // No machine linked: nothing about a linked machine's ids.
+    expect(unknown.content[0]!.text).toBe("thread_not_found: No thread msg_nope.");
+    const empty = await call(client, { thread_id: "  ", until: later(60_000) });
+    expect(empty.content[0]!.text).toBe("validation_error: thread_id: required.");
+    expect(server.store.snoozes()).toEqual([]);
+  });
+
+});
 
 describe("snooze", () => {
   test("the window's list takes a snoozed thread out of every section into `snoozed`; the phone's keeps it, marked", async () => {
