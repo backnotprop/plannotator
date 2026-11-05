@@ -64,6 +64,7 @@ import {
   INBOX_RECORD_VERSION,
   type InboxAck,
   type InboxAddressee,
+  type InboxReplyViewing,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -132,7 +133,7 @@ import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSa
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -301,6 +302,11 @@ export interface InboxReplyInput {
   feedback?: string;
   /** The annotations that text carries: marked sent with the reply. */
   annotation_ids?: string[];
+  /**
+   * The file on screen when the person sent this from full screen's floating box (`planViewing`): the window's
+   * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
+   */
+  viewing?: unknown;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -4211,6 +4217,7 @@ export class InboxStore {
     }
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
+    const viewing = this.planViewing(message.thread_id, input.viewing, carried);
     // Skips only what the person listed ("Skip them"), and only while still open.
     const planned = new Set(plan.map((p) => p.record.id));
     const listed = this.planSkips(message, input.skip);
@@ -4353,6 +4360,7 @@ export class InboxStore {
         ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
+      ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
@@ -4374,6 +4382,28 @@ export class InboxStore {
     // The person's words as typed: never the picks, the action items or the feedback the Send adds.
     this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * What a reply says was on screen (`InboxReplyInput.viewing`): the name and the message read from the thread's own
+   * file, never from the window. Undefined for a file not of this thread, and for a file the reply carries a comment
+   * on: its "Feedback on the attached files" names it already.
+   */
+  private planViewing(threadId: string, raw: unknown, carried: readonly InboxAnnotationRecord[]): InboxReplyViewing | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const input = raw as { attachment_id?: unknown; time?: unknown; page?: unknown; as_sent?: unknown };
+    if (typeof input.attachment_id !== "string") return undefined;
+    const hit = this.attachment(input.attachment_id);
+    if (!hit || hit.message.thread_id !== threadId || carried.some((record) => record.attachment_id === hit.attachment.id)) return undefined;
+    const time = typeof input.time === "string" ? inboxViewingText(input.time) : "";
+    const page = typeof input.page === "string" ? inboxViewingText(input.page) : "";
+    return {
+      name: hit.attachment.name,
+      message_id: hit.message.id,
+      ...(INBOX_VIEWING_TIME.test(time) ? { time } : {}),
+      ...(page ? { page } : {}),
+      ...(input.as_sent === true ? { as_sent: true as const } : {}),
+    };
   }
 
   /**
