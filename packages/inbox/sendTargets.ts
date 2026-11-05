@@ -116,16 +116,18 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
 
 /**
  * The person's reply that holds the thread now because a session that ended was replaced (`took_over`, set by the
- * server), while no agent has written since: its latest addressed reply, so moving it or aiming the next one follows.
+ * server), while no agent has written since: that session's latest reply, so moving it or aiming the next one follows.
  * Null otherwise: a reply aimed elsewhere while the asker is live never takes over.
  */
 export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
-  let latest: InboxMessageWire | null = null;
+  if (activeHandoff(thread)) return null;
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const m = thread.messages[index]!;
     if (m.author.kind === 'agent') return null;
-    if (m.to && !m.handoff?.undone_at) latest ??= m;
-    if (m.took_over && latest) return latest;
+    if (!m.took_over || !m.to) continue;
+    // That session's latest since (the server's owner too): a stale tab's reply to another session does not take it.
+    const owner = m.to.session;
+    return thread.messages.slice(index + 1).filter((later) => later.to?.session === owner).at(-1) ?? m;
   }
   return null;
 }

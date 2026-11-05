@@ -176,9 +176,20 @@ describe('wordsMessage: who the next reply goes to after a session ended', () =>
     expect(wordsMessage(thread([ended, reply('msg_2', { to })])).id).toBe('msg_1');
   });
 
-  test('a further reply, aimed elsewhere after the takeover, is the one followed', () => {
-    const later = reply('msg_3', { to: { host: 'pi', session: 'ses_third' }, reply_to: 'msg_2' });
-    expect(wordsMessage(thread([ended, reply('msg_2', { to, took_over: true }), later])).id).toBe('msg_3');
+  test('a further reply to the session that took over is the one followed; one aimed elsewhere, without taking over, is not (as on the server)', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const next = reply('msg_3', { to, reply_to: 'msg_2' });
+    expect(wordsMessage(thread([ended, moved, next])).id).toBe('msg_3');
+    const elsewhere = reply('msg_4', { to: { host: 'pi', session: 'ses_third' }, reply_to: 'msg_1' });
+    expect(wordsMessage(thread([ended, moved, next, elsewhere])).id).toBe('msg_3');
+    const again = reply('msg_5', { to: { host: 'pi', session: 'ses_third' }, took_over: true });
+    expect(wordsMessage(thread([ended, moved, next, again])).id).toBe('msg_5');
+  });
+
+  test('a hand-off after the take over owns the next reply', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const handed = reply('msg_3', { to: { host: 'pi', session: 'ses_third' }, handoff: { from: { host: 'pi', session: 'ses_new' }, label: null, at: 'x' } });
+    expect(wordsMessage(thread([ended, moved, handed])).id).toBe('msg_3');
   });
 
   test('any agent writing ends it: the latest writer takes the words again, the old session too if it was resumed', () => {

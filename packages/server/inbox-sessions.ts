@@ -209,9 +209,19 @@ export function replacesEndedAsker(asked: InboxMessage | null | undefined, live:
   return !live.askerLive(asked.author.session);
 }
 
-/** `session`, which a reply leaves, owned the thread (a hand-off made it the owner) and has ended: the reply takes its place too. */
-export function replacesEndedOwner(session: string | null | undefined, owner: { session: string } | null, live: { askerLive(session: string): boolean }): boolean {
-  return !!session && owner?.session === session && !live.askerLive(session);
+/**
+ * Whether a reply aimed away from `leaving` (the session it waits on, if any) takes the thread (`took_over`): never
+ * while its owner is there, so answering an older message cannot take a thread from a hand-off's new owner; otherwise
+ * when it leaves that owner, or answers a session read as ended.
+ */
+export function takesOver(
+  owner: { session: string } | null,
+  asked: InboxMessage | null | undefined,
+  leaving: string | null | undefined,
+  live: { askerLive(session: string): boolean },
+): boolean {
+  if (!owner || live.askerLive(owner.session)) return false;
+  return owner.session === leaving || replacesEndedAsker(asked, live);
 }
 
 /**

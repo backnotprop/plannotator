@@ -285,6 +285,9 @@ test('the id a stop notice shows reads as its reply wherever an agent can pass i
   const answered = await call('send_message', { body: 'Understood.', reply_to: notice!.id, agent_host: 'pi', agent_name: 'The agent' })
   expect(answered.isError ?? false).toBe(false)
   expect(answered.structuredContent?.thread_id).toBe(w.asked.thread_id)
+  const resolved = (await w.client.callTool({ name: 'resolve_message', arguments: { message_id: notice!.id } })) as { isError?: boolean; content: { text: string }[]; structuredContent?: unknown }
+  expect(resolved.isError ?? false).toBe(false)
+  expect(resolved.content[0]!.text).toContain(w.asked.thread_id)
   // An id that is no notice's is named as it was written.
   for (const id of ['-stop', 'msg_x-stop']) {
     const bad = await call('read_thread', { message_id: id })

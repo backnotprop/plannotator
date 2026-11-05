@@ -6083,13 +6083,13 @@ export class InboxStore {
    * session is not live (`session_not_live`). The same session writes nothing.
    *
    * `targetLive`: the server read that the session it waits on is still there, so it stays on its way
-   * (`session_still_live`). `tookOver`: the session the reply answers has ended (only a waking session can be known to),
-   * so the moved reply takes its place (`took_over`); a plain reply moves only then. A plain reply a read already
+   * (`session_still_live`). `askerEnded`: the session the reply answers has ended (only a waking session can be known to);
+   * a plain reply moves only then. `tookOver`: the moved reply takes the thread (`took_over`, the server's `takesOver`). A plain reply a read already
    * settled, or a session that already took it through a tag, is refused as taken. What was saved earlier for the same
    * session goes with it, so none stays owed there with no line saying so. A move is a new delivery for the session it
    * reaches: an old claim on it does not stand.
    */
-  readdressMessage(messageId: string, to: InboxAddressee | null, options: { targetLive?: boolean; tookOver?: boolean } = {}): InboxMessage {
+  readdressMessage(messageId: string, to: InboxAddressee | null, options: { targetLive?: boolean; askerEnded?: boolean; tookOver?: boolean } = {}): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const notAddressed = () => new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
@@ -6108,7 +6108,7 @@ export class InboxStore {
     if (tookIt(message)) throw taken();
     if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
     if (options.targetLive) throw new InboxError("session_still_live", "That session is still running, so it still gets this. Nothing was changed.");
-    if (!message.to && !options.tookOver) throw notAddressed();
+    if (!message.to && !options.askerEnded) throw notAddressed();
     const at = this.stamp();
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.

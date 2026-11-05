@@ -402,6 +402,45 @@ describe("a later reply moved when the hand-off's new owner has ended", () => {
     expect(await w.handedTo(HERDR, w.herdr, next.id)).toBe(false);
   });
 
+  test("a stale tab answers the old hand-off after the take over: server and window keep the third session's", async () => {
+    const w = await handedThenEnded(false);
+    const more = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    expect((await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } })).status).toBe(200);
+    const stale = (await reply(w.server, w.handed.id, { idempotency_key: "k3", words: "From the old tab." })).json.reply as InboxMessageWire;
+    expect(stale.to?.session).toBe(HERDR);
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    expect(wordsMessage(await thread(w.server, w.asked.thread_id)).id).toBe(more.id);
+    const next = await w.nextReply("k4");
+    expect(await w.handedTo(C, w.project, next.id)).toBe(true);
+  });
+
+  test("a stale tab answers the old hand-off after the take over: server and window keep the session that took over", async () => {
+    const w = await handedThenEnded(false);
+    const more = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    expect((await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } })).status).toBe(200);
+    const stale = (await reply(w.server, w.handed.id, { idempotency_key: "k3", words: "From the old tab." })).json.reply as InboxMessageWire;
+    expect(stale.to?.session).toBe(HERDR);
+    expect(stale.took_over).toBeUndefined();
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    expect(wordsMessage(await thread(w.server, w.asked.thread_id)).id).toBe(more.id);
+    const next = await w.nextReply("k4");
+    expect(await w.handedTo(C, w.project, next.id)).toBe(true);
+  });
+
+  test("the session that took over is there: a reply to the asker's old message aimed elsewhere does not take it from it", async () => {
+    const w = await handedThenEnded(false);
+    const more = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
+    expect((await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } })).status).toBe(200);
+    await w.handedTo(C, w.project, more.id);
+    w.age();
+    await poll(w.server, C, w.project);
+    await poll(w.server, "cc-fourth", w.project);
+    const aimed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k3", words: "Fourth.", to: { host: "claude-code", session: "cc-fourth" } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBeUndefined();
+    expect(await owner(w.server, w.asked.thread_id)).toBe(C);
+    expect(wordsMessage(await thread(w.server, w.asked.thread_id)).id).toBe(more.id);
+  });
+
   test("a reply aimed at another session from the hand-off itself, its owner ended: it takes over too", async () => {
     const w = await handedThenEnded(false);
     const aimed = (await reply(w.server, w.handed.id, { idempotency_key: "k2", words: "Yours, third.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
@@ -420,6 +459,90 @@ describe("a later reply moved when the hand-off's new owner has ended", () => {
     const more = (await reply(w.server, handed.id, { idempotency_key: "k2", words: "Also do Y." })).json.reply as InboxMessageWire;
     expect((await post(w.server, `/api/inbox/messages/${more.id}/to`, { to: { host: "claude-code", session: C } })).status).toBe(422);
     expect(await owner(w.server, w.asked.thread_id)).toBe(HERDR);
+  });
+});
+
+describe("a reply to the former owner's message while the new owner is there", () => {
+  const C = "cc-third";
+  /** The owner handed the thread to `HERDR`, which stays; the owner ended. */
+  async function formerEnded() {
+    let now = 1_000_000;
+    const w = await world(100, () => now);
+    const handed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(w.server, HERDR, w.herdr)).length > 0, "the hand-off to settle");
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(w.server, HERDR, w.herdr);
+    await poll(w.server, C, w.project);
+    /** Server and window both say the thread stays with `HERDR`, and the person's next words reach it. */
+    const staysWithNewOwner = async () => {
+      expect(await owner(w.server, w.asked.thread_id)).toBe(HERDR);
+      const words = wordsMessage(await thread(w.server, w.asked.thread_id));
+      expect(words.id).toBe(handed.id);
+      const next = (await reply(w.server, words.id, { idempotency_key: "k9", words: "Next." })).json.reply as InboxMessageWire;
+      expect((await poll(w.server, HERDR, w.herdr)).map((c) => c.id)).toContain(next.id);
+      expect((await poll(w.server, C, w.project)).map((c) => c.id)).not.toContain(next.id);
+    };
+    return { ...w, staysWithNewOwner };
+  }
+
+  test("aimed at a third session: that session gets it, and the thread stays with the new owner", async () => {
+    const w = await formerEnded();
+    const aimed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For you, third.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([aimed.id]);
+    await w.staysWithNewOwner();
+  });
+
+  test("plain, then moved to a third session: it moves, and the thread stays with the new owner", async () => {
+    const w = await formerEnded();
+    const plain = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For the one that asked." })).json.reply as InboxMessageWire;
+    const moved = await post(w.server, `/api/inbox/messages/${plain.id}/to`, { to: { host: "claude-code", session: C } });
+    expect(moved.status).toBe(200);
+    expect((moved.json.message as InboxMessageWire).took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([plain.id]);
+    await w.staysWithNewOwner();
+  });
+});
+
+describe("a reply to an older message while the thread's owner is there", () => {
+  const C = "cc-third";
+  /** The asker handed the thread to `HERDR`, which stays; the asker ended. */
+  async function formerEnded() {
+    let now = Date.now();
+    const w = await world(100, () => now);
+    const handed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    await until(async () => (await poll(w.server, HERDR, w.herdr)).length > 0, "the hand-off to settle");
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(w.server, HERDR, w.herdr);
+    await poll(w.server, C, w.project);
+    /** Server and window both say the thread stays with `HERDR`, and the person's next words reach it. */
+    const staysWithNewOwner = async () => {
+      expect(await owner(w.server, w.asked.thread_id)).toBe(HERDR);
+      const words = wordsMessage(await thread(w.server, w.asked.thread_id));
+      expect(words.id).toBe(handed.id);
+      const next = (await reply(w.server, words.id, { idempotency_key: "k9", words: "Next." })).json.reply as InboxMessageWire;
+      expect((await poll(w.server, HERDR, w.herdr)).map((c) => c.id)).toContain(next.id);
+      expect((await poll(w.server, C, w.project)).map((c) => c.id)).not.toContain(next.id);
+    };
+    return { ...w, staysWithNewOwner };
+  }
+
+  test("aimed at a third session: that session gets it, and the thread stays with the hand-off's new owner", async () => {
+    const w = await formerEnded();
+    const aimed = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For you, third.", to: { host: "claude-code", session: C } })).json.reply as InboxMessageWire;
+    expect(aimed.took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([aimed.id]);
+    await w.staysWithNewOwner();
+  });
+
+  test("plain, then moved to a third session: it moves, and the thread stays with the hand-off's new owner", async () => {
+    const w = await formerEnded();
+    const plain = (await reply(w.server, w.asked.message_id, { idempotency_key: "k2", words: "For the one that asked." })).json.reply as InboxMessageWire;
+    const moved = await post(w.server, `/api/inbox/messages/${plain.id}/to`, { to: { host: "claude-code", session: C } });
+    expect(moved.status).toBe(200);
+    expect((moved.json.message as InboxMessageWire).took_over).toBeUndefined();
+    expect((await poll(w.server, C, w.project)).map((c) => c.id)).toEqual([plain.id]);
+    await w.staysWithNewOwner();
   });
 });
 
