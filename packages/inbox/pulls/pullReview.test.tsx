@@ -1007,6 +1007,11 @@ const LOCALE_PR = (fields: Partial<InboxPull> = {}) =>
   pull(869, { repo: 'northwind/web-app', title: 'Fall back to English for missing strings', head: 'locale-fallback', ...fields });
 const handoffOf = (p: InboxPull, ask?: Parameters<typeof pullHandoffMessage>[1]) => pullHandoffMessage(inboxPullStacks([p])[0]!, ask);
 
+test("a teammate's PR: the agent is told to leave it alone: no push, no comment on it, no approval, no merge", () => {
+  const text = handoffOf({ ...model.pulls.find((p) => p.number === 869)!, mine: false, author: 'jun' });
+  for (const forbidden of ['push', 'comment', 'approve', 'merge']) expect(text).toMatch(new RegExp(`Don't[^.]*${forbidden}`));
+});
+
 /** The owner's approved text, word for word (`.product/approved/pull-handoff-message/approval.md`). */
 const APPROVED_OWN = `You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.
 
