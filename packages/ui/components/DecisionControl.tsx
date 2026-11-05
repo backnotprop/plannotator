@@ -506,7 +506,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
         className={cn(
           'rounded-r-none border-r-0',
           // One control with its caret, which stays live: quiet words on the same fill, never half of a coloured pill.
-          spec.primary.muted && 'cursor-not-allowed bg-muted text-muted-foreground hover:bg-muted',
+          spec.primary.muted && 'cursor-not-allowed bg-muted text-muted-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted',
         )}
       >
         {spec.primary.shortLabel ? (
@@ -562,7 +562,7 @@ export const DecisionControl: React.FC<DecisionControlProps> = ({
         aria-expanded={popover !== null}
         aria-label="More decisions"
         data-decision-caret="true"
-        className={cn('rounded-l-none px-1.5', spec.primary.muted && 'bg-muted text-foreground hover:bg-muted/70')}
+        className={cn('rounded-l-none px-1.5', spec.primary.muted && 'bg-muted text-foreground [@media(hover:hover)_and_(pointer:fine)]:hover:bg-muted/70')}
       >
         <ChevronDown
           className={cn('size-3.5 transition-transform duration-150', popover && 'rotate-180')}

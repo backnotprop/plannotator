@@ -1075,7 +1075,22 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   const ownApprove = review.locator('[data-review-posts] [data-decision-primary]');
   await expect(ownApprove).toHaveAttribute('aria-disabled', 'true');
   const look = (el: Element) => { const css = getComputedStyle(el); return [css.backgroundColor, css.opacity]; };
-  expect(await ownApprove.evaluate(look)).toEqual(await review.locator('[data-review-posts] [data-decision-caret]').evaluate(look));
+  const ownCaret = review.locator('[data-review-posts] [data-decision-caret]');
+  const atRest = await ownApprove.evaluate(look);
+  expect(atRest).toEqual(await ownCaret.evaluate(look));
+  // Under the pointer: Approve does not change, and the caret lightens its own fill. Neither shows the enabled green.
+  await ownApprove.hover();
+  await expect.poll(() => ownApprove.evaluate(look)).toEqual(atRest);
+  await page.waitForTimeout(250);
+  expect(await ownApprove.evaluate(look)).toEqual(atRest);
+  await ownCaret.hover();
+  await page.waitForTimeout(250);
+  const caretHover = await ownCaret.evaluate(look);
+  expect(caretHover[0]).not.toBe(atRest[0]);
+  // The grey's own hue: an oklab colour with next to no chroma, where the enabled green has plenty.
+  const [, greenRed, blueYellow] = caretHover[0].match(/-?[\d.]+/g)!.map(Number);
+  expect(Math.hypot(greenRed, blueYellow)).toBeLessThan(0.03);
+  await page.mouse.move(2, 2);
   await shot(page, '10-ending-choice');
   {
     const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
