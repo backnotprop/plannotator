@@ -32,8 +32,8 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, sep } from "node:path";
 import { getPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import {
   BUILTIN_DEFAULT_PROFILE,
@@ -67,6 +67,26 @@ export interface DiscoveredSkill {
 // ---------------------------------------------------------------------------
 // Root resolution
 // ---------------------------------------------------------------------------
+
+/**
+ * True when `dir` (already resolved) sits inside a temp folder. A test run
+ * (PLANNOTATOR_TEST_SANDBOX) reads only such folders, so a test that left HOME
+ * or CLAUDE_CONFIG_DIR alone never reads the person's real skills, while a test
+ * that seeds skills under a scratch home still finds them. Like
+ * `agentHomeAllowed` in inbox-agents.ts, which this file cannot import: it is
+ * vendored to Pi.
+ */
+function isScratchDir(dir: string): boolean {
+  return [tmpdir(), "/tmp", "/private/tmp"].some((root) => {
+    let base = root;
+    try {
+      base = realpathSync(root);
+    } catch {
+      // No such temp root here (/private/tmp off macOS); compare it as written.
+    }
+    return dir.startsWith(`${base.replace(/[\\/]+$/, "")}${sep}`);
+  });
+}
 
 /**
  * The ordered global skill roots, honoring env overrides. First-seen wins on a
@@ -109,6 +129,7 @@ export function resolveGlobalSkillRoots(): Array<{ dir: string; root: SkillRoot 
       // non-existent root still dedupes against an identical literal.
       key = candidate.dir;
     }
+    if (process.env.PLANNOTATOR_TEST_SANDBOX && !isScratchDir(key)) continue;
     if (seen.has(key)) continue;
     seen.add(key);
     roots.push(candidate);
