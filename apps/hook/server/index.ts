@@ -767,6 +767,13 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
+/**
+ * Print output that can be bigger than a pipe holds (64 KiB), then exit only after this settles: it
+ * does once everything is written or the reader has gone. Without the wait, or through console.log
+ * on Bun 1.3, the end is lost and the CLI still exits 0 (cli-stdout-pipe.test.ts).
+ */
+const writeWholeToStdout = (text: string) => new Promise<void>((done) => void process.stdout.write(text, () => done()));
+
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
@@ -774,10 +781,7 @@ if (helpSubcommand) {
     helpSubcommand === "inbox"
       ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
       : formatSubcommandHelp(helpSubcommand);
-  // The guide can be bigger than a pipe holds (64 KiB), so wait for a slow reader: the callback
-  // runs once it is all written or the reader has gone. Without the wait, or through console.log
-  // on Bun 1.3, the end is lost (inbox-help-pipe.test.ts).
-  await new Promise<void>((done) => void process.stdout.write(`${help}\n`, () => done()));
+  await writeWholeToStdout(`${help}\n`);
   process.exit(0);
 }
 
@@ -2310,7 +2314,8 @@ if (args[0] === "sessions") {
   // had the annotate gate flags (`--json` included) stripped above, so hand
   // it everything after "guide" from the raw argv instead.
   const result = await runGuideCli(rawArgs.slice(rawArgs.indexOf("guide") + 1), process.env, process.env.PLANNOTATOR_CWD || process.cwd());
-  if (result.stdout) process.stdout.write(result.stdout);
+  // `guide export --out -` prints the whole Guided Review as HTML.
+  if (result.stdout) await writeWholeToStdout(result.stdout);
   if (result.stderr) process.stderr.write(result.stderr);
   process.exit(result.code);
 
