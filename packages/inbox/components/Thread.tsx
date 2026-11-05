@@ -41,7 +41,7 @@ import { takeArrivalFocus } from '../threadStep';
 import type { InboxToastModel } from './Toast';
 import { AnnotationsChip, AnnotationsList, type AnnotationsListProps, type CommentEdit, type CommentsListAt } from './AnnotationsChip';
 import { agentName, clockTime, dayWords, formatCount, fullTime, plural, shortAgentName, whenTime } from '../format';
-import { inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
+import { inboxRowSnoozed, inboxSnoozeWhen } from '@plannotator/core/inbox-snooze';
 import { foldSnippet, holdingsOf, isDelivered, isPersonLook, isPersonReply, lastNonNote, lookBoundary, newSinceLook, planFolds, snippetText, type FoldSnippet, type Holding } from '../folding';
 import { highlightSearchHits } from '../search/highlight';
 import { AuthorMark, Icon } from '../icons';
@@ -5441,7 +5441,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             <span>handed off {whenTime(handedOff.created_at)}</span>
           </div>
         )}
-        {row?.snoozed && (
+        {/* By this window's clock: an archived thread stays open across its time with no list read to end it. */}
+        {row?.snoozed && inboxRowSnoozed(row) && (
           <div className="ib-readline" data-snooze-line="">
             <Icon name="clock" size={16} />
             <div>Snoozed until {inboxSnoozeWhen(row.snoozed.until)}</div>
