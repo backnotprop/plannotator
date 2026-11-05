@@ -1923,6 +1923,8 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await page.goto(`${world.url}#thread=${encodeURIComponent(threadId!)}`);
   await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
   await shot(page, 'w-thread');
+});
+
 test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {
   const { page } = world;
   await setCodeReview(true);
