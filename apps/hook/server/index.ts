@@ -241,7 +241,8 @@ import { exitOnUnknownSubcommand } from "./unknown-subcommand";
 import { completeAnnotateCommand } from "./annotate-command";
 import { ensureInboxRunning, runInboxCommand, selfCommand as inboxSelfCommand } from "./inbox-command";
 import { runCardCommand } from "./card-command";
-import { runShapeCommand, SHAPE_OFF_TEXT } from "./shape-command";
+import { runShapeCommand, runShapeSwitch, SHAPE_OFF_TEXT } from "./shape-command";
+import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import { runShapeOpen, runShapeServe } from "./shape-open";
 import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
@@ -350,16 +351,23 @@ const rawArgs = process.argv.slice(2);
   const args = rawArgs;
   // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
   // learns nothing of it (the same switch hides the Pebble, the row and the routes).
-  if (args[0] === "shape" && loadConfig().inboxShape !== true) {
+  // `shape on|off` is the switch itself, so it runs while Shape is off (only it; `on --help` still gets the off line).
+  if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
+    process.exit(runShapeSwitch(args.slice(1)));
+  }
+  if (args[0] === "shape" && !shapeSwitchOn()) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
   }
   // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
-  if (args[0] === "shape" && args[1] === "open" && !hasHelpFlag(args.slice(2))) {
+  // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.
+  if (args[0] === "shape" && (args.length === 1 || (args[1] === "open" && !hasHelpFlag(args.slice(2))))) {
     process.exit(
       await runShapeOpen(args.slice(2), {
         dataDir: getPlannotatorDataDir(),
         openUrl: (url) => openBrowserDetached(url, { isRemote: isRemoteSession() }),
+        // Bare: the page already open, if there is one; `shape open` always opens a tab.
+        reuseOpenPage: args.length === 1,
       }),
     );
   }
