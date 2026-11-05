@@ -1541,3 +1541,41 @@ test.skipIf(!hasDom)('after a reload, other code at its line under the same head
   expect(forge.reviews[0]!.body).toContain('[Outdated');
   expect(forge.reviews[0]!.body).toContain(LINE.text);
 });
+
+test.skipIf(!hasDom)('the older comment went and the review at the head was refused: reopened, the words stay a comment, never an Approve', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await openPost();
+  await typeInDialog('The words.');
+  postAnswer = (body) => (body.head_sha === B ? Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 }) : null);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  postAnswer = null;
+  await act(async () => inDialog('Cancel').click());
+  await settle();
+  await openPost();
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')!.value).toBe('The words.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge!.reviews.at(-1)).toMatchObject({ commit: B, action: 'comment' });
+  expect(forge!.reviews.at(-1)!.body).toContain('The words.');
+});
+
+test.skipIf(!hasDom)('words left in a follow-up nobody sent do not turn a later Approve into a comment', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await openPost();
+  await act(async () => inDialog('Approve').click());
+  await settle();
+  await act(async () => document.querySelector<HTMLElement>('[data-review-post-followup]')!.click());
+  await settle();
+  await typeInDialog('Half a thought.');
+  await act(async () => inDialog('Cancel').click());
+  await settle();
+  diffHead = B;
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await openPost();
+  expect(inDialog('Approve').textContent).toBe('Approve');
+});

@@ -61,7 +61,7 @@ const OPEN_PR_KEY = 'plannotator-inbox-platform-open-pr';
 /** Between a PR's URL and a commit, in a target of that commit. */
 const AT = '#plannotator-at-';
 
-export default function PlatformPost({ pull, open, comments, anchor, post, onClose, onPosted, onWent }: PlatformPostProps) {
+export default function PlatformPost({ pull, open, comments, anchor, post, onClose, onPosted, onWent, hostReadsAgain }: PlatformPostProps) {
   const rules = platformRules(pull);
   const [action, setAction] = useState<PlatformAction>('comment');
   const [chooseEvent, setChooseEvent] = useState(false);
@@ -102,8 +102,9 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
     // A plan kept from a partial or blocked attempt stays (its narrowed retry); otherwise built fresh.
     if (opened.current) return;
     opened.current = true;
-    // Words typed for a review are no approval because its comments have gone (a new commit): they stay that review.
-    setAction(open.action === 'approve' && general.trim() ? action : open.action);
+    // Words typed for a refused review are no approval because its comments have gone (a new commit): they stay that
+    // review. A host that closes the dialog and reads the PR again has put the decision back, and that is what was pressed.
+    setAction(open.action === 'approve' && general.trim() && refused.current && !hostReadsAgain ? action : open.action);
     setChooseEvent(open.chooseEvent);
     const sameHead = planHead.current === pull.head_sha;
     planHead.current = pull.head_sha;

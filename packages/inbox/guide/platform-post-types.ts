@@ -60,4 +60,6 @@ export interface PlatformPostProps {
   onPosted: (result: { action: PlatformAction; url: string; posted: readonly string[]; head: string }) => void;
   /** Comments that went at the commit they were read on, ahead of the review itself (which can still fail). */
   onWent?: (ids: readonly string[]) => void;
+  /** A refused post closes this dialog and the host reads the PR again, so the next opening is a new decision. */
+  hostReadsAgain?: boolean;
 }

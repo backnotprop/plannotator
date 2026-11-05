@@ -246,6 +246,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               }}
               onClose={() => setOpen(null)}
               onWent={onWent}
+              hostReadsAgain={Boolean(onMoved)}
               onPosted={(result) => {
                 setOpen(null);
                 // A follow-up comment after an approval still reads as the approval.
