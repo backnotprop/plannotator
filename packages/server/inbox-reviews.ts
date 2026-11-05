@@ -5,15 +5,29 @@
  * derived on read and kept until the store changes (its event-log cursor, or
  * a re-read from disk). A review sent before guide refs carried their
  * `source` has it read once from its snapshot blob (a blob never changes, so
- * that read is kept by its hash). No git, gh or glab here.
+ * that read is kept by its hash). No git, gh or glab in the index.
  *
  * The rules (whose move, the rows) are core's (`packages/core/inbox-reviews.ts`).
  */
 
 import { readFileSync } from "node:fs";
 import { parseGuideSnapshotJson } from "@plannotator/core/guide-format";
-import { inboxReviewSourceOf, isInboxNote, type InboxMessage, type InboxReviewSource, type InboxReviewThread } from "@plannotator/core/inbox-types";
+import {
+  inboxPullRefOfKey,
+  inboxPullRefOfUrl,
+  inboxReviewLandingId,
+  inboxReviewLandingOf,
+  inboxReviewSourceOf,
+  isInboxNote,
+  type InboxMessage,
+  type InboxPull,
+  type InboxPullHost,
+  type InboxReviewLanding,
+  type InboxReviewSource,
+  type InboxReviewThread,
+} from "@plannotator/core/inbox-types";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
+import { refCliRunner, type RefRunner } from "./ref-cards";
 
 /** The parts of the store the index reads. */
 export interface InboxReviewIndexStore {
@@ -130,6 +144,113 @@ export function createInboxReviewIndex(store: InboxReviewIndexStore): InboxRevie
       sources = kept;
       built = { cursor, reloads, threads };
       return threads;
+    },
+  };
+}
+
+/** A PR read that said it is still open is not read again for this long. */
+export const INBOX_PULL_STATE_AGAIN_MS = 30 * 60_000;
+/** A closed PR can reopen off the list (a merged one cannot): its record is checked this often. */
+export const INBOX_PULL_STATE_CLOSED_AGAIN_MS = 24 * 60 * 60_000;
+/** At most this many PRs are read after one read of the list; the rest wait for the next. */
+export const INBOX_PULL_STATE_READS = 5;
+
+export interface InboxPullStateAnswer {
+  state: "open" | "merged" | "closed";
+  at: string | null;
+  title: string;
+  url: string;
+  head: string | null;
+}
+
+/** A PR gone from the forge's list: what one read answered, or null when it could not say. */
+export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli"], ref: { host: string; repo: string; number: number }): Promise<InboxPullStateAnswer | null> {
+  const endpoint = cli === "gh" ? `repos/${ref.repo}/pulls/${ref.number}` : `projects/${encodeURIComponent(ref.repo)}/merge_requests/${ref.number}`;
+  const read = await run(cli, ["api", "--hostname", ref.host, endpoint]).catch(() => null);
+  if (!read || read.exitCode !== 0) return null;
+  try {
+    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown }; source_branch?: unknown };
+    const text = (value: unknown) => (typeof value === "string" && value ? value : null);
+    const merged = text(pr.merged_at);
+    const state = merged || pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : pr.state === "open" || pr.state === "opened" ? "open" : null;
+    const url = text(pr.html_url) ?? text(pr.web_url);
+    if (!state || !url) return null;
+    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch) };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Reads the state of a review thread's PRs that left the list: the list never carries a closed PR, and a merged one only
+ * for a while, so a thread would read as a local review again. In the background (the list never waits for it), and
+ * only for hosts that answered this list. One that merged or closed is recorded through `onLand`; a merged one is not
+ * read again, and a closed one that reopened off the list is forgotten when it is next checked.
+ */
+export function createInboxPullStates(options: { run?: RefRunner; now?: () => number; onLand: (record: readonly InboxReviewLanding[], forget?: readonly string[]) => void }) {
+  const run = options.run ?? refCliRunner;
+  const now = options.now ?? Date.now;
+  const lastRead = new Map<string, number>();
+  let reading: Promise<void> | null = null;
+  return {
+    /** Starts the reads this list leaves to do; resolves when they are done (the tests' wait). */
+    look(input: {
+      threads: readonly InboxReviewThread[];
+      pulls: readonly InboxPull[];
+      hosts: readonly InboxPullHost[];
+      owners: ReadonlyMap<string, { thread_id: string }>;
+      landed: readonly InboxReviewLanding[];
+    }): Promise<void> {
+      if (reading) return reading;
+      const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
+      const listed = new Set(input.pulls.map((pull) => pull.key));
+      const cliOf = new Map(input.hosts.filter((host) => !host.error).map((host) => [host.host, host.cli]));
+      // Only review threads have a row to get wrong: a thread with no review leaves Reviews with its PR.
+      const wanted = new Map<string, Set<string>>();
+      const want = (key: string, threadId: string) => wanted.set(key, (wanted.get(key) ?? new Set()).add(threadId));
+      for (const [key, owner] of input.owners) if (byThread.has(owner.thread_id)) want(key, owner.thread_id);
+      for (const thread of input.threads) {
+        const key = thread.source?.pr ? inboxPullRefOfUrl(thread.source.pr.url)?.key : null;
+        if (key) want(key, thread.thread_id);
+      }
+      const merged = new Set(input.landed.filter((landing) => landing.state === "merged").map(inboxReviewLandingId));
+      const recorded = new Set(input.landed.map(inboxReviewLandingId));
+      const due: { key: string; threads: string[]; cli: InboxPullHost["cli"]; ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>> }[] = [];
+      const pick = (again: (key: string, threads: string[]) => number | null) => {
+        for (const [key, threadIds] of wanted) {
+          if (due.length >= INBOX_PULL_STATE_READS) return;
+          const threads = [...threadIds];
+          const wait = listed.has(key) || due.some((d) => d.key === key) ? null : again(key, threads);
+          if (wait === null || now() - (lastRead.get(key) ?? -Infinity) < wait) continue;
+          const ref = inboxPullRefOfKey(key);
+          const cli = ref ? cliOf.get(ref.host) : undefined;
+          if (ref && cli) due.push({ key, threads, cli, ref });
+        }
+      };
+      const ids = (key: string, threads: readonly string[]) => threads.map((thread_id) => inboxReviewLandingId({ key, thread_id }));
+      // A PR with a thread still unrecorded first; then a closed one, checked for a reopen. A merged one is done.
+      pick((key, threads) => (ids(key, threads).some((id) => !recorded.has(id)) ? INBOX_PULL_STATE_AGAIN_MS : null));
+      pick((key, threads) => (ids(key, threads).every((id) => recorded.has(id) && !merged.has(id)) ? INBOX_PULL_STATE_CLOSED_AGAIN_MS : null));
+      if (due.length === 0) return Promise.resolve();
+      reading = (async () => {
+        for (const { key, threads, cli, ref } of due) {
+          lastRead.set(key, now());
+          const state = await readInboxPullState(run, cli, ref);
+          if (!state) continue;
+          if (state.state === "open") {
+            if (input.landed.some((landing) => landing.key === key)) options.onLand([], [key]);
+            continue;
+          }
+          const platform = cli === "gh" ? ("github" as const) : ("gitlab" as const);
+          const fresh = threads.filter((threadId) => !recorded.has(inboxReviewLandingId({ key, thread_id: threadId })));
+          options.onLand(fresh.map((threadId) => inboxReviewLandingOf({ key, url: state.url, number: ref.number, title: state.title, platform, state: state.state as "merged" | "closed", at: state.at, head: state.head }, threadId, byThread.get(threadId) ?? null)));
+        }
+      })()
+        .catch((cause) => console.error(`inbox: reading a pull request's state failed: ${cause instanceof Error ? cause.message : String(cause)}`))
+        .finally(() => {
+          reading = null;
+        });
+      return reading;
     },
   };
 }
