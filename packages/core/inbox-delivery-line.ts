@@ -328,7 +328,7 @@ export function deliveryText(
     case 'undelivered':
       return `Not delivered. That ${words.undeliveredHost} session stopped before it took this. If it is resumed, it still gets it.`;
     case 'stuck':
-      return `Not delivered. ${name} stopped while it was taking this, so it won't get it.`;
+      return `Not delivered. ${name} stopped while it was taking this, so it may not have it.`;
     case 'ended':
       return `Saved for ${words.endedName}. That session has ended; it gets this only if it's resumed.`;
     case 'reads':
