@@ -55,7 +55,7 @@ import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
-import type { InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { InboxPullDetailsAnswer, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -664,6 +664,8 @@ export class InboxApiError extends Error {
     message: string,
     /** The request's field the refusal names (`files[1]`), when it names one. */
     readonly field: string | null = null,
+    /** When a held read may be asked again (ms since the epoch), when the answer says. */
+    readonly retryAt: number | null = null,
   ) {
     super(message);
     this.name = 'InboxApiError';
@@ -678,6 +680,7 @@ async function readJson<T>(response: Response): Promise<T> {
       typeof body.code === 'string' ? body.code : 'error',
       typeof body.error === 'string' ? body.error : `The Inbox answered ${response.status}.`,
       typeof body.field === 'string' ? body.field : null,
+      typeof body.retry_at === 'number' ? body.retry_at : null,
     );
   }
   return body as T;
@@ -1514,6 +1517,7 @@ export const inboxApi = {
     return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
   },
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
+  pullDetails: (key: string, signal?: AbortSignal) => get<InboxPullDetailsAnswer>(inboxUrl(`/pulls/details?key=${encodeURIComponent(key)}`), signal),
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>

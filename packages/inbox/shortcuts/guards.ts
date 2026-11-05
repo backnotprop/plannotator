@@ -6,7 +6,7 @@
  * modifiers differ from the key's (`E` never matches ⌘E or ⌥E).
  */
 import { isTouchPhone } from '../phone';
-import { selectionToolbarShowing } from '../selectionToolbar';
+import { selectionToolbarShowing, STRANGERS_MARKUP } from '../selectionToolbar';
 import { shortcutPrefs } from './prefs';
 
 /**
@@ -57,18 +57,30 @@ export function hasCommandModifier(event: KeyboardEvent): boolean {
 }
 
 /**
+ * The image annotator's stage on its overlay. A Markdown body's raw HTML keeps `data-*` but never a class
+ * (`sanitizeHtml`), so a message cannot draw one to switch these keys off; a diagram's label can, so a PR description
+ * is ruled out by place (`STRANGERS_MARKUP`).
+ */
+export const ANNOTATOR_STAGE = '.pn-visible-viewport-overlay [data-pn-image-annotator-stage]';
+
+/**
  * A modal over the window keeps its keys: the Inbox's dialogs (update, sound,
  * agent note, search, compose: `<dialog open>`) and the image annotator's
  * stage (Mark up).
  */
 export function modalOpen(doc: Document | null = typeof document === 'undefined' ? null : document): boolean {
   if (!doc) return false;
-  return doc.querySelector('dialog[open], [data-pn-image-annotator-stage]') !== null;
+  for (const el of doc.querySelectorAll(`dialog[open], ${ANNOTATOR_STAGE}`)) {
+    if (!el.closest(STRANGERS_MARKUP)) return true;
+  }
+  return false;
 }
 
-/** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. */
+/** The key came from inside a dialog or a popover layer (a composer, the image annotator): it is theirs. A body's raw HTML is no layer. */
 export function inOverlay(target: Element | null): boolean {
-  return !!target?.closest('[role="dialog"], [role="alertdialog"], [data-popover-layer], [data-pn-image-annotator-stage]');
+  if (target?.closest(STRANGERS_MARKUP)) return false;
+  if (target?.closest(`[role="dialog"], [role="alertdialog"], ${ANNOTATOR_STAGE}`)) return true;
+  return !!target?.closest('[data-popover-layer]') && !target.closest('.html-block');
 }
 
 /**

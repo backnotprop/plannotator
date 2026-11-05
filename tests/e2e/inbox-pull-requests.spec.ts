@@ -169,7 +169,18 @@ function writeForge(dir: string) {
     '  echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'',
     '  exit 0',
     'fi',
+    // A PR's details: its context, who is asked to review, and the pictures and threads of its context's GraphQL read.
+    'if [ "$1" = pr ] && [ "$2" = view ]; then',
+    '  echo "gh details $3" >> "$calls"',
+    '  if [ -f "$dir/details-fail" ]; then echo "HTTP 502" >&2; exit 1; fi',
+    '  if [ -f "$dir/ctx-$3.json" ]; then cat "$dir/ctx-$3.json"; else echo \'{"body":"","state":"OPEN","isDraft":false,"labels":[],"comments":[],"reviews":[],"reviewDecision":"","mergeable":"","mergeStateStatus":"","statusCheckRollup":[],"closingIssuesReferences":[]}\'; fi',
+    '  exit 0',
+    'fi',
+    'if [ "$1" = api ] && [ "${2##*/}" = requested_reviewers ]; then',
+    '  n="${2%/requested_reviewers}"; n="${n##*/}"; if [ -f "$dir/req-$n.json" ]; then cat "$dir/req-$n.json"; else echo \'{"users":[],"teams":[]}\'; fi; exit 0',
+    'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    '  case "$*" in *"reviewThreads(first"*) for a in "$@"; do case "$a" in number=*) n="${a#number=}";; esac; done; if [ -f "$dir/ctxg-$n.json" ]; then cat "$dir/ctxg-$n.json"; else echo \'{"data":{"repository":{"pullRequest":null}}}\'; fi; exit 0;; esac',
     // Others (a read of its own): nothing open past the person's own lists.
     '  case "$*" in *"query InboxPullsOthers"*) echo "gh others" >> "$calls"; echo \'{"data":{"viewer":{"login":"dana"},"others0":{"issueCount":0,"nodes":[]}}}\'; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
@@ -184,11 +195,9 @@ function writeForge(dir: string) {
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
     'fi',
-    // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
+    // A PR read around its patch (`--jq`): the list's `headRefOid` for that number, and its description.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"',
-    '  if [ -f "$dir/gh-head-${4##*/}" ]; then cat "$dir/gh-head-${4##*/}"; exit 0; fi',
-    '  printf "%040d\\n" "${4##*/}"; exit 0',
+    '  echo "gh head $4" >> "$calls"; n="${4##*/}"; body=null; [ -f "$dir/gh-body-$n.json" ] && body=$(cat "$dir/gh-body-$n.json"); sha=$(printf "%040d" "$n"); [ -f "$dir/gh-head-$n" ] && sha=$(cat "$dir/gh-head-$n"); printf \'{"sha":"%s","body":%s}\\n\' "$sha" "$body"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
@@ -368,6 +377,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const forgeDir = join(root, 'forge');
   const forge = writeForge(forgeDir);
+  // Two layers' descriptions, read through the real path (`--jq`); no other PR here has one.
+  writeFileSync(join(forgeDir, 'gh-body-413.json'), JSON.stringify('Backs off between the attempts.'));
+  writeFileSync(join(forgeDir, 'gh-body-414.json'), JSON.stringify('The emails, in a draft until they are reviewed.'));
   // The authors' pictures: a loopback server the fake forge's avatarUrl names (allowed under the test sandbox only).
   const avatars = await startFakeAvatars();
   avatarOf = avatars.url;
@@ -631,6 +643,9 @@ test('off (the default): no row, a #pulls link says Code review is off, and no g
   await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
   await expect(page.locator('[data-reviews-off]')).toContainText('Code review is off');
   await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+  // Refused before anything runs, the details' route too.
+  const refused = await page.request.get(`${world.url}api/inbox/pulls/details?key=${encodeURIComponent(LAYER_412)}`);
+  expect([refused.status(), ((await refused.json()) as { code: string }).code]).toEqual([409, 'code_review_off']);
   await shot(page, '1-off-link');
   await page.setViewportSize({ width: 390, height: 844 });
   await expect(page.locator('[data-reviews-off-settings]')).toBeVisible();
@@ -760,6 +775,8 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
     await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
+    // Round, as in the details.
+    expect(await av.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('50%');
     const src = new URL((await av.locator('img').getAttribute('src'))!, world.url);
     expect([src.origin, src.pathname]).toEqual([new URL(world.url).origin, '/api/inbox/pulls/avatar']);
   }
@@ -1149,6 +1166,613 @@ async function stubbedReview(browser: Browser, width: number, patch: string, ans
   await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
   return { context, page };
 }
+
+/** The details over the code, from the bar or, on a phone, the title's row. */
+async function openDetails(review: Locator): Promise<Locator> {
+  await review.locator('[data-pull-details-button]').click();
+  const panel = review.locator('[data-pull-details]');
+  await expect(panel).toBeVisible();
+  return panel;
+}
+
+test('the details wait for the list: on a fresh load the forge is not asked about a PR the Inbox has not listed yet', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    let release = () => {};
+    const held = new Promise<void>((resolve) => { release = resolve; });
+    await page.route((url) => url.pathname === '/api/inbox/pulls', async (route) => {
+      await held;
+      await route.continue();
+    });
+    const asked: string[] = [];
+    page.on('request', (request) => {
+      if (new URL(request.url()).pathname === '/api/inbox/pulls/details') asked.push(request.url());
+    });
+    const answered = page.waitForResponse((response) => new URL(response.url()).pathname === '/api/inbox/pulls/details', { timeout: 30_000 });
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(STACK_ID)}&layer=${encodeURIComponent(LAYER_413)}&scope=layer`);
+    await page.waitForTimeout(1500);
+    expect(asked).toEqual([]);
+    release();
+    expect((await answered).status()).toBe(200);
+    await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await openDetails(page.locator('[data-pull-review]'));
+    await expect(page.locator('[data-pull-details-failed]')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+});
+
+test("the details as real gh answers them: a running check, a template for a body, a bot's hidden notes, a comment posing as the window's overlay", async ({ browser }) => {
+  // A PR of its own: the server keeps a details read a minute, so the next test's #880 is not this one's.
+  const pull = 'github.com/northwind/web-app#872';
+  const number = '872';
+  const write = (name: string, value: unknown) => writeFileSync(join(world.forge, name), JSON.stringify(value));
+  const template = '<!-- Please describe\n\nyour-change-here -->';
+  const posing = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
+  write(`gh-body-${number}.json`, template);
+  write(`ctx-${number}.json`, {
+    body: template, state: 'OPEN', isDraft: false, reviewDecision: '', mergeable: '', mergeStateStatus: '', closingIssuesReferences: [], labels: [],
+    comments: [
+      { id: 'c1', author: { login: 'kim' }, body: 'Plain words.\n\n<!-- bot-state\n\nhidden-bot-marker -->\n\nAfter.', createdAt: '2026-11-01T09:00:00Z', url: '' },
+      { id: 'c2', author: { login: 'kim' }, body: `\`\`\`mermaid\ngraph TD\n  ${posing}\n\`\`\``, createdAt: '2026-11-01T10:00:00Z', url: '' },
+    ],
+    reviews: [],
+    statusCheckRollup: [
+      { __typename: 'CheckRun', name: 'build', workflowName: 'CI', status: 'IN_PROGRESS', conclusion: '', startedAt: '2026-11-05T00:00:00Z', completedAt: '0001-01-01T00:00:00Z', detailsUrl: 'https://ci.example/1' },
+    ],
+  });
+  // A page of comments on lines that fails: no answer the first time, an empty list after.
+  write(`ctxg-${number}.json`, { errors: [{ message: 'Something went wrong' }] });
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, {}, 'layer', pull);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const button = review.locator('[data-pull-details-button]');
+    await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'pending', { timeout: 30_000 });
+    const panel = await openDetails(review);
+    await expect(panel.locator('[data-pull-details-check="pending"]')).toHaveCount(1);
+    await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(0);
+    await expect(panel).toContainText('No description.');
+    await expect(panel).toContainText('Plain words.');
+    await expect(panel).not.toContainText('your-change-here');
+    await expect(panel).not.toContainText('hidden-bot-marker');
+
+    // What a diagram in a comment draws can copy the marks of the window's overlays. It draws late, above the note
+    // below, so it is waited for first; Escape still closes the panel.
+    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+
+    await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
+    write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
+    await panel.locator('[data-pull-details-threads-missing] button').click();
+    await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
+    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached();
+    await page.mouse.move(700, 5);
+    await page.keyboard.press('Escape');
+    await expect(panel).toBeHidden();
+
+    // Opening it again reads again.
+    const again = page.waitForRequest((request) => new URL(request.url()).pathname === '/api/inbox/pulls/details');
+    await button.click();
+    await again;
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText('Plain words.');
+  } finally {
+    await context.close();
+  }
+});
+
+test('the details, from the forge: who stands where, the checks, every comment; pictures through the Inbox; a failure says so', async ({ browser }) => {
+  const number = TEAMMATE.split('#')[1]!;
+  const pic = (login: string) => world.avatars.url(login);
+  const longCheck = 'e2e (chromium, shard 3 of 8, retry the flaky ones) on the release branch after the migration step';
+  // Real jobs share most of their words and differ at the end (matrix, shard, OS).
+  const twinPrefix = 'Run changed specs against the staging build with the remote cache and the worker pool turned on';
+  const dir = world.forge;
+  const write = (name: string, value: unknown) => writeFileSync(join(dir, name), JSON.stringify(value));
+  write(`ctx-${number}.json`, {
+    body: '', state: 'OPEN', isDraft: false, reviewDecision: '', mergeable: '', mergeStateStatus: '', closingIssuesReferences: [],
+    labels: [{ name: 'billing', color: 'ededed' }],
+    comments: [
+      { id: 'c1', author: { login: 'kim' }, body: 'Could the key include the attempt?', createdAt: '2026-11-01T09:00:00Z', url: 'https://github.com/n/w/pull/1#c1' },
+      { id: 'c2', author: null, body: 'Words of a gone account.', createdAt: '2026-11-01T10:00:00Z', url: '' },
+      { id: 'c3', author: { login: 'codecov[bot]' }, body: '## Coverage\n\nCoverage is up.', createdAt: '2026-11-01T11:00:00Z', url: '' },
+    ],
+    reviews: [{ id: 'r1', author: { login: 'mei' }, state: 'CHANGES_REQUESTED', body: '', submittedAt: '2026-11-01T08:00:00Z' }],
+    statusCheckRollup: [
+      { name: longCheck, workflowName: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://ci.example/1' },
+      { name: `${twinPrefix} (linux, 1/5)`, workflowName: 'test', status: 'COMPLETED', conclusion: 'FAILURE', detailsUrl: 'https://ci.example/3' },
+      { name: `${twinPrefix} (windows, 1/5)`, workflowName: 'test', status: 'COMPLETED', conclusion: 'TIMED_OUT', detailsUrl: 'https://ci.example/4' },
+      { name: 'lint', workflowName: 'ci', status: 'COMPLETED', conclusion: 'SUCCESS', detailsUrl: 'https://ci.example/2' },
+    ],
+  });
+  write(`ctxg-${number}.json`, { data: { repository: { pullRequest: {
+    comments: { nodes: [{ author: { __typename: 'User', login: 'kim', avatarUrl: pic('kim') } }, { author: null }, { author: { __typename: 'Bot', login: 'codecov[bot]', avatarUrl: pic('codecov') } }] },
+    reviews: { nodes: [{ author: { __typename: 'User', login: 'mei', avatarUrl: pic('mei') } }] },
+    reviewThreads: { nodes: [{ id: 't', isResolved: false, isOutdated: false, line: 3, startLine: null, path: 'src/app.ts', diffSide: 'RIGHT', comments: { nodes: [{ id: 'rc', body: 'On a line.', author: { __typename: 'User', login: 'kim', avatarUrl: pic('kim') }, createdAt: '2026-11-01T09:30:00Z', url: '' }] } }] },
+  } } } });
+  write(`req-${number}.json`, { users: [{ login: 'ana', avatar_url: pic('ana'), type: 'User' }], teams: [{ slug: 'billing-platform' }] });
+
+  const avatarCode = async (page: Page, login: string) => {
+    const answer = await page.request.get(`${world.url}api/inbox/pulls/avatar?host=github.com&login=${encodeURIComponent(login)}`);
+    return answer.ok() ? 'ok' : ((await answer.json()) as { code: string }).code;
+  };
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const button = review.locator('[data-pull-details-button]');
+    // The bar's control says how the checks stand and how many people's comments, bots not counted.
+    await expect(button.locator('[data-pull-details-checks]')).toHaveAttribute('data-pull-details-checks', 'fail');
+    await expect(button.locator('[data-pull-details-comments]')).toHaveText('3');
+    const panel = await openDetails(review);
+    await expect(panel).toBeFocused();
+    await expect(panel).toHaveAttribute('data-layout', 'columns');
+    // Who stands where, with the worst first and a team among them.
+    const reviewers = panel.locator('[data-pull-details-reviewer]');
+    await expect(reviewers).toHaveCount(3);
+    expect(await reviewers.evaluateAll((rows) => rows.map((row) => row.getAttribute('data-pull-details-reviewer')))).toEqual(['mei', 'ana', 'northwind/billing-platform']);
+    // Pictures come through the Inbox's own route, for reviewers and commenters past the list's authors; a team has none.
+    const face = panel.locator('[data-pull-details-reviewer="mei"] img');
+    await expect(face).toHaveAttribute('data-shown', '');
+    expect(new URL((await face.getAttribute('src'))!, world.url).pathname).toBe('/api/inbox/pulls/avatar');
+    await expect(panel.locator('[data-pull-details-reviewer="northwind/billing-platform"] img')).toHaveCount(0);
+    await expect(panel.locator('[data-pull-details-reviewer="northwind/billing-platform"] .ib-prd-face')).toHaveAttribute('data-square', '');
+    // Round, as on the Reviews list.
+    expect(await face.evaluate((img) => getComputedStyle(img.closest('.ib-prd-pic')!).borderRadius)).toBe('50%');
+    // A check's name takes up to two lines, then gives way in its middle: two jobs that share a long start still read
+    // apart by their ends. The job's own name (no workflow before it), its state on its first line, the whole name in
+    // its tip; the passed ones behind a line.
+    const failed = panel.locator('[data-pull-details-check="fail"]', { has: page.locator(`.ib-prd-cfit[data-name="${longCheck}"]`) });
+    const name = failed.locator('.ib-prd-rname');
+    await expect(failed.locator('.ib-prd-rstate')).toHaveText('Failed');
+    const twin = (end: string) => panel.locator(`.ib-prd-cfit[data-name="${twinPrefix} (${end}, 1/5)"]`);
+    const looks = async (el: Locator) => el.evaluate((box) => ({ text: box.textContent!, lines: Math.round(box.getBoundingClientRect().height / parseFloat(getComputedStyle(box).lineHeight)) }));
+    const linux = await looks(twin('linux'));
+    const windows = await looks(twin('windows'));
+    expect(linux.text).not.toBe(windows.text);
+    expect(linux.text).toContain('…');
+    expect(linux.text.endsWith('(linux, 1/5)')).toBe(true);
+    expect(windows.text.endsWith('(windows, 1/5)')).toBe(true);
+    expect([linux.lines, windows.lines]).toEqual([2, 2]);
+    // A long name is two lines at most, its end in view; a failure's word on its first line.
+    const long = await looks(failed.locator('.ib-prd-cfit'));
+    expect(long.lines).toBeLessThanOrEqual(2);
+    expect(long.text.endsWith('after the migration step')).toBe(true);
+    expect(Math.abs((await failed.locator('.ib-prd-rstate').boundingBox())!.y - (await name.boundingBox())!.y)).toBeLessThan(4);
+    await name.hover();
+    await expect(page.locator('[data-pn-tooltip]')).toHaveText(`test / ${longCheck}`);
+    await page.mouse.move(0, 0);
+    await expect(failed.locator('a')).toHaveAttribute('href', 'https://ci.example/1');
+    await expect(failed.locator('a')).toHaveAttribute('target', '_blank');
+    await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(0);
+    await panel.getByRole('button', { name: '1 passed' }).click();
+    await expect(panel.locator('[data-pull-details-check="pass"]')).toHaveCount(1);
+    // Comments in time order: a line comment goes to its file; a deleted account is one; bots wait behind a line.
+    await expect(panel.locator('[data-pull-details-comment]')).toHaveCount(3);
+    await expect(panel.locator('[data-pull-details-comment="c2"] b')).toHaveText('A deleted account');
+    await expect(panel.locator('[data-pull-details-comment="c2"] .ib-prd-face')).toHaveAttribute('data-gone', '');
+    await expect(panel).not.toContainText('Coverage is up.');
+    await panel.locator('[data-pull-details-bots]').click();
+    await expect(panel).toContainText('Coverage is up.');
+    // A bot's report opening with a heading stays a comment's size.
+    expect(await panel.locator('.ib-prd-cbody h2', { hasText: 'Coverage' }).evaluate((h) => parseFloat(getComputedStyle(h).fontSize))).toBeLessThanOrEqual(14);
+    // The tab behind the panel does not peek out.
+    await expect(review.locator('[data-guide-section-tab]').first()).toBeHidden();
+    // Escape closes it, back on its button; the tab returns.
+    await page.keyboard.press('Escape');
+    await expect(panel).toHaveCount(0);
+    await expect(button).toBeFocused();
+    await expect(review.locator('[data-guide-section-tab]').first()).toBeVisible();
+    // One thing over the code at a time.
+    await page.setViewportSize({ width: 1280, height: 900 });
+    await button.click();
+    await review.locator('.ib-vcomments').click();
+    await expect(panel).toHaveCount(0);
+    await page.keyboard.press('Escape');
+    await expect(review.locator('.ib-gpanel')).toBeHidden();
+    // A comment's file: the panel closes, on the file.
+    await page.setViewportSize({ width: 1440, height: 900 });
+    await button.click();
+    await panel.locator('[data-pull-details-comment="rc"] .ib-prd-cfile').click();
+    await expect(panel).toHaveCount(0);
+    await expect(review.locator('[data-guide-file-shell="src/app.ts"]')).toBeInViewport();
+    // The people it named keep their pictures past a new list, whoever is not in it stays refused.
+    expect(await avatarCode(page, 'mei')).toBe('ok');
+    await page.request.get(`${world.url}api/inbox/pulls?refresh=1`);
+    expect(await avatarCode(page, 'mei')).toBe('ok');
+    expect(await avatarCode(page, 'nobody-it-named')).toBe('avatar_unknown');
+  } finally {
+    await context.close();
+  }
+
+  // On a phone: one column, people and checks a line each, a long name on two lines at most, the title's row is the way in.
+  const phone = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
+  try {
+    const review = phone.page.locator('[data-pull-review]');
+    const panel = await openDetails(review);
+    await expect(panel).toHaveAttribute('data-layout', 'column');
+    const box = (await panel.boundingBox())!;
+    expect([box.x, box.width]).toEqual([0, 390]);
+    await panel.locator('.ib-prd-sum').last().click();
+    const name = panel.locator(`.ib-prd-cfit[data-name="${longCheck}"]`);
+    await expect(name).toBeVisible();
+    expect(await name.evaluate((el) => Math.round(el.getBoundingClientRect().height / parseFloat(getComputedStyle(el).lineHeight)))).toBeLessThanOrEqual(2);
+    await expect(phone.page.evaluate(() => document.documentElement.scrollWidth)).resolves.toBeLessThanOrEqual(390);
+    await panel.locator('[data-pull-details-close]').click();
+    await expect(panel).toHaveCount(0);
+    await expect(review.locator('[data-pull-details-button]')).toBeFocused();
+  } finally {
+    await phone.context.close();
+  }
+
+  // The forge not answering: the words still read, it says so, and Try again reads again.
+  writeFileSync(join(dir, 'details-fail'), '');
+  const other = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: 'Still here.' }, 'layer', STACK_ID);
+  try {
+    const review = other.page.locator('[data-pull-review]');
+    const panel = await openDetails(review);
+    await expect(panel).toContainText('Still here.');
+    await expect(panel.locator('[data-pull-details-failed]')).toBeVisible();
+    rmSync(join(dir, 'details-fail'));
+    await panel.getByRole('button', { name: 'Try again' }).click();
+    await expect(panel.locator('[data-pull-details-failed]')).toHaveCount(0);
+    await expect(panel.locator('.ib-prd-side')).toHaveCount(0);
+  } finally {
+    await other.context.close();
+    rmSync(join(dir, 'details-fail'), { force: true });
+    for (const name of [`ctx-${number}.json`, `ctxg-${number}.json`, `req-${number}.json`]) rmSync(join(dir, name), { force: true });
+  }
+});
+
+test("the PR's description in its details: a short one whole, a long one folded, an empty one says so", async ({ browser }) => {
+  const comment = '<!-- A template comment nobody should read. -->';
+  const longBody = [
+    comment,
+    '## Why',
+    '',
+    'Charges that fail today are retried by hand.',
+    '',
+    '![Retry timeline](https://user-images.githubusercontent.com/1/timeline.png)',
+    '',
+    '<img src="https://github.com/user-attachments/assets/abc" alt="Dashboard after" width="600">',
+    '',
+    '| Area | Risk |',
+    '| --- | --- |',
+    '| `schedule.ts` | Low |',
+    '',
+    '<script>window.scripted = true</script>',
+    '',
+    '[The ticket](https://example.invalid/ticket)',
+    '',
+    ...Array.from({ length: 480 }, (_, i) => (i % 3 === 2 ? '' : `Line ${i} of the rollout notes.`)),
+  ].join('\n');
+  const first = (review: Locator) => review.locator('[data-guide-file-shell]').first();
+  for (const width of [1440, 390]) {
+    // Short: whole, no way to open it, the title not stacked a second time.
+    const short = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: `${comment}\n\nMoves the settings to logical properties.` });
+    try {
+      const review = short.page.locator('[data-pull-review]');
+      const section = review.locator('[data-pull-description]');
+      // Nothing above the code until it is asked for.
+      await expect(section).toHaveCount(0);
+      await openDetails(review);
+      await expect(section).toHaveAttribute('data-pull-description', 'whole');
+      await expect(section).toContainText('Moves the settings to logical properties.');
+      await expect(section).not.toContainText('A template comment');
+      await expect(section.getByRole('button')).toHaveCount(0);
+      await expect(review.locator('[data-pull-review-title]')).toHaveCount(1);
+      await expect(section.getByText('RTL layout for the settings pages')).toHaveCount(0);
+    } finally {
+      await short.context.close();
+    }
+
+    // Long: folded, and the first file stays on screen, opened too. Nothing it holds loads or runs.
+    const asked: string[] = [];
+    const long = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: longBody });
+    try {
+      const { page } = long;
+      page.on('request', (request) => asked.push(request.url()));
+      await page.reload();
+      const review = page.locator('[data-pull-review]');
+      const section = review.locator('[data-pull-description]');
+      await openDetails(review);
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      const more = section.getByRole('button', { name: 'Show more' });
+      await expect(more).toHaveAttribute('aria-expanded', 'false');
+      expect((await section.boundingBox())!.height).toBeLessThanOrEqual(290);
+      // What is clipped takes no Tab stops.
+      expect(await section.locator('.ib-prr-desc-body').evaluate((body) => (body as HTMLElement).inert)).toBe(true);
+
+      await more.click();
+      await expect(section).toHaveAttribute('data-pull-description', 'open');
+      await expect(section.getByRole('button', { name: 'Show less' })).toHaveAttribute('aria-expanded', 'true');
+      // It reads in the panel, whose own scroll takes the rest.
+      const body = section.locator('.ib-prr-desc-body');
+      await expect.poll(() => review.locator(width === 390 ? '.ib-prd' : '.ib-prd-main').evaluate((el) => el.scrollHeight > el.clientHeight * 2)).toBe(true);
+      await expect(section.getByRole('link', { name: 'The ticket' })).toBeVisible();
+      await expect(section.locator('table')).toContainText('schedule.ts');
+      await expect(section).not.toContainText('A template comment');
+      // A picture is its words: nothing asked of its host, no script run.
+      await expect(section.getByText('Retry timeline')).toBeVisible();
+      await expect(section.getByText('Dashboard after')).toBeVisible();
+      await expect(section.locator('img')).toHaveCount(0);
+      expect(asked.filter((url) => /githubusercontent|github\.com\/user-attachments/.test(url))).toEqual([]);
+      expect(await page.evaluate(() => (window as { scripted?: boolean }).scripted)).toBeUndefined();
+
+      await section.getByRole('button', { name: 'Show less' }).click();
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      // The words folded open on a click as well.
+      await body.click({ force: true });
+      await expect(section).toHaveAttribute('data-pull-description', 'open');
+    } finally {
+      await long.context.close();
+    }
+
+    // Empty: it says so, whether the forge said none or only spaces.
+    for (const description of [null, '']) {
+      const empty = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description });
+      try {
+        const review = empty.page.locator('[data-pull-review]');
+        await expect(first(review)).toBeVisible();
+        const panel = await openDetails(review);
+        await expect(panel).toContainText('No description.');
+        await expect(review.locator('[data-pull-description]')).toHaveCount(0);
+        await expect(review.getByRole('button', { name: 'Show more' })).toHaveCount(0);
+        // Whose PR it is: its author leads the details; beside the title too, past a phone; nothing above the diff.
+        await expect(panel.locator('.ib-prd-who b')).toHaveText('tomas');
+        if (width !== 390) await expect(review.locator('.ib-vhead [data-pull-review-readonly]')).toHaveText('by tomas');
+        await expect(review.locator('.ib-gbody [data-pull-review-readonly]')).toHaveCount(0);
+      } finally {
+        await empty.context.close();
+      }
+    }
+  }
+});
+
+test("a stranger's description: paths open on the forge, only the web's links are links, it can't reach the window's keys or width", async ({ browser }) => {
+  const body = [
+    '[guide](docs/guide.md) [api](/api/inbox/settings) [launch](vscode://file/etc/passwd) [ssh](ssh://a.example) [anchor](#why) [web](https://a.example/x)',
+    '',
+    '<div><a href="docs/raw" target="_top">raw</a> <a href="https://a.example/y" target="_top">top</a> <a href="#why">raw anchor</a></div>',
+    '',
+    '<div data-pn-image-annotator-stage>stage</div>',
+    '',
+    '![pixel](data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAEBgIApD5fRAAAAABJRU5ErkJggg==)',
+  ].join('\n');
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: body });
+  try {
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
+    await openDetails(review);
+    const route = page.url();
+    const link = (name: string) => section.getByRole('link', { name, exact: true });
+    // Folded, what is clipped is inert: read it open, or whole when it fits.
+    await expect(section).toContainText('guide');
+    if (await section.getByRole('button', { name: 'Show more' }).count()) await section.getByRole('button', { name: 'Show more' }).click();
+    // A path is the file on the forge, in a new tab; this window stays, Markdown and raw HTML alike, whatever its target says.
+    for (const [name, path] of [['guide', '/docs/guide.md'], ['api', '/api/inbox/settings'], ['raw', '/docs/raw']] as const) {
+      await expect(link(name)).toHaveAttribute('href', new RegExp(`^https://github\\.com/[^/]+/[^/]+/blob/[^/]+${path}$`));
+      const opened = context.waitForEvent('page');
+      await link(name).click();
+      await (await opened).close();
+      expect(page.url()).toBe(route);
+    }
+    await expect(link('raw')).not.toHaveAttribute('target', '_top');
+    await expect(link('top')).toHaveAttribute('target', '_blank');
+    // A scheme that launches an app is its words: no pointer, and a key or script click goes nowhere.
+    for (const name of ['launch', 'ssh']) {
+      const words = section.locator('a', { hasText: new RegExp(`^${name}$`) });
+      expect(await words.evaluate((el) => getComputedStyle(el).pointerEvents)).toBe('none');
+      expect(await words.evaluate((el) => !el.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true })))).toBe(true);
+    }
+    // An anchor never moves the window's route, which is its hash.
+    for (const name of ['anchor', 'raw anchor']) {
+      await link(name).click();
+      expect(page.url()).toBe(route);
+    }
+    await expect(section.locator('img[alt="pixel"]')).toHaveCount(1);
+    // Its `data-pn-image-annotator-stage` is no modal: Escape still closes the details, and then a sheet.
+    await page.keyboard.press('Escape');
+    await expect(review.locator('[data-pull-details]')).toHaveCount(0);
+    await page.locator('.ib-vhead .ib-vcomments').click();
+    await expect(page.locator('.ib-panel-open')).toHaveCount(1);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('.ib-panel-open')).toHaveCount(0);
+  } finally {
+    await context.close();
+  }
+  // A short one with a wide table, drawn whole: the table scrolls in its own box, never the review.
+  const wide = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: '<table width="5000"><tr><td>wide</td></tr></table>' });
+  try {
+    await openDetails(wide.page.locator('[data-pull-review]'));
+    await expect(wide.page.locator('[data-pull-review] [data-pull-description]')).toHaveAttribute('data-pull-description', 'whole');
+    await expect(wide.page.locator('[data-pull-description] table')).toBeAttached();
+    expect(await wide.page.locator('[data-pull-review] .ib-prd-main').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  } finally {
+    await wide.context.close();
+  }
+  // A long one is parsed only to its start while folded, and all of it on Show more.
+  const tail = 'THE-LAST-WORDS';
+  const long = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: `${Array.from({ length: 700 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\n${tail}` });
+  try {
+    await openDetails(long.page.locator('[data-pull-review]'));
+    const section = long.page.locator('[data-pull-review] [data-pull-description]');
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+    await expect(section).not.toContainText(tail);
+    await section.getByRole('button', { name: 'Show more' }).click();
+    await expect(section).toContainText(tail);
+  } finally {
+    await long.context.close();
+  }
+  // A <details> opened in a short one stays open under the click, though it grew past the fold.
+  const details = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: `<details><summary>More</summary>\n\n${Array.from({ length: 40 }, (_, i) => `Line ${i}.`).join('\n\n')}\n\n</details>` });
+  try {
+    await openDetails(details.page.locator('[data-pull-review]'));
+    const section = details.page.locator('[data-pull-review] [data-pull-description]');
+    await expect(section).toHaveAttribute('data-pull-description', 'whole');
+    await section.locator('summary').click();
+    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    await expect(section.locator('details')).toHaveAttribute('open', '');
+    await expect(section.getByText('Line 39.', { exact: true })).toBeAttached();
+    // Show less is the last word: a change of size does not open it again.
+    await section.getByRole('button', { name: 'Show less' }).click();
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+    await details.page.setViewportSize({ width: 1280, height: 900 });
+    await details.page.waitForTimeout(250);
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+  } finally {
+    await details.context.close();
+  }
+});
+
+test("a description's web links never replace the window, however they are spelled; an empty address goes nowhere", async ({ browser }) => {
+  const body = [
+    '[one](//evil.example/a.md) [two](//evil.example/a.html) [three](HTTPS://evil.example/a.md) [four](Http://evil.example/a.html)',
+    '',
+    '<div><a href="" target="_top">empty</a> <a href=" " target="_top">space</a> <a href="mailto:a@example.com">rawmail</a></div>',
+  ].join('\n');
+  const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: body });
+  try {
+    await context.route(/evil\.example/, (route) => route.fulfill({ contentType: 'text/html', body: 'elsewhere' }));
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
+    await openDetails(review);
+    const address = page.url();
+    for (const name of ['one', 'two', 'three', 'four']) {
+      const opened = context.waitForEvent('page');
+      await section.getByRole('link', { name, exact: true }).click();
+      const tab = await opened;
+      await tab.waitForURL(/evil\.example\/a\./);
+      await tab.close();
+      expect(page.url()).toBe(address);
+      await expect(review).toHaveCount(1);
+    }
+    // A raw mailto has no target either: it stays the mail app's, with no empty tab.
+    const opens = await section.locator('a', { hasText: /^rawmail$/ }).evaluate((el) => {
+      let count = 0;
+      const open = window.open;
+      window.open = () => (count++, null);
+      document.addEventListener('click', (event) => event.preventDefault(), { once: true });
+      (el as HTMLElement).click();
+      window.open = open;
+      return count;
+    });
+    expect(opens).toBe(0);
+    for (const name of ['empty', 'space']) {
+      await section.locator('a', { hasText: new RegExp(`^${name}$`) }).focus();
+      await page.keyboard.press('Enter');
+      await page.waitForTimeout(150);
+      expect(page.url()).toBe(address);
+      await expect(review).toHaveCount(1);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the details", async ({ browser }) => {
+  const label = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
+  for (const description of ['<div data-pn-annotation-toolbar-row>x</div>', '<div data-quick-label-picker>x</div>', `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``]) {
+    const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
+    try {
+      const review = page.locator('[data-pull-review]');
+      await openDetails(review);
+      const section = page.locator('[data-pull-review] [data-pull-description]');
+      const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
+      await expect(posing.first()).toBeAttached({ timeout: 15_000 });
+      await page.keyboard.press('Escape');
+      await expect(review.locator('[data-pull-details]')).toHaveCount(0);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a description with a list never scrolls sideways', async ({ browser }) => {
+  for (const width of [1440, 390]) {
+    const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: '- one\n- two\n\n1. three\n2. four' });
+    try {
+      await openDetails(page.locator('[data-pull-review]'));
+      const box = page.locator('[data-pull-review] .ib-prr-desc-body');
+      await expect(box).toContainText('four');
+      expect(await box.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('a <details> cut by the fold keeps its lines inside; Show more draws the whole body', async ({ browser }) => {
+  const lines = Array.from({ length: 300 }, (_, i) => `log line ${i} of the failing worker`);
+  for (const inside of [lines.join('\n\n'), `\`\`\`\n${lines.join('\n')}\n\`\`\``]) {
+    const description = `<details><summary>Logs</summary>\n\n${inside}\n\n</details>\n\nAFTER-THE-LOGS`;
+    const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
+    try {
+      await openDetails(page.locator('[data-pull-review]'));
+      const section = page.locator('[data-pull-review] [data-pull-description]');
+      await expect(section).toHaveAttribute('data-pull-description', 'folded');
+      await expect(section.locator('details')).toHaveCount(1);
+      await expect(section.locator('details')).not.toHaveAttribute('open', '');
+      // No line of the log anywhere outside its box.
+      const outside = await section.locator('.ib-prr-desc-body').evaluate((el) =>
+        [...el.querySelectorAll('*')].filter((node) => !node.children.length && !node.closest('details') && /log line \d/.test(node.textContent ?? '')).length,
+      );
+      expect(outside).toBe(0);
+      expect(await section.locator('.ib-prr-desc-body').evaluate((el) => /<\/?details/.test(el.textContent ?? ''))).toBe(false);
+      await section.getByRole('button', { name: 'Show more' }).click();
+      await expect(section).toContainText('AFTER-THE-LOGS');
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('each layer shows its own description, through the forge read: Next layer changes it, Whole stack keeps it, none is none', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    const open = async (key: string, scope: string) => {
+      await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(STACK_ID)}&layer=${encodeURIComponent(key)}&scope=${scope}`);
+      await page.reload();
+      await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    };
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
+    await open(LAYER_413, 'layer');
+    await openDetails(review);
+    await expect(section).toHaveText('Backs off between the attempts.');
+    await page.keyboard.press('Escape');
+    // Another layer is another PR: its details do not stay open over it.
+    await review.locator(`[data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(review).toHaveAttribute('data-pull-review', STACK_ID);
+    await expect(review.locator('[data-pull-details]')).toHaveCount(0);
+    await openDetails(review);
+    await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
+    await page.keyboard.press('Escape');
+    await review.locator('[data-pull-layer-all]').click();
+    await expect(review).toHaveAttribute('data-pull-scope', 'stack');
+    await openDetails(review);
+    await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
+    await open(LAYER_412, 'layer');
+    await openDetails(review);
+    await expect(section).toHaveCount(0);
+    // A layer opens folded, whatever the last one did.
+    await page.route('**/api/inbox/pulls/diff*', async (route) => {
+      const real = await route.fetch().catch(() => null);
+      if (real) await route.fulfill({ status: 200, json: { ...(await real.json()), description: Array.from({ length: 60 }, (_, i) => `Line ${i}.`).join('\n\n') } });
+    });
+    await open(LAYER_413, 'layer');
+    await openDetails(review);
+    await section.getByRole('button', { name: 'Show more' }).click();
+    await expect(section).toHaveAttribute('data-pull-description', 'open');
+    await page.keyboard.press('Escape');
+    await review.locator(`[data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(review).toHaveAttribute('data-pull-review', STACK_ID);
+    await openDetails(review);
+    await expect(section).toHaveAttribute('data-pull-description', 'folded');
+  } finally {
+    await context.close();
+  }
+});
 
 test("the rail: a stack's layers stay in view over a tree of many files; on a phone the layer's place stays on one line", async ({ browser }) => {
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
@@ -1740,9 +2364,10 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     const box = shell.locator('[data-guide-code-view-mounted="true"]');
     await expect(box).toBeVisible({ timeout: 30_000 });
 
-    // A PR that takes no verdict here: plain words (no band) on the controls' row, left of them, while the rail is out.
+    // Whose PR it is: plain words (no band) beside its title, while the bar has room; never "tomas's pull request".
     const note = review.locator('[data-pull-review-readonly]');
     await expect(note).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+    await expect(note).toHaveText('by tomas');
     // The bar has it at every width but a phone's, beside the title.
     for (const width of [800, 1040, 1280, 1440]) {
       await page.setViewportSize({ width, height: 900 });
@@ -1752,7 +2377,7 @@ test('the flat PR view: quiet words on the controls\' row, the comments column\'
     // A long name is cut on that row, never under the controls.
     const words = await note.evaluate((node) => {
       const before = node.textContent;
-      node.textContent = `${'a-very-long-name-'.repeat(20)}'s pull request`;
+      node.textContent = `by ${'a-very-long-name-'.repeat(20)}`;
       return before;
     });
     for (const width of [800, 1280, 1440]) {

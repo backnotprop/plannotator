@@ -63,7 +63,7 @@ test.beforeAll(async () => {
       `dir='${forgeDir}'`,
       `if [ "$1" = auth ]; then echo '{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}'; exit 0; fi`,
       'if [ "$2" = graphql ]; then cat "$dir/pulls.json"; exit 0; fi',
-      `if [ "$5" = --jq ]; then printf "%040d\\n" "\${4##*/}"; exit 0; fi`,
+      `if [ "$5" = --jq ]; then printf '{"sha":"%040d","body":null}\\n' "\${4##*/}"; exit 0; fi`,
       'if [ "$2" = --hostname ]; then cat "$dir/patch"; exit 0; fi',
       'exit 1',
       '',
