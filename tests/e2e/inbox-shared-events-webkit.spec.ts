@@ -143,6 +143,13 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
   await setFront(front, true, true);
   const sender = keepSending(w.agents[0]!, w.project, 40);
   await new Promise((done) => setTimeout(done, 600));
+  // A heartbeat on the old leader's main thread: its longest silence is when the script really ran. The page takes
+  // seconds to load on a busy runner, so the time since the click says little about the stall.
+  await leader!.evaluate(() => {
+    const beats: number[] = [];
+    (window as unknown as { __beats: number[] }).__beats = beats;
+    setInterval(() => beats.push(Date.now()), 50);
+  });
   const at = Date.now();
   // The leader opens the page: the script starts, the leader stops answering.
   void leader!.evaluate(([thread, file]) => {
@@ -159,13 +166,15 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
       return null;
     },
     (v) => v !== null,
-    10_000,
+    // Up to about four seconds for the page to load, five for the check, and room.
+    15_000,
   );
   while (Date.now() - at < 9000) {
     streamSamples.push(await streams(w));
     await new Promise((done) => setTimeout(done, 100));
   }
   await sender.stop();
+  const senderStoppedAt = Date.now();
   // The script ended: the old leader learns its lock was taken and follows.
   const rejoin = await waitFor(
     async () => (await logOf(leader!)).filter((e) => e.at >= at).map((e) => e.type),
@@ -176,18 +185,35 @@ test('WebKit: a long script in an attached page stalls the leader (no freeze); t
   expect((await leaders(w.pages)).includes(leader!)).toBe(false);
   await sendSome(w, 3);
   const checked = await expectEveryRecordOnce(w, w.pages, { exact: false });
-  const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000).map((e) => e.at);
-  const frontLongestGapMs = Math.max(frontRecords[0]! - at, ...frontRecords.slice(1).map((t, i) => t - frontRecords[i]!));
+  // While the agent was writing: the quiet between its last line and the three above is not a gap.
+  const frontRecords = (await logOf(front)).filter((e) => e.type === 'record' && e.at >= at - 1000 && e.at <= senderStoppedAt).map((e) => e.at);
+  const frontLongestGapMs = Math.max(frontRecords[0]! - at, ...frontRecords.slice(1).map((t, i) => t - frontRecords[i]!), senderStoppedAt - frontRecords.at(-1)!);
+  const stall = await waitFor(
+    () =>
+      leader!.evaluate(() => {
+        const beats = (window as unknown as { __beats: number[] }).__beats;
+        const longest = { startedAt: beats[0]!, ms: 0 };
+        for (let i = 1; i < beats.length; i++) if (beats[i]! - beats[i - 1]! > longest.ms) Object.assign(longest, { startedAt: beats[i - 1]!, ms: beats[i]! - beats[i - 1]! });
+        return longest;
+      }),
+    (s) => s.ms >= 8000,
+  );
   // The old leader learned it lost the lock only when the script let go (about eight seconds in): it was stopped all along.
   const stolenAtMs = (await logOf(leader!)).find((e) => e.type === 'stolen' && e.at >= at)!.at - at;
   expect(stolenAtMs).toBeGreaterThan(7000);
-  // The check every 3 s, no answer in 2 s, and room for a busy CI runner (7.1 s and 7.3 s seen): still while the
-  // eight-second script holds the old leader, which is what makes this a takeover.
-  expect(takeover.value!).toBeLessThan(8000);
-  expect(frontLongestGapMs).toBeLessThan(8500);
+  // Counted from the script's start, the last beat before it: the check every 3 s and no answer in 2 s make five seconds.
+  // The bound is the script's eight: inside it the old leader cannot have let go, so this is a takeover, not the script ending.
+  const takeoverIntoStallMs = at + takeover.value! - stall.value.startedAt;
+  expect(takeoverIntoStallMs).toBeGreaterThan(0);
+  expect(takeoverIntoStallMs).toBeLessThan(8000);
+  // The tab in front never waited out the script (a real freeze is the whole eight seconds).
+  expect(frontLongestGapMs).toBeLessThan(stall.value.ms);
   expect(Math.max(...streamSamples)).toBeLessThanOrEqual(2);
   results.stallLeader = {
     takeoverMs: takeover.value,
+    scriptStartedAtMs: stall.value.startedAt - at,
+    stallMs: stall.value.ms,
+    takeoverIntoStallMs,
     frontLongestGapMs,
     rejoinAfterScriptMs: rejoin.ms,
     oldLeaderLearnedAtMs: stolenAtMs,
