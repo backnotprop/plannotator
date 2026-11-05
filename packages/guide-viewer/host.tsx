@@ -112,6 +112,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
   /**
+   * A picture slot under the title when the guide's overview has no diagram
+   * (the Inbox's code review: "Show me" asks the agent for one). Answering
+   * null (or absent) leaves the guide exactly as it is.
+   */
+  renderOverviewFigure?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
    * edge (the Inbox: its Split | Unified switch on the first card). Called with
    * each card's index (the "Everything else" card's is the number of
