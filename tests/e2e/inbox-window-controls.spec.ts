@@ -195,6 +195,15 @@ test('health declares the hook', async () => {
 });
 
 test('unset: nothing moves and nothing drags', async () => {
+  await page.goto(`${world.url}#tour=2`);
+  await page.locator('[data-tour-bar]').waitFor();
+  expect((await boxOf(page, '[data-tour-bar]')).height).toBe(45);
+  await page.locator('[data-tour-exit="exit"]').click();
+  await page.locator('[data-tour-bar]').waitFor({ state: 'detached' });
+  await openRoute(page, world, '#drafts');
+  expect((await boxOf(page, '.ib-dh')).top).toBe(36);
+  await openRoute(page, world, '#whats-new=');
+  expect((await boxOf(page, '.ib-wn-bar')).height).toBe(52);
   await openRoute(page, world, '');
   expect(await top(page, '.ib-brand')).toBe(14);
   expect((await boxOf(page, '.ib-lhead')).height).toBe(60);
@@ -374,10 +383,16 @@ test('the fixed row: the toggle, the title and the toolbar sit on the line the p
     // The sidebar's first row starts where the buttons' room ends.
     if (sidebar === 'open') expect((await boxOf(page, '.ib-brand')).top).toBe(H);
   }
-  // A page whose head is its own comes up to the same line.
-  await openRoute(page, world, '#board', 'collapsed');
-  await setControls(page);
-  expect((await boxOf(page, '.ib-bhead')).centre).toBe(parseFloat(await centerY(page)));
+  // A page whose head is its own comes up to the same line, and its toggle clears the buttons.
+  for (const [hash, head] of [['#board', '.ib-bhead'], ['#whats-new=', '.ib-wn-bar'], ['#drafts', '.ib-dh']] as const) {
+    await openRoute(page, world, hash, 'collapsed');
+    await setControls(page);
+    const line = parseFloat(await centerY(page));
+    expect((await boxOf(page, head)).centre, hash).toBe(line);
+    // A head's 1 px rule can take half a pixel off its content, as it does the thread toolbar's buttons.
+    expect(Math.abs((await boxOf(page, `${head} .ib-sb-trigger`)).centre - line), hash).toBeLessThanOrEqual(0.5);
+    expect(await page.locator(`${head} .ib-sb-trigger`).evaluate((el) => el.getBoundingClientRect().left), hash).toBeGreaterThanOrEqual(W);
+  }
 });
 
 test('the tour bar and Decision mode, with the variables set: clear of the buttons and every control clicks', async () => {
@@ -385,6 +400,10 @@ test('the tour bar and Decision mode, with the variables set: clear of the butto
   await page.locator('[data-tour-bar]').waitFor();
   await setControls(page);
   expect(await contentInset(page, '[data-tour-bar]')).toBeGreaterThanOrEqual(W);
+  // Its content on the line, and the sidebar below the bar, wherever the bar ends.
+  const line = parseFloat(await centerY(page));
+  expect((await boxOf(page, '[data-tour-bar] .ib-tour-tag')).centre).toBe(line);
+  expect((await boxOf(page, '.ib-sb-panel')).top).toBe((await boxOf(page, '[data-tour-bar]')).bottom);
   expect((await controlsThatDrag(page)).dragging).toEqual([]);
   await page.locator('[data-tour-exit="exit"]').click();
   await page.locator('[data-tour-bar]').waitFor({ state: 'detached' });

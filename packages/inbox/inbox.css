@@ -8168,8 +8168,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* Dragging the window: only in a host that set the variable (a style query, so it also sees a sheet the host injects
    after load). The band over the whole window and blank header space drag; every control and float does not. */
 @container style(--pn-window-controls-height) {
-  /* The list head comes up to the thread toolbar's height: one line, gutter + 23, whatever the sidebar does. */
-  .ib-lhead, .ib-bhead { height: 46px; }
+  /* The heads come up to the thread toolbar's height: one line, gutter + 23, whatever the sidebar does. */
+  .ib-lhead, .ib-bhead, .ib-wn-bar, .ib-dh { height: 46px; }
+  .ib-dpage { padding-top: 0; }
+  /* The tour's bar is at the window's top, with no gutter: twice the line, and its 1 px rule, put its content on it. */
+  .pn-inbox[data-tour] { --ib-tour-bar-h: calc(2 * var(--pn-window-controls-center-y, 31px) + 1px); }
   .pn-inbox::before { content: ''; position: fixed; top: 0; left: 0; right: 0; z-index: -1; height: var(--pn-window-controls-height); -webkit-app-region: drag; }
   /* Over the page, a layer's band drags and its body does not, whatever header lies under it. */
   .ib-wlayer { -webkit-app-region: drag; }
