@@ -28,6 +28,7 @@ import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, 
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { inboxReviewStartOf } from "@plannotator/core/inbox-types";
 import type { InboxMessage, InboxPullHost, InboxReviewLanding, InboxReviewLinkAnswer, InboxReviewRow, InboxReviewsAnswer, InboxReviewThread } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 import { inboxBlobPath } from "@plannotator/shared/inbox/attachments";
@@ -419,6 +420,13 @@ describe("the read that follows the store (?cached=1)", () => {
 });
 
 describe("a pull request link", () => {
+  test("a started link's row survives a restart: the store reads back what it wrote", () => {
+    const dir = mkdtempSync(join(tmpdir(), "inbox-links-"));
+    const start = inboxReviewStartOf({ kind: "link", url: "https://github.com/northwind/payments/pull/231", title: "Idempotent refunds", mine: false, ask: "guide" }, { host: "claude-code", project_id: "prj_1", at: "2026-11-05T10:00:00.000Z" })!;
+    createInboxPullLinks(dir).start("msg_1", start);
+    expect(createInboxPullLinks(dir).started().get("msg_1")?.pull?.number).toBe(231);
+  });
+
   const LINK = "https://github.com/northwind/payments/pull/231";
   const read = async (w: Awaited<ReturnType<typeof world>>, ref: string) => {
     const res = await fetch(`${w.base}/api/inbox/reviews/link?ref=${encodeURIComponent(ref)}`);

@@ -20,12 +20,8 @@ function Choices<T extends string>({ label, value, options, onChange, name }: { 
   );
 }
 
-const Row = ({ label, children }: { label: string; children: ReactNode }) => (
-  <div className="ib-cp-to ib-cp-rvrow">
-    <span className="ib-cp-tol">{label}</span>
-    {children}
-  </div>
-);
+/** No visible label: each control says what it asks. */
+const Row = ({ children }: { children: ReactNode }) => <div className="ib-cp-to ib-cp-rvrow">{children}</div>;
 
 function SummaryLine({ summary }: { summary: ReviewSummary }) {
   if (!summary) return null;
@@ -211,22 +207,23 @@ export function ReviewRows(props: {
   const button = useRef<HTMLButtonElement>(null);
   return (
     <>
-      <Row label="Review">
+      <Row>
         <Choices label="Review" name="kind" value={kind} onChange={props.onKind} options={[['local', 'Local'], ['pr', 'Pull request'], ['walkthrough', 'Walkthrough']]} />
       </Row>
       {kind === 'local' ? (
-        <Row label="Changes">
+        <Row>
           <Choices label="Changes" name="changes" value={props.changes} onChange={props.onChanges} options={[['uncommitted', 'Uncommitted'], ['last', 'Last commit'], ['branch', 'Whole branch']]} />
           <SummaryLine summary={props.summary} />
         </Row>
       ) : kind === 'walkthrough' ? null : (
         <>
-          <Row label="Pull request">
-            <button ref={button} type="button" className="ib-cp-tobtn ib-cp-rvpick" aria-haspopup="listbox" aria-expanded={menu} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
+          <Row>
+            <button ref={button} type="button" className="ib-cp-tobtn ib-cp-rvpick" aria-haspopup="listbox" aria-expanded={menu} aria-label={`Pull request: ${linkPull ? `${linkPull.pull.repo} ${inboxPullLabel(linkPull.pull)} ${linkPull.pull.title}` : linkChosen ? props.link : pick ? `${pick.label} ${pick.title}` : 'none chosen'}`} data-review-pick={linkPull?.pull.key ?? pick?.id ?? 'choose'} onClick={() => onMenu(!menu)}>
               {linkPull ? (
                 <>
                   <RefMarkIcon kind="pr" state={linkStateWord(linkPull) ?? 'open'} size={14} />
-                  <span className="ib-cp-tod">{linkPull.pull.repo} {inboxPullLabel(linkPull.pull)}</span>
+                  <span className="ib-cp-tod">{linkPull.pull.repo}</span>
+                  <span className="ib-cp-rvnum">{inboxPullLabel(linkPull.pull)}</span>
                   <b dir="auto">{linkPull.pull.title}</b>
                   {linkStateWord(linkPull) && <span className="ib-cp-tod">· {linkStateWord(linkPull)}</span>}
                 </>
@@ -239,7 +236,7 @@ export function ReviewRows(props: {
                   <b dir="auto">{pick.title}</b>
                 </>
               ) : (
-                <span className="ib-cp-tod">Choose one, or paste a link</span>
+                <span className="ib-cp-tod">Choose or paste a pull request</span>
               )}
               <Icon name="chevD" size={15} />
             </button>
