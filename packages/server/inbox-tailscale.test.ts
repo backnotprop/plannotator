@@ -12,6 +12,7 @@ import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { brotliDecompressSync, gunzipSync } from "node:zlib";
+import { packApp } from "@plannotator/shared/packed-app";
 import { describeTailscaleFailure, type TailscaleRunner } from "@plannotator/shared/tailscale";
 import { writeReleaseNotes } from "@plannotator/shared/update-check";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -223,6 +224,35 @@ describe("Inbox over your tailnet", () => {
     expect(local.headers.get("etag")).toBeNull();
     expect(local.headers.get("cache-control")).toBe("no-store");
     expect(await local.text()).toBe(page);
+  });
+
+  test("the window's packed scripts (#2593) pass the same listener checks as the page and go out compressed, as the page does", async () => {
+    const dataDir = world({ inboxTailscale: true });
+    const ts = fakeTailscale();
+    const entry = `export const sentinel = "entry-sentinel";\n${"// the window's entry script\n".repeat(20000)}`;
+    const page = '<!doctype html><script type="module" crossorigin src="/assets/entry-a.js"></script>';
+    const inbox = await start(dataDir, ts.run, { htmlContent: packApp(page, { "/assets/entry-a.js": { type: "text/javascript; charset=utf-8", text: entry } }) });
+    const listener = inbox.tailscale.listenerPort()!;
+    const raw = (path: string, headers: Record<string, string>, login: string | null = OWNER) =>
+      fetch(`http://127.0.0.1:${listener}${path}`, {
+        headers: { Host: `${MAGIC}:${inbox.port}`, ...(login ? { "Tailscale-User-Login": login } : {}), ...headers },
+        decompress: false,
+      } as RequestInit);
+
+    expect(await (await raw("/", {})).text()).toBe(page);
+    const script = await raw("/assets/entry-a.js", { "Accept-Encoding": "gzip, deflate, br", "Sec-Fetch-Site": "same-origin", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" });
+    expect(script.status).toBe(200);
+    expect(script.headers.get("content-encoding")).toBe("br");
+    expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+    expect(brotliDecompressSync(Buffer.from(await script.arrayBuffer())).toString("utf8")).toBe(entry);
+    // Another login, a loopback Host claim, another site's fetch: refused before any script is read.
+    expect((await raw("/assets/entry-a.js", {}, "someone@example.com")).status).toBe(403);
+    expect((await raw("/assets/entry-a.js", { Host: `127.0.0.1:${inbox.port}` })).status).toBe(403);
+    expect((await raw("/assets/entry-a.js", { "Sec-Fetch-Site": "cross-site", "Sec-Fetch-Mode": "cors", "Sec-Fetch-Dest": "script" })).status).toBe(403);
+    // On loopback, uncompressed.
+    const local = await fetch(`http://127.0.0.1:${inbox.port}/assets/entry-a.js`, { headers: { "Accept-Encoding": "gzip, deflate, br" }, decompress: false } as RequestInit);
+    expect(local.headers.get("content-encoding")).toBeNull();
+    expect(await local.text()).toBe(entry);
   });
 
   test("through the tailnet the connection surface is unreachable, even with the token and a loopback Host claim, and the window's guards still apply", async () => {

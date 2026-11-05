@@ -24,7 +24,8 @@
  * No new keyboard shortcuts. The comments and Viewed ticks are kept in this
  * window's storage per layer and scope until the verdict goes.
  */
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -52,7 +53,7 @@ import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
 /** The review's width (px) under which its file rail folds into the Files picker over the diff. */
 const RAIL_FOLD_BELOW = 900;
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface PullReviewProps {
   model: InboxPullsAnswer | null;
@@ -549,9 +550,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
             </p>
           ) : snapshot ? (
-            <Suspense fallback={null}>
+            // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
+            <ReaderPart diff={snapshot.review.rawPatch}>
               <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
-            </Suspense>
+            </ReaderPart>
           ) : (
             <p className="ib-pr-empty" aria-busy="true">
               Reading the diff…
