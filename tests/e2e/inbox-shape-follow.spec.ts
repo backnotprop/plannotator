@@ -9,7 +9,8 @@
  *  - the long step keeps its signature and its deciding line in view;
  *  - folded, the arrows and the picture still step;
  *  - a phone keeps the path: every stop, the one on now in view, at the top of the sheet while it scrolls;
- *  - one column beside a board: what decided it first, nothing on top of anything, the dock's every button on screen.
+ *  - one column beside a board: what decided it first, nothing on top of anything, the dock's every button on screen;
+ *  - a path too long for its room keeps the stop on now in view, on the rail and on a phone.
  *
  * Build first: see inbox.spec.ts.
  */
@@ -71,7 +72,24 @@ const LONG_STEP = {
 };
 const steps = [SHORT, NORMAL, LONG_STEP, { ...SHORT, part: 'd', tag: 'nothing shows', text: 'Nothing shows for the guest', inputs: [{ name: 'decision.show', value: 'false', from: { step: 3 } }] }];
 const parts = ['a', 'b', 'c', 'd'].map((p, i) => part(p, i + 1, box(20 + i * 220, 60, 190, 90), text(40 + i * 220, 110, `Part ${p}`))).join('');
-const board = { title: 'Follow one example', claim: 'Built. Nothing waits on you.', views: { how: { ...svg(920, 220, parts), examples: [{ name: 'A guest leaves', title: 'A guest leaves a thread', steps }] } } };
+const longWay = Array.from({ length: 12 }, (_, i) => ({ ...SHORT, part: 'abcd'[i % 4], tag: `stop ${i + 1}`, text: `Stop ${i + 1} on the long way` }));
+const board = {
+  title: 'Follow one example',
+  claim: 'Built. Nothing waits on you.',
+  // Every view and a reference, so the dock is as wide as it gets.
+  views: {
+    picture: { html: '<p>The picture</p>', css: '' },
+    know: 'What to know.[^1]',
+    how: {
+      ...svg(920, 220, parts),
+      examples: [
+        { name: 'A guest leaves', title: 'A guest leaves a thread', steps },
+        { name: 'The long way', title: 'The long way round', steps: longWay },
+      ],
+    },
+  },
+  refs: [{ n: 1, kind: 'link', title: 'Reference 1', target: 'https://example.com/ref' }],
+};
 
 async function openBoard(browser: Browser, options: Parameters<Browser['newContext']>[0] = {}) {
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, ...options });
@@ -227,4 +245,26 @@ test('one column beside a board: what decided it first, nothing on top of anythi
   const lastInDock = await page.locator('.shp-dock > *').last().evaluate((el) => el.getBoundingClientRect().right);
   expect(lastInDock).toBeLessThanOrEqual(right);
   await context.close();
+});
+
+test('a path too long for its room keeps the stop on now in view, on the rail and on a phone', async ({ browser }) => {
+  for (const [options, room] of [[{}, '.shp-ex-rail .shp-ex-stops'], [phone, '.shp-ex-strip']] as const) {
+    const { context, page } = await openBoard(browser, options);
+    await page.locator('.shp-ex-tabs button').nth(1).click();
+    await settle(page);
+    const through = page.getByRole('button', { name: 'Step through' });
+    if (await through.count()) await press(page, 'Step through');
+    await press(page, options === phone ? 'Show more' : 'Inputs and outputs');
+    await expect(page.locator(`${room} .shp-ex-stop`)).toHaveCount(longWay.length);
+    for (let i = 1; i < longWay.length; i++) await press(page, 'Next step');
+    await expect(page.locator('.shp-ex-stop.on')).toContainText('stop 12');
+    // The room scrolls: the last stop is only in it because the path followed.
+    const on = (await rect(page, '.shp-ex-stop.on'))!;
+    const box = (await rect(page, room))!;
+    expect(on.top).toBeGreaterThanOrEqual(box.top);
+    expect(on.bottom).toBeLessThanOrEqual(box.bottom);
+    expect(on.left).toBeGreaterThanOrEqual(box.left);
+    expect(on.right).toBeLessThanOrEqual(box.right);
+    await context.close();
+  }
 });
