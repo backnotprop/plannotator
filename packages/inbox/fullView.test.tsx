@@ -471,6 +471,22 @@ test.skipIf(!hasDom)('the floating panel goes with the tools when they gather an
   expect(pane().hasAttribute('data-full-view')).toBe(false);
 });
 
+test.skipIf(!hasDom)('⌘⇧X with focus in the floating panel (HTML) gathers it with the tools and puts focus on the corner control, never on something gone inert', async () => {
+  stubViews();
+  await render(<Pane start={page} harness={harnessOf()} />);
+  await click(host!.querySelector('[data-full-view-comments]'));
+  expect(pane().classList.contains('ib-drawer')).toBe(true);
+  const close = host!.querySelector<HTMLButtonElement>('.ib-apanel .ib-sheet-h button')!;
+  close.focus();
+  expect(document.activeElement === close).toBe(true);
+  const event = await key(close, chord());
+  await settle();
+  expect(event.defaultPrevented).toBe(true);
+  expect(pane().getAttribute('data-tools')).toBe('tucked');
+  expect(host!.querySelector<HTMLElement>('.ib-apanel')!.inert).toBe(true);
+  expect(document.activeElement === handle()).toBe(true);
+});
+
 test.skipIf(!hasDom)('the floating panel closes when the person leaves the file: full screen ends, a step to another file, the file closing', async () => {
   stubViews();
   const harness = harnessOf();

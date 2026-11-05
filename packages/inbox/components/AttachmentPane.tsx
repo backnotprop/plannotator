@@ -557,6 +557,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
    * again when the person leaves the file: full screen ends, another file opens, or the file closes (the pane goes).
    */
   const [drawer, setDrawer] = useState(false);
+  /** A comment on another file picked in the open panel: the panel stays open there, focus on that comment's card. */
+  const keepPanelFor = useRef<string | null>(null);
   /** The panel is open: the floating panel in full screen on a desktop, else the sheet. */
   const panelOpen = drawerMode ? drawer : sheetMode && sheet;
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
@@ -798,8 +800,15 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     setEndNote(null);
     setGuard(null);
     setSheet(false);
-    // The comments panel was about the file left: the next one opens without it.
-    setDrawer(false);
+    // The comments panel was about the file left: the next one opens without it, unless a pick in it opened this file.
+    const kept = keepPanelFor.current;
+    keepPanelFor.current = null;
+    if (kept === null) setDrawer(false);
+    else
+      requestAnimationFrame(() => {
+        const card = sectionRef.current?.querySelector<HTMLElement>(`.ib-apanel [data-annotation-id="${CSS.escape(kept)}"]`);
+        (card ?? sheetButtonRef.current)?.focus({ preventScroll: true });
+      });
     const source = pendingStep.current;
     pendingStep.current = null;
     if (!source) return;
@@ -1723,7 +1732,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (recordKey(record.path, record.version) === currentKey) setSelectedId(id);
     else {
       const owner = props.attachments.find((a) => a.id === record.attachment_id);
-      leave(owner?.name ?? 'that file', () => props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id));
+      leave(owner?.name ?? 'that file', () => {
+        // Picked in the open floating panel: the person is using it, so it stays open on the file it opens.
+        if (drawerMode && drawer) keepPanelFor.current = id;
+        props.onOpenAt(record.attachment_id, record.version === 'current' ? 'current' : 'sent', id);
+      });
     }
   };
 

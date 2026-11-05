@@ -8,7 +8,8 @@
  *  - the count opens the panel over the page's right side: the page keeps its whole width, the toolbar does not move;
  *  - » (the top bar's Hide tools) and the reply card's ⌄ (the bottom bar's) each take the panel away with the tools,
  *    and the corner control brings it back open;
- *  - the panel closes by its × and the count, and on its own when full screen ends or another file opens;
+ *  - the panel closes by its × and the count, and on its own when full screen ends or another file opens, but stays
+ *    open (focus on the card) when a comment on another file is picked in it;
  *  - a comment picked in the panel whose mark is under it scrolls the page so the mark shows below the panel;
  *  - at 1280 px the reply card moves left so it never runs under the panel;
  *  - a 390 px phone keeps the bottom sheet.
@@ -374,6 +375,20 @@ test('the panel closes on its own when full screen ends or another file opens', 
   await pane(page).locator('.ib-vhead [data-full-screen-toggle]').click();
   await expect(pane(page)).toHaveAttribute('data-full-view', '');
   await expect(panel(page)).toBeHidden();
+  await context.close();
+});
+
+test('a comment on another file picked in the panel opens that file with the panel still open, focus on its card', async ({ browser }) => {
+  const context = await browser.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await open(context, world.two, 'pricing.html');
+  await count(page).click();
+  await panelAtRest(page);
+  // The panel lists every file's comments: c3 is on the checkout screen.
+  await panel(page).locator('[data-annotation-id="c3"]').first().click();
+  await expect(pane(page)).toHaveAttribute('data-attachment-pane', world.two.files['checkout.png']!);
+  await expect(pane(page)).toHaveAttribute('data-full-view', '');
+  await expect(panel(page)).toBeVisible();
+  await expect.poll(() => page.evaluate(() => document.activeElement?.closest('.ib-apanel [data-annotation-id]')?.getAttribute('data-annotation-id') ?? null)).toBe('c3');
   await context.close();
 });
 
