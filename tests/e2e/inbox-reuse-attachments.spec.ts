@@ -488,6 +488,7 @@ test("a phone, a thread with only a PDF: its tile holds a 44 px button clear of 
     await tile(phone, SHEET).scrollIntoViewIfNeeded();
     const add = phone.locator(`section.ib-pane .ib-attachments:not(.ib-hatts-tiles) [data-reuse-surface="tile"][aria-label="Add ${SHEET} to your reply"]`);
     await expect(add).toBeVisible();
+    await expect(add).toHaveCSS('opacity', '1');
     const box = (await add.boundingBox())!;
     expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
     const tileBox = (await tile(phone, SHEET).boundingBox())!;
