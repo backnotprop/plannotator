@@ -527,8 +527,12 @@ function cell(value: string | number | boolean | null): string {
   return /[",\n\r]/.test(safe) ? `"${safe.replace(/"/g, '""')}"` : safe;
 }
 
-/** The moment the range goes by, as the page cuts it: a decision by when it was made, anything else by when it was asked. */
-const rangeMoment = (row: DecisionRow): number => (row.fate === "answered" || row.fate === "skipped" ? (row.answered_at ?? row.asked_at) : row.asked_at);
+/** The range as the page cuts it: what waits stays whatever its age, a decision goes by when it was made, anything else by when it was asked. */
+function csvInRange(row: DecisionRow, since: number): boolean {
+  if (row.fate === "open" || row.fate === "picked_unsent") return true;
+  const at = row.fate === "answered" || row.fate === "skipped" ? (row.answered_at ?? row.asked_at) : row.asked_at;
+  return at >= since;
+}
 
 function* csvSteps(input: DecisionDataInput, since: number | null): Generator<void, string> {
   const { rows, labelOf } = yield* rowsSteps(input);
@@ -536,7 +540,7 @@ function* csvSteps(input: DecisionDataInput, since: number | null): Generator<vo
   let tick = 0;
   for (const row of rows) {
     if (++tick % EVERY === 0) yield;
-    if (since !== null && rangeMoment(row) < since) continue;
+    if (since !== null && !csvInRange(row, since)) continue;
     lines.push(
       [row.id, row.thread_id, labelOf(row.project_id), row.agent, row.kind, row.fate, iso(row.asked_at), iso(row.answered_at), iso(row.sent_at), row.offered, row.took, row.stopped, row.holds_up, row.files, row.revisions]
         .map(cell)

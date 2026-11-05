@@ -741,24 +741,31 @@ describe("the CSV", () => {
     expect(line).toContain(",harbor,Claude Code,");
   });
 
-  test("the range cuts as the page does: a decision by when it was made, anything else by when it was asked", async () => {
+  test("the range cuts as the page does: a decision by when it was made, what waits whatever its age, anything else by when it was asked", async () => {
     const w = world();
     const decidedLately = w.ask();
     const oldOpen = w.ask();
     const decidedLongAgo = w.ask();
     w.answer(decidedLongAgo.id, "A");
+    const oldClosed = w.ask();
+    w.store.markRead(oldClosed.thread_id, true);
     w.tick(9 * DAY);
     w.answer(decidedLately.id, "A");
-    const recentOpen = w.ask();
+    const recentClosed = w.ask();
+    w.store.markRead(recentClosed.thread_id, true);
     const since = NOW - 3 * DAY;
     const text = await w.csv(since);
     expect(text).toContain(decidedLately.thread_id);
-    expect(text).toContain(recentOpen.thread_id);
-    expect(text).not.toContain(oldOpen.thread_id);
+    expect(text).toContain(oldOpen.thread_id);
+    expect(text).toContain(recentClosed.thread_id);
+    expect(text).not.toContain(oldClosed.thread_id);
     expect(text).not.toContain(decidedLongAgo.thread_id);
-    // The page's count and the CSV's decided lines are the same.
-    const decided = text.trim().split("\n").slice(1).filter((line) => line.split(",")[5] === "answered");
-    expect(decided.length).toBe((await w.summary({ since })).counts.answered);
+    // Line for line, the numbers the page shows for this range.
+    const fates = text.trim().split("\n").slice(1).map((line) => line.split(",")[5]);
+    const page = await w.summary({ since });
+    expect(fates.filter((fate) => fate === "answered").length).toBe(page.counts.answered);
+    expect(fates.filter((fate) => fate === "set_aside").length).toBe(page.counts.set_aside);
+    expect(fates.filter((fate) => fate === "open").length).toBe(page.waiting);
   });
 
   test("a formula behind spaces or in full-width signs is kept as text like any other; an ordinary name is left alone", async () => {
