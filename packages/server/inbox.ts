@@ -3129,6 +3129,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   store.setDeliveryPresence({
     connection: live.deliveryConnectionOf,
     askerLive: live.askerLive,
+    hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
     autoSendAfterMs: live.autoSendAfterMs,

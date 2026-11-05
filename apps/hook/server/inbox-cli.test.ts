@@ -27,6 +27,7 @@ import { OPENCODE_INBOX_AGENT_NAME, OPENCODE_INBOX_HOST } from "../../opencode-p
 import { DSH_INBOX_AGENT_NAME, DSH_INBOX_HOST } from "../../dsh-plugin/inbox";
 import { detachedInboxEnv } from "./inbox-command";
 import { fillInboxToolArguments, inboxCallHostSession, inboxHostSessionFromEnv, inboxQwenShimContext, INBOX_SESSION_HOST_NAMES, runInboxMcpShim } from "./inbox-mcp-shim";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, signalProvenInbox, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 
@@ -49,6 +50,8 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 /** Remember the Inbox the sandbox's registry names now, for the teardown. */
 function track(box: Sandbox): void {
@@ -80,7 +83,7 @@ function sandbox(): Sandbox {
     dataDir,
     browserMarker,
     env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      ...agents.env,
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
