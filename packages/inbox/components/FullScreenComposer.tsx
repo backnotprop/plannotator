@@ -129,10 +129,10 @@ function useSentFlash(sentAt: number | null): boolean {
   return on;
 }
 
-/** "2 comments", one flex item. Short of room, a phone keeps the number (`.ib-fcomp-w` goes visually hidden, so the name stays whole). */
 /** The least room between a phone's pill and the toolbar on one row. */
 const PILL_BAR_GAP = 4;
 
+/** "2 comments", one flex item. Short of room, a phone keeps the number (`.ib-fcomp-w` goes visually hidden, so the name stays whole). */
 const Count = ({ n, word }: { n: number; word: string }) => (
   <span>
     {n}
