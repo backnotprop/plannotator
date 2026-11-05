@@ -48,7 +48,7 @@ function forge(files: Record<string, string>) {
     const endpoint = args.find((arg) => arg.includes("/contents/"));
     if (cli === "gh" && endpoint) {
       const path = decodeURIComponent(endpoint.split("/contents/")[1]!.split("?")[0]!);
-      if (!endpoint.endsWith(`?ref=${HEAD}`) || !(path in files)) return { stdout: "", stderr: "HTTP 404", exitCode: 1 };
+      if (!endpoint.endsWith(`?ref=${HEAD}`) || !(path in files)) return { stdout: '{"message":"Not Found","documentation_url":"https://docs.github.com/rest/repos/contents#get-repository-content","status":"404"}', stderr: "gh: Not Found (HTTP 404)\n", exitCode: 1 };
       return { stdout: `${Buffer.from(files[path]!).toString("base64")}\n`, stderr: "", exitCode: 0 };
     }
     return { stdout: "", stderr: "unexpected", exitCode: 1 };
@@ -234,6 +234,76 @@ describe("who may read", () => {
   });
 });
 
+describe("InboxPulls.file: a GitLab merge request", () => {
+  const SHA = "60a2fd19c03433aaa1ae39da50845568822a9fed";
+  const repos = [{ host: "gitlab.com", repo: "acme/runner", project_id: "prj_1" }];
+  const MR = {
+    iid: "61",
+    title: "Retry",
+    webUrl: "https://gitlab.com/acme/runner/-/merge_requests/61",
+    state: "opened",
+    draft: false,
+    updatedAt: "2026-11-03T10:00:00Z",
+    targetBranch: "main",
+    sourceBranch: "retry",
+    diffHeadSha: SHA,
+    project: { fullPath: "acme/runner" },
+    sourceProject: { fullPath: "acme/runner" },
+    author: { username: "jun" },
+    diffStatsSummary: { additions: 1, deletions: 0, fileCount: 1 },
+    mergedAt: null,
+    approved: false,
+    detailedMergeStatus: "NOT_APPROVED",
+    headPipeline: { status: "SUCCESS" },
+    approvedBy: { nodes: [] },
+    reviewers: { nodes: [{ username: "dana" }] },
+  };
+  function gitlab(files: Record<string, string>, down = { now: false }) {
+    const reads: string[] = [];
+    const run: RefRunner = async (cli, args) => {
+      if (cli === "glab" && args[0] === "auth") return { stdout: "gitlab.com\n  ✓ Logged in to gitlab.com as dana (keyring)\n", stderr: "", exitCode: 0 };
+      if (cli === "gh" && args[0] === "auth") return { stdout: "", stderr: "not logged in", exitCode: 1 };
+      if (cli === "glab" && args.includes("graphql")) {
+        const others = args.some((arg) => arg.startsWith("query=query InboxPullsOthers"));
+        return { stdout: JSON.stringify(others ? { data: { currentUser: { username: "dana" } } } : { data: { currentUser: { username: "dana", requested: { nodes: [MR] }, authored: { nodes: [] }, merged: { nodes: [] } } } }), stderr: "", exitCode: 0 };
+      }
+      const endpoint = args.find((arg) => arg.includes("/repository/files/"));
+      if (cli === "glab" && endpoint) {
+        reads.push(endpoint);
+        if (down.now) return { stdout: "", stderr: "glab: connection refused", exitCode: 1 };
+        const path = decodeURIComponent(endpoint.split("/repository/files/")[1]!.split("/raw?")[0]!);
+        // gitlab.com's own answers for a missing file, read with curl: glab itself was not available to capture.
+        if (!endpoint.endsWith(`?ref=${SHA}`) || !(path in files)) return { stdout: '{"message":"404 File Not Found"}', stderr: "", exitCode: 1 };
+        return { stdout: files[path]!, stderr: "", exitCode: 0 };
+      }
+      return { stdout: "", stderr: "unexpected", exitCode: 1 };
+    };
+    return { run, reads };
+  }
+
+  test("reads the raw file at the head commit, with GitLab's address and label", async () => {
+    const f = gitlab({ "src/a b.go": "package main\n" });
+    const pulls = createInboxPulls({ run: f.run });
+    const KEY = (await pulls.list(repos)).pulls[0]!.key;
+    expect(await pulls.file(KEY, "src/a b.go")).toEqual({ contents: "package main\n", label: "!61", platform: "gitlab", url: `https://gitlab.com/acme/runner/-/blob/${SHA}/src/a%20b.go` });
+    expect(f.reads[0]).toContain("acme%2Frunner/repository/files/src%2Fa%20b.go/raw");
+  });
+
+  test("a 404 is kept as a miss; a failed read asks again", async () => {
+    const down = { now: false };
+    const f = gitlab({ "src/a.go": "package main\n" }, down);
+    const pulls = createInboxPulls({ run: f.run });
+    const KEY = (await pulls.list(repos)).pulls[0]!.key;
+    expect(await pulls.file(KEY, "no/such.go")).toBeNull();
+    expect(await pulls.file(KEY, "no/such.go")).toBeNull();
+    expect(f.reads).toHaveLength(1);
+    down.now = true;
+    expect(await pulls.file(KEY, "src/a.go")).toBeNull();
+    down.now = false;
+    expect((await pulls.file(KEY, "src/a.go"))?.contents).toBe("package main\n");
+  });
+});
+
 describe("InboxPulls.file: the PR's head commit, from the forge", () => {
   const repos = [{ host: "github.com", repo: REPO, project_id: "prj_1" }];
   const KEY = `github.com/${REPO}#412`;
@@ -259,6 +329,15 @@ describe("InboxPulls.file: the PR's head commit, from the forge", () => {
     expect(await pulls.file(KEY, "src/a.ts")).toBeNull();
     expect(f.contentReads()).toHaveLength(1);
     expect(await pulls.file(KEY, "bin/tool")).toBeNull();
+  });
+
+  test("over GitHub's 1 MB for this read: an empty answer, as the real gh gives one, is not shown, and is kept", async () => {
+    const f = forge({ "big.bin": "" });
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list(repos);
+    expect(await pulls.file(KEY, "big.bin")).toBeNull();
+    expect(await pulls.file(KEY, "big.bin")).toBeNull();
+    expect(f.contentReads()).toHaveLength(1);
   });
 
   test("a failed read is not a missing file: the next one asks again, and finds it", async () => {

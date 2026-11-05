@@ -68,6 +68,7 @@ interface World {
   pullThread: string;
   forgeLog: string;
   marksThread: string;
+  missingMarkThread: string;
   prReviewThread: string;
   prReviewMessage: string;
   askAgent: ScriptedAskAgent;
@@ -270,6 +271,7 @@ test.beforeAll(async () => {
   // A review of that PR, the agent's message after it, and Ask AI's window with an answer: a live session it can reach.
   const prReview = await claude.submitGuide({ project_path: project, thread: 'pr review', subject: 'Backoff: the review', guide: REVIEW_GUIDE, patch, review: true, agent_session: 'ses-pr-review' } as never);
   const marksThread = (await claude.send({ project_path: project, thread: 'marks', subject: 'Marks: where to look', body: 'The rows go through `src/ledger.ts:1` and the words after it go on for a while, past [env](.env) and on to the end of this line.' })).thread_id as string;
+  const missingMarkThread = (await claude.send({ project_path: project, thread: 'missing mark', subject: 'Marks: a missing file', body: 'Everything on this line is plain words, then [env](.env) sits in the middle, and more plain words follow it to the end.' })).thread_id as string;
   const prReviewThread = prReview.thread_id as string;
   const prReviewMessage = prReview.message_id as string;
   await claude.send({ project_path: project, reply_to: prReviewMessage, body: 'Start at `src/retry.ts:1-3`. The schedule is in [the new file](src/pr-only-schedule.ts:30-34).', agent_session: 'ses-pr-review' } as never);
@@ -304,6 +306,7 @@ test.beforeAll(async () => {
     pullThread: pullSent.thread_id as string,
     forgeLog: join(stubs, 'forge.log'),
     marksThread,
+    missingMarkThread,
     prReviewThread,
     prReviewMessage,
     askAgent,
@@ -857,6 +860,33 @@ test('a selection or a saved comment across the words: resting on them still sho
     await expect(window).toContainText('retryPayout');
     await expect(reader).toBeVisible();
     expect(errors).toEqual([]);
+  } finally {
+    await context.close();
+  }
+});
+
+test('a saved comment across a link to a missing file: learning it is missing leaves the highlight on the words', async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1440, 900, 'dark');
+  try {
+    await page.goto(`${world.url}#thread=${world.missingMarkThread}`);
+    const link = page.locator('.ib-body [data-code-hover=".env"], .ib-body [data-local-link="unavailable"]').first();
+    await expect(link).toBeVisible();
+    await dragAcross(page, link);
+    await page.locator('.annotation-toolbar button[aria-label="Comment"]').click();
+    await page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last().fill('Is this one here?');
+    await page.getByRole('button', { name: 'Save' }).click();
+    await page.reload();
+    await expect(link.locator('mark').first()).toBeVisible();
+    await link.hover();
+    // It says why on this first rest, and the highlight stays.
+    await expect(page.locator('[data-pn-tooltip]')).toBeVisible();
+    await expect(link.locator('mark').first()).toBeVisible();
+    await page.screenshot({ path: join(proofDir, '36-missing-link-mark-dark.png') });
+    await page.mouse.move(1, 1);
+    await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
+    await link.hover();
+    await expect(page.locator('[data-pn-tooltip]')).toBeVisible();
+    await expect(link.locator('mark').first()).toBeVisible();
   } finally {
     await context.close();
   }

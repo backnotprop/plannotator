@@ -5,6 +5,7 @@ import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
 import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
+import { Tooltip } from '@plannotator/ui/components/Tooltip';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
 import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
 import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
@@ -378,10 +379,13 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
   const phone = usePhone();
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
+  const [told, setTold] = useState(false);
   const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
     // Open's own answer comes with the code, so the window opens whole.
     const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
     setMissing(!answer?.found);
+    // Still resting on the words: they say so now, with no second rest.
+    if (!answer?.found && (pointerIn.current || document.activeElement === hover.anchorRef.current)) setTold(true);
     return answer?.found ? answer : null;
   });
   const { preview, anchorRef, dismiss: close } = hover;
@@ -399,6 +403,7 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
   };
   const leave = () => {
     pointerIn.current = false;
+    setTold(false);
     if (!listOpen.current) hover.onLeave();
   };
   const controls = () => Array.from(windowEl.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
@@ -485,11 +490,11 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
       )}
     </span>
   );
-  return { hover, touch, open, missing, enter, leave, controls, windowEl, pointerIn, element };
+  return { hover, touch, open, missing, told, enter, leave, controls, windowEl, pointerIn, element };
 }
 
 function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title?: string; children: ReactNode }) {
-  const { hover, touch, open, missing, enter, leave, controls, windowEl, pointerIn, element } = useCodeHover(words);
+  const { hover, touch, open, missing, told, enter, leave, controls, windowEl, pointerIn, element } = useCodeHover(words);
   const anchor = (
     <span
       ref={(el) => {
@@ -500,6 +505,7 @@ function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title
       tabIndex={0}
       aria-haspopup="dialog"
       aria-expanded={open}
+      aria-description={title && missing ? title : undefined}
       data-code-hover={words.path}
       onMouseEnter={touch ? undefined : enter}
       onMouseLeave={touch ? undefined : leave}
@@ -535,7 +541,21 @@ function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title
 
   return (
     <>
-      {title ? <HostTitle title={missing ? title : undefined}>{anchor}</HostTitle> : anchor}
+      {/* Always this tooltip, closed until the file is known to be missing: redrawing the words would lose a comment's highlight on them. */}
+      {title ? (
+        <Tooltip
+          content={title}
+          wide
+          escapePassesThrough
+          forceOpen={told}
+          shouldOpen={() => missing && !touch}
+          container={hover.anchorRef.current ? tooltipContainerOf(hover.anchorRef.current) : null}
+        >
+          {anchor}
+        </Tooltip>
+      ) : (
+        anchor
+      )}
       {element}
     </>
   );

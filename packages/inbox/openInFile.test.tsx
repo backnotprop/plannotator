@@ -287,7 +287,7 @@ describe('words that name a file', () => {
     await act(async () => root!.render(<OpenInCodeHover scope={scope} path="src/gone.ts" title="Not attached"><span>the file</span></OpenInCodeHover>));
     await rest();
     expect(codeWindow()).toBeNull();
-    expect(words().getAttribute('title') ?? words().parentElement?.getAttribute('title')).toBe('Not attached');
+    expect(document.querySelector('[data-pn-tooltip]')?.textContent).toBe('Not attached');
   });
 
   test.skipIf(!hasDom)('by keyboard: Enter shows it, Enter again goes in, Escape closes it and returns, and the page keeps no Escape', async () => {
@@ -403,9 +403,16 @@ describe('words with a comment\'s marks around them', () => {
     answers.code = { status: 200, body: { found: false } };
     await draw('Not on this computer');
     markTheWordsAfter();
+    const words = host!.querySelector('[data-code-hover]')!;
+    const highlight = document.createElement('mark');
+    words.querySelector('code')!.appendChild(highlight);
     await rest();
     expect(codeWindow()).toBeNull();
-    expect(host!.querySelector('[data-code-hover]')!.textContent).toBe('src/a.ts');
+    // The same element, so a comment's highlight on the words is still there, and it says why on this first rest.
+    expect(host!.querySelector('[data-code-hover]')).toBe(words);
+    expect(words.contains(highlight)).toBe(true);
+    expect(document.querySelector('[data-pn-tooltip]')?.textContent).toBe('Not on this computer');
+    expect(words.getAttribute('aria-description')).toBe('Not on this computer');
   });
 
   test.skipIf(!hasDom)('a drag over them is a selection: nothing opens or is asked', async () => {
