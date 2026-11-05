@@ -571,6 +571,56 @@ test.if(hasDom)('the dialog: a double click on Undo restores once and keeps what
   expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
 });
 
+// Done pressed while the restore is on its way: the window's toast offered Undo for what was already back.
+test.if(hasDom)("Done during the dialog's Undo hands the window's toast only what the restore leaves out", async () => {
+  const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'offline' };
+  scriptRestores(answers);
+  const scripted = globalThis.fetch;
+  let release: () => void = () => {};
+  const held = new Promise<void>((resolve) => (release = resolve));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && JSON.parse(String(init.body)).op === 'restore') await held;
+    return scripted(input, init);
+  }) as typeof fetch;
+  const toasts: ({ lead: string; detail?: string; onUndo?: () => void } | null)[] = [];
+  draw({ onToast: (toast) => toasts.push(toast) });
+  const { dialog, del, undo } = await openInitiatives();
+  await del(SHAPE);
+  await del(MEMORY);
+  await undo();
+  await act(async () => dialog.querySelector<HTMLElement>('[data-initiatives-done]')!.click());
+  await settle();
+  expect($('[data-dialog="initiatives"]')).toBeNull();
+  expect(toasts.filter((t) => t?.lead === 'Deleted')).toEqual([]);
+
+  await act(async () => release());
+  await settle();
+  const handed = toasts.at(-1)!;
+  expect([handed.lead, handed.detail]).toEqual(['Deleted', '“Memory”']);
+  expect(handed.onUndo).toBeDefined();
+});
+
+// Seven seconds from the delete would take the Undo away just after the line said to try again.
+test.if(hasDom)("a failed save in the dialog gives its Undo the toast's full time again", async () => {
+  scriptRestores({ [MEMORY]: 'offline' });
+  draw();
+  const { dialog, del, undo } = await openInitiatives();
+  await del(MEMORY);
+  const realSet = globalThis.setTimeout;
+  const armed: number[] = [];
+  globalThis.setTimeout = ((fn: () => void, ms?: number, ...rest: unknown[]) => {
+    armed.push(ms ?? 0);
+    return realSet(fn, ms, ...(rest as []));
+  }) as typeof setTimeout;
+  try {
+    await undo();
+  } finally {
+    globalThis.setTimeout = realSet;
+  }
+  expect(dialog.querySelector('.ib-toast [data-toast-undo]')).not.toBeNull();
+  expect(armed).toContain(7000);
+});
+
 // The review's blocker: after Done, one refused name lost every other initiative in the toast, and a failed save left nothing to press.
 test.if(hasDom)("the window's Undo after Done: every restore is tried; a failed save offers Undo again, for what is still out", async () => {
   const answers: Record<string, 'taken' | 'offline' | undefined> = { [MEMORY]: 'taken' };

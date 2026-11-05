@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { INBOX_INITIATIVE_NAME_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
-import { INITIATIVE_SAVE_FAILED, initiativeRefusal, restoreInitiatives } from './initiativeUndo';
+import { INITIATIVE_SAVE_FAILED, initiativeRefusal, restoreInitiatives, type InitiativesRestored } from './initiativeUndo';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { InboxToast, type InboxToastModel } from '../components/Toast';
@@ -20,7 +20,6 @@ import { initiativeDeletedToast } from './model';
  * inert), so while this is open the same toast draws inside it; closed with
  * the Undo still up, `onCloseWithUndo` hands it to the window's.
  */
-/** The refusal whose server text the dialog shows as is (a 409): a name taken. */
 /** As long as the window's toast stays up (MARK_READ_UNDO_MS). */
 const DELETED_TOAST_MS = 7_000;
 
@@ -96,16 +95,17 @@ export function InitiativesDialog({
     armToast();
     onChanged();
   };
-  // The second click of a double click on Undo waits on the first, or it would answer for rows already settled.
-  const undoing = useRef(false);
+  // A restore under way: the second click of a double click waits on it, and Done hands over only what it leaves out.
+  const undoing = useRef<{ back: readonly InboxInitiative[]; run: Promise<InitiativesRestored> } | null>(null);
   const undo = async () => {
     if (undoing.current) return;
-    undoing.current = true;
     const back = deleted;
+    const run = restoreInitiatives(back);
+    undoing.current = { back, run };
     setBusy(true);
     setError(null);
-    const { restored, left, line } = await restoreInitiatives(back);
-    undoing.current = false;
+    const { restored, left, line } = await run;
+    undoing.current = null;
     setBusy(false);
     setError(line);
     // What came back shows on the next read; a refusal's read shows who took the name.
@@ -113,13 +113,24 @@ export function InitiativesDialog({
     // By id, so one deleted meanwhile keeps its Undo. A failed save keeps it too, to try again.
     const settled = new Set(back.filter((i) => !left.some((still) => still.id === i.id)).map((i) => i.id));
     setDeleted((now) => now.filter((i) => !settled.has(i.id)));
-    if (left.length > 0) return;
+    if (left.length > 0) {
+      armToast();
+      return;
+    }
     // Undo's button is gone: focus never drops to the page.
     const last = restored.at(-1);
     setFocusTo(last ? { kind: 'row', id: last.id } : { kind: 'new' });
   };
   const close = () => {
-    if (deleted.length > 0) onCloseWithUndo?.(deleted);
+    const running = undoing.current;
+    if (running) {
+      const others = deleted.filter((i) => !running.back.includes(i));
+      void running.run.then(({ left }) => {
+        if (left.length + others.length > 0) onCloseWithUndo?.([...left, ...others]);
+      });
+    } else if (deleted.length > 0) {
+      onCloseWithUndo?.(deleted);
+    }
     onClose();
   };
   // The dialog first focuses its primary button: New initiative… lands in the name field instead.
