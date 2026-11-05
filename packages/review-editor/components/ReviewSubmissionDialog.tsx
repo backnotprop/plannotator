@@ -10,7 +10,7 @@ import {
   OUTDATED_ANNOTATION_LABEL,
 } from '../utils/exportFeedback';
 import { useCompactTouchLayout } from '@plannotator/ui/hooks/useIsMobile';
-import { canPostInline } from '../utils/codeAnnotationAnchor';
+import { canPostInline } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import {
   Dialog,
   DialogContent,

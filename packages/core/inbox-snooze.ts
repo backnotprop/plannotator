@@ -189,10 +189,13 @@ export function inboxRowSnoozed(row: Pick<InboxListRow, "snoozed">, now: Date = 
  * from the store: back in its own section (a Quiet thread comes back as New,
  * so a snooze is also a reminder), bold, with the return time as its time and
  * `snooze_back` for the small clock, until the person reads it. An archived
- * thread stays archived.
+ * thread (an agent archiving leaves the snooze) stays archived and has no
+ * return, and is no longer snoozed either: nothing says "Snoozed until" a time
+ * gone by.
  */
 export function inboxRowAsOf(row: InboxListRow, now: Date = new Date()): InboxListRow {
-  if (!row.snoozed || inboxSnoozeRunning(row.snoozed.until, now) || inboxRowArchived(row)) return row;
+  if (!row.snoozed || inboxSnoozeRunning(row.snoozed.until, now)) return row;
+  if (inboxRowArchived(row)) return { ...row, snoozed: null };
   const { until } = row.snoozed;
   return {
     ...row,

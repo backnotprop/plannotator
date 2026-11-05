@@ -25,6 +25,7 @@ import {
 import { inboxId } from "@plannotator/core/inbox-types";
 import { INBOX_WAKE_INSTRUCTION, inboxContinuesLine } from "@plannotator/shared/inbox/connection";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 import type { InboxGitRunner } from "./inbox-project-root";
 
@@ -62,7 +63,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup(projectRootGit?: InboxGitRunner) {
+async function setup(projectRootGit?: InboxGitRunner, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-compose-")));
   roots.push(root);
   const ledger = join(root, "ledger");
@@ -70,7 +71,7 @@ async function setup(projectRootGit?: InboxGitRunner) {
   mkdirSync(ledger, { recursive: true });
   mkdirSync(billing, { recursive: true });
   const dataDir = join(root, "data");
-  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}) });
+  const server = await startInboxServer({ dataDir, ...(projectRootGit ? { projectRootGit } : {}), ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-compose-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -211,9 +212,11 @@ describe("a thread the person starts", () => {
   });
 
   test("Send to another session moves a message no session took yet; once delivered it stays", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Rename Quiet?", idempotency_key: "c1" })).json()) as { message: InboxMessage };
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     const moved = await post(server, `/api/inbox/messages/${sent.message.id}/to`, { to: { host: "pi", session: "ses-b" } });
     expect(moved.status).toBe(200);
@@ -245,7 +248,8 @@ describe("a thread the person starts", () => {
   });
 
   test("more words moved to a session that has seen nothing of the thread wake it with the line to read the thread first", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: sent.message.id });
@@ -255,6 +259,7 @@ describe("a thread the person starts", () => {
     expect(own).toMatchObject({ type: "reply", id: follow.id });
     expect(own!.continues_thread).toBeUndefined();
 
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     expect((await post(server, `/api/inbox/messages/${follow.id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);
     const [moved] = await poll(server, "ses-b", "pi", billing);
@@ -270,7 +275,8 @@ describe("a thread the person starts", () => {
   });
 
   test("the root and a follow-up for the same session in one poll: no 'another session' line, also after both are moved there", async () => {
-    const { server, billing } = await setup();
+    let now = 1_000_000;
+    const { server, billing } = await setup(undefined, () => now);
     await poll(server, "ses-a", "claude-code", billing);
     const sent = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-a" }, body: "Add a retry budget.", idempotency_key: "c1" })).json()) as { message: InboxMessage };
     const follow = ((await (await post(server, `/api/inbox/messages/${sent.message.id}/reply`, { words: "And log each retry.", idempotency_key: "r1" })).json()) as { reply: InboxMessage }).reply;
@@ -279,6 +285,7 @@ describe("a thread the person starts", () => {
     expect(both[1]!.continues_thread).toBeUndefined();
 
     // Both moved to B before anyone took them: B gets the root first, so the follow-up needs no line either.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, "ses-b", "pi", billing);
     for (const id of [sent.message.id, follow.id]) {
       expect((await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "pi", session: "ses-b" } })).status).toBe(200);

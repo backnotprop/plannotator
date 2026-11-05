@@ -25,6 +25,7 @@ import {
   type InboxReplyCommand,
 } from "@plannotator/shared/inbox/connection";
 import * as modContract from "../../apps/hook/hooks/mod/inbox-contract";
+import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
 
 const roots: string[] = [];
@@ -46,12 +47,12 @@ const OTHER_TAG = { host: "claude-code", session: OTHER, label: "Claude Code (ot
 const QUESTION = [":::question", "Route through the second region?", "", "- [ ] Yes", "- [ ] No", ":::"].join("\n");
 
 /** `undoMs`: the Undo window (the set-aside delay) of a 👍, a Mark read and a hand-off. */
-async function setup(undoMs = 60_000) {
+async function setup(undoMs = 60_000, sessionsNow?: () => number) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-reply-title-")));
   roots.push(root);
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data"), setAsideDelayMs: undoMs });
+  const server = await startInboxServer({ dataDir: join(root, "data"), setAsideDelayMs: undoMs, ...(sessionsNow ? { sessionsNow } : {}) });
   servers.push(server);
   const client = new Client({ name: "inbox-reply-title-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -330,11 +331,14 @@ describe("what is not a plain reply keeps the subject, in a named thread too", (
   });
 
   test("words moved to a session that has seen nothing of the thread", async () => {
-    const { server, project } = await setup();
+    let now = 1_000_000;
+    const { server, project } = await setup(undefined, () => now);
     await poll(server, OWNER, project);
     const started = await post(server, "/api/inbox/messages", { to: { session: OWNER }, body: "Add a retry budget.", idempotency_key: key() });
     await delivered(server, OWNER, started.message.id);
     const id = await personReplies(server, started.message.id, "And log each retry.");
+    // A move needs the session it waits on to have ended.
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     await poll(server, OTHER, project);
     await post(server, `/api/inbox/messages/${id}/to`, { to: { host: "claude-code", session: OTHER } });
     expect((await poll(server, OTHER, project))[0]).toMatchObject({ id, continues_thread: true, subject: "Add a retry budget" });

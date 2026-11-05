@@ -16,8 +16,8 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
+import { dirname, join } from "node:path";
+import type { InboxLaunchRecord, InboxQuestion } from "@plannotator/core/inbox-types";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { FAKE, fakeLaunchHost } from "../../tests/helpers/fake-launch-host";
@@ -329,6 +329,103 @@ describe("a second agent behind LaunchHost", () => {
     expect(await launch.runOf(one.id)).toMatchObject({ state: "stopped", stopped_by_person: true, cause: null });
   });
 
+  describe("a row's Session ended is about the session it names", () => {
+    const pickOf = (key: string, kind: InboxQuestion["kind"], prompt: string, label: string) => ({ v: 1 as const, key, kind, prompt, selected: [label] });
+    const question = (prompt: string, labels: string[]) => `:::question\n${prompt}\n${labels.map((label) => `- ${label}`).join("\n")}\n:::`;
+    /** A launch that started as L and stopped; `ended` are the sessions read as not there. */
+    async function stopped() {
+      const world = setup();
+      const { store, clock, project, fake, launch } = world;
+      const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+      const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+      const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+      launch.begin(root);
+      await until(() => !!store.message(root.id)!.launch!.session_ref);
+      const L = store.message(root.id)!.to!.session;
+      fake.poll(L, false, clock.now);
+      store.recordDelivery(root.id, { host: FAKE, session: L });
+      await fake.host.stop("f1");
+      clock.now += INBOX_RUN_START_GRACE_MS * 2;
+      const ended = new Set<string>([L]);
+      store.setDeliveryPresence({ connection: () => null, askerLive: (session) => !ended.has(session), launchResumes: (threadId, session) => launch.resumes(threadId, session) });
+      const agent = (session: string) => ({ kind: "agent" as const, host: FAKE, session, name: "Fake Agent" });
+      const says = (body: string, session: string, replyTo: string, key: string) => store.sendMessage({ project_id: project.id, author: agent(session), body, reply_to: replyTo, wakes: true, idempotency_key: key }).message;
+      const pick = (messageId: string, label: string) => {
+        const q = store.questionsOf(messageId)[0]!;
+        store.savePicks(messageId, [{ key: q.key, revision: q.revision, answer: pickOf(q.key, q.kind, q.prompt, label) }]);
+      };
+      return { ...world, root, L, ended, says, pick, mark: () => store.listRow(root.id)!.session_ended };
+    }
+
+    test("the stopped launched session asked and is answered, though a live agent wrote last: not ended", async () => {
+      const w = await stopped();
+      const asked = w.says(question("Which?", ["One", "Two"]), w.L, w.root.id, "a1");
+      const later = w.says("Tagged in.", "ses_t", asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+    });
+
+    test("another agent asked and ended, though the stopped launched session wrote last: ended", async () => {
+      const w = await stopped();
+      w.ended.add("ses_t");
+      const asked = w.says(question("Which?", ["One", "Two"]), "ses_t", w.root.id, "a1");
+      const later = w.says("Noted.", w.L, asked.id, "a2");
+      w.pick(asked.id, "One");
+      w.store.sendReply(later.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply aimed at another session that ended: ended, while the launched session stays stopped", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      w.ended.add("ses_c");
+      w.store.sendReply(said.id, { words: "For you.", idempotency_key: "k1", to: { host: FAKE, session: "ses_c" } });
+      expect(w.mark()).toBe(true);
+    });
+
+    test("a reply waiting on the stopped launched session: not ended; its launch deleted: ended", async () => {
+      const w = await stopped();
+      const said = w.says("Done.", w.L, w.root.id, "a1");
+      expect(w.mark()).toBeUndefined();
+      w.store.sendReply(said.id, { words: "Go on.", idempotency_key: "k1" });
+      expect(w.mark()).toBeUndefined();
+      await w.post(w.root.launch!.id, "delete");
+      expect(w.launch.resumes(w.root.id, w.L)).toBe(false);
+      expect(w.mark()).toBe(true);
+    });
+  });
+
+  test("only the session the launch started reads by its launch: a root moved to another session reads as that session", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    fake.host.start = async () => ({ ok: false, code: "missing", text: "Not installed." });
+    const failed = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(failed);
+    await until(() => !!store.message(failed.id)!.launch!.error);
+    const placeholder = store.message(failed.id)!.to!.session;
+    expect(launch.gone(failed.id, placeholder)).toBe(true);
+    store.readdressMessage(failed.id, { host: FAKE, session: "ses_c" });
+    expect(launch.gone(failed.id, "ses_c")).toBe(false);
+    expect(launch.resumes(failed.id, "ses_c")).toBe(false);
+  });
+
+  test("a started root moved away: the session it started still reads by its launch, the one it moved to does not", async () => {
+    const { store, project, fake, launch } = setup();
+    const target = launch.target({ launch: { agent: FAKE, project_id: project.id } })!;
+    const prepared = await launch.prepare(target, { name: "One", body: "One.", resolveProject: async () => project });
+    const root = store.startPersonThread({ project_id: project.id, body: "One.", to: prepared.to, idempotency_key: "send-1", launch: prepared.launch }).message;
+    launch.begin(root);
+    await until(() => !!store.message(root.id)!.launch!.session_ref);
+    const L = store.message(root.id)!.to!.session;
+    expect(store.message(root.id)!.launch!.session).toBe(L);
+    fake.poll(L, false, Date.now());
+    store.readdressMessage(root.id, { host: FAKE, session: "ses_c" });
+    expect(launch.resumes(root.id, L)).toBe(true);
+    expect(launch.resumes(root.id, "ses_c")).toBe(false);
+  });
+
   test("a scratch launch's Delete purges its folder through its host", async () => {
     const { store, fake, launch, post } = setup();
     const target = launch.target({ launch: { agent: FAKE, scratch: true } })!;
@@ -348,6 +445,8 @@ describe("a second agent behind LaunchHost", () => {
     const root = store.startPersonThread({ project_id: project.id, body: "Hello.", to: { host: "gone-agent", session: "session-g1" }, idempotency_key: "send-gone", launch: record }).message;
 
     expect(await launch.runOf(root.id)).toBeNull();
+    // Nothing here can start it again, so a reply to it does not read as doing so.
+    expect(launch.resumes(root.id, "session-g1")).toBe(false);
     expect(launch.attachOf(root.id)).toBeNull();
     expect(launch.signature()).toBe(`${record.id}:-`);
     expect(() => launch.sweep(true)).not.toThrow();
@@ -546,5 +645,86 @@ describe("Trust folder (`trustOffer`)", () => {
     expect(await launch.runOf(root.id, false)).toMatchObject({ untrusted: true, home_folder: true });
     expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed" });
     expect(startsOf(fake.calls)).toBe(1);
+  });
+});
+
+/**
+ * Which how-to Claude Code's real host and the engine pick for a start refused for trust (`RunLine` turns the flags into
+ * words: packages/inbox/runTrustHowto.test.tsx). The failure this catches: a folder whose trust would land on home, or
+ * `/`, told to run Claude Code there, which would trust all of home (or `/`); or anyone else losing the words that help them.
+ */
+describe("the trust how-to, from Claude Code's own trust key", () => {
+  const LAUNCH_ID = "lch_0123456789ABCDEFGHJKMNPQRS";
+  /** A launch of Claude Code in the folder `folderOf` names, refused for trust. An empty `.git` folder is enough: the key only looks for one. */
+  async function refusedIn(folderOf: (home: string, root: string) => string, options: { homeDir?: (home: string, root: string) => string; scratch?: boolean } = {}) {
+    const world = setup(options.homeDir ? { homeDir: options.homeDir } : {});
+    const folder = folderOf(world.home, dirname(world.home));
+    const at = new Date(world.clock.now).toISOString();
+    const project = world.store.ensureProject({ name: "here", root: folder });
+    const record = { id: LAUNCH_ID, agent: "claude-code", session_ref: null, folder, scratch: options.scratch === true, started_at: at } as const;
+    const root = world.store.startPersonThread({ project_id: project.id, body: "Tidy.", to: { host: "claude-code", session: `launch:${LAUNCH_ID}` }, idempotency_key: "howto", launch: record }).message;
+    world.store.settleLaunch(root.id, { error: { code: "untrusted", text: `${folder} isn't a trusted folder yet.`, at } });
+    const run = await world.launch.runOf(root.id, true);
+    // A guest reads the same sentence: the how-to is about the folder, not who is reading.
+    const guest = await world.launch.runOf(root.id, false);
+    if (!run?.trust) expect([guest?.trust_covers_home, guest?.home_folder]).toEqual([run?.trust_covers_home, run?.home_folder]);
+    return { untrusted: run?.untrusted, trust: run?.trust, covers: run?.trust_covers_home, home: run?.home_folder };
+  }
+  const homeRepo = (home: string) => mkdirSync(join(home, ".git"));
+  const inside = (home: string, ...parts: string[]) => {
+    const folder = join(home, ...parts);
+    mkdirSync(folder, { recursive: true });
+    return folder;
+  };
+  const linkTo = (home: string, root: string) => {
+    const link = join(root, "home-link");
+    symlinkSync(home, link);
+    return link;
+  };
+  const COVERS_HOME = { untrusted: true, trust: undefined, covers: true, home: undefined };
+  const HOME_SENTENCE = { untrusted: true, trust: undefined, covers: undefined, home: true };
+  const RUN_IT_THERE = { untrusted: true, trust: undefined, covers: undefined, home: undefined };
+
+  test("a folder with no repo of its own under a repo rooted at home, and home itself in that repo", async () => {
+    expect(await refusedIn((home) => (homeRepo(home), inside(home, "projects", "foo")))).toEqual(COVERS_HOME);
+    // Home in that repo carries both flags: a window from before the new one keeps its home sentence, never "run it here".
+    expect(await refusedIn((home) => (homeRepo(home), home))).toEqual({ ...COVERS_HOME, home: true });
+  });
+
+  test("the file-system root", async () => {
+    expect(await refusedIn(() => "/")).toEqual(COVERS_HOME);
+  });
+
+  test("home named through a link, or with a trailing slash, still finds a repo rooted there", async () => {
+    for (const homeDir of [linkTo, (home: string) => `${home}/`]) {
+      expect(await refusedIn((home) => (homeRepo(home), inside(home, "projects", "foo")), { homeDir })).toEqual(COVERS_HOME);
+    }
+  });
+
+  test("a scratch folder is judged by where its trust lands: the scratch root, under a repo rooted at home", async () => {
+    expect(await refusedIn((home) => (homeRepo(home), inside(home, "scratch", "one")), { scratch: true })).toEqual(COVERS_HOME);
+  });
+
+  test("home with no repo keeps its own sentence, however home or the folder is spelled (samePlace)", async () => {
+    expect(await refusedIn((home) => home)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => `${home}/`)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn(linkTo)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => home, { homeDir: (home) => `${home}/` })).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => home, { homeDir: linkTo })).toEqual(HOME_SENTENCE);
+  });
+
+  test("a project with its own repo under a repo rooted at home gets the button, and no home sentence", async () => {
+    const offered = await refusedIn((home) => {
+      homeRepo(home);
+      const folder = inside(home, "code", "ledger");
+      mkdirSync(join(folder, ".git"));
+      return folder;
+    });
+    expect(offered).toEqual({ untrusted: true, trust: { warning: null }, covers: undefined, home: undefined });
+  });
+
+  test("everyone else with no button keeps the words that help: a folder above home, and a scratch root at home with no repo", async () => {
+    expect(await refusedIn((_home, root) => root)).toEqual(RUN_IT_THERE);
+    expect(await refusedIn((home) => inside(home, "one"), { scratch: true })).toEqual(RUN_IT_THERE);
   });
 });
