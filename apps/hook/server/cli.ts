@@ -1,8 +1,9 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
-import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
 import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
+import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
@@ -218,7 +219,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
     "  plannotator inbox call [--session <id>] <action> [<json> | -]",
     "  plannotator t3 login | logout --url <T3 MCP URL>",
-    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
@@ -257,13 +258,14 @@ export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>] [--initiative <name>]",
   "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
-  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
+  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>] [--initiative <name>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
   "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]      (moves it to done)",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
+  "  plannotator card initiative_delete <name or ini_id>      (its cards stay, in no initiative)",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
   "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
@@ -273,6 +275,7 @@ export const CARD_COMMAND_USAGE = [
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
+  `--initiative: ${INBOX_CARD_INITIATIVE_FIELD} ${INBOX_CARD_INITIATIVE_RULE} ${INBOX_CARD_INITIATIVE_CLEAR_OUT}`,
   "When you move a card to in_review, link the Inbox thread where the person makes the call (--thread), so \"You: …\" opens it.",
   "--ref: an issue or PR as owner/repo#123, or any http(s) link with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; a Jira or YouTrack issue link shows its key; any other link shows as a plain link.",
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
@@ -282,40 +285,11 @@ export const CARD_COMMAND_USAGE = [
 
 /**
  * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
- * Unreleased (HIDDEN_SUBCOMMANDS). DRAFT: every word below needs the owner's
- * approval before Shape ships (approval "shape-living-board", "Still needs
- * its own approval").
+ * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
+ * text (packages/core/shape-skill.ts): the welcome and the commands, then the
+ * drawing guide the Inbox's `/shape` skill ends with too.
  */
-export const SHAPE_COMMAND_USAGE = [
-  "DRAFT: this text is not approved yet.",
-  "",
-  "Usage:",
-  "  plannotator shape update --file <board.json> [--id <shp_id> --base <n>] [--thread <msg_id>] [--through <msg_id>] [--project <folder>]",
-  "  plannotator shape read [<shp_id>] [--version <n>] [--notes]",
-  "  plannotator shape drawing [<shp_id>]",
-  "  plannotator shape answer [<shp_id>] --re <shn_id> --text '<answer>'",
-  "  plannotator shape done [<shp_id>]",
-  "  plannotator shape list [--all] [--json]",
-  "",
-  "A shape is a board you draw for the person: a Picture, How it works, Requirements",
-  "and Code, with numbered references. Each update stores a new version of the whole board.",
-  "",
-  "update   Stores the board in <board.json>. Without --id it makes a new shape and",
-  "         prints its id. With --id, --base is the version you drew from; if the shape",
-  "         changed since, the update is refused and the latest version is printed.",
-  "         Keep the same ids (data-mark, requirement ids) for the same parts, so the",
-  "         board redraws only what changed.",
-  "read     Prints the latest version (or --version <n>). --notes also prints the notes",
-  "         that wait for you (Change it and Ask) and marks them as received.",
-  "drawing  Tells the board you are drawing a new version (until it lands, at most 10 minutes).",
-  "answer   Answers the person's Ask (its id is in read --notes). Change it notes need",
-  "         no answer: draw the change as a new version.",
-  "done     Finishes the shape. Do this only when the person says so.",
-  "list     Lists the active shapes, newest change first (--all: finished ones too).",
-  "",
-  "Without <shp_id>, read, drawing, answer and done use your session's newest active shape,",
-  "else this project's.",
-].join("\n");
+export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback
@@ -422,6 +396,7 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
+  "  plannotator inbox permission-hook",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
   "                                  or open the one already running",
@@ -460,6 +435,9 @@ export const INBOX_COMMAND_USAGE = [
   "                                  files (claude-code, codex, gemini, qwen, pi,",
   "                                  opencode, comma-separated). Only with the",
   "                                  person's yes; starts nothing.",
+  "  plannotator inbox permission-hook",
+  "                                  Claude Code's permission hook in sessions the Inbox",
+  "                                  started (their settings file runs it). Never run it.",
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",

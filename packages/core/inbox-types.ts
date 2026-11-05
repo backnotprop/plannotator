@@ -19,7 +19,9 @@ import type { InboxAnnotationRecord, InboxAttachment, InboxAttachmentKind, Inbox
 import type { InboxDeliverNowBy, InboxRowDelivery } from "./inbox-delivery";
 import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
+import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
+import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
@@ -37,12 +39,16 @@ export * from "./inbox-t3";
 export * from "./inbox-cards";
 // Thread steps (approval "inbox-thread-steps"), the same way.
 export * from "./inbox-steps";
+// The Board's initiatives (approval "board-initiatives"), the same way.
+export * from "./inbox-initiatives";
 // The surface bridge's messages (the phone, PLAN step S1), the same way.
 export * from "./inbox-surface-bridge";
 // Tidy (the list header's and the Board's ⋮ menu), the same way.
 export * from "./inbox-tidy";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
+// Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
+export * from "./inbox-reviews";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -53,8 +59,8 @@ export const INBOX_RECORD_VERSION = 1 as const;
 export { ulid } from "./ulid";
 import { ulid } from "./ulid";
 
-/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread. */
-export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "ibx" | "stp";
+/** `upl`: a file the person uploaded for a message; `drf`: a draft of one (compose); `crd`: a Board card; `stp`: a session's steps in a thread; `ini`: a Board initiative; `lch`: a launch (an agent started from the Inbox). */
+export type InboxIdPrefix = "msg" | "prj" | "ses" | "dec" | "dev" | "upl" | "drf" | "crd" | "tdy" | "lch" | "ibx" | "stp" | "ini";
 
 export function inboxId(prefix: InboxIdPrefix, now?: number): string {
   return `${prefix}_${ulid(now)}`;
@@ -73,10 +79,14 @@ const ID_RE: Record<InboxIdPrefix, RegExp> = {
   crd: /^crd_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One press of Tidy (packages/core/inbox-tidy.ts). */
   tdy: /^tdy_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** An agent the Inbox started (launch; packages/server/inbox-launch.ts). */
+  lch: /^lch_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** An Inbox: the stable id other machines' links key on (packages/server/inbox-links.ts). */
   ibx: /^ibx_[0-9A-HJKMNP-TV-Z]{26}$/,
   /** One agent session's steps in one thread (packages/core/inbox-steps.ts). */
   stp: /^stp_[0-9A-HJKMNP-TV-Z]{26}$/,
+  /** A Board initiative (packages/core/inbox-initiatives.ts). */
+  ini: /^ini_[0-9A-HJKMNP-TV-Z]{26}$/,
 };
 
 export function isInboxId(prefix: InboxIdPrefix, value: unknown): value is string {
@@ -360,6 +370,23 @@ export function inboxAgentName(author: { kind: string; host?: string | null; nam
   return "An agent";
 }
 
+/**
+ * What was on screen when the person sent a reply from full screen's floating box. Context for the agent, not a
+ * choice: it never touches the words, and only the agent's read gets it (`inboxViewingLine`), never the thread.
+ */
+export interface InboxReplyViewing {
+  /** The open file's name. */
+  name: string;
+  /** The message that carries the file. */
+  message_id: string;
+  /** That message's time, in the person's own time zone. */
+  time?: string;
+  /** A page the attached HTML page links to, when that page is the one on screen. */
+  page?: string;
+  /** They had the version sent open, and the file has changed since. */
+  as_sent?: true;
+}
+
 /** A message or reply. A thread is its root message's id. */
 export interface InboxMessage {
   id: string;
@@ -445,6 +472,12 @@ export interface InboxMessage {
    */
   agent_checked_seq?: number | null;
   agent_checked_at?: string | null;
+  /**
+   * The host of the agent whose read moved `agent_checked_seq`, when it is known not to be the agent the reply was
+   * for (another host's session, new to the thread, settled a reply no connection wakes). Absent otherwise, and on a
+   * thread from before this was recorded: those keep "Delivered".
+   */
+  agent_checked_by?: string | null;
   /**
    * The files an agent attached (send_message's `attachments`), recorded at
    * send time and read only by their ids (see inbox-attachments.ts). Added in
@@ -594,6 +627,14 @@ export interface InboxMessage {
    */
   started_by_person?: true;
   /**
+   * On a person message a tailnet guest wrote (a login `inboxTailscaleAllow`
+   * let in that is not this computer's owner): a reply, a re-ask, a new
+   * message or a thread started in compose. It is kept and delivered as any,
+   * but never starts a stopped launched session again. Set once, when the
+   * message is written; absent on the owner's and on every other message.
+   */
+  by_guest?: true;
+  /**
    * On the root of a thread the person started with compose's Board chip on
    * (approval "inbox-compose-board-chip", 2026-10-27): the person asked the
    * agent to track the work on the Board. The body stays as typed; what the
@@ -602,6 +643,13 @@ export interface InboxMessage {
    * other message.
    */
   board_request?: true;
+  /** On a person's reply sent from full screen's floating box: the file on screen. Rendered for the agent at read time; the body never holds it. */
+  viewing?: InboxReplyViewing;
+  /**
+   * On the root of a thread the person started by launching an agent (To:
+   * "New Claude Code session"). Absent on every other message.
+   */
+  launch?: InboxLaunchRecord;
   /**
    * On the root of a thread the person started: who gave it its name, the
    * thread chip (approval "inbox-agent-names-own-thread"). The person may name
@@ -865,9 +913,93 @@ export interface InboxAddressee {
   session: string;
 }
 
+/**
+ * Launch (start an agent from compose): the agents the Inbox can start a
+ * session of, one per line. PR 1: Claude Code only.
+ */
+export type InboxLaunchAgent =
+  | "claude-code";
+
+/** Why a launch did not start (`InboxLaunchRecord.error`): `untrusted` folder, the CLI `missing`, or anything else. */
+export interface InboxLaunchError {
+  code: "untrusted" | "missing" | "failed";
+  /** One sentence for the run line (screen 14). */
+  text: string;
+  at: string;
+}
+
+/**
+ * On the root of a thread the person started by launching an agent: written
+ * with the root, then once more when the host answers (`session_ref`, or
+ * `error`). Live state is never stored; the server computes `InboxRun` on
+ * read. Per-launch files live in `<dataDir>/inbox/launch/<id>/`.
+ */
+export interface InboxLaunchRecord {
+  id: string;
+  agent: InboxLaunchAgent;
+  /** The host's own short id (`claude attach <ref>`); null until it started. */
+  session_ref: string | null;
+  /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
+  folder: string;
+  /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
+  scratch: boolean;
+  /**
+   * A scratch folder's identity when the Inbox made it (`<dev>:<ino>`): Delete purges and removes the folder
+   * only while the same folder is still there, never one made later at that path.
+   */
+  scratch_inode?: string;
+  started_at: string;
+  /** Started with Settings → Agents' full permissions (bypass mode): the thread's header says so. */
+  full_permissions?: true;
+  /** Started in the person's own Claude `permissions.defaultMode` (no `--permission-mode`). Neither this nor full: auto mode. */
+  own_mode?: true;
+  /**
+   * The person recorded Claude Code's bypass consent when the launch was made: it starts with
+   * `--allow-dangerously-skip-permissions`, and its card offers Full permissions. Absent (an older launch
+   * too): no Full permissions.
+   */
+  bypass_available?: true;
+  error?: InboxLaunchError | null;
+  /** The ⋯ menu's Delete removed the session and its files; the thread stays, with no run line. */
+  deleted_at?: string;
+}
+
+/** The run line's state (`packages/core/inbox-run-line.ts`). Absent: no line (the agent is resting). */
+export type InboxRunState = "starting" | "working" | "waiting_answer" | "waiting_terminal" | "stopped" | "failed" | "missing";
+
+/** What a launched thread's run line shows (the thread route's `run`). */
+export interface InboxRun {
+  state: InboxRunState;
+  launch_id: string;
+  agent: InboxLaunchAgent;
+  /** The project's name (the line's "in <project>"). */
+  project: string;
+  folder: string;
+  /** Since when: the start (starting), the turn (working), the prompt (waiting_answer, waiting_terminal), the stop. */
+  since: string | null;
+  /** `starting` after a reply's respawn ("Starting … again"). */
+  again: boolean;
+  /** `stopped`: the person pressed Stop (the line names the time). */
+  stopped_by_person: boolean;
+  /** `failed`: the cause in words; `stopped`: the host's note, when it has one (else null); `missing`: null. */
+  cause: string | null;
+  /** `failed` because the folder is not trusted: Open in Terminal runs plain `claude` there. */
+  untrusted: boolean;
+  /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
+  home_folder?: true;
+  /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
+  trust_covers_home?: true;
+  /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
+  trust?: { warning: string | null };
+  /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
+  attach_command: string | null;
+}
+
 /** How a person's reply or New message reached an agent session (`InboxMessage.delivery`). */
 export interface InboxDelivery {
   state: "delivered";
+  /** Settled by a read of another agent (its host), not by the session named here (`InboxMessage.agent_checked_by`). */
+  read_by?: string | null;
   /** The connection's host, e.g. `claude-code`. */
   host: string;
   /** The session it was delivered to (the asking message's `author.session`, or the message's `to.session`). */
@@ -915,6 +1047,13 @@ export interface InboxGuideRef {
   review?: true;
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
+  /**
+   * A review's source (Reviews, approval "inbox-reviews-page"): the
+   * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
+   * git ref), each one line. Only with `review`; absent on reviews sent
+   * before it (the Reviews index reads those from the snapshot once).
+   */
+  source?: InboxReviewSource;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
@@ -1376,6 +1515,11 @@ export interface InboxListRow extends InboxThreadSummary {
      */
     wakes?: boolean;
     /**
+     * Settled by a read of another agent than the one it was for: that agent's host ("Read by Claude Code, 6:25 PM").
+     * Absent otherwise, and on a thread from before this was recorded.
+     */
+    read_by?: string;
+    /**
      * When the reply tags agents (`InboxMessage.tags`): every session it goes
      * to, the owner first, each with its own delivery ("1 of 3 delivered").
      * `checked_at` is then set once every recipient a connection wakes has
@@ -1404,6 +1548,12 @@ export interface InboxListRow extends InboxThreadSummary {
    * on every other thread and from an older Inbox.
    */
   addressee?: InboxAddressee | null;
+  /**
+   * On a launched thread (the window's list only): the one muted word after
+   * the agent's mark ("Starting", "Working"). Absent otherwise and from an
+   * older Inbox.
+   */
+  run?: "starting" | "working" | null;
   /**
    * When the person marked the thread read (Mark read), while it still holds:
    * no message but a set-aside note since. The row is Quiet. Null otherwise.
@@ -1554,10 +1704,11 @@ export interface InboxThread {
 
 /**
  * `card`: a Board card (approval "inbox-board"); `steps`: one agent session's
- * steps in a thread (approval "inbox-thread-steps"). A reader that does not
- * know a kind skips its lines.
+ * steps in a thread (approval "inbox-thread-steps"); `initiative`: a Board
+ * initiative (approval "board-initiatives"). A reader that does not know a
+ * kind skips its lines.
  */
-export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps";
+export type InboxRecordKind = "project" | "message" | "question" | "annotation" | "card" | "steps" | "initiative";
 
 /** One line of the store: a full snapshot of one record. */
 export type InboxLine =
@@ -1566,7 +1717,8 @@ export type InboxLine =
   | { v: 1; seq: number; at: string; kind: "question"; id: string; record: InboxQuestionRecord }
   | { v: 1; seq: number; at: string; kind: "annotation"; id: string; record: InboxAnnotationRecord }
   | { v: 1; seq: number; at: string; kind: "card"; id: string; record: InboxCard }
-  | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps };
+  | { v: 1; seq: number; at: string; kind: "steps"; id: string; record: InboxSteps }
+  | { v: 1; seq: number; at: string; kind: "initiative"; id: string; record: InboxInitiative };
 
 // ─────────────────────────────── Health ───────────────────────────────
 
@@ -2243,10 +2395,26 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * the pictures rule, measured again the same way: 11,468 → 11,410 bytes
  * (-58, -14 tokens), so 11,456 with Pi's wrapper (checked within 5% by
  * inbox-board-switch.test.ts).
+ * Agents and initiatives (the card action's `initiative` field, carrying
+ * INBOX_CARD_INITIATIVE_RULE; approval "board-initiatives"): measured on Pi
+ * with the cost test, main 11,581 → 12,005 bytes (+424); the description
+ * stays 1,940 characters; Board off unchanged. Tokens scaled at about 4
+ * bytes a token for the added prose (+137 from the stated 11,456), so 3,273.
+ * With the op `initiative_delete` (its name in the enum, +20 bytes): 12,025
+ * bytes, tokens scaled the same way (+5), so 3,278. The sentence on clearing
+ * out is not in the tool: `plannotator card --help` and a per-call nudge.
+ * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
+ * its `until` field; no line in the description): 10,095 → 10,248 bytes with
+ * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
+ * Both landed together (snooze_thread above, 11,779 bytes, plus the +444 of initiatives above): 12,223 bytes,
+ * tokens +142, so 3,366; the board-switch test checks the bytes within 5%.
  */
-const INBOX_TOOL_COST_NOW = { bytes: 10096, tokens: 2750 };
+const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11456, tokens: 3136 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 12223, tokens: 3366 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
@@ -2465,6 +2633,43 @@ export interface InboxComposeSession {
 export interface InboxComposeProject {
   project: { id: string | null; name: string; root: string };
   sessions: InboxComposeSession[];
+}
+
+/** A press of Trust and start, on `POST /api/inbox/messages`'s `to.launch.trust`: what the person was offered. The press is the consent. */
+export interface InboxLaunchTrust {
+  /** The folder the trust lands on. */
+  folder: string;
+  /** Its reading as the window had it: `[]` when none was read yet, so a folder with any fact answers `trust_warning_changed`. */
+  facts: string[];
+}
+
+/**
+ * A folder compose would Trust and start. Every entry has `folder`, the one the trust lands on (a repository's root, a
+ * scratch root), which can differ from the folder picked. Only the folder picked in To has `facts`, the short lines the
+ * details show (none: a clean folder, no circle), and `warns`: a fact beyond "the whole repository" (the warning colour).
+ */
+export interface InboxLaunchUntrusted {
+  folder: string;
+  facts?: string[];
+  warns?: boolean;
+}
+
+/**
+ * Compose's launch block (`GET /api/inbox/sessions` `launch`, only while
+ * `inboxLaunch.enabled`): the agents To offers to start (only those
+ * available: no grey rows), and the projects the folder menu lists, the most
+ * recently active first, each with whether its folder is still there.
+ */
+export interface InboxComposeLaunch {
+  /**
+   * `scratch_trusted: false`: the agent does not trust the scratch root yet. `untrusted`: only for the owner's window,
+   * the folders the agent does not trust and the owner can trust from here, by project id, the scratch root under
+   * `INBOX_SCRATCH_PICK`. No entry for a trusted folder, the home folder, the root or a folder above home.
+   */
+  agents: { agent: InboxLaunchAgent; name: string; scratch_trusted?: boolean; untrusted?: Record<string, InboxLaunchUntrusted> }[];
+  projects: { id: string; name: string; root: string; exists: boolean }[];
+  /** The folder menu's "New scratch folder": the root new scratch folders go in (Settings → Agents). Absent from an older Inbox. */
+  scratch?: { root: string };
 }
 
 /**

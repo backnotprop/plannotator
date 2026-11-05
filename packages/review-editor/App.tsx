@@ -239,7 +239,7 @@ import type { ChangedFileView } from './components/FileViewSwitch';
 import type { CodeFileAnnotationInput, CodeFileTokenTarget } from '@plannotator/ui/components/CodeFilePopout';
 import type { DiffFile, AnnotationScrollTarget } from './types';
 import { annotationMatchesPrScope, proseAnnotationMatchesPr } from './utils/annotationScope';
-import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from './utils/codeAnnotationAnchor';
+import { annotationNavigation, reanchorCodeAnnotations, restorableViewedFiles } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import { localReviewDraftTransport, withLocalReviewTarget } from './utils/localReviewDraft';
 import type { DiffOption, WorktreeInfo, GitContext, SinceBaseSections, CommitDiffInfo, ReviewSourceKind } from '@plannotator/shared/types';
 import { SectionsPanel } from './components/SectionsPanel';
@@ -5032,16 +5032,17 @@ const ReviewApp: React.FC = () => {
   // the sidebar's existing delete); like it, it is deliberately NOT
   // withPRContext-stamped, so it survives an in-place PR switch (see the
   // factory's doc in reviewDecision.ts).
-  const handleAddGeneralComment = useCallback((text: string) => {
+  const handleAddGeneralComment = useCallback((text: string): boolean => {
     // Mirrors the 'note' route's guard: a commit during an in-flight decision
     // POST would append an annotation the captured body never carries — the
     // server then deletes the draft and the comment vanishes from wire and
     // archive alike.
-    if (submitted || busyWithDecision) return;
+    if (submitted || busyWithDecision) return false;
     const note = createGeneralReviewComment(text, identity);
-    if (!note) return;
+    if (!note) return false;
     if (localDraftTarget) note.localReviewTarget = localDraftTarget;
     addCodeAnnotationsWithHistory([note]);
+    return true;
   }, [identity, addCodeAnnotationsWithHistory, busyWithDecision, submitted, localDraftTarget]);
 
   // A global comment chosen in the guide's list: the sidebar's Annotations tab

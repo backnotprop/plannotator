@@ -185,7 +185,7 @@ describeCommentSubmitKeys('review sidebar general comment', async (text) => {
       onSelectAnnotation={() => {}}
       onNavigateToAnnotation={() => {}}
       onDeleteAnnotation={() => {}}
-      onAddGeneralComment={(value) => added.push(value)}
+      onAddGeneralComment={(value) => { added.push(value); }}
     />,
   );
   await act(async () => must<HTMLButtonElement>('[data-add-general-comment]').click());

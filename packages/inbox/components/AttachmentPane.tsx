@@ -24,6 +24,7 @@ import type { Annotation, EditorMode, InputMethod } from '@plannotator/ui/types'
 import { annotationOwnsHighlight } from '@plannotator/ui/utils/annotationOwnsHighlight';
 import { groupAnnotationsByDocument, type AnnotationScope } from '@plannotator/ui/utils/annotationScope';
 import { InboxApiError, type AttachmentView, type LinkedPageView } from '../api';
+import { attachmentDrawReady } from '../threadDrawReady';
 import { selectionOnPhrase, useInboxFileSource } from '../fileSource';
 import { folderOf, resolveInboxHtmlLink } from '../htmlLinks';
 import { htmlAssetRouteFromDocument } from '@plannotator/ui/utils/htmlLinkNavigation';
@@ -66,13 +67,15 @@ import { forgetComposerOpened, pickComposerMode, setComposerMinimized } from '..
 import { useHtmlPageComment } from './HtmlPageComment';
 import { releaseWindowZoom, useWindowPinched } from '../windowPinch';
 import { FilePeek, peekSheetHost } from './AttachmentStepper';
+import { CommentCount, EarlierSection, commentsLabel } from './EarlierSection';
+import { earlierCommentsOn } from '../earlierComments';
 import { FullScreenMore } from './OpenIn';
 import { fileSwipeMode, prefersReducedMotion, useFileSwipe } from '../fileSwipe';
 import { FileSwipeCard } from './FileSwipeCard';
 import { ImageSwipePeek, isImageStep } from './ImageSwipePeek';
 import { OptionCaption } from './OptionCaption';
 import { FIRST_OPTION_NOTE, LAST_OPTION_NOTE, optionAnnouncement, type OptionSet } from '../optionSets';
-import { createPortal } from 'react-dom';
+import { createPortal, flushSync } from 'react-dom';
 import type { Notice } from './Markup';
 import { MarkupPicture } from './Markup';
 import { isWordlessMarkup, MARKUP_ONLY_TEXT } from '../markup';
@@ -170,6 +173,8 @@ export interface AttachmentPaneProps {
   attachments: readonly InboxAttachmentState[];
   /** The thread's annotations waiting for a Send. */
   records: readonly InboxAnnotationRecord[];
+  /** The person's comments on the thread's files that a Send already carried (earlierComments.ts). */
+  earlierRecords?: readonly InboxAnnotationRecord[];
   /**
    * Tag agents with `@` in a comment (approval "inbox-tag-agents"): markdown, text and HTML files. The
    * image, video, code and diagram comment boxes take none yet.
@@ -418,7 +423,10 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     if (!readsText) return;
     source
       .view(attachment, effectiveVersion)
-      .then((next) => {
+      .then(async (next) => {
+        // Its code's grammars and KaTeX are chunks loaded on first use (#2593): the file draws once they are in,
+        // so its code paints highlighted and its math typeset, never plain first (threadDrawReady.ts).
+        await attachmentDrawReady(kind, attachment.name, next.text, next.text.length <= CODE_HIGHLIGHT_MAX_CHARS);
         if (!cancelled) setView(next);
       })
       .catch((cause) => {
@@ -464,6 +472,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
    * of full screen starts showing.
    */
   const [toolbar, setToolbar] = useState<ToolbarState>('pinned');
+  // Earlier comments: what the person said about this file before, under the current ones in the comments column.
+  const earlierReplies = useMemo(() => earlierCommentsOn(props.earlierRecords ?? [], attachment), [props.earlierRecords, attachment]);
+  const earlierCount = useMemo(() => earlierReplies.reduce((sum, reply) => sum + reply.comments.length, 0), [earlierReplies]);
   const barRef = useRef<FullViewBarHandle>(null);
   /** What gathered the tools: back from the corner, focus returns there (the composer's field, else »). */
   const gatheredFrom = useRef<'bar' | 'composer'>('bar');
@@ -904,6 +915,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   const focusComposer = () => {
     const area = unsavedComposer(sectionRef.current, savedTextRef.current);
     if (!area) return;
+    // A phone's comments sheet hides the card (inbox.css): it closes first, so the words can take focus.
+    if (phone && sheet) flushSync(() => setSheet(false));
     const focusAt = (field: HTMLTextAreaElement) => {
       field.focus();
       field.setSelectionRange(field.value.length, field.value.length);
@@ -1290,7 +1303,9 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     let cancelled = false;
     source
       .linkedPage(attachment, relative)
-      .then((page) => {
+      .then(async (page) => {
+        // A linked Markdown page waits for its code and math as the file does.
+        if (page.html === null) await attachmentDrawReady('markdown', page.name, page.text);
         if (cancelled) return;
         setLinkedStack((stack) => [...stack.filter((p) => p.attachmentId === attachment.id), { ...page, relative, hash, attachmentId: attachment.id }]);
         announce(`${page.name}. It is not attached, so comments are off.`);
@@ -1644,8 +1659,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     barRef.current?.hide();
   }, []);
   const composerValue = useMemo<FullScreenComposerValue | null>(
-    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', onGather: gatherFromComposer } : null),
-    [hasComposer, props.composer, shownToolbar, gatherFromComposer],
+    () => (hasComposer && props.composer ? { ...props.composer, tucked: shownToolbar === 'tucked', covered: phone && sheet, onGather: gatherFromComposer } : null),
+    [hasComposer, props.composer, shownToolbar, phone, sheet, gatherFromComposer],
   );
   /** Back from the corner: focus where the person gathered from. The card's field, when it was the card's ⌄. */
   const restoreTarget = () => {
@@ -1693,8 +1708,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
   }, [props.records, props.attachments, props.projectRoot, attachment]);
   const currentKey = recordKey(attachment.path, annotationVersion);
   const otherFiles = documents.some((d) => d.path !== currentKey);
-  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list.
-  const hasPanel = !isDownload || otherFiles;
+  // A PDF or any other download takes no comments: no panel (nor a Comments button) unless other files have comments to list, or it has earlier ones.
+  const hasPanel = !isDownload || otherFiles || earlierCount > 0;
   const groups = useMemo(() => groupAnnotationsByDocument(documents, currentKey), [documents, currentKey]);
   const openInDocument = (_path: string, id: string) => {
     const record = props.records.find((r) => r.id === id);
@@ -1807,6 +1822,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
     .join(', ');
   /** The thread's annotations on files other than this one (the foot of the drawer says so). */
   const elsewhere = props.records.filter((r) => recordKey(r.path, r.version) !== currentKey).length;
+  /** This file has earlier comments and no current ones: nothing may read as if they are gone ("Comments 0", "No annotations yet"). */
+  const onlyEarlier = earlierCount > 0 && annotations.length === 0;
   /** Full screen's ⋯ offers the other version, as the changed chip does. */
   const versionAction = versionChip?.action ? { label: versionChip.action.label, onSelect: () => chooseVersion(versionChip!.action!.to) } : null;
   /** The file changed since it was sent, or is gone: the tucked handle carries an amber dot. */
@@ -1877,6 +1894,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             hasPanel
               ? {
                   count: annotations.length,
+                  earlier: earlierCount,
                   open: panelOpen,
                   controls: sheetId,
                   onToggle: togglePanel,
@@ -1984,11 +2002,11 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               }}
               aria-expanded={sheet}
               aria-controls={sheetId}
-              aria-label={`Comments, ${annotations.length}`}
+              aria-label={commentsLabel(annotations.length, earlierCount)}
               data-annotations-sheet=""
             >
               <Icon name="comment" size={15} />
-              {annotations.length}
+              <CommentCount count={annotations.length} earlier={earlierCount} />
             </button>
           )}
           {!props.fullLocked && (
@@ -2358,7 +2376,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
           {(folded || full) && (
             <div className="ib-sheet-h">
               <b>Comments</b>
-              <span className="ib-mut">{annotations.length}</span>
+              {!onlyEarlier && <span className="ib-mut">{annotations.length}</span>}
               <span className="ib-sp" />
               {isVideo && <span className="ib-mut ib-sheet-note">By time</span>}
               <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
@@ -2372,6 +2390,21 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
             // A linked page takes no comments: the hint says where they can be written instead.
             emptyHint={linkedTop ? `Comment on ${attachment.name}, not on this page` : isImage ? 'Comment below the image' : isVideo ? 'Pause at a moment and comment below the film' : isCode ? 'Click a line to comment' : undefined}
             isOpen
+            hideEmptyMessage={earlierCount > 0}
+            timelineFooter={
+              earlierCount > 0 ? (
+                <EarlierSection
+                  // Each file and version starts by the fold rule.
+                  key={`${attachment.id}:${annotationVersion}`}
+                  replies={earlierReplies}
+                  count={earlierCount}
+                  current={annotations.length}
+                  // Closed, the column is hidden: a long list waits to be seen before it is drawn.
+                  shown={!(drawerMode || sheetMode) || panelOpen}
+                  inAllFiles={otherFiles && scope === 'all'}
+                />
+              ) : undefined
+            }
             annotations={annotations}
             blocks={blocks}
             // A film's comments read by the moment they are at, each with its time (a click seeks there).
@@ -2475,10 +2508,12 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name="chevD" size={13} />
                 </button>
               )}
+              {!(onlyEarlier && props.strip.picks === 0 && props.strip.annotations === 0) && (
               <p className="ib-fvsend" data-strip-chip="">
                 <b>{chipText}</b> {props.strip.picks === 0 && props.strip.annotations === 1 ? 'rides' : 'ride'} your next Send to {props.agent}.
                 {elsewhere > 0 && ` ${elsewhere} ${elsewhere === 1 ? 'is' : 'are'} on other files.`}
               </p>
+              )}
               <div className="ib-fvacts">
                 <button type="button" className="ib-btn ib-sm ib-pri" onClick={() => leave(null, props.strip.onWriteReply)}>
                   <Icon name="reply" size={14} />

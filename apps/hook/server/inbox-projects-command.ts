@@ -17,6 +17,7 @@
 import { type InboxTidyCombine, isInboxId } from "@plannotator/core/inbox-types";
 import type { InboxRegistryEntry } from "@plannotator/shared/inbox/registry";
 import { hasHelpFlag, INBOX_PROJECTS_USAGE } from "./cli";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 /** One request never waits longer: a wedged Inbox must not hang the agent. */
 const REQUEST_TIMEOUT_MS = 90_000;
@@ -75,7 +76,7 @@ export interface ProjectsCommandDeps {
   ensureRunning: () => Promise<InboxRegistryEntry>;
   /** This program as a shell line, for the commands the answers print. Default `plannotator`. */
   self?: string;
-  out?: (text: string) => void;
+  out?: (text: string) => void | Promise<void>;
   err?: (text: string) => void;
   /** Tests: how long one request, and a list's wait for the repositories, may take. */
   timeoutMs?: number;
@@ -106,11 +107,11 @@ function listText(folders: readonly Folder[], suggestions: readonly InboxTidyCom
 
 /** Run `plannotator inbox projects …`; resolves to the exit code. */
 export async function runInboxProjectsCommand(argv: readonly string[], deps: ProjectsCommandDeps): Promise<number> {
-  const out = deps.out ?? ((text: string) => void process.stdout.write(text));
+  const out = deps.out ?? writeWholeToStdout;
   const err = deps.err ?? ((text: string) => void process.stderr.write(text));
   const self = deps.self ?? "plannotator";
   if (hasHelpFlag([...argv])) {
-    out(`${INBOX_PROJECTS_USAGE}\n`);
+    await out(`${INBOX_PROJECTS_USAGE}\n`);
     return 0;
   }
   const parsed = parseProjectsCommand(argv);
@@ -162,7 +163,7 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
     if (parsed.op === "list") {
       const { suggestions, loading } = await suggestionsOf();
       const projects = folders.map(({ id, name, root, threads, combined }) => ({ id, name, root, threads, ...(combined ? { combined } : {}) }));
-      print({ projects, suggestions, ...(loading ? { suggestions_loading: true } : {}) }, listText(folders, suggestions, loading, self));
+      await print({ projects, suggestions, ...(loading ? { suggestions_loading: true } : {}) }, listText(folders, suggestions, loading, self));
       return 0;
     }
 
@@ -173,7 +174,7 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
     const name = head?.id === project ? head.name : (head?.combined?.find((member) => member.id === project)?.name ?? project);
     const into = parsed.op === "combine" ? parsed.into : null;
     if (into !== null && into !== project && head && head.id !== project && head.id === headOf(into)?.id) {
-      print({ project: head, changed: false }, `${name} is already in ${head.name}. Nothing changed.\n`);
+      await print({ project: head, changed: false }, `${name} is already in ${head.name}. Nothing changed.\n`);
       return 0;
     }
 
@@ -187,7 +188,7 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
       return refused(code, String(answer.body?.error ?? "The projects did not change."));
     }
     if (into !== null) {
-      print({ project: shown, changed: true }, `Combined ${name} into ${shown.name}. To undo: ${self} inbox projects undo ${project}\n`);
+      await print({ project: shown, changed: true }, `Combined ${name} into ${shown.name}. To undo: ${self} inbox projects undo ${project}\n`);
       return 0;
     }
     // The route answers 200 and writes nothing for a project that is not combined, which must not read as done.
@@ -196,7 +197,7 @@ export async function runInboxProjectsCommand(argv: readonly string[], deps: Pro
       return refused("not_combined", `${name} is not combined into another project.${members ? ` In it: ${members}. Undo one of those.` : ""}`);
     }
     const kept = shown.combined?.map((member) => member.name).join(", ");
-    print({ project: shown, changed: true }, `${shown.name} is its own project again${kept ? `, with ${kept} still combined into it` : ""}.\n`);
+    await print({ project: shown, changed: true }, `${shown.name} is its own project again${kept ? `, with ${kept} still combined into it` : ""}.\n`);
     return 0;
   } catch (error) {
     err(`Plannotator Inbox did not answer: ${error instanceof Error ? error.message : String(error)}\n`);

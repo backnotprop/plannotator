@@ -59,6 +59,8 @@ export interface ShapeHost {
   assetUrl?(id: string, src: string): string;
   /** A file's text, for a file reference and the Code view's whole-file viewer. */
   readFile?(id: string, path: string): Promise<string | null>;
+  /** A control beside a file the board names (a reference, the file viewer, the guide's file cards): the host's "open in". Absent: none. */
+  fileAction?(id: string, file: { path: string; line?: number }): ReactNode;
   /** Hover insight data for a code token (code review's `/api/code-nav/hover`), handed to `CodeHoverCard`. */
   codeHover?(id: string, request: ShapeCodeHoverRequest): Promise<unknown | null>;
   /** The prompt that resumes waiting changes in any session ("Copy prompt"). */
@@ -70,6 +72,12 @@ export interface ShapeHost {
    * no Ask AI fallback). Absent: a host whose Ask AI answers then, and the panel says so.
    */
   askWaitsWhenEnded?: boolean;
+  /**
+   * This host cannot tell whether the agent's session is live (the standalone Shape page: its server knows no
+   * sessions, so every board reads `gone`). The Ask panel then shows no session line at all, rather than claim the
+   * session ended. Absent: the line shows the session's state, as always.
+   */
+  sessionless?: boolean;
 }
 
 export interface ShapeCodeHoverRequest {
@@ -87,6 +95,8 @@ export interface ShapeCodeGuideProps {
   openLine?: (path: string) => number | null;
   onOpenFile?: (path: string, line: number) => void;
   headerActions?: ReactNode;
+  /** The host's control beside a file (`ShapeHost.fileAction`). */
+  fileAction?: (path: string) => ReactNode;
 }
 
 /** The props a code hover card takes (code review's `TokenHoverCard` matches them). */
@@ -102,7 +112,7 @@ export type ShapePanelTab = 'ask' | 'thread' | 'refs';
 export interface ShapeSurfaceProps {
   host: ShapeHost;
   id: string;
-  /** The Pebble closes Shape (the Inbox: back to the thread). Absent: the Pebble is only the mark. */
+  /** The × at the title's right closes Shape (the Inbox: back to the thread). Absent: no close button. */
   onClose?: () => void;
   /** The Code view's Guided Review. Absent: the Code view lists the guide's steps without diffs. */
   CodeGuide?: ComponentType<ShapeCodeGuideProps>;
@@ -110,9 +120,18 @@ export interface ShapeSurfaceProps {
   CodeHoverCard?: ComponentType<ShapeCodeHoverCardProps>;
   /** The Thread tab's body (an Inbox shape). Absent: no Thread tab. Mark each message `data-shape-message="<id>"`. */
   renderThread?: (options: { flash: string | null }) => ReactNode;
+  /**
+   * Plannotator's board: annotation starts off behind an Annotate button, a number pops out a bubble with its
+   * picture and line (a file's lines through `host.readFile`, and a PR or link with a picture opens the picture),
+   * and a narrow canvas scrolls sideways. Absent: a part can be marked at once, a number lights and opens, a
+   * narrow canvas shrinks to fit.
+   */
+  readFirst?: boolean;
   /** Where to start. */
   initialView?: ShapeViewId;
   initialPanel?: ShapePanelTab | null;
   /** The view or the panel changed (a host keeps its URL in step). */
   onNavigate?: (state: { view: ShapeViewId; panel: ShapePanelTab | null }) => void;
+  /** Before the title, on its line (the Inbox: its sidebar toggle). Absent: the title comes first. */
+  headStart?: ReactNode;
 }

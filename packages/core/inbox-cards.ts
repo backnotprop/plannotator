@@ -116,6 +116,44 @@ export const INBOX_BOARD_REQUEST_OPEN = "<plannotator-board-request>";
 export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
 
 /**
+ * When an agent puts a card in an initiative (the owner, q-a9c87ac3,
+ * 2026-11-04: "only if it's a true initiative that's going to span a lot of
+ * work… Not everything requires an initiative… use smart judgment, don't
+ * overthink it"). Fixed text: the card tool's `initiative` field, `plannotator
+ * card --help`, `plannotator inbox --help`, the Board request, the Board's
+ * prompt and the plannotator skill carry it whole, so they cannot drift.
+ * Words approved by the owner (q-f1ff983a, msg_01M6MCACRRYAJJ3PNS25BH4AZ7,
+ * with "Not all cards need an initiative:" for the draft's opening). Change
+ * them here only (the skill, being markdown, pastes the rule;
+ * plannotator-skill-reference.test.ts checks it still does).
+ */
+export const INBOX_CARD_INITIATIVE_RULE =
+  "Not all cards need an initiative: put a card in one only when it is part of an extensive effort that spans several cards or PRs, and reuse an initiative that fits (list shows them) instead of making a near-duplicate. Use good judgement; don't overthink it.";
+
+/**
+ * Clearing initiatives out. The owner, 2026-11-04: "Only on like a board --help
+ * or a hook nudge when agents create initiatives ... Try not to bloat main
+ * instruction or main tool description." So it is in `plannotator card --help`
+ * and, per call, in the answer to a call that just made an initiative
+ * (inboxCardInitiativeMadeNudge), and nowhere the rule goes.
+ */
+export const INBOX_CARD_INITIATIVE_CLEAR_OUT = "When an initiative's work is done, delete it (`initiative_delete`); its cards stay.";
+
+/** The line an agent's call gets when it just made an initiative; joining one gets none. */
+export function inboxCardInitiativeMadeNudge(name: string): string {
+  return `Made initiative ${JSON.stringify(name)}. When its work is done, delete it (initiative_delete); its cards stay.`;
+}
+
+/** The line an agent's call gets when the person's tag on the thread is what put the card in this initiative. */
+export function inboxCardInitiativeTaggedNote(name: string): string {
+  return `In ${JSON.stringify(name)}: the person tagged this thread.`;
+}
+
+/** What the `initiative` field takes, before the rule. */
+export const INBOX_CARD_INITIATIVE_FIELD =
+  'The card\'s initiative, by name: an existing one (case and spaces ignored) or a new one; "" takes the card out.';
+
+/**
  * What an agent receives after the words of a message the person sent with
  * compose's Board chip on: the agent makes the card or cards itself, for
  * what was asked (owner, 2026-10-27: "create board card(s) depending on the
@@ -128,7 +166,7 @@ export const INBOX_BOARD_REQUEST_CLOSE = "</plannotator-board-request>";
 export function inboxBoardRequestBlock(threadId: string): string {
   return [
     INBOX_BOARD_REQUEST_OPEN,
-    `The person turned on Board tracking for this thread (thread_id ${threadId}). If no Board card links it yet (card op list, asked_by anyone, shows them), create card(s) for the work they asked for and link each to it; if one does, keep that one current instead of making another. How: your Inbox card tool, or \`plannotator card --help\`.`,
+    `The person turned on Board tracking for this thread (thread_id ${threadId}). If no Board card links it yet (card op list, asked_by anyone, shows them), create card(s) for the work they asked for and link each to it; if one does, keep that one current instead of making another. ${INBOX_CARD_INITIATIVE_RULE} How: your Inbox card tool, or \`plannotator card --help\`.`,
     INBOX_BOARD_REQUEST_CLOSE,
   ].join("\n");
 }
@@ -309,6 +347,14 @@ export interface InboxCard {
    * lines, InboxStore's load).
    */
   done_prs?: string[] | null;
+  /**
+   * The Board initiative the card is in (approval "board-initiatives"): an
+   * `ini_` id, or null for none. Absent on a line written before initiatives
+   * (readInboxCard reads it as null). The person sets it by id; an agent by
+   * name or id (the card tool's `initiative`). The last one to set it wins. A
+   * deleted initiative reads as none on the wire.
+   */
+  initiative?: string | null;
 }
 
 /** An automatic ship: when, and the URLs of the PRs that had all merged. */
@@ -508,11 +554,15 @@ export interface InboxCardSent {
 /** The longest card notes, in characters. */
 export const INBOX_CARD_NOTES_MAX = 4000;
 
-/** A stored card with the fields added since step 1 filled in (`notes`, `sent`, `refs`) and its columns read as v2 (readInboxCardColumns). */
+/**
+ * A stored card with the fields added since step 1 filled in (`notes`, `sent`,
+ * `refs`, `initiative`: a missing one is null) and its columns read as v2
+ * (readInboxCardColumns).
+ */
 export function readInboxCard(card: InboxCard): InboxCard {
   const read = readInboxCardColumns(card);
-  if (read.notes !== undefined && read.sent !== undefined && read.refs !== undefined) return read;
-  return { ...read, notes: read.notes ?? null, sent: read.sent ?? null, refs: inboxCardRefsOf(read) };
+  if (read.notes !== undefined && read.sent !== undefined && read.refs !== undefined && read.initiative !== undefined) return read;
+  return { ...read, notes: read.notes ?? null, sent: read.sent ?? null, refs: inboxCardRefsOf(read), initiative: read.initiative ?? null };
 }
 
 /**
@@ -549,6 +599,8 @@ export type InboxCardHistoryEntry =
   | { at: string; by: InboxAuthor; kind: "linked_ref"; ref: string; ref_kind: string }
   | { at: string; by: InboxAuthor; kind: "renamed"; title: string }
   | { at: string; by: InboxAuthor; kind: "notes" }
+  /** Put in an initiative (its `ini_` id; the window names it), or taken out of one (null). */
+  | { at: string; by: InboxAuthor; kind: "initiative"; initiative: string | null }
   | { at: string; by: InboxAuthor; kind: "sent"; to: InboxAuthor; thread_id: string; /** Sent into a thread the card already linked (Start), not a new one. */ existing_thread: boolean };
 
 /**
@@ -580,6 +632,7 @@ export function inboxCardHistory(snapshots: readonly InboxCard[]): InboxCardHist
     for (const ref of inboxCardRefsOf(card)) if (!known.some((k) => k.url === ref.url)) out.push({ at, by, kind: "linked_ref", ref: ref.ref, ref_kind: ref.kind });
     if (card.title !== before.title) out.push({ at, by, kind: "renamed", title: card.title });
     if ((card.notes ?? null) !== (before.notes ?? null)) out.push({ at, by, kind: "notes" });
+    if ((card.initiative ?? null) !== (before.initiative ?? null)) out.push({ at, by, kind: "initiative", initiative: card.initiative ?? null });
     if (card.column !== before.column) {
       if (card.column === "dropped") out.push({ at, by, kind: "dropped", reason: card.dropped?.reason ?? null });
       else if (card.column === "done" && card.auto_shipped && card.auto_shipped.at !== before.auto_shipped?.at) {

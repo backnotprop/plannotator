@@ -16,13 +16,20 @@
 import { chmodSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { isInboxId } from "@plannotator/core/inbox-types";
-import type { InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { InboxError } from "./schema";
 
 export const INBOX_SNOOZES_FILE = "snoozes.json";
 
 function fileOf(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_SNOOZES_FILE);
+}
+
+/** Refuses an `until` no snooze can take, in the store's own codes; a linked machine's thread is checked with this before it is sent there. */
+export function refuseInboxSnoozeUntil(until: unknown, now: Date): void {
+  const refusal = inboxSnoozeRefusal(until, now);
+  if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
+  if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
 }
 
 /** The snoozes on disk. A file that does not parse reads as none; a bad or repeated entry is skipped. */

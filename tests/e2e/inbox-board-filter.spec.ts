@@ -1,14 +1,19 @@
 /**
- * The Board's project filter (option a, the owner's pick 2026-10-28) in a
- * real browser against the compiled binary, agents writing cards through
- * `plannotator inbox mcp` (scripts/inbox-sim.ts), in eight projects (one
- * with a long name), and a scripted `gh` first on PATH:
+ * The Board's one filter (approval "board-initiatives", take C; its project
+ * part the owner's pick 2026-10-28) in a real browser against the compiled
+ * binary, agents writing cards through `plannotator inbox mcp`
+ * (scripts/inbox-sim.ts), in eight projects (one with a long name), and a
+ * scripted `gh` first on PATH:
  *
- *  - no filter: `#board` is today's Board, every card, the button reading
- *    "All projects";
- *  - picking a project from the keyboard: `#board&project=prj_…`, the lanes,
- *    the lanes (the Done lane too) and the All done page narrowed, the button reading the name
- *    alone; Back undoes the pick; a reload keeps it;
+ *  - no filter: `#board` is today's Board, every card, the filter icon alone;
+ *  - picking a project from the keyboard: `#board&project=prj_…`, the lanes
+ *    (the Done lane too) and the All done page narrowed, the project's name
+ *    as a token; Back undoes the pick; a reload keeps it;
+ *  - initiatives: made from the filter menu, set on a card from its
+ *    right-click menu and from the opened card, the menu's counts (No
+ *    initiative too), `&initiative=` with the project, kept through a card's
+ *    thread and back, New card starting in it, deleted (its cards back in No
+ *    initiative, the filter gone);
  *  - opening a card, then its thread, then the way back: the same filtered
  *    Board;
  *  - New card opens on the filtered project;
@@ -56,7 +61,12 @@ let world: World;
 test.describe.configure({ mode: 'serial' });
 
 const cardEl = (page: Page, id: string) => page.locator(`.ib-bcard[data-card-id="${id}"]`);
-const chip = (page: Page) => page.locator('[data-board-project-chip]');
+const filterButton = (page: Page) => page.locator('[data-board-filter-button]');
+/** A token's words (the picked project's or initiative's name), or null when none of that kind is picked. */
+const tokenWords = async (page: Page, kind: 'project' | 'initiative') => {
+  const token = page.locator(`[data-board-filter-token="${kind}"] .ib-bflt-tok-l`);
+  return (await token.count()) === 0 ? null : token.textContent();
+};
 const hashOf = (page: Page) => page.evaluate(() => window.location.hash);
 
 async function shot(page: Page, name: string, keepFocus = false) {
@@ -76,7 +86,6 @@ async function both(page: Page, name: string, keepFocus = false) {
   await page.emulateMedia({ colorScheme: 'light' });
 }
 
-/** The words the button shows (its screen reader's "Project: " prefix aside). */
 /** The Board as the server has it: the person's last look and the store's cursor. */
 const boardSeen = (page: Page) =>
   page.evaluate(async () => {
@@ -84,12 +93,14 @@ const boardSeen = (page: Page) =>
     return { seen: board.seen_seq ?? null, cursor: board.cursor };
   });
 
-const chipWords = (page: Page) =>
-  page.locator('[data-board-project-chip] .ib-bpf-l').evaluate((el) => {
-    const copy = el.cloneNode(true) as HTMLElement;
-    copy.querySelector('.ib-sr')?.remove();
-    return copy.textContent;
-  });
+/** Arrow down the open filter menu until `target` is highlighted (Base UI's menu keys; no shortcut of its own). */
+async function arrowTo(page: Page, target: string) {
+  for (let i = 0; i < 30; i++) {
+    if ((await page.locator(target).getAttribute('data-highlighted')) !== null) return;
+    await page.keyboard.press('ArrowDown');
+  }
+  throw new Error(`never highlighted: ${target}`);
+}
 
 test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(existsSync(binary), `build the binary first: ${binary}`).toBe(true);
@@ -167,7 +178,7 @@ const ALL_IN_FLIGHT = 12;
 /** On the lanes: those, and the three cards done this week on Done's lane. */
 const ON_LANES = ALL_IN_FLIGHT + 3;
 
-test('no filter: the Board as before, every card, the button reading All projects', async () => {
+test('no filter: the Board as before, every card, the filter icon alone', async () => {
   const { page, ids } = world;
   await page.locator('[data-board-nav]').click();
   await expect(page.locator('[data-board-page][data-board-view="lanes"]')).toBeVisible();
@@ -178,8 +189,8 @@ test('no filter: the Board as before, every card, the button reading All project
   await expect(page.locator('.ib-blanes [data-lane="done"] .ib-lane-n')).toHaveText('3');
   await expect(page.locator('[data-board-link="done"]')).toHaveText('All done');
   await expect(page.locator('[data-board-link="cancelled"]')).toHaveText('Cancelled 1');
-  expect(await chipWords(page)).toBe('All projects');
-  await expect(page.locator('[data-board-project-clear]')).toHaveCount(0);
+  await expect(filterButton(page)).toHaveAccessibleName('Filter');
+  await expect(page.locator('[data-board-filter-token]')).toHaveCount(0);
   for (const id of [ids.auto, ids.design, ids.store, ids.long]) await expect(cardEl(page, id)).toBeVisible();
   await both(page, 'none-1440');
 });
@@ -187,22 +198,20 @@ test('no filter: the Board as before, every card, the button reading All project
 test('picking a project from the keyboard narrows the lanes (the Done lane too) and All done; Back undoes it; a reload keeps it', async () => {
   const { page, ids, project } = world;
   // Keyboard only: Tab-reachable, Enter opens, arrows move, Enter picks (Base UI's menu; no shortcut of its own).
-  await chip(page).focus();
+  await filterButton(page).focus();
   await page.keyboard.press('Enter');
-  const menu = page.locator('[data-board-project-menu]');
+  const menu = page.locator('[data-board-filter-menu]');
   await expect(menu).toBeVisible();
   // Only projects with a card: halftone and relay have threads but no card.
-  const options = menu.locator('[role="menuitemradio"]');
+  const options = menu.locator('[data-board-project-option] .ib-pmi-l');
   await expect(options).toHaveText(['All projects', 'plannotator', 'workspaces', 'machine', LONG, 'guides-repo', 'pando']);
-  await expect(options.first()).toHaveAttribute('aria-checked', 'true');
+  await expect(menu.locator('[data-board-project-option=""]')).toHaveAttribute('aria-checked', 'true');
   await both(page, 'menu-1440', true);
-  await page.keyboard.press('ArrowDown');
-  await page.keyboard.press('ArrowDown');
-  await expect(options.nth(2)).toHaveAttribute('data-highlighted', '');
+  await arrowTo(page, `[data-board-project-option="${project.workspaces}"]`);
   await page.keyboard.press('Enter');
   await expect(menu).toHaveCount(0);
   // Focus back on the button.
-  await expect(chip(page)).toBeFocused();
+  await expect(filterButton(page)).toBeFocused();
 
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}`);
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
@@ -210,8 +219,8 @@ test('picking a project from the keyboard narrows the lanes (the Done lane too) 
   await expect(cardEl(page, ids.auto)).toHaveCount(0);
   await expect(page.locator('.ib-blanes [data-lane="done"] .ib-lane-n')).toHaveText('1');
   // The name alone, no "in" (the owner, 2026-10-28), and ×.
-  expect(await chipWords(page)).toBe('workspaces');
-  await expect(page.locator('[data-board-project-clear]')).toBeVisible();
+  expect(await tokenWords(page, 'project')).toBe('workspaces');
+  await expect(page.locator('[data-board-filter-clear="project"]')).toBeVisible();
   // The polite live region names the pick (its wording is free to change).
   await expect(page.locator('[data-board-live]')).toContainText('workspaces');
   await both(page, 'filtered-1440');
@@ -227,7 +236,7 @@ test('picking a project from the keyboard narrows the lanes (the Done lane too) 
   // A reload keeps it (the address is the state; nothing is stored).
   await page.reload();
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
-  expect(await chipWords(page)).toBe('workspaces');
+  expect(await tokenWords(page, 'project')).toBe('workspaces');
 
   // Back undoes the pick: the Board shows every project again.
   await page.goBack();
@@ -251,7 +260,7 @@ test('opening a card, then its thread, then the way back lands on the same filte
   await expect(panel).toBeVisible();
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&card=${ids.design}`);
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(4);
-  expect(await chipWords(page)).toBe('workspaces');
+  expect(await tokenWords(page, 'project')).toBe('workspaces');
   await panel.locator('[data-card-close]').click();
   await expect(panel).toHaveCount(0);
   expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}`);
@@ -267,9 +276,115 @@ test('New card opens on the filtered project', async () => {
   await expect(dialog).toHaveCount(0);
 });
 
+test('initiatives: made from the filter, set from a card\'s menu and the opened card, counted, filtered with the project, kept through a thread, deleted', async () => {
+  const { page, ids, project } = world;
+  const cardsRead = () =>
+    page.evaluate(async () => (await (await fetch('/api/inbox/cards')).json()) as { cards: { id: string; initiative: string | null }[]; initiatives: { id: string; name: string; deleted_at: string | null }[] });
+  // Two made from the filter menu's New initiative….
+  await filterButton(page).click();
+  await page.locator('[data-board-initiative-new]').click();
+  const dialog = page.locator('dialog[data-dialog="initiatives"]');
+  await expect(dialog).toBeVisible();
+  await expect(dialog.locator('[data-initiative-new-name]')).toBeFocused();
+  for (const name of ['Design system', 'Onboarding']) {
+    await page.keyboard.type(name);
+    await page.keyboard.press('Enter');
+    await expect(dialog.locator('[data-initiative-name]')).toHaveCount(name === 'Design system' ? 1 : 2);
+  }
+  await dialog.locator('[data-initiatives-done]').click();
+  await expect(dialog).toHaveCount(0);
+  // The menu item that opened it is gone: focus lands on the filter button.
+  await expect(filterButton(page)).toBeFocused();
+  const made = (await cardsRead()).initiatives;
+  expect(made.map((i) => i.name)).toEqual(['Design system', 'Onboarding']);
+  const design = made[0]!.id;
+
+  // From the card's right-click menu: Initiative ▸ Design system.
+  await cardEl(page, ids.design).locator('[data-card-open]').click({ button: 'right' });
+  await page.locator('[data-card-context-menu] [data-card-menu-action="initiative"]').hover();
+  await page.locator(`[data-card-initiative-menu] [data-card-initiative-option="${design}"]`).click();
+  await expect.poll(async () => (await cardsRead()).cards.find((c) => c.id === ids.design)?.initiative).toBe(design);
+  // From the opened card: its who line's Initiative.
+  await cardEl(page, ids.tokens).locator('[data-card-open]').click();
+  const panel = page.locator(`[data-card-panel="${ids.tokens}"]`);
+  await panel.locator('[data-card-initiative]').click();
+  await page.locator(`[data-card-initiative-menu] [data-card-initiative-option="${design}"]`).click();
+  await expect(panel.locator('[data-card-initiative]')).toHaveAttribute('data-card-initiative', design);
+  await expect(panel.locator('.ib-crdp-hist')).toContainText('Initiative: Design system by you');
+  await panel.locator('[data-card-close]').click();
+
+  // The menu counts workspaces' lanes: two in Design system, none in Onboarding, two in none.
+  await filterButton(page).click();
+  const counts = page.locator('[data-board-filter-menu] [data-board-initiative-option]');
+  await expect(counts.locator('.ib-pmi-l')).toHaveText(['All initiatives', 'Design system', 'Onboarding', 'No initiative']);
+  await expect(counts.locator('.ib-bflt-n')).toHaveText(['2', '0', '2']);
+  await page.locator(`[data-board-initiative-option="${design}"]`).click();
+  expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&initiative=${design}`);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(2);
+  expect(await tokenWords(page, 'initiative')).toBe('Design system');
+  expect(await tokenWords(page, 'project')).toBe('workspaces');
+  await page.reload();
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(2);
+
+  // A card's thread and back: the same filtered Board.
+  await cardEl(page, ids.design).locator('[data-card-open]').click();
+  await page.locator(`[data-card-panel="${ids.design}"] [data-card-thread]`).first().click();
+  await expect(page.locator('[data-thread-card]')).toBeVisible();
+  expect(await hashOf(page)).toContain(`board-initiative=${design}`);
+  await page.locator('[data-thread-card]').click();
+  expect(await hashOf(page)).toBe(`#board&project=${project.workspaces}&initiative=${design}&card=${ids.design}`);
+  await page.locator(`[data-card-panel="${ids.design}"] [data-card-close]`).click();
+
+  // New card starts in it.
+  await page.locator('[data-board-new]').click();
+  await expect(page.locator('dialog[data-dialog="new-card"] [data-new-card-initiative]')).toHaveAttribute('data-new-card-initiative', design);
+  await page.keyboard.press('Escape');
+
+  // The project's × keeps the initiative: Design system across every project.
+  await page.locator('[data-board-filter-clear="project"]').click();
+  expect(await hashOf(page)).toBe(`#board&initiative=${design}`);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(2);
+
+  // No initiative: every lane card but those two.
+  await page.goto(`${world.url}#board&initiative=none`);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES - 2);
+  expect(await tokenWords(page, 'initiative')).toBe('No initiative');
+
+  // Deleted in one click, no question: its cards are in none again, and a link to it is no filter.
+  const onboarding = made[1]!.id;
+  const deleteOf = (id: string) => dialog.locator(`[data-initiative-row="${id}"] [data-initiative-delete]`);
+  await filterButton(page).click();
+  await page.locator('[data-board-initiative-edit]').click();
+  await deleteOf(design).click();
+  await expect(dialog.locator(`[data-initiative-row="${design}"]`)).toHaveCount(0);
+  // Focus on the next row's Delete; the toast's Undo, drawn inside the modal, can be pressed and brings it back.
+  await expect(deleteOf(onboarding)).toBeFocused();
+  await dialog.locator('.ib-toast [data-toast-undo]').click();
+  await expect(dialog.locator(`[data-initiative-row="${design}"]`)).toHaveCount(1);
+  await expect.poll(async () => (await cardsRead()).cards.filter((c) => c.initiative === design).length).toBe(2);
+  await deleteOf(design).click();
+  await expect(deleteOf(onboarding)).toBeFocused();
+  await page.keyboard.press('Enter');
+  await expect(dialog.locator('[data-initiative-row]')).toHaveCount(0);
+  await expect(dialog.locator('[data-initiative-new-name]')).toBeFocused();
+  await dialog.locator('[data-initiatives-done]').click();
+  await expect(filterButton(page)).toBeFocused();
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
+  const after = await cardsRead();
+  expect(after.cards.filter((c) => c.initiative !== null)).toEqual([]);
+  await page.goto(`${world.url}#board&initiative=${design}`);
+  await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
+  await expect(page.locator('[data-board-filter-token]')).toHaveCount(0);
+  // The next step on the Board drops the deleted id from the address.
+  await cardEl(page, ids.design).locator('[data-card-open]').click();
+  expect(await hashOf(page)).toBe(`#board&card=${ids.design}`);
+  await page.goto(`${world.url}#board`);
+  expect(world.errors).toEqual([]);
+});
+
 test('a project with nothing in flight says so; Show all projects clears the filter', async () => {
   const { page, project } = world;
-  await chip(page).click();
+  await filterButton(page).click();
   await page.locator(`[data-board-project-option="${project.pando}"]`).click();
   const empty = page.locator('[data-board-empty="project"]');
   await expect(empty).toBeVisible();
@@ -290,9 +405,8 @@ test('an empty or unknown project in the address is no filter', async () => {
     await page.goto('about:blank');
     await page.goto(`${world.url}${hash}`);
     await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES);
-    await expect(page.locator('[data-board-project-filter]')).not.toHaveAttribute('data-set', '');
-    expect(await chipWords(page)).toBe('All projects');
-    await expect(page.locator('[data-board-project-clear]')).toHaveCount(0);
+    await expect(page.locator('[data-board-filter]')).not.toHaveAttribute('data-set', '');
+    await expect(page.locator('[data-board-filter-token]')).toHaveCount(0);
     await expect(page.locator('[data-board-empty="project"]')).toHaveCount(0);
   }
 });
@@ -329,17 +443,20 @@ test("a filtered visit leaves the other projects' news unread (the look is recor
   await expect(cardEl(page, ids.auto)).not.toHaveAttribute('data-unread', '');
 });
 
-test('a narrow window: the button on its own row under the header, a long name whole, nothing cut in the header', async () => {
+test('a narrow window: the picks on their own row under the header, a long name whole, nothing cut in the header', async () => {
   const { page, ids, project } = world;
   await page.setViewportSize({ width: 900, height: 800 });
   await page.goto(`${world.url}#board&project=${project[LONG]}`);
   await expect(cardEl(page, ids.long)).toBeVisible();
-  await expect(page.locator('.ib-bfbar [data-board-project-chip]')).toBeVisible();
-  await expect(page.locator('.ib-bhead [data-board-project-chip]')).toHaveCount(0);
+  await expect(page.locator('.ib-bfbar [data-board-filter-token="project"]')).toBeVisible();
+  await expect(page.locator('.ib-bhead [data-board-filter-token]')).toHaveCount(0);
+  await expect(page.locator('.ib-bhead [data-board-filter-button]')).toBeVisible();
   // Nothing in the header runs past its edge.
   const headCut = await page.locator('.ib-bhead').evaluate((el) => el.scrollWidth > el.clientWidth + 1);
   expect(headCut).toBe(false);
-  expect(await chipWords(page)).toBe(LONG);
+  expect(await tokenWords(page, 'project')).toBe(LONG);
+  // Whole: the token is not cut (its words fit their box).
+  expect(await page.locator('.ib-bfbar [data-board-filter-token="project"] .ib-bflt-tok-l').evaluate((el) => el.scrollWidth <= el.clientWidth + 1)).toBe(true);
   await shot(page, 'long-900-light.png');
   await page.emulateMedia({ colorScheme: 'dark' });
   await shot(page, 'long-900-dark.png');
@@ -359,21 +476,21 @@ test.describe('iPhone 15 (WebKit)', () => {
   });
 
   for (const scheme of ['light', 'dark'] as const) {
-    test(`the button under the header; its menu a sheet at the bottom; picking narrows the list (${scheme})`, async () => {
+    test(`the filter icon in the header, its picks on a row under it; its menu a sheet at the bottom; picking narrows the list (${scheme})`, async () => {
       const { ids, project } = world;
       const context = await browser!.newContext({ ...device, colorScheme: scheme });
       try {
         const page = await context.newPage();
         await page.goto(`${world.url}#board`);
         await expect(page.locator('[data-board-view="phone"]')).toBeVisible();
-        const button = page.locator('.ib-bfbar [data-board-project-chip]');
+        const button = page.locator('.ib-bhead [data-board-filter-button]');
         await expect(button).toBeVisible();
         // A whole 44 px touch target, unset and (below) picked.
         expect(Math.round((await button.boundingBox())!.height)).toBeGreaterThanOrEqual(44);
         await page.waitForTimeout(400);
         await page.screenshot({ path: join(shots, `phone-none-${scheme}.png`) });
         await button.tap();
-        const sheet = page.locator('[data-board-project-menu]');
+        const sheet = page.locator('[data-board-filter-menu]');
         await expect(sheet).toBeVisible();
         const box = (await sheet.boundingBox())!;
         const viewport = page.viewportSize()!;
@@ -387,7 +504,7 @@ test.describe('iPhone 15 (WebKit)', () => {
         await expect(cardEl(page, ids.design)).toBeVisible();
         await expect(cardEl(page, ids.auto)).toHaveCount(0);
         expect(await page.evaluate(() => window.location.hash)).toBe(`#board&project=${project.workspaces}`);
-        for (const target of [button, page.locator('.ib-bfbar [data-board-project-clear]')]) {
+        for (const target of [button, page.locator('.ib-bfbar [data-board-filter-clear="project"]')]) {
           const picked = (await target.boundingBox())!;
           expect(Math.round(picked.height)).toBeGreaterThanOrEqual(44);
           expect(Math.round(picked.width)).toBeGreaterThanOrEqual(44);
@@ -401,4 +518,33 @@ test.describe('iPhone 15 (WebKit)', () => {
       }
     });
   }
+
+  // A phone's toast is `absolute`: inside the dialog it would anchor to the dialog's foot and cover Done for its 7 s.
+  test('one-click delete on a phone: the toast at the window foot, clear of Done, which closes and hands over the Undo', async () => {
+    const context = await browser!.newContext({ ...device });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${world.url}#board`);
+      // Made here: the initiatives test above deleted its own.
+      await page.evaluate(async () => {
+        const res = await fetch('/api/inbox/initiatives', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Phone toast' }) });
+        if (!res.ok) throw new Error(`initiative: ${res.status}`);
+      });
+      await page.reload();
+      await page.locator('.ib-bhead [data-board-filter-button]').tap();
+      await page.locator('[data-board-initiative-edit]').tap();
+      const dialog = page.locator('[data-dialog="initiatives"]');
+      await dialog.locator('[data-initiative-delete]').first().tap();
+      const toast = dialog.locator('.ib-toast');
+      await expect(toast).toBeVisible();
+      const done = dialog.locator('[data-initiatives-done]');
+      const doneBox = (await done.boundingBox())!;
+      expect((await toast.boundingBox())!.y).toBeGreaterThanOrEqual(doneBox.y + doneBox.height);
+      await done.tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.locator('.ib-toast [data-toast-undo]')).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
 });

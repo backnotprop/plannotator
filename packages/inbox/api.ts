@@ -5,11 +5,15 @@
  * writing into a store it did not read.
  */
 
+import type { InboxReviewDrawing, InboxShowMeTarget } from '@plannotator/core/inbox-review';
 import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } from '@plannotator/core/shape';
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
+import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
+  InboxInitiative,
   InboxDecisionsModel,
   InboxGuideRef,
   InboxHealth,
@@ -25,6 +29,10 @@ import type {
   InboxTourState,
   InboxThread,
   InboxComposeProject,
+  InboxComposeLaunch,
+  InboxLaunchAgent,
+  InboxLaunchTrust,
+  InboxRun,
   InboxDraft,
   InboxDraftPasted,
   InboxReplyDraft,
@@ -119,6 +127,14 @@ export interface CardsModel {
   threads?: Record<string, InboxListRow | null>;
   /** While the person's checklist switch is on: each linked thread's lists with steps (approval "inbox-thread-steps"). Absent: off, or an older Inbox. */
   steps?: Record<string, InboxStepsWire[]>;
+  /** The Board's initiatives, deleted ones too (approval "board-initiatives"). Absent from an older Inbox: none. */
+  initiatives?: InboxInitiative[];
+  /**
+   * Approval "board-hashtags": per live initiative that a message tags, the latest-tagged threads no card of it
+   * links (at most 4, newest first; their rows are in `threads`) and `total`, how many such threads in all.
+   * Absent from an older Inbox: the preview lists no threads.
+   */
+  initiative_threads?: Record<string, { threads: string[]; total: number }>;
 }
 
 /** A draft's file as a save names it: an upload id, or the id with where a long paste goes back. */
@@ -214,6 +230,13 @@ export interface ListModel {
    * offers no pin.
    */
   pins?: InboxListRow[];
+  /** The version of this list, named by the next read so only what changed comes back (listRead.ts). Absent from an older Inbox. */
+  list_version?: string;
+  /**
+   * Each session's label by id (issue #2450; sessionLabels.ts): the rows' agents and a message's author. Absent from
+   * an older Inbox and for a tailnet guest, which then read every session as before.
+   */
+  session_labels?: Record<string, string>;
 }
 
 /** GET /api/inbox/threads/archived: Settings' Archived block, newest archived first, a page at a time. */
@@ -236,6 +259,10 @@ export interface ThreadModel {
   thread: InboxThread;
   /** The thread's list row, an archived thread's too (the window's list leaves those out). Absent from an older Inbox. */
   row?: InboxListRow | null;
+  /** A launched thread's run line (inbox-launch.ts): null while the agent rests. Absent: not a launched thread, or launch is off. */
+  run?: InboxRun | null;
+  /** With `run`: the command that attaches to the launched session in a terminal, also while it rests; null before it exists. */
+  attach_command?: string | null;
 }
 
 export interface ReplyResult {
@@ -423,6 +450,8 @@ export interface SettingsModel {
   tour?: InboxTourState;
   /** Settings → Prompts: the Inbox reminder and the plan, review and annotate prompts. Absent from an older Inbox. */
   prompts?: InboxPromptsSettings;
+  /** Settings → Agents' launch switch: present only while `inboxLaunch.enabled`. */
+  launch?: InboxLaunchSettings;
   /** The store's folder (Settings → Storage's line). Its sizes are their own read: `inboxApi.storage()`. Absent from an older Inbox. */
   store_dir?: string;
   /** The sizes, from an older Inbox only (a current one leaves them out for `?store=0`). */
@@ -444,6 +473,24 @@ export interface InboxStorageModel {
     /** The projects combined into this one, by name: deleting it leaves them. */
     combined?: string[];
   }[];
+}
+
+/** Settings → Agents: starting agents from New message (config.json `inboxLaunch`). */
+export interface InboxLaunchSettings {
+  enabled: boolean;
+  /** "Start new sessions with full permissions": Claude Code starts in bypass mode (otherwise auto mode). */
+  full_permissions: boolean;
+  /** Never set by the person, and on because their Claude settings (`claude`) or their shell (`shell`) run Claude in bypass mode. */
+  follows?: 'claude' | 'shell' | null;
+  /** A launch starts in the person's own Claude default mode (not auto). */
+  own_mode?: boolean;
+  /** Full permissions wanted, but Claude Code's bypass notice is not accepted on this computer: a launch starts without them. */
+  needs_consent?: boolean;
+  /** Full permissions wanted, but Claude Code's own settings turn bypass mode off: a launch starts without them. */
+  bypass_off?: boolean;
+  /** Where new scratch folders go (absolute), and as shown (`~/…`). Absent from an older Inbox. */
+  scratch_dir?: string;
+  scratch_dir_shown?: string;
 }
 
 /**
@@ -472,6 +519,8 @@ export interface LiveSession {
   wrote_thread: boolean;
   /** Its connection can put a message into a running turn (Send now). Absent from an older Inbox. */
   send_now?: boolean;
+  /** The session's label (issue #2450): Send to another session's rows. Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  label?: string;
 }
 
 export interface LiveSessionsModel {
@@ -510,6 +559,8 @@ export interface TaggableSession {
   /** `live`: its connection polls and wakes it; `mcp`: it reads the Inbox only. */
   kind: 'live' | 'mcp';
   name: string | null;
+  /** A live session's label (issue #2450). Absent when it has none, from an older Inbox, and for a tailnet guest. */
+  label?: string;
   project: { id: string | null; name: string; root: string | null } | null;
   started_at: string | null;
   last_at: string;
@@ -720,7 +771,6 @@ export class InboxHeldError extends InboxApiError {
 /** What a held write says, by its machine's state. */
 export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
   const name = machine?.name ?? 'the other machine';
-  if (machine?.state === 'revoked') return `Not sent: ${name} removed the link. Link it again to send.`;
   return machine && machine.state !== 'online' && machine.state !== 'connecting'
     ? `Waiting for ${name}: this applies when ${name} is back.`
     : `Sending to ${name}: this applies once ${name} confirms.`;
@@ -813,6 +863,10 @@ export function pageServerSession(): string | null {
  * it takes the thread over.
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
+
+/** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
+/** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string };
 
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
@@ -956,14 +1010,23 @@ export interface ComposeSessionsModel {
   projects: InboxComposeProject[];
   /** Asked for with `?session=`: whether that session is still there (with the asker grace). */
   session?: { session: string; live: boolean };
+  /** Only while `inboxLaunch.enabled`: the agents To offers to start, and the folder menu's projects. */
+  launch?: InboxComposeLaunch;
 }
 
 /** A draft as the Drafts page lists it, with its chip. */
 export type DraftView = InboxDraft & { status: InboxDraftStatus };
 
+/** The folder To names, whose files a sessions read looks at: a project's id, or `SCRATCH_PICK`. */
+export interface ComposeTrustPick {
+  agent: string;
+  project: string;
+}
+
 /** What compose sends: a new thread to one live session. */
 export interface StartThreadInput {
-  to: { host: string; session: string };
+  /** A live session, or (launch on) a new session of `agent` started in the project; `trust`: Trust and start, on this reading. */
+  to: { host: string; session: string } | { launch: ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust } };
   body: string;
   idempotency_key: string;
   uploads?: string[];
@@ -1034,6 +1097,16 @@ export function saveRecentSearch(input: { q: string } | { clear: true }): Promis
   return post<{ recent_searches: string[] }>(inboxUrl('/search/recent'), input);
 }
 
+/** The window's list reads (listRead.ts): `since` names the list it holds; empty asks for the whole list. */
+const listReader = createListReader<ListModel>((since) =>
+  get<ListReadAnswer<ListModel>>(inboxUrl(`/threads?archived=exclude&snoozed=exclude&machines=1&since=${encodeURIComponent(since)}`)),
+);
+
+/** Tests only: the next list read is a whole one. */
+export function resetListReads(): void {
+  listReader.reset();
+}
+
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
@@ -1047,8 +1120,9 @@ export const inboxApi = {
   // project naming this Inbox; an older Inbox ignores the parameter.
   // `snoozed=exclude` the same way: snoozed threads come apart from the sections, for the band under Quiet. The rule
   // runs here again with this window's clock, which is the one the person reads the time on.
+  // Only the rows changed since the list this window holds, and one read for calls close together (listRead.ts).
   list: () =>
-    get<ListModel>(inboxUrl('/threads?archived=exclude&snoozed=exclude&machines=1')).then((read) => {
+    listReader.read().then((read) => {
       const model = read.snoozed ? { ...read, ...inboxSectionsAsOf(read.sections, read.snoozed) } : read;
       learnMachines(model);
       return model;
@@ -1107,6 +1181,8 @@ export const inboxApi = {
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
   shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
+  /** Where a board's kept picture loads from. */
+  shapeFileUrl: (id: string, src: string) => `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(src.replace(/^files\//, ''))}`,
   shape: (id: string, n?: number) => get<ShapeLoadedWire>(`/api/shapes/${encodeURIComponent(id)}${n ? `?n=${n}` : ''}`),
   shapeNote: (id: string, input: Record<string, unknown>) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/notes`, input),
   shapeAnswer: (id: string, input: { re: string; text: string; from: { host: string; id: string } }) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/answer`, input),
@@ -1165,10 +1241,11 @@ export const inboxApi = {
   combineProject: (projectId: string, into: string | null) =>
     post<{ project: ProjectFolder | null }>(projectUrl(projectId, `/combine`), { into }),
   /** `unsentOnly`: refused (`question_already_sent`) when a reply already sent the question (decision mode, where a pick can race a Send). */
-  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean } = {}) =>
+  pick: (messageId: string, key: string, revision: number, answer: QuestionAnswer | null, options: { unsentOnly?: boolean; confirmFull?: boolean } = {}) =>
     post<{ questions: InboxQuestion[] }>(messageUrl(messageId, `/picks`), {
       questions: [{ key, revision, answer }],
       ...(options.unsentOnly ? { unsent_only: true } : {}),
+      ...(options.confirmFull ? { confirm_full: true } : {}),
     }).then((result) => ({ ...result, questions: questionsOnly(result.questions) })),
   /**
    * An action item's Done (with an optional note) or Can't do it (with the reason),
@@ -1205,6 +1282,8 @@ export const inboxApi = {
       questions: { message_id?: string; key: string; revision: number }[];
       feedback?: string;
       annotation_ids?: string[];
+      /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
+      viewing?: ReplyViewing;
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host?: string; session: string };
       /**
@@ -1332,6 +1411,11 @@ export const inboxApi = {
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
+  /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
+  openInFileCheck: (scope: OpenInFileScope, path: string) =>
+    get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
+    post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
   // `machine`: the drawing is of another machine's file, so it is kept there (it is sent while that machine is online).
   uploadMarkup: async (image: Blob, machine?: string | null) =>
@@ -1345,10 +1429,25 @@ export const inboxApi = {
   deleteThread: (threadId: string) => post<{ store: InboxStorageModel }>(threadUrl(threadId, `/delete`), {}),
   // Step 8: New message to a live session of the thread's project.
   // Compose: every live session, a new thread, Send to another session, and drafts.
-  composeSessions: (session?: string | null) =>
-    get<ComposeSessionsModel>(inboxUrl('/sessions', session ? `session=${encodeURIComponent(session)}` : undefined)),
+  composeSessions: (session?: string | null, trust?: ComposeTrustPick | null) => {
+    const query = new URLSearchParams({ ...(session ? { session } : {}), ...(trust ? { trust_agent: trust.agent, trust_project: trust.project } : {}) }).toString();
+    return get<ComposeSessionsModel>(inboxUrl('/sessions', query || undefined));
+  },
   startThread: (input: StartThreadInput) =>
-    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean }>(inboxUrl('/messages'), { ...input }),
+    post<{ thread_id: string; message: InboxMessage; project?: { id: string; name: string; root: string }; replayed: boolean; launch?: { id: string; state: 'starting' | 'failed' } }>(inboxUrl('/messages'), { ...input }),
+  // Launch (behind `inboxLaunch.enabled`): the run line's buttons and Settings → Agents' switch.
+  launchStop: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/stop`), {}),
+  launchOpen: (launchId: string) => post<{ ok: true; command: string }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/open`), {}),
+  launchDelete: (launchId: string) => post<{ ok: true; scratch_removed?: boolean }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/delete`), {}),
+  launchRetry: (launchId: string) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/retry`), {}),
+  /** `warning`: the line the person read (`run.trust.warning`): a server that now reads another saves nothing. */
+  launchTrust: (launchId: string, warning: string | null) => post<{ run: InboxRun | null }>(inboxUrl(`/launch/${encodeURIComponent(launchId)}/trust`), { warning }),
+  /** Settings → Agents, shown: the switch as it stands (never set: the login shell read again when stale). */
+  /** `ahead`: the composer picked "Start Claude Code": read the login shell now (switch never set), so the Send need not wait. */
+  launchSettingsRead: (ahead = false) => get<{ launch: InboxLaunchSettings }>(inboxUrl(ahead ? '/launch/settings?ahead=1' : '/launch/settings')),
+  launchSettings: (fullPermissions: boolean) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { full_permissions: fullPermissions }),
+  /** Settings → Agents' "Scratch folders": a full path (`~/…` too), or null for the default. */
+  launchScratchDir: (path: string | null) => post<{ launch: InboxLaunchSettings }>(inboxUrl('/launch/settings'), { scratch_dir: path }),
   readdress: (messageId: string, to: { host: string; session: string }) =>
     post<{ message: InboxMessage; row: InboxListRow | null }>(messageUrl(messageId, `/to`), { to }),
   /** `replies` (additive): open threads holding unsent work; an older Inbox sends none. */
@@ -1374,8 +1473,25 @@ export const inboxApi = {
    * The person's New card: a title, notes and links, in Backlog (or Todo); or sent: `thread_id` is
    * the thread compose's Send just started for it (the card lands in Todo, in that thread's project).
    */
-  createCard: (input: { project?: string | null; title: string; notes?: string | null; column?: 'backlog' | 'todo'; refs?: string[]; thread_id?: string; idempotency_key?: string }) =>
-    post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  createCard: (input: {
+    project?: string | null;
+    title: string;
+    notes?: string | null;
+    column?: 'backlog' | 'todo';
+    refs?: string[];
+    thread_id?: string;
+    idempotency_key?: string;
+    /** The initiative the Board is filtered to: the new card starts in it. */
+    initiative?: string | null;
+  }) => post<{ card: InboxCardWire; replayed: boolean }>(inboxUrl('/cards'), { ...input }),
+  /** The card's initiative (an `ini_` id), or none (null). */
+  setCardInitiative: (id: string, initiative: string | null) =>
+    post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), { op: 'initiative', initiative }),
+  /** A new initiative, named. */
+  createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
+  /** An initiative renamed, or deleted (its cards read as in none). */
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
+    post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
     post<{ card: InboxCardWire }>(inboxUrl(`/cards/${encodeURIComponent(id)}`), change),
@@ -1390,11 +1506,17 @@ export const inboxApi = {
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
-  pulls: (refresh = false, signal?: AbortSignal) => get<InboxPullsAnswer>(inboxUrl(`/pulls${refresh ? '?refresh=1' : ''}`), signal),
+  /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
+  pulls: (refresh = false, signal?: AbortSignal, others = false) => {
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
+    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
+  },
+  /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
+  pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
-  /** The person handed a PR (a stack's open layers) to an agent: `threadId` is the thread compose's Send (or Hand to an agent) just started for it. */
+  /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
   /**
@@ -1522,7 +1644,10 @@ export const inboxApi = {
   /** Ask AI (packages/server/inbox-ask.ts): the chat list, one thread's chat, a question, and what the window saw. */
   askChats: () => get<{ chats: InboxAskChat[] }>(inboxUrl('/ask')),
   askRead: (threadId: string) => get<InboxAskModel>(inboxUrl(`/threads/${threadId}/ask`)),
-  askSend: (threadId: string, turnId: string, question: string) => post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question }),
+  askSend: (threadId: string, turnId: string, question: string, showMe?: InboxShowMeAsk) =>
+    post<InboxAskPosted>(inboxUrl(`/threads/${threadId}/ask`), { turn_id: turnId, question, ...(showMe ?? {}) }),
+  /** Show me's pictures of one review (code review in the Inbox; packages/server/inbox-review-drawings.ts). */
+  reviewDrawings: (messageId: string) => get<InboxReviewDrawingsRead>(inboxUrl(`/reviews/${encodeURIComponent(messageId)}/drawings`)),
   askSeen: (threadId: string, seenAt: string) => post<unknown>(inboxUrl(`/threads/${threadId}/ask/seen`), { seen_at: seenAt }),
   askStop: (threadId: string, turnId: string) => post<{ stopped: boolean }>(inboxUrl(`/threads/${threadId}/ask/stop`), { turn_id: turnId }),
   deleteProject: (projectId: string) => post<{ store: InboxStorageModel }>(inboxUrl(`/projects/${encodeURIComponent(projectId)}/delete`), {}),
@@ -1540,6 +1665,28 @@ export interface InboxAskTurnWire {
   answered_at?: string;
   stopped?: boolean;
   failure?: 'gone' | 'taken_over' | 'failed';
+  /** A Show me (code review in the Inbox): the agent was asked to draw these lines of a review. */
+  kind?: 'show_me';
+  show_me?: InboxShowMeTarget;
+  /** Show me again: the round of the picture it asked to redraw. */
+  again_of_round?: number;
+  /** The picture the agent sent for this Show me (`plannotator review draw`), by id. */
+  drawing?: string;
+}
+
+/** What a Show me sends beside its question on `POST …/ask`. */
+export interface InboxShowMeAsk {
+  kind: 'show_me';
+  show_me: InboxShowMeTarget;
+  again_of_round?: number;
+}
+
+/** `GET /api/inbox/reviews/:msg/drawings`. */
+export interface InboxReviewDrawingsRead {
+  title?: string;
+  round?: number;
+  overview?: { round: number; codes: string[] } | null;
+  drawings: InboxReviewDrawing[];
 }
 
 export interface InboxAskConversationWire {
@@ -1600,7 +1747,9 @@ export type InboxEvent =
   /** A Board card (approval "inbox-board"); absent from an older Inbox. */
   | { seq: number; kind: 'card'; id: string; card: InboxCardWire }
   /** A session's steps in a thread changed (approval "inbox-thread-steps"): silent; the window reads that thread's steps again. Absent from an older Inbox. */
-  | { seq: number; kind: 'steps'; id: string; thread_id: string };
+  | { seq: number; kind: 'steps'; id: string; thread_id: string }
+  /** A Board initiative made, renamed or deleted (approval "board-initiatives"): silent; the Board reads its cards again. Absent from an older Inbox. */
+  | { seq: number; kind: 'initiative'; id: string; initiative: InboxInitiative };
 
 /** A thread's attachments as they are now, and the person's annotations waiting for a Send. */
 export interface AttachmentsModel {
@@ -1609,6 +1758,8 @@ export interface AttachmentsModel {
   /** The images the messages show, captured as files (additive; absent from an older Inbox). */
   inline_images?: InboxAttachmentState[];
   annotations: InboxAnnotationRecord[];
+  /** The person's comments on files that a Send already carried (additive; absent from an older Inbox or peer). */
+  earlier_annotations?: InboxAnnotationRecord[];
 }
 
 /** One version of a file: its text, and for HTML the page as annotate serves it. */
@@ -1647,9 +1798,10 @@ export interface InboxEventHandlers {
   /**
    * A row's delivery may have moved with the live sessions (a turn started or
    * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox.
+   * Never called by an older Inbox. `labels`: a session's label changed too (issue #2450), so the rows' agents
+   * and the authors read the list again.
    */
-  onDeliveries?: () => void;
+  onDeliveries?: (change?: { labels: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -1658,8 +1810,11 @@ export interface InboxEventHandlers {
    * stream serves this one changes, so the report names it (`served_by`).
    */
   onConnect?: () => void;
-  /** A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"); never called by an older Inbox. */
-  onDrafts?: (threadId: string) => void;
+  /**
+   * A reply draft was saved or discarded (`event: drafts`, approval "inbox-reply-drafts"), or a compose draft saved,
+   * deleted or sent (`{ compose: true }`: null); never called by an older Inbox.
+   */
+  onDrafts?: (threadId: string | null) => void;
   /** An Ask AI chat changed (`event: ask`), only ever on the owner's own window with the setting on. */
   onAsk?: (threadId: string) => void;
   /** The sidebar's pins changed (`event: pins`, approval "inbox-pinned-threads"); never called by an older Inbox. */
@@ -1759,8 +1914,9 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'drafts':
       try {
-        const data = JSON.parse(frame.data) as { thread_id?: unknown };
+        const data = JSON.parse(frame.data) as { thread_id?: unknown; compose?: unknown };
         if (typeof data.thread_id === 'string') handlers.onDrafts?.(data.thread_id);
+        else if (data.compose === true) handlers.onDrafts?.(null);
       } catch {
         // A malformed frame changes nothing.
       }
@@ -1773,9 +1929,16 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
         // A malformed frame changes nothing.
       }
       return;
-    case 'deliveries':
-      handlers.onDeliveries?.();
+    case 'deliveries': {
+      let labels = false;
+      try {
+        labels = (JSON.parse(frame.data) as { labels?: unknown } | null)?.labels === true;
+      } catch {
+        // An empty or malformed frame is a delivery change alone.
+      }
+      handlers.onDeliveries?.({ labels });
       return;
+    }
     case 'pins':
       handlers.onPins?.();
       return;

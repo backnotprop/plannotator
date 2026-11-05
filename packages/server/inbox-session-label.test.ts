@@ -116,6 +116,24 @@ describe("cleanInboxSessionLabel", () => {
     expect(cleanInboxSessionLabel(emoji)).toBe("\u{1F600}".repeat(60));
   });
 
+  test("no cut splits a family emoji: the 60-character cap, the 200 code points read, the first UTF-16 cut", () => {
+    // One character of seven code points (eleven UTF-16 units): a code-point cut leaves a man or a ZWJ behind.
+    const family = "\u{1F468}‍\u{1F469}‍\u{1F467}‍\u{1F466}";
+    const graphemes = (text: string) => Array.from(new Intl.Segmenter("en", { granularity: "grapheme" }).segment(text), (s) => s.segment);
+    // The 60 cap: the family as the 59th, 60th and 61st character.
+    expect(cleanInboxSessionLabel(`${"a".repeat(58)}${family}bc`)).toBe(`${"a".repeat(58)}${family}b`);
+    expect(cleanInboxSessionLabel(`${"a".repeat(59)}${family}b`)).toBe(`${"a".repeat(59)}${family}`);
+    expect(cleanInboxSessionLabel(`${"a".repeat(60)}${family}`)).toBe("a".repeat(60));
+    // The 200 code points read: whole when it ends at 200, left out when it would cross it (never half of it).
+    const stripped = (count: number) => "‮".repeat(count);
+    expect(cleanInboxSessionLabel(`${stripped(193)}${family}a`)).toBe(family);
+    for (let count = 194; count <= 199; count += 1) expect(cleanInboxSessionLabel(`${stripped(count)}${family}a`)).toBeNull();
+    // The first cut at 400 UTF-16 units falls inside the 37th family: whole families only, as many as fit in 200 code points.
+    const cut = cleanInboxSessionLabel(family.repeat(40))!;
+    expect(cut).toBe(family.repeat(28));
+    expect(graphemes(cut).every((g) => g === family)).toBe(true);
+  });
+
   test("the cap counts what is left after cleaning, and a cut never ends on a space", () => {
     expect(cleanInboxSessionLabel(`${"‮".repeat(30)}${"a".repeat(60)}`)).toBe("a".repeat(60));
     expect(cleanInboxSessionLabel(`${"a".repeat(59)} tail`)).toBe("a".repeat(59));

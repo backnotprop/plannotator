@@ -2,8 +2,10 @@
  * A guided review open in the Inbox (the record's 4.2): it takes the window
  * the way an attachment does, under a header naming who sent it, with
  * Plannotator's guide viewer below. The viewer mounts through a dynamic import
- * (React.lazy): in the single-file build its code is inline and its modules
- * run at page load, but nothing of the guide renders until Open. Reviewed
+ * (React.lazy): its code is a chunk the Inbox serves (build/pack-inbox.ts),
+ * loaded on the first Open; when it cannot arrive (the Inbox stopped, or
+ * restarted onto a new release under this page) the pane says so with Reload
+ * (ReaderPart) and the window stays as it is. Reviewed
  * ticks are kept with the thread, on the message in the store, so they
  * survive a reload, another browser and the Inbox moving to another port.
  *
@@ -15,7 +17,8 @@
  * shows the guide read-only.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { parseGuideSnapshot, type GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxAnnotationRecord, InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -25,10 +28,11 @@ import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
-const GuideReader = lazy(() => import('#guide-reader'));
+const GuideReader = GuideReaderPart.Part;
 
 export interface GuidePaneProps {
   thread: InboxThread;
@@ -37,6 +41,8 @@ export interface GuidePaneProps {
   onBack: () => void;
   /** Close the guide and the thread. */
   onClose: () => void;
+  /** Settings → Capabilities → Code review: each diff header offers Open in. */
+  codeReview?: boolean;
 }
 
 /**
@@ -174,8 +180,9 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites };
 }
 
-export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) {
+export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
   const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);
@@ -261,9 +268,11 @@ export function GuidePane({ thread, message, onBack, onClose }: GuidePaneProps) 
               {error}
             </div>
           ) : snapshot ? (
-            <Suspense fallback={null}>
-              <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} />
-            </Suspense>
+            <ReaderPart diff={snapshot.review.rawPatch}>
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
+                <GuideReader snapshot={snapshot} reviewed={reviewed} onReviewedChange={changeReviewed} comments={readerComments} fileOpenIn={codeReview ? fileOpenIn : undefined} />
+              </OpenInCodeSpans>
+            </ReaderPart>
           ) : null}
         </div>
         <div

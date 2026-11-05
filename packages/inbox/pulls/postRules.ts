@@ -2,15 +2,24 @@
  * Post to GitHub/GitLab (the owner's answer C on #2590): the forge's rules for one PR, read as the review app reads
  * them (`getPRPlatformCapabilities`), and which pull request a review may be posted to.
  */
-import type { InboxPull } from '@plannotator/core/inbox-types';
+import { inboxPullIsOpen, type InboxPull } from '@plannotator/core/inbox-types';
+import type { CodeAnnotation } from '@plannotator/ui/types';
 import { getPRPlatformCapabilities } from '../../shared/pr-types';
 import type { PlatformPostPull, PlatformRules } from '../guide/platform-post-types';
 
 export { resolvePlatformDecisionAction } from '../../review-editor/reviewDecision';
 
+/**
+ * A posted comment as it went: its id with what it says and where. A comment edited after it was posted keeps its id
+ * but not this, so the correction counts as new: it has not gone, and the follow-up offers it.
+ */
+export function postedSignature(c: CodeAnnotation): string {
+  return JSON.stringify([c.id, c.text ?? '', c.suggestedCode ?? '', c.conventionalLabel ?? '', c.decorations ?? [], c.filePath, c.lineStart, c.lineEnd, c.side, c.scope ?? 'line']);
+}
+
 /** The PR as `#platform-post` posts it, or null when it can't be: closed, merged, or its head commit unknown. */
 export function postablePull(pull: InboxPull | null | undefined): PlatformPostPull | null {
-  if (!pull || !pull.head_sha || (pull.state !== 'open' && pull.state !== 'draft')) return null;
+  if (!pull || !pull.head_sha || !inboxPullIsOpen(pull)) return null;
   return { key: pull.key, url: pull.url, number: pull.number, title: pull.title, repo: pull.repo, host: pull.host, platform: pull.platform, head_sha: pull.head_sha, mine: pull.mine };
 }
 

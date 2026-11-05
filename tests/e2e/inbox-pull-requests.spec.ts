@@ -9,22 +9,27 @@
  * real `git diff`s of scratch repositories with invented names.
  *
  * What is proved, in order:
- *  1. Off (the default): no Pull requests row, a #pulls link lands on the
- *     Inbox, and no gh / glab query runs (the fakes' call log).
+ *  1. Off (the default): no Reviews row, a #pulls link (the permanent alias of
+ *     #reviews) says Code review is off, with Open Settings, and no gh / glab
+ *     query runs (the fakes' call log).
  *  2. On, with the Board off: the row; the list grouped by whose move it is
  *     (On you with a teammate's review request and the agent's stack, Ready
  *     to land, the folded "2 waiting on others"); the stack is one row with
  *     its chain.
  *  3. The stack view with the Board off: layers from main up, "Lands next" on
- *     the lowest open one, the agent's thread (tied by the PR's link in the
- *     agent's own message), no Board UI, no merge button.
- *  4. A PR with no agent: "No agent yet", the Agent line lists the
- *     project's live sessions as pills that pick; the purple Review starts a
- *     thread with the hand-off's words for the picked one, and the PR is that
- *     thread's from then on. "Open the diff" sits beside it in every state
- *     (before, on the way, arrived, posted), and each row opens its diff. (Launch an agent shows
- *     only while the Inbox can launch; the shots add compose's launch block to
- *     the sessions answer, since launching is not on main yet.)
+ *     the lowest open one, its review thread's agent (tied by the PR's link in
+ *     the agent's own message) and Open review thread, no Board UI, no merge
+ *     button.
+ *  4. A PR with no review thread (approval "pr-page-review-with-agent"): one
+ *     button, Review with an agent, opens the picker inline: Ask for, the
+ *     project's running agents as one radio list, Start a new agent; Start
+ *     review thread sends the first message to the picked one, and the PR is
+ *     that thread's from then on ("Review thread with Claude Code", Open
+ *     review thread, also once the guided review arrived). "Open the diff"
+ *     sits beside the button in every state, and each row opens its diff.
+ *     (Start a new agent shows only while the Inbox can launch; the shots add
+ *     compose's launch block to the sessions answer, since launching is not
+ *     on main yet.)
  *  5. The Board on, a card linking the stack: a quiet Board chip.
  *  6. Open the diff opens the lowest open layer's own diff; Next layer moves up;
  *     Whole stack is the compare from the lowest open layer's base (not the
@@ -37,6 +42,11 @@
  *     approval with a line comment (the fake gh's stdin is the review the
  *     review app's provider builds), and a refusal from GitHub shown in the
  *     dialog with nothing claimed posted.
+ * 10. The rows' top left is each author's picture (the owner on #2608), the
+ *     Inbox's own route fetching it from the fake forge's `avatarUrl` (a
+ *     loopback server, tests/helpers/fake-avatars.ts); the window never asks
+ *     another origin for anything. A long title is cut in the review header,
+ *     whose controls stay in the window from 1280 down to 760 wide.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -52,6 +62,7 @@ import { INBOX_BRIDGE_POLL_PATH } from '../../packages/shared/inbox/connection';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
+import { startFakeAvatars, type FakeAvatars } from '../helpers/fake-avatars';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -73,6 +84,22 @@ interface World {
   context: BrowserContext;
   page: Page;
   errors: string[];
+  avatars: FakeAvatars;
+  /** Every request a window made to an origin other than the Inbox's (none may happen). */
+  outside: string[];
+}
+
+/** The real person's Inbox port: a spec's Inbox never takes it. */
+const OWNER_INBOX_PORT = '59812';
+
+/** Records any request the page makes to an origin other than `url`'s (data: and blob: are the page's own). */
+function watchOutside(page: Page, url: string, outside: string[]): void {
+  const own = new URL(url).origin;
+  page.on('request', (request) => {
+    const at = new URL(request.url());
+    if (at.protocol === 'data:' || at.protocol === 'blob:') return;
+    if (at.origin !== own) outside.push(request.url());
+  });
 }
 
 let world: World;
@@ -132,19 +159,25 @@ function writeForge(dir: string) {
     '  exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = graphql ]; then',
+    // Others (a read of its own): nothing open past the person's own lists.
+    '  case "$*" in *"query InboxPullsOthers"*) echo "gh others" >> "$calls"; echo \'{"data":{"viewer":{"login":"dana"},"others0":{"issueCount":0,"nodes":[]}}}\'; exit 0;; esac',
     '  case "$*" in *"requested: search"*) echo "gh pulls" >> "$calls"; cat "$dir/gh-pulls.json"; exit 0;; esac',
     '  echo "gh graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
     // A review posted (Post to GitHub): `gh api <endpoint> --method POST --input -`, the review on stdin, kept.
     'if [ "$1" = api ] && [ "$3" = --method ]; then',
     '  echo "gh post $2" >> "$calls"',
-    '  cat > "$dir/gh-posted.json"',
+    // `gh-posted.json` the last one, `gh-posts.jsonl` every one.
+    '  tee "$dir/gh-posted.json" >> "$dir/gh-posts.jsonl"',
+    '  echo >> "$dir/gh-posts.jsonl"',
     '  if [ -f "$dir/gh-post-fail" ]; then cat "$dir/gh-post-fail" >&2; exit 1; fi',
     '  echo \'{"id":1}\'; exit 0',
     'fi',
     // A layer's head commit, read around its patch (`--jq .head.sha`): the list's `headRefOid` for that number.
     'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then',
-    '  echo "gh head $4" >> "$calls"; printf "%040d\\n" "${4##*/}"; exit 0',
+    '  echo "gh head $4" >> "$calls"',
+    '  if [ -f "$dir/gh-head-${4##*/}" ]; then cat "$dir/gh-head-${4##*/}"; exit 0; fi',
+    '  printf "%040d\\n" "${4##*/}"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$2" = --hostname ]; then',
     '  echo "gh diff $4" >> "$calls"',
@@ -163,6 +196,7 @@ function writeForge(dir: string) {
     '  echo "gitlab.com"; echo "  ✓ Logged in to gitlab.com as dana (keyring)"; exit 0',
     'fi',
     'if [ "$1" = api ] && [ "$4" = graphql ]; then',
+    '  case "$*" in *"query InboxPullsOthers"*) echo "glab others" >> "$calls"; echo \'{"data":{"currentUser":{"username":"dana"}}}\'; exit 0;; esac',
     '  case "$*" in *reviewRequestedMergeRequests*) echo "glab pulls" >> "$calls"; cat "$dir/glab-pulls.json"; exit 0;; esac',
     '  echo "glab graphql-other" >> "$calls"; echo \'{"data":null}\'; exit 1',
     'fi',
@@ -189,6 +223,9 @@ function writeForge(dir: string) {
 const forgeCalls = () => readFileSync(join(world.forge, 'calls'), 'utf8').split('\n').filter(Boolean);
 const ago = (minutes: number) => new Date(Date.now() - minutes * 60_000).toISOString();
 
+/** The fake forge's picture address for a login (the loopback server started in beforeAll). */
+let avatarOf = (login: string) => `http://127.0.0.1:9/${login}.png`;
+
 function ghPull(repoName: string, number: number, fields: Record<string, unknown>) {
   return {
     number,
@@ -207,7 +244,7 @@ function ghPull(repoName: string, number: number, fields: Record<string, unknown
     reviewDecision: 'REVIEW_REQUIRED',
     repository: { nameWithOwner: repoName },
     headRepository: { nameWithOwner: repoName },
-    author: { login: 'dana' },
+    author: { login: 'dana', avatarUrl: avatarOf('dana') },
     reviewRequests: { nodes: [] },
     latestReviews: { nodes: [] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
@@ -228,7 +265,7 @@ function stats(patch: string) {
   return { additions, deletions, changedFiles: files };
 }
 
-/** One live session: the bridge's long-poll, as the mod, Pi and OpenCode run it (compose's and Hand to an agent's sessions). */
+/** One live session: the bridge's long-poll, as the mod, Pi and OpenCode run it (compose's and the review picker's sessions). */
 class Poll {
   private stopped = false;
   private readonly loop: Promise<void>;
@@ -262,7 +299,7 @@ class Poll {
 
 /**
  * Launching an agent from the Inbox is not on main yet: for the shots, compose's sessions answer gets the launch
- * block an Inbox that can launch adds, so Launch an agent shows. Nothing is launched.
+ * block an Inbox that can launch adds, so Start a new agent shows. Nothing is launched.
  */
 async function offerLaunch(page: Page): Promise<void> {
   await page.route('**/api/inbox/sessions*', async (route) => {
@@ -312,6 +349,9 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
   const forgeDir = join(root, 'forge');
   const forge = writeForge(forgeDir);
+  // The authors' pictures: a loopback server the fake forge's avatarUrl names (allowed under the test sandbox only).
+  const avatars = await startFakeAvatars();
+  avatarOf = avatars.url;
   const src = join(root, 'src');
 
   // billing-svc: Claude Code's stack of four, the charge client merged under it.
@@ -419,7 +459,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       data: {
         viewer: { login: 'dana' },
         requested: {
-          nodes: [ghPull(webRepo, 880, { title: 'RTL layout for the settings pages', author: { login: 'tomas' }, headRefName: 'tomas/rtl-settings', updatedAt: ago(4), ...stats(rtl), reviewRequests: { nodes: [{ requestedReviewer: { login: 'dana' } }] } })],
+          nodes: [ghPull(webRepo, 880, { title: 'RTL layout for the settings pages', author: { login: 'tomas', avatarUrl: avatarOf('tomas') }, headRefName: 'tomas/rtl-settings', updatedAt: ago(4), ...stats(rtl), reviewRequests: { nodes: [{ requestedReviewer: { login: 'dana' } }] } })],
         },
         authored: {
           nodes: [
@@ -451,7 +491,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     headPipeline: { status: 'SUCCESS' },
     project: { fullPath: 'northwind/ledger' },
     sourceProject: { fullPath: 'northwind/ledger' },
-    author: { username: 'dana' },
+    author: { username: 'dana', avatarUrl: avatarOf('dana') },
     approvedBy: { nodes: [] },
     reviewers: { nodes: [] },
     ...fields,
@@ -466,7 +506,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
       data: {
         currentUser: {
           username: 'dana',
-          requested: { nodes: [mr(58, { title: 'Round cents half to even', author: { username: 'priya' }, sourceBranch: 'priya/rounding', updatedAt: ago(75), ...glStats(rounding) })] },
+          requested: { nodes: [mr(58, { title: 'Round cents half to even', author: { username: 'priya', avatarUrl: avatarOf('priya') }, sourceBranch: 'priya/rounding', updatedAt: ago(75), ...glStats(rounding) })] },
           authored: { nodes: [mr(61, { title: 'Export the ledger to CSV', sourceBranch: 'csv-export', headPipeline: { status: 'RUNNING' }, updatedAt: ago(15), ...glStats(csvPatch) })] },
           merged: { nodes: [] },
         },
@@ -492,10 +532,14 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   expect(started.status, started.stderr).toBe(0);
   rememberInboxOf(dataDir);
   const url = started.stdout.trim();
+  // The person's own Inbox port is never this spec's.
+  expect(new URL(url).port).not.toBe(OWNER_INBOX_PORT);
   const context = await browser.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.message));
+  const outside: string[] = [];
+  watchOutside(page, url, outside);
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const codex = await SimAgent.connect({ binary, env, name: 'Codex', host: 'codex' });
 
@@ -508,7 +552,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   });
   const viteThread = await codex.send({ project_path: web.dir, thread: 'vite-8', subject: 'Vite 8', body: 'Priya approved the Vite 8 upgrade and the checks passed: https://github.com/northwind/web-app/pull/872' });
   const csvThread = await codex.send({ project_path: ledger.dir, thread: 'csv', subject: 'Ledger CSV export', body: 'The CSV export is up; its pipeline is running. https://gitlab.com/northwind/ledger/-/merge_requests/61' });
-  // Two live sessions in web-app (Hand to an agent's menu), one in billing-svc.
+  // Two live sessions in web-app (the review picker's list), one in billing-svc.
   const now = Date.now();
   const polls = [
     new Poll(dataDir, 'ses-web-claude', 'claude-code', web.dir, now - 40 * 60_000),
@@ -531,6 +575,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     context,
     page,
     errors,
+    avatars,
+    outside,
   };
 });
 
@@ -541,6 +587,7 @@ test.afterAll(async () => {
     await world.claude.close().catch(() => {});
     await world.codex.close().catch(() => {});
     await world.context.close();
+    await world.avatars.close();
   } finally {
     await removeInboxScratch();
   }
@@ -551,7 +598,7 @@ const LAYER_412 = 'github.com/northwind/billing-svc#412';
 const LAYER_413 = 'github.com/northwind/billing-svc#413';
 const LOCALE = 'github.com/northwind/web-app#869';
 
-test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or glab query runs', async () => {
+test('off (the default): no row, a #pulls link says Code review is off, and no gh or glab query runs', async () => {
   const { page } = world;
   const reads: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
@@ -562,8 +609,16 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await expect(page.locator('[data-pulls-nav]')).toHaveCount(0);
   await page.goto(`${world.url}#pulls`);
-  await expect.poll(() => page.evaluate(() => location.hash)).not.toContain('pulls');
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(page.locator('[data-reviews-off]')).toContainText('Code review is off');
   await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+  await shot(page, '1-off-link');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(page.locator('[data-reviews-off-settings]')).toBeVisible();
+  await shot(page, '1-off-link-phone');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.locator('[data-reviews-off-settings]').click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toContain('capabilities');
   await page.goto(world.url);
   await expect(page.locator('[data-inbox-nav]')).toBeVisible();
   await page.waitForTimeout(800);
@@ -571,6 +626,80 @@ test('off (the default): no row, a #pulls link lands on the Inbox, and no gh or 
   page.off('request', watch);
   expect(reads).toEqual([]);
   expect(forgeCalls().filter((c) => c.endsWith(' pulls') || c.includes(' diff '))).toEqual([]);
+});
+
+test('an old #pulls link opened fresh, in a new window, becomes #reviews', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  try {
+    await page.goto('about:blank');
+    await page.goto(`${world.url}#pulls&view=review`);
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews&view=review');
+  } finally {
+    await context.close();
+  }
+});
+
+test("#reviews&new with Code review off: the off page, and no box", async () => {
+  const { page } = world;
+  await setCodeReview(false);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-reviews-off]')).toBeVisible();
+  await page.waitForTimeout(400);
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+});
+
+test('a #reviews link on a tailnet guest\'s page: the Inbox, and Back goes where the person was', async () => {
+  const context = await world.page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 } });
+  const page = await context.newPage();
+  await setCodeReview(true);
+  try {
+    await page.route('**/api/inbox/settings*', async (route) => {
+      if (route.request().method() !== 'GET') return route.continue();
+      const answer = await route.fetch();
+      await route.fulfill({ response: answer, json: { ...(await answer.json()), via: 'tailnet', guest: true } });
+    });
+    const thread = `#thread=${encodeURIComponent(world.threads.stack)}`;
+    await page.goto(`${world.url}${thread}`);
+    await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+    await page.evaluate(() => {
+      location.hash = '#reviews';
+    });
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+    await expect(page.locator('[data-pulls-list]')).toHaveCount(0);
+    await page.goBack();
+    await expect.poll(() => page.evaluate(() => location.hash)).toBe(thread);
+  } finally {
+    await context.close();
+    await setCodeReview(false);
+  }
+});
+
+test('#reviews&new opens the box over the page once: the address goes back to #reviews, so a reload does not reopen it', async () => {
+  const { page } = world;
+  await setCodeReview(true);
+  await page.goto(`${world.url}#reviews&new`);
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.reload();
+  await expect(page.locator('[data-pulls-list]')).toBeVisible();
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  // The address was replaced, not pushed: Back from the box leaves the page, and does not open it again.
+  await page.goto(world.url);
+  await expect(page.locator('[data-inbox-nav]')).toBeVisible();
+  await page.evaluate(() => {
+    location.hash = '#reviews&new';
+  });
+  await expect(page.locator('dialog[data-compose]')).toBeVisible();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await page.goBack();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('');
+  await page.waitForTimeout(400);
+  await expect(page.locator('dialog[data-compose]')).toHaveCount(0);
+  await setCodeReview(false);
 });
 
 test('on, with the Board off: the row, and the list by whose move it is, the stack one row with its chain', async () => {
@@ -582,6 +711,8 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   // Pull requests needs no Board.
   await expect(page.locator('[data-board-nav]')).toHaveCount(0);
   await nav.click();
+  await expect.poll(() => page.evaluate(() => location.hash)).toBe('#reviews');
+  await expect(nav).toContainText('Reviews');
   const list = page.locator('[data-pulls-list]');
   await expect(list.locator('[data-pulls-row]').first()).toBeVisible();
   expect(forgeCalls().filter((c) => c.endsWith(' pulls')).sort()).toEqual(['gh pulls', 'glab pulls']);
@@ -598,14 +729,24 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   const stackRow = list.locator(`[data-pulls-row="${STACK_ID}"]`);
   await expect(stackRow).toHaveAttribute('data-pulls-layers', '4');
   await expect(stackRow.locator('[data-pulls-chain] .ib-bc-mark')).toHaveCount(4);
-  await expect(stackRow).toContainText('3 open, 1 merged · start at #412');
-  await expect(stackRow).toContainText('Retry failed charges');
-  await expect(list.locator('[data-pulls-on-you]')).toHaveText('3 on you');
-  // The head's title and count are never cut: the project filter gives way (unset, its folder mark).
-  for (const selector of ['[data-pulls-heading]', '[data-pulls-on-you]']) {
-    expect(await list.locator(selector).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  // The agent on the third line, its mark before its name; top left, the author's picture (her own stack too).
+  await expect(stackRow).toContainText('3 open, 1 merged · Review thread with Claude Code · start at #412');
+  await expect(stackRow.locator('.ib-pv [data-pulls-row-agent="claude-code"]')).toBeVisible();
+  await expect(stackRow.locator('.ib-lead .ib-atiles')).toHaveCount(0);
+  for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
+    const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
+    await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
+    const src = new URL((await av.locator('img').getAttribute('src'))!, world.url);
+    expect([src.origin, src.pathname]).toEqual([new URL(world.url).origin, '/api/inbox/pulls/avatar']);
   }
-  await expect(list.locator('[data-board-project-chip]')).toHaveAccessibleName(/All projects/);
+  // The Inbox fetched them from the fake forge's addresses; the window asked no other origin.
+  expect(world.avatars.served).toEqual(expect.arrayContaining(['/dana.png', '/tomas.png', '/priya.png']));
+  expect(world.outside).toEqual([]);
+  await expect(stackRow).toContainText('Retry failed charges');
+  // The head is "Reviews" and the filter mark (inbox-pull-filters.spec.ts); the On you band carries the count.
+  expect(await list.locator('[data-pulls-heading]').evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+  await expect(list.locator('[data-pulls-heading]')).toHaveText('Reviews');
+  await expect(list.locator('[data-pulls-filter-trigger]')).toHaveAccessibleName('Filter');
   await expect(page.locator('[data-pulls-nav] .ib-n')).toHaveText('3');
   await shot(page, '2-list');
   await fold.click();
@@ -613,7 +754,7 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   await fold.click();
 });
 
-test('the stack view with the Board off: layers from main up, Lands next, the agent and its thread, no Board UI, no merge button', async () => {
+test('the stack view with the Board off: layers from main up, Lands next, its review thread, no Board UI, no merge button', async () => {
   const { page } = world;
   await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
@@ -632,22 +773,25 @@ test('the stack view with the Board off: layers from main up, Lands next, the ag
   await expect(pane.locator(`[data-pulls-layer="${STACK_ID}"]`)).toContainText('Draft');
   await expect(pane.locator('[data-pulls-layer="github.com/northwind/billing-svc#411"]')).toContainText('Merged');
   await expect(pane.locator('.ib-pr-base')).toContainText('main');
-  await expect(pane).toContainText('Claude Code');
-  await expect(pane.locator('[data-pulls-thread]')).toBeVisible();
-  await expect(pane.locator('[data-pulls-thread]')).toHaveText(/^Thread\s*Retry failed charges$/);
+  // Its review thread: the agent's line under the title (its last words under it), one button that opens the thread.
+  const line = pane.locator('[data-pulls-thread-line="live"]');
+  await expect(line).toBeVisible();
+  await expect(line.locator('.ib-pr-thread-h')).toContainText('Review thread with Claude Code');
+  await expect(pane.locator('[data-pulls-primary]')).toHaveText('Open review thread');
+  await expect(pane).not.toContainText(/\bhand/i);
   // The Board is off: no card chip, no Board words.
   await expect(pane.locator('[data-pulls-card]')).toHaveCount(0);
   await expect(pane).not.toContainText('Board');
-  await expect(pane.locator('[data-pulls-no-agent]')).toHaveCount(0);
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
-  // An agent has it: no Review (Hand to another agent asks again); the diff is one button away.
-  await expect(pane.locator('[data-pulls-review]')).toHaveCount(0);
+  // It has a review thread: no picker, and no way to add a second agent; the diff is one button away.
+  await expect(pane.locator('[data-pulls-primary="review"], [data-pulls-picker]')).toHaveCount(0);
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
-  await expect(pane.getByRole('button', { name: 'Whole stack' })).toBeVisible();
+  // The whole stack is the review's own switch: one Open the diff here.
+  await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
   await shot(page, '3-stack-board-off');
 });
 
-/** The agent's guided review of a one-file PR, sent as phase 1's review (`review: true`), in reply to the hand-off. */
+/** The agent's guided review of a one-file PR, sent as phase 1's review (`review: true`), in reply to the review thread's first message. */
 async function sendReview(agent: SimAgent, projectPath: string, replyTo: string, patch: string, file: string, title: string): Promise<void> {
   await agent.submitGuide({
     project_path: projectPath,
@@ -665,8 +809,8 @@ async function sendReview(agent: SimAgent, projectPath: string, replyTo: string,
   } as never);
 }
 
-/** The same PR on a phone (390 px), in a context of its own: for the hand-off's states, taken where they happen. */
-async function phoneShot(browser: Browser, row: string, name: string, schemes: readonly ('light' | 'dark')[] = ['light', 'dark']): Promise<void> {
+/** The same PR on a phone (390 px), in a context of its own: for the review thread's states, taken where they happen. */
+async function phoneShot(browser: Browser, row: string, name: string, schemes: readonly ('light' | 'dark')[] = ['light', 'dark'], openPicker = false): Promise<void> {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true, colorScheme: 'light', deviceScaleFactor: 2 });
   const page = await context.newPage();
   try {
@@ -676,9 +820,13 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     if (await toggle.count()) await toggle.click();
     await page.locator(`[data-pulls-row="${row}"]`).click();
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
-    // The pills wrap inside the screen: nothing scrolls sideways, and each is a full touch target.
+    if (openPicker) {
+      await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
+      await expect(page.locator('[data-pulls-picker-session]').first()).toBeVisible();
+    }
+    // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator('[data-pulls-hand-session], [data-pulls-launch], [data-pulls-review], [data-pulls-open-diff]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
       expect(box.right).toBeLessThanOrEqual(390);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
@@ -689,7 +837,10 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-test('a PR with no agent: Ask for (Guided review / Custom curation), the picked agent, Review, "on the way", Start review, Hand to another agent, and Open the diff in each', async ({ browser }) => {
+/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, the picker's Ask for options, its rows and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-pulls-picker-session], [data-pulls-picker-new], [data-pulls-start], [data-pulls-picker-cancel], [data-pulls-ask-option]';
+
+test('a PR with no review thread: Review with an agent, the picker (Ask for, the running agents, Start a new agent), "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -697,101 +848,101 @@ test('a PR with no agent: Ask for (Guided review / Custom curation), the picked 
   await list.locator('[data-pulls-waiting-toggle]').click();
   await list.locator(`[data-pulls-row="${LOCALE}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
-  await expect(pane.locator('[data-pulls-no-agent]')).toHaveText('No agent yet');
-  // Inline, no menu: Ask for, then Agent with the agents as pills (one picked) and + New agent last.
-  const hand = pane.locator('[data-pulls-handoff="first"]');
-  await expect(hand).toContainText('Ask for');
-  await expect(hand.locator('.ib-pr-lab').nth(1)).toHaveText('Agent');
-  // The pills are one radio group: one agent is picked.
-  await expect(hand.getByRole('radiogroup', { name: 'Agent' }).getByRole('radio')).toHaveCount(2);
-  await expect(hand.locator('[data-pulls-hand-session] input:checked')).toHaveCount(1);
-  await expect(pane.locator('[data-pulls-hand-menu], [role="menu"]')).toHaveCount(0);
-  await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
-  // Only web-app's live sessions: billing-svc's is another project's.
-  await expect(hand.locator('[data-pulls-hand-session]')).toHaveCount(2);
-  await expect(hand.locator('[data-pulls-hand-session="ses-billing-claude"]')).toHaveCount(0);
-  await expect(hand.locator('[data-pulls-launch]')).toHaveText('New agent');
-  await expect(hand.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
-  // Review (just "Review", purple) sits under the two lines, Open the diff beside it.
-  const grid = (await hand.locator('.ib-pr-hgrid').boundingBox())!;
-  const reviewButton = hand.locator('[data-pulls-review]');
-  await expect(reviewButton).toHaveText('Review');
-  await expect(reviewButton).toHaveClass(/ib-pri/);
-  expect((await reviewButton.boundingBox())!.y).toBeGreaterThan(grid.y + grid.height - 1);
-  expect((await hand.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await reviewButton.boundingBox())!.y);
-  // A pill only picks: nothing is sent until Review.
-  await hand.locator('[data-pulls-hand-session="ses-web-claude"]').click();
-  await expect(hand.locator('[data-pulls-hand-session="ses-web-claude"] input')).toBeChecked();
-  await expect(hand.locator('[data-pulls-review]')).toHaveAccessibleDescription('With Claude Code');
+  // One button under the title, Open the diff beside it; no picker until it is asked for, no thread, no Reply.
+  const primary = pane.locator('[data-pulls-primary]');
+  await expect(primary).toHaveText('Review with an agent');
+  await expect(primary).toHaveClass(/ib-pri/);
+  await expect(primary).toHaveAttribute('aria-expanded', 'false');
+  expect((await pane.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await primary.boundingBox())!.y);
+  await expect(pane.locator('[data-pulls-picker]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
-  await shot(page, '4-no-agent');
+  await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
+  await expect(pane).not.toContainText(/\bhand/i);
+  await shot(page, '4-no-thread');
+  await primary.click();
+  // Inline under the button, no menu: Ask for, then one radio list of web-app's running agents and Start a new agent.
+  const picker = pane.locator('[data-pulls-picker]');
+  await expect(primary).toHaveAttribute('aria-expanded', 'true');
+  await expect(picker).toContainText('Ask for');
+  await expect(picker).toContainText('Running in web-app');
+  await expect(pane.locator('[role="menu"]')).toHaveCount(0);
+  expect((await picker.boundingBox())!.y).toBeGreaterThan((await primary.boundingBox())!.y);
+  const agents = picker.getByRole('radiogroup', { name: 'Agent, running in web-app' });
+  await expect(agents.getByRole('radio')).toHaveCount(3);
+  await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
+  await expect(picker.locator('[data-pulls-picker-session="ses-billing-claude"]')).toHaveCount(0);
+  await expect(picker.locator('[data-pulls-picker-session] input:checked')).toHaveCount(1);
+  await expect(picker.locator('[data-pulls-picker-new]')).toContainText('Start a new agent');
+  await expect(picker.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
+  // A row only picks: nothing is sent until Start review thread.
+  await picker.locator('[data-pulls-picker-session="ses-web-claude"]').click();
+  await expect(picker.locator('[data-pulls-picker-session="ses-web-claude"] input')).toBeChecked();
+  await expect(picker.locator('[data-pulls-start]')).toHaveText('Start review thread');
+  await expect(picker.locator('[data-pulls-start]')).toHaveAttribute('data-pulls-start', 'ses-web-claude');
+  await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
+  await shot(page, '4a-picker');
   // The row opens the diff too: "Open diff ›" at its end, under the pointer.
   const row = pane.locator(`[data-pulls-layer="${LOCALE}"] button`);
   await row.hover();
   await expect(row.locator('.ib-pr-lgo')).toHaveText('Open diff');
   await shot(page, '4b-row-hover', ['light']);
   await page.mouse.move(0, 0);
-  await hand.locator('[data-pulls-ask-option="custom"]').click();
-  await hand.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
+  await picker.locator('[data-pulls-ask-option="custom"]').click();
+  await picker.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
   await shot(page, '5-ask-custom');
-  await hand.locator('[data-pulls-ask-option="guide"]').click();
-  await hand.locator('[data-pulls-review]').click();
-  await expect(hand).toHaveCount(0);
-  // Focus lands on the status line that says who has it.
-  await expect(pane.locator('[data-pulls-said]')).toBeFocused();
-  const chip = pane.locator('[data-pulls-thread]');
-  await expect(chip).toBeVisible();
-  await expect(pane.locator('[data-pulls-said]')).toContainText(/Claude Code\s*· guided review on the way\s*·\s*Hand to another agent/);
-  const threadId = String(await chip.getAttribute('data-pulls-thread'));
+  await picker.locator('[data-pulls-ask-option="guide"]').click();
+  await picker.locator('[data-pulls-start]').click();
+  await expect(picker).toHaveCount(0);
+  // Focus lands on the line that names the review thread's agent.
+  const line = pane.locator('[data-pulls-thread-line]');
+  await expect(line).toBeFocused();
+  await expect(line).toHaveText(/^Review thread with Claude Code\s*Guided review on the way$/);
+  const threadId = String(await line.getAttribute('data-pulls-thread'));
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
-  expect(words).toContain('Own pull request #869: `Fall back to English for missing strings`');
-  expect(words).toContain('https://github.com/northwind/web-app/pull/869');
-  expect(words).toContain('\n/review-curate\n');
+  expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
+  expect(words).toContain('\n- Title: Fall back to English for missing strings\n- Number: #869\n');
+  expect(words).toContain('\n- Link: https://github.com/northwind/web-app/pull/869\n');
+  expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
-  // Kept: a fresh read still ties it to that thread, and says what was asked.
+  // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
-  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Claude Code has it · your review');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-said-waiting]')).toContainText('guided review on the way');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-review]')).toHaveCount(0);
+  await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Review thread with Claude Code · your review');
+  await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="asked"]')).toContainText('Guided review on the way');
+  await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
+  await expect(page.locator('[data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
+  await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
   await phoneShot(browser, LOCALE, 'phone-6-on-the-way');
 
-  // The agent's guided review arrives through phase 1's path: on the PR it is Start review.
+  // The agent's guided review arrives through phase 1's path: the thread is still the way in.
   await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'Fall back to English for missing strings');
   await page.reload();
-  const startReview = page.locator('[data-pulls-stack] [data-pulls-start-review]');
-  await expect(startReview).toBeVisible();
-  await expect(page.locator('[data-pulls-stack] [data-pulls-ask]')).toHaveCount(0);
-  const startBox = (await startReview.boundingBox())!;
-  expect((await page.locator('[data-pulls-stack] [data-pulls-open-diff]').boundingBox())!.y).toBe(startBox.y);
-  await shot(page, '6a-start-review');
-  await phoneShot(browser, LOCALE, 'phone-6a-start-review');
-  // Hand to another agent: the two lines again, "Hand again for", without the agent that has it; Escape folds them.
-  await page.locator('[data-pulls-stack] [data-pulls-rehand]').click();
-  const again = page.locator('[data-pulls-stack] [data-pulls-handoff="again"]');
-  await expect(again).toContainText('Hand again for');
-  await expect(again.locator('[data-pulls-hand-session]')).toHaveCount(1);
-  await expect(again.locator('[data-pulls-hand-session="ses-web-pi"]')).toBeVisible();
-  await expect(again.locator('[data-pulls-launch]')).toHaveCount(0);
-  await expect(again.locator('[data-pulls-hand-session="ses-web-pi"] input')).toBeChecked();
-  await shot(page, '6c-start-review-rehand');
-  await again.locator('[data-pulls-ask-option="guide"]').focus();
-  await page.keyboard.press('Escape');
-  await expect(again).toHaveCount(0);
-  await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();
+  const stackPane = page.locator('[data-pulls-stack]');
+  await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
+  await expect(stackPane.locator('[data-pulls-ask]')).toHaveCount(0);
+  expect(await stackPane.locator('.ib-pr-actions button').allTextContents()).toEqual(['Open review thread', 'Open the diff']);
+  await shot(page, '6a-review-arrived');
+  await phoneShot(browser, LOCALE, 'phone-6a-review-arrived');
+  // The thread is named for the PR (owner, q-49bd0699 A), as the person's own name: the Inbox list shows it.
+  await page.goto(world.url);
+  await expect(page.locator(`[data-row="${threadId}"]`)).toContainText('Review #869: Fall back to English for missing strings');
+  await shot(page, '6t-thread-name', ['light']);
+  await page.goto(`${world.url}#pulls`);
+  await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
+  await expect(stackPane.locator('[data-pulls-thread-line="live"]')).toBeVisible();
+  await stackPane.locator('[data-pulls-open-diff]').click();
   await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', LOCALE);
   await page.goto(`${world.url}#pulls`);
   await page.locator(`[data-pulls-row="${LOCALE}"]`).click();
-  await expect(startReview).toBeVisible();
-  await startReview.click();
-  await expect.poll(() => page.evaluate(() => location.hash)).toContain('guide=');
+  await page.locator('[data-pulls-stack] [data-pulls-primary="open"]').click();
+  await expect.poll(() => page.evaluate(() => decodeURIComponent(location.hash))).toContain(threadId);
   await page.unroute('**/api/inbox/sessions*');
 });
 
-test('the Board on, a card linking the stack: a quiet Board chip beside its thread', async () => {
+test('the Board on, a card linking the stack: a quiet Board chip, its review thread under it', async () => {
   const { page, claude } = world;
   await setBoard(true);
   const card = await claude.card({ op: 'create', project_path: world.projects.billing, title: 'Retry failed charges', column: 'in_review', thread_id: world.threads.stack, pr: 'northwind/billing-svc#414', say: 'Stack of 3 up for review', you: 'Review the stack from #412' });
@@ -803,7 +954,7 @@ test('the Board on, a card linking the stack: a quiet Board chip beside its thre
   await page.locator(`[data-pulls-row="${STACK_ID}"]`).click();
   const pane = page.locator('[data-pulls-stack]');
   await expect(pane.locator('[data-pulls-card]')).toHaveText(/^Board\s*Retry failed charges$/);
-  await expect(pane.locator('[data-pulls-thread]')).toHaveText(/^Thread\s*Retry failed charges$/);
+  await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Review thread with Claude Code');
   await shot(page, '6b-stack-board-on');
 });
 
@@ -831,7 +982,53 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
     const box = (await row.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(rail!.x + rail!.width);
   }
+  // One title, the header's: the reader draws none, the header names no repository, the strip only numbers.
+  await expect(review.locator('.ib-gbody h1')).toHaveCount(0);
+  await expect(review.locator('.ib-vhead .ib-from')).toHaveCount(0);
+  await expect(review.locator('[data-pull-layer-step][aria-current="step"]')).toContainText('#412');
+  // Each file's box is as tall as its lines (the empty band under a short file, #2615): the 5-line migration's
+  // last row ends within one row of its box's bottom.
+  const sqlShell = review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]');
+  const sqlBox = (await sqlShell.locator('[data-guide-code-view-mounted]').boundingBox())!;
+  const sqlLast = (await sqlShell.locator('[data-line="5"]').first().boundingBox())!;
+  expect(sqlBox.y + sqlBox.height - (sqlLast.y + sqlLast.height)).toBeLessThan(24);
+  // The Global comment button sits on the Split | Unified tab's row (owner, q-bfcf3a4a B), left of it, not over it.
+  const addGlobal = (await review.locator('[data-guide-section-tab] [data-guide-global-comment-add]').boundingBox())!;
+  const layoutSwitch = (await review.locator('[data-guide-section-tab] [data-diff-style-switch]').boundingBox())!;
+  expect(Math.abs(addGlobal.y + addGlobal.height / 2 - (layoutSwitch.y + layoutSwitch.height / 2))).toBeLessThan(3);
+  expect(addGlobal.x + addGlobal.width).toBeLessThan(layoutSwitch.x);
   await shot(page, '7-layer-review');
+  // A long title gives way in the header: cut with "…" (whole in its hover); Back and the decision stay in the window.
+  const fn = review.locator('[data-pull-review-title]');
+  await expect(fn).toHaveAttribute('title', '#412 Retry schedule table and next-attempt time');
+  for (const width of [1280, 1100, 900, 800, 760]) {
+    await page.setViewportSize({ width, height: 900 });
+    const decision = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
+    const back = (await review.locator('.ib-vhead .ib-back').boundingBox())!;
+    expect([width, decision.x + decision.width <= width, back.x >= 0]).toEqual([width, true, true]);
+  }
+  // The worst case's title (break-ui #1), laid out in this header at 900 wide: cut, the decision still in the window.
+  await page.setViewportSize({ width: 900, height: 900 });
+  const long = 'Migrate the entire settlement reconciliation pipeline from the legacy batch processor to the new streaming ledger with exactly-once semantics';
+  const was = await fn.locator('bdi').evaluate((node, text) => {
+    const before = node.textContent;
+    node.textContent = text;
+    return before;
+  }, long);
+  const cut = await fn.locator('bdi').evaluate((node) => ({ cut: node.scrollWidth > node.clientWidth, overflow: getComputedStyle(node).textOverflow }));
+  expect(cut).toEqual({ cut: true, overflow: 'ellipsis' });
+  const after = (await review.locator('.ib-vhead [data-review-decision]').boundingBox())!;
+  expect(after.x + after.width).toBeLessThanOrEqual(900);
+  await fn.locator('bdi').evaluate((node, text) => (node.textContent = text), was);
+  // Under 900 px of review the file rail folds into the Files picker over the diff, and the diff takes the width.
+  await page.setViewportSize({ width: 1024, height: 900 });
+  await expect(review.locator('.ib-rrail')).toBeHidden();
+  await expect(review.locator('[data-review-phonebar] .ib-rv-jump')).toBeVisible();
+  const gbody = (await review.locator('.ib-gbody').boundingBox())!;
+  const split1024 = (await review.locator('.ib-rsplit').boundingBox())!;
+  expect(gbody.width).toBe(split1024.width);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await expect(review.locator('.ib-rrail')).toBeVisible();
 
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
@@ -873,6 +1070,7 @@ test('Reply at the stack\'s foot goes into the agent\'s thread', async () => {
   const reply = await claude.nextReply(world.threads.stack, 50, verdictId);
   expect(String(reply.body)).toBe('Hold #414 until Priya has read the email copy.');
   expect(world.errors).toEqual([]);
+  expect(world.outside).toEqual([]);
 });
 
 test('a phone at 390 px: the list, a stack, a layer review; and off, no row', async ({ browser }) => {
@@ -894,20 +1092,22 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no agent: the same two lines, each label over its line, the pills wrapping.
+    // A teammate's PR with no review thread: Review with an agent, the picker inline, every row a touch target.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
-    const hand = page.locator('[data-pulls-stack] [data-pulls-handoff="first"]');
-    await expect(hand.locator('[data-pulls-hand-session]')).toHaveCount(2);
+    await shot(page, 'phone-4-no-thread');
+    await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
+    const picker = page.locator('[data-pulls-stack] [data-pulls-picker]');
+    await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await hand.locator('[data-pulls-hand-session], [data-pulls-launch], [data-pulls-review], [data-pulls-open-diff]').evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
       expect(box.right).toBeLessThanOrEqual(390);
       expect(box.height).toBeGreaterThanOrEqual(44);
     }
-    await shot(page, 'phone-4-no-agent');
-    await hand.locator('[data-pulls-ask-option="custom"]').click();
-    await hand.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
+    await shot(page, 'phone-4a-picker');
+    await picker.locator('[data-pulls-ask-option="custom"]').click();
+    await picker.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
     await shot(page, 'phone-5-ask-custom');
     // Every control in the review's strip and foot is a 44 px target or more on a phone.
     for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
@@ -1040,6 +1240,61 @@ test("Post to GitHub (the owner's answer C): the choice beside the decision, a t
   expect(world.errors).toEqual([]);
 });
 
+test('a saved line comment over a push: labelled, posted at the commit read, the typed words at the new head', async () => {
+  const { page } = world;
+  const endpoint = 'repos/northwind/web-app/pulls/880';
+  const named = (e: string) => join(world.forge, `gh-${e.replace(/[/.%?&=]/g, '_')}.patch`);
+  const read = '880'.padStart(40, '0');
+  const pushed = 'f'.repeat(40);
+  const list = readFileSync(join(world.forge, 'gh-pulls.json'), 'utf8');
+  const patch = readFileSync(named(endpoint), 'utf8');
+  const words = 'ms-6 flips with dir; check the sidebar in Hebrew too.';
+  rmSync(join(world.forge, 'gh-posts.jsonl'), { force: true });
+  try {
+    await page.goto(`${world.url}#pulls&stack=${encodeURIComponent(TEAMMATE)}&layer=${encodeURIComponent(TEAMMATE)}&scope=layer`);
+    const review = page.locator('[data-pull-review]');
+    await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"]')).toBeVisible({ timeout: 30_000 });
+    await commentOn(page, 'src/settings/Layout.tsx', 3, words);
+    await expect(review.locator('.ib-vcomments')).toHaveAttribute('aria-label', 'Comments, 1');
+
+    // Pushed: other code at that line, the old commit still on the PR.
+    writeFileSync(named(endpoint), patch.replace(/ms-6/g, 'ms-8'));
+    writeFileSync(join(world.forge, 'gh-head-880'), `${pushed}\n`);
+    writeFileSync(named(`${endpoint}/commits?per_page=100`), `${read}\n${pushed}\n`);
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list.replaceAll(read, pushed).replace(/("number":880,[^}]*?"updatedAt":")[^"]+/, `$1${new Date().toISOString()}`));
+    // The list reads again on focus, at most every 20 s.
+    await expect(async () => {
+      await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+      await expect(page.getByText('ms-8').first()).toBeVisible({ timeout: 2_000 });
+    }).toPass({ timeout: 90_000, intervals: [3_000] });
+
+    await review.locator('.ib-vcomments').click();
+    await expect(page.locator('[data-code-annotation-note]')).toHaveText('Written on older code');
+    await page.locator('[data-pull-review] .ib-vcomments').click();
+
+    await review.locator('[data-review-posts] [data-decision-primary]').click();
+    const dialog = page.getByRole('dialog');
+    await expect(dialog).toContainText(`#880 — read at ${read.slice(0, 7)}`);
+    await dialog.locator('textarea').fill('Everything else reads well.');
+    await dialog.getByRole('button', { name: 'Post Comments', exact: true }).click();
+    await expect(review.locator('[data-pull-review-posted]')).toContainText('on GitHub');
+
+    const sent = readFileSync(join(world.forge, 'gh-posts.jsonl'), 'utf8').split('\n').filter(Boolean).map((l) => JSON.parse(l) as Record<string, unknown>);
+    expect(sent).toEqual([
+      { commit_id: read, body: 'See inline comments.', event: 'COMMENT', comments: [{ path: 'src/settings/Layout.tsx', line: 3, side: 'RIGHT', body: words }] },
+      expect.objectContaining({ commit_id: pushed, body: 'Everything else reads well.', event: 'COMMENT' }),
+    ]);
+    expect((sent[1] as { comments?: unknown[] }).comments ?? []).toEqual([]);
+    await expect(review.locator('.ib-vcomments')).toHaveAttribute('aria-label', 'Comments, 0');
+    expect(world.errors).toEqual([]);
+  } finally {
+    writeFileSync(named(endpoint), patch);
+    writeFileSync(join(world.forge, 'gh-pulls.json'), list);
+    rmSync(join(world.forge, 'gh-head-880'), { force: true });
+    rmSync(named(`${endpoint}/commits?per_page=100`), { force: true });
+  }
+});
+
 test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment, approved on GitHub; the choice on the person\'s own', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'posting-video');
@@ -1079,7 +1334,7 @@ test('the posting video (25 s or less): a teammate\'s PR reviewed with a comment
   renameSync(join(dir, recorded!), join(proofDir, 'posting.webm'));
 });
 
-test('the walkthrough video (20 s or less): Review hands a PR to the picked agent, Open the diff in every state, its guided review arriving as Start review', async ({ browser }) => {
+test('the walkthrough video (20 s or less): Review with an agent starts a review thread with the picked agent, Open the diff in every state, its guided review arriving', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const dir = join(proofDir, 'video');
   await setBoard(false);
@@ -1089,31 +1344,33 @@ test('the walkthrough video (20 s or less): Review hands a PR to the picked agen
   const pause = (ms: number) => page.waitForTimeout(ms);
   try {
     await page.goto(`${world.url}#pulls`);
-    // A teammate's PR with no agent: Review, and Open the diff beside it.
+    // A teammate's PR with no review thread: Review with an agent, and Open the diff beside it.
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     const pane = page.locator('[data-pulls-stack]');
-    await expect(pane.locator('[data-pulls-review]')).toBeVisible();
+    await expect(pane.locator('[data-pulls-primary="review"]')).toBeVisible();
     await pause(2200);
     // The row opens the diff too.
     await pane.locator('[data-pulls-layer="github.com/northwind/web-app#880"] button').hover();
     await pause(1300);
-    await pane.locator('[data-pulls-hand-session="ses-web-pi"]').hover();
-    await pause(300);
-    await pane.locator('[data-pulls-hand-session="ses-web-claude"]').click();
+    await pane.locator('[data-pulls-primary]').click();
     await pause(900);
-    await pane.locator('[data-pulls-review]').hover();
+    await pane.locator('[data-pulls-picker-session="ses-web-pi"]').hover();
+    await pause(300);
+    await pane.locator('[data-pulls-picker-session="ses-web-claude"]').click();
+    await pause(900);
+    await pane.locator('[data-pulls-start]').hover();
     await pause(500);
-    await pane.locator('[data-pulls-review]').click();
+    await pane.locator('[data-pulls-start]').click();
     const chip = pane.locator('[data-pulls-thread]');
     await expect(chip).toBeVisible();
-    await expect(pane.locator('[data-pulls-said]')).toContainText('guided review on the way');
+    await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Guided review on the way');
     await pane.locator('[data-pulls-open-diff]').hover();
     await pause(2500);
     const threadId = String(await chip.getAttribute('data-pulls-thread'));
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
-    await expect(page.locator('[data-pulls-stack] [data-pulls-start-review]')).toBeVisible();
+    await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="live"]')).toBeVisible();
     await pause(2500);
     // Open the diff: straight into the review mode, no stop on the way.
     await page.locator('[data-pulls-stack] [data-pulls-open-diff]').click();

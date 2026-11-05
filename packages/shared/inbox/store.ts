@@ -42,10 +42,12 @@ import {
   isInboxQuestionSupersedable,
   parseInboxQuestionBlocks,
   parseInboxSupersedeRef,
+  splitInboxReplyBody,
   summarizeInboxQuestions,
   toInboxQuestion,
   type InboxAnswerRefusal,
 } from "@plannotator/core/inbox-questions";
+import { withoutInboxSkillsBlock } from "@plannotator/core/skill-reference-block";
 import {
   checkInboxActionResult,
   composeInboxActionsReply,
@@ -53,6 +55,7 @@ import {
   withInboxActionsSection,
   parseInboxActionBlocks,
   parseInboxDoneRef,
+  INBOX_ACTIONS_HEADING,
 } from "@plannotator/core/inbox-actions";
 import {
   inboxId,
@@ -61,6 +64,9 @@ import {
   INBOX_RECORD_VERSION,
   type InboxAck,
   type InboxAddressee,
+  type InboxLaunchError,
+  type InboxLaunchRecord,
+  type InboxReplyViewing,
   type InboxAuthor,
   type InboxDecision,
   type InboxGuideRef,
@@ -108,6 +114,7 @@ import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } fro
 import { inboxProjectLabels } from "./project-name";
 import { inboxAckLine } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
+import { INBOX_PERMISSION_FULL, INBOX_PERMISSION_SESSION_PREFIX, isInboxPermissionSession } from "@plannotator/core/inbox-permission";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
 import {
@@ -129,13 +136,13 @@ import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSa
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
 import { checkInboxPinOrder, checkInboxPinRestore, readInboxPins, writeInboxPins } from "./pins";
-import { readInboxSnoozes, writeInboxSnoozes } from "./snoozes";
-import { INBOX_SNOOZE_MAX_DAYS, inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
+import { readInboxSnoozes, refuseInboxSnoozeUntil, writeInboxSnoozes } from "./snoozes";
+import { inboxSnoozeRefusal, inboxSnoozeRunning, type InboxSnooze } from "@plannotator/core/inbox-snooze";
 import { INBOX_CARD_PR_HINT } from "./cards";
 import { INBOX_CARD_REF_HINT, parseInboxCardRef } from "./card-refs";
 import {
@@ -170,10 +177,25 @@ import {
   type InboxCardWire,
 } from "@plannotator/core/inbox-types";
 import { isInboxStepsRecord, normalizeInboxSteps, sameInboxSteps, type InboxSteps } from "@plannotator/core/inbox-types";
+import {
+  inboxHashtags,
+  inboxInitiativeBareName,
+  inboxInitiativeJoinKey,
+  inboxInitiativeNameKey,
+  inboxInitiativeTagKey,
+  inboxTaggedInitiative,
+  INBOX_INITIATIVE_NAME_MAX,
+  isInboxInitiativeId,
+  isInboxInitiativeRecord,
+  type InboxInitiative,
+} from "@plannotator/core/inbox-types";
 import type { InboxReviewVerdictRecord } from "@plannotator/core/inbox-review";
+import { INBOX_ATTACHMENT_FEEDBACK_TITLE, INBOX_GUIDE_FEEDBACK_TITLE, INBOX_MESSAGE_FEEDBACK_TITLE } from "@plannotator/core/inbox-review";
+import { codeFenceCloseIndex } from "@plannotator/core/markdown-structure";
 import {
   ANNOTATIONS_FILE,
   CARDS_FILE,
+  INITIATIVES_FILE,
   LEGACY_DECISIONS_FILE,
   INBOX_PROJECTS_DIR,
   SEQ_FLOOR_FILE,
@@ -194,6 +216,12 @@ export type InboxListener = (line: InboxLine) => void;
 export interface InboxSendInput {
   project_id: string;
   author: Extract<InboxAuthor, { kind: "agent" }>;
+  /**
+   * Server only (launch's permission route): the author is a permission
+   * question's `perm:<session>` identity. Every other writer is refused that
+   * prefix, so a `perm:` author is always the Inbox's own permission card.
+   */
+  permission?: boolean;
   body: string;
   subject?: string | null;
   reply_to?: string | null;
@@ -275,6 +303,8 @@ export interface InboxAnswerEntry {
 
 export interface InboxReplyInput {
   words?: string;
+  /** Written by a tailnet guest (`InboxMessage.by_guest`): the server's `isGuest`, never the window's word. */
+  by_guest?: boolean;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
   /**
@@ -284,6 +314,11 @@ export interface InboxReplyInput {
   feedback?: string;
   /** The annotations that text carries: marked sent with the reply. */
   annotation_ids?: string[];
+  /**
+   * The file on screen when the person sent this from full screen's floating box (`planViewing`): the window's
+   * `{ attachment_id, time?, page?, as_sent? }`. Context only, so anything off about it drops it and never refuses the Send.
+   */
+  viewing?: unknown;
   /**
    * The person chose another live session to take this reply, because the
    * session that asked has ended (the window's choice at Send). Absent: the
@@ -348,6 +383,8 @@ export interface InboxReplyInput {
 /** The person's Re-ask (approval "inbox-reask"): ask the agent for its open questions again, in one message. */
 export interface InboxReaskInput {
   idempotency_key: string;
+  /** Written by a tailnet guest (`InboxMessage.by_guest`). */
+  by_guest?: boolean;
   /**
    * Another live session takes the note, because the one that asked has
    * ended (the window's choice, as for a reply). Null: a session was asked
@@ -553,6 +590,8 @@ function legacySeqFloor(path: string): number {
 export interface InboxDeliveryPresence {
   /** How a session is connected now (no grace), or null when it does not poll. */
   connection(session: string): InboxDeliveryConnection | null;
+  /** The host a live session said it is (its poll, or an MCP call that named one). Absent or null: not known. */
+  hostOf?(session: string): string | null;
   /** Whether the session that asked is still there, with the sessions route's grace (`askerLive`). */
   askerLive(session: string): boolean;
   /**
@@ -623,6 +662,34 @@ function guideCommentFields(fields: Record<string, unknown>, scope: "line" | "ge
   return kept;
 }
 
+/** The headings a Send appends after the person's words (the action items, the annotations' feedback). */
+const SEND_APPENDED_HEADINGS: ReadonlySet<string> = new Set([
+  `## ${INBOX_ACTIONS_HEADING}`,
+  `# ${INBOX_MESSAGE_FEEDBACK_TITLE}`,
+  `# ${INBOX_ATTACHMENT_FEEDBACK_TITLE}`,
+  `# ${INBOX_GUIDE_FEEDBACK_TITLE}`,
+]);
+
+/**
+ * The person's own words in a reply as stored (approval "board-hashtags"), for a card made later for its
+ * thread (`threadTaggedInitiative`): without the reply's first line, the still-open line and the answers
+ * section (`splitInboxReplyBody`) and the skills block, cut where a Send appends its own sections (the
+ * action items, the annotations' feedback, which quote plans and files): only at those headings, each after
+ * a blank line, never inside a code fence. The person's own headings and fenced `# comments` stay words.
+ * At send time the reply's words are read directly (`sendReply`), and a New message's body is its words.
+ */
+function personWords(body: string): string {
+  const lines = splitInboxReplyBody(withoutInboxSkillsBlock(body)).words.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    if (/^\s*```/.test(lines[i]!)) {
+      i = codeFenceCloseIndex(lines, i);
+      continue;
+    }
+    if (SEND_APPENDED_HEADINGS.has(lines[i]!.trimEnd()) && (i === 0 || lines[i - 1]!.trim() === "")) return lines.slice(0, i).join("\n");
+  }
+  return lines.join("\n");
+}
+
 export class InboxStore {
   readonly dir: string;
   /** The live sessions, for the rows' delivery; null (tests, tools): not known, every session counts as there. */
@@ -635,6 +702,8 @@ export class InboxStore {
   private projectLabels: Map<string, string> | null = null;
   private projectGroups: { heads: Map<string, string>; members: Map<string, string[]> } | null = null;
   private readonly messages = new Map<string, InboxMessage>();
+  /** The ids of the thread roots an agent was launched for (`launch`): the launch sweep reads these, never every message. */
+  private readonly launchedRootIds = new Set<string>();
   /** The seq of a message's first line: its place in the event log. */
   private readonly messageSeq = new Map<string, number>();
   /**
@@ -715,6 +784,17 @@ export class InboxStore {
   private readonly stepsIdOf = new Map<string, string>();
   /** Each thread's steps record ids (a thread's read never scans every list). */
   private readonly stepsIdsByThread = new Map<string, Set<string>>();
+  /** The Board's initiatives, by id, deleted ones too (approval "board-initiatives"). Read by the Board only. */
+  private readonly initiativesById = new Map<string, InboxInitiative>();
+  /**
+   * Hashtags (approval "board-hashtags"): every thread a message (an agent's or the person's) tags, by the
+   * tag's key (`inboxInitiativeTagKey`, so a rename needs no rebuild): each thread's latest tagging seq, and
+   * the threads in the order of those seqs (`order`, oldest first; a thread tagged again is appended again,
+   * its earlier entry stale, compacted when stale entries outnumber live ones). Filled as each message is
+   * first applied (load and write alike, both in seq order, `indexTags`), never rescanned and never written
+   * to disk; a delete's reload builds it again. Read by `initiativeThreads` only, from the newest end.
+   */
+  private readonly tagThreads = new Map<string, { latest: Map<string, number>; order: string[] }>();
   /** A guided review's files by its snapshot's sha256 (a blob never changes). */
   private readonly guideFileSets = new Map<string, ReadonlyMap<string, DiffFile>>();
   private readonly tornFiles = new Set<string>();
@@ -751,38 +831,44 @@ export class InboxStore {
     this.replyDraftRemovals.clear();
     for (const [threadId, draft] of readInboxReplyDrafts(this.dir)) this.replyDrafts.set(threadId, draft);
     const projectsDir = join(this.dir, INBOX_PROJECTS_DIR);
+    const lines: InboxLine[] = [];
+    // The Board's initiatives: one file for every project, on the same seq.
+    this.readLines(join(this.dir, INITIATIVES_FILE), lines);
     if (!existsSync(projectsDir)) {
+      lines.sort((a, b) => a.seq - b.seq);
+      for (const line of lines) this.apply(line);
       this.loadPins();
       this.loadSnoozes();
       return;
     }
-    const lines: InboxLine[] = [];
     for (const key of readdirSync(projectsDir)) {
       const folder = join(projectsDir, key);
       // Decisions were removed (2026-10): an older store's decisions.jsonl is
       // left on disk and never applied, but its seqs still count, so a seq is
       // never handed out twice.
       this.seq = Math.max(this.seq, legacySeqFloor(join(folder, LEGACY_DECISIONS_FILE)));
-      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) {
-        const path = join(folder, name);
-        let text: string;
-        try {
-          text = readFileSync(path, "utf8");
-        } catch {
-          continue;
-        }
-        if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
-        for (const raw of text.split("\n")) {
-          const line = parseInboxLine(raw);
-          if (line) lines.push(line);
-        }
-      }
+      for (const name of [PROJECT_FILE, MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, CARDS_FILE, STEPS_FILE]) this.readLines(join(folder, name), lines);
     }
     lines.sort((a, b) => a.seq - b.seq);
     for (const line of lines) this.apply(line);
     this.repairUnsentAnswers();
     this.loadPins();
     this.loadSnoozes();
+  }
+
+  /** One store file's lines into `into` (none when it is missing); a torn last line is noted for the next append. */
+  private readLines(path: string, into: InboxLine[]): void {
+    let text: string;
+    try {
+      text = readFileSync(path, "utf8");
+    } catch {
+      return;
+    }
+    if (text.length > 0 && !text.endsWith("\n")) this.tornFiles.add(path);
+    for (const raw of text.split("\n")) {
+      const line = parseInboxLine(raw);
+      if (line) into.push(line);
+    }
   }
 
   /**
@@ -847,12 +933,14 @@ export class InboxStore {
           this.indexName(line.record.project_id, line.record.thread_name, line.record.id);
         }
         this.messages.set(line.record.id, line.record);
+        if (line.record.launch !== undefined && line.record.thread_id === line.record.id) this.launchedRootIds.add(line.record.id);
         if (!this.messageSeq.has(line.record.id)) {
           this.messageSeq.set(line.record.id, line.seq);
           const members = this.threadMembers.get(line.record.thread_id);
           if (members) members.push(line.record.id);
           else this.threadMembers.set(line.record.thread_id, [line.record.id]);
           this.indexRoot(line.record);
+          this.indexTags(line.record, line.seq);
         }
         break;
       }
@@ -877,6 +965,9 @@ export class InboxStore {
           // before the upgrade, or by an older Inbox that carried a stale list along, is not moved to Done again.
           if (card.column === "done") card = { ...card, done_prs: inboxCardDonePrs(card, card.done_prs ?? prev?.done_prs) };
           else if (card.done_prs === undefined && prev?.done_prs) card = { ...card, done_prs: prev.done_prs };
+          // An Inbox from before initiatives writes a card without the field: the card keeps its initiative
+          // (only the person sets one, and that Inbox has no way to).
+          if (line.record.initiative === undefined && prev?.initiative) card = { ...card, initiative: prev.initiative };
           if (!prev || !isInboxCardSeenOnlyChange(prev, card)) this.cardHeardSeq.set(card.id, line.seq);
           this.cards.set(card.id, card);
         }
@@ -890,6 +981,10 @@ export class InboxStore {
           if (!ids) this.stepsIdsByThread.set(line.record.thread_id, (ids = new Set()));
           ids.add(line.record.id);
         }
+        break;
+      case "initiative":
+        // The Board's initiatives (approval "board-initiatives"): read by the Board only.
+        if (isInboxInitiativeRecord(line.record)) this.initiativesById.set(line.record.id, line.record);
         break;
     }
   }
@@ -1170,9 +1265,7 @@ export class InboxStore {
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     if (root.resolved_at !== null && !this.agentAfterArchive(threadId)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
-    const refusal = inboxSnoozeRefusal(until, this.now());
-    if (refusal === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
-    if (refusal) throw new InboxError("validation_error", `until: a time within ${INBOX_SNOOZE_MAX_DAYS} days.`, { field: "until" });
+    refuseInboxSnoozeUntil(until, this.now());
     const now = this.now();
     // `at` (Undo's earlier snooze) is a real ISO time, not after now; stored normalized like `until`.
     if (at !== undefined && (typeof at !== "string" || !/^\d{4}-\d{2}-\d{2}T/.test(at) || Number.isNaN(Date.parse(at)) || Date.parse(at) > now.getTime())) {
@@ -1181,6 +1274,20 @@ export class InboxStore {
     const snooze: InboxSnooze = { thread_id: threadId, until: new Date(until as string).toISOString(), at: at === undefined ? now.toISOString() : new Date(at as string).toISOString() };
     this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), snooze]);
     return snooze;
+  }
+
+  /**
+   * A snooze write a linked machine held for this one. Its time can pass on the way, and then it is not refused: the
+   * person wanted the thread back by then. A snooze still running here returns now, as if the write had landed in
+   * time (its mark included). A return not read yet keeps its own mark. Null: the thread is not snoozed now.
+   */
+  setHeldSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze | null {
+    if (inboxSnoozeRefusal(until, this.now()) !== "past") return this.setSnooze(threadId, until, at);
+    const root = this.messages.get(threadId);
+    if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
+    const running = this.snoozeList.find((entry) => entry.thread_id === threadId && inboxSnoozeRunning(entry.until, this.now()));
+    if (running) this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), { ...running, until: new Date(until as string).toISOString() }]);
+    return null;
   }
 
   /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */
@@ -1783,6 +1890,8 @@ export class InboxStore {
       if (awaited.some((r) => r.delivered_at === null)) return null;
       return awaited.reduce<string | null>((latest, r) => (latest === null || r.delivered_at! > latest ? r.delivered_at : latest), null) ?? lastReal.created_at;
     };
+    // Who settled it, when that was not the agent it was for: the mark's read, else its own delivery's.
+    const readBy = recipients ? null : (root.agent_checked_seq ?? 0) >= seqOf(lastReal) ? root.agent_checked_by : lastReal.delivery?.read_by;
     const sent =
       lastReal.author.kind === "person"
         ? {
@@ -1795,6 +1904,7 @@ export class InboxStore {
                   (lastReal.delivery?.at ?? null),
             wakes: this.wakesRecipient(lastReal),
             ...(recipients ? { recipients } : {}),
+            ...(readBy ? { read_by: readBy } : {}),
           }
         : null;
     const participants = this.participantsOf(messages);
@@ -1900,7 +2010,7 @@ export class InboxStore {
     lastReal: InboxMessage,
     /** The agent message whose session asked (`inboxAskingMessage`, the thread's rule), when a person's item is last. */
     asking: InboxMessage | null,
-    sent: { checked_at: string | null } | null,
+    sent: { checked_at: string | null; read_by?: string } | null,
     recipients: InboxSentRecipient[] | null,
     resolved: boolean,
   ): InboxRowDelivery | null {
@@ -2009,6 +2119,7 @@ export class InboxStore {
         at: deliveredAt,
         host: author?.host ?? null,
         name: author?.name ?? null,
+        ...(decision.state === "delivered" && sent?.read_by ? { read_by: sent.read_by } : {}),
         ...(decision.reason === "ended" && askingAuthor ? { asking: { host: askingAuthor.host ?? null, name: askingAuthor.name ?? null } } : {}),
         ...waitWire(decision),
       };
@@ -3055,15 +3166,44 @@ export class InboxStore {
     let newcomer: boolean | undefined;
     const isNewcomer = () => (newcomer ??= this.newcomerTo(threadId, reader ?? null));
     let checked = 0;
+    let lastChecked: InboxMessage | null = null;
     for (const id of this.threadMembers.get(threadId) ?? []) {
       const seq = this.messageSeq.get(id) ?? 0;
       const message = this.messages.get(id);
       if (seq > upToSeq || message?.author.kind !== "person") continue;
       if (reader !== undefined && seq > from && this.owedToAnother(message, reader, isNewcomer)) break;
       checked = Math.max(checked, seq);
+      lastChecked = message;
     }
-    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) return;
-    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at }, at);
+    if (checked === 0 || (root.agent_checked_seq ?? 0) >= checked) {
+      // The agent it was for read it after another did: it has it now, so the line goes back to Delivered.
+      const asked = lastChecked?.reply_to ? this.messages.get(lastChecked.reply_to) : undefined;
+      if (root.agent_checked_by && reader && asked?.author.kind === "agent" && asked.author.session === reader) {
+        this.appendMessage({ ...root, agent_checked_at: at, agent_checked_by: undefined }, at);
+      }
+      return;
+    }
+    // Undefined when no other agent read it: an earlier read's name goes with the mark it moved.
+    const by = (lastChecked && this.readByAnother(lastChecked, reader)) || undefined;
+    this.appendMessage({ ...root, agent_checked_seq: checked, agent_checked_at: at, agent_checked_by: by }, at);
+  }
+
+  /**
+   * The host of `reader`, when its read of this reply is known not to be the agent the reply was for: another host
+   * than the session it answers. Null when it may be that agent: its own session, the same host (a raw MCP client
+   * takes a new `ses_` id each time it restarts, `owedToAnother`), a host not known, or one the Inbox has no name for.
+   */
+  private readByAnother(message: InboxMessage, reader: string | null | undefined): string | null {
+    if (!reader || message.to || hasTags(message)) return null;
+    const asked = message.reply_to ? this.messages.get(message.reply_to) : undefined;
+    if (asked?.author.kind !== "agent" || !asked.author.host || asked.author.session === reader) return null;
+    // Both from the names the Inbox knows: an agent's host is free text, "Cursor" and "cursor" are one agent, and so
+    // are `claude` and `claude-code`, so the names are what differ.
+    if (!Object.hasOwn(INBOX_HOST_NAMES, asked.author.host)) return null;
+    const known = this.deliveryPresence?.hostOf?.(reader);
+    const wrote = known ? null : this.latestAgentMessages().get(reader)?.author;
+    const host = known ?? (wrote?.kind === "agent" ? wrote.host : null);
+    return host && Object.hasOwn(INBOX_HOST_NAMES, host) && INBOX_HOST_NAMES[host] !== INBOX_HOST_NAMES[asked.author.host] ? host : null;
   }
 
   /**
@@ -3128,7 +3268,8 @@ export class InboxStore {
       const at = this.stamp();
       // A session it answers when it had one; else the reader's (a message and a read that both name none: "").
       const session = asked.author.session ?? reader ?? "";
-      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at } }, at);
+      const readBy = this.readByAnother(message, reader);
+      this.appendMessage({ ...message, delivery: { state: "delivered", host: asked.author.host ?? "agent", session, at, ...(readBy ? { read_by: readBy } : {}) } }, at);
     }
   }
 
@@ -3364,6 +3505,9 @@ export class InboxStore {
    * store's log, so a replay routes the same way.
    */
   sendMessage(input: InboxSendInput): InboxSendResult {
+    if (input.permission !== true && isInboxPermissionSession(input.author.session)) {
+      throw new InboxError("validation_error", `agent_session: "${INBOX_PERMISSION_SESSION_PREFIX}" is reserved for the Inbox's own permission questions.`, { field: "agent_session" });
+    }
     const body = input.body;
     if (typeof body !== "string" || body.trim() === "") throw new InboxError("validation_error", "body: a message needs a body.", { field: "body" });
     // One line of plain text, checked before anything else (a reply ignores
@@ -3965,7 +4109,7 @@ export class InboxStore {
     mode: "pick" | "send",
     /** Each entry's index in the request's `questions` (a Send's entries are planned per message). */
     indices?: readonly number[],
-    options: { unsentOnly?: boolean } = {},
+    options: { unsentOnly?: boolean; confirmFull?: boolean } = {},
   ): { record: InboxQuestionRecord; answer: QuestionAnswer | null | undefined }[] {
     const records = new Map(this.questionRecords(message.id).map((r) => [r.key, r]));
     const seen = new Set<string>();
@@ -4000,9 +4144,16 @@ export class InboxStore {
       // revision matches when the pick raced the Send (read before it, saved after), and saving it would reopen an
       // answer the agent already has. Without it a sent question takes a pick again, as the thread-state model has
       // it (the window never offers one; adr/implementation/inbox-thread-state.md).
-      if (mode === "pick" && options.unsentOnly === true && record.answer !== null && record.revision > 0 && record.sent_revision === record.revision) {
+      // A launched session's permission question is always unsent-only: its answer already went to the hook, and
+      // a stale window or phone must never reopen it or rewrite what the thread says Claude was told.
+      const permission = message.author.kind === "agent" && isInboxPermissionSession(message.author.session);
+      const alreadySent = record.answer !== null && record.revision > 0 && record.sent_revision === record.revision;
+      if (mode === "pick" && (options.unsentOnly === true || permission) && alreadySent) {
         throw refusalError({ code: "question_already_sent", key: entry.key });
       }
+      // The same for a reply that carries its own answer: once the prompt is answered, the reply posts as text
+      // and leaves the answer record alone (sendReply refuses it when nothing else is left to send).
+      if (mode === "send" && permission && alreadySent) return;
       let answer: QuestionAnswer | null | undefined;
       if (entry.answer === null) {
         if (mode === "send") throw new InboxError("validation_error", `${field}.answer: a Send cannot clear a pick.`, { field: `${field}.answer` });
@@ -4016,15 +4167,40 @@ export class InboxStore {
         const checked = checkInboxAnswer(record, entry.answer, `${field}.answer`);
         if (!checked.ok) throw refusalError(checked.refusal);
         answer = checked.answer;
+        // Full permissions turns every later prompt off: the first time in a session it is picked only with the
+        // person's confirmation (`confirm_full`, the window's "Switch this session to Full permissions?").
+        // A consent step, not a control: the window that asks can send it.
+        if (permission && answer?.selected.includes(INBOX_PERMISSION_FULL) && !(mode === "pick" && options.confirmFull === true) && !this.fullPermissionsUsed(message)) {
+          throw new InboxError("validation_error", "Full permissions: confirm it first (confirm_full).", { field: "confirm_full" });
+        }
       }
       plan.push({ record, answer });
     });
     return plan;
   }
 
+  /**
+   * Whether the session that wrote this permission question already switched to Full permissions from an
+   * earlier one in the thread (its answer sent): only the first time asks for `confirm_full`.
+   */
+  private fullPermissionsUsed(message: InboxMessage): boolean {
+    if (message.author.kind !== "agent") return false;
+    const session = message.author.session;
+    for (const id of this.threadMessageIds(message.thread_id)) {
+      if (id === message.id) continue;
+      const earlier = this.message(id);
+      if (earlier?.author.kind !== "agent" || earlier.author.session !== session) continue;
+      for (const record of this.questionRecords(id)) {
+        if (record.answer?.selected.includes(INBOX_PERMISSION_FULL) && record.revision > 0 && record.sent_revision === record.revision) return true;
+      }
+    }
+    return false;
+  }
+
   /** Save picks at once (no reply is written): each revision goes up by one. */
   /** `unsentOnly`: refuse a pick on a question a reply already sent (`question_already_sent`), as decision mode asks. */
-  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean } = {}): InboxQuestion[] {
+  /** `confirmFull`: the person confirmed Full permissions on a launched session's permission question. */
+  savePicks(messageId: string, entries: readonly InboxAnswerEntry[], options: { unsentOnly?: boolean; confirmFull?: boolean } = {}): InboxQuestion[] {
     const message = this.targetMessage(messageId);
     if (!Array.isArray(entries) || entries.length === 0) {
       throw new InboxError("validation_error", "questions: at least one question is required.", { field: "questions" });
@@ -4092,7 +4268,13 @@ export class InboxStore {
       plan.push(...this.planAnswers(target, list.map((x) => x.entry), "send", list.map((x) => x.index)));
     }
     const feedback = typeof input.feedback === "string" ? input.feedback.trim() : "";
+    // Every listed answer was on an answered permission question (planAnswers leaves those alone) and the reply
+    // has no words of its own: say so, rather than "write a reply".
+    if (entries.length > 0 && plan.length === 0 && words.trim() === "" && feedback === "" && (input.attachments ?? []).length === 0) {
+      throw refusalError({ code: "question_already_sent", key: entries[0]!.key });
+    }
     const carried = this.planSentAnnotations(message.thread_id, input.annotation_ids);
+    const viewing = this.planViewing(message.thread_id, input.viewing, carried);
     // Skips only what the person listed ("Skip them"), and only while still open.
     const planned = new Set(plan.map((p) => p.record.id));
     const listed = this.planSkips(message, input.skip);
@@ -4228,6 +4410,7 @@ export class InboxStore {
       created_at: at,
       resolved_at: null,
       idempotency_key: key,
+      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
@@ -4235,6 +4418,7 @@ export class InboxStore {
         ? { handoff: { from: handoff.from ? { host: handoff.from.host, session: handoff.from.session } : null, ...(handoff.label ? { label: handoff.label } : {}), at } }
         : {}),
       ...(verdict ? { review_verdict: verdict } : {}),
+      ...(viewing ? { viewing } : {}),
       ...(reviewCommentsOf.length > 0 ? { review_comments_of: reviewCommentsOf } : {}),
     };
     // A hand-off still inside its Undo window in this thread goes first (approval "inbox-tag-handoff"):
@@ -4253,7 +4437,31 @@ export class InboxStore {
       throw error;
     }
     this.endSnooze(message.thread_id);
+    // The person's words as typed: never the picks, the action items or the feedback the Send adds.
+    this.tagThreadCards(reply.thread_id, words);
     return { reply, questions: this.questionsOf(message.id), replayed: false };
+  }
+
+  /**
+   * What a reply says was on screen (`InboxReplyInput.viewing`): the name and the message read from the thread's own
+   * file, never from the window. Undefined for a file not of this thread, and for a file the reply carries a comment
+   * on: its "Feedback on the attached files" names it already.
+   */
+  private planViewing(threadId: string, raw: unknown, carried: readonly InboxAnnotationRecord[]): InboxReplyViewing | undefined {
+    if (!raw || typeof raw !== "object") return undefined;
+    const input = raw as { attachment_id?: unknown; time?: unknown; page?: unknown; as_sent?: unknown };
+    if (typeof input.attachment_id !== "string") return undefined;
+    const hit = this.attachment(input.attachment_id);
+    if (!hit || hit.message.thread_id !== threadId || carried.some((record) => record.attachment_id === hit.attachment.id)) return undefined;
+    const time = typeof input.time === "string" ? inboxViewingText(input.time) : "";
+    const page = typeof input.page === "string" ? inboxViewingText(input.page) : "";
+    return {
+      name: hit.attachment.name,
+      message_id: hit.message.id,
+      ...(INBOX_VIEWING_TIME.test(time) ? { time } : {}),
+      ...(page ? { page } : {}),
+      ...(input.as_sent === true ? { as_sent: true as const } : {}),
+    };
   }
 
   /**
@@ -4343,6 +4551,11 @@ export class InboxStore {
     if (message.author.kind !== "agent") {
       throw new InboxError("validation_error", "Re-ask goes to an agent's message: the questions it asked.", { field: "message_id" });
     }
+    // A launched session's permission prompt is never asked again: its hook waits on this one question,
+    // and a Re-ask would send the person's unsent picks without their Send.
+    if (isInboxPermissionSession(message.author.session)) {
+      throw new InboxError("validation_error", "A permission prompt is not asked again: answer it here, or in Terminal.", { field: "message_id" });
+    }
     // The questions this session asked in the thread (only this message's
     // when the agent named no session), not one the archive closed.
     const asker = message.author.session ? message.author : null;
@@ -4386,6 +4599,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       reask: open.map((r) => r.id),
+      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
     };
     try {
@@ -4660,6 +4874,22 @@ export class InboxStore {
     const out: InboxAnnotationRecord[] = [];
     for (const record of this.annotations.values()) {
       if (record.thread_id === threadId && record.removed_at === null && record.sent_reply_id === null) out.push(record);
+    }
+    return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  /**
+   * The person's comments on files in a thread that a Send already carried: what the file view lists as earlier
+   * comments (`earlierCommentsOn` in packages/inbox/earlierComments.ts narrows them to the file open). A sent record
+   * is never edited, so its `updated_at` is its reply's `created_at`. Comments on a guided review or a message's text are not on a file.
+   */
+  earlierAnnotations(threadId: string): InboxAnnotationRecord[] {
+    const out: InboxAnnotationRecord[] = [];
+    for (const record of this.annotations.values()) {
+      if (record.thread_id !== threadId || record.removed_at !== null || record.sent_reply_id === null) continue;
+      if (record.guide || record.message) continue;
+      if (this.messages.get(record.sent_reply_id)?.author.kind !== "person") continue;
+      out.push(record);
     }
     return out.sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
   }
@@ -5285,6 +5515,7 @@ export class InboxStore {
     this.projectLabels = null;
     this.projectGroups = null;
     this.messages.clear();
+    this.launchedRootIds.clear();
     this.messageSeq.clear();
     this.resolvedSeq.clear();
     this.readdressed.clear();
@@ -5301,6 +5532,8 @@ export class InboxStore {
     this.stepsById.clear();
     this.stepsIdOf.clear();
     this.stepsIdsByThread.clear();
+    this.initiativesById.clear();
+    this.tagThreads.clear();
     this.tornFiles.clear();
     this.load();
     const used = pendingInboxUploadBlobs(this.dir);
@@ -5778,7 +6011,7 @@ export class InboxStore {
    * message it wrote, and writes nothing. Whether the session is live is the
    * server's check: `to` null means it is not, and only a replay answers.
    */
-  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown }): { message: InboxMessage; replayed: boolean } {
+  sendNewMessage(threadId: string, input: { body: unknown; to: InboxAddressee | null; idempotency_key: unknown; by_guest?: boolean }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const root = this.messages.get(threadId);
@@ -5805,9 +6038,11 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
+      ...(input.by_guest ? { by_guest: true as const } : {}),
     };
     this.appendMessage(message, at);
     this.endSnooze(threadId);
+    this.tagThreadCards(threadId, message.body);
     return { message, replayed: false };
   }
   // ──────────── Tidy ────────────
@@ -5876,6 +6111,8 @@ export class InboxStore {
     body: unknown;
     to: InboxAddressee | null;
     idempotency_key: unknown;
+    /** Written by a tailnet guest (`InboxMessage.by_guest`). */
+    by_guest?: boolean;
     attachments?: InboxAttachment[];
     /** The thread's name (its chip), when the person gave one: checked by the thread-name rules; an agent never replaces it. */
     thread_name?: unknown;
@@ -5893,17 +6130,14 @@ export class InboxStore {
      * first Send's.
      */
     board_request?: unknown;
+    /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
+    launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
     const key = typeof input.idempotency_key === "string" ? input.idempotency_key.trim() : "";
     if (!key) throw new InboxError("validation_error", "idempotency_key: required on a Send.", { field: "idempotency_key" });
     const body = typeof input.body === "string" ? input.body.trim() : "";
     const auto = input.thread_name_auto === true;
-    let threadName: string | null = null;
-    if (input.thread_name !== undefined && input.thread_name !== null && !(typeof input.thread_name === "string" && input.thread_name.trim() === "")) {
-      const checked = checkInboxThreadName(input.thread_name);
-      if (checked.ok) threadName = checked.name;
-      else if (!auto) throw new InboxError("validation_error", `thread_name: ${checked.message}`, { field: "thread_name" });
-    }
+    let threadName = this.sentThreadName(input.thread_name, auto);
     for (const message of this.messages.values()) {
       if (!message.started_by_person || message.idempotency_key !== key) continue;
       // A retry is the same Send: the same body and the same name the person typed (compose's suggestion is the body's own).
@@ -5918,14 +6152,7 @@ export class InboxStore {
     // Words or files: a message of attached files alone (a long paste) is the person's too, as a reply of files is.
     if (!body && !(input.attachments && input.attachments.length > 0)) throw new InboxError("validation_error", "body: write a message.", { field: "body" });
     if (!this.projectsById.has(input.project_id)) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
-    if (threadName && auto && this.threadNameTaken(input.project_id, threadName, null)) threadName = null;
-    if (threadName && this.threadNameTaken(input.project_id, threadName, null)) {
-      throw new InboxError(
-        "thread_name_taken",
-        `Another open thread in this project is already named "${threadName}". Pick another name, or leave it empty.`,
-        { field: "thread_name" },
-      );
-    }
+    threadName = this.freeThreadName(input.project_id, threadName, auto);
     const at = this.stamp();
     const id = inboxId("msg");
     const message: InboxMessage = {
@@ -5942,12 +6169,36 @@ export class InboxStore {
       idempotency_key: key,
       to: { host: input.to.host, session: input.to.session },
       started_by_person: true,
+      ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
+      ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
     };
     this.appendMessage(message, at);
     return { message, replayed: false };
+  }
+
+  /** A Send's thread name, or null for none. A suggestion (`auto`) that is not a valid name is dropped; a typed one is refused. */
+  private sentThreadName(name: unknown, auto: boolean): string | null {
+    if (name === undefined || name === null || (typeof name === "string" && name.trim() === "")) return null;
+    const checked = checkInboxThreadName(name);
+    if (checked.ok) return checked.name;
+    if (!auto) throw new InboxError("validation_error", `thread_name: ${checked.message}`, { field: "thread_name" });
+    return null;
+  }
+
+  /** The name a thread would get in this project: a suggestion another open thread has is dropped; a typed one is refused. */
+  private freeThreadName(projectId: string, name: string | null, auto: boolean): string | null {
+    if (!name || !this.threadNameTaken(projectId, name, null)) return name;
+    if (auto) return null;
+    throw new InboxError("thread_name_taken", `Another open thread in this project is already named "${name}". Pick another name, or leave it empty.`, { field: "thread_name" });
+  }
+
+  /** What `startPersonThread` would refuse about a thread's name, with nothing written: for a Send with work to do before the write. */
+  checkPersonThreadName(input: { project_id: string; thread_name?: unknown; thread_name_auto?: unknown }): void {
+    const auto = input.thread_name_auto === true;
+    this.freeThreadName(input.project_id, this.sentThreadName(input.thread_name, auto), auto);
   }
 
   /** The thread the person started with this idempotency key, for a replayed Send. */
@@ -5980,6 +6231,39 @@ export class InboxStore {
     const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
     this.appendMessage(next, at);
     return next;
+  }
+
+  /**
+   * Launch: the host answered for the agent started for this root. Started:
+   * the root moves from its placeholder to the real session (`to`, no
+   * liveness check: the session polls a moment later) and records the host's
+   * own id; an earlier error is cleared. Failed (or Try again clearing it):
+   * `launch.error`; the root keeps its placeholder, so the window shows Not
+   * delivered. Deleted: `launch.deleted_at` (no run line, no respawn). One
+   * snapshot each.
+   */
+  settleLaunch(
+    messageId: string,
+    outcome: { to: InboxAddressee; session_ref: string } | { error: InboxLaunchError | null } | { deleted_at: string },
+  ): InboxMessage {
+    const message = this.messages.get(messageId);
+    if (!message?.launch) throw new InboxError("message_not_found", `No launched thread ${messageId}.`);
+    const next: InboxMessage =
+      "to" in outcome
+        ? { ...message, to: { host: outcome.to.host, session: outcome.to.session }, launch: { ...message.launch, session_ref: outcome.session_ref, error: null } }
+        : "error" in outcome
+          ? { ...message, launch: { ...message.launch, error: outcome.error } }
+          : { ...message, launch: { ...message.launch, deleted_at: outcome.deleted_at } };
+    this.appendMessage(next, this.stamp());
+    return next;
+  }
+
+  /** The launched threads' roots (any project, archived included). */
+  launchedRoots(): InboxMessage[] {
+    return [...this.launchedRootIds].flatMap((id) => {
+      const message = this.messages.get(id);
+      return message ? [message] : [];
+    });
   }
 
   /**
@@ -6144,7 +6428,184 @@ export class InboxStore {
   cardWire(card: InboxCard): InboxCardWire {
     const threads = card.threads.filter((id) => this.messages.get(id)?.thread_id === id);
     // A combined project's cards read the project it went into, as its rows do. The record keeps its own.
-    return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
+    // A card whose initiative was deleted reads as in none (the record keeps the id, for its history).
+    // A raw line an older Inbox wrote has no field: it reads the initiative the store kept (apply carries it).
+    const held = card.initiative === undefined ? this.cards.get(card.id)?.initiative : card.initiative;
+    const initiative = held ? (this.initiativesById.get(held)?.deleted_at === null ? held : null) : null;
+    return { ...card, project_id: this.canonicalProjectId(card.project_id), threads, initiative, heard_seq: this.cardHeardSeq.get(card.id) ?? 0 };
+  }
+
+  // ─────────────────────────── initiatives ───────────────────────────
+  // The Board's initiatives (approval "board-initiatives"): named by the
+  // person, across projects; a card is in at most one. Only the person
+  // renames them. An agent puts its card in one through the card tool's
+  // `initiative` (createCard and updateCard's `initiative_name`), makes one
+  // only that way, and may delete one (op `initiative_delete`). Deleting
+  // writes no card: a card whose initiative is deleted reads as in none
+  // (cardWire), and is back in it if the person undoes the delete. A card made
+  // for a thread the person tagged starts in the tagged one, whatever the agent
+  // named (createCard). After that whoever sets it last wins, the person or an
+  // agent (no write is refused for the other's earlier pick), as any card field.
+
+  /** Every initiative, deleted ones too (a card's history still names them), oldest first. */
+  initiatives(): InboxInitiative[] {
+    return [...this.initiativesById.values()].sort((a, b) => a.created_at.localeCompare(b.created_at) || a.id.localeCompare(b.id));
+  }
+
+  initiative(id: string): InboxInitiative | null {
+    return this.initiativesById.get(id) ?? null;
+  }
+
+  private liveInitiative(id: unknown): InboxInitiative {
+    const found = isInboxInitiativeId(id) ? this.initiativesById.get(id) : undefined;
+    if (!found || found.deleted_at !== null) throw new InboxError("initiative_not_found", `No initiative ${String(id)}.`, { field: "initiative" });
+    return found;
+  }
+
+  /** A name the person typed, one line; refused when a live initiative (not `self`) already has it, ignoring case. */
+  private initiativeName(value: unknown, self: string | null): string {
+    const name = this.cardText(value, "name", INBOX_INITIATIVE_NAME_MAX);
+    const key = inboxInitiativeNameKey(name);
+    for (const other of this.initiativesById.values()) {
+      if (other.id !== self && other.deleted_at === null && inboxInitiativeNameKey(other.name) === key) {
+        throw new InboxError("initiative_exists", `There is already an initiative named ${other.name}.`, { field: "name", initiative_id: other.id });
+      }
+    }
+    return name;
+  }
+
+  private appendInitiative(record: InboxInitiative, at: string): void {
+    this.write(join(this.dir, INITIATIVES_FILE), { v: INBOX_RECORD_VERSION, seq: this.seq + 1, at, kind: "initiative", id: record.id, record });
+    // An older Inbox never reads initiatives.jsonl: the floor keeps it from handing out this seq again.
+    try {
+      this.keepSeqFloor();
+    } catch {
+      // Best effort: the line is written; only a downgrade would read the floor.
+    }
+  }
+
+  /** A new initiative, named `name` (the person's; an agent makes one only through a card's `initiative_name`). */
+  createInitiative(input: { name: unknown; by: InboxAuthor }): InboxInitiative {
+    if (input.by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person makes an initiative.");
+    const name = this.initiativeName(input.name, null);
+    return this.appendNewInitiative(name, input.by);
+  }
+
+  private appendNewInitiative(name: string, by: InboxAuthor): InboxInitiative {
+    const at = this.stamp();
+    const record: InboxInitiative = { id: inboxId("ini"), name, created_at: at, created_by: by, updated_at: at, deleted_at: null };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /**
+   * The live initiative a card tool's `initiative` means: its `ini_` id, or
+   * its name, ignoring case, or else the first made with the same join key
+   * (inboxInitiativeJoinKey). Null when none is, a stale id included.
+   */
+  initiativeNamed(value: string): InboxInitiative | null {
+    return this.initiativeAnswering(value, inboxInitiativeJoinKey);
+  }
+
+  /**
+   * The live initiative `initiative_delete` means: its `ini_` id, or its name
+   * ignoring case, spaces and a leading `#` only. Narrower than initiativeNamed:
+   * a card put in the wrong one can be moved, a deleted initiative cannot.
+   */
+  initiativeToDelete(value: string): InboxInitiative | null {
+    return this.initiativeAnswering(value, (name) => inboxInitiativeNameKey(inboxInitiativeBareName(name)).normalize("NFC").replace(/\s+/gu, ""));
+  }
+
+  /** A live one by `ini_` id, else by name ignoring case, else the first made with `name`'s `key` (an empty key matches nothing). */
+  private initiativeAnswering(value: string, key: (name: string) => string): InboxInitiative | null {
+    const text = value.trim();
+    const byId = isInboxInitiativeId(text) ? this.initiativesById.get(text) : undefined;
+    if (byId?.deleted_at === null) return byId;
+    // In the order they were made, as a tag reads them (`initiatives()` breaks a same-millisecond tie by random id).
+    const live = [...this.initiativesById.values()].filter((i) => i.deleted_at === null);
+    const name = text.replace(/\s+/g, " ");
+    const exact = live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name));
+    if (exact) return exact;
+    const wanted = key(name);
+    return wanted ? (live.find((i) => key(i.name) === wanted) ?? null) : null;
+  }
+
+  /**
+   * A card's initiative given by the card tool's `initiative`: `""` is none, and
+   * so is that written out (two quote characters, as agents do send it);
+   * a live initiative it names (initiativeNamed) is that one; a stale `ini_`
+   * id is ignored (null: the card's initiative stays as it is, never one named
+   * after the id), and a value only shaped like an id ("ini_abc", cut short or
+   * upper-cased) is not found rather than a name; anything else is a new one's
+   * name, without a leading `#` ("#Billing" makes "Billing"; "#" alone is
+   * refused as an empty name), checked
+   * here (one line, the length) and made by `initiativeOfPick` only once the card
+   * write can no longer be refused, so a refused card leaves no initiative behind.
+   */
+  private initiativePick(value: unknown): { id: string | null } | { make: string } | null {
+    if (typeof value !== "string") throw new InboxError("validation_error", "initiative: a name, or \"\" for none.", { field: "initiative" });
+    const text = value.trim();
+    if (text === "" || text === '""' || text === "''") return { id: null };
+    const named = this.initiativeNamed(text);
+    if (named) return { id: named.id };
+    if (isInboxInitiativeId(text)) return null;
+    const name = inboxInitiativeBareName(text);
+    if (/^ini_\S*$/iu.test(name)) throw new InboxError("initiative_not_found", `No initiative ${name}.`, { field: "initiative" });
+    return { make: this.cardText(name, "initiative", INBOX_INITIATIVE_NAME_MAX) };
+  }
+
+  private initiativeOfPick(pick: { id: string | null } | { make: string }, by: InboxAuthor): string | null {
+    return "make" in pick ? this.appendNewInitiative(pick.make, by).id : pick.id;
+  }
+
+  /** The person renamed an initiative: every card in it reads the new name (they name it by id). */
+  renameInitiative(id: string, name: unknown): InboxInitiative {
+    const current = this.liveInitiative(id);
+    const next = this.initiativeName(name, current.id);
+    if (next === current.name) return current;
+    const at = this.stamp();
+    const record: InboxInitiative = { ...current, name: next, updated_at: at };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /** Deleted (the person, or an agent's `initiative_delete`): its cards read as in none; no card line is written (their ages stay). */
+  deleteInitiative(id: string): InboxInitiative {
+    const current = this.liveInitiative(id);
+    const at = this.stamp();
+    const record: InboxInitiative = { ...current, updated_at: at, deleted_at: at };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /**
+   * The person's Undo of a delete: its cards read as in it again (they kept
+   * its id). Refused when a live one has taken the name since; a live one
+   * answers as it is.
+   */
+  restoreInitiative(id: string): InboxInitiative {
+    const current = isInboxInitiativeId(id) ? this.initiativesById.get(id) : undefined;
+    if (!current) throw new InboxError("initiative_not_found", `No initiative ${id}.`, { field: "initiative" });
+    if (current.deleted_at === null) return current;
+    this.initiativeName(current.name, current.id);
+    const at = this.stamp();
+    const record: InboxInitiative = { ...current, updated_at: at, deleted_at: null };
+    this.appendInitiative(record, at);
+    return record;
+  }
+
+  /** The person put a card in an initiative, or took it out of one (null): one card line, a history entry. */
+  setCardInitiative(id: string, initiative: unknown, by: InboxAuthor): InboxCard {
+    if (by.kind !== "person") throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.");
+    const card = this.cards.get(id);
+    if (!card) throw new InboxError("card_not_found", `No card ${id}.`);
+    const next = initiative === null ? null : this.liveInitiative(initiative).id;
+    const now = this.cardWire(card).initiative ?? null;
+    if (next === now) return card;
+    const at = this.stamp();
+    const written: InboxCard = { ...card, initiative: next, heard_at: at, heard_by: by };
+    this.appendCard(written, at);
+    return this.cards.get(id) ?? written;
   }
 
   /**
@@ -6308,10 +6769,19 @@ export class InboxStore {
     notes?: unknown;
     /** The person's message that sends the new card to an agent: checked before the card is written, one line for both. */
     send_thread_id?: unknown;
-  }): { card: InboxCard; replayed: boolean } {
+    /** The person's New card on a Board filtered to an initiative: it starts in that one (an `ini_` id; null or absent: none). */
+    initiative?: unknown;
+    /** The card tool's `initiative` (anyone, agents included): a name, matched or made (initiativePick); `""` is none. */
+    initiative_name?: unknown;
+  }): { card: InboxCard; replayed: boolean; tag_decided?: true } {
     const project = this.projectsById.get(input.project_id);
     if (!project) throw new InboxError("project_not_found", `No project ${input.project_id}.`);
     const byAgent = input.by.kind === "agent";
+    const givenInitiative = input.initiative !== undefined && input.initiative !== null;
+    if (givenInitiative && byAgent) throw new InboxError("initiative_person_only", "Only the person puts a card in an initiative.", { field: "initiative" });
+    const givenName = input.initiative_name !== undefined && input.initiative_name !== null;
+    if (givenInitiative && givenName) throw new InboxError("validation_error", "initiative: an id or a name, not both.", { field: "initiative" });
+    const initiativeById = givenInitiative ? this.liveInitiative(input.initiative).id : null;
     const sending = input.send_thread_id !== undefined && input.send_thread_id !== null;
     if (sending && byAgent) throw new InboxError("validation_error", "thread_id: only the person sends a card to an agent.", { field: "thread_id" });
     const target = sending ? this.cardSendTarget(project.id, input.send_thread_id) : null;
@@ -6344,6 +6814,8 @@ export class InboxStore {
         return { card: known, replayed: true };
       }
     }
+    // Checked here, after a replay answered (a retry makes no initiative), and made only just before the card is written.
+    const pick = givenName ? this.initiativePick(input.initiative_name) : null;
     // Sent to an agent: Todo (the person asked for it). Otherwise an agent's card is work it took on (Todo), the person's an idea (Backlog).
     const column = input.column === undefined || input.column === null ? (byAgent || target ? "todo" : "backlog") : this.cardColumn(input.column);
     if (column === "dropped") throw new InboxError("validation_error", "column: a new card starts in a live column (or done), never dropped.", { field: "column" });
@@ -6355,6 +6827,12 @@ export class InboxStore {
     const refs = this.cardRefs([], input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
+    // The last check that can refuse (notes) comes before a new initiative is made.
+    const notes = this.cardNotes(input.notes);
+    // Made for a thread the person tagged (`#Shape`, approval "board-hashtags"): it starts in that initiative,
+    // over an agent's name (none is made for it) or "". Only the person's own pick on New card holds.
+    const tagged = initiativeById === null ? this.threadTaggedInitiative(threads) : null;
+    const initiative = tagged ? null : pick ? this.initiativeOfPick(pick, input.by) : initiativeById;
     const at = this.stamp();
     const card: InboxCard = {
       id: inboxId("crd"),
@@ -6376,12 +6854,18 @@ export class InboxStore {
       dropped: null,
       aside_from: null,
       idempotency_key: key,
-      notes: this.cardNotes(input.notes),
+      notes,
       sent: target ? { at, to: target.to, thread_id: target.thread } : null,
       refs,
       ...(column === "done" && !target ? { done_prs: inboxCardDonePrs({ refs, prs }) } : {}),
+      initiative,
     };
     this.appendCard(card, at);
+    if (tagged) {
+      // The tag is what decided it, unless the agent named that very one.
+      const agreed = pick !== null && "id" in pick && pick.id === tagged;
+      return { card: this.setCardInitiative(card.id, tagged, { kind: "person" }), replayed: false, ...(agreed ? {} : { tag_decided: true as const }) };
+    }
     return { card, replayed: false };
   }
 
@@ -6411,6 +6895,8 @@ export class InboxStore {
       reason?: unknown;
       restore?: boolean;
       notes?: unknown;
+      /** The card tool's `initiative` (anyone): a name, matched or made (initiativePick); `""` takes the card out. */
+      initiative_name?: unknown;
     },
   ): InboxCard {
     const card = this.cards.get(id);
@@ -6426,9 +6912,10 @@ export class InboxStore {
       !(input.prs && input.prs.length > 0) &&
       !(input.refs && input.refs.length > 0) &&
       input.notes === undefined &&
+      !given(input.initiative_name) &&
       !input.restore
     ) {
-      throw new InboxError("validation_error", "Nothing to change: pass column, say, you, title, thread_id or pr.");
+      throw new InboxError("validation_error", "Nothing to change: pass column, say, you, title, thread_id, pr or initiative.");
     }
     let column = card.column;
     if (input.restore) {
@@ -6480,6 +6967,10 @@ export class InboxStore {
     const refs = this.cardRefs(inboxCardRefsOf(card), input.prs ?? [], input.refs ?? [], input.by);
     const prs = this.prsOf(refs);
     this.checkLinkCounts(threads.length, refs.length);
+    const notes = input.notes === undefined ? card.notes : this.cardNotes(input.notes);
+    // Made (when new) only now, with nothing left to refuse the card's write.
+    const pick = given(input.initiative_name) ? this.initiativePick(input.initiative_name) : null;
+    const picked = pick ? { initiative: this.initiativeOfPick(pick, input.by) } : {};
     const at = this.stamp();
     // Leaving a live column (or Done) for Dropped remembers it, so restoring goes back there.
     const asideFrom =
@@ -6505,12 +6996,102 @@ export class InboxStore {
       heard_by: input.by,
       dropped,
       aside_from: asideFrom,
-      notes: input.notes === undefined ? card.notes : this.cardNotes(input.notes),
+      notes,
+      ...picked,
       // Into Done by hand (anyone's ship, a restore to Done): its PRs then never move it there again by themselves.
       ...(moves && column === "done" ? { done_prs: inboxCardDonePrs({ refs, prs }, card.done_prs) } : {}),
     };
     this.appendCard(next, at);
+    // A thread the person tagged, linked now to a card in none: the card goes in that initiative.
+    const added = threads.filter((thread) => !card.threads.includes(thread));
+    const tagged = added.length > 0 && this.cardWire(next).initiative === null ? this.threadTaggedInitiative(added) : null;
+    if (tagged) return this.setCardInitiative(id, tagged, { kind: "person" });
     return next;
+  }
+
+  /** Hashtags: the tags in a message's body, indexed to its thread (`tagThreads`). Code holds no tag. */
+  private indexTags(message: InboxMessage, seq: number): void {
+    if (typeof message.body !== "string" || !message.body.includes("#")) return;
+    for (const key of new Set(inboxHashtags(message.body).map((tag) => tag.key))) {
+      if (!key) continue;
+      let entry = this.tagThreads.get(key);
+      if (!entry) this.tagThreads.set(key, (entry = { latest: new Map(), order: [] }));
+      if ((entry.latest.get(message.thread_id) ?? -1) >= seq) continue;
+      entry.latest.set(message.thread_id, seq);
+      entry.order.push(message.thread_id);
+      if (entry.order.length > 2 * entry.latest.size + 16) {
+        // Keep each thread's last entry only, in order.
+        const seen = new Set<string>();
+        entry.order = entry.order.reverse().filter((id) => !seen.has(id) && !!seen.add(id)).reverse();
+      }
+    }
+  }
+
+  /**
+   * Hashtags: for each live initiative that a message tags, the latest-tagged threads (at most `limit`,
+   * thread ids, newest tag first) that `linked` (its cards' threads) leaves out, and `total`, how many such
+   * threads there are. Walks the index from its newest end and stops at `limit`: no sort, no message parsed,
+   * so a tag used in thousands of threads costs the same as one used in a few.
+   */
+  initiativeThreads(options: { limit?: number; linked?: (initiativeId: string) => ReadonlySet<string> | undefined } = {}): Record<string, { threads: string[]; total: number }> {
+    const limit = options.limit ?? Infinity;
+    const out: Record<string, { threads: string[]; total: number }> = {};
+    for (const initiative of this.initiativesById.values()) {
+      if (initiative.deleted_at !== null) continue;
+      const entry = this.tagThreads.get(inboxInitiativeTagKey(initiative.name));
+      if (!entry || entry.latest.size === 0) continue;
+      const linked = options.linked?.(initiative.id);
+      let total = entry.latest.size;
+      if (linked) for (const id of linked) if (entry.latest.has(id)) total--;
+      const threads: string[] = [];
+      const seen = new Set<string>();
+      for (let i = entry.order.length - 1; i >= 0 && threads.length < limit; i--) {
+        const id = entry.order[i]!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        if (linked?.has(id)) continue;
+        // A delete reloads the store, so every indexed thread exists; checked anyway, cheaply.
+        if (this.isThreadRoot(id)) threads.push(id);
+      }
+      if (total > 0) out[initiative.id] = { threads, total };
+    }
+    return out;
+  }
+
+  /**
+   * Hashtags (approval "board-hashtags"): the person's message in a thread
+   * that tags a live initiative (`#Shape`; the last one wins) puts the
+   * thread's cards in it, as if the person set it on each (a history line
+   * each). A cancelled card stays as it is.
+   */
+  private tagThreadCards(threadId: string, words: string): void {
+    const tagged = inboxTaggedInitiative(words, [...this.initiativesById.values()]);
+    if (!tagged) return;
+    for (const card of [...this.cards.values()]) {
+      if (card.column === "dropped" || !card.threads.includes(threadId)) continue;
+      if (this.cardWire(card).initiative === tagged.id) continue;
+      this.setCardInitiative(card.id, tagged.id, { kind: "person" });
+    }
+  }
+
+  /** The initiative the person's latest tag in any of `threads` names (newest message first), or null. */
+  private threadTaggedInitiative(threads: readonly string[]): string | null {
+    const live = [...this.initiativesById.values()];
+    if (!live.some((i) => i.deleted_at === null)) return null;
+    let best: { seq: number; id: string } | null = null;
+    for (const thread of threads) {
+      const messages = this.threadMessages(thread);
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const message = messages[i]!;
+        if (message.author.kind !== "person") continue;
+        const found = inboxTaggedInitiative(personWords(message.body), live);
+        if (!found) continue;
+        const seq = this.messageSeq.get(message.id) ?? 0;
+        if (!best || seq > best.seq) best = { seq, id: found.id };
+        break;
+      }
+    }
+    return best?.id ?? null;
   }
 
   private cardNotes(value: unknown): string | null {
@@ -6537,9 +7118,15 @@ export class InboxStore {
     const lines: { seq: number; card: InboxCard }[] = [];
     for (const raw of text.split("\n")) {
       const line = parseInboxLine(raw);
-      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: readInboxCard(line.record) });
+      if (line?.kind === "card" && line.record.id === id) lines.push({ seq: line.seq, card: line.record });
     }
     lines.sort((a, b) => a.seq - b.seq);
+    // A line an Inbox from before initiatives wrote has no `initiative`: the card kept its own (as apply reads it).
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i]!.card;
+      const kept = i > 0 && raw.initiative === undefined ? lines[i - 1]!.card.initiative : raw.initiative;
+      lines[i] = { seq: lines[i]!.seq, card: readInboxCard({ ...raw, initiative: kept }) };
+    }
     return inboxCardHistory(lines.length > 0 ? lines.map((line) => line.card) : [card]);
   }
 

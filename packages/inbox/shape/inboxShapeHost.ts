@@ -11,12 +11,19 @@
  *   it up, and the event feed clears "waits for the agent" then.
  * - Files and hover: the shape's project folder, through code-nav.
  * - Copy prompt: the command any session runs to pick up what waits.
+ * - Open in: with Code review on, a referenced file gets the window's Open in
+ *   (components/OpenIn.tsx), by the shape's id: the server holds the path to its project.
  */
+import { createElement } from 'react';
 import type { ShapeNote, ShapeNoteInput, ShapeVersion } from '@plannotator/core/shape';
-import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapeSessionStatus } from '@plannotator/ui/components/shape';
+import type { ShapeHost, ShapeLoaded } from '@plannotator/ui/components/shape';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { generateId } from '@plannotator/ui/utils/generateId';
 import { inboxApi, type ShapeLoadedWire } from '../api';
+import { OpenInFile } from '../components/OpenIn';
+import { shapeEventsBetween } from './events';
+
+export { shapeEventsBetween };
 
 const ASK_CONTEXT = { mode: 'annotate', annotate: { filePath: '', content: '' } } as const;
 
@@ -27,6 +34,8 @@ export interface InboxShapeHostOptions {
   command?: string | null;
   /** The fetch the Ask stream uses (tests). */
   fetch?: typeof fetch;
+  /** Offer Open in on a board's file references and code (Settings → Capabilities → Code review). */
+  openIn?: boolean;
 }
 
 /** The words the session gets for a question on a board. */
@@ -154,35 +163,15 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
         return null;
       }
     },
-    assetUrl(id, src) {
-      const name = src.replace(/^files\//, '');
-      return `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
-    },
+    assetUrl: inboxApi.shapeFileUrl,
     resumePrompt(id) {
       return `${options.command || 'plannotator'} shape read ${id} --notes`;
     },
     async copy(text) {
       await copyTextToClipboard(text);
     },
+    ...(options.openIn ? { fileAction: (id: string, file: { path: string; line?: number }) => createElement(OpenInFile, { scope: { shape: id }, path: file.path, line: file.line }) } : {}),
     // No Ask AI fallback here: with the session gone, a question waits for the agent's `shape answer`.
     askWaitsWhenEnded: true,
   };
-}
-
-/** What changed between two reads of a board, as the board's events. */
-export function shapeEventsBetween(before: ShapeLoadedWire | null, now: ShapeLoadedWire): ShapeEvent[] {
-  const out: ShapeEvent[] = [];
-  if (!before) return out;
-  if (now.version.n !== before.version.n) out.push({ type: 'version', shape: now.shape, version: now.version });
-  const wasDrawing = before.shape.drawing?.until ?? null;
-  const drawing = now.shape.drawing?.until ?? null;
-  if (drawing !== wasDrawing && now.version.n === before.version.n) out.push({ type: 'drawing', until: drawing });
-  if (now.shape.state !== before.shape.state) out.push({ type: 'state', shape: now.shape });
-  const old = new Map(before.notes.map((n) => [n.id, n]));
-  for (const note of now.notes) {
-    const was = old.get(note.id);
-    if (!was || was.delivered !== note.delivered || was.text !== note.text) out.push({ type: 'note', note });
-  }
-  if (now.session.state !== before.session.state || now.session.agent !== before.session.agent) out.push({ type: 'session', session: now.session as ShapeSessionStatus });
-  return out;
 }
