@@ -6667,18 +6667,14 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-bfield .ib-fbk-msg { min-height: 136px; line-height: 1.5; }
 .ib-fbk-count { margin: 6px 0 0; text-align: right; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-fbk-count.ib-fbk-over { color: var(--destructive); }
-/* "Might be related" (FeedbackRelated.tsx). Empty it has no height and no margin: with no match the form is laid out as if it were not there. */
+/* "These might help" (FeedbackRelated.tsx). Empty it has no height and no margin: with no match the form is laid out as if it were not there. */
 .ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
 .ib-fbk-rel li { margin: 0; padding: 2px 0; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }
 .ib-fbk-rel a { color: var(--foreground); text-decoration: underline; text-decoration-color: color-mix(in oklch, var(--foreground) 30%, transparent); text-underline-offset: 2px; }
 .ib-fbk-rel a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 3px; }
-.ib-fbk-rel-row, .ib-fbk-rel li.ib-fbk-rel-said { display: flex; gap: 8px; }
-.ib-fbk-rel-row { align-items: center; }
-.ib-fbk-rel li.ib-fbk-rel-said { align-items: flex-start; }
-.ib-fbk-rel-row a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.pn-inbox .ib-fbk-rel svg.ib-fbk-rel-mark { flex: none; width: 14px; height: 14px; color: var(--muted-foreground); }
-.pn-inbox .ib-fbk-rel-said svg.ib-fbk-rel-mark { margin-top: 2px; }
+.ib-fbk-rel li { display: flex; }
+.ib-fbk-rel a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (hover: hover) { .ib-fbk-rel a:hover { color: var(--primary); text-decoration-color: currentColor; } }
 .ib-fbk-optional { margin: 12px 0 0; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 6px; }
@@ -6710,11 +6706,13 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
   /* The whole row is the 44 px target (the link's ::after), its text centered. */
   .ib-fbk-rel li { position: relative; display: flex; align-items: center; min-height: 44px; padding: 4px 0; font-size: var(--ib-fs-14, 14px); }
   .ib-fbk-rel a::after { content: ''; position: absolute; inset: 0; }
-  /* Over a keyboard: a shorter box and one line of at most two rows leave the line, the "what is sent" line and Send all in the sheet. */
+  /* Over a keyboard: a shorter box and one line leave the line, the "what is sent" line and Send all in the sheet. */
   :root[data-ib-keyboard] .ib-bfield .ib-fbk-msg { min-height: 112px; height: 112px; }
-  /* The line's room is kept while the keyboard is up, so nothing moves under a finger when it lands: the box and Send both stay put. */
-  :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: 82px; }
-  :root[data-ib-keyboard] .ib-fbk-rel li > span { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+  /* The line's room is kept while the keyboard is up, so nothing moves under a finger when it lands: the box and Send both stay put. As small as one name allows: the row is 24 px, and its target stays 44 over the heading and the margin below, where nothing else takes a tap. */
+  :root[data-ib-keyboard] .ib-fbk-rel { display: flow-root; min-height: calc(33px + var(--ib-fs-12, 12px) * 1.5); }
+  :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
+  :root[data-ib-keyboard] .ib-fbk-rel li { min-height: 24px; padding: 0; }
+  :root[data-ib-keyboard] .ib-fbk-rel a::after { inset: -10px 0; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }

@@ -359,7 +359,7 @@ describe.skipIf(!hasDom)('the sidebar row', () => {
   });
 });
 
-describe.skipIf(!hasDom)('Might be related under the box', () => {
+describe.skipIf(!hasDom)('These might help under the box', () => {
   /** The real file, through the dialog's real pause; the matcher's own rules are in feedbackRelated.test.ts. */
   const pause = () => act(async () => new Promise((done) => setTimeout(done, 650)));
   async function typeAndPause(text: string) {
@@ -424,26 +424,18 @@ describe.skipIf(!hasDom)('Might be related under the box', () => {
     expect(document.activeElement === dialog.box()).toBe(true);
   });
 
-  test('a release note and an issue: a mark for the kind, the kind in the name, all of it on hover', async () => {
-    await typeAndPause('quick labels please');
-    const rows = [...list().querySelectorAll('li')];
-    expect(rows.length).toBeGreaterThan(0);
-    for (const row of rows) {
-      const name = row.querySelector('a')!.getAttribute('aria-label')!;
-      const reason = /(Release note, v[\d.]+|Open issue #\d+)$/.exec(name)?.[1];
-      expect(reason).toBeTruthy();
-      expect(name.startsWith(row.querySelector('a')!.textContent!)).toBe(true);
-      expect(row.getAttribute('title')).toBe(name);
-      expect(row.querySelector('svg')!.getAttribute('data-icon')).toBe(reason!.startsWith('Open') ? 'issue' : 'tag');
+  test('every line, whatever its kind, is only its name: a link and nothing beside it', async () => {
+    for (const words of ['quick labels please', 'need a done button']) {
+      await typeAndPause(words);
+      const rows = [...list().querySelectorAll('li')];
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) {
+        const link = row.querySelector('a')!;
+        expect(row.textContent).toBe(link.textContent);
+        expect(row.querySelector('svg') === null).toBe(true);
+        expect(row.hasAttribute('title') || link.hasAttribute('title')).toBe(false);
+      }
     }
-  });
-
-  test('a feature: the check mark, and its sentence in the page rather than behind a hover', async () => {
-    await typeAndPause('need a done button');
-    const row = list().querySelector('li')!;
-    expect(row.querySelector('svg')!.getAttribute('data-icon')).toBe('check');
-    expect(row.textContent).toContain('Already there');
-    expect(row.querySelector('a')!.textContent).toBe('Archive');
   });
 
   test('the window losing focus is not the link losing it: the list keeps waiting', async () => {

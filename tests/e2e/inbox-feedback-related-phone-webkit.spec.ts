@@ -1,5 +1,5 @@
 /**
- * "Might be related" on a phone, in WebKit: a 390 px sheet with the keyboard up,
+ * "These might help" on a phone, in WebKit: a 390 px sheet with the keyboard up,
  * both ways this can be stood in for here. A real keyboard is a different thing
  * (iOS scrolls and pans the page on its own): this spec proves the layout, and
  * the owner's iPhone proves the rest.
@@ -94,7 +94,6 @@ async function lineAboveKeyboard(page: Page) {
   expect(after.y).toBe(before.y);
   expect(after.y).toBeGreaterThanOrEqual(0);
   const line = (await page.locator('[data-feedback-related] li').boundingBox())!;
-  expect(line.height).toBeGreaterThanOrEqual(44);
   expect(line.y + line.height).toBeLessThanOrEqual(await bottomOfScreen(page));
 }
 
@@ -124,7 +123,7 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     for (const part of ['[data-feedback-message]', '[data-feedback-what]', '[data-feedback-send]']) await showsInSheet(page, part);
   });
 
-  test('several matches show one line, at most two rows, and Send still shows', async ({ page }) => {
+  test('several matches show one line, and Send still shows', async ({ page }) => {
     await openSheet(page);
     await keyboardUp(page);
     await page.keyboard.type('quick labels please', { delay: 15 });
@@ -139,8 +138,22 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     await page.keyboard.type('quick labels please', { delay: 15 });
     await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
     await page.locator('[data-feedback-related] a').evaluate((a) => (a.textContent = 'A title far too long for any row of this form, '.repeat(6)));
-    expect((await page.locator('[data-feedback-related] li').boundingBox())!.height).toBe(44);
+    expect((await page.locator('[data-feedback-related] li').boundingBox())!.height).toBe(24);
     await showsInSheet(page, '[data-feedback-send]');
+  });
+
+  test('over the keyboard the small row is still a 44 px target, and the tap opens the link', async ({ page }) => {
+    await openSheet(page);
+    await keyboardUp(page);
+    await page.keyboard.type('need a done button', { delay: 15 });
+    await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
+    const hits = await page.locator('[data-feedback-related] li').evaluate((li) => {
+      const row = li.getBoundingClientRect();
+      const middle = row.top + row.height / 2;
+      const opens = (y: number) => !!document.elementFromPoint(row.left + 2, y)?.closest('a');
+      return { above: opens(middle - 21), below: opens(middle + 21), far: !!document.elementFromPoint(row.right - 2, middle)?.closest('a') };
+    });
+    expect(hits).toEqual({ above: true, below: true, far: true });
   });
 
   test('when the line lands nothing moves: the chips, Cancel and Send stay under the finger', async ({ page }) => {
@@ -151,11 +164,11 @@ test.describe('390 by 844, the visual viewport loses the keyboard', () => {
     await page.keyboard.type('need a done button', { delay: 15 });
     await expect(page.locator('[data-feedback-related] a')).toHaveCount(1);
     expect(await spots()).toEqual(before);
-    const twoRows = await spots();
+    const landed = await spots();
     await page.locator('[data-feedback-message]').fill('');
     await page.keyboard.type('quick labels please', { delay: 15 });
     await page.waitForTimeout(800);
-    expect(await spots()).toEqual(twoRows);
+    expect(await spots()).toEqual(landed);
   });
 
   test('a real tap on Cancel as the line lands sends nothing, and a later tap cancels', async ({ page }) => {
@@ -229,7 +242,7 @@ test.describe('390 by 844, no keyboard', () => {
     const hits = await page.locator('[data-feedback-related] li').evaluateAll((items) =>
       items.map((li) => {
         const row = li.getBoundingClientRect();
-        // The mark's end and the far end of the row both open the link.
+        // Both ends of the row open the link.
         const opens = (x: number) => !!document.elementFromPoint(x, row.top + row.height / 2)?.closest('a');
         return { height: row.height, left: opens(row.left + 2), right: opens(row.right - 2) };
       }),

@@ -18,7 +18,7 @@ afterEach(() => {
   if (hasDom) document.body.innerHTML = '';
 });
 
-describe.skipIf(!hasDom)('Might be related when its file cannot be read', () => {
+describe.skipIf(!hasDom)('These might help when its file cannot be read', () => {
   test('no lines, nothing thrown, and the form still takes words', async () => {
     (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
     const host = document.body.appendChild(document.createElement('div'));

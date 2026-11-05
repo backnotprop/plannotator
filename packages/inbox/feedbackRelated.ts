@@ -1,5 +1,5 @@
 /**
- * "Might be related" under the Feedback box (components/FeedbackRelated.tsx):
+ * "These might help" under the Feedback box (components/FeedbackRelated.tsx):
  * plain word matching against feedbackRelated.data.json, in the window. The
  * person's words go nowhere: no request, not even to this Inbox's server.
  *
@@ -14,7 +14,6 @@
 export interface RelatedFeature {
   title: string;
   phrases: string[];
-  reason: string;
   url: string;
 }
 export interface RelatedRelease {
@@ -37,9 +36,7 @@ export interface RelatedData {
 export interface RelatedLink {
   /** Whole: the row cuts it to one line, and the window offers the rest on hover. */
   title: string;
-  reason: string;
   href: string;
-  kind: Kind;
 }
 
 const REPO_URL = 'https://github.com/backnotprop/plannotator';
@@ -103,7 +100,7 @@ export function isPublicRelatedUrl(url: string): boolean {
   }
 }
 
-export type Kind = 'feature' | 'release' | 'issue';
+type Kind = 'feature' | 'release' | 'issue';
 
 interface Entry {
   kind: Kind;
@@ -121,16 +118,16 @@ export interface RelatedIndex {
 
 export function relatedIndex(data: RelatedData): RelatedIndex {
   const entries: Entry[] = [];
-  const add = (kind: Kind, title: string, reason: string, href: string, extra = '', phrases: string[][] = []) => {
+  const add = (kind: Kind, title: string, href: string, extra = '', phrases: string[][] = []) => {
     if (!isPublicRelatedUrl(href)) return;
-    entries.push({ kind, link: { title: title.replace(/\.$/, ''), reason, href, kind }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
+    entries.push({ kind, link: { title: title.replace(/\.$/, ''), href }, terms: tokens(`${title} ${extra}`), key: tokens(title).join(' '), phrases });
   };
-  for (const feature of data.features) add('feature', feature.title, feature.reason, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
+  for (const feature of data.features) add('feature', feature.title, feature.url, '', feature.phrases.map((phrase) => phrase.split(' ').map(stem)));
   for (const release of data.releases) {
-    if (/^v\d+\.\d+\.\d+$/.test(release.version)) add('release', release.title, `Release note, ${release.version}`, `${REPO_URL}/releases/tag/${release.version}`);
+    if (/^v\d+\.\d+\.\d+$/.test(release.version)) add('release', release.title, `${REPO_URL}/releases/tag/${release.version}`);
   }
   for (const issue of data.issues) {
-    if (Number.isSafeInteger(issue.number) && issue.number > 0) add('issue', issue.title, `Open issue #${issue.number}`, `${REPO_URL}/issues/${issue.number}`, issue.prWords);
+    if (Number.isSafeInteger(issue.number) && issue.number > 0) add('issue', issue.title, `${REPO_URL}/issues/${issue.number}`, issue.prWords);
   }
   const documents = new Map<string, number>();
   let length = 0;

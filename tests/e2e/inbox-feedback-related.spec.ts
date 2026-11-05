@@ -1,5 +1,5 @@
 /**
- * "Might be related" under the Feedback box, in a real browser on the compiled
+ * "These might help" under the Feedback box, in a real browser on the compiled
  * binary, where layout is real: nothing typed leaves the window, no match
  * leaves the form's layout identical, the box stays put when a line shows, Send
  * does not move under a resting pointer, and a link opens safely.
@@ -124,18 +124,17 @@ test('no match leaves the form laid out exactly as it was', async ({ page }) => 
 
 const LONG = 'A title far too long for any row of this form, '.repeat(6);
 
-/** Every row, its link and its mark: what a long title could push out of shape. */
+/** Every row and its link: what a long title could push out of shape. */
 const rows = (page: Page) =>
   page.locator('[data-feedback-related] li').evaluateAll((items) =>
     items.map((li) => {
       const a = li.querySelector('a')!;
-      const mark = li.querySelector('svg')!.getBoundingClientRect();
       const row = li.getBoundingClientRect();
-      return { height: row.height, markWidth: mark.width, inside: a.getBoundingClientRect().right <= row.right + 0.5, cut: a.scrollWidth > a.clientWidth };
+      return { height: row.height, inside: a.getBoundingClientRect().right <= row.right + 0.5, cut: a.scrollWidth > a.clientWidth };
     }),
   );
 
-test('a release note or issue is one line: a long title changes nothing but where it is cut', async ({ page }) => {
+test('a line is one row: a long title changes nothing but where it is cut', async ({ page }) => {
   await openForm(page);
   await page.keyboard.type('quick labels please', { delay: 15 });
   await expect(lines(page).first()).toBeVisible();
@@ -145,7 +144,7 @@ test('a release note or issue is one line: a long title changes nothing but wher
   const after = await rows(page);
   expect(await layout(page)).toEqual(before);
   expect(after.map((row) => row.height)).toEqual(shape.map((row) => row.height));
-  for (const row of after) expect(row).toMatchObject({ markWidth: 14, inside: true, cut: true });
+  for (const row of after) expect(row).toMatchObject({ inside: true, cut: true });
 });
 
 test('a pointer resting on the chips holds the list: the chip stays under it and its click lands', async ({ page, context }) => {
@@ -187,22 +186,17 @@ test('a click in the instant the list appears opens no page', async ({ page, con
   expect(opened).toEqual([]);
 });
 
-test('a screen reader hears the kind with the link', async ({ page }) => {
-  await openForm(page);
-  await page.keyboard.type('quick labels please', { delay: 15 });
-  await expect(lines(page).first()).toBeVisible();
-  const related = page.locator('[data-feedback-related]');
-  await expect(related.getByRole('link', { name: /Release note, v\d|Open issue #\d/ })).toHaveCount(await lines(page).count());
-});
-
-test("a feature's sentence stays whole: longer words wrap and grow the row", async ({ page }) => {
+test('a name that is cut offers the rest on hover; one that fits does not', async ({ page }) => {
   await openForm(page);
   await page.keyboard.type('need a done button', { delay: 15 });
   await expect(lines(page).first()).toBeVisible();
-  const row = page.locator('[data-feedback-related] li');
-  const before = (await row.boundingBox())!.height;
-  await row.locator('span').evaluate((said, long) => said.append(long), LONG);
-  expect((await row.boundingBox())!.height).toBeGreaterThan(before);
+  await lines(page).first().hover();
+  await page.waitForTimeout(400);
+  await expect(page.locator('[data-pn-tooltip]')).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await lines(page).first().evaluate((a) => (a.style.maxWidth = '24px'));
+  await lines(page).first().hover();
+  await expect(page.locator('[data-pn-tooltip]')).toContainText('Archive');
 });
 
 test('a line shows under the box: the box stays put and the dialog grows down only', async ({ page }) => {

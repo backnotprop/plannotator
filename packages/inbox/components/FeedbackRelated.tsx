@@ -1,6 +1,6 @@
 /// <reference path="../assets.d.ts" />
 import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
-import { Icon, type IconName } from '../icons';
+import { Tip } from './Tip';
 import { relatedIndex, relatedLinks, type RelatedData, type RelatedIndex, type RelatedLink } from '../feedbackRelated';
 
 /** How long after the last keystroke the list may change. */
@@ -165,7 +165,7 @@ export function useFeedbackRelated(options: {
     };
   }, [message, frozen, index, phone, boxRef, belowRef, listRef]);
 
-  // Over a keyboard the sheet has room for one line and Send, not three. The rest come back with the room.
+  // Over a keyboard the sheet has room for one line and Send, not three (a 44 px target each). The rest come back with the room.
   const shown = keyboardUp ? links.slice(0, 1) : links;
 
   // The title yields as the keyboard rises, not when a line shows: the box is under the caret and stays there.
@@ -195,22 +195,14 @@ export function useFeedbackRelated(options: {
   return shown;
 }
 
-/** Always in the DOM so a screen reader hears the lines arrive; empty, it takes no room. */
-const MARKS: Record<RelatedLink['kind'], IconName> = { feature: 'check', release: 'tag', issue: 'issue' };
-
-/** The row's words in full: the link's name for a screen reader, and the row's hover. */
-const whole = (link: RelatedLink) => `${link.title}${/[…?!]$/.test(link.title) ? ' ' : '. '}${link.reason}`;
-
-const opens = (link: RelatedLink) => ({ href: link.href, target: '_blank', rel: 'noopener noreferrer' });
-
 /**
- * A release note or an issue is one line, cut at its end, with a mark for its
- * kind: the height never depends on the title. A feature's line is the answer
- * itself ("Already there: ..."), so it stays whole and wraps.
+ * Each line is only a name, a link, cut at its end: the height never depends on
+ * the title. Always in the DOM so a screen reader hears the lines arrive; empty,
+ * it takes no room.
  */
 export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; listRef: RefObject<HTMLDivElement | null> }) {
   const changedAt = useRef<number | null>(null);
-  const lines = links.map((link) => link.href).join(' ');
+  const lines = links.map((link) => `${link.href} ${link.title}`).join(' ');
   const lastLines = useRef(lines);
   useLayoutEffect(() => {
     if (lines !== lastLines.current) changedAt.current = performance.now();
@@ -233,25 +225,17 @@ export function FeedbackRelated({ links, listRef }: { links: RelatedLink[]; list
     <div className="ib-fbk-rel" role="status" data-feedback-related="" ref={listRef}>
       {links.length > 0 && (
         <>
-          <p className="ib-fbk-rel-h">Might be related</p>
+          <p className="ib-fbk-rel-h">These might help</p>
           <ul>
-            {links.map((link) =>
-              link.kind === 'feature' ? (
-                <li key={link.href + link.title} className="ib-fbk-rel-said">
-                  <Icon name={MARKS.feature} className="ib-fbk-rel-mark" />
-                  <span>
-                    <a {...opens(link)}>{link.title}</a>. {link.reason}
-                  </span>
-                </li>
-              ) : (
-                <li key={link.href + link.title} className="ib-fbk-rel-row" title={whole(link)}>
-                  <Icon name={MARKS[link.kind]} className="ib-fbk-rel-mark" />
-                  <a {...opens(link)} aria-label={whole(link)}>
+            {links.map((link) => (
+              <li key={link.href + link.title}>
+                <Tip content={link.title} cut>
+                  <a href={link.href} target="_blank" rel="noopener noreferrer">
                     {link.title}
                   </a>
-                </li>
-              ),
-            )}
+                </Tip>
+              </li>
+            ))}
           </ul>
         </>
       )}

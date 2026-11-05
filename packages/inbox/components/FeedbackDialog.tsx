@@ -34,7 +34,7 @@ function lengthOf(value: string): number {
  * Sidebar → Feedback: a short form that sends the person's words about
  * Plannotator to its maintainers. A message, an optional category and an
  * optional email; a line saying what is sent; Send and Cancel; a
- * short "Sent" state. Under the box, sometimes, "Might be related"
+ * short "Sent" state. Under the box, sometimes, "These might help"
  * (FeedbackRelated.tsx), matched in this window; with no match the form is
  * unchanged. "Prompt your agent to send feedback" copies a prompt that has
  * the person's agent collect the feedback and send it with

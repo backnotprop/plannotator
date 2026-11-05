@@ -1,5 +1,5 @@
 /**
- * "Might be related": what regresses is the gate going soft (a wrong link under
+ * "These might help": what regresses is the gate going soft (a wrong link under
  * someone's words is worse than none), a link that can leave the public
  * addresses, and the shipped file carrying anything but public titles.
  *
@@ -15,10 +15,10 @@ const DOC = 'https://plannotator.ai/docs/reference/inbox/#what-you-see';
 const release = (title: string, version = 'v0.28.40') => ({ title, version });
 const FROZEN: RelatedData = {
   features: [
-    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'move to trash'], reason: 'Already there.', url: DOC },
-    { title: 'Dictate your replies', phrases: ['by voice', 'use microphone'], reason: 'Already there.', url: DOC },
-    { title: 'Settings, Rows', phrases: ['compact row', 'row too cramped'], reason: 'Already there.', url: DOC },
-    { title: 'Over your tailnet', phrases: ['use on my phone', 'mobile app'], reason: 'Already there.', url: DOC },
+    { title: 'Archive', phrases: ['done button', 'mark as done', 'delete thread', 'move to trash'], url: DOC },
+    { title: 'Dictate your replies', phrases: ['by voice', 'use microphone'], url: DOC },
+    { title: 'Settings, Rows', phrases: ['compact row', 'row too cramped'], url: DOC },
+    { title: 'Over your tailnet', phrases: ['use on my phone', 'mobile app'], url: DOC },
   ],
   releases: [
     release('Mark unread'),
@@ -123,20 +123,20 @@ describe('it finds what it is for', () => {
   });
 
   test('an open bug, also through the words of an open PR that cites it', () => {
-    expect(relatedLinks(index, 'the inbox uses too much memory').map((link) => link.reason)).toEqual(['Open issue #2593']);
-    expect(relatedLinks(index, 'blank page after update').map((link) => link.reason)).toEqual(['Open issue #2594']);
+    expect(relatedLinks(index, 'the inbox uses too much memory').map((link) => link.href)).toEqual([expect.stringMatching(/\/issues\/2593$/)]);
+    expect(relatedLinks(index, 'blank page after update').map((link) => link.href)).toEqual([expect.stringMatching(/\/issues\/2594$/)]);
   });
 
   test('notes, issues and features each have their limit: two, one and one', () => {
     const many: RelatedData = {
       features: [
-        { title: 'One feature', phrases: ['snooze a thread'], reason: 'Already there.', url: DOC },
-        { title: 'Another feature', phrases: ['snooze a thread'], reason: 'Already there.', url: DOC },
+        { title: 'One feature', phrases: ['snooze a thread'], url: DOC },
+        { title: 'Another feature', phrases: ['snooze a thread'], url: DOC },
       ],
       releases: [...Array.from({ length: 9 }, (_, n) => release(`Snooze a thread ${n + 10}`)), ...FROZEN.releases],
       issues: Array.from({ length: 9 }, (_, n) => ({ title: `Snooze a thread ${n + 20}`, number: n + 20 })),
     };
-    const kinds = (data: RelatedData) => relatedLinks(relatedIndex(data), 'snooze a thread please').map((link) => link.kind);
+    const kinds = (data: RelatedData) => relatedLinks(relatedIndex(data), 'snooze a thread please').map((link) => (link.href === DOC ? 'feature' : link.href.includes('/issues/') ? 'issue' : 'release'));
     expect(kinds({ ...many, features: [] })).toEqual(['release', 'release', 'issue']);
     expect(kinds(many)).toEqual(['feature', 'issue']);
   });
@@ -155,12 +155,6 @@ describe('it finds what it is for', () => {
     const [link] = relatedLinks(relatedIndex({ ...FROZEN, features: [], releases: [release(long), ...FROZEN.releases] }), 'a notification for every new thread an agent starts');
     expect(link!.title).toBe(long);
   });
-
-  test('each line knows its kind, which picks its mark', () => {
-    expect(relatedLinks(index, 'need a done button')[0]!.kind).toBe('feature');
-    expect(relatedLinks(index, 'snooze a thread until tomorrow')[0]!.kind).toBe('release');
-    expect(relatedLinks(index, 'blank page after update')[0]!.kind).toBe('issue');
-  });
 });
 
 describe('the opening decides', () => {
@@ -169,7 +163,7 @@ describe('the opening decides', () => {
     ...FROZEN,
     features: [
       ...FROZEN.features,
-      { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread'], reason: 'Already there.', url: DOC },
+      { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread'], url: DOC },
     ],
     releases: [
       release('Snoozing the thread you have open moves its row out of the list right away.'),
@@ -337,7 +331,7 @@ describe('a link goes only to a public address', () => {
 
   test('a bad address, version or number in the file draws no link at all', () => {
     const bad = relatedIndex({
-      features: [{ title: 'Snooze a thread', phrases: ['snooze'], reason: 'x', url: 'https://evil.example/' }],
+      features: [{ title: 'Snooze a thread', phrases: ['snooze'], url: 'https://evil.example/' }],
       releases: [{ title: 'Snooze a thread', version: '../../evil' }, ...FROZEN.releases.filter((line) => line.title !== 'Snooze a thread')],
       issues: [{ title: 'Snooze a thread', number: -1 }],
     });
@@ -354,7 +348,7 @@ describe('a link goes only to a public address', () => {
 describe('the shipped file holds public titles and nothing else', () => {
   const data = shipped as RelatedData;
   test('only these fields: no bodies, authors, dates or labels', () => {
-    for (const row of data.features) expect(Object.keys(row).sort()).toEqual(['phrases', 'reason', 'title', 'url']);
+    for (const row of data.features) expect(Object.keys(row).sort()).toEqual(['phrases', 'title', 'url']);
     for (const row of data.releases) expect(Object.keys(row).sort()).toEqual(['title', 'version']);
     for (const row of data.issues) expect(Object.keys(row).sort().filter((key) => key !== 'prWords')).toEqual(['number', 'title']);
   });

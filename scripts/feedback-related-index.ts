@@ -30,21 +30,21 @@ const OUT_FILE = 'packages/inbox/feedbackRelated.data.json';
 /**
  * Features people ask for by another name, which no title can match ("done
  * button" for Archive). By hand: keep it about this short, and check each
- * reason against the product when you add one. Two words or more, always: a
- * single word fires under praise and bug reports ("this tool is trash", "docker
- * compose fails") and then says "Already there".
+ * name and link against the product when you add one. Two words or more,
+ * always: a single word fires under praise and bug reports ("this tool is
+ * trash", "docker compose fails").
  */
 export const RELATED_FEATURES: RelatedFeature[] = [
-  { title: 'Archive', phrases: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], reason: "Already there: Archive thread in a thread's ⋯ menu. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
-  { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], reason: "Already there: on a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'Pin a thread', phrases: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], reason: "Already there: Pin thread in a thread's ⋯ menu.", url: `${DOCS}#what-you-see` },
-  { title: 'Snooze a thread', phrases: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], reason: 'Already there: its top bar, or ⋯ menu on a phone.', url: `${REPO_URL}/releases/tag/v0.28.46` },
-  { title: 'Voice', phrases: ['by voice', 'voice input', 'voice reply', 'use voice', 'use microphone', 'microphone input', 'microphone button', 'dictate reply', 'dictate message', 'speech to text'], reason: 'Already there: turn on Voice in Settings, then press the mic.', url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'New message', phrases: ['compose message', 'compose new message', 'compose button', 'write first', 'write to agent first', 'start new message', 'write new message', 'send new message', 'new message button'], reason: 'Already there: the pencil beside Search.', url: `${DOCS}#what-you-see` },
-  { title: 'Search', phrases: ['search message', 'search thread', 'find thread', 'find message', 'search across thread', 'search across message', 'search all message'], reason: 'Already there: at the top of the sidebar.', url: `${DOCS}#what-you-see` },
-  { title: 'Settings, Appearance', phrases: ['dark mode', 'light mode', 'font size', 'text size', 'change theme', 'own theme', 'own color'], reason: 'Already there: light or dark, text size and colors.', url: `${DOCS}#what-you-see` },
-  { title: 'Settings, Rows', phrases: ['compact row', 'compact list', 'rows compact', 'row density', 'list density', 'density option', 'rows feel cramped', 'list too cramped', 'row too cramped'], reason: 'Already there: density, first line and more.', url: `${REPO_URL}/releases/tag/v0.28.47` },
-  { title: 'Over your tailnet', phrases: ['use on my phone', 'use on phone', 'open on my phone', 'inbox on my phone', 'use from my phone', 'reply from my phone', 'open from my phone', 'check from my phone', 'use on mobile', 'mobile app', 'iphone app', 'android app', 'ipad app'], reason: 'Already there: open the Inbox from your other devices.', url: `${DOCS}#over-your-tailnet` },
+  { title: 'Archive', phrases: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], url: `${DOCS}#what-you-see` },
+  { title: 'Mark unread', phrases: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], url: `${REPO_URL}/releases/tag/v0.28.43` },
+  { title: 'Pin a thread', phrases: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], url: `${DOCS}#what-you-see` },
+  { title: 'Snooze a thread', phrases: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], url: `${REPO_URL}/releases/tag/v0.28.46` },
+  { title: 'Voice', phrases: ['by voice', 'voice input', 'voice reply', 'use voice', 'use microphone', 'microphone input', 'microphone button', 'dictate reply', 'dictate message', 'speech to text'], url: `${REPO_URL}/releases/tag/v0.28.43` },
+  { title: 'New message', phrases: ['compose message', 'compose new message', 'compose button', 'write first', 'write to agent first', 'start new message', 'write new message', 'send new message', 'new message button'], url: `${DOCS}#what-you-see` },
+  { title: 'Search', phrases: ['search message', 'search thread', 'find thread', 'find message', 'search across thread', 'search across message', 'search all message'], url: `${DOCS}#what-you-see` },
+  { title: 'Settings, Appearance', phrases: ['dark mode', 'light mode', 'font size', 'text size', 'change theme', 'own theme', 'own color'], url: `${DOCS}#what-you-see` },
+  { title: 'Settings, Rows', phrases: ['compact row', 'compact list', 'rows compact', 'row density', 'list density', 'density option', 'rows feel cramped', 'list too cramped', 'row too cramped'], url: `${REPO_URL}/releases/tag/v0.28.47` },
+  { title: 'Over your tailnet', phrases: ['use on my phone', 'use on phone', 'open on my phone', 'inbox on my phone', 'use from my phone', 'reply from my phone', 'open from my phone', 'check from my phone', 'use on mobile', 'mobile app', 'iphone app', 'android app', 'ipad app'], url: `${DOCS}#over-your-tailnet` },
 ];
 
 export interface ReleaseInput {
