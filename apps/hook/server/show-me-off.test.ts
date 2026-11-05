@@ -5,7 +5,7 @@
  * MCP tool list, the guide brief, `plannotator inbox --help`, the top-level
  * help (Board off and on) and `plannotator review --help`; `plannotator review
  * draw …` and `review drawings …` are the review parse's (`review <DIRECTORY>`),
- * the drawings routes are the unknown route, and a version-3 guide snapshot is
+ * and a version-3 guide snapshot is
  * refused with the release's own "Unsupported snapshot version" words.
  *
  * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
@@ -170,22 +170,7 @@ test("Code review off with a broken config.json: --version, --help, review --hel
   }
 }, 120_000);
 
-test("Code review off: the drawings routes are the unknown route, and a version-3 snapshot is an unsupported version", async () => {
-  const dataDir = join(root, "data-routes");
-  mkdirSync(dataDir, { recursive: true });
-  const server = await startInboxServer({ dataDir, codeReview: false, phones: false });
-  try {
-    const base = `http://127.0.0.1:${server.port}`;
-    const path = "/api/inbox/reviews/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings";
-    for (const headers of [{ "sec-fetch-site": "same-origin" }, { authorization: "Bearer x" }]) {
-      const unknown = await fetch(`${base}/api/inbox/reviewz/msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F/drawings`, { headers });
-      const read = await fetch(`${base}${path}`, { headers });
-      expect([read.status, await read.text()]).toEqual([unknown.status, await unknown.text()]);
-      expect(read.status).toBe(404);
-    }
-  } finally {
-    server.stop();
-  }
+test("Code review off: a version-3 snapshot is an unsupported version", () => {
   // 0.28.49's parser knew versions 1 and 2: any other was "Unsupported snapshot version: <n>", at $.version.
   const snapshot = { kind: "plannotator-guided-review", version: 3, exportedAt: "2026-01-01T00:00:00Z", guide: {}, review: {}, source: {} };
   expect(checkInboxGuide({ snapshot }, root, { codeReview: false })).toEqual({ ok: false, error: "Invalid guide snapshot ($.version): Unsupported snapshot version: 3" });

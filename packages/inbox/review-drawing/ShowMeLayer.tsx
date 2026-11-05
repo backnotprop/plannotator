@@ -152,6 +152,7 @@ export function ShowMeCorner({
   title,
   picture,
   part,
+  resolveSrc,
   onGrow,
   onClose,
 }: {
@@ -160,6 +161,8 @@ export function ShowMeCorner({
   /** The board's Picture, drawn small. */
   picture: ShapeDrawnView | null;
   part: { name: string; mark: string | null; file: string; lines: [number, number] };
+  /** Where the board's own pictures (its `files/`) are served from. */
+  resolveSrc: (src: string) => string;
   onGrow: () => void;
   onClose: () => void;
 }) {
@@ -206,7 +209,7 @@ export function ShowMeCorner({
       <div className="ib-sm-pip-b" ref={box} onClick={onGrow} aria-hidden="true" data-show-me-grow="">
         {picture && (
           <div className="ib-sm-pip-in" ref={inner} style={{ width: CORNER_DRAWN_WIDTH, transform: `scale(${scale})` }}>
-            <ShapeDiagram drawn={picture} animate={false} marks={marks} />
+            <ShapeDiagram drawn={picture} animate={false} marks={marks} resolveSrc={resolveSrc} />
           </div>
         )}
       </div>

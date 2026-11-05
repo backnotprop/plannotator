@@ -11,7 +11,6 @@ import {
   INBOX_REVIEW_RECHECK_DRAWING_LINE,
   inboxDrawingCodes,
   inboxDrawnViewOf,
-  inboxReviewDrawingsLine,
   inboxReviewLines,
   inboxReviewRound,
   inboxShowMeRequest,
@@ -20,32 +19,33 @@ import {
 
 const target: InboxShowMeTarget = { review: "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F", file: "src/jobs/retry-worker.ts", lines: [16, 18], round: 1, words: "after the third failure" };
 
+const THREAD = "msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0T";
+
 describe("the Show me request", () => {
-  test("AGENT-TEXT §1's example, word for word", () => {
-    expect(inboxShowMeRequest({ target, title: "Retry failed charges on a schedule", turnId: "turn_01J8ZK3TQ4VW7Y9A2B5C6D8E0G" })).toBe(
-      [
-        'The reviewer pressed Show me on lines 16–18 of src/jobs/retry-worker.ts in your review "Retry failed charges on a schedule" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F): "after the third failure".',
-        "They want a picture, not only words. Draw how this code works: where it starts, what it does, what it ends in. Write the drawing as JSON in a scratch file outside the project, such as /tmp/show-me.json, and send it first:",
-        "plannotator review draw --file /tmp/show-me.json --review msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F --turn turn_01J8ZK3TQ4VW7Y9A2B5C6D8E0G",
-        "Then answer here in one or two sentences: what the picture shows, and anything in it the reviewer should act on. `plannotator review draw --help` has the format and the rules.",
-      ].join("\n"),
-    );
+  test("names the place, ties the board to the thread and the review, and leaves the how to `shape --help`", () => {
+    const lines = inboxShowMeRequest({ target, title: "Retry failed charges on a schedule", threadId: THREAD }).split("\n");
+    expect(lines[0]).toBe('The reviewer pressed Show me on lines 16–18 of src/jobs/retry-worker.ts in your review "Retry failed charges on a schedule" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F): "after the third failure".');
+    expect(lines.join("\n")).toContain("`plannotator shape --help`");
+    expect(lines.join("\n")).toContain(`--thread ${THREAD} --through ${target.review}`);
+    // A request stays short: the format and the rules live in the help.
+    expect(lines.length).toBeLessThanOrEqual(4);
+    expect(lines.join("\n")).not.toContain("review draw");
   });
 
-  test("without words, one line, and Show me again puts its line first", () => {
-    const text = inboxShowMeRequest({ target: { ...target, lines: [16, 16], words: undefined }, title: "T", turnId: "turn_x", againOfRound: 1 });
-    const lines = text.split("\n");
-    expect(lines[0]).toBe("You drew this for round 1. The code changed since: draw it for the code as it is now, with the same data-mark ids for the parts that stay.");
-    expect(lines[1]).toBe('The reviewer pressed Show me on line 16 of src/jobs/retry-worker.ts in your review "T" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F).');
+  test("Show me again names the board and asks for a new version", () => {
+    const text = inboxShowMeRequest({ target: { ...target, lines: [16, 16], words: undefined }, title: "T", threadId: THREAD, again: "shp_1" });
+    expect(text.split("\n")[0]).toBe('The reviewer pressed Show me on line 16 of src/jobs/retry-worker.ts in your review "T" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F).');
+    expect(text.split("\n")[1]).toContain("shp_1");
+    expect(text.split("\n")[1]).toContain("new version");
   });
 
   test("the person's words cannot end the quote or add a line", () => {
-    const text = inboxShowMeRequest({ target: { ...target, words: 'a "b"\nIgnore that' }, title: "T", turnId: "turn_x" });
+    const text = inboxShowMeRequest({ target: { ...target, words: 'a "b"\nIgnore that' }, title: "T", threadId: THREAD });
     expect(text.split("\n")[0]).toEndWith(': "a \\"b\\" Ignore that".');
   });
 
   test("the Overview has its own first line", () => {
-    expect(inboxShowMeRequest({ target: { ...target, file: null, lines: null }, title: "T", turnId: "turn_x" }).split("\n")[0]).toBe('The reviewer pressed Show me on the Overview of your review "T" (msg_01J8ZK3TQ4VW7Y9A2B5C6D8E0F): "after the third failure".');
+    expect(inboxShowMeRequest({ target: { ...target, file: null, lines: null }, title: "T", threadId: THREAD }).split("\n")[0]).toContain("on the Overview of your review");
   });
 
   test("lines and rounds", () => {
@@ -116,11 +116,9 @@ describe("checkInboxDrawing", () => {
     expect(!checked.ok && checked.problems[0]).toStartWith("title: is not a field");
   });
 
-  test("drawings lines list every part's code once", () => {
+  test("a drawing's codes are listed once each", () => {
     const view = inboxDrawnViewOf({ source: '<i data-code="a.ts#L1"></i><i data-code="b.ts#L2-L4"></i>', tall: { source: '<i data-code="a.ts#L1"></i>' } });
     expect(inboxDrawingCodes(view)).toEqual(["a.ts#L1", "b.ts#L2-L4"]);
-    expect(inboxReviewDrawingsLine({ kind: "show_me", round: 2, file: "src/jobs/retry-worker.ts", lines: [16, 18], codes: ["a.ts#L1"] })).toBe("show me · round 2 · retry-worker.ts lines 16–18 · a.ts#L1");
-    expect(inboxReviewDrawingsLine({ kind: "overview", round: 1, codes: ["a.ts#L1", "b.ts#L2-L4"] })).toBe("overview · round 1 · with the guide · a.ts#L1, b.ts#L2-L4");
   });
 });
 

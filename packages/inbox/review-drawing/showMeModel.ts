@@ -4,8 +4,7 @@
  * part opens, the part's name for the corner card, and which parts of a redrawn
  * Overview changed.
  */
-import { parseShapeCodeTarget, shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
-import { inboxReviewLines } from '@plannotator/core/inbox-review';
+import { shapeHtmlMarks, type ShapeCodeTarget } from '@plannotator/core/shape';
 import { guideDiagramIsDrawn } from '@plannotator/core/guide-format';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 

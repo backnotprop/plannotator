@@ -4388,7 +4388,6 @@ function Inbox() {
   // Pull requests (approval "inbox-code-review-direction", items 4 and 5): only with Code review on, read while the
   // page is open, and for the sidebar's count once at start and on focus; never from a tailnet guest's page (it runs
   // this computer's gh / glab).
-  const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
   const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
@@ -4878,6 +4877,8 @@ function Inbox() {
   const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
+  // A review, while Code review is on: the full-window review (ReviewPane).
+  const reviewPaneOpen = codeReviewOn && !!guideMessage?.guide?.review;
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
   // held for it. A phone and a stacked window show this in the thread's place too, so a held answer is never out of sight.
   const openOwner = route.thread ? machines.linked.find((m) => m.id === machineOf(route.thread!)) : undefined;

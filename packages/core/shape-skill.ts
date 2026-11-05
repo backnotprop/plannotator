@@ -86,6 +86,7 @@ Draw it however you like, by hand or from a one-off script. The board makes it b
 - \`data-mark="id"\` on each part the person may point at. Keep the id across versions.
 - \`data-step="N"\` on parts that should appear together; steps arrive in number order, the order you would explain them aloud.
 - \`data-ref="n"\` is the number for reference n: empty (\`<span data-ref="n"></span>\`), the board draws it; around your own (\`<g data-ref="n">…</g>\`), yours is used.
+- \`data-code="path#L42"\` (or \`#L42-L48\`) on a part that is code: a click opens that code. In a code review, use the review's paths and the new file's line numbers, and the click lands on that line of the diff.
 - Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, the one accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill), and \`var(--alert)\` for what is wrong. Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"alert"\`, \`"dash"\`, and \`"t-acc"\`, \`"t-grey"\`, \`"t-alert"\`, \`"t-mono"\` for text.
 - Nothing from outside: no scripts, no event handlers, no \`<style>\` in the HTML (use \`css\`), no external images, fonts or \`url()\`, no iframes, forms or popovers. The store refuses them and says which.
 - Links: \`#id\` scrolls inside the drawing; an https link opens in a new tab.
