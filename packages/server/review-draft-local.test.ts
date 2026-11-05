@@ -11,7 +11,7 @@ import { getGitContext, runGitDiff, type DiffType } from '@plannotator/shared/re
 import { contentHash, saveDraft } from '@plannotator/shared/draft';
 import { gitRuntime } from './vcs';
 import { parseDiffToFiles } from '../review-editor/utils/diffParser';
-import { captureAnchor, reanchorCodeAnnotations } from '../review-editor/utils/codeAnnotationAnchor';
+import { captureAnchor, reanchorCodeAnnotations } from '../ui/utils/codeAnnotationAnchor';
 import type { CodeAnnotation } from '../ui/types';
 
 let root: string;
