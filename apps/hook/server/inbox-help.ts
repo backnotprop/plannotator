@@ -21,9 +21,10 @@
  * the platform.
  */
 
-import { INBOX_CARD_ACTION_ON, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
+import { INBOX_CARD_ACTION_ON, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE, INBOX_CODEX_QUEUE_MIN_VERSION, INBOX_QWEN_WAKE_MIN_VERSION, INBOX_SECTIONS, INBOX_THREAD_NAME_MAX, inboxToolCostText, type InboxSectionId } from "@plannotator/core/inbox-types";
 import { QUESTION_AUTHORING_GUIDE } from "@plannotator/core/question-block";
 import { INBOX_SET_ASIDE_HEADING } from "@plannotator/core/inbox-questions";
+import { INBOX_SNOOZE_MAX_DAYS } from "@plannotator/core/inbox-snooze";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_ACTIONS_HEADING } from "@plannotator/core/inbox-actions";
 import { HARNESSES, harnessPanel, shellLine, type ConnectContext, type Harness } from "@plannotator/inbox/harnesses";
 import { join } from "node:path";
@@ -139,6 +140,13 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
       "Archive the thread a message belongs to for the person; use it only when nothing in it is left for them to read or answer. `message_id` is any message in the thread, or the thread id; `resolved: false` reopens it. Its questions then read as closed.",
     ],
   },
+  snooze_thread: {
+    args: ["thread_id", "until"],
+    lines: [
+      `Only when the person asks. Snoozes a thread until \`until\` (ISO 8601 with zone, within ${INBOX_SNOOZE_MAX_DAYS} days); it then returns by itself. \`null\` ends it. Sends nothing.`,
+      "- A linked machine's thread works the same, by its thread id. If that machine is away, it applies when it is back. One too old answers `machine_needs_update`.",
+    ],
+  },
   get_guide_brief: {
     args: [],
     lines: [
@@ -152,13 +160,14 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
     ],
   },
   card: {
-    args: ["op", "card_id", "title", "column", "say", "you", "thread_id", "pr", "ref", "reason", "idempotency_key", "asked_by", "include_resolved"],
+    args: ["op", "card_id", "title", "column", "say", "you", "thread_id", "pr", "ref", "reason", "initiative", "idempotency_key", "asked_by", "include_resolved"],
     lines: [
       "Keep a card on the person's Board for work that outlasts the reply it was asked in: a lane or background task started, a PR opened, \"I'll send you X\". Not for a quick answer. Make it when you take such an ask, then keep it current with one short call at the moments you already note: work started, your part handed over, done. The person reads the Board instead of asking each terminal where things are; each card shows how long ago anyone last wrote to it. A card is its own record: it never changes a thread or the person's list. The Board is something the person turns on (Settings → Capabilities in the Inbox); while it is off the Inbox does not list `card`, and a call answers `board_off` and writes nothing. Turned on, agents get `card` in their next session.",
-      "- `op`: `create`, `move`, `say`, `link`, `ship`, `drop` or `list`. Every op but create and list takes `card_id` (`crd_…`, from create or list); an op refuses a field it does not take.",
+      "- `op`: `create`, `move`, `say`, `link`, `ship`, `drop`, `list` or `initiative_delete`. Every op but create, list and initiative_delete takes `card_id` (`crd_…`, from create or list); an op refuses a field it does not take.",
       "- `column` says where the work stands, never whose move it is: `todo` (you were asked, or the person sent it to you, and you have not started; the default for a card you make), `in_progress` (you are working on it: research, a plan, mocks, code, a draft PR), `in_review` (your part is done and you hand it over on purpose: a PR ready to merge, screenshots before a merge, a sheet or options to pick from, a release go), `done` (merged, live, staging included, or finished when it is not code), `dropped` (cancelled), `backlog` (nobody asked for it yet: an idea or a follow-up you propose; a backlog card is never a signal to start, the person sends it to you when it is to be done). A question you ask the person mid-work leaves the card in `in_progress`: the Board shows it from the thread. Work you hold back yourself stays in its column, with the reason in `say`. Names from before (`designing`, `building`, `your_look`, `your_review`, `asked`, `icebox`) are still read.",
       "- `you`: what the person owes, one line, shown as \"You: …\" in in_review. Moving a card into in_review needs it; it is dropped when the card leaves, and refused elsewhere. Link the Inbox thread where the person makes the call (`thread_id`), so \"You: …\" opens it. `say`: your last word, one line (\"lane running, sheet in ~1 h\"), shown on the opened card.",
       "- create: `title`: 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in `say`. Or `thread_id` (a thread or message id of this project) to link it and take its subject as the title (subjects run long: pass a short `title` with it); `column` (default todo; a live column or done), `say`, `you`, `pr`, `idempotency_key` (the same key answers the first card). The card is your session's: list shows it as yours.",
+      `- \`initiative\` (create, say): ${INBOX_CARD_INITIATIVE_FIELD.replace(/^The/, "the")} ${INBOX_CARD_INITIATIVE_RULE} \`initiative_delete\`: \`initiative\`, the one to delete by name or id.`,
       "- move: `column`, with any of `say`, `you`, `pr` and `thread_id`; to dropped it needs `reason`. say: `say` and/or `you` (refs in them link as in `body`), or `title` to rename. link: `thread_id`, `pr` (`owner/repo#123`, or a GitHub, GitLab or Bitbucket PR URL) and/or `ref` (an issue or PR as `owner/repo#123`, or any http(s) link written with its scheme, `https://…`: an issue, a doc, a design; move, create and ship take it too). The person sees each GitHub or GitLab link's live state when they open the card; a Jira or YouTrack issue link shows as its key, and any other link as a plain link. Every write counts as hearing from the card.",
       "- ship (moves it to done): when its PR merged, or it is live or finished. Ship it when you see the merge: the Board also moves a card in todo, in_progress or in_review to done once every PR linked through `pr` has merged and none is open, but only while the person has the Board open, and never for Bitbucket; a PR linked through `ref` is context and never moves it. Reported broken again: move it back to todo. drop: `reason` (required from you, one line); the Board shows the person your drop and its reason until they look, and they can restore it.",
       "- list: your cards in this project (`asked_by: \"anyone\"` for every card here) in backlog, todo, in_progress and in_review; `include_resolved` adds done and dropped. One line each: id, title, column, `You:` or said, when it was last heard, dropped reason (and whether the person has seen your drop yet), threads, PRs, the agent it belongs to. Read it after a compaction or in a new session to pick your work back up.",

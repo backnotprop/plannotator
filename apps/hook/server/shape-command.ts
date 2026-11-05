@@ -23,7 +23,7 @@ import { readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
-import { diffShapeVersions, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
+import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
 import { SHAPE_COMMAND_USAGE } from "./cli";
@@ -250,7 +250,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     const before = result.v > 1 ? store.read(result.id, result.v - 1) : null;
     const after = store.read(result.id, result.v);
     const changed = before && after ? summarizeShapeDiff(diffShapeVersions(before, after)) : [];
-    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed }, null, 2));
+    const notes = after ? shapeBoardNotes(after) : [];
+    await say(JSON.stringify({ id: result.id, v: result.v, created: result.created, changed, ...(notes.length ? { notes } : {}) }, null, 2));
     return 0;
   }
 

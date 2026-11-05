@@ -350,24 +350,21 @@ test('initiatives: made from the filter, set from a card\'s menu and the opened 
   await expect(page.locator('.ib-blanes .ib-bcard')).toHaveCount(ON_LANES - 2);
   expect(await tokenWords(page, 'initiative')).toBe('No initiative');
 
-  // Deleted (asked once): its cards are in none again, and a link to it is no filter.
+  // Deleted in one click, no question: its cards are in none again, and a link to it is no filter.
   const onboarding = made[1]!.id;
   const deleteOf = (id: string) => dialog.locator(`[data-initiative-row="${id}"] [data-initiative-delete]`);
   await filterButton(page).click();
   await page.locator('[data-board-initiative-edit]').click();
-  // The ask takes focus on its Cancel; Cancel gives it back to the row's Delete.
   await deleteOf(design).click();
-  await expect(dialog.locator(`[data-initiative-delete-ask="${design}"] [data-initiative-delete-no]`)).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(deleteOf(design)).toBeFocused();
-  await page.keyboard.press('Enter');
-  await expect(dialog.locator(`[data-initiative-delete-ask="${design}"]`)).toContainText('Its 2 cards go to No initiative.');
-  await dialog.locator('[data-initiative-delete-yes]').click();
   await expect(dialog.locator(`[data-initiative-row="${design}"]`)).toHaveCount(0);
-  // Focus on the next row's Delete; the last one gone, on the name field.
+  // Focus on the next row's Delete; the toast's Undo, drawn inside the modal, can be pressed and brings it back.
+  await expect(deleteOf(onboarding)).toBeFocused();
+  await dialog.locator('.ib-toast [data-toast-undo]').click();
+  await expect(dialog.locator(`[data-initiative-row="${design}"]`)).toHaveCount(1);
+  await expect.poll(async () => (await cardsRead()).cards.filter((c) => c.initiative === design).length).toBe(2);
+  await deleteOf(design).click();
   await expect(deleteOf(onboarding)).toBeFocused();
   await page.keyboard.press('Enter');
-  await dialog.locator('[data-initiative-delete-yes]').click();
   await expect(dialog.locator('[data-initiative-row]')).toHaveCount(0);
   await expect(dialog.locator('[data-initiative-new-name]')).toBeFocused();
   await dialog.locator('[data-initiatives-done]').click();
@@ -521,4 +518,33 @@ test.describe('iPhone 15 (WebKit)', () => {
       }
     });
   }
+
+  // A phone's toast is `absolute`: inside the dialog it would anchor to the dialog's foot and cover Done for its 7 s.
+  test('one-click delete on a phone: the toast at the window foot, clear of Done, which closes and hands over the Undo', async () => {
+    const context = await browser!.newContext({ ...device });
+    try {
+      const page = await context.newPage();
+      await page.goto(`${world.url}#board`);
+      // Made here: the initiatives test above deleted its own.
+      await page.evaluate(async () => {
+        const res = await fetch('/api/inbox/initiatives', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name: 'Phone toast' }) });
+        if (!res.ok) throw new Error(`initiative: ${res.status}`);
+      });
+      await page.reload();
+      await page.locator('.ib-bhead [data-board-filter-button]').tap();
+      await page.locator('[data-board-initiative-edit]').tap();
+      const dialog = page.locator('[data-dialog="initiatives"]');
+      await dialog.locator('[data-initiative-delete]').first().tap();
+      const toast = dialog.locator('.ib-toast');
+      await expect(toast).toBeVisible();
+      const done = dialog.locator('[data-initiatives-done]');
+      const doneBox = (await done.boundingBox())!;
+      expect((await toast.boundingBox())!.y).toBeGreaterThanOrEqual(doneBox.y + doneBox.height);
+      await done.tap();
+      await expect(dialog).toHaveCount(0);
+      await expect(page.locator('.ib-toast [data-toast-undo]')).toBeVisible();
+    } finally {
+      await context.close();
+    }
+  });
 });

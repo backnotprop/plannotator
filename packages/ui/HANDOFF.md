@@ -1851,7 +1851,9 @@ Everything below is opt-in and byte-identical when a host passes none of it.
 
 ## Publishing & versioning
 
+- **Unreleased: core 0.25.21 (launch-agents stack, #2376 to #2407).** Core adds three `exports` subpaths: `./inbox-run-line` (a launched thread's run line), `./inbox-permission` (a launched session's permission question; ui imports it in `components/inbox-thread/reask.ts`) and `./inbox-scratch` (scratch folders). ui pins core `0.25.21` exactly so `smoke:package` matches the source manifest. Core 0.25.19 went out from `main` (#2582) and core 0.25.20 is on `main` (#2612), both without these subpaths, so the stack takes 0.25.21. Core 0.25.21 is published from `main` after the stack merges there, never from a stack branch; publish core before the next ui.
 - **Unreleased: core 0.25.20 (#2612).** Core adds one `exports` subpath, `./stack-layers` (which layer of a stack wrote each line: `mapStackLines`, `lineOrigin` and their types). ui does not import it; ui pins core `0.25.20` exactly only so `smoke:package` matches the source manifest. Publish core 0.25.20 before the next ui.
+- **Unreleased, in the same ui 0.62.0 and core 0.25.20 (#2660).** Not additive for a Shape host: see "Shape: What to know (ui 0.62.0; not additive)" below. A new opt-in prop, `readFirst`, holds the behaviour; the Requirements view is gone with no seam. The UI imports `shapeViewContent`, `shapeViewNow` and `shapeKnowParagraphs` from core. If either version publishes before #2660 merges, it needs its own bump.
 - **Unreleased: ui 0.62.0 (#2596), on core 0.25.20 (#2596 itself changed no core; ui pins 0.25.20 for #2612, line above).** Minor, and **not additive**: the Shape board's header changed (approval `shape-board-look`, q-a9a1bf61). See "Shape: the board header (ui 0.62.0)" below before you upgrade a host that styles or queries the board's header. No `exports` subpath is added, removed or renamed, and no export is removed. Three opt-in seams, each a no-op when absent: `CommentPopover`'s `errorText` (a `role="alert"` line under the header, `data-comment-popover-error`), `DocumentAIChatPanel`'s `hideProviderBar`, and `ShapeHost.sessionless` (no session line in the board's Ask panel). Not opt-in, for every host of `ShapeSurface`: a Change it the host did not take opens the composer again with the person's words and Shape's own line, `SHAPE_CHANGE_NOT_SENT`; an Ask the host did not take stays in the Ask panel with `SHAPE_ASK_NOT_SENT` (fixed English; a host cannot pass its own). Both are exported from `@plannotator/ui/components/shape`.
 - **Published: ui 0.61.0 (#2585), after core 0.25.19.** Minor: two `exports` subpaths are added, `./components/shape` and `./shape.css` (see "Shape" below), and core 0.25.19 gains `./shape`. Nothing is removed or renamed. `smoke:package` imports both new subpaths.
 - **Published: core 0.25.19 (#2582).** Core adds one `exports` subpath, `./inbox-review` (the Inbox's code review: the review skills' texts, the verdict words, `inboxThreadHadReview`, `inboxReviewTitleLine`); `inbox-types` gains `InboxMessage.review_verdict`, `review_comments_of`, `guide_viewed` and `InboxGuideRef.review` / `chapters`. ui does not import it; ui pins core `0.25.19` exactly only so `smoke:package` matches the source manifest. Additive ui changes in the same PR, for the next ui's notes: `DecisionControl` takes optional host-held notes (`drafts`, `onDraftsChange`; absent, unchanged), and `utils/skillCatalog` adds `reloadSkillCatalog()` and `onSkillCatalogReload(listener)` (`useSkillReferenceAutocomplete` reads the catalog again on a reload).
@@ -2747,6 +2749,35 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 
 - **`parseMarkdownToBlocks(text, { keepBlankLines: true })`**: a paragraph that follows 2+ blank lines carries `Block.blankLinesBefore` (capped at 10), and `BlockRenderer` gives it a top margin of that many lines. Absent: nothing is set and no style is emitted, so plan, review and annotate blocks and DOM are unchanged.
 - **`SoftLineBreaksContext`** (exported from `components/InlineMarkdown`; `RenderedMarkdown`'s `softLineBreaks` provides it): inside it a bare newline is a `<br>`. Together the two show text as typed (single breaks and blank lines), as Slack does. Workspaces can wrap a Viewer holding the person's own text in the provider and pass the option; a document or an agent's text should not.
+
+## Shape: What to know (ui 0.62.0; not additive)
+
+Plannotator's board reads first now, and What to know replaces Requirements. A host that changes no code keeps the board's behaviour; what could not be kept is listed below.
+
+**Behind `readFirst` on `ShapeSurface` (default off, your board stays as it is).** Pass it to get Plannotator's board:
+- Annotation starts off behind an Annotate button in the dock, on phones too. Off: a click on a part does nothing, and the strip has only Select and Pinpoint (`AnnotationToolstrip`'s new `hideActionModes`).
+- A number pops out a bubble on hover or focus; on touch the first tap pins it and the second opens it. **A file reference calls `host.readFile` on hover**, with no cache on the UI's side, so cache it in your host if a read costs anything. Esc closes the bubble first.
+- A PR or link reference with `images` opens the picture; its page is one more click, in the bubble.
+- On a touch screen, a drawing's numbers grow from 16 to 22 px with a larger hit area. `ShapeDrawn` does this whenever it has `onRefPeek`.
+- A fixed canvas under 700 px stops at scale 0.55 and scrolls sideways. `ShapeDrawn` takes this as its own `pan` prop. `ShapeDiagram` never pans, so a diagram in a side panel still fits.
+
+**What changes with no seam:**
+- **`ShapeViewId`:** `reqs` became `know`, so TypeScript breaks if your code names it, and `onNavigate` reports `know`. A saved `initialView: 'reqs'` and saved notes with `view: "reqs"` still open as `know`; `shapeViewNow` from core does the same for your own store. Old versions holding `views.reqs` still render every line in the new view.
+- **`checkShapeBoard`:** refuses `views.reqs` on a new board and takes `views.know`, a string of at most 2 paragraphs and 1,200 characters.
+- **Removed:** `ShapeRequirements.tsx` (reachable through the `./components/*` export), the classes `.shp-reqs` and `.shp-req-*`. New: `ShapeKnow.tsx`, `.shp-know`, `.shp-more`, `.shp-peek*`.
+- **`SHAPE_FRAME_CSS`:** nested `svg` clips, a `.dash` with no `fill` is an outline and with no `stroke` is grey (attributes win), new classes `.alert`, `.t-alert`, `.t-mono`, `.obj` (a drop shadow), `.if-dark`, `.if-light` and the variable `--alert`.
+- **`data-ref` with content inside:** what the agent drew is now the number, in its own look. Empty or blank still gets the board's bubble.
+- **`ShapeThumb`:** a board with a fixed canvas drops the 1.11 zoom, so all of it shows. It takes an optional `resolveSrc`, and `ShapeGrid` an optional `assetUrl`, so kept pictures load.
+- **`views.picture.more`:** a board with one gets a Show more button; Esc comes back from it before anything closes. Only boards that carry it.
+- **`ShapeInline`:** bold renders inline markup inside it, so `` **a `b`** `` shows code.
+- **`SHAPE_LIMITS`:** `groups` and `items` are removed, with Requirements; `know` and `knowParagraphs` are new. TypeScript breaks if your code names the old ones.
+- **`ShapeRef.images[].crop`:** a new optional field, `[x, y, width, height]` from 0 to 1, for the part of a picture a bubble shows.
+- **Hover ring:** it no longer clears on every other pointer move, and it clears when the board scrolls.
+- **`.shp-tstrip`:** now `inline-flex` with a 6 px gap.
+
+**Fixes that reach every host:**
+- `<image href="files/…">` in a drawing now loads through `resolveSrc`. Before, the bare name stayed and the picture was broken.
+- Clicking a part inside an SVG now opens the comment box. Before, it threw and opened nothing.
 
 ## Shape: the board header (ui 0.62.0; not additive)
 
