@@ -13,7 +13,7 @@ import { spawnSync } from "node:child_process";
 import { realpathSync } from "node:fs";
 import { resolve } from "node:path";
 
-/** The real path, so a symlink or another letter case is the same folder. Only resolves the path. */
+/** The real path, so a symlink to the home is the same folder. Only resolves the path. */
 function canonical(path: string): string {
   try {
     return realpathSync.native(path);
