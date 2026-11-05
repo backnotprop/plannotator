@@ -870,6 +870,17 @@ describe("a walkthrough", () => {
     expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ reviewed: true, move: "on_you", reason: "review_ready", review: { walkthrough: true } }]);
   });
 
+  test("the person's reply leaves On you, and the agent's answer, a plain message, brings it back", async () => {
+    const w = await world();
+    await w.setCodeReview(true);
+    source(w);
+    const sent = await w.call("submit_guide", { guide: guide(), walkthrough: true, thread: "retries" });
+    await w.say(sent.message_id, "00000000-0000-4000-8000-000000000012", "Where does the 200 come from?");
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "agents", reason: "feedback_sent" }]);
+    await w.call("send_message", { reply_to: sent.message_id, body: "From charge.ts, line 4." });
+    expect(rowsOf(await w.reviews(), sent.thread_id)).toMatchObject([{ move: "on_you", reason: "review_ready" }]);
+  });
+
   test("the agent's own patch, or an empty one, can't break it: what it named is what shows", async () => {
     const w = await world();
     await w.setCodeReview(true);
