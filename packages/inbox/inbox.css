@@ -1819,7 +1819,7 @@ button.ib-acct-row:hover .ib-acct-car { opacity: 1; }
 .ib-dpage { padding: 28px 44px; flex: 1; min-width: 0; overflow-y: auto; }
 .ib-dh { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
 .ib-dh h1 { font-size: var(--ib-fs-22, 22px); font-weight: 650; margin: 0; letter-spacing: -0.01em; }
-.ib-dsub { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); margin: 0 0 22px; }
+.ib-drafts .ib-dh { margin-bottom: 18px; }
 
 /* attachments (step 2, record 2.1 to 2.8) */
 /* One line, "Changed 6:43 PM": the whole sentence is the hover text (tiles of a grid kept their heights uneven when it wrapped). */
@@ -3269,7 +3269,7 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-dpage { padding: 0 0 calc(24px + env(safe-area-inset-bottom)); }
   .ib-dh { min-height: calc(52px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0 4px; gap: 6px; margin-bottom: 6px; }
   .ib-dh h1 { font-size: var(--ib-fs-22, 22px); flex: none; }
-  .ib-dsub { margin: 0 16px 14px; }
+  .ib-drafts .ib-dh { margin-bottom: 6px; }
 
   /* settings, What's new, the first run */
   .ib-spage { padding: 0 16px calc(32px + env(safe-area-inset-bottom)); }
@@ -4162,7 +4162,6 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 .ib-readdress .ib-routeform { max-width: 460px; }
 
 /* The Drafts page. */
-.ib-drafts-n { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-drafts-empty { color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-draft { display: flex; align-items: center; gap: 8px; border-bottom: 1px solid var(--ib-hair); }
 .pn-inbox .ib-draft-open { flex: 1; min-width: 0; display: grid; grid-template-columns: var(--ib-mark-30) minmax(0, 1fr) max-content; align-items: center; gap: 14px; padding: 12px 8px 12px 0; border: 0; background: none; text-align: left; color: var(--foreground); }
