@@ -421,7 +421,7 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
   const group = el.querySelector('[data-settings-capabilities]')!;
   const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
   // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
-  expect(rows).toEqual(['Board', 'Checklist']);
+  expect(rows).toEqual(['Board', 'Checklist', 'Bro mode']);
   // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
   expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
   expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
@@ -435,6 +435,25 @@ test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under t
     await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
   } finally {
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
+test.skipIf(!hasDom)('Capabilities: Bro mode is off by default; its switch saves config.json inboxBro both ways', async () => {
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Bro mode') !== null, 'the Bro mode switch');
+  expect(readConfig(current!).inboxBro).toBeUndefined();
+  expect(switchNamed(el, 'Bro mode')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Bro mode')!.click());
+    await until(() => readConfig(current!).inboxBro === true, 'config.json inboxBro true');
+    await until(() => switchNamed(el, 'Bro mode')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Bro mode')!.click());
+    await until(() => readConfig(current!).inboxBro === false, 'config.json inboxBro false');
+    await until(() => switchNamed(el, 'Bro mode')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    // The world is shared across this file's tests: back to never set.
+    const { inboxBro: _bro, ...rest } = readConfig(current!);
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify(rest));
   }
 });
 
@@ -498,7 +517,7 @@ test.skipIf(!hasDom)(
       const el = await renderApp('#settings/capabilities');
       await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
       const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
-      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
+      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape', 'Bro mode']);
       for (const held of HELD) {
         expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
         expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');

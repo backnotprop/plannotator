@@ -443,6 +443,19 @@ export const INBOX_ATTACHMENTS_PICTURES_LINE =
   'Screenshots and pictures go in the body instead (`![alt](path)`); attach what the person should open or click through.'
 
 /**
+ * Bro mode's line (approval "bro-mode", 2026-11-05; the owner's own words, and only the owner changes them). While the
+ * person has Bro mode on (config.json `inboxBro`) it goes in send_message's `body` field and nowhere else; off, the
+ * field is what it was before.
+ */
+export const INBOX_BRO_LINE =
+  "Don't use jargon and speak coherently. State things more simply and concisely, like one human talking to another. Don't drop important details, especially if the user asks for them."
+
+/** A `body` description with the line, right after its first words. */
+export function inboxBodyWithBro(description: string): string {
+  return description.replace('The message, markdown.', `The message, markdown. ${INBOX_BRO_LINE}`)
+}
+
+/**
  * The agent tool's own words for the fields whose Inbox description is long
  * (the MCP server's are written for a raw MCP client, which has no other
  * guide): every Pi and OpenCode request carries the tool whole, so these keep
@@ -648,7 +661,9 @@ export function inboxAgentTool(
       }
       // The agent tool's own short words where the Inbox's are long; the rest is the Inbox's.
       const own = INBOX_AGENT_FIELD_DESCRIPTIONS[tool.name]?.[name]
-      properties[name] = { ...schema, description: (own ?? (typeof schema.description === 'string' ? schema.description : '')).trim() }
+      const served = typeof schema.description === 'string' ? schema.description : ''
+      // The running Inbox says Bro mode is on by carrying the line in the field these words stand in for.
+      properties[name] = { ...schema, description: (own === undefined ? served : served.includes(INBOX_BRO_LINE) ? inboxBodyWithBro(own) : own).trim() }
     }
   }
   for (const [name, users] of usedBy) {

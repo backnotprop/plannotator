@@ -20,7 +20,7 @@ import { inboxStoredAgentName } from "@plannotator/core/inbox-format";
 import { inboxQuestionKeysWithRecommendedMarker } from "@plannotator/core/inbox-questions";
 import { INBOX_ACTION_EXAMPLE, INBOX_ACTION_GUIDE, INBOX_DONE_DESCRIPTION } from "@plannotator/core/inbox-actions";
 import { checkInboxSubject, INBOX_CARD_ACTION_ON, INBOX_MCP_WAKING_HOSTS, inboxTidyMcpLine, INBOX_NAME_THIS_THREAD_HINT, INBOX_SECTIONS, isInboxNote, INBOX_THREAD_NAME_MAX, type InboxGuideRef, type InboxSectionId, type InboxMessage, type InboxProject } from "@plannotator/core/inbox-types";
-import { INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
+import { inboxBodyWithBro, INBOX_AGENT_RULES, INBOX_ATTACHMENTS_PICTURES_LINE, INBOX_PEEK_META_KEY, INBOX_PICTURES_RULE, INBOX_REF_LINK_RULE, INBOX_REPLY_TO_CHECK, INBOX_WAKES_META_KEY, INBOX_WORKING_FOLDER_META_KEY } from "@plannotator/shared/inbox/connection";
 import { inboxSectionOf } from "@plannotator/shared/inbox/list";
 import { bodyShowsLocalImages, captureInboxInlineImages, type InlineImageFailure } from "@plannotator/shared/inbox/inline-images";
 import { inboxMessageRemoteImageRefsInOrder } from "@plannotator/shared/inbox/message-images";
@@ -280,6 +280,11 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * a `steps` call answers `steps_off` with nothing written. Absent: off.
    */
   stepsOn?: () => boolean;
+  /**
+   * Whether Bro mode is on (config.json `inboxBro`, read on every request; approval "bro-mode"). On: send_message's
+   * `body` field carries the line (`INBOX_BRO_LINE`). Off or absent: the field is `SEND_BODY_DESCRIPTION`, unchanged.
+   */
+  broOn?: () => boolean;
   /**
    * Whether code review is on (config.json `inboxCodeReview`, read on every
    * request; approval "inbox-code-review-direction"). Off: submit_guide has
@@ -1004,7 +1009,7 @@ export function createInboxMcpServer(context: InboxMcpContext): McpServer {
       description: SEND_MESSAGE_DESCRIPTION,
       inputSchema: z
         .object({
-          body: z.string().min(1).describe(SEND_BODY_DESCRIPTION),
+          body: z.string().min(1).describe(context.broOn?.() ? inboxBodyWithBro(SEND_BODY_DESCRIPTION) : SEND_BODY_DESCRIPTION),
           ...SEND_ROUTING_FIELDS,
           attachments: z
             .array(z.string())

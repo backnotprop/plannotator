@@ -212,6 +212,7 @@ import { createInboxSnoozes } from "./inbox-snooze";
 import { inboxRowAsOf, inboxRowSnoozed, inboxSplitSnoozed } from "@plannotator/core/inbox-snooze";
 import { snoozeIntroDue, snoozeIntroFirstUse, type SnoozeIntroSaved } from "./inbox-snooze-intro";
 import { revealLastShown, revealMayClaim, revealNext, type RevealId, type RevealState } from "@plannotator/shared/inbox/reveals";
+import { isMarkedReleaseBuild } from "@plannotator/shared/daily-ping";
 import { createInboxEmbeds } from "./inbox-embeds";
 import { createInboxFeedback, INBOX_FEEDBACK_PATH } from "./inbox-feedback";
 import { forgeCardRefResolver, resolveInboxCardRefs } from "./inbox-card-refs";
@@ -432,6 +433,10 @@ export interface InboxServerOptions {
   board?: boolean;
   /** Thread steps, decided here instead of config.json `inboxSteps` (tests). Absent: config.json decides on every request. */
   steps?: boolean;
+  /** Bro mode's switch, as `steps` (absent: config.json `inboxBro`). */
+  bro?: boolean;
+  /** The Bro mode offer may open though this is no release CI build (absent: only such a build; a test's way in). */
+  broOffer?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
   codeReview?: boolean;
   /** Shape, decided here instead of config.json `inboxShape` (tests). Absent: config.json decides on every request. */
@@ -1197,6 +1202,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         boardOn,
         // Thread steps: the steps tool and field are listed and served only while the person has them on.
         stepsOn,
+        // Bro mode: send_message's `body` field carries the line only while the person has it on.
+        broOn,
         // Code review: submit_guide's `review` field is listed and served only while the person has it on.
         codeReviewOn,
         // A thread only a linked machine holds goes through the window's own forward (inbox-machines.ts).
@@ -2219,6 +2226,24 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   };
 
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): on only when the person turned it on (config.json `inboxBro`). Off or
+   * unset: agent text is byte-equal to what it was before. Not held by `heldSwitch`: the owner offers it to everyone.
+   */
+  const broOn = () => options.bro ?? loadConfig().inboxBro === true;
+  const saveBro = (input: unknown, validateOnly = false) => {
+    if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
+      throw new InboxError("validation_error", "bro: { on: boolean }.", { field: "bro" });
+    }
+    const on = (input as { on: boolean }).on;
+    if (validateOnly) return { on: broOn() };
+    const was = broOn();
+    saveConfig({ inboxBro: on });
+    if ((loadConfig().inboxBro === true) !== on) throw new InboxError("config_not_saved", "config.json could not be saved; nothing changed. A config.json that is not valid JSON is never written over: fix or remove it.");
+    if (was !== broOn()) for (const listener of capabilityListeners) listener();
+    return { on: broOn() };
+  };
+
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): on only when the person turned it on (config.json
    * `inboxCodeReview`). Off or unset, agents get nothing of it (no
@@ -2275,6 +2300,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const boardUndecided = () => INBOX_CARD_ACTION_ON && options.board === undefined && loadConfig().inboxBoard === undefined;
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
+  /** Bro mode's offer, while `inboxBro` is unset. Only in a build release CI marked: a spec's or sandbox's build never meets it. */
+  const broUndecided = () => options.bro === undefined && loadConfig().inboxBro === undefined;
+  const broOffered = options.broOffer ?? isMarkedReleaseBuild();
   const revealState = (now: Date): RevealState => {
     const snooze = snoozeIntroSaved();
     const config = loadConfig();
@@ -2296,6 +2324,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         // The Checklist (approval "inbox-checklist-reveal"): never decided by the person and never revealed. The Board
         // need not be on.
         steps: stepsUndecided() && !reveals?.steps?.shownAt,
+        bro: broOffered && broUndecided() && !reveals?.bro?.shownAt,
       },
       waitingSince: reveals?.waitingSince,
     };
@@ -2329,6 +2358,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const claimReveal = (id: RevealId, owner: boolean, key: string | null = null): boolean => {
     if (id === "snooze") return claimSnoozeIntro(owner);
     if (id === "steps") return claimStepsReveal(owner, key);
+    if (id === "bro") return claimBroReveal(owner, key);
     if (id !== "board" || !owner || !snoozeIntroRelease) return false;
     if (key && loadConfig().inboxReveals?.board?.key === key) return boardUndecided();
     const now = new Date();
@@ -2350,6 +2380,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const at = now.toISOString();
     saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, steps: { shownAt: at, ...(key ? { key } : {}) } } });
     return loadConfig().inboxReveals?.steps?.shownAt === at;
+  };
+  /** The Bro mode offer's claim (approval "bro-mode"), as the Checklist's: it turns nothing on; only "Turn it on" writes `inboxBro`. */
+  const claimBroReveal = (owner: boolean, key: string | null): boolean => {
+    if (!owner || !snoozeIntroRelease) return false;
+    if (key && loadConfig().inboxReveals?.bro?.key === key) return broUndecided();
+    const now = new Date();
+    if (!revealMayClaim("bro", revealState(now), now) || !broUndecided()) return false;
+    const at = now.toISOString();
+    saveConfig({ inboxReveals: { ...loadConfig().inboxReveals, lastShownAt: at, bro: { shownAt: at, ...(key ? { key } : {}) } } });
+    return loadConfig().inboxReveals?.bro?.shownAt === at;
   };
   const experimentalState = () => ({
     decision_mode: { on: decisionModeOn(), env: parseExperimentalEnv("decision-mode") ?? null },
@@ -2459,6 +2499,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(launch.enabled() ? { launch: launch.settingsState() } : {}),
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
+    /** Bro mode (config.json `inboxBro`): off unless the person turned it on. */
+    bro: { on: broOn() },
     /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
@@ -2630,7 +2672,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         syncShapes();
         const onCapabilities = (changed?: "code_review" | "shape") => {
           syncShapes();
-          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
+          const frame = { board: { on: boardOn() }, steps: { on: stepsOn() }, bro: { on: broOn() }, ...heldSwitch("code_review", codeReviewOn(), changed === "code_review"), ...heldSwitch("shape", shapeOn(), changed === "shape") };
           send(`event: capabilities\ndata: ${JSON.stringify(frame)}\n\n`);
         };
         if (windowId) capabilityListeners.add(onCapabilities);
@@ -4058,19 +4100,22 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           body.prompts === undefined &&
           body.board === undefined &&
           body.steps === undefined &&
+          body.bro === undefined &&
           body.code_review === undefined &&
           body.shape === undefined &&
           body.cookie_host === undefined &&
           body.voice === undefined &&
           !updateSwitches
         ) {
-          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
+          throw new InboxError("validation_error", "body: inbox_tool, notifications, sound, tailscale, theme, text_size, rows, diff_style, experimental, tour, prompts, board, steps, bro, code_review, shape, voice, update_check, auto_update or cookie_host is required.");
         }
         const owner = ownerOrLocal(req, via);
         // The Board changes what agents on this computer are offered (the card tool): the owner's to change.
         if (body.board !== undefined && !owner) return localOnly();
         // Steps too (the steps tool, the wake and compaction lines): the owner's to change.
         if (body.steps !== undefined && !owner) return localOnly();
+        // Bro mode too (a line in what every agent here reads): the owner's to change.
+        if (body.bro !== undefined && !owner) return localOnly();
         // Code review too (submit_guide's `review` field, the review skills): the owner's to change.
         if (body.code_review !== undefined && !owner) return localOnly();
         // Shape too (the shape skill, the routes): the owner's to change.
@@ -4115,6 +4160,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (body.tour !== undefined) saveTour(body.tour, true);
         if (body.board !== undefined) saveBoard(body.board, true);
         if (body.steps !== undefined) saveSteps(body.steps, true);
+        if (body.bro !== undefined) saveBro(body.bro, true);
         if (body.code_review !== undefined) saveCodeReview(body.code_review, true);
         if (body.shape !== undefined) saveShape(body.shape, true);
         if (body.cookie_host !== undefined) saveCookieHostSwitch(body.cookie_host, true);
@@ -4136,11 +4182,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const tour = body.tour === undefined ? tourState() : saveTour(body.tour);
         const board = body.board === undefined ? { on: boardOn() } : saveBoard(body.board);
         const steps = body.steps === undefined ? { on: stepsOn() } : saveSteps(body.steps);
+        const bro = body.bro === undefined ? { on: broOn() } : saveBro(body.bro);
         const codeReview = body.code_review === undefined ? { on: codeReviewOn() } : saveCodeReview(body.code_review);
         const shape = body.shape === undefined ? { on: shapeOn() } : saveShape(body.shape);
         if (body.voice !== undefined) voice.save(body.voice);
         if (promptsChange) saveInboxPromptsChange(promptsChange);
-        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
+        return json({ inbox_tool: inboxTool, notifications, sound, tailscale: tailnet, updates: updateState, theme, text_size: textSize, ...rows, diff_style: diffStyle, experimental, tour, board, steps, bro, ...heldSwitch("code_review", codeReview.on, body.code_review !== undefined), ...heldSwitch("shape", shape.on, body.shape !== undefined), voice: voice.settings(via, !owner), prompts: promptsState(owner), ...(owner ? { cookie_host: cookieHost ?? cookieHostWire() } : {}) });
       }
       // Voice dictation (inbox-voice.ts). A read here can start a `codex`, so another site's is refused too.
       if (path.startsWith("/api/inbox/voice/")) {
@@ -4200,7 +4247,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const body = await readBody(req);
         if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
         const id = body.id;
-        if (id !== "snooze" && id !== "board" && id !== "steps") throw new InboxError("validation_error", "id: snooze, board or steps.", { field: "id" });
+        if (id !== "snooze" && id !== "board" && id !== "steps" && id !== "bro") throw new InboxError("validation_error", "id: snooze, board, steps or bro.", { field: "id" });
         // The page's own key for this claim (a retry after a lost answer sends it again): optional, as an older page sends none.
         const key = body.key;
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });

@@ -79,6 +79,8 @@ export interface SettingsPageProps {
   onToggleShape?: (next: boolean) => void;
   /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
   onToggleSteps?: (next: boolean) => void;
+  /** Settings → Capabilities → Bro mode (approval "bro-mode"). Absent (or an Inbox without it): no row. */
+  onToggleBro?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -470,6 +472,8 @@ function CapabilitiesSection({
   onToggleCodeReview,
   shape,
   onToggleShape,
+  bro,
+  onToggleBro,
   experimental,
   onToggleExperimental,
   experimentalHeading,
@@ -485,6 +489,9 @@ function CapabilitiesSection({
   /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
   shape: { on: boolean } | null;
   onToggleShape?: (next: boolean) => void;
+  /** Bro mode (approval "bro-mode"), null on an Inbox without it. */
+  bro: { on: boolean } | null;
+  onToggleBro?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
@@ -494,9 +501,10 @@ function CapabilitiesSection({
   const stepsRow = steps && onToggleSteps;
   const codeReviewRow = codeReview && onToggleCodeReview;
   const shapeRow = shape && onToggleShape;
+  const broRow = bro && onToggleBro;
   return (
     <>
-      {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
+      {(boardRow || stepsRow || codeReviewRow || shapeRow || broRow) && (
         <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
             {boardRow && (
@@ -556,6 +564,19 @@ function CapabilitiesSection({
                 </span>
                 <span className="ib-ctl">
                   <Switch on={shape.on} labelledBy="ib-shape-label" onClick={() => onToggleShape(!shape.on)} />
+                </span>
+              </div>
+            )}
+            {broRow && (
+              <div className="ib-prow" data-settings-bro="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-bro-label">
+                    Bro mode
+                  </span>
+                  <span className="ib-desc">Agents write to your Inbox in plain words, from their next session.</span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={bro.on} labelledBy="ib-bro-label" onClick={() => onToggleBro(!bro.on)} />
                 </span>
               </div>
             )}
@@ -891,13 +912,14 @@ export function SettingsPage(props: SettingsPageProps) {
   const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
   const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
   const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
+  const bro = settings?.bro && props.onToggleBro ? settings.bro : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
   const voice = useVoiceSettings();
   const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || bro !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -1072,7 +1094,7 @@ export function SettingsPage(props: SettingsPageProps) {
         break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || steps || codeReview || shape || experimental ? (
+          (board && props.onToggleBoard) || steps || codeReview || shape || bro || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
@@ -1082,6 +1104,8 @@ export function SettingsPage(props: SettingsPageProps) {
               onToggleCodeReview={props.onToggleCodeReview}
               shape={shape}
               onToggleShape={props.onToggleShape}
+              bro={bro}
+              onToggleBro={props.onToggleBro}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}

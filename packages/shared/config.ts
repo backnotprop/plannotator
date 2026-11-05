@@ -474,6 +474,13 @@ export interface PlannotatorConfig {
    */
   inboxSteps?: boolean;
   /**
+   * Bro mode (approval "bro-mode", 2026-11-05): something the person turns on, off by default. On: send_message's
+   * `body` field carries the owner's line, so agents write to the Inbox in plain words. Off or unset: agent text as
+   * before. Unset is also "not decided", the only state the one-time offer opens in. Written by Settings →
+   * Capabilities and the offer (`POST /api/inbox/settings` `{ bro: { on } }`), read on every request.
+   */
+  inboxBro?: boolean;
+  /**
    * Code review in the Inbox (approval "inbox-code-review-direction",
    * 2026-11-03): something the person turns on, off by default. On: the
    * review skills in the reply box's "/" list, the review card and its
@@ -502,15 +509,17 @@ export interface PlannotatorConfig {
    * on this machine (list options, voice, Snooze, the Board), the 48 h
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
-   * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
+   * `steps.shownAt`: the Checklist reveal was claimed. `bro.shownAt`: the Bro
+   * mode offer was claimed. `key` beside any of them:
    * the claiming page's own key, so that page's retry after a lost answer is
    * shown it again (any other key is not).
    */
   inboxReveals?: {
     lastShownAt?: string;
-    waitingSince?: { snooze?: string; board?: string; steps?: string };
+    waitingSince?: { snooze?: string; board?: string; steps?: string; bro?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    bro?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;

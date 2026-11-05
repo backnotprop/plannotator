@@ -173,7 +173,7 @@ export function useRevealMoment(input: RevealMomentInput) {
 
 /** What a load arms, read once from settings: the reveal that is next, and whether that is Snooze's announcement. */
 export interface RevealArmed {
-  next: 'snooze' | 'board' | 'steps' | null;
+  next: 'bro' | 'snooze' | 'board' | 'steps' | null;
   /** Snooze's own `due`, armed only while it is next. */
   snoozeDue: boolean;
 }
@@ -218,7 +218,7 @@ type RevealClaimAnswer = Awaited<ReturnType<typeof inboxApi.claimReveal>>;
  * answer was lost (the phone's network dropped after the Inbox stamped it) is sent again, once, and is shown it again.
  * An answer from the Inbox (any status) is final; another window's or device's key still gets `show: false`.
  */
-export async function claimRevealOnce(id: 'board' | 'steps', key: string): Promise<RevealClaimAnswer> {
+export async function claimRevealOnce(id: 'board' | 'steps' | 'bro', key: string): Promise<RevealClaimAnswer> {
   try {
     return await inboxApi.claimReveal(id, key);
   } catch (cause) {
@@ -303,6 +303,40 @@ export function useStepsReveal(input: StepsRevealInput) {
       const answer = await claimRevealOnce('steps', key.current);
       if (answer.steps?.on) latest.current.onStepsOn();
       return answer.show;
+    },
+  });
+}
+
+/** What one load knows for the Bro mode offer: the Board's, less the rows it asks for. */
+export type BroRevealInput = Omit<BoardRevealInput, 'onBoardOn'>;
+
+/** At a settled moment: the Board's gate without its row count, as this offer is for everyone. */
+export function broRevealMayClaim(gate: Pick<BroRevealInput, 'due' | 'blocked' | 'listLoaded' | 'firstRun'>, pageAge: number): boolean {
+  return gate.due && !gate.blocked && gate.listLoaded && !gate.firstRun && pageAge >= REVEAL_TIMES.pageAgeMs;
+}
+
+/**
+ * The Bro mode offer (approval "bro-mode"): the Board's calm moment (back on the list after reading a thread, 60 s into
+ * the page). The claim only stamps it; the page opens `BroIntro`, whose "Turn it on" turns Bro mode on.
+ */
+export function useBroReveal(input: BroRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  const key = useRef<string | null>(null);
+  return useRevealMoment({
+    wanted: input.due && !input.blocked,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now, _row, next) => boardRevealLeaveCounts(visit, now, next),
+    mayClaim: (pageAge) => broRevealMayClaim(latest.current, pageAge),
+    holds: () => !latest.current.on,
+    claim: async () => {
+      key.current ??= newUuid();
+      return (await claimRevealOnce('bro', key.current)).show;
     },
   });
 }

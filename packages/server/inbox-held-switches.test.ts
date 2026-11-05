@@ -128,7 +128,7 @@ test("already on: both rows' keys are there; turning each off answers off, tells
   expect(stream.frames[0]!.shape).toEqual({ on: true });
   expect((await w.save({ shape: { on: false } })).shape).toEqual({ on: false });
   await stream.next(2);
-  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, shape: { on: false } });
+  expect(stream.frames[1]).toEqual({ board: { on: false }, steps: { on: false }, bro: { on: false }, shape: { on: false } });
   await stream.stop();
 
   const after = await w.read();

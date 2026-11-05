@@ -118,7 +118,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { revealArmed, useBoardReveal, useBroReveal, useStepsReveal } from './reveal';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -162,6 +162,7 @@ import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { BroIntro } from './components/BroIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
@@ -972,7 +973,7 @@ function Inbox() {
    * The reveals for returning users (reveal.ts; approval "inbox-feature-reveal"): the one this page may arm, read once
    * per load (settings `reveal.next`), and the Snooze announcement's own `due`. Only `next` is armed: one per load.
    */
-  const snoozeIntroLatch = useRef<{ due: boolean; next: 'snooze' | 'board' | 'steps' | null } | null>(null);
+  const snoozeIntroLatch = useRef<{ due: boolean; next: 'bro' | 'snooze' | 'board' | 'steps' | null } | null>(null);
   /** An update dialog or a restart was on screen in this load: no Snooze announcement on it. */
   const updatingThisLoad = useRef(false);
   /** This page snoozed something in this load: the announcement would tell the person what they just did. */
@@ -4002,6 +4003,19 @@ function Inbox() {
     }
   };
 
+  // Bro mode (approval "bro-mode"): every other window hears `event: capabilities`.
+  const toggleBro = async (next: boolean) => {
+    setSettingsError(null);
+    setSettings((current) => (current ? { ...current, bro: { on: next } } : current));
+    try {
+      const saved = await inboxApi.saveBro(next);
+      setSettings((current) => (current ? { ...current, bro: saved.bro } : current));
+    } catch (cause) {
+      setSettingsError(cause instanceof Error ? cause.message : 'The setting was not saved.');
+      void refreshSettings();
+    }
+  };
+
   // Thread steps (approval "inbox-thread-steps"): every other window hears `event: capabilities`.
   const toggleSteps = async (next: boolean) => {
     setSettingsError(null);
@@ -4368,10 +4382,24 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // The Bro mode offer (approval "bro-mode"): the same moment; the claim only stamps it, then BroIntro offers it.
+  const broReveal = useBroReveal({
+    due: snoozeIntroLatch.current?.next === 'bro',
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked: revealBlocked,
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+    on: settings?.bro?.on === true,
+  });
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
-      save: feature === 'board' ? () => inboxApi.saveBoard(true).then((saved) => saved.board) : () => inboxApi.saveSteps(true).then((saved) => saved.steps),
+      save: () => (feature === 'board' ? inboxApi.saveBoard(true).then((saved) => saved.board) : feature === 'steps' ? inboxApi.saveSteps(true).then((saved) => saved.steps) : inboxApi.saveBro(true).then((saved) => saved.bro)),
       setSettings,
       showToast,
       dismissToast,
@@ -4420,7 +4448,9 @@ function Inbox() {
     boardReveal.stage !== 'open' &&
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
-    stepsReveal.stage !== 'claimed';
+    stepsReveal.stage !== 'claimed' &&
+    broReveal.stage !== 'open' &&
+    broReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5214,6 +5244,7 @@ function Inbox() {
         landOnExperimental={route.experimental === true}
         onToggleBoard={(next) => void toggleBoard(next)}
         onToggleSteps={(next) => void toggleSteps(next)}
+        onToggleBro={(next) => void toggleBro(next)}
         onToggleCodeReview={(next) => void toggleCodeReview(next)}
         onToggleShape={(next) => void toggleShape(next)}
         agents={agents}
@@ -5977,6 +6008,7 @@ function Inbox() {
         <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
       )}
       {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
+      {broReveal.stage === 'open' && <BroIntro phone={phone} onClose={broReveal.close} onTurnOn={() => turnOnFromReveal('bro', broReveal.close)} />}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

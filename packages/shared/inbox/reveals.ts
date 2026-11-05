@@ -1,6 +1,7 @@
 /**
  * The queue of one-time feature reveals for people who come back (approval "inbox-feature-reveal", 2026-11-03): Snooze
- * (its announcement), then the Board, then the Checklist (thread steps, approval "inbox-checklist-reveal"). Pure, so a
+ * (its announcement), then the Board, then the Checklist (thread steps, approval "inbox-checklist-reveal"), with the Bro
+ * mode offer ahead of them (approval "bro-mode"). Pure, so a
  * test can move the clock; the Inbox server (packages/server/inbox.ts) builds the state from config.json and the
  * store, reports `revealNext` to the page (`GET /api/inbox/settings` `reveal.next`) and spends the claim with
  * `revealMayClaim` (`POST /api/inbox/reveal`).
@@ -17,7 +18,7 @@
  *  - No active-days counter.
  */
 
-export type RevealId = "snooze" | "board" | "steps";
+export type RevealId = "bro" | "snooze" | "board" | "steps";
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -33,6 +34,10 @@ export interface RevealEntry {
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
+  // Bro mode (approval "bro-mode", 2026-11-05): "a one-time card offers Bro mode to everyone once it ships", so no
+  // tenure or threads, and first in line. Opt-in, as the others: the claim only stamps it. Only a build release CI
+  // marked ever opens it (`broOffered` in packages/server/inbox.ts), so no test run or sandbox build meets it.
+  { id: "bro", tenureMs: 0, minThreads: 0, enabled: true },
   // Its own rules stay (packages/server/inbox-snooze-intro.ts); the queue adds the spacing.
   { id: "snooze", tenureMs: 2 * DAY_MS, minThreads: 0, enabled: true },
   // The owner: "ok board can be 3 days, snooze 2". Opt-in (the owner, 2026-11-04): the claim only stamps it; the

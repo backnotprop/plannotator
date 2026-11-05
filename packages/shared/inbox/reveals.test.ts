@@ -21,10 +21,20 @@ function state(over: Partial<RevealState> = {}): RevealState {
 
 describe("the order", () => {
   test("Snooze first, then the Board once Snooze is no longer open; nothing once both are spent", () => {
-    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["snooze", "board", "steps"]);
+    expect(INBOX_REVEALS.map((entry) => entry.id)).toEqual(["bro", "snooze", "board", "steps"]);
     expect(revealNext(state(), NOW)).toBe("snooze");
     expect(revealNext(state({ open: { snooze: false, board: true } }), NOW)).toBe("board");
     expect(revealNext(state({ open: { snooze: false, board: false } }), NOW)).toBeNull();
+  });
+
+  test("Bro mode goes first whenever it is open, for everyone: no tenure, no threads; closed, the queue is as it was", () => {
+    const dayOne = { firstUseAt: ago(60_000), threads: 0 };
+    expect(revealNext(state({ ...dayOne, open: { bro: true, snooze: true } }), NOW)).toBe("bro");
+    expect(revealNext(state({ open: { bro: false, snooze: true } }), NOW)).toBe("snooze");
+    // Never before first use, on a dev build, or inside the spacing.
+    expect(revealNext(state({ firstUseAt: null, open: { bro: true } }), NOW)).toBeNull();
+    expect(revealNext(state({ release: false, open: { bro: true } }), NOW)).toBeNull();
+    expect(revealNext(state({ lastShownAt: ago(60_000), open: { bro: true } }), NOW)).toBeNull();
   });
 
   test("a claim for anything but next is refused (a tab that armed something else)", () => {

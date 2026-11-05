@@ -7,7 +7,7 @@
  */
 import type { InboxToastModel } from './components/Toast';
 
-export type RevealFeature = 'board' | 'steps';
+export type RevealFeature = 'board' | 'steps' | 'bro';
 
 /** The part of the settings a reveal reads and writes. */
 type FeatureSettings = { [K in RevealFeature]?: { on: boolean } };
@@ -39,7 +39,7 @@ export function turnOnFromReveal<S extends FeatureSettings>(feature: RevealFeatu
       deps.showToast(
         {
           icon: 'warn',
-          lead: feature === 'board' ? 'The Board isn’t on' : 'The Checklist isn’t on',
+          lead: feature === 'board' ? 'The Board isn’t on' : feature === 'steps' ? 'The Checklist isn’t on' : 'Bro mode isn’t on',
           detail: 'The setting wasn’t saved. You can turn it on in Settings.',
           action: {
             label: 'Open Settings',

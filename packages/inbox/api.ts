@@ -80,7 +80,7 @@ import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEv
 import { newUuid } from './uuid';
 
 /** A reveal for returning users, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server side). */
-export type InboxRevealId = 'snooze' | 'board' | 'steps';
+export type InboxRevealId = 'bro' | 'snooze' | 'board' | 'steps';
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
@@ -435,6 +435,8 @@ export interface SettingsModel {
   board?: { on: boolean };
   /** Thread steps (config.json `inboxSteps`, approval "inbox-thread-steps"): off unless the person turned them on. Absent from an older Inbox (no steps then). */
   steps?: { on: boolean };
+  /** Bro mode (config.json `inboxBro`, approval "bro-mode"): off unless the person turned it on. Absent from an older Inbox (no row then). */
+  bro?: { on: boolean };
   /** Code review (config.json `inboxCodeReview`, approval "inbox-code-review-direction"): off unless the person turned it on. Absent from an older Inbox (off then). */
   code_review?: { on: boolean };
   /** Shape (Settings → Capabilities): the boards agents draw. Absent from an older Inbox. */
@@ -1176,6 +1178,7 @@ export const inboxApi = {
   saveBoard: (on: boolean) => post<{ board: { on: boolean } }>(inboxUrl('/settings'), { board: { on } }),
   /** Thread steps on or off (Settings → Capabilities, approval "inbox-thread-steps"): every window hears `event: capabilities`. */
   saveSteps: (on: boolean) => post<{ steps: { on: boolean } }>(inboxUrl('/settings'), { steps: { on } }),
+  saveBro: (on: boolean) => post<{ bro: { on: boolean } }>(inboxUrl('/settings'), { bro: { on } }),
   /** Code review on or off (Settings → Capabilities, approval "inbox-code-review-direction"): every window hears `event: capabilities`. */
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
@@ -1824,7 +1827,7 @@ export interface InboxEventHandlers {
   /** How the list's rows look was saved, here or in another window (`event: rows`, approval "inbox-customize-rows"). */
   onRows?: (rows: unknown, rev: unknown) => void;
   /** A capability switch was saved, here or in another window (`event: capabilities`: the Board, thread steps, ...); never called by an older Inbox. */
-  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } }) => void;
+  onCapabilities?: (capabilities: { board?: { on: boolean }; steps?: { on: boolean }; bro?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } }) => void;
   /** Shape's boards changed (`event: shapes`, only while Shape is on): their ids. */
   onShapes?: (ids: string[]) => void;
   /**
@@ -1955,10 +1958,11 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'capabilities':
       try {
-        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown } };
+        const data = JSON.parse(frame.data) as { board?: { on?: unknown }; steps?: { on?: unknown }; bro?: { on?: unknown }; code_review?: { on?: unknown }; shape?: { on?: unknown } };
         handlers.onCapabilities?.({
           ...(typeof data.board?.on === 'boolean' ? { board: { on: data.board.on } } : {}),
           ...(typeof data.steps?.on === 'boolean' ? { steps: { on: data.steps.on } } : {}),
+          ...(typeof data.bro?.on === 'boolean' ? { bro: { on: data.bro.on } } : {}),
           ...(typeof data.code_review?.on === 'boolean' ? { code_review: { on: data.code_review.on } } : {}),
           ...(typeof data.shape?.on === 'boolean' ? { shape: { on: data.shape.on } } : {}),
         });
