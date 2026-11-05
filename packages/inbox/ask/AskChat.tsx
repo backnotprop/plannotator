@@ -5,11 +5,11 @@ import { HostMark } from '@plannotator/ui/components/inbox-thread/icons';
 import { useAIChat } from '@plannotator/ui/hooks/useAIChat';
 import { SESSION_ASK_ERROR_CODES } from '@plannotator/ui/utils/aiProvider';
 import { generateId } from '@plannotator/ui/utils/generateId';
-import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskPosted, type InboxAskTurnWire } from '../api';
+import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel, type InboxAskPosted, type InboxAskTurnWire, type InboxShowMeAsk } from '../api';
 import { isTouchPhone } from '../phone';
 import { errorText } from '../toastError';
 import { AskChatMenu } from './AskChatMenu';
-import { askAnswerId, askChatName, askMessages, askStopped, askTurnNote, askUnanswered, askUnseen, askUserId } from './askModel';
+import { askAnswerId, askChatName, askMessages, askShownQuestion, askStopped, askTurnNote, askUnanswered, askUnseen, askUserId } from './askModel';
 import { readAskWords, saveAskWords } from './askWords';
 
 /** The server writes the real context for each session (inbox-ask.ts): the hook only needs one to start. */
@@ -25,6 +25,8 @@ export interface AskChatProps {
   phone: boolean;
   /** Moves with each press that asks for the box's focus; `takeFocus` says whether it was for this chat. */
   focusRequest: number;
+  /** Words to put in the box (a new token each time): after the words already there. */
+  seed?: { words: string; token: number } | null;
   takeFocus: () => boolean;
   onPick: (chat: InboxAskChat) => void;
   onLeave: () => void;
@@ -44,7 +46,10 @@ export interface AskChatProps {
  * shortcuts. The window sits outside the thread's section and wears
  * `data-popover-layer`, so its keys reach neither the reply nor the ladder.
  */
-export function AskChat({ threadId, store, model, picked, phone, focusRequest, takeFocus, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
+/** Seeds already put in a box: a chat that mounts again (minimized, reopened) never adds them twice. */
+const seedsApplied = new Set<number>();
+
+export function AskChat({ threadId, store, model, picked, phone, focusRequest, seed, takeFocus, onPick, onLeave, onConversation, onReload, onReply }: AskChatProps) {
   const chat = useAIChat({ context: ASK_CONTEXT });
   const [words, setWords] = useState(() => readAskWords(threadId));
   const [posting, setPosting] = useState(false);
@@ -73,6 +78,13 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
   useEffect(() => {
     saveAskWords(threadId, words);
   }, [threadId, words]);
+
+  // Words handed in (code review's Ask on lines): after what the box holds, never in place of it; once each.
+  useEffect(() => {
+    if (!seed || seedsApplied.has(seed.token)) return;
+    seedsApplied.add(seed.token);
+    setWords((box) => (box.trim() ? `${box.trimEnd()}\n${seed.words}` : seed.words));
+  }, [seed?.token]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The stream ended here: read what the Inbox kept, whether or not its event came first.
   const wasStreaming = useRef(false);
@@ -121,8 +133,8 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     void chat.ask({ prompt: question, ...(policy ? { busyPolicy: policy } : {}) }, { providerId });
   };
 
-  const post = async (turnId: string, question: string): Promise<InboxAskPosted> => {
-    const posted = await inboxApi.askSend(threadId, turnId, question);
+  const post = async (turnId: string, question: string, showMe?: InboxShowMeAsk): Promise<InboxAskPosted> => {
+    const posted = await inboxApi.askSend(threadId, turnId, question, showMe);
     onConversation(posted.conversation);
     return posted;
   };
@@ -161,7 +173,14 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
     keepFocusHere();
     const shownFor = live?.session;
     try {
-      const posted = await post(turn.id, turn.question);
+      // A Show me asks again as a Show me: the agent's request to draw, the same lines.
+      const posted = await post(
+        turn.id,
+        turn.question,
+        turn.kind === 'show_me' && turn.show_me
+          ? { kind: 'show_me', show_me: turn.show_me, ...(turn.again_of_round !== undefined ? { again_of_round: turn.again_of_round } : {}) }
+          : undefined,
+      );
       // A busy choice holds for the session the person saw busy. A retry goes to the thread's owner now, and
       // after a hand-off that one gets its own note: it is never interrupted on a choice made about another.
       if (posted.provider_id) answer(posted, turn.question, posted.provider_id, posted.turn.session === shownFor ? policy : undefined);
@@ -232,7 +251,7 @@ export function AskChat({ threadId, store, model, picked, phone, focusRequest, t
             type="button"
             className="ib-ask-notebtn"
             onClick={() => {
-              onReply(turn.question);
+              onReply(askShownQuestion(turn));
               // A window that fills the screen would cover the reply it just opened.
               if (store.fullscreen || phone) minimize();
             }}
