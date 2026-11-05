@@ -609,6 +609,12 @@ export const INBOX_PULL_DIFF_TIMEOUT_MS = 30_000;
 export const INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS = 5 * 60_000;
 /** GitHub's files API stops listing here, whatever the PR holds. */
 const GITHUB_FILES_API_STOP = 3000;
+/**
+ * For a judgment, where wrongly calling a read complete costs more: older GitLab sends neither flag, so an empty added
+ * or deleted file may be one it held back. A review shows such a file as it is, so its own check doesn't count it.
+ */
+const glMayBeHeldBack = (d: GitLabDiffEntry): boolean =>
+  glEntryMissingContent(d) || (d.diff.trim() === "" && d.too_large == null && d.collapsed == null && (d.new_file || d.deleted_file));
 
 /**
  * gh / glab for a diff, read as a stream: the bytes are counted as they come and the CLI is stopped past
@@ -1102,7 +1108,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const read = (endpoint: string, ...more: string[]) => diffRun(cli, ["api", "--hostname", pull.host, endpoint, ...more], Number.POSITIVE_INFINITY, { timeoutMs: INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, signal });
       /** Not the forge's limit on one document: asking it again some other way wouldn't help. */
       const stopFor = (result: RefCommandResult) => {
-        const error = refErrorOf(cli, result);
+        // By stderr alone, where gh and glab write their errors: stdout here is a diff, and a diff can say anything.
+        const error = refErrorOf(cli, { ...result, stdout: "" });
         if (error === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
         if (error === "signed_out") return `${cli} is not signed in to ${pull.host}.`;
         return error === "rate_limited" || error === "cli_missing" ? `${cli} could not read this diff. Try again, or open it on the forge.` : null;
@@ -1124,7 +1131,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
         };
         try {
           if (github) gather(parsePaginatedArray<GitHubFileEntry>(paged.stdout), reconstructGhPatch, ghEntryMissingContent);
-          else gather(parsePaginatedArray<GitLabDiffEntry>(paged.stdout), reconstructGitlabPatch, glEntryMissingContent);
+          else gather(parsePaginatedArray<GitLabDiffEntry>(paged.stdout), reconstructGitlabPatch, glMayBeHeldBack);
         } catch {
           patch = "";
         }

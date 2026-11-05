@@ -5,15 +5,18 @@
  * low, medium or high with one sentence why, in the background, a few at a time. The
  * agent reads the whole diff.
  *
- *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, rules, level, why } } }
+ *   inbox/pull-risk.json   { v: 1, judgments: { [pull key]: { head, base, rules, level, why } } }
  *
  * - Runs only while Code review is on and rules exist, and only from the owner's
  *   window's list read (the routes in inbox.ts guard those). Open and draft PRs only.
- * - A judgment belongs to a head and to the rules it was made against (`rules` is a
- *   hash of them, the words stay in config.json): a new head or new rules means a new
+ * - A judgment belongs to a head, to the base it was read against and to the rules it
+ *   was made against (`rules` is a hash of them, the words stay in config.json): a new
+ *   head, a PR retargeted to another base or new rules means a new
  *   judgment, and a restart redoes nothing.
  * - A failed run keeps no judgment: the PR shows the reason, a diff too big for the
- *   model or the forge included, and never a level. It waits (`RISK_RETRY_MS`). Failures
+ *   model included, and never a level. It waits (`RISK_RETRY_MS`). A forge that won't
+ *   serve the diff as one document is read file by file (`wholeDiff`), and a Low from
+ *   a read known to be incomplete is kept as Medium. Failures
  *   in a row mean the agent itself is broken: nothing runs for a while
  *   (`RISK_AGENT_PAUSE_MS`). It never blocks the list.
  * - The agent is an Ask AI provider started for one answer (`oneShot`): no tools where

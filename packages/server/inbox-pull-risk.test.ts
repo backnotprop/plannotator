@@ -234,6 +234,23 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     });
 
     test.each([
+      ["an added file", { new_file: true }],
+      ["a deleted file", { deleted_file: true }],
+    ])("an older GitLab, no flags, %s with an empty diff: it may be held back, so Medium", async (_name, fields) => {
+      const { level } = await levelOf("gitlab", { whole: { stdout: "" }, paged: { stdout: JSON.stringify([glFile({ diff: "@@ -1 +1 @@\n+x\n" }), glFile(fields)]) } }, LOW);
+      expect(level).toBe("medium");
+    });
+
+    test.each([
+      ["an empty new file on a GitLab that says it held nothing back", { new_file: true, too_large: false, collapsed: false }],
+      ["an older GitLab's pure rename", { renamed_file: true }],
+      ["an older GitLab's new file with its content", { new_file: true, diff: "@@ -0,0 +1 @@\n+fresh\n" }],
+    ])("GitLab keeps Low: %s", async (_name, fields) => {
+      const { level } = await levelOf("gitlab", { whole: { stdout: "" }, paged: { stdout: JSON.stringify([glFile(fields)]) } }, LOW);
+      expect(level).toBe("low");
+    });
+
+    test.each([
       ["High", HIGH, "high"],
       ["Medium", MEDIUM, "medium"],
     ])("%s stays as it is", async (_name, answer, expected) => {
@@ -286,6 +303,39 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     now += RISK_RETRY_MS;
     await judge();
     expect(endpoints.length).toBeGreaterThan(before);
+  });
+
+  describe("a read that dies partway, with a diff that happens to say an error's words", () => {
+    const died = (line: string) => ({ stdout: `diff --git a/x.ts b/x.ts\n${line}\n`, exitCode: 143 });
+    const notHeld = async (pulls: { wholeDiff(key: string): Promise<unknown> }, key: string) => {
+      const again = await pulls.wholeDiff(key).then(() => "", (cause: Error) => cause.message);
+      expect(again).not.toContain("slow down");
+    };
+
+    test.each([
+      ["429", "+// handle a 429 here"],
+      ["rate limit", "+// the API rate limit exceeded path"],
+      ["sign-in", "+// run gh auth login first"],
+      ["not logged in", "+// not logged in"],
+    ])("%s in the diff: the per-file read still runs, and the host isn't held", async (_name, line) => {
+      setRules();
+      const { pulls, risk, runs, judge, endpoints, key } = await reading("github", { whole: died(line), paged: { stdout: FILES_PAGE_1 } });
+      await judge();
+      expect(endpoints.some((e) => e.includes("/files"))).toBe(true);
+      expect(runs).toHaveLength(1);
+      expect(risk.answer().judgments[key]?.level).toBe("high");
+      await notHeld(pulls, key);
+    });
+
+    test("the per-file read dying the same way holds nothing either", async () => {
+      setRules();
+      const paged = { stdout: '[{"filename":"a.ts","patch":"+// handle a 429 here', exitCode: 143 };
+      const { pulls, risk, runs, judge, key } = await reading("github", { whole: { stderr: "gh: (HTTP 406)", exitCode: 1 }, paged });
+      await judge();
+      expect(runs).toEqual([]);
+      expect(risk.answer().failed[key]).toBe("gh could not read this diff. Try again, or open it on the forge.");
+      await notHeld(pulls, key);
+    });
   });
 
   test.each([
