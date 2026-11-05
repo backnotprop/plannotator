@@ -236,6 +236,7 @@ import { inboxCanonicalBaseUrl, inboxCanonicalRedirect } from "./inbox-canonical
 import { createInboxWindows, parseWindowId, parseWindowOrigin, parseWindowPermission } from "./inbox-windows";
 import { handleInboxTourRequest } from "./inbox-tour";
 import { createBunShapeRoutes } from "./shape-routes";
+import { shapeCodeRoot } from "@plannotator/shared/shape/store";
 import { shapeEventFrame } from "@plannotator/shared/shape/routes";
 import { shapeAgentName } from "@plannotator/shared/shape/routes";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch, shapeSwitchOn } from "@plannotator/shared/shape/switch";
@@ -3286,7 +3287,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
     codeReviewOn,
-    shapeRoot: (id) => (shapeOn() ? (shapes.store.get(id)?.project.root ?? null) : null),
+    shapeRoot: (id) => {
+      const shape = shapeOn() ? shapes.store.get(id) : null;
+      return shape ? shapeCodeRoot(shape.project) : null;
+    },
     // The PR page read the pull list first, which read each project's origin.
     repoRoots: (repo) =>
       store

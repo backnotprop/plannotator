@@ -32,7 +32,10 @@
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInAllows, inboxOpenInPolicy } from "@plannotator/core/inbox-types";
 import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
-import { checkInboxAttachmentForLaunch, checkInboxProjectFile } from "@plannotator/shared/inbox/attachments";
+import { existsSync, realpathSync } from "node:fs";
+import { dirname, isAbsolute, join, posix, relative, sep } from "node:path";
+import { checkInboxAttachmentForLaunch, checkInboxProjectFile, type InboxProjectFilePlace } from "@plannotator/shared/inbox/attachments";
+import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
@@ -92,6 +95,30 @@ export interface InboxOpenInRouteContext {
 }
 
 /** The scope of a referenced file: where its path starts. */
+/** The checkout a folder lies in: the nearest folder up with a `.git` (a file in a linked worktree). */
+function checkoutOf(folder: string): string | null {
+  if (!existsSync(folder)) return null;
+  for (let dir = folder; ; dir = dirname(dir)) {
+    if (existsSync(join(dir, ".git"))) return dir;
+    if (dirname(dir) === dir) return null;
+  }
+}
+
+/** `path` from `root`, with forward slashes, when it lies inside `root`. */
+function pathInside(root: string, path: string): string | null {
+  const inside = relative(root, path);
+  if (!inside || inside === ".." || inside.startsWith(`..${sep}`) || isAbsolute(inside)) return null;
+  return inside.split(sep).join("/");
+}
+
+function realpathOrNull(path: string): string | null {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+}
+
 interface FileScope {
   thread?: unknown;
   message?: unknown;
@@ -102,29 +129,57 @@ interface FileScope {
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots } = context;
 
-  /** The folders a scope's paths start in: the message's project, then the thread's own and the one it shows under. */
-  const rootsOf = (scope: FileScope): string[] => {
+  /**
+   * Where a scope's path may be, in the order to try. A shape's or a repository's path starts at its root. A message's
+   * link is as the agent wrote it, so it starts in the checkout the agent wrote from: at its folder (`base_path`), then
+   * at that checkout's top. Other projects come after, except that a linked worktree folded into its project never falls
+   * back to the main checkout: that copy is not the agent's file. An absolute path says which of these it means.
+   */
+  const placesOf = (scope: FileScope, named: string): InboxProjectFilePlace[] => {
     if (typeof scope.shape === "string") {
       const root = shapeRoot(scope.shape);
-      return root ? [root] : [];
+      return root ? [{ root, relative: named }] : [];
     }
-    if (typeof scope.repo === "string") return repoRoots(scope.repo.toLowerCase());
+    if (typeof scope.repo === "string") return repoRoots(scope.repo.toLowerCase()).map((root) => ({ root, relative: named }));
     if (typeof scope.thread !== "string") return [];
     const first = store.message(scope.thread);
     if (!first || first.thread_id !== scope.thread) return [];
     const message = typeof scope.message === "string" ? store.message(scope.message) : null;
-    const from = message?.thread_id === scope.thread ? message.from_project?.root : null;
-    const roots = [from, store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
-    return [...new Set(roots.filter((root): root is string => typeof root === "string"))];
+    const sender = message?.thread_id === scope.thread ? message : first;
+    const base = sender.base_path ?? null;
+    const checkout = base ? checkoutOf(base) : null;
+    const own = sender.from_project?.root ?? store.project(sender.project_id)?.root ?? null;
+    const shown = [store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
+    const known = (roots: unknown[]) => [...new Set(roots.filter((root): root is string => typeof root === "string"))];
+    if (isAbsolute(named)) {
+      const roots = known([checkout, own, ...shown]);
+      const real = realpathOrNull(named);
+      const places = roots.flatMap((root) => {
+        const inside = pathInside(root, named) ?? (real ? pathInside(root, real) : null);
+        return inside ? [{ root, relative: inside }] : [];
+      });
+      // Outside all of them: refused by the path rule, as any other path outside the project.
+      return places.length || !roots.length ? places : [{ root: roots[0]!, relative: named }];
+    }
+    const folded = checkout !== null && own !== null && pathInside(own, checkout) === null && pathInside(checkout, own) === null && checkout !== own;
+    const roots = known(folded ? [checkout, ...shown.filter((root) => root !== own)] : [checkout, own, ...shown]);
+    const clean = posix.normalize(named.replace(/\\/g, "/"));
+    return roots.flatMap((root) => {
+      const from = base ? (base === root ? "" : pathInside(root, base)) : null;
+      const places = from ? [{ root, relative: posix.join(from, clean) }] : [];
+      return [...places, { root, relative: clean }];
+    });
   };
 
   /** Open in for a file a reference names: its project-relative path, in a scope; never a root from the request. */
   const fileRoute = async (req: Request): Promise<Response> => {
     if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
     if (req.method === "GET") {
-      const params = new URL(req.url).searchParams;
+      const url = new URL(req.url);
+      if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+      const params = url.searchParams;
       const scope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo") };
-      const file = await checkInboxProjectFile(rootsOf(scope), params.get("path") ?? "");
+      const file = await checkInboxProjectFile(placesOf(scope, params.get("path") ?? ""));
       return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
@@ -132,12 +187,12 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     if (checkServerSession(body, serverSession) === "mismatch") return json(serverSessionMismatchBody(INBOX_SERVER_SESSION_MISMATCH_ERROR), 409);
     if (typeof body.path !== "string" || body.path === "") throw new InboxError("validation_error", "path: a path in the project.", { field: "path" });
     if (typeof body.app_id !== "string" || body.app_id === "") throw new InboxError("validation_error", "app_id: an app id.", { field: "app_id" });
-    const file = await checkInboxProjectFile(rootsOf(body), body.path);
+    const file = await checkInboxProjectFile(placesOf(body, body.path));
     if (!file.ok) {
       if (file.code === "refused") throw new InboxError("open_not_allowed", `${body.path} is not a file of this project.`);
       throw new InboxError("attachment_missing", `${body.path} is not on this computer.`);
     }
-    const line = typeof body.line === "number" && Number.isInteger(body.line) && body.line > 0 ? body.line : undefined;
+    const line = typeof body.line === "number" && Number.isSafeInteger(body.line) && body.line > 0 ? body.line : undefined;
     return launch(body.app_id, { name: body.path, kind: file.kind, path: file.path }, line);
   };
 

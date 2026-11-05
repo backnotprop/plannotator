@@ -15,7 +15,8 @@
  * with that name, when only one has it.
  *
  * A local link that names no attachment of the message is drawn as inert
- * text titled "Not attached": the window never asks the server for it.
+ * text titled "Not attached". With Code review on, "Open in" asks the server
+ * whether it is a file on this computer (`projectFileOfLink`); nothing else does.
  */
 import { useMemo } from 'react';
 import type { InboxAttachment, InboxProjectRepo } from '@plannotator/core/inbox-types';
@@ -101,19 +102,16 @@ export function attachmentForLink<T extends LinkableAttachment>(
 }
 
 /**
- * The project file a link that names no attachment may mean, for "Open in": its path relative to the project root
- * (the message's own folder first, as for an attachment) and the line it names (`#L12`, `:12`), or null for a path
- * outside the project. The server checks it again.
+ * The file a link or a code span names, for "Open in": the path as the agent wrote it, and the line (`#L12`, `:12`,
+ * `:12-20`, `:12:4`). The server decides where it starts (the message's folder and checkout) and whether it is a file.
  */
-export function projectFileOfLink(href: string, options: { root: string; base?: string | null }): { path: string; line?: number } | null {
+export function projectFileOfLink(href: string): { path: string; line?: number } | null {
   const candidate = linkCandidates(href).at(-1);
   if (!candidate) return null;
-  const line = /^#L(\d+)/.exec(href.trim().replace(/^[^#]*/, ''))?.[1] ?? /:(\d+)(?::\d+)?$/.exec(candidate)?.[1];
-  const named = candidate.replace(/:\d+(?::\d+)?$/, '');
-  const root = normalizeLinkPath(options.root).replace(/\/$/, '');
-  const absolute = normalizeLinkPath(isAbsolutePath(named) ? named : `${options.base || options.root}/${named}`);
-  if (!root || !absolute.startsWith(`${root}/`)) return null;
-  return { path: absolute.slice(root.length + 1), ...(line ? { line: Number(line) } : {}) };
+  const line = /^#L(\d+)/.exec(href.trim().replace(/^[^#]*/, ''))?.[1] ?? /:(\d+)(?:-\d+|:\d+)?$/.exec(candidate)?.[1];
+  const path = candidate.replace(/:\d+(?:-\d+|:\d+)?$/, '').replace(/\\/g, '/');
+  if (!path || path.endsWith('/')) return null;
+  return { path, ...(line ? { line: Number(line) } : {}) };
 }
 
 /**

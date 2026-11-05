@@ -414,6 +414,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
+      // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
+      if (document.querySelector('[role="menu"]')) return;
       // An open bubble goes first.
       if (peekRef.current) {
         e.preventDefault();
@@ -1133,7 +1135,10 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
         )}
         {viewer?.kind === 'diff' && (
           <PopoutDialog open onClose={() => setViewer(null)} title={viewer.path}>
-            <div className="shp-diff-pop"><ShapePatch patch={viewer.patch} /></div>
+            <div className="shp-diff-pop">
+              {host.fileAction && <div className="shp-diff-pop-acts">{fileAction({ path: viewer.path })}</div>}
+              <ShapePatch patch={viewer.patch} />
+            </div>
           </PopoutDialog>
         )}
       </div>

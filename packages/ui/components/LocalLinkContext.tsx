@@ -27,6 +27,13 @@ export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;
  */
 export const LocalLinkContext = createContext<LocalLinkResolver | null>(null);
 
+/**
+ * A host's own wrap for an inline code span that names a code file (`src/a.ts:12`): `text` is the span's words, `code`
+ * the span as it is drawn without a host. With no provider, nothing changes.
+ */
+export type CodeSpanRenderer = (text: string, code: ReactNode) => ReactNode;
+export const CodeSpanContext = createContext<CodeSpanRenderer | null>(null);
+
 export function useLocalLinkResolver(): LocalLinkResolver | null {
   return useContext(LocalLinkContext);
 }

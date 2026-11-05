@@ -2751,11 +2751,15 @@ These did not change: `@codemirror/autocomplete` `^6.20.3`, `lang-javascript` `^
 
 ## Shape and links: a slot for a file's action (unreleased; additive)
 
-Three optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
+Optional seams, so a host can put its own control beside a file a board or a message names. A host that passes none of them sees no change. Plannotator's Inbox uses them for "Open in".
 
-- `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head and the file popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
+- `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
 - `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
 - `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+- `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file. Without a provider the span draws as before.
+- `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
+
+Two small changes come with them. Shape's diff popout gains a row above the patch when a host passes `fileAction`, which also clears the × from the patch's header. Esc on the board does nothing while a menu is open anywhere on the page, so the menu closes alone. Core's `ShapeRecord.project` is now `ShapeProject`, with an optional `worktree`; the JSON only gains that field, on boards written from a linked worktree.
 
 ## Shape: What to know (ui 0.62.0; not additive)
 

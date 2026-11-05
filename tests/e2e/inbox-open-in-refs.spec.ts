@@ -10,8 +10,10 @@
  *  - Each place offers the window's split button for a file on disk, and picking
  *    from it launches with that file's real path (and its line, on an editor that
  *    takes one). A referenced file that is not on disk has no control at all.
+ *  - A code span naming a file opens the list on a click; one that is not a file stays a plain span.
+ *  - An agent in a linked worktree: its message, review and board open the worktree's file, never the main checkout's.
  *  - At 390 px (a phone) no place offers one.
- *  - Code review off: no place offers one, and nothing else changes.
+ *  - Code review off: no place offers one, and the window asks nothing about them.
  *  - "Tell your agents" never appears.
  *
  * Build the binary first (see inbox.spec.ts). Shots land in
@@ -19,7 +21,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -46,6 +48,10 @@ interface World {
   shapeThread: string;
   reviewThread: string;
   messageThread: string;
+  worktree: string;
+  treeLinksThread: string;
+  treeReviewThread: string;
+  treeShape: string;
   claude: SimAgent;
 }
 
@@ -76,7 +82,10 @@ function payouts(parent: string) {
   const patch = git('diff', 'main...backoff');
   git('checkout', '-q', 'main');
   git('remote', 'add', 'origin', 'https://github.com/acme/payouts.git');
-  return { dir, patch };
+  // An agent's linked worktree on that branch, `main` left checked out beside it: how agents work.
+  const worktree = join(parent, 'wt-backoff');
+  git('worktree', 'add', '-q', worktree, 'backoff');
+  return { dir, patch, worktree: realpathSync(worktree) };
 }
 
 /** The fakes first on PATH: the launchers log and exit; `gh` answers the one PR. */
@@ -165,13 +174,13 @@ test.beforeAll(async () => {
   markTourDecided(dataDir);
   writeFileSync(join(dataDir, 'config.json'), JSON.stringify({ ...(JSON.parse(readFileSync(join(dataDir, 'config.json'), 'utf8')) as object), inboxCodeReview: true, inboxShape: true }));
   for (const dir of ['claude', 'codex', 'xdg']) mkdirSync(join(root, dir), { recursive: true });
-  const { dir: project, patch } = payouts(join(root, 'src'));
+  const { dir: project, patch, worktree } = payouts(join(root, 'src'));
   const launches = join(root, 'launches.log');
   const stubs = join(root, 'stubs');
   fakes(stubs, launches, patch);
   const env: Record<string, string> = {
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
-    ...(process.env.HOME ? { HOME: process.env.HOME } : {}),
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
@@ -189,12 +198,17 @@ test.beforeAll(async () => {
   const url = started.stdout.trim();
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const shapeSent = await claude.send({ project_path: project, thread: 'shape', subject: 'Retries: the board', body: 'The board is up.' });
-  const messageSent = await claude.send({ project_path: project, thread: 'links', subject: 'Retries: where to look', body: 'The wait is in [the retry loop](src/retry.ts#L3), and the rows in [the ledger](src/ledger.ts). I also meant [a file that is gone](src/gone.ts).' });
+  const messageSent = await claude.send({ project_path: project, thread: 'links', subject: 'Retries: where to look', body: 'The wait is in [the retry loop](src/retry.ts#L3), and the rows in [the ledger](src/ledger.ts). I also meant [a file that is gone](src/gone.ts). The table is `src/ledger.ts:1`, and `react.js` is not one of ours.' });
+  const treeLinks = await claude.send({ project_path: worktree, thread: 'tree links', subject: 'Retries: from my worktree', body: 'See [the new file](src/only-on-the-pr.ts), `src/only-on-the-pr.ts:1` and `src/retry.ts`.' });
+  const treeReview = await claude.submitGuide({ project_path: worktree, thread: 'tree review', subject: 'Retries: worktree review', guide: REVIEW_GUIDE, patch, review: true } as never);
   const reviewSent = await claude.submitGuide({ project_path: project, thread: 'review', subject: 'Retries: review', guide: REVIEW_GUIDE, patch, review: true } as never);
   mkdirSync(join(root, 'boards'), { recursive: true });
   writeFileSync(join(root, 'boards', 'board.json'), JSON.stringify(board(patch)));
   const updated = spawnSync(binary, ['shape', 'update', '--file', join(root, 'boards', 'board.json'), '--project', project, '--thread', shapeSent.thread_id as string], { env, cwd: project, encoding: 'utf8', timeout: 30_000 });
   expect(updated.status, updated.stderr).toBe(0);
+  // `--project` is the agent's working folder: a worktree folds into the project and the board keeps it.
+  const treeUpdated = spawnSync(binary, ['shape', 'update', '--file', join(root, 'boards', 'board.json'), '--project', worktree, '--thread', treeLinks.thread_id as string], { env, encoding: 'utf8', timeout: 60_000 });
+  expect(treeUpdated.status, treeUpdated.stderr).toBe(0);
   world = {
     root,
     dataDir,
@@ -206,6 +220,10 @@ test.beforeAll(async () => {
     shapeThread: shapeSent.thread_id as string,
     reviewThread: reviewSent.thread_id as string,
     messageThread: messageSent.thread_id as string,
+    worktree,
+    treeLinksThread: treeLinks.thread_id as string,
+    treeReviewThread: treeReview.thread_id as string,
+    treeShape: (JSON.parse(treeUpdated.stdout) as { id: string }).id,
     claude,
   };
 });
@@ -232,8 +250,8 @@ const shot = (page: Page, name: string) => page.screenshot({ path: join(proofDir
 const realPath = (file: string) => join(world.project, file);
 
 /** The board's References panel, open. */
-async function openRefs(page: Page) {
-  await page.goto(`${world.url}#thread=${world.shapeThread}&shape=${world.shape}`);
+async function openRefs(page: Page, thread = world.shapeThread, shape = world.shape) {
+  await page.goto(`${world.url}#thread=${thread}&shape=${shape}`);
   const panelTab = page.getByRole('button', { name: /References/ }).first();
   await panelTab.waitFor();
   await panelTab.click();
@@ -241,8 +259,8 @@ async function openRefs(page: Page) {
 }
 
 /** The agent's review, on All files. */
-async function openReviewFiles(page: Page) {
-  await page.goto(`${world.url}#thread=${world.reviewThread}`);
+async function openReviewFiles(page: Page, thread = world.reviewThread) {
+  await page.goto(`${world.url}#thread=${thread}`);
   await page.getByRole('button', { name: 'Start review' }).first().click();
   await page.locator('[data-review-mode-choice="files"]').click();
 }
@@ -286,6 +304,26 @@ for (const colorScheme of ['light', 'dark'] as const) {
       } else {
         await page.keyboard.press('Escape');
       }
+
+      // Esc on that menu closes the menu, and leaves the panel.
+      await rows.nth(0).locator('[data-open-in-caret]').click();
+      await expect(menu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(menu).toHaveCount(0);
+      await expect(page.locator('.shp-ref-list')).toBeVisible();
+
+      // A diff reference's popout has it too, and a pick leaves it open.
+      await rows.nth(1).locator('.shp-ref-open').click();
+      const diffPopout = page.locator('[data-popout]');
+      await expect(diffPopout.locator('.shp-diff-pop')).toBeVisible();
+      await diffPopout.locator('[data-open-in-caret]').click();
+      await expect(menu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `04c-shape-diff-popout-${colorScheme}`);
+      const diffCount = launched().length;
+      await menu.locator('[data-open-in-item="reveal"]').click();
+      await expect.poll(() => launched().length).toBe(diffCount + 1);
+      expect(launched().at(-1)).toContain(realPath('src/retry.ts'));
+      await expect(diffPopout).toBeVisible();
 
       // A bubble's preview, on the board. Its menu opens without closing the preview.
       await page.reload();
@@ -359,6 +397,30 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(body.locator('[data-open-in-caret]')).toHaveCount(2);
       await shot(page, `07-message-links-${colorScheme}`);
 
+      // Its code spans look like code until used: a click opens the same list at the span, and its line goes along.
+      const spanNames = page.locator('[data-open-in-span]');
+      await expect(spanNames).toHaveCount(2);
+      const spanMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
+      await page.locator('[data-open-in-span="src/ledger.ts"]').click();
+      await expect(spanMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      await shot(page, `11-message-code-span-menu-${colorScheme}`);
+      const spanEditor = spanMenu.locator('[data-open-in-item="vscode"]');
+      if (await spanEditor.count()) {
+        const count = launched().length;
+        await spanEditor.click();
+        await expect.poll(() => launched().length).toBe(count + 1);
+        expect(launched().at(-1)).toMatch(/(vscode:\/\/file.*src\/ledger\.ts:1|--goto .*src\/ledger\.ts:1)/);
+      } else {
+        await page.keyboard.press('Escape');
+      }
+      await expect(spanMenu).toHaveCount(0);
+      // A span that is not a file: no menu, no error, and from then on a plain span.
+      await page.locator('[data-open-in-span="react.js"]').click();
+      await expect(page.locator('[data-open-in-span="react.js"]')).toHaveCount(0);
+      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+      await expect(body.locator('code', { hasText: 'react.js' })).toBeVisible();
+      await expect(page.locator('[data-open-in-status].ib-err')).toHaveCount(0);
+
       await expect(page.getByText('Tell your agents')).toHaveCount(0);
     } finally {
       await context.close();
@@ -392,19 +454,73 @@ for (const colorScheme of ['light', 'dark'] as const) {
   });
 }
 
+// An agent in a linked worktree, `main` checked out in the main repository: every place opens the agent's checkout.
+test('an agent in a linked worktree: its message, review and board open the worktree, not the main checkout', async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1440, 900, 'light');
+  const inTree = (file: string) => join(world.worktree, file);
+  const pick = async (id: string) => {
+    const item = page.locator(`[data-open-in-menu="${id}"] [data-open-in-item="reveal"]`);
+    await expect(item).toBeVisible();
+    const count = launched().length;
+    await item.click();
+    await expect.poll(() => launched().length).toBe(count + 1);
+    return launched().at(-1)!;
+  };
+  try {
+    // A link and a span to a file only the worktree has; a span to one both have.
+    await page.goto(`${world.url}#thread=${world.treeLinksThread}`);
+    const body = page.locator('.ib-body').first();
+    await expect(body.locator('[data-open-in-caret]')).toHaveCount(1);
+    await body.locator('[data-open-in-caret]').click();
+    expect(await pick('src/only-on-the-pr.ts')).toContain(inTree('src/only-on-the-pr.ts'));
+    await page.locator('[data-open-in-span="src/retry.ts"]').click();
+    expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
+
+    // The review: the same two files.
+    await openReviewFiles(page, world.treeReviewThread);
+    const newFile = page.locator('[data-guide-file-shell="src/only-on-the-pr.ts"]');
+    await newFile.scrollIntoViewIfNeeded();
+    await expect(newFile.locator('[data-open-in-caret]')).toBeVisible();
+    await newFile.locator('[data-open-in-caret]').click();
+    expect(await pick('src/only-on-the-pr.ts')).toContain(inTree('src/only-on-the-pr.ts'));
+    const changed = page.locator('[data-guide-file-shell="src/retry.ts"]');
+    await changed.scrollIntoViewIfNeeded();
+    await changed.locator('[data-open-in-caret]').click();
+    expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
+    await shot(page, '12-worktree-review-light');
+
+    // The board: Open in, and its own file viewer, read the worktree (the main checkout's has no BACKOFF_MS).
+    await openRefs(page, world.treeLinksThread, world.treeShape);
+    const row = page.locator('.shp-ref-list li').nth(0);
+    await row.locator('[data-open-in-caret]').click();
+    expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
+    await row.locator('.shp-ref-open').click();
+    await expect(page.locator('[data-popout]')).toContainText('BACKOFF_MS');
+  } finally {
+    await context.close();
+  }
+});
+
 test('Code review off: no place offers one', async ({ browser }) => {
   const config = join(world.dataDir, 'config.json');
   const was = readFileSync(config, 'utf8');
   writeFileSync(config, JSON.stringify({ ...(JSON.parse(was) as object), inboxCodeReview: false }));
   const { context, page } = await windowAt(browser, 1440, 900, 'light');
+  // The window itself stays out of it: not one question goes to these routes (the server's refusal alone would hide the control).
+  const asked: string[] = [];
+  page.on('request', (request) => {
+    if (request.url().includes('/open-in/')) asked.push(request.url());
+  });
   try {
     await page.goto(`${world.url}#thread=${world.messageThread}`);
     await expect(page.locator('.ib-body [data-local-link="unavailable"]').first()).toBeVisible();
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
+    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
     await page.goto(`${world.url}#thread=${world.shapeThread}&shape=${world.shape}`);
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
+    expect(asked).toEqual([]);
   } finally {
     await context.close();
     writeFileSync(config, was);

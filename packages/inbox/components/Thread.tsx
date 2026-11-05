@@ -17,7 +17,7 @@ import { INBOX_UPLOAD_MAX_BYTES, inboxActionInDraft, inboxActionPersonMark, type
 import { withoutInboxActionsSection } from '@plannotator/core/inbox-actions';
 import { capQuestionPrompt, emptyQuestionAnswer, indexQuestionBlocks, isQuestionAnswerEmpty, type IndexedQuestion, type QuestionAnswer, type QuestionStatus } from '@plannotator/core/question-block';
 import { INBOX_AUTO_SEND_ACK_NOTES, inboxAskingMessage, wholeMinutes, isInboxNote, isInboxTextKind, readInboxAttachmentKind, type InboxAnnotationRecord, type InboxAttachment, type InboxAttachmentState, type InboxInlineImage, type InboxQuestionState } from '@plannotator/core/inbox-types';
-import type { LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
+import { CodeSpanContext, type CodeSpanRenderer, type LocalLinkResolver } from '@plannotator/ui/components/LocalLinkContext';
 import { NOT_ATTACHED_TITLE, attachmentDeepLink, attachmentDisplayPath, attachmentForLink, openAttachmentTitle, projectFileOfLink, useRefRepo } from '../links';
 import { InboxApiError, InboxHeldError, inboxApi, type AttachmentsModel, type MachineView, type OutboxView, type TagMode } from '../api';
 import { awayLine, outboxLine } from '../machines';
@@ -28,7 +28,7 @@ import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
-import { OpenInFile, type OpenInSurface } from './OpenIn';
+import { OpenInCodeSpan, OpenInFile, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -717,7 +717,7 @@ export function MessageBody({
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       if (!attachment) {
         // Not attached, but a file of the project: its Open in (nothing when it is not on this computer).
-        const projectFile = openInFiles ? projectFileOfLink(href, { root: projectRoot, base: message.base_path ?? null }) : null;
+        const projectFile = openInFiles ? projectFileOfLink(href) : null;
         return {
           kind: 'unavailable',
           title: NOT_ATTACHED_TITLE,
@@ -732,6 +732,11 @@ export function MessageBody({
       };
     },
     [message.attachments, message.base_path, message.thread_id, message.id, projectRoot, replyFileList, openInFiles],
+  );
+  // A code span that names a file opens Open in when clicked, and only then asks about it.
+  const renderCodeSpan = useCallback<CodeSpanRenderer>(
+    (text, code) => <OpenInCodeSpan scope={{ thread: message.thread_id, message: message.id }} text={text}>{code}</OpenInCodeSpan>,
+    [message.thread_id, message.id],
   );
   const renderFooter = useCallback(
     (question: IndexedQuestion) => {
@@ -913,6 +918,7 @@ export function MessageBody({
   return (
     <ImageResolverContext.Provider value={resolveImage}>
     <SoftLineBreaksContext.Provider value={ownReply}>
+    <CodeSpanContext.Provider value={openInFiles ? renderCodeSpan : null}>
     <div className="ib-body" data-message-id={message.id} data-text-comments={comments ? '' : undefined} data-sent-reply={replyParts ? '' : undefined} ref={bodyRef} onMouseUpCapture={comments?.onOpen ? readPress : undefined} onClickCapture={openHashtag} onClick={comments?.onOpen ? openHighlight : undefined}>
       {refCard}
       {tagPeek.node}
@@ -974,6 +980,7 @@ export function MessageBody({
       )}
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
+    </CodeSpanContext.Provider>
     </SoftLineBreaksContext.Provider>
     </ImageResolverContext.Provider>
   );

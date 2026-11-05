@@ -8,7 +8,7 @@ import { hasLinkedDocExtension } from "../utils/markdownExtensions";
 import { getImageSrc } from "./ImageThumbnail";
 import { UNAVAILABLE_IMAGE_CLASS, useImageResolver } from "./ImageResolverContext";
 import { useCodePathValidation, type CodePathValidationContextValue } from "./CodePathValidationContext";
-import { isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
+import { CodeSpanContext, isLocalLinkTarget, isNewTabClick, useLocalLinkResolver } from "./LocalLinkContext";
 import type { ValidationEntry } from "../hooks/useValidatedCodePaths";
 import { CodeFilePicker } from "./CodeFilePicker";
 import { normalizeMathTex, renderMathToHtml } from "../utils/math";
@@ -479,6 +479,7 @@ export const InlineMarkdown: React.FC<{
 }> = ({ text, onOpenLinkedDoc, resolveLinkedDoc, onOpenCodeFile, onNavigateAnchor, imageBaseDir, onImageClick, githubRepo, repoHost }) => {
   const validation = useCodePathValidation();
   const resolveLocalLink = useLocalLinkResolver();
+  const renderCodeSpan = useContext(CodeSpanContext);
   const softLineBreaks = useContext(SoftLineBreaksContext);
   const resolveImage = useImageResolver();
   const refLinks = forgeRefLinks({ display: githubRepo, host: repoHost });
@@ -803,13 +804,18 @@ export const InlineMarkdown: React.FC<{
           />,
         );
       } else {
-        parts.push(
+        const code = (
           <code
             key={key++}
             className="px-1.5 py-0.5 rounded bg-muted text-sm font-mono"
           >
             {codeContent}
-          </code>,
+          </code>
+        );
+        parts.push(
+          renderCodeSpan && isCodeFilePath(codeContent)
+            ? <React.Fragment key={code.key}>{renderCodeSpan(codeContent, code)}</React.Fragment>
+            : code,
         );
       }
       remaining = remaining.slice(match[0].length);

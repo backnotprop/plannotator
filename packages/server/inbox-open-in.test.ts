@@ -8,7 +8,8 @@
  * has its own temp data dir; Tailscale is a scripted runner, never the CLI.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
@@ -311,7 +312,7 @@ describe("Inbox Open in: a file a reference names", () => {
     symlinkSync(join(r.root, "secret.txt"), join(r.project, "out.txt"));
     symlinkSync(r.root, join(r.project, "up"));
     symlinkSync(join(r.project, ".env"), join(r.project, "config.txt"));
-    for (const path of ["../secret.txt", "src/../../secret.txt", join(r.root, "secret.txt"), "~/secret.txt", "out.txt", "up/secret.txt", ".env", "config.txt", "..%2fsecret.txt"]) {
+    for (const path of ["../secret.txt", "src/../../secret.txt", join(r.root, "secret.txt"), "~/secret.txt", "out.txt", "up/secret.txt", ".env", ".env::$DATA", "config/.env .", "config.txt", "..%2fsecret.txt"]) {
       expect([path, await r.check({ thread: r.thread, path })]).toEqual([path, { found: false }]);
       expect([path, ...(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" })))]).toEqual([path, 422, "open_not_allowed"]);
     }
@@ -330,6 +331,140 @@ describe("Inbox Open in: a file a reference names", () => {
     await r.open({ thread: r.thread, path: "deploy.sh", app_id: "cursor" });
     await r.open({ thread: r.thread, path: "shot.png", app_id: "default" });
     expect(r.launches.map((l) => l.how)).toEqual(["app", "default"]);
+  });
+
+  /** A linked worktree of the project, as git leaves it: a folder whose `.git` is a file. */
+  function worktree(r: { root: string }, name: string, files: Record<string, string>) {
+    const dir = realpathSync(mkdtempSync(join(r.root, `${name}-`)));
+    writeFileSync(join(dir, ".git"), "gitdir: /elsewhere/.git/worktrees/x\n");
+    for (const [path, text] of Object.entries(files)) {
+      mkdirSync(join(dir, path, ".."), { recursive: true });
+      writeFileSync(join(dir, path), text);
+    }
+    return dir;
+  }
+
+  const AGENT = { kind: "agent", host: "claude-code", session: "ses_b", name: "Claude Code" } as const;
+
+  test("an agent in a linked worktree: its links open the worktree's file, never the main checkout's copy", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    writeFileSync(join(r.project, "src/only-main.ts"), "main\n");
+    const wt = worktree(r, "wt", { "src/app.ts": "worktree\n", "src/only-here.ts": "worktree\n" });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: wt });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(wt, "src/app.ts"));
+    expect((await r.check({ ...scope, path: "src/only-here.ts" })).path).toBe(join(wt, "src/only-here.ts"));
+    expect((await r.check({ ...scope, path: join(wt, "src/app.ts") })).path).toBe(join(wt, "src/app.ts"));
+    // A file the worktree does not have: the main checkout's copy is not the agent's file.
+    expect(await r.check({ ...scope, path: "src/only-main.ts" })).toEqual({ found: false });
+    // Named absolutely, it means that file.
+    expect((await r.check({ ...scope, path: join(r.project, "src/only-main.ts") })).path).toBe(join(r.project, "src/only-main.ts"));
+
+    await r.open({ ...scope, path: "src/app.ts", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path: join(wt, "src/app.ts") }]);
+  });
+
+  test("a worktree that is gone: the project's own copy", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "plan.md"), "# main\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.root, "removed-worktree") });
+    expect((await r.check({ thread: sent.message.thread_id, message: sent.message.id, path: "plan.md" })).path).toBe(join(r.project, "plan.md"));
+  });
+
+  test("a board written from a linked worktree opens that worktree's file, and the project's once the worktree is gone", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    const wt = worktree(r, "wt", { "app.ts": "worktree\n", "new.ts": "worktree\n" });
+    const made = createShapeStore({ dataDir: r.dataDir }).update({
+      board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+      project: { root: r.project, name: "billing", worktree: wt },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(wt, "app.ts"));
+    expect((await r.check({ shape: made.id, path: "new.ts" })).path).toBe(join(wt, "new.ts"));
+    // Its file viewer reads the same checkout.
+    const read = (await (await fetch(`${r.base}/api/shapes/${made.id}/code/file?path=app.ts`)).json()) as Json;
+    expect(JSON.stringify(read)).toContain("worktree");
+    rmSync(wt, { recursive: true, force: true });
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(r.project, "app.ts"));
+  });
+
+  test("an agent in a subfolder: a link starts at its folder, and at the top of its checkout", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/ledger.ts"), "ledger\n");
+    writeFileSync(join(r.project, "src/near.ts"), "near\n");
+    writeFileSync(join(r.project, "near.ts"), "top\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.project, "src") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/ledger.ts" })).path).toBe(join(r.project, "src/ledger.ts"));
+    expect((await r.check({ ...scope, path: "near.ts" })).path).toBe(join(r.project, "src/near.ts"));
+    expect((await r.check({ ...scope, path: "../near.ts" })).path).toBe(join(r.project, "near.ts"));
+  });
+
+  test("a reply from another project: an absolute link means that file; a relative one starts in the sender's project", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "billing\n");
+    const other = realpathSync(mkdtempSync(join(r.root, "other-")));
+    writeFileSync(join(other, "app.ts"), "other\n");
+    writeFileSync(join(other, "theirs.ts"), "other\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Hello.", reply_to: r.thread, from_project: { name: "other", root: other } } as never);
+    expect(sent.message.from_project?.root).toBe(other);
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: join(r.project, "app.ts") })).path).toBe(join(r.project, "app.ts"));
+    expect((await r.check({ ...scope, path: join(other, "theirs.ts") })).path).toBe(join(other, "theirs.ts"));
+    expect((await r.check({ ...scope, path: "app.ts" })).path).toBe(join(other, "app.ts"));
+  });
+
+  test("a message scope reads only its own thread: another thread's message brings no root", async () => {
+    const r = await referenced();
+    const elsewhere = realpathSync(mkdtempSync(join(r.root, "elsewhere-")));
+    writeFileSync(join(elsewhere, ".git"), "gitdir: /x\n");
+    writeFileSync(join(elsewhere, "secret.ts"), "there\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const stray = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "There.", base_path: elsewhere });
+    // Without the thread rule, this message's folder would answer.
+    expect((await r.check({ thread: stray.message.thread_id, message: stray.message.id, path: "secret.ts" })).found).toBe(true);
+    expect(await r.check({ thread: r.thread, message: stray.message.id, path: "secret.ts" })).toEqual({ found: false });
+    expect(await answerOf(await r.open({ thread: r.thread, message: stray.message.id, path: "secret.ts", app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+  });
+
+  test("only a whole, safe line number reaches the launcher", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "export {};\n");
+    const path = join(r.project, "app.ts");
+    for (const line of ["12; rm -rf /", "12", 12.5, -1, 0, [12], {}, null, true, 1e24]) {
+      r.launches.length = 0;
+      await r.open({ thread: r.thread, path: "app.ts", app_id: "vscode", line });
+      expect([line, r.launches]).toEqual([line, [{ how: "app", path, app: "vscode" }]]);
+    }
+  });
+
+  test("only a regular file: a folder or a pipe has no control, and a read of one does not hang", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "folder.ts"));
+    spawnSync("mkfifo", [join(r.project, "pipe.ts")]);
+    expect(existsSync(join(r.project, "pipe.ts"))).toBe(true);
+    for (const path of ["folder.ts", "pipe.ts"]) {
+      expect(await r.check({ thread: r.thread, path })).toEqual({ found: false });
+      expect(await answerOf(await r.open({ thread: r.thread, path, app_id: "vscode" }))).toEqual([404, "attachment_missing"]);
+    }
+    expect(r.launches).toEqual([]);
+  });
+
+  test("a read from another site is refused", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "export {};\n");
+    const answer = await fetch(`${r.base}${FILE}?thread=${r.thread}&path=app.ts`, { headers: { Origin: "https://evil.example" } });
+    expect(answer.status).toBe(403);
   });
 
   test("a stale tab is turned away, and with Code review off the route answers nothing", async () => {

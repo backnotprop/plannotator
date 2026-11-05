@@ -255,19 +255,15 @@ test.skipIf(!hasDom)('a Viewer without resolveLocalLink draws a local link as it
 });
 
 test('the project file a link that names no attachment may mean: relative to the root, with its line; nothing outside the project', () => {
-  const root = '/work/app';
-  expect(projectFileOfLink('src/a.ts', { root })).toEqual({ path: 'src/a.ts' });
-  expect(projectFileOfLink('src/a.ts#L12', { root })).toEqual({ path: 'src/a.ts', line: 12 });
-  expect(projectFileOfLink('src/a.ts:12', { root })).toEqual({ path: 'src/a.ts', line: 12 });
-  expect(projectFileOfLink('src/a.ts:12:4', { root })).toEqual({ path: 'src/a.ts', line: 12 });
-  expect(projectFileOfLink('/work/app/src/a.ts', { root })).toEqual({ path: 'src/a.ts' });
-  expect(projectFileOfLink('my%20file.ts', { root })).toEqual({ path: 'my file.ts' });
-  // The message's own folder first, as for an attachment.
-  expect(projectFileOfLink('a.ts', { root, base: '/work/app/src' })).toEqual({ path: 'src/a.ts' });
-  expect(projectFileOfLink('../a.ts', { root, base: '/work/app/src' })).toEqual({ path: 'a.ts' });
-  // Out of the project.
-  expect(projectFileOfLink('../other/a.ts', { root })).toBeNull();
-  expect(projectFileOfLink('/etc/hosts', { root })).toBeNull();
-  expect(projectFileOfLink('/work/application/a.ts', { root })).toBeNull();
-  expect(projectFileOfLink('#top', { root })).toBeNull();
+  expect(projectFileOfLink('src/a.ts')).toEqual({ path: 'src/a.ts' });
+  expect(projectFileOfLink('src/a.ts#L12')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12-20')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('my%20file.ts')).toEqual({ path: 'my file.ts' });
+  // The path stays as written: the server knows the folder the agent wrote from.
+  expect(projectFileOfLink('/work/wt/src/a.ts')).toEqual({ path: '/work/wt/src/a.ts' });
+  expect(projectFileOfLink('../a.ts')).toEqual({ path: '../a.ts' });
+  expect(projectFileOfLink('#top')).toBeNull();
+  expect(projectFileOfLink('src/')).toBeNull();
 });

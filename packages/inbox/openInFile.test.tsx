@@ -7,12 +7,12 @@
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
-import { afterEach, beforeEach, expect, test } from 'bun:test';
+import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 
 const hasDom = typeof document !== 'undefined';
-const { OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { OpenInCodeSpan, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
 type Asked = { method: string; url: string; body: Record<string, unknown> | null };
@@ -125,4 +125,63 @@ test.skipIf(!hasDom)('a source that writes nothing (the tour): nothing', async (
   await settle();
   expect(host!.innerHTML).toBe('');
   expect(fileReads()).toHaveLength(0);
+});
+
+describe('a code span that names a file', () => {
+  const scope = { thread: 'msg_span', message: 'msg_span2' };
+  const span = () => host!.querySelector('[data-open-in-span]') as HTMLElement | null;
+  const menu = () => document.querySelector('[data-open-in-menu]');
+  const draw = (text = 'src/a.ts:12') =>
+    act(async () => root!.render(<OpenInCodeSpan scope={scope} text={text}><code>{text}</code></OpenInCodeSpan>));
+  const press = async (key = 'Enter') => {
+    await act(async () => {
+      span()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+      await new Promise((done) => setTimeout(done, 20));
+    });
+  };
+
+  test.skipIf(!hasDom)('asks nothing until it is used, and then opens the list', async () => {
+    await draw();
+    await settle();
+    expect(span()!.querySelector('code')!.textContent).toBe('src/a.ts:12');
+    expect(asked.filter((a) => a.url.includes('/open-in/'))).toHaveLength(0);
+    await press();
+    await settle();
+    expect(fileReads()[0]!.url).toContain('path=src%2Fa.ts');
+    expect(menu()).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a click waits out a double click, which only selects the words', async () => {
+    await draw('src/b.ts');
+    await act(async () => {
+      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
+      await new Promise((done) => setTimeout(done, 260));
+    });
+    expect(fileReads()).toHaveLength(0);
+    await act(async () => {
+      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
+      await new Promise((done) => setTimeout(done, 260));
+    });
+    await settle();
+    expect(menu()).not.toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a span that is not a file stays a plain span: no menu, no error', async () => {
+    answers.file = { status: 200, body: { found: false } };
+    await draw('react.js');
+    await press();
+    await settle();
+    expect(menu()).toBeNull();
+    expect(span()).toBeNull();
+    expect(host!.innerHTML).toBe('<code>react.js</code>');
+  });
+
+  test.skipIf(!hasDom)('on a phone it is only the span', async () => {
+    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+    await draw();
+    await settle();
+    expect(span()).toBeNull();
+    expect(host!.querySelector('code')).not.toBeNull();
+  });
 });

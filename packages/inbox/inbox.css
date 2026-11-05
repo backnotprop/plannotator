@@ -4284,6 +4284,10 @@ dialog.ib-cp::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-appi { width: 16px; height: 16px; flex: none; display: block; }
 /* Shape's file popout portals out of .pn-inbox, as a menu does: the caret keeps its stroke there too. */
 [data-popout] .ib-split svg.ib-ic { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+/* A code span naming a file looks like any other code span until the pointer is on it. */
+.ib-openin-span { cursor: pointer; border-radius: 4px; }
+.ib-openin-span:hover code { color: var(--primary); }
+.ib-openin-span:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
 /* A referenced file's Open in, in a message's line of text: it stays within the line. */
 .ib-body .ib-openin { vertical-align: middle; margin-left: 4px; }
 .ib-body .ib-split { height: 20px; }

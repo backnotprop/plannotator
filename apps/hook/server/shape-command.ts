@@ -19,10 +19,10 @@
  * of text otherwise. A refusal goes to stderr as `<code>: <message>` and exits
  * 1; bad usage exits 2.
  */
-import { readFileSync, statSync } from "node:fs";
-import { dirname, isAbsolute, resolve } from "node:path";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
-import { createShapeStore, type ShapeStore } from "@plannotator/shared/shape/store";
+import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
 import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
@@ -151,12 +151,14 @@ export interface ShapeCommandDeps {
   stdout?: (text: string) => void | Promise<void>;
   stderr?: (text: string) => void;
   /** The project a folder belongs to (the Inbox's rule). Tests pass a stand-in. */
-  projectRootOf?: (folder: string) => Promise<{ root: string; name: string }>;
+  projectRootOf?: (folder: string) => Promise<ShapeProject>;
 }
 
 async function defaultProjectRoot(folder: string) {
   const resolved = await resolveInboxProjectRoot(folder);
-  return { root: resolved.root, name: resolved.name };
+  // A linked worktree folds into its project; the board's code is the worktree's. (A folder of checkouts is not one.)
+  const worktree = resolved.worktree && existsSync(join(resolved.worktree, ".git")) ? resolved.worktree : null;
+  return { root: resolved.root, name: resolved.name, ...(worktree ? { worktree } : {}) };
 }
 
 /** Write to stdout and settle once the text is flushed (or the pipe is closed). */
@@ -223,7 +225,7 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
-    let project: { name: string; root: string } | null = null;
+    let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
       if (!record) return refuse("not_found", `No shape ${c.id}. List them with \`plannotator shape list\`.`);

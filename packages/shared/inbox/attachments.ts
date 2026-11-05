@@ -447,6 +447,12 @@ export async function checkInboxAttachmentForLaunch(inboxDirPath: string, attach
 }
 
 /** What a file in a project is, for "Open in" on a reference to it. */
+/** One place a referenced file may be: a folder and the path from it. */
+export interface InboxProjectFilePlace {
+  root: string;
+  relative: string;
+}
+
 export type InboxProjectFile = { ok: true; path: string; kind: InboxAttachmentKind } | { ok: false; code: "missing" | "refused" };
 
 /**
@@ -456,10 +462,13 @@ export type InboxProjectFile = { ok: true; path: string; kind: InboxAttachmentKi
  * target's is of the dotenv family. The kind comes from its name and first bytes, as a send decides it, so the same
  * per-kind policy applies. The first root holding the file wins (two clones of one repository).
  */
-export async function checkInboxProjectFile(roots: readonly string[], relative: string): Promise<InboxProjectFile> {
-  if (!isShapeProjectPath(relative)) return { ok: false, code: "refused" };
+export async function checkInboxProjectFile(places: readonly InboxProjectFilePlace[]): Promise<InboxProjectFile> {
   let refused = false;
-  for (const root of roots) {
+  for (const { root, relative } of places) {
+    if (!isShapeProjectPath(relative) || inboxAttachmentNameRefusal(relative)) {
+      refused = true;
+      continue;
+    }
     let real: string;
     let realRoot: string;
     try {
@@ -468,7 +477,7 @@ export async function checkInboxProjectFile(roots: readonly string[], relative: 
     } catch {
       continue;
     }
-    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep) || inboxAttachmentNameRefusal(relative) || inboxAttachmentNameRefusal(real)) {
+    if (!real.startsWith(realRoot.endsWith(sep) ? realRoot : realRoot + sep) || inboxAttachmentNameRefusal(real)) {
       refused = true;
       continue;
     }

@@ -1,14 +1,15 @@
 import { inboxUrl } from '../inboxUrl';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type MouseEvent, type ReactNode } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
-import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
+import { loadOpenInApps, useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { InboxApiError, inboxApi, type OpenInFileScope } from '../api';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl } from '../attachments';
+import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
 import { usePhone } from '../phone';
 import { Tip } from './Tip';
@@ -299,6 +300,83 @@ function OpenInFileSplit({ scope, path, line }: { scope: OpenInFileScope; path: 
   if (!answer?.available || !file) return null;
   const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
   return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={false} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+}
+
+/**
+ * A code span that names a file (`src/retry.ts:12`) in a message: it looks as it does without this, and a click opens
+ * the same list at the span. Nothing is asked before the click; a span that is not a file on this computer then stays a
+ * plain span, with no menu and no error. The short wait lets a double click select the words, as in any other text.
+ */
+export function OpenInCodeSpan({ scope, text, children }: { scope: OpenInFileScope; text: string; children: ReactNode }) {
+  const phone = usePhone();
+  const { writes } = useInboxFileSource();
+  const named = projectFileOfLink(text);
+  if (phone || !writes || !named) return <>{children}</>;
+  return <OpenInCodeSpanMenu scope={scope} path={named.path} line={named.line}>{children}</OpenInCodeSpanMenu>;
+}
+
+const CODE_SPAN_CLICK_MS = 200;
+
+function OpenInCodeSpanMenu({ scope, path, line, children }: { scope: OpenInFileScope; path: string; line?: number; children: ReactNode }) {
+  const [remembered, remember] = useRememberedOpenInApp();
+  const [found, setFound] = useState<{ menu: OpenInMenu; kind: string; path: string } | null>(null);
+  const [notAFile, setNotAFile] = useState(false);
+  const [open, setOpen] = useState(false);
+  const anchor = useRef<HTMLSpanElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current);
+  }, []);
+  const { status, launch, copyPath } = useOpenInActions(found?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
+
+  const ask = async () => {
+    const [apps, file] = await Promise.all([loadOpenInApps(INBOX_OPEN_IN_APPS_URL), inboxApi.openInFileCheck(scope, path).catch(() => null)]);
+    if (!apps.available || !file?.found || !file.path || !file.kind) {
+      setNotAFile(true);
+      return;
+    }
+    const target = { path: file.path, kind: file.kind };
+    setFound({ ...target, menu: openInMenuFor(target, apps.apps, apps.platform ?? 'linux', remembered, null, false) });
+    setOpen(true);
+  };
+
+  if (notAFile) return <>{children}</>;
+  const onClick = (event: MouseEvent) => {
+    if (timer.current) clearTimeout(timer.current);
+    // A second click, a drag over the words or a link around the span: not this.
+    if (event.detail > 1 || !window.getSelection()?.isCollapsed || (event.target as Element).closest('a')) return;
+    timer.current = setTimeout(() => void ask(), CODE_SPAN_CLICK_MS);
+  };
+  return (
+    <>
+      <span
+        ref={anchor}
+        className="ib-openin-span"
+        role="button"
+        tabIndex={0}
+        title="Open in…"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        data-open-in-span={path}
+        onClick={onClick}
+        onKeyDown={(event) => {
+          if (event.key !== 'Enter' && event.key !== ' ') return;
+          event.preventDefault();
+          void ask();
+        }}
+      >
+        {children}
+      </span>
+      {found && (
+        <DropdownMenu open={open} onOpenChange={setOpen}>
+          <DropdownMenuContent anchor={anchor} align="start" sideOffset={6} className="min-w-[12rem]" finalFocus={anchor} data-open-in-menu={path}>
+            <OpenInMenuItems kind={found.kind} missingWord="" menu={found.menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
+          </DropdownMenuContent>
+        </DropdownMenu>
+      )}
+      {status && <Status status={status} />}
+    </>
+  );
 }
 
 /**
