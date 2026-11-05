@@ -46,7 +46,7 @@ import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure
 import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
 import { overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe } from '../review-drawing/useShowMe';
-import { ShapeLayer, ShapePebbleButton } from '../shape/ShapeParts';
+import { ShapeBoardLayer, ShapePebbleButton } from '../shape/ShapeParts';
 import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelectionActions } from '../guide/types';
 import { InboxApiError, inboxApi } from '../api';
@@ -775,7 +775,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
-      {board && <ShapeLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} />}
+      {board && <ShapeBoardLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} />}
       {board && landed && (
         <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed} resolveSrc={(src) => shapeHost.assetUrl?.(board, src) ?? src} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} />
       )}

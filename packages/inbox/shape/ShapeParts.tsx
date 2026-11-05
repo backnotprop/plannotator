@@ -4,7 +4,7 @@
  * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
  * are the window's.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
@@ -65,18 +65,27 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 
 /**
 /**
- * The board, over the thread, the grid or a review: its ×, Esc or Back closes it. It covers the page's head, so the
- * sidebar toggle every full page's head has sits at its title's left: the board can take the window's width. `hidden`:
- * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its
- * line; a review is its own full page, so it has no toggle.
+ * The board, over the thread or the grid: its ×, Esc or Back closes it. It covers the page's head, so the sidebar
+ * toggle every full page's head has sits at its title's left: the board can take the window's width.
  */
-export function ShapeLayer({
+export function ShapeLayer(props: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
+  // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
+  const { isMobile } = useSidebar();
+  return <ShapeBoardLayer {...props} headStart={isMobile ? undefined : <SidebarTrigger />} />;
+}
+
+/**
+ * The layer itself, needing no sidebar: a review is a full window of its own, outside the sidebar's shell. `hidden`:
+ * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
+ */
+export function ShapeBoardLayer({
   host,
   id,
   onClose,
   thread,
   hidden,
   onCode,
+  headStart,
 }: {
   host: ShapeHost;
   id: string;
@@ -84,9 +93,8 @@ export function ShapeLayer({
   thread: InboxThread | null;
   hidden?: boolean;
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => boolean;
+  headStart?: ReactNode;
 }) {
-  // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
-  const { isMobile } = useSidebar();
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
   // (this layer mounted again, or another board in it) asks for the chunk again.
   const [failedOn, setFailedOn] = useState<string | null>(null);
@@ -108,7 +116,7 @@ export function ShapeLayer({
           onClose={onClose}
           onCode={onCode}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
-          headStart={isMobile || onCode ? undefined : <SidebarTrigger />}
+          headStart={headStart}
         />
       </PanePart>
     </section>
