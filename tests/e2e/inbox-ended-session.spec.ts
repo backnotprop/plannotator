@@ -126,6 +126,10 @@ async function shot(name: string): Promise<void> {
   const page = world.page;
   for (const width of [1440, 390]) {
     await page.setViewportSize({ width, height: width === 1440 ? 900 : 844 });
+    // A resize moves the thread's scroll: its end is where the note, the form or the latest reply is.
+    await page.locator('section.ib-pane').evaluate((pane) => {
+      for (const el of [pane, ...pane.querySelectorAll('*')]) if (el.scrollHeight > el.clientHeight + 1 && getComputedStyle(el).overflowY !== 'visible') el.scrollTop = el.scrollHeight;
+    });
     for (const scheme of ['light', 'dark'] as const) {
       await page.emulateMedia({ colorScheme: scheme, reducedMotion: 'reduce' });
       await page.waitForTimeout(300);
