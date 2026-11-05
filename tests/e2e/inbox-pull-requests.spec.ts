@@ -1080,17 +1080,23 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
   await expect(review.locator('[data-pull-layer-row][aria-current="step"]')).toContainText('#413');
 
-  // Whole stack up to #413: from the lowest open layer's base, so #412's files and #413's, not the merged #411's.
-  await review.locator('[data-pull-layer-all]').click();
+  // All 3 layers, from #413 too: the top open layer's whole stack, from the lowest open layer's base, so every open
+  // layer's files, not the merged #411's. Its number and its title say so.
+  const allLayers = review.locator('[data-pull-layer-all]');
+  await expect(allLayers).toContainText('All 3 layers');
+  await allLayers.click();
   await expect(review).toHaveAttribute('data-pull-scope', 'stack');
-  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(3);
+  await expect(review).toHaveAttribute('data-pull-review', STACK_ID);
+  await expect(review.locator('[data-pull-review-title]').first()).toContainText('Whole stack up to #414');
+  await expect(allLayers).toHaveAttribute('aria-pressed', 'true');
+  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(4);
   await expect(review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]')).toBeVisible({ timeout: 30_000 });
   await expect(review.locator('[data-guide-file-shell="src/charges/client.ts"]')).toHaveCount(0);
-  expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/retry/charge-client...retry/backoff');
+  expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/retry/charge-client...retry/dunning');
   await shot(page, '8-whole-stack', ['light']);
   await review.locator(`[data-pull-layer-row="${LAYER_413}"]`).click();
   await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
-  expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_413} layer`, `${LAYER_413} stack`]);
+  expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_413} layer`, `${STACK_ID} stack`]);
   page.off('request', watch);
 
   // Approve: the person's reply in the agent's thread, naming the layer.
@@ -1163,6 +1169,33 @@ test('the same small gap between files, whatever separators a file draws: above 
     await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
     await review.locator('[data-diff-style-switch] input[value="unified"]').locator('..').click();
     await expect.poll(() => seams(review)).toEqual([12, 12, 12, 12]);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a tooltip on screen does not take a sheet's Escape: ui's on the rail's Viewed circle", async ({ browser }) => {
+  const { context, page } = await stubbedReview(browser, 1100, COLLIDING_PATHS_DIFF);
+  try {
+    const review = page.locator('[data-pull-review]');
+    const panel = review.locator('.ib-gpanel');
+    const comments = review.locator('.ib-vcomments');
+    const tip = page.locator('[data-pn-tooltip]');
+    const row = review.locator('[data-review-files] button').filter({ has: page.locator('.ib-prp-fname') }).first();
+    const closesOverTip = async (hoverIt: () => Promise<void>) => {
+      await comments.click();
+      await expect(panel).toBeVisible();
+      await hoverIt();
+      await expect(tip).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(panel).toBeHidden();
+      await expect(tip).toHaveCount(0);
+      await expect(review).toBeVisible();
+    };
+    await closesOverTip(async () => {
+      await row.hover();
+      await row.locator('[role="checkbox"]').hover();
+    });
   } finally {
     await context.close();
   }

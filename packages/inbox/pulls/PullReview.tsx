@@ -53,6 +53,7 @@ import { postablePull, postedSignature, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { FileTreeMark } from './fileTreeMark';
+import { TooltipEscapePassesThrough } from '@plannotator/ui/components/Tooltip';
 import { RailStack } from './RailStack';
 import { RailTree } from './RailTree';
 import { useSheetEscape } from '../shortcuts/useSheetEscape';
@@ -129,7 +130,12 @@ function keep(id: string, value: { comments: KeptComment[]; viewed: string[] }):
  * One review per layer and scope: moving to another layer (Next layer, the rail) or to all the layers starts afresh, so a note drafted on #412 never rides into #413's verdict.
  */
 export function PullReview(props: PullReviewProps) {
-  return <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />;
+  // A tooltip in the rail, a file's head or the decision (ui's, not the Inbox's Tip) would eat the Escape that closes a sheet.
+  return (
+    <TooltipEscapePassesThrough.Provider value={true}>
+      <LayerReview key={`${props.layerKey}\u0000${props.scope}`} {...props} />
+    </TooltipEscapePassesThrough.Provider>
+  );
 }
 
 /** What the diff on screen is, for the kept comments: what is read of it, and what the list says. */
@@ -681,7 +687,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   };
   const rail = (
     <>
-      {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} onLayer={onLayer} />}
+      {stack.layers.length > 1 && <RailStack layers={stack.layers} here={layer} scope={scope} wholeTip={wholeTip} wholeCounts={scope === 'stack' && diff ? { add: files.reduce((sum, f) => sum + f.additions, 0), del: files.reduce((sum, f) => sum + f.deletions, 0) } : undefined} onLayer={onLayer} />}
       <RailTree tree={tree} loose={loose} files={files} viewed={viewedSet} commentCount={(path) => comments.filter((comment) => comment.filePath === path).length} onSelect={pickFile} onToggleViewed={toggleViewed} />
     </>
   );
