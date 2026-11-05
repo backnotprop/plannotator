@@ -28,7 +28,7 @@ export function BroIntro({ phone, onClose, onTurnOn }: { phone: boolean; onClose
           <a href={BRO_CREDIT.seenBy} target="_blank" rel="noopener noreferrer">
             @dillon_mullroy
           </a>
-          , by{' '}
+          , repo:{' '}
           <a href={BRO_CREDIT.by} target="_blank" rel="noopener noreferrer">
             backnotprop
           </a>
