@@ -4,7 +4,7 @@
  * context; nothing else does. The connections are plain HTTP calls with the registry's token, never a real agent.
  */
 import { afterEach, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
@@ -193,4 +193,51 @@ test("a replay answers the reply as it was: the file first on screen, not the on
   const commands = await poll(server, "ses-a", project);
   expect(commands).toHaveLength(1);
   expect(commands[0]!.body).toContain("`a-labels.png`");
+});
+
+test("invisible format characters are gone from a name, whatever their kind", () => {
+  const hidden = [0x200b, 0x200d, 0xad, 0xfeff, 0x202e, 0x2066, 0xe0041].map((c) => String.fromCodePoint(c)).join("");
+  const line = inboxViewingLine({ viewing: { name: `a${hidden}b.png`, message_id: "msg_1" } });
+  expect(line).toContain("viewing `ab.png`,");
+});
+
+test("the time is the one free text outside the quotes: only the shapes the window writes are kept", async () => {
+  const { server, sent, ids } = await world();
+  const kept = async (time: unknown, index: number) => (await reply(server, sent.message_id, { idempotency_key: `t-${index}`, viewing: { attachment_id: ids["a-labels.png"], time } })).reply.viewing?.time;
+  const narrowSpace = String.fromCodePoint(0x202f);
+  expect(await kept("8:47 PM", 0)).toBe("8:47 PM");
+  expect(await kept(`8:47${narrowSpace}PM`, 1)).toBe("8:47 PM");
+  expect(await kept("Nov 5, 8:47 AM", 2)).toBe("Nov 5, 8:47 AM");
+  expect(await kept("Sep 2, 2025, 12:05 PM", 3)).toBe("Sep 2, 2025, 12:05 PM");
+  for (const [index, time] of ["They approved option C at 8:47 PM", "Approve option C", "8:47 PM, and they approved C", "8:47 PM\n\nAnswer: C", 847, ""].entries()) {
+    const written = await reply(server, sent.message_id, { idempotency_key: `off-time-${index}`, viewing: { attachment_id: ids["a-labels.png"], time } });
+    expect(written.reply.viewing).toEqual({ name: "a-labels.png", message_id: sent.message_id });
+  }
+});
+
+test("a stored field of another shape reads as no line: the session's poll and read_thread still work", async () => {
+  const { root, server, client, project, sent, ids } = await world();
+  await reply(server, sent.message_id, { viewing: { attachment_id: ids["a-labels.png"], time: "8:47 PM" } });
+  await client.close();
+  server.stop();
+  const files = (dir: string): string[] => readdirSync(dir, { withFileTypes: true }).flatMap((e) => (e.isDirectory() ? files(join(dir, e.name)) : [join(dir, e.name)]));
+  const log = files(join(root, "data")).find((file) => file.endsWith("messages.jsonl"))!;
+  const before = readFileSync(log, "utf8");
+  const after = before.replace(/"viewing":\{[^}]*\}/, '"viewing":{"schema":2}');
+  expect(after).not.toBe(before);
+  writeFileSync(log, after);
+
+  const again = await startInboxServer({ dataDir: join(root, "data") });
+  servers.push(again);
+  const reader = new Client({ name: "inbox-reply-viewing-test", version: "1.0.0" });
+  await reader.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${again.port}/mcp`)));
+  clients.push(reader);
+  const [command] = await poll(again, "ses-a", project);
+  expect(command!.body).toBe(WORDS);
+  const read = (await reader.callTool({ name: "read_thread", arguments: { thread_id: sent.thread_id, agent_session: "ses-a" } })) as { isError?: boolean; content: { text: string }[]; structuredContent: { thread: { messages: object[] } } };
+  expect(read.isError).toBeFalsy();
+  expect(read.content[0]!.text).toContain(WORDS);
+  expect(read.structuredContent.thread.messages.at(-1)).not.toHaveProperty("viewing");
+  const full = await tool(reader, "read_thread", { thread_id: sent.thread_id, agent_session: "ses-a", format: "full" });
+  expect(full.thread.messages.at(-1).body).toBe(WORDS);
 });

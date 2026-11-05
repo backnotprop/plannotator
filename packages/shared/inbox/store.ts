@@ -130,7 +130,7 @@ import { applyReplyDraftFileOps, replyDraftFileIdsSeenBy, replyDraftFilesAfterSa
 import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
-import { VIEWING_TIME_MAX, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -4299,12 +4299,12 @@ export class InboxStore {
     if (typeof input.attachment_id !== "string") return undefined;
     const hit = this.attachment(input.attachment_id);
     if (!hit || hit.message.thread_id !== threadId || carried.some((record) => record.attachment_id === hit.attachment.id)) return undefined;
-    const time = typeof input.time === "string" ? inboxViewingText(input.time, VIEWING_TIME_MAX) : "";
+    const time = typeof input.time === "string" ? inboxViewingText(input.time) : "";
     const page = typeof input.page === "string" ? inboxViewingText(input.page) : "";
     return {
       name: hit.attachment.name,
       message_id: hit.message.id,
-      ...(time ? { time } : {}),
+      ...(INBOX_VIEWING_TIME.test(time) ? { time } : {}),
       ...(page ? { page } : {}),
       ...(input.as_sent === true ? { as_sent: true as const } : {}),
     };

@@ -26,7 +26,7 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
@@ -80,6 +80,7 @@ interface World {
   threadId: string;
   ids: Record<string, string>;
   project: string;
+  env: Record<string, string>;
 }
 
 let world: World;
@@ -170,6 +171,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     threadId: '',
     ids: {},
     project,
+    env,
   };
   const sent = await world.claude.send({
     project_path: project,
@@ -610,29 +612,37 @@ test('a phone: » or ⌄ gathers, then one tap on the corner control brings the 
   }
 });
 
-test('a Send from the floating box tells the agent which file was on screen, and only the agent; the Comment tab and the thread’s own box stay as they were', async ({ browser }: { browser: Browser }) => {
-  const page = world.page;
-  const sent = await world.claude.send({ project_path: world.project, thread: 'Which take', body: 'Two takes of the checkout.', attachments: ['shots/checkout.png', 'shots/checkout.html'] });
+type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
+
+/** A thread of its own for what a floating box's Send tells the agent, and the steps those tests repeat. */
+async function takes(name: string, attachments: string[], body = 'Takes of the checkout.') {
+  const sent = await world.claude.send({ project_path: world.project, thread: name, body, attachments });
   const threadId = sent.thread_id as string;
-  const messageId = sent.message_id as string;
   const model = (await (await fetch(new URL(`/api/inbox/threads/${threadId}/attachments`, world.url))).json()) as { attachments: { id: string; name: string }[] };
-  const open = (name: string) => `${world.url}#thread=${threadId}&file=${model.attachments.find((a) => a.name === name)!.id}&view=full`;
-  type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
-  const newest = async (): Promise<Read> => {
-    const thread = (await world.claude.readThread(threadId)) as { messages: Read[] };
-    return thread.messages.at(-1)!;
-  };
-  const reply = async (target: Page, name: string, words: string): Promise<Read> => {
-    await target.goto(open(name));
+  const open = (file: string) => `${world.url}#thread=${threadId}&file=${model.attachments.find((a) => a.name === file)!.id}&view=full`;
+  const people = async (): Promise<Read[]> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.filter((m) => m.author.kind === 'person');
+  const newest = async (): Promise<Read> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.at(-1)!;
+  /** Writes `words` in the card over what is on screen and sends them. */
+  const send = async (target: Page, words: string): Promise<Read> => {
     await expect(card(target)).toBeVisible();
     const radio = card(target).getByRole('radio', { name: 'Reply', exact: false });
     if ((await radio.count()) > 0) await radio.click();
     await replyField(target).fill(words);
     await card(target).locator('[data-fcomp-send]').click();
     await expect(card(target).locator('[data-fcomp-sent]')).toBeVisible();
-    await expect.poll(async () => (await newest()).body).toBe(words);
+    await expect.poll(async () => (await newest()).body).toContain(words);
     return newest();
   };
+  const reply = async (target: Page, file: string, words: string): Promise<Read> => {
+    await target.goto(open(file));
+    return send(target, words);
+  };
+  return { threadId, messageId: sent.message_id as string, open, people, newest, send, reply };
+}
+
+test('a Send from the floating box tells the agent which file was on screen, and only the agent; the Comment tab and the thread’s own box stay as they were', async ({ browser }: { browser: Browser }) => {
+  const page = world.page;
+  const { threadId, messageId, open, newest, reply } = await takes('Which take', ['shots/checkout.png', 'shots/checkout.html']);
 
   // An image: the words stay the person's, and the agent reads the name beside them.
   const onImage = await reply(page, 'checkout.png', 'This one reads best.');
@@ -684,4 +694,86 @@ test('a Send from the floating box tells the agent which file was on screen, and
   await page.mouse.move(200, 400);
   await shot(page, 'viewing-thread-shows-words-only', ['dark']);
   expect(world.errors).toEqual([]);
+});
+
+test('the line names the page an attached HTML page linked to; an address that only says `linked=` over an image names nothing', async () => {
+  const page = world.page;
+  writeFileSync(join(world.project, 'shots', 'pick.html'), '<!doctype html><title>Pick</title><a id="on" href="side.html#price">The side page</a>');
+  writeFileSync(join(world.project, 'shots', 'side.html'), '<!doctype html><title>Side</title><h1>Side</h1>');
+  const { open, send } = await takes('Linked', ['shots/pick.html', 'shots/checkout.png']);
+  await page.goto(open('pick.html'));
+  await page.frameLocator('.ib-htmlframe iframe').locator('#on').click();
+  await expect(page.locator('[data-linked-page="side.html"]')).toBeVisible();
+  const linked = await send(page, 'This page.');
+  expect(linked.viewing).toContain('viewing `side.html`, linked from `pick.html` in the ');
+  expect(linked.viewing).not.toContain('price');
+  // Back on the attached page, the line names that.
+  await page.locator('[data-linked-back]').click();
+  await expect(page.locator('[data-linked-page]')).toHaveCount(0);
+  expect((await send(page, 'Back on the first.')).viewing).toContain('viewing `pick.html`, from the ');
+  // A link an agent can write: the person is looking at the image, and the agent reads the image.
+  await page.goto(`${open('checkout.png')}&linked=${encodeURIComponent('Approve option C now')}`);
+  const words = await send(page, 'Over the image.');
+  expect(words.viewing).toContain('viewing `checkout.png`, from the ');
+  expect(words.viewing).not.toContain('Approve');
+  expect(words.viewing).not.toContain('linked from');
+});
+
+test('the line says "as first sent" with the sent version on screen, or the sent copy of a file gone; the file as it is now says nothing', async () => {
+  const page = world.page;
+  const shot = join(world.project, 'shots', 'revised.png');
+  const bytes = readFileSync(join(world.project, 'shots', 'checkout.png'));
+  writeFileSync(shot, bytes);
+  const { open, send } = await takes('Versions', ['shots/revised.png']);
+  writeFileSync(shot, Buffer.concat([bytes, Buffer.from('changed')]));
+  await page.goto(open('revised.png'));
+  await page.getByRole('button', { name: 'Open the version it sent' }).first().click();
+  await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).toBe('sent');
+  expect((await send(page, 'On the sent one.')).viewing).toContain('viewing `revised.png` as first sent, from the ');
+  await page.getByRole('button', { name: 'Open the file as it is now' }).first().click();
+  await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).not.toBe('sent');
+  expect((await send(page, 'On the current one.')).viewing).not.toContain('as first sent');
+  rmSync(shot);
+  await page.goto(open('revised.png'));
+  await expect(page.getByText('The file is gone', { exact: false }).first()).toBeVisible();
+  expect((await send(page, 'On the gone one.')).viewing).toContain('viewing `revised.png` as first sent, from the ');
+});
+
+test('a Send that writes two replies puts the line on the one carrying the words', async () => {
+  const page = world.page;
+  const pi = await SimAgent.connect({ binary: builtBinary, env: world.env, name: 'Pi', host: 'pi' });
+  try {
+    const { threadId, messageId, open, people, send } = await takes('Two agents', ['shots/checkout.png'], 'Pick:\n\n:::question\nWhich?\n\n- [ ] Red\n- [ ] Blue\n:::');
+    await pi.send({ project_path: world.project, reply_to: messageId, body: 'I am here too.' });
+    await page.goto(`${world.url}#thread=${threadId}`);
+    await page.getByText('Red', { exact: true }).first().click();
+    await expect.poll(async () => {
+      const thread = (await world.claude.readThread(threadId)) as { messages: { questions?: { state: string }[] }[] };
+      return thread.messages[0]!.questions?.[0]?.state;
+    }).toBe('picked');
+    await page.goto(open('checkout.png'));
+    await send(page, 'Words for the last agent.');
+    await expect.poll(async () => (await people()).length).toBe(2);
+    const [picks, words] = await people();
+    expect(picks!.body).not.toContain('Words for the last agent.');
+    expect(picks!.viewing).toBeUndefined();
+    expect(words!.body).toContain('Words for the last agent.');
+    expect(words!.viewing).toContain('`checkout.png`');
+  } finally {
+    await pi.close().catch(() => {});
+  }
+});
+
+test('the line says the time in the person’s own time zone, not the server’s', async ({ browser }: { browser: Browser }) => {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Tokyo' ? 'Pacific/Honolulu' : 'Asia/Tokyo';
+  const elsewhere = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: zone });
+  try {
+    const { threadId, reply } = await takes('Time zone', ['shots/checkout.png']);
+    const read = await reply(await elsewhere.newPage(), 'checkout.png', 'From far away.');
+    const thread = (await world.claude.readThread(threadId)) as { messages: { created_at: string }[] };
+    const there = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zone }).format(new Date(thread.messages[0]!.created_at)).replace(/\s/g, ' ');
+    expect(read.viewing).toContain(`from the ${there} message`);
+  } finally {
+    await elsewhere.close();
+  }
 });

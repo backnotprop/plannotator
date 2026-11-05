@@ -73,16 +73,18 @@ export function inboxAttachedLines(message: { attachments?: readonly InboxAttach
 
 /** The longest file name `inboxViewingLine` prints; a longer one is cut. */
 const VIEWING_NAME_MAX = 120;
-/** A time's words are short in any locale. */
-export const VIEWING_TIME_MAX = 24;
+/** The longest time `inboxViewingLine` prints. */
+const VIEWING_TIME_MAX = 24;
+/** A time as the window words it (`whenTime`, always en-US): "8:47 PM", "Nov 5, 8:47 PM", "Nov 5, 2025, 8:47 PM". It is the one part of the line outside its quotes. */
+export const INBOX_VIEWING_TIME = /^(?:[A-Z][a-z]{2} \d{1,2}, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M$/;
 
 /**
  * A file name or a time for `inboxViewingLine`: text anyone can write (an agent names its files, a page names its links)
- * going into an agent's prompt. One line, no controls, no backtick to close the quote around it, a sane length.
+ * going into an agent's prompt. One line, no controls or invisible format characters, no backtick to close the quote around it, a sane length.
  */
 export function inboxViewingText(text: string, max = VIEWING_NAME_MAX): string {
   const line = text
-    .replace(new RegExp(THREAD_NAME_BIDI.source, "gu"), "")
+    .replace(/\p{Cf}/gu, "")
     .replace(new RegExp(THREAD_NAME_CONTROL.source, "g"), " ")
     .replace(/\s+/g, " ")
     .replace(/`/g, "'")
@@ -96,10 +98,11 @@ export function inboxViewingText(text: string, max = VIEWING_NAME_MAX): string {
  */
 export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }): string {
   const viewing = message.viewing;
-  if (!viewing) return "";
+  // A record of another shape (a newer Inbox wrote it) must not take the session's poll or read_thread down with it.
+  if (!viewing || typeof viewing.name !== "string" || typeof viewing.message_id !== "string") return "";
   const name = inboxViewingText(viewing.name) || "a file";
-  const page = viewing.page ? inboxViewingText(viewing.page) : "";
-  const time = viewing.time ? inboxViewingText(viewing.time, VIEWING_TIME_MAX) : "";
+  const page = typeof viewing.page === "string" ? inboxViewingText(viewing.page) : "";
+  const time = typeof viewing.time === "string" ? inboxViewingText(viewing.time, VIEWING_TIME_MAX) : "";
   const from = `the ${time ? `${time} ` : ""}message ${inboxViewingText(viewing.message_id)}`;
   const what = page ? `\`${page}\`, linked from \`${name}\` in ${from}` : `\`${name}\`${viewing.as_sent ? " as first sent" : ""}, from ${from}`;
   return `(They sent this while viewing ${what}.)`;

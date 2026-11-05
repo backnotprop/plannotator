@@ -423,7 +423,7 @@ export function agentMessage(message: InboxMessageWire, form: AgentMessageForm =
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
-    ...(message.viewing ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
@@ -452,7 +452,7 @@ export function agentMessageLine(message: InboxMessageWire, caller: string | nul
     ...(message.to ? { to: addressee(message, caller) } : {}),
     ...(taggedOf(message, caller) ? { tagged: taggedOf(message, caller) } : {}),
     ...(message.board_request === true ? { board_request: true as const } : {}),
-    ...(message.viewing ? { viewing: inboxViewingLine(message) } : {}),
+    ...(inboxViewingLine(message) ? { viewing: inboxViewingLine(message) } : {}),
   };
 }
 
