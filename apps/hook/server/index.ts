@@ -770,11 +770,14 @@ if (isTopLevelHelpInvocation(args)) {
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
-  console.log(
+  const help =
     helpSubcommand === "inbox"
       ? formatInboxHelp({ command: inboxSelfCommand(), dataDir: getPlannotatorDataDir(), board: boardOnForHelp(), steps: stepsOnForHelp(), codeReview: codeReviewOnForHelp() })
-      : formatSubcommandHelp(helpSubcommand),
-  );
+      : formatSubcommandHelp(helpSubcommand);
+  // The guide can be bigger than a pipe holds (64 KiB), so wait for a slow reader: the callback
+  // runs once it is all written or the reader has gone. Without the wait, or through console.log
+  // on Bun 1.3, the end is lost (inbox-help-pipe.test.ts).
+  await new Promise<void>((done) => void process.stdout.write(`${help}\n`, () => done()));
   process.exit(0);
 }
 
