@@ -1905,6 +1905,7 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.getByRole('button', { name: 'Approve', exact: true })).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Unified', exact: true })).toHaveCount(0);
   await expect(page.getByText('No chapter files in the current diff')).toHaveCount(0);
+  await expect(page.locator('[data-section-no-code]')).toHaveText('No code in this chapter.');
   await expect(page.locator('[aria-label="Walkthrough"]').first()).toBeVisible();
   await page.waitForTimeout(1200);
   await shot(page, 'w-pane');

@@ -389,6 +389,8 @@ export default function GuideReader({
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
       ...(phone || asItIs ? {} : { renderSectionTab }),
+      // A walkthrough's chapter can be words alone: nothing is missing, so it says that and not "out of date".
+      ...(asItIs && { renderSectionEmpty: () => <p className="ib-rv-nocode" data-section-no-code="">No code in this chapter.</p> }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(globalComments ? { globalComments } : {}),
