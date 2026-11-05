@@ -21,6 +21,7 @@ import type { InboxCard } from "./inbox-cards";
 import type { InboxSteps } from "./inbox-steps";
 import type { InboxInitiative } from "./inbox-initiatives";
 import type { InboxReviewVerdictRecord } from "./inbox-review";
+import type { InboxReviewSource } from "./inbox-reviews";
 import type { InboxTidyMark } from "./inbox-tidy";
 import type { InboxRowSnooze } from "./inbox-snooze";
 import { INBOX_CODEX_QUEUE_MIN_VERSION } from "./inbox-codex";
@@ -46,6 +47,8 @@ export * from "./inbox-surface-bridge";
 export * from "./inbox-tidy";
 // Pull requests (code review in the Inbox, phase 2), the same way.
 export * from "./inbox-pulls";
+// Reviews (approval "inbox-reviews-page"): the per-thread review index and whose move, the same way.
+export * from "./inbox-reviews";
 
 /** Every record and line carries this version. Fields are only ever added. */
 export const INBOX_RECORD_VERSION = 1 as const;
@@ -1017,6 +1020,13 @@ export interface InboxGuideRef {
   review?: true;
   /** A review's chapter titles, in order (the card lists them). Only with `review`. */
   chapters?: string[];
+  /**
+   * A review's source (Reviews, approval "inbox-reviews-page"): the
+   * snapshot's `source` (kind, repo, branch, head, PR) and `review` (base,
+   * git ref), each one line. Only with `review`; absent on reviews sent
+   * before it (the Reviews index reads those from the snapshot once).
+   */
+  source?: InboxReviewSource;
 }
 
 /** One choice as the wire serves it (Workspaces' `QuestionChoice`). */
