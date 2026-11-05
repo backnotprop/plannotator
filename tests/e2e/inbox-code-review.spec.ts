@@ -15,8 +15,8 @@
  *  2. On: the "/" list offers /review-curate labelled Plannotator, and not
  *     /review-recheck; a reply that uses it carries its instructions.
  *  3. The agent's review (submit_guide `review: true`) shows a review card
- *     with Start review; Start review opens the full-window review (chapters
- *     rail, Walkthrough | All files, the real diff), a line comment and a
+ *     with Start review; Start review opens the full-window review (the top
+ *     bar's Walkthrough | All files and chapter menu, the real diff), a line comment and a
  *     Viewed tick land, and Send feedback sends the verdict as the person's
  *     reply, which the agent reads with the comment in the review app's
  *     export. The card then shows the outcome; /review-recheck is offered.
@@ -28,7 +28,7 @@
  * PLANNOTATOR_E2E_VIDEO=1.
  */
 
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -328,7 +328,11 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await card.getByRole('button', { name: 'Start review' }).click();
   const pane = page.locator('[data-review-message]');
   await expect(pane).toBeVisible();
-  await expect(pane.locator('[data-review-chapters] li')).toHaveCount(4);
+  await pane.locator('[data-review-jump]').click();
+  await expect(page.locator('[data-review-chapters] [data-review-jump-row]')).toHaveCount(4);
+  await page.keyboard.press('Escape');
+  await expect(page.locator('[data-review-jump-menu]')).toHaveCount(0);
+  await expect(pane).toBeVisible();
   const retry = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
@@ -342,10 +346,12 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await page.getByRole('button', { name: 'Add Comment' }).click();
   await expect(pane.locator('[data-guide-comments]')).toHaveAttribute('data-guide-comments', '1');
 
-  // All files: the rail lists every changed file; a Viewed tick is kept on the message.
+  // All files: the menu lists every changed file; a Viewed tick is kept on the message.
   await pane.locator('[data-review-mode-choice="files"]').click();
   await expect(pane).toHaveAttribute('data-review-mode', 'files');
-  await expect(pane.locator('[data-review-files] li')).toHaveCount(4);
+  await pane.locator('[data-review-jump]').click();
+  await expect(page.locator('[data-review-files] [data-review-jump-row]')).toHaveCount(4);
+  await page.keyboard.press('Escape');
   const ledger = pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]');
   await ledger.scrollIntoViewIfNeeded();
   // The review app's V key does not work here: the tooltip does not name it.
@@ -464,6 +470,317 @@ test('a phone at 390 px: the switch, the "/" list, the card, the review with a c
   }
 });
 
+/** A jump's smooth scroll has landed: the review's scroll holds still. */
+async function settled(body: Locator): Promise<void> {
+  let last = -1;
+  await expect(async () => {
+    const now = await body.evaluate((el) => el.scrollTop);
+    const still = now === last;
+    last = now;
+    expect(still).toBe(true);
+  }).toPass({ intervals: [300] });
+}
+
+/** Fails when a part of the review's top bar overlaps another, or leaves the window. */
+async function expectBarFits(page: Page): Promise<void> {
+  const trouble = await page.evaluate(() => {
+    const head = document.querySelector('[data-review-message] .ib-vhead') as HTMLElement;
+    const parts = [...head.children, ...head.querySelectorAll('.ib-rv-nav > *')]
+      .filter((el) => el.getClientRects().length > 0 && !el.classList.contains('ib-sp') && !el.classList.contains('ib-rv-nav'))
+      .map((el) => ({ name: (el as HTMLElement).className || el.tagName, box: el.getBoundingClientRect() }))
+      .sort((a, b) => a.box.left - b.box.left);
+    const problems: string[] = [];
+    parts.forEach((part, i) => {
+      if (part.box.right > window.innerWidth + 0.5 || part.box.left < -0.5) problems.push(`${part.name} leaves the window`);
+      const next = parts[i + 1];
+      if (next && next.box.left < part.box.right - 0.5) problems.push(`${part.name} overlaps ${next.name}`);
+    });
+    if (head.scrollWidth > head.clientWidth + 1) problems.push('the bar overflows');
+    return problems;
+  });
+  expect(trouble).toEqual([]);
+}
+
+/** The place named in the top bar reads whole when it is the short word "Overview". */
+async function expectOverviewWhole(page: Page): Promise<void> {
+  const name = page.locator('[data-review-message] .ib-rj-name');
+  await expect(name).toHaveText('Overview');
+  expect(await name.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+}
+
+test('the top bar holds what the rail held: chapters, the count, files, Overview, Split | Unified, by mouse and by keyboard', async () => {
+  const { page, claude } = world;
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'top-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  await page.setViewportSize({ width: 1440, height: 700 });
+  await page.goto(`${world.url}#thread=${review.thread_id}`);
+  await page.locator('[data-review-card]').getByRole('button', { name: 'Start review' }).click();
+  const pane = page.locator('[data-review-message]');
+  const bar = pane.locator('.ib-vhead');
+  const jump = pane.locator('[data-review-jump]');
+  const menu = page.locator('[data-review-jump-menu]');
+  const firstFile = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+  await expect(firstFile.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+
+  // No rail, and the bar says the review's name once.
+  await expect(pane.locator('.ib-rrail')).toHaveCount(0);
+  await expect(pane.locator('[data-review-title]')).toHaveText('Retry failed payouts');
+  await expect(jump).toContainText('Overview');
+  // The heading says what is being reviewed; the title's tooltip says it too, from anywhere in the review.
+  await expect(pane.locator('[data-guide-facts]')).toContainText('main');
+  await pane.locator('[data-review-title]').hover();
+  await expect(page.locator('[data-review-source]')).toBeVisible();
+  await page.mouse.move(700, 500);
+  // Split | Unified is the tab above the first card, as marks; not in the bar.
+  await expect(bar.locator('[data-diff-style-switch]')).toHaveCount(0);
+  const tab = pane.locator('[data-guide-section-tab] [data-diff-style-switch]');
+  await expect(tab).toBeVisible();
+  await expect(tab).toHaveText('');
+  await expect(tab.getByRole('radio', { name: 'Unified' })).toBeAttached();
+  const held = pane.locator('[data-review-diff-style-held] [data-diff-style-switch]');
+  await expect(held).toHaveCount(0);
+  // Words cut from the screen stay in a tooltip: the arrow says Thread, a mark says what it does.
+  await pane.locator('.ib-back').hover();
+  await expect(page.getByText('Thread', { exact: true })).toBeVisible();
+  await tab.locator('[data-diff-style="unified"]').hover();
+  await expect(page.getByText('Unified: old and new in one column. Also code review.')).toBeVisible();
+  await page.mouse.move(700, 500);
+
+  // The menu: Overview, every chapter, the count.
+  await jump.click();
+  await expect(menu.locator('[data-review-jump-row]')).toHaveCount(4);
+  await expect(menu.locator('[data-review-jump-row="overview"]')).toHaveText('Overview');
+  await expect(menu.locator('[data-review-progress]')).toHaveText('0 of 3 chapters reviewed');
+  await shot(page, 'topbar-menu');
+
+  // A pick goes to the chapter and names it. Scrolling by hand then names what is in view.
+  await menu.locator('[data-review-jump-row="1"]').click();
+  await expect(jump).toContainText('2 of 3');
+  await expect(jump).toContainText('Write each attempt to the ledger once');
+  await expect(pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]')).toBeInViewport();
+  const body = pane.locator('.ib-gbody');
+  await settled(body);
+  await body.hover();
+  await page.mouse.wheel(0, -100000);
+  await expect(jump).toContainText('Overview');
+  await page.mouse.wheel(0, 100000);
+  await expect(jump).toContainText('of 3');
+
+  // Scrolled past the first card: Split | Unified is held under the bar, in the spot the tab reached, and it works.
+  await expect(held).toBeInViewport();
+  const unified = held.locator('[data-diff-style="unified"]');
+  await unified.click();
+  await expect(held).toHaveAttribute('data-diff-style-switch', 'unified');
+  await expect.poll(() => pane.locator('pre[data-diff]').evaluateAll((pres) => [...new Set(pres.map((p) => p.getAttribute('data-diff-type')))])).toEqual(['single']);
+  await page.mouse.wheel(0, -100000);
+  // Back at the top the tab is the one, holding the same choice, in the same column as the held one was.
+  await expect(held).toHaveCount(0);
+  await expect(tab).toHaveAttribute('data-diff-style-switch', 'unified');
+  const tabBox = (await tab.boundingBox())!;
+  await tab.locator('[data-diff-style="split"]').click();
+  await page.mouse.wheel(0, 100000);
+  await expect(held).toBeInViewport();
+  const heldBox = (await held.boundingBox())!;
+  expect(Math.abs(heldBox.x - tabBox.x)).toBeLessThanOrEqual(1);
+  expect(heldBox.y - ((await bar.boundingBox())!.y + (await bar.boundingBox())!.height)).toBeLessThanOrEqual(12);
+
+  // Reviewed: the tick shows in the menu, the count moves, and the rows are still there.
+  await page.mouse.wheel(0, -100000);
+  await pane.locator('[data-guide-section="0"]').getByRole('button', { name: 'Reviewed' }).click();
+  await jump.click();
+  await expect(menu.locator('[data-review-progress]')).toHaveText('1 of 3 chapters reviewed');
+  await expect(menu.locator('[data-review-jump-row="0"] [data-done]')).toBeVisible();
+  // Keyboard, as the rail's rows were: Enter opens (on the trigger), an arrow and Enter pick, focus comes back to the button.
+  await page.keyboard.press('Escape');
+  await expect(menu).toHaveCount(0);
+  await expect(pane).toBeVisible();
+  await jump.focus();
+  await page.keyboard.press('Enter');
+  await expect(menu).toBeVisible();
+  const third = menu.locator('[data-review-jump-row="2"]');
+  await expect(async () => {
+    await page.keyboard.press('ArrowDown');
+    await expect(third).toBeFocused({ timeout: 200 });
+  }).toPass();
+  await page.keyboard.press('Enter');
+  await expect(jump).toContainText('3 of 3');
+  await expect(jump).toBeFocused();
+
+  // What the rail's Files gave, and the place kept across the switch: the file in view stays in view.
+  const ledger = pane.locator('[data-guide-file-shell="src/payouts/ledger.ts"]');
+  await jump.click();
+  await menu.locator('[data-review-jump-row="1"]').click();
+  await expect(ledger).toBeInViewport();
+  await page.waitForTimeout(600);
+  await pane.locator('[data-review-mode-choice="files"]').click();
+  await expect(pane).toHaveAttribute('data-review-mode', 'files');
+  await expect(jump).toContainText('ledger.ts');
+  await expect(ledger).toBeInViewport();
+  await jump.click();
+  await expect(menu.locator('[data-review-files] [data-review-jump-row]')).toHaveCount(4);
+  await expect(menu.locator('[data-review-progress]')).toHaveText('0 of 4 files viewed');
+  // The menu lists the files in the order the review draws them, so "2 of 4" is the second one down the page.
+  const drawn = await pane.locator('[data-guide-file-shell]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.guideFileShell));
+  const listed = await menu.locator('[data-review-jump-row]').evaluateAll((els) => els.map((el) => (el as HTMLElement).dataset.reviewJumpRow));
+  expect(listed).toEqual(drawn);
+  await menu.locator('[data-review-jump-row="src/payouts/retry.ts"]').click();
+  await expect(pane.locator('[data-guide-section-narrative]').first()).toBeHidden();
+  await pane.locator('[data-review-mode-choice="walkthrough"]').click();
+
+  // Keys the review did not have stay that way: nothing here moves the thread or the chapter.
+  const before = page.url();
+  const place = await jump.textContent();
+  await body.click({ position: { x: 3, y: 3 } });
+  for (const key of ['j', 'k', ']', '[']) await page.keyboard.press(key);
+  expect(page.url()).toBe(before);
+  expect(await jump.textContent()).toBe(place);
+
+  // With the menu closed Escape goes back to the thread, as it always did.
+  await page.keyboard.press('Escape');
+  await expect(pane).toHaveCount(0);
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(world.errors).toEqual([]);
+});
+
+test('narrow windows, long titles and many chapters: nothing overlaps or leaves the window, and Split | Unified is held', async () => {
+  const { page, claude } = world;
+  const long = 'Retry every failed payout with a jittered backoff, then remove the row and send exactly one email, whatever the worker crashed on halfway through its run';
+  const unbroken = 'reconcile_failed_payouts_against_the_ledger_before_the_morning_report_runs_and_never_twice_for_the_same_invoice';
+  const guide = {
+    ...REVIEW_GUIDE,
+    title: long,
+    intent: long,
+    sections: Array.from({ length: 30 }, (_, i) => ({
+      title: i % 3 === 0 ? `${unbroken}_${i}` : `${long} (${i + 1})`,
+      overview: 'Notes.',
+      diffs: i === 0 ? [{ file: 'src/payouts/retry.ts', summary: 'The loop.' }] : i === 1 ? [{ file: 'src/payouts/ledger.ts', summary: 'The row.' }] : [],
+    })),
+  };
+  const review = await claude.submitGuide({ project_path: world.project, guide, patch: world.patch, thread: 'worst', subject: long, body: 'Ready.', review: true } as never);
+  await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+  const pane = page.locator('[data-review-message]');
+  await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+  const jump = pane.locator('[data-review-jump]');
+  const menu = page.locator('[data-review-jump-menu]');
+  for (const width of [1440, 1280, 1100, 960, 800, 768]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expectBarFits(page);
+    await jump.click();
+    await expect(menu).toBeVisible();
+    // Thirty chapters: the list scrolls inside the window and the count stays on screen.
+    await expect(menu.locator('[data-review-progress]')).toBeInViewport({ ratio: 1 });
+    const box = (await menu.boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(width);
+    expect(box.y + box.height).toBeLessThanOrEqual(800);
+    await menu.locator('[data-review-jump-row="5"]').click();
+    await expect(jump).toContainText('6 of 30');
+    await expectBarFits(page);
+    // The chapter's own name in the bar is cut, never the count.
+    await expect(pane.locator('.ib-rj-lead')).toHaveText('6 of 30');
+    await settled(pane.locator('.ib-gbody'));
+    await expect(pane.locator('[data-review-diff-style-held] [data-diff-style-switch]')).toBeInViewport();
+    await pane.locator('.ib-gbody').hover();
+    await page.mouse.wheel(0, -1000000);
+    await expect(jump).toContainText('Overview');
+    await expectOverviewWhole(page);
+  }
+  // A pull request's destination joins the bar (thread and list stubbed in this page; nothing reaches a forge).
+  const key = 'github.com/acme/payouts#880';
+  const threadRoute = /\/api\/inbox\/threads\/[^/?]+(\?.*)?$/;
+  const pullsRoute = /\/api\/inbox\/pulls(\?|$)/;
+  await page.route(threadRoute, async (route) => {
+    if (route.request().method() !== 'GET') return route.fallback();
+    const response = await route.fetch();
+    const json = (await response.json()) as Record<string, unknown>;
+    return route.fulfill({ response, json: json.thread ? { ...json, thread: { ...(json.thread as object), pull_keys: [key] } } : { ...json, pull_keys: [key] } });
+  });
+  await page.route(pullsRoute, (route) =>
+    route.fulfill({
+      json: { fetched_at: null, hosts: [], links: {}, projects: {}, cards: {}, pulls: [{ key, platform: 'github', host: 'github.com', repo: 'acme/payouts', number: 880, url: 'https://github.com/acme/payouts/pull/880', title: long, author: 'someone', mine: true, requested: false, state: 'open', base: 'main', head: 'retry', head_repo: 'acme/payouts', head_sha: 'a'.repeat(40), additions: 4, deletions: 1, files: 1, review: null, approved_by: null, reviewers: [], checks: 'success', updated_at: '2026-10-11T10:00:00.000Z', merged_at: null }] },
+    }),
+  );
+  await page.reload();
+  await expect(pane.locator('[data-review-destination]')).toBeVisible();
+  for (const width of [1440, 1280, 1100, 1099, 960, 959, 800, 768]) {
+    await page.setViewportSize({ width, height: 800 });
+    await expectBarFits(page);
+    await expectOverviewWhole(page);
+  }
+  await page.unroute(threadRoute);
+  await page.unroute(pullsRoute);
+  await page.reload();
+  await expect(pane.locator('[data-review-destination]')).toHaveCount(0);
+  // A chapter past the window's middle is in view when the menu opens.
+  await page.setViewportSize({ width: 1440, height: 800 });
+  await jump.click();
+  await menu.locator('[data-review-jump-row="28"]').click();
+  await expect(jump).toContainText('29 of 30');
+  await jump.click();
+  await expect(menu.locator('[data-review-jump-row="28"]')).toBeInViewport();
+  await page.keyboard.press('Escape');
+  await page.setViewportSize({ width: 1440, height: 900 });
+  expect(world.errors).toEqual([]);
+});
+
+test('a phone at 390 px: the switch and the list stay at the top of the scroll, with the count, and a file lands clear of them', async ({ browser }) => {
+  const { claude } = world;
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'phone-bar', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    const pane = page.locator('[data-review-message]');
+    await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    // A phone reads Unified only: no layout to choose, in the bar or on a card. No chapter menu either: the native list.
+    await expect(pane.locator('[data-diff-style-switch]')).toHaveCount(0);
+    await expect(pane.locator('[data-review-nav]')).toHaveCount(0);
+    const bar = pane.locator('[data-review-phonebar]');
+    const list = bar.locator('select');
+    await expect(list.locator('option').first()).toHaveText('Overview · 0 of 3 reviewed');
+    await expect(list.locator('option').last()).toHaveText('0 of 3 chapters reviewed');
+    expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+
+    // Under the bar means hidden: the top of the file header has to clear the bar's foot.
+    const clear = async (path: string) => {
+      const shell = pane.locator(`[data-guide-file-shell="${path}"]`);
+      await expect(shell).toBeInViewport();
+      await settled(pane.locator('.ib-gbody'));
+      const barBox = (await bar.boundingBox())!;
+      const shellBox = (await shell.boundingBox())!;
+      expect(shellBox.y).toBeGreaterThanOrEqual(barBox.y + barBox.height);
+    };
+    await list.selectOption('1');
+    await expect(list.locator('option').first()).toHaveText('2 of 3 · Write each attempt to the ledger once');
+    await clear('src/payouts/ledger.ts');
+    // All files keeps the place, and the file is not left under the bar.
+    await bar.locator('[data-review-mode-choice="files"]').click();
+    await expect(pane).toHaveAttribute('data-review-mode', 'files');
+    await expect(list.locator('option').first()).toContainText('ledger.ts');
+    await clear('src/payouts/ledger.ts');
+    await list.selectOption('src/payouts/retry.ts');
+    await clear('src/payouts/retry.ts');
+    await expect(list.locator('option').last()).toHaveText('0 of 4 files viewed');
+  } finally {
+    await context.close();
+  }
+});
+
+test('Code review off: the same review opens in the guide pane, with no top bar of chapters and the Split | Unified tab on its card', async () => {
+  const { page, claude } = world;
+  const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
+  await setCodeReview(false);
+  try {
+    await page.goto(`${world.url}#thread=${review.thread_id}&guide=${review.message_id}`);
+    await expect(page.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(page.locator('[data-review-message]')).toHaveCount(0);
+    await expect(page.locator('[data-review-nav]')).toHaveCount(0);
+    await expect(page.locator('[data-guide-heading]')).toHaveCount(0);
+    await expect(page.locator('[data-guide-section-tab] [data-diff-style-switch]')).toBeVisible();
+    await expect(page.locator('h1').filter({ hasText: 'Retry failed payouts' })).toBeVisible();
+  } finally {
+    await setCodeReview(true);
+  }
+});
+
 test('the walkthrough video: a review from the card to Approve', async ({ browser }) => {
   test.skip(!video, 'PLANNOTATOR_E2E_VIDEO=1 records it');
   const { claude } = world;
@@ -485,16 +802,19 @@ test('the walkthrough video: a review from the card to Approve', async ({ browse
     const retry = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
     await expect(retry.locator('[data-line-type="change-addition"][data-column-number="12"]')).toBeVisible({ timeout: 30_000 });
     await pause(2500);
-    for (const index of [1, 2, 3]) {
-      await pane.locator('[data-review-chapters] li').nth(index).click();
+    for (const index of [0, 1, 2]) {
+      await pane.locator('[data-review-jump]').click();
+      await page.locator(`[data-review-jump-row="${index}"]`).click();
       await pause(1800);
     }
     await pane.locator('[data-review-mode-choice="files"]').click();
     await pause(1800);
-    await pane.locator('[data-review-files] li').first().click();
+    await pane.locator('[data-review-jump]').click();
+    await page.locator('[data-review-files] [data-review-jump-row]').first().click();
     await pause(1500);
     await pane.locator('[data-review-mode-choice="walkthrough"]').click();
-    await pane.locator('[data-review-chapters] li').nth(1).click();
+    await pane.locator('[data-review-jump]').click();
+    await page.locator('[data-review-jump-row="0"]').click();
     await pause(1200);
     await retry.hover();
     await retry.locator('[data-line-type="change-addition"][data-column-number="9"]').click();
