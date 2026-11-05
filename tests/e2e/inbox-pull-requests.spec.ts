@@ -761,6 +761,8 @@ test('on, with the Board off: the row, and the list by whose move it is, the sta
   for (const [row, login] of [[STACK_ID, 'dana'], ['github.com/northwind/web-app#880', 'tomas'], ['gitlab.com/northwind/ledger#58:pull', 'priya']] as const) {
     const av = list.locator(`[data-pulls-row="${row}"] .ib-lead [data-pulls-author="${login}"]`);
     await expect(av).toHaveAttribute('data-pulls-avatar', 'shown');
+    // Round, as in the details.
+    expect(await av.evaluate((el) => getComputedStyle(el).borderRadius)).toBe('50%');
     const src = new URL((await av.locator('img').getAttribute('src'))!, world.url);
     expect([src.origin, src.pathname]).toEqual([new URL(world.url).origin, '/api/inbox/pulls/avatar']);
   }
@@ -1237,6 +1239,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
     await review.locator('.ib-vcomments').click();
     await expect(panel).toHaveCount(0);
     await page.keyboard.press('Escape');
+    await expect(review.locator('.ib-gpanel')).toBeHidden();
     // A comment's file: the panel closes, on the file.
     await page.setViewportSize({ width: 1440, height: 900 });
     await button.click();
@@ -1273,7 +1276,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
 
   // The forge not answering: the words still read, it says so, and Try again reads again.
   writeFileSync(join(dir, 'details-fail'), '');
-  const other = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: 'Still here.' }, 'layer', LOCALE);
+  const other = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description: 'Still here.' }, 'layer', STACK_ID);
   try {
     const review = other.page.locator('[data-pull-review]');
     const panel = await openDetails(review);
@@ -1437,7 +1440,9 @@ test("a stranger's description: paths open on the forge, only the web's links ar
       expect(page.url()).toBe(route);
     }
     await expect(section.locator('img[alt="pixel"]')).toHaveCount(1);
-    // Its `data-pn-image-annotator-stage` is no modal: Escape still closes the sheet.
+    // Its `data-pn-image-annotator-stage` is no modal: Escape still closes the details, and then a sheet.
+    await page.keyboard.press('Escape');
+    await expect(review.locator('[data-pull-details]')).toHaveCount(0);
     await page.locator('.ib-vhead .ib-vcomments').click();
     await expect(page.locator('.ib-panel-open')).toHaveCount(1);
     await page.keyboard.press('Escape');
@@ -1534,18 +1539,18 @@ test("a description's web links never replace the window, however they are spell
   }
 });
 
-test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the sheet", async ({ browser }) => {
+test("a description's markup can't pose as the window's own overlays, even through a diagram's label: Escape still closes the details", async ({ browser }) => {
   const label = `A["<div class='pn-visible-viewport-overlay'><div data-pn-image-annotator-stage='1'>x</div></div>"]`;
   for (const description of ['<div data-pn-annotation-toolbar-row>x</div>', '<div data-quick-label-picker>x</div>', `\`\`\`mermaid\ngraph TD\n  ${label}\n\`\`\``]) {
     const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
     try {
+      const review = page.locator('[data-pull-review]');
+      await openDetails(review);
       const section = page.locator('[data-pull-review] [data-pull-description]');
       const posing = section.locator('[data-pn-annotation-toolbar-row], [data-quick-label-picker], .pn-visible-viewport-overlay [data-pn-image-annotator-stage]');
       await expect(posing.first()).toBeAttached({ timeout: 15_000 });
-      await page.locator('.ib-vhead .ib-vcomments').click();
-      await expect(page.locator('.ib-panel-open')).toHaveCount(1);
       await page.keyboard.press('Escape');
-      await expect(page.locator('.ib-panel-open')).toHaveCount(0);
+      await expect(review.locator('[data-pull-details]')).toHaveCount(0);
     } finally {
       await context.close();
     }
@@ -1556,6 +1561,7 @@ test('a description with a list never scrolls sideways', async ({ browser }) => 
   for (const width of [1440, 390]) {
     const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF, { description: '- one\n- two\n\n1. three\n2. four' });
     try {
+      await openDetails(page.locator('[data-pull-review]'));
       const box = page.locator('[data-pull-review] .ib-prr-desc-body');
       await expect(box).toContainText('four');
       expect(await box.evaluate((el) => el.scrollWidth - el.clientWidth)).toBe(0);
@@ -1571,6 +1577,7 @@ test('a <details> cut by the fold keeps its lines inside; Show more draws the wh
     const description = `<details><summary>Logs</summary>\n\n${inside}\n\n</details>\n\nAFTER-THE-LOGS`;
     const { context, page } = await stubbedReview(browser, 1440, COLLIDING_PATHS_DIFF, { description });
     try {
+      await openDetails(page.locator('[data-pull-review]'));
       const section = page.locator('[data-pull-review] [data-pull-description]');
       await expect(section).toHaveAttribute('data-pull-description', 'folded');
       await expect(section.locator('details')).toHaveCount(1);
@@ -1598,14 +1605,25 @@ test('each layer shows its own description, through the forge read: Next layer c
       await page.reload();
       await expect(page.locator('[data-pull-review] [data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
     };
-    const section = page.locator('[data-pull-review] [data-pull-description]');
+    const review = page.locator('[data-pull-review]');
+    const section = review.locator('[data-pull-description]');
     await open(LAYER_413, 'layer');
+    await openDetails(review);
     await expect(section).toHaveText('Backs off between the attempts.');
-    await page.locator(`[data-pull-review] [data-pull-next-layer="${STACK_ID}"]`).click();
+    await page.keyboard.press('Escape');
+    // Another layer is another PR: its details do not stay open over it.
+    await review.locator(`[data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(review).toHaveAttribute('data-pull-review', STACK_ID);
+    await expect(review.locator('[data-pull-details]')).toHaveCount(0);
+    await openDetails(review);
     await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
-    await page.locator('[data-pull-review]').getByRole('radio', { name: 'Whole stack' }).click();
+    await page.keyboard.press('Escape');
+    await review.locator('[data-pull-layer-all]').click();
+    await expect(review).toHaveAttribute('data-pull-scope', 'stack');
+    await openDetails(review);
     await expect(section).toHaveText('The emails, in a draft until they are reviewed.');
     await open(LAYER_412, 'layer');
+    await openDetails(review);
     await expect(section).toHaveCount(0);
     // A layer opens folded, whatever the last one did.
     await page.route('**/api/inbox/pulls/diff*', async (route) => {
@@ -1613,10 +1631,13 @@ test('each layer shows its own description, through the forge read: Next layer c
       if (real) await route.fulfill({ status: 200, json: { ...(await real.json()), description: Array.from({ length: 60 }, (_, i) => `Line ${i}.`).join('\n\n') } });
     });
     await open(LAYER_413, 'layer');
+    await openDetails(review);
     await section.getByRole('button', { name: 'Show more' }).click();
     await expect(section).toHaveAttribute('data-pull-description', 'open');
-    await page.locator(`[data-pull-review] [data-pull-next-layer="${STACK_ID}"]`).click();
-    await expect(page.locator('[data-pull-review]')).toHaveAttribute('data-pull-review', STACK_ID);
+    await page.keyboard.press('Escape');
+    await review.locator(`[data-pull-next-layer="${STACK_ID}"]`).click();
+    await expect(review).toHaveAttribute('data-pull-review', STACK_ID);
+    await openDetails(review);
     await expect(section).toHaveAttribute('data-pull-description', 'folded');
   } finally {
     await context.close();

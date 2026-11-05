@@ -175,6 +175,7 @@ beforeEach(() => {
       sessionReads += 1;
       return Response.json(sessionsAnswer);
     }
+    if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;

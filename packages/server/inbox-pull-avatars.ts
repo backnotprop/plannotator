@@ -3,9 +3,9 @@
  * always the author's picture). The window's CSP stays `img-src 'self' data: blob:`: it never loads a remote image
  * itself. The Inbox fetches the picture and serves it from its own origin.
  *
- * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list
- * (`allow`), never a URL or login the page names. A login the last list did not return is refused before anything
- * runs.
+ * What is fetched: only the avatar URL the forge's own answer gave for an author of a PR in the current list, or for
+ * a reviewer or commenter the details of such a PR named (`allow`), never a URL or login the page names. A login none
+ * of those returned is refused before anything runs.
  * - https only; at most 3 redirects, each https. The URL's host must be public (as the favicons check it) unless it
  *   is the forge host itself (a GitHub Enterprise or self-managed GitLab on a private network serves its own), on
  *   the forge's own port (the avatar URL's when the forge returned one on its name, else 443).
