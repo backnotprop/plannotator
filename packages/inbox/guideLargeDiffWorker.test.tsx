@@ -10,9 +10,10 @@
  */
 import { plugin } from 'bun';
 import { afterEach, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, type FC } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import type { GuideDiffRendererProps } from '@plannotator/guide-viewer';
+import { resolve } from 'node:path';
+import type { GuideDiffRendererProps } from '@plannotator/guide-viewer/host';
 
 // The review app's worker is Vite's `?worker&inline`, which Bun cannot load: here it is a Worker whose constructor
 // throws, as when the page may not start workers.
@@ -28,7 +29,12 @@ plugin({
 });
 
 const hasDom = typeof document !== 'undefined';
-const { GuideDiff } = (hasDom ? await import('./guide/GuideReader') : {}) as typeof import('./guide/GuideReader');
+// The reader does not compile under the window's strict tsconfig (see guide/reader-module.d.ts), so it loads from a
+// path tsc does not follow, typed by the props this test passes.
+const readerPath = resolve(import.meta.dir, 'guide/GuideReader.tsx');
+const { GuideDiff } = (hasDom ? await import(readerPath) : {}) as {
+  GuideDiff: FC<GuideDiffRendererProps & { largeDiffsInWorker?: boolean }>;
+};
 
 // Past the reader's 50,000-character line for worker highlighting.
 const lines = Array.from({ length: 3000 }, (_, i) => `+export const value${i} = ${i};`);
