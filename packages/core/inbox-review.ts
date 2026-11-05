@@ -75,7 +75,7 @@ export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>
     body: [
       'The person wants to understand how something works, not to judge a change. Send them a walkthrough of the code as it is now, in the order that explains it best, following their words.',
       '',
-      'Call get_guide_brief for the guide\'s shape, then submit_guide with `walkthrough: true` and `reply_to` set to this reply, and no `patch`. In each chapter, `diffs` names a `file` and the `lines` to show (`"lines": "10-40, 80-95"`, or leave it out for the whole file), and its `summary` says what those lines do: this code is not new, so never "Adds". A file goes in one chapter. Do not change code.',
+      'Call get_guide_brief for the guide\'s shape, then submit_guide with `walkthrough: true` and `reply_to` set to this reply, and no `patch`. In each chapter, `diffs` names a `file` and the `lines` to show (`"lines": "10-40, 80-95"`; leave it out only to show a short file whole), and its `summary` says what those lines do: this code is not new, so never "Adds". A file goes in one chapter. Do not change code.',
       '',
       'If they reply with more to look at, answer in this thread, with another walkthrough when showing code helps. If submit_guide takes no `walkthrough` field in this session, explain in a plain message instead.',
     ].join('\n'),
