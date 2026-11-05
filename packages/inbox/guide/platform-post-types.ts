@@ -51,15 +51,17 @@ export interface PlatformPostProps {
   open: { action: PlatformAction; chooseEvent: boolean } | null;
   /** The person's comments in this review. */
   comments: readonly KeptComment[];
+  /** Those comments as stored right now, for a host whose comments another window can change. */
+  readComments?: () => readonly KeptComment[];
   /** What the comments were written on: the PR's own diff, an agent's guided review, or the whole stack. */
   anchor: 'diff' | 'guide' | 'stack';
   /** Sends one request to the Inbox's `POST /api/inbox/pulls/review`. */
   post: (request: Record<string, unknown>) => Promise<Response>;
   onClose: () => void;
-  /** `posted`: the ids of the comments that went (a whole stack's line comments map to no PR's lines and stay). */
-  onPosted: (result: { action: PlatformAction; url: string; posted: readonly string[]; head: string }) => void;
-  /** Comments that went at the commit they were read on, ahead of the review itself (which can still fail). */
-  onWent?: (ids: readonly string[]) => void;
+  /** `posted`: the comments that went, in the words that went (a whole stack's line comments map to no PR's lines and stay). */
+  onPosted: (result: { action: PlatformAction; url: string; posted: readonly CodeAnnotation[]; head: string }) => void;
+  /** Comments the forge took ahead of the review's end (an older commit, a partly posted review), in the words it took. */
+  onWent?: (went: readonly CodeAnnotation[]) => void;
   /** A refused post closes this dialog and the host reads the PR again, so the next opening is a new decision. */
   hostReadsAgain?: boolean;
 }

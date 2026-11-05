@@ -1222,6 +1222,19 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls.filter((c) => c.args.includes("POST"))).toEqual([]);
   });
 
+  test("file-level comments over the limit, or one malformed: all refused and nothing posted, never cut for the page to forget", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const one = { path: "src/retry.ts", body: "On the file." };
+    const review = (fileLevelComments: unknown[]) => w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "Words.", fileLevelComments });
+    const over = await review(Array.from({ length: 501 }, () => one));
+    expect(over.status).toBe(422);
+    expect(((await over.json()) as { error: string }).error).toContain("at most 500");
+    expect((await review([one, { path: "src/retry.ts", body: "  " }])).status).toBe(422);
+    expect(w.post.calls).toEqual([]);
+  });
+
   test("GitHub lists 250 commits at most: a full list not naming the commit says nothing, and GitHub decides", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");

@@ -3756,7 +3756,10 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (text.length > PULL_REVIEW_BODY_MAX) throw new InboxError("validation_error", `body: at most ${PULL_REVIEW_BODY_MAX} characters.`, { field: "body" });
         const fileComments = pullReviewComments(body.fileComments);
         if (!fileComments) throw new InboxError("validation_error", `fileComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, line, side, body }.`, { field: "fileComments" });
-        const fileLevelComments = parseFileLevelComments(body.fileLevelComments).slice(0, PULL_REVIEW_COMMENTS_MAX);
+        // All of them go or none: the page forgets what it sent once the forge has it.
+        const fileLevelComments = parseFileLevelComments(body.fileLevelComments);
+        const fileLevelSent = Array.isArray(body.fileLevelComments) ? body.fileLevelComments.length : 0;
+        if (fileLevelSent !== fileLevelComments.length || fileLevelSent > PULL_REVIEW_COMMENTS_MAX) throw new InboxError("validation_error", `fileLevelComments: at most ${PULL_REVIEW_COMMENTS_MAX} comments, each { path, body }.`, { field: "fileLevelComments" });
         if (!pulls.find(key)) await pulls.list((await pullProjects()).wanted, { refresh: false });
         const pull = pulls.find(key);
         if (!pull) return json({ error: "That pull request is not in the list. Refresh the list and try again.", code: "pull_unknown" }, 404);

@@ -21,7 +21,7 @@ import {
 } from '@plannotator/review-editor/components/ReviewSubmissionDialog';
 import { submitPlatformReviewTargets } from '@plannotator/review-editor/utils/platformReviewSubmission';
 import { closePendingTab, openPendingTab, settlePendingTab, type TabOpener } from '@plannotator/review-editor/utils/pendingExternalTab';
-import { platformRules } from '../pulls/postRules';
+import { platformRules, postedSignature } from '../pulls/postRules';
 import type { KeptComment, PlatformAction, PlatformPostProps, PlatformPostPull } from './platform-post-types';
 
 /** A link to lines at the PR's head commit, for a comment the platform cannot take inline (review app `prBlobPermalink`). */
@@ -62,11 +62,14 @@ function asSubmitted(comments: readonly KeptComment[], pull: PlatformPostPull, a
   });
 }
 
+type Inline = SubmissionTarget['fileComments'][number];
+const inlineKey = (c: Inline) => JSON.stringify([c.path, c.line, c.side, c.start_line ?? null, c.start_side ?? null, c.body]);
+
 const OPEN_PR_KEY = 'plannotator-inbox-platform-open-pr';
 /** Between a PR's URL and a commit, in a target of that commit. */
 const AT = '#plannotator-at-';
 
-export default function PlatformPost({ pull, open, comments, anchor, post, onClose, onPosted, onWent, hostReadsAgain }: PlatformPostProps) {
+export default function PlatformPost({ pull, open, comments, readComments, anchor, post, onClose, onPosted, onWent, hostReadsAgain }: PlatformPostProps) {
   const rules = platformRules(pull);
   const [action, setAction] = useState<PlatformAction>('comment');
   const [chooseEvent, setChooseEvent] = useState(false);
@@ -90,11 +93,11 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
   // the next plan.
   const planned = useRef<readonly KeptComment[]>([]);
   const carried = useRef<CodeAnnotation[]>([]);
-  const planOf = (kept: readonly KeptComment[]) => {
-    const submitted = asSubmitted(kept, pull, anchor, gone.current, planHead.current);
-    planned.current = kept;
-    carried.current = submitted;
-    return buildReviewSubmission(
+  // What the forge took so far, in the words it took: never sent again. An edit since is a different comment.
+  const took = useRef(new Map<string, CodeAnnotation>());
+  const live = () => readComments?.() ?? comments;
+  const build = (submitted: CodeAnnotation[]) =>
+    buildReviewSubmission(
       submitted,
       [],
       pull.url,
@@ -104,13 +107,74 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       pull.platform,
       permalinkOf(pull),
     );
+  const inlineOf = (c: CodeAnnotation): Inline | undefined => build([c]).targets[0]?.fileComments[0];
+  const planOf = (kept: readonly KeptComment[]) => {
+    const submitted = asSubmitted(
+      kept.filter((c) => !took.current.has(postedSignature(c))),
+      pull,
+      anchor,
+      gone.current,
+      planHead.current,
+    );
+    planned.current = kept;
+    carried.current = submitted;
+    return build(submitted);
+  };
+  /**
+   * A plan of these comments as they stand. `was` is what has happened so far: what went stays shown, and a partly posted
+   * review keeps what the forge said is left to do (its narrowed retry), now in these words. If nothing is left to do, it
+   * is over, and what it posted of the main comment is on the forge.
+   */
+  const planOver = (was: ReviewSubmission, kept: readonly KeptComment[]): ReviewSubmission => {
+    const ofInline = new Map(carried.current.flatMap((c) => {
+      const inline = inlineOf(c);
+      return inline ? [[inlineKey(inline), c.id] as const] : [];
+    }));
+    const next = planOf(kept);
+    const inlineNow = new Map(carried.current.flatMap((c) => {
+      const inline = inlineOf(c);
+      return inline ? [[c.id, inline] as const] : [];
+    }));
+    const narrow = (from: SubmissionTarget, target: SubmissionTarget): SubmissionTarget => {
+      const partial = from.partial!;
+      const { body: owedBody, ...retry } = partial.retry;
+      const body = buildPlatformReviewBody(retry.action, pull.platform, owedBody !== undefined ? general : '', target);
+      return {
+        ...target,
+        status: 'partial',
+        error: from.error,
+        partial: {
+          ...partial,
+          failedFileComments: partial.failedFileComments.flatMap((failure) => {
+            const comment = inlineNow.get(ofInline.get(inlineKey(failure.comment)) ?? '');
+            return comment ? [{ ...failure, comment }] : [];
+          }),
+          retry: { ...retry, fileComments: target.fileComments, ...(body ? { body } : {}) },
+        },
+      };
+    };
+    const owes = (target: SubmissionTarget) => {
+      const partial = target.partial!;
+      return partial.retry.fileComments.length > 0 || partial.retry.body !== undefined || partial.approval === 'failed';
+    };
+    const partly = was.targets.filter((t) => t.partial && t.status !== 'success');
+    const nothing = { fileComments: [], fileLevelComments: [], fileScopedBody: '', fileCount: 0, annotationCount: 0 };
+    const worked = [
+      ...next.targets.map((t) => {
+        const from = partly.find((w) => w.prUrl === t.prUrl);
+        return from ? narrow(from, t) : t;
+      }),
+      ...partly.filter((w) => !next.targets.some((t) => t.prUrl === w.prUrl)).map((w) => narrow(w, { ...w, ...nothing })),
+    ];
+    const targets = worked.filter((t) => !t.partial || owes(t));
+    if (targets.length < worked.length) setGeneral('');
+    return { ...next, targets: [...was.targets.filter((t) => t.status === 'success' && !targets.some((n) => n.prUrl === t.prUrl)), ...targets] };
   };
   useEffect(() => {
     if (!open) {
       opened.current = false;
       return;
     }
-    // A plan kept from a partial or blocked attempt stays (its narrowed retry); otherwise built fresh.
     if (opened.current) return;
     opened.current = true;
     // Words typed for a refused review are no approval because its comments have gone (a new commit): they stay that
@@ -120,22 +184,58 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
     const sameHead = planHead.current === pull.head_sha;
     planHead.current = pull.head_sha;
     refused.current = false;
-    setPlan((was) => (sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked') ? was : planOf(comments)));
+    // Always the comments as they stand. A post of unknown result is offered again: if it went whole, the Inbox says so.
+    setPlan(planOver(sameHead && plan.targets.some((t) => t.partial && t.status !== 'success') ? plan : { targets: [], orphans: [] }, live()));
   }, [open, comments, pull, anchor]);
 
-  /** A comment went only if a target the forge took carried it; what the dialog could only offer to copy did not. */
-  const wentIn = (targets: readonly SubmissionTarget[], orphans: ReviewSubmission['orphans']) => {
+  /**
+   * What the forge has just shown it took, noted in the words it took: a target it accepted whole, or a partly posted
+   * review's comments it does not ask for again. If its count disagrees none of those count, so they are sent again
+   * rather than lost. What the dialog could only offer to copy did not go.
+   */
+  const noteWent = (targets: readonly SubmissionTarget[], orphans: ReviewSubmission['orphans']) => {
     const kept = new Set(orphans.flatMap((group) => group.annotations.map((a) => a.id)));
-    return carried.current.filter((c) => !kept.has(c.id) && targets.some((t) => t.status === 'success' && t.prUrl === c.prUrl)).map((c) => c.id);
+    const mine = carried.current.filter((c) => !kept.has(c.id) && !took.current.has(postedSignature(c)));
+    const went = targets.flatMap((target) => {
+      const here = mine.filter((c) => c.prUrl === target.prUrl);
+      if (target.status === 'success') return here;
+      if (target.status !== 'partial' || !target.partial) return [];
+      const { retry, postedFileCommentCount, reviewBodyPosted } = target.partial;
+      const owed = new Set(retry.fileComments.map(inlineKey));
+      const inline = here.filter((c) => {
+        const comment = inlineOf(c);
+        return comment && !owed.has(inlineKey(comment));
+      });
+      const inBody = here.filter((c) => !inlineOf(c) && retry.body === undefined && reviewBodyPosted);
+      return [...(inline.length === postedFileCommentCount ? inline : []), ...inBody];
+    });
+    for (const c of went) took.current.set(postedSignature(c), c);
+    return went;
   };
 
-  const send = async (pending: ReturnType<typeof openPendingTab> | null) => {
+  const send = async (pending: ReturnType<typeof openPendingTab> | null, shown: ReviewSubmission) => {
     // Refused, and the new commit is in: retrying that plan can never go, so this shows the new one to read and post.
     if (refused.current && planHead.current !== pull.head_sha) {
       closePendingTab(pending);
       refused.current = false;
       planHead.current = pull.head_sha;
-      setPlan(planOf(comments));
+      setPlan(planOf(live()));
+      return;
+    }
+    // The plan's comments as they stand now: an edit since goes in its new words, and a deleted one does not go. Another
+    // window's new comment waits for the next plan, which shows it first.
+    const now = new Map(live().map((c) => [c.id, c]));
+    const left = planned.current.filter((c) => !took.current.has(postedSignature(c)));
+    const current = left.flatMap((c) => {
+      const stands = now.get(c.id);
+      return stands ? [{ ...stands, postAt: c.postAt, postHere: c.postHere, outdated: c.outdated }] : [];
+    });
+    const same = current.length === left.length && current.every((c, i) => postedSignature(c) === postedSignature(left[i]!));
+    const plan = same ? shown : planOver(shown, current);
+    if (!same) setPlan(plan);
+    // All of them deleted: there is nothing of what was shown left to send, so the dialog says so before anything goes.
+    if (!same && plan.targets.every((t) => t.status === 'success')) {
+      closePendingTab(pending);
       return;
     }
     setSubmitting(true);
@@ -147,8 +247,8 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         const response = await post({ ...request, key: pull.key, head_sha: at ?? planHead.current });
         if (response.status === 409) {
           const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
-          // It went on an earlier try whose answer never came: nothing there holds up the rest.
-          if (answer?.code === 'already_posted' && at) return Response.json({ ok: true, prUrl: pull.url, submission: { status: 'complete' } });
+          // These very words went on an earlier try whose answer never came: nothing there holds up the rest.
+          if (answer?.code === 'already_posted') return Response.json({ ok: true, prUrl: pull.url, submission: { status: 'complete' } });
           if (answer?.code === 'pull_commit_gone' && at) gone.current.add(at);
           else if (answer?.code === 'pull_moved' || answer?.code === 'pull_commit_gone') refused.current = true;
         }
@@ -160,8 +260,8 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       if (older.length > 0) {
         const earlier = await submitPlatformReviewTargets({ targets: older, action: 'comment', generalComment: '', bodyForTarget: (target) => buildPlatformReviewBody('comment', pull.platform, '', target), fetchReview });
         settled = earlier.targets;
-        const ids = wentIn(settled, plan.orphans);
-        if (ids.length > 0) onWent?.(ids);
+        const went = noteWent(settled, plan.orphans);
+        if (went.length > 0) onWent?.(went);
         const stuck = settled.filter((t) => t.status !== 'success' && !gone.current.has(t.prUrl.slice(t.prUrl.indexOf(AT) + AT.length)));
         if (stuck.length > 0) {
           closePendingTab(pending);
@@ -200,13 +300,17 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         fetchReview,
       });
       if (!attempt.allComplete) {
+        const went = noteWent(attempt.targets, rebuilt.orphans);
+        if (went.length > 0) onWent?.(went);
         closePendingTab(pending);
         setPlan({ ...rebuilt, targets: [...settled.filter((t) => t.status === 'success'), ...attempt.targets] });
         return;
       }
       if (openPR) settlePendingTab(pending, attempt.openUrls.length > 0 ? attempt.openUrls : [pull.url], window as unknown as TabOpener);
       else closePendingTab(pending);
-      const posted = wentIn([...settled, ...attempt.targets], rebuilt.orphans);
+      noteWent([...settled, ...attempt.targets], rebuilt.orphans);
+      const posted = [...took.current.values()];
+      took.current.clear();
       setPlan({ targets: [], orphans: [] });
       setGeneral('');
       onPosted({ action, url: pull.url, posted, head: planHead.current });
@@ -237,7 +341,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         onConfirm={() => {
           // The tab opens in the click itself (browsers allow it only then), as the review app does (#1583).
           const pending = openPR ? openPendingTab(window as unknown as TabOpener, rules.label) : null;
-          void send(pending);
+          void send(pending, plan);
         }}
         onCancel={onClose}
         isSubmitting={submitting}

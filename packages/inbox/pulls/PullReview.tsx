@@ -46,7 +46,7 @@ import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
-import { postablePull, postedWords } from './postRules';
+import { postablePull, postedSignature, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
 import { railRows } from './rail';
@@ -106,12 +106,14 @@ function readKept(id: string): { comments: KeptComment[]; viewed: string[] } {
   }
 }
 
-function keep(id: string, value: { comments: KeptComment[]; viewed: string[] }): void {
+function keep(id: string, value: { comments: KeptComment[]; viewed: string[] }): boolean {
   try {
     if (value.comments.length === 0 && value.viewed.length === 0) window.localStorage.removeItem(STORE + id);
     else window.localStorage.setItem(STORE + id, JSON.stringify(value));
+    return true;
   } catch {
     // Storage full or off: kept for this visit only.
+    return false;
   }
 }
 
@@ -196,6 +198,7 @@ function gather(layerKey: string, scope: string, keptId: string, screen: OnScree
     let changed = mine.some((c, i) => c !== now.comments[i]);
     const carried: KeptComment[] = [];
     const ticks: string[] = [];
+    const taken: (() => void)[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
       if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
@@ -206,8 +209,10 @@ function gather(layerKey: string, scope: string, keptId: string, screen: OnScree
       carried.push(...was.comments.map((c) => placed(c, stale)));
       if (!ofAHead) ticks.push(...was.viewed);
       if (mode === 'read') continue;
-      if (!ofAHead || mode === 'move') window.localStorage.removeItem(name);
-      else keep(name.slice(STORE.length), { comments: [], viewed: was.viewed });
+      taken.push(() => {
+        if (!ofAHead || mode === 'move') window.localStorage.removeItem(name);
+        else keep(name.slice(STORE.length), { comments: [], viewed: was.viewed });
+      });
     }
     changed ||= carried.length > 0 || ticks.length > 0;
     const ids = new Set(mine.map((c) => c.id));
@@ -218,7 +223,8 @@ function gather(layerKey: string, scope: string, keptId: string, screen: OnScree
       comments.push(c);
     }
     const value = { comments, viewed: [...new Set([...now.viewed, ...ticks])] };
-    if (mode !== 'read' && changed) keep(keptId, value);
+    // The other entries give up their words only once this one holds them.
+    if (mode !== 'read' && (!changed || keep(keptId, value))) for (const take of taken) take();
     return value;
   } catch {
     // Storage off.
@@ -342,19 +348,35 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     // The layer and scope are in `keptId`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptId, sure, stamp]);
+  // Another window's words reach this one, so its next save does not write over them. If this window could not store,
+  // what it holds is the only copy.
+  const unstored = useRef(false);
+  useEffect(() => {
+    const changed = (event: StorageEvent) => {
+      if (unstored.current || (event.key !== null && !event.key.startsWith(`${STORE}${layerKey}:${scope}:`))) return;
+      const kept = words('read');
+      setComments(kept.comments);
+      setViewed(kept.viewed);
+    };
+    window.addEventListener('storage', changed);
+    return () => window.removeEventListener('storage', changed);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [keptId, sure, stamp]);
   const store = (value: { comments: KeptComment[]; viewed: string[] }) => {
     if (!sure) words('absorb');
-    keep(keptId, value);
+    unstored.current = !keep(keptId, value);
   };
-  // What went leaves every entry of this review, so it cannot come back on a reload and go twice: a post started before a
-  // push answers after the page has moved its comments to the new head's entry.
-  const forgetWent = (ids: readonly string[]) => {
-    const went = new Set(ids);
+  // What went, in the words that went, leaves every entry of this review, so it cannot come back on a reload and go twice:
+  // a post started before a push answers after the page has moved its comments to the new head's entry. A comment edited
+  // since has not gone, and stays.
+  const forgetWent = (went: readonly CodeAnnotation[]) => {
+    const sent = new Set(went.map(postedSignature));
     for (const id of allEntries(layerKey, scope)) {
       const was = readKept(id);
-      if (was.comments.some((c) => went.has(c.id))) keep(id, { ...was, comments: was.comments.filter((c) => !went.has(c.id)) });
+      const left = was.comments.filter((c) => !sent.has(postedSignature(c)));
+      if (left.length < was.comments.length) keep(id, { ...was, comments: left });
     }
-    setComments((now) => now.filter((c) => !went.has(c.id)));
+    setComments((now) => now.filter((c) => !sent.has(postedSignature(c))));
   };
   const write = (next: { comments?: KeptComment[]; viewed?: string[] }) => {
     const value = { comments: next.comments ?? comments, viewed: next.viewed ?? viewed };
@@ -584,6 +606,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                 : null
             }
             comments={forPost(comments, screen, postHead, layer.platform, scope)}
+            readComments={() => forPost(unstored.current ? comments : words('read').comments, screen, postHead, layer.platform, scope)}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
             headSha={postHead}
             busy={sending || !snapshot}

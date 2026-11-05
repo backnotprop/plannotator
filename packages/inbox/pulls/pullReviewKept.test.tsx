@@ -762,20 +762,6 @@ for (const [what, answer, button] of [
   ['partly posted', () => Response.json({ ok: true, prUrl: '', submission: { status: 'partial', postedFileCommentCount: 0, failedFileComments: [{ comment: { path: PATH, line: 12, side: 'RIGHT', body: LINE.text }, error: 'No such line.' }], reviewBodyPosted: false, approval: 'not-requested', retry: { action: 'comment', fileComments: [{ path: PATH, line: 12, side: 'RIGHT', body: LINE.text }] } } }), 'Review partially posted'],
   ['of unknown result', () => Response.json({ ok: true }), 'Automatic retry blocked'],
 ] as const) {
-  test.skipIf(!hasDom)(`a post ${what}, the same head: reopening keeps that plan`, async () => {
-    const { low, top } = layers({ mine: false, author: 'tomas' });
-    await open([low, top], top);
-    await work();
-    await openPost();
-    postAnswer = answer;
-    await act(async () => inDialog('Post Comments').click());
-    await settle();
-    await act(async () => inDialog('Close').click());
-    await settle();
-    await openPost();
-    expect(document.querySelector('[role="dialog"]')?.textContent).toContain(button);
-  });
-
   test.skipIf(!hasDom)(`GitLab: a post ${what}, then a new commit: reopening builds a plan of the new head, without the old lines`, async () => {
     const { low, top } = layers(ON_GITLAB);
     await open([low, top], top);
@@ -801,6 +787,41 @@ for (const [what, answer, button] of [
     expect(reviews()[0]!.body.fileComments ?? []).toEqual([]);
   });
 }
+
+test.skipIf(!hasDom)('a post partly posted, the same head: reopening keeps its narrowed retry', async () => {
+  const { low, top } = layers({ mine: false, author: 'tomas' });
+  await open([low, top], top);
+  await work();
+  await openPost();
+  postAnswer = () => Response.json({ ok: true, prUrl: '', submission: { status: 'partial', postedFileCommentCount: 0, failedFileComments: [{ comment: { path: PATH, line: 12, side: 'RIGHT', body: LINE.text }, error: 'No such line.' }], reviewBodyPosted: false, approval: 'not-requested', retry: { action: 'comment', fileComments: [{ path: PATH, line: 12, side: 'RIGHT', body: LINE.text }] } } });
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await act(async () => inDialog('Close').click());
+  await settle();
+  await openPost();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Review partially posted');
+});
+
+test.skipIf(!hasDom)('a post of unknown result holds the dialog; closed and reopened it can go again, and the Inbox saying it is already there ends it', async () => {
+  const { low, top } = layers({ mine: false, author: 'tomas' });
+  await open([low, top], top);
+  await work();
+  await openPost();
+  postAnswer = () => Response.json({ ok: true });
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(document.querySelector('[role="dialog"]')?.textContent).toContain('Automatic retry blocked');
+  expect(stored(top, 'layer', A)?.comments).toEqual(['g1', 'l1']);
+  await act(async () => inDialog('Close').click());
+  await settle();
+  await openPost();
+  expect(document.querySelector('[role="dialog"]')?.textContent).not.toContain('Automatic retry blocked');
+  postAnswer = () => Response.json({ error: 'This review is already on the pull request.', code: 'already_posted' }, { status: 409 });
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(document.querySelector('[data-pull-review-posted]')?.textContent ?? '').toContain('posted');
+  expect(stored(top, 'layer', A)?.comments ?? []).toEqual([]);
+});
 
 test.skipIf(!hasDom)('head unknown: an older Inbox entry on a PR updated since is labelled once written', async () => {
   const { low, top } = layers({ head_sha: null });
@@ -1796,7 +1817,7 @@ test.skipIf(!hasDom)('the verdict refused after the older comment went, then Can
 });
 
 /** The dialog by itself: it forgets only what a target the forge took carried. */
-async function postDialog(kept: readonly Record<string, unknown>[], answer: (head: string) => Response, head = B) {
+async function postDialog(kept: readonly Record<string, unknown>[], answer: (head: string) => Response, head = B, fields: Partial<PlatformPostProps['pull']> = {}, anchor: PlatformPostProps['anchor'] = 'diff') {
   const seam: string = '../guide/PlatformPost.tsx';
   const { default: PlatformPost } = (await import(seam)) as { default: ComponentType<PlatformPostProps> };
   const pull = { key: 'github.com/o/r#7', url: 'https://github.com/o/r/pull/7', number: 7, title: 'PR 7', repo: 'o/r', host: 'github.com', platform: 'github' as const, head_sha: head, mine: false };
@@ -1806,23 +1827,23 @@ async function postDialog(kept: readonly Record<string, unknown>[], answer: (hea
   host = document.createElement('div');
   document.body.append(host);
   root = createRoot(host);
-  const draw = (comments: readonly Record<string, unknown>[], at: string) =>
+  const draw = (comments: readonly Record<string, unknown>[], at: string, opened = true) =>
     act(async () => {
       root!.render(
         <div className="pn-inbox">
           <PlatformPost
-            pull={{ ...pull, head_sha: at }}
-            open={{ action: 'comment', chooseEvent: false }}
+            pull={{ ...pull, ...fields, head_sha: at }}
+            open={opened ? OPENED : null}
             comments={comments as never}
-            anchor="diff"
+            anchor={anchor}
             post={async (request) => {
               const body = request as { head_sha: string; fileComments?: { body: string }[]; body?: string };
               sent.push({ head: body.head_sha, inline: (body.fileComments ?? []).map((c) => c.body), body: body.body ?? '' });
               return answer(body.head_sha);
             }}
             onClose={() => {}}
-            onWent={(ids) => went.push([...ids])}
-            onPosted={(result) => posted.push([...result.posted])}
+            onWent={(comments) => went.push(comments.map((c) => c.id))}
+            onPosted={(result) => posted.push(result.posted.map((c) => c.id))}
           />
         </div>,
       );
@@ -1831,6 +1852,7 @@ async function postDialog(kept: readonly Record<string, unknown>[], answer: (hea
   await settle();
   return { sent, went, posted, redraw: draw };
 }
+const OPENED = { action: 'comment', chooseEvent: false } as const;
 const TOOK = () => Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
 const GONE = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
 const FAILED = () => Response.json({ error: 'GitHub refused it.', code: 'pull_review_failed' }, { status: 502 });
@@ -1876,4 +1898,272 @@ test.skipIf(!hasDom)('the dialog: both reviews taken: the older comment counts a
   await settle();
   expect(went).toEqual([['old']]);
   expect(posted).toEqual([['old', 'now']]);
+});
+
+// What goes is what the person's words are now, and only those words count as gone.
+const words = (p: InboxPull, suffix: string) => (JSON.parse(window.localStorage.getItem(`${STORE}${p.key}:layer:${suffix}`) ?? '{"comments":[]}') as { comments: { id: string; text: string }[] }).comments.map((c) => c.text).sort();
+const inAnotherWindow = (p: InboxPull, suffix: string, change: (comments: { id: string; text: string }[]) => { id: string; text: string }[]) => {
+  const name = `${STORE}${p.key}:layer:${suffix}`;
+  const was = JSON.parse(window.localStorage.getItem(name)!) as { comments: { id: string; text: string }[]; viewed: string[] };
+  window.localStorage.setItem(name, JSON.stringify({ ...was, comments: change(was.comments) }));
+  return name;
+};
+const inline = (body: Record<string, unknown>) => ((body.fileComments ?? []) as { body: string }[]).map((c) => c.body);
+const dialogText = () => document.querySelector('[role="dialog"]')?.textContent ?? '';
+const bodyWentLineRefused = () =>
+  Response.json({ ok: true, prUrl: '', submission: { status: 'partial', postedFileCommentCount: 0, failedFileComments: [{ comment: { path: PATH, line: 12, side: 'RIGHT', body: LINE.text }, error: 'No such line.' }], reviewBodyPosted: true, approval: 'not-requested', retry: { action: 'comment', fileComments: [{ path: PATH, line: 12, side: 'RIGHT', body: LINE.text }] } } });
+
+test.skipIf(!hasDom)('partly posted, on the page: what went leaves at once; the refused comment edited goes in its new words, once; nothing is left', async () => {
+  const { low, top } = layers(ON_GITLAB);
+  await open([low, top], top);
+  await work();
+  await openPost();
+  postAnswer = bodyWentLineRefused;
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(String(reviews()[0]!.body.body)).toContain(GLOBAL.text);
+  expect(words(top, A)).toEqual([LINE.text]);
+  await act(async () => inDialog('Close').click());
+  await settle();
+  await act(async () => void reader!.comments!.onSave({ ...LINE, text: 'New words.' }));
+  await openPost();
+  expect(dialogText()).toContain('Review partially posted');
+  expect(dialogText()).toContain('New words.');
+  expect(dialogText()).not.toContain(LINE.text);
+  posted = [];
+  postAnswer = null;
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(reviews().map((r) => inline(r.body))).toEqual([['New words.']]);
+  expect(reviews()[0]!.body.body ?? '').toBe('');
+  expect(stored(top, 'layer', A)?.comments ?? []).toEqual([]);
+  expect(document.querySelector('[data-pull-review-posted]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)('an edit while the post is on its way: the old words went, the new ones stay, on screen and stored, and go next', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  let answer = () => {};
+  postHold = new Promise<void>((done) => (answer = done));
+  await act(async () => inDialog('Post Comments').click());
+  await act(async () => void reader!.comments!.onSave({ ...LINE, text: 'Edited on the way.' }));
+  postHold = null;
+  await act(async () => answer());
+  await settle();
+  expect(reviews().map((r) => inline(r.body))).toEqual([[LINE.text]]);
+  expect(words(top, A)).toEqual(['Edited on the way.']);
+  expect(drawn()).toEqual(['l1']);
+  posted = [];
+  await act(async () => document.querySelector<HTMLElement>('[data-review-posts] [data-decision-primary]')!.click());
+  await settle();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews().map((r) => inline(r.body))).toEqual([['Edited on the way.']]);
+  expect(stored(top, 'layer', A)).toBeNull();
+});
+
+test.skipIf(!hasDom)('another window edits a comment under the open dialog: its new words go, and nothing is left', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  inAnotherWindow(top, A, (comments) => comments.map((c) => ({ ...c, text: 'From the other window.' })));
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews().map((r) => inline(r.body))).toEqual([['From the other window.']]);
+  expect(stored(top, 'layer', A)).toBeNull();
+});
+
+test.skipIf(!hasDom)('another window deletes a comment under the open dialog: it does not go; with none left nothing goes and nothing says posted', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', text: 'The other one.' }));
+  await openPost();
+  inAnotherWindow(top, A, (comments) => comments.filter((c) => c.id !== 'l2'));
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews().map((r) => inline(r.body))).toEqual([[LINE.text]]);
+  close();
+  posted = [];
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  inAnotherWindow(top, A, () => []);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews()).toEqual([]);
+  expect(document.querySelector('[data-pull-review-posted]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('another window writes: this one shows it, and its next save does not write over it', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  const key = inAnotherWindow(top, A, (comments) => [...comments.map((c) => ({ ...c, text: 'Edited there.' })), { ...LINE, id: 'l2', text: 'Written there.' }]);
+  await act(async () => void window.dispatchEvent(new StorageEvent('storage', { key })));
+  await settle();
+  expect(drawn()).toEqual(['l1', 'l2']);
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l3', text: 'Written here.' }));
+  expect(words(top, A)).toEqual(['Edited there.', 'Written here.', 'Written there.']);
+});
+
+/** Nothing more can be stored while `run` runs (happy-dom's storage takes no stub of its own method). */
+async function withStorageFull(run: () => Promise<void>) {
+  const real = window.localStorage;
+  const full = new Proxy(real, {
+    get(target, name) {
+      if (name === 'setItem') return () => { throw new Error('QuotaExceededError'); };
+      const value = Reflect.get(target, name) as unknown;
+      return typeof value === 'function' ? value.bind(target) : value;
+    },
+  });
+  Object.defineProperty(window, 'localStorage', { value: full, configurable: true });
+  try {
+    await run();
+  } finally {
+    Object.defineProperty(window, 'localStorage', { value: real, configurable: true, writable: true });
+  }
+}
+
+test.skipIf(!hasDom)('storage full: what this window holds is the only copy, so it goes, and another window saying something does not wipe it', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top);
+  await withStorageFull(async () => {
+    await act(async () => void reader!.comments!.onSave(LINE));
+    await act(async () => void window.dispatchEvent(new StorageEvent('storage', { key: `${STORE}${top.key}:layer:${A}` })));
+    expect(drawn()).toEqual(['l1']);
+    await openPost();
+    await act(async () => inDialog('Post Comments').click());
+    await settle();
+  });
+  expect(reviews().map((r) => inline(r.body))).toEqual([[LINE.text]]);
+});
+
+test.skipIf(!hasDom)('Whole stack: a typed review went, and the line comment it could only offer to copy stays', async () => {
+  const { low, top } = layers(TEAMMATE);
+  await open([low, top], top, 'stack');
+  await act(async () => void reader!.comments!.onSave(LINE));
+  await openPost();
+  await typeInDialog('The words.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews().map((r) => r.body.body)).toEqual(['The words.']);
+  expect(stored(top, 'stack', A)?.comments).toEqual(['l1']);
+  expect(drawn()).toEqual(['l1']);
+});
+
+const FIRST = { ...LINE, id: 'first', text: 'First.', lineStart: 12, lineEnd: 12 };
+const SECOND = { ...LINE, id: 'second', text: 'Second.', lineStart: 13, lineEnd: 13 };
+const FILE = { ...LINE, id: 'file', scope: 'file', text: 'On the file.' };
+const inlineAt = (c: typeof FIRST) => ({ path: PATH, line: c.lineStart, side: 'RIGHT', body: c.text });
+const partly = (comments: (typeof FIRST)[], fields: Record<string, unknown> = {}) =>
+  Response.json({ ok: true, prUrl: '', submission: { status: 'partial', postedFileCommentCount: 1, failedFileComments: comments.map((c) => ({ comment: inlineAt(c), error: 'No such line.' })), reviewBodyPosted: false, approval: 'not-requested', retry: { action: 'comment', fileComments: comments.map(inlineAt) }, ...fields } });
+const ON_GITLAB_DIALOG = { platform: 'gitlab', host: 'gitlab.com' } as const;
+const reopen = async (redraw: (comments: readonly Record<string, unknown>[], at: string, opened?: boolean) => Promise<void>, comments: readonly Record<string, unknown>[]) => {
+  await redraw(comments, B, false);
+  await settle();
+  await redraw(comments, B, true);
+  await settle();
+};
+
+test.skipIf(!hasDom)('the dialog, partly posted: the comment the forge took is forgotten at once and not sent again, with or without a host that drops it', async () => {
+  const answers = [() => partly([SECOND]), TOOK];
+  const { sent, went, posted, redraw } = await postDialog([FIRST, SECOND], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(went).toEqual([['first']]);
+  expect(posted).toEqual([]);
+  await reopen(redraw, [FIRST, SECOND]);
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(sent.map((s) => s.inline)).toEqual([['First.', 'Second.'], ['Second.']]);
+  expect(posted).toEqual([['first', 'second']]);
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted, the retry of unknown result: reopening offers the narrowed retry again, and the Inbox saying it is there ends it', async () => {
+  const already = () => Response.json({ error: 'This review is already on the pull request.', code: 'already_posted' }, { status: 409 });
+  const answers = [() => partly([SECOND]), () => Response.json({ ok: true }), already];
+  const { sent, posted, redraw } = await postDialog([FIRST, SECOND], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(dialogText()).toContain('Automatic retry blocked');
+  await reopen(redraw, [FIRST, SECOND]);
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(sent.map((s) => s.inline)).toEqual([['First.', 'Second.'], ['Second.'], ['Second.']]);
+  expect(posted).toEqual([['first', 'second']]);
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted: a count that disagrees with what it asks for again says nothing went, so nothing is forgotten', async () => {
+  const { sent, went, posted, redraw } = await postDialog([FIRST, SECOND], () => partly([SECOND], { postedFileCommentCount: 0 }), B, ON_GITLAB_DIALOG);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(went).toEqual([]);
+  await reopen(redraw, [FIRST, SECOND]);
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(sent.at(-1)!.inline).toEqual(['First.', 'Second.']);
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted: the refused comment deleted: nothing is left to retry, nothing goes, and the main comment that went is not sent again', async () => {
+  const { sent, posted, redraw } = await postDialog([FIRST, SECOND], () => partly([SECOND], { reviewBodyPosted: true }), B, ON_GITLAB_DIALOG);
+  await typeInDialog('The main comment.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(sent).toHaveLength(1);
+  await reopen(redraw, []);
+  expect(dialogText()).not.toContain('Review partially posted');
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('');
+  expect(inDialog('Post Comments').disabled).toBe(true);
+  expect(sent).toHaveLength(1);
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted with the body gone: a comment that rides the body, new since, goes in the retry and only then counts as gone', async () => {
+  const answers = [() => partly([SECOND], { reviewBodyPosted: true }), () => partly([SECOND], { reviewBodyPosted: false, postedFileCommentCount: 0, retry: { action: 'comment', fileComments: [inlineAt(SECOND)], body: 'x' } }), TOOK];
+  const { sent, went, posted, redraw } = await postDialog([FIRST, SECOND], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await typeInDialog('The main comment.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await reopen(redraw, [FIRST, SECOND, FILE]);
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(sent[1]!.inline).toEqual(['Second.']);
+  expect(sent[1]!.body).toContain('On the file.');
+  expect(sent[1]!.body).not.toContain('The main comment.');
+  expect(went).toEqual([['first']]);
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(posted).toEqual([['first', 'second', 'file']]);
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted: a refused comment edited shows its new words among the failures, and one that rides the body is rebuilt too', async () => {
+  const answers = [() => partly([SECOND], { reviewBodyPosted: false, postedFileCommentCount: 1, retry: { action: 'comment', fileComments: [inlineAt(SECOND)], body: 'held back' } }), TOOK];
+  const { sent, redraw } = await postDialog([FIRST, SECOND, FILE], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await reopen(redraw, [FIRST, { ...SECOND, text: 'Second, again.' }, { ...FILE, text: 'On the file, again.' }]);
+  expect(dialogText()).toContain('Second, again.');
+  expect(dialogText()).not.toContain('Second.');
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(sent[1]!.inline).toEqual(['Second, again.']);
+  expect(sent[1]!.body).toBe(`**${PATH}:** On the file, again.`);
+});
+
+test.skipIf(!hasDom)('storage full when a push moves the words to the new head: the old entry keeps them', async () => {
+  const { low, top } = layers({ ...TEAMMATE, head_sha: B });
+  diffHead = B;
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${A}`, JSON.stringify({ comments: [LINE], viewed: [] }));
+  await withStorageFull(async () => {
+    await open([low, top], top);
+    expect(stored(top, 'layer', A)?.comments).toEqual(['l1']);
+    expect(drawn()).toEqual(['l1']);
+  });
 });

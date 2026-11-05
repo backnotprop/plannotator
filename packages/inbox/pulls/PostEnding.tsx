@@ -23,7 +23,7 @@ import { RowAgentTiles } from '../components/RowAgents';
 import { Icon } from '../icons';
 import { usePhone } from '../phone';
 import type { PlatformAction } from '../guide/platform-post-types';
-import { platformRules, postablePull, postedWords, resolvePlatformDecisionAction } from './postRules';
+import { platformRules, postablePull, postedSignature, postedWords, resolvePlatformDecisionAction } from './postRules';
 
 // `#platform-post` is packages/inbox/guide/PlatformPost.tsx (package.json `imports`): the review app's dialog.
 const PlatformPost = PlatformPostPart.Part;
@@ -35,14 +35,6 @@ function LoadFailed({ notice, onFailed }: { notice: ReactNode; onFailed: (notice
 }
 
 export type ReviewDestination = 'forge' | 'agent';
-
-/**
- * A posted comment as it went: its id with what it says and where. A comment edited after it was posted keeps its
- * id but not this, so the correction counts as new and the follow-up offers it.
- */
-export function postedSignature(c: CodeAnnotation): string {
-  return JSON.stringify([c.id, c.text ?? '', c.suggestedCode ?? '', c.filePath, c.lineStart, c.lineEnd, c.side, c.scope ?? 'line']);
-}
 
 const DEST_KEY = 'plannotator-inbox-review-dest';
 
@@ -89,9 +81,11 @@ export interface PostEndingProps {
   picked: ReviewDestination;
   onPick: (next: ReviewDestination) => void;
   /** The review went on the PR: the host clears the comments that went (`posted`, their ids) and says so. */
-  onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly string[] }) => void;
+  onPosted: (result: { action: PlatformAction; url: string; label: string; posted: readonly CodeAnnotation[] }) => void;
   /** Comments that went at the commit they were read on, ahead of the review itself. */
-  onWent?: (ids: readonly string[]) => void;
+  onWent?: (went: readonly CodeAnnotation[]) => void;
+  /** The comments as stored right now, for a host whose comments another window can change. */
+  readComments?: () => readonly CodeAnnotation[];
   /**
    * The commit the comments were written on (the layer patch's own head, `InboxPullDiffAnswer.head_sha`), posted to
    * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
@@ -101,7 +95,7 @@ export interface PostEndingProps {
   onMoved?: () => void;
 }
 
-export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved }: PostEndingProps) {
+export function PostEnding({ pull, agent, comments: all, readComments, anchor, busy, picked, onPick, onPosted, onWent, headSha, onMoved }: PostEndingProps) {
   const phone = usePhone();
   const target = useMemo(() => {
     const listed = postablePull(pull);
@@ -246,14 +240,14 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
               }}
               onClose={() => setOpen(null)}
               onWent={onWent}
+              readComments={readComments && (() => readComments().filter((c) => !sameKey || !done!.ids.has(postedSignature(c))))}
               hostReadsAgain={Boolean(onMoved)}
               onPosted={(result) => {
                 setOpen(null);
                 // A follow-up comment after an approval still reads as the approval.
                 const action = sameHead && result.action === 'comment' ? done!.action : result.action;
-                const went = new Set(result.posted);
                 // At the commit it went to: a newer one on screen by now is still to be reviewed.
-                setDone({ key: target.key, head: result.head, action, ids: new Set([...(sameKey ? done!.ids : []), ...comments.filter((c) => went.has(c.id)).map(postedSignature)]) });
+                setDone({ key: target.key, head: result.head, action, ids: new Set([...(sameKey ? done!.ids : []), ...result.posted.map(postedSignature)]) });
                 onPosted({ ...result, action, label: rules.label });
               }}
             />
