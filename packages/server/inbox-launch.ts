@@ -1152,6 +1152,14 @@ export function createInboxLaunch(options: {
       return state !== "missing" && state !== "failed";
     },
 
+    /** Whether this launched session is gone (the line's "missing"), however recently it was heard from. */
+    gone(threadId: string, session: string | null | undefined): boolean {
+      if (!enabled() || !session) return false;
+      const root = store.message(threadId);
+      if (!root?.launch || root.launch.deleted_at || root.to?.session !== session) return false;
+      return runOfRoot(root)?.state === "missing";
+    },
+
     /** A launched row with its run word, and a session blocked on a prompt placed in Stopped on you (through `rowDecorator`). */
     decorateLaunched<T extends InboxListRow>(listed: T): T {
       const root = store.message(listed.thread_id);

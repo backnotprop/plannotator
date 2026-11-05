@@ -183,7 +183,7 @@ import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import { createInboxLiveSessions, takesOver } from "./inbox-sessions";
+import { createInboxLiveSessions, takesOver, thereInThread } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -4771,7 +4771,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
                 ...(isGuest(req, via) ? { by_guest: true } : {}),
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(to === undefined ? {} : { to }),
-                ...(to && asked && takesOver(store, asked.thread_id, asked, asked.to?.session, { askerLive: (session) => live.askerLive(session) || launch.resumes(asked.thread_id, session) }) ? { took_over: true } : {}),
+                ...(to && asked && takesOver(store, asked.thread_id, asked, asked.to?.session, thereInThread(live, launch, asked.thread_id)) ? { took_over: true } : {}),
                 ...(tags && tags.length > 0 ? { tags } : {}),
                 ...(handoff ? { handoff } : {}),
                 words: typeof body.words === "string" ? body.words : undefined,

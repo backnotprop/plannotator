@@ -53,7 +53,7 @@ import {
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
-import { replacesEndedAsker, takesOver, type createInboxLiveSessions } from "./inbox-sessions";
+import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
 const INBOX_REPLY_PREVIEW_MAX = 160;
@@ -78,7 +78,7 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
-  launch?: Pick<InboxLaunch, "enabled" | "resumes" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
+  launch?: Pick<InboxLaunch, "enabled" | "resumes" | "gone" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
   /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
   isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
@@ -251,10 +251,11 @@ export function createInboxCompose(options: {
     const asked = message.reply_to ? store.message(message.reply_to) : null;
     const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
     const waitsOn = message.to?.session ?? askedWakes;
+    const there = thereInThread(live, options.launch, message.thread_id);
     const next = store.readdressMessage(messageId, target, {
-      targetLive: !!waitsOn && live.askerLive(waitsOn),
+      targetLive: !!waitsOn && there.askerLive(waitsOn),
       askerEnded: replacesEndedAsker(asked, live),
-      tookOver: takesOver(store, message.thread_id, asked, waitsOn, { askerLive: (session) => live.askerLive(session) || !!options.launch?.resumes(message.thread_id, session) }),
+      tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
     });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };

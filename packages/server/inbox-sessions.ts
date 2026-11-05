@@ -214,6 +214,23 @@ export function replacesEndedAsker(asked: InboxMessage | null | undefined, live:
 }
 
 /**
+ * Whether a session is there, for moving a reply off it or taking its thread. A launched thread's own session reads by
+ * its launch: one a reply starts again is there even when stopped, and one that is gone is not, however recent.
+ */
+export function thereInThread(
+  live: { askerLive(session: string): boolean },
+  launch: { resumes(threadId: string, session: string): boolean; gone(threadId: string, session: string): boolean } | undefined,
+  threadId: string,
+): { askerLive(session: string): boolean } {
+  return {
+    askerLive: (session) => {
+      if (launch?.gone(threadId, session)) return false;
+      return !!launch?.resumes(threadId, session) || live.askerLive(session);
+    },
+  };
+}
+
+/**
  * Whether a reply aimed away from `leaving` (the session it waits on, if any) takes the thread (`took_over`): only from
  * an owner known to have ended (`ownerCanEnd`), so answering an older message cannot take a thread from a hand-off's new
  * owner or from an agent that reads through MCP; then when it leaves that owner, or answers a session read as ended.
