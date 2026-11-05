@@ -1266,7 +1266,7 @@ test('the details, from the forge: who stands where, the checks, every comment; 
   const pic = (login: string) => world.avatars.url(login);
   const longCheck = 'e2e (chromium, shard 3 of 8, retry the flaky ones) on the release branch after the migration step';
   // Real jobs share most of their words and differ at the end (matrix, shard, OS).
-  const twinPrefix = 'Test new and changed tests when deployed to the preview environment with the adapter and the cache';
+  const twinPrefix = 'Run changed specs against the staging build with the remote cache and the worker pool turned on';
   const dir = world.forge;
   const write = (name: string, value: unknown) => writeFileSync(join(dir, name), JSON.stringify(value));
   write(`ctx-${number}.json`, {

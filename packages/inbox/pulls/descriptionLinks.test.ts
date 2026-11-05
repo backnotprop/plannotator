@@ -52,9 +52,14 @@ describe('forgeBody', () => {
     expect(forgeBody('<!-- only a template -->').trim()).toBe('');
   });
   test(":robot: is the emoji the forge draws, outside code; a word GitHub has no emoji for stays", () => {
-    expect(forgeBody('## :robot: Stats from current PR\n\n:white_check_mark: :+1: :-1: :100:')).toBe('## 🤖 Stats from current PR\n\n✅ 👍 👎 💯');
+    expect(forgeBody('## :robot: Size report for this branch\n\n:white_check_mark: :+1: :-1: :100:')).toBe('## 🤖 Size report for this branch\n\n✅ 👍 👎 💯');
     expect(forgeBody('Run `:robot:` as is')).toBe('Run `:robot:` as is');
     expect(forgeBody('```\n:robot:\n```')).toBe('```\n:robot:\n```');
     expect(forgeBody(':octocat: at 10:30:00 and :not_an_emoji:')).toBe(':octocat: at 10:30:00 and :not_an_emoji:');
+  });
+  test("a shortcode in a link's address stays, so the link still goes where it went; its words still get emoji", () => {
+    expect(forgeBody('[:tada: docs](https://x.test/a:tada:b) :tada:')).toBe('[🎉 docs](https://x.test/a:tada:b) 🎉');
+    expect(forgeBody('[docs](<https://x.test/a b:tada:>) :tada:')).toBe('[docs](<https://x.test/a b:tada:>) 🎉');
+    expect(forgeBody('<https://x.test/a:tada:b> and https://x.test/c:robot:d, :robot:')).toBe('<https://x.test/a:tada:b> and https://x.test/c:robot:d, 🤖');
   });
 });

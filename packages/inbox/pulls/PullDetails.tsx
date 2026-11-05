@@ -168,7 +168,7 @@ function ReviewerRows({ reviewers, host, words }: { reviewers: readonly InboxPul
 
 /**
  * A check's own name, as the forge's checks page leads with it: a reusable workflow's run is "<job> / <its job>", so the
- * caller's job ("Test new and changed tests when deployed (adapter, 1/5)") names it, without the workflow before it or
+ * caller's job ("Run changed specs against the staging build (worker, 1/5)") names it, without the workflow before it or
  * the called job after it. Two checks that would read the same keep their whole names.
  */
 export function checkLabels(checks: readonly InboxPullCheck[]): Map<InboxPullCheck, string> {

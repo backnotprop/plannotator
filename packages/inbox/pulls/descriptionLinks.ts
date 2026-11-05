@@ -37,7 +37,7 @@ export function withEmoji(text: string): string {
 /**
  * A forge's body as the Inbox's Markdown should read it: HTML comments gone (a PR template's, which the forge hides too),
  * a line holding nothing but `<br>` (dependabot's), which would draw as those words, and `:shortcodes:` as their emoji.
- * In code, each stays.
+ * In code, each stays; in an address, a shortcode stays.
  */
 export function forgeBody(markdown: string): string {
   const out: string[] = [];
@@ -67,7 +67,8 @@ export function forgeBody(markdown: string): string {
         inComment = false;
         continue;
       }
-      const next = /(`+).*?\1|<!--/.exec(rest);
+      // Code, a comment's start, and an address (a link's `](…)`, an autolink, a bare URL), which an emoji would break.
+      const next = /(`+).*?\1|<!--|\]\((?:<[^>\n]*>|[^)\s]*)|<[a-z][a-z0-9+.-]*:[^\s<>]*>|\bhttps?:\/\/[^\s<>]+/i.exec(rest);
       if (!next) {
         kept += withEmoji(rest);
         break;

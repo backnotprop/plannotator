@@ -57,13 +57,13 @@ test.if(hasDom)('what needs eyes stays on the column, whatever else folds, and i
 
 test.if(hasDom)('a failure says how it failed, on its one line; many running fold into the line with the passed and skipped', () => {
   const failed: InboxPullCheck[] = [
-    { name: 'Test new and changed tests when deployed (adapter, 1/5) / build', workflow: 'build-and-test', state: 'fail', note: 'Failed', url: 'https://ci.example/1' },
-    { name: 'thank you, next', workflow: 'build-and-test', state: 'fail', note: 'Timed out' },
+    { name: 'Run changed specs against the staging build (worker, 1/5) / build', workflow: 'verify', state: 'fail', note: 'Failed', url: 'https://ci.example/1' },
+    { name: 'post the summary', workflow: 'verify', state: 'fail', note: 'Timed out' },
   ];
   draw([...many(113, 'pass'), ...many(7, 'pass', 'Skipped'), ...many(14, 'pending'), ...failed]);
   const shown = [...host.querySelectorAll('[data-pull-details-check]')];
   expect(shown.map((row) => row.getAttribute('data-pull-details-check'))).toEqual(['fail', 'fail']);
-  expect(shown[0]!.querySelector('.ib-prd-rname')!.textContent).toBe('Test new and changed tests when deployed (adapter, 1/5)');
+  expect(shown[0]!.querySelector('.ib-prd-rname')!.textContent).toBe('Run changed specs against the staging build (worker, 1/5)');
   expect(shown[0]!.querySelector('.ib-prd-rstate')!.textContent).toBe('Failed');
   expect(shown[1]!.querySelector('.ib-prd-rstate')!.textContent).toBe('Timed out');
   expect(shown[0]!.querySelector('a')!.getAttribute('href')).toBe('https://ci.example/1');
@@ -78,12 +78,12 @@ test.if(hasDom)('a failure says how it failed, on its one line; many running fol
 });
 
 test.if(hasDom)("a check's own name: the job, without the workflow before it or the called job after it, unless two would read the same", () => {
-  const a = { name: 'Test new and changed tests when deployed (adapter, 1/5) / build', workflow: 'build-and-test', state: 'fail' as const };
+  const a = { name: 'Run changed specs against the staging build (worker, 1/5) / build', workflow: 'verify', state: 'fail' as const };
   const b = { name: 'lint', workflow: 'ci', state: 'pass' as const };
   const c = { name: 'e2e (chromium) / build', state: 'pass' as const };
   const d = { name: 'e2e (chromium) / deploy', state: 'pass' as const };
   const labels = checkLabels([a, b, c, d]);
-  expect([labels.get(a), labels.get(b), labels.get(c), labels.get(d)]).toEqual(['Test new and changed tests when deployed (adapter, 1/5)', 'lint', 'e2e (chromium) / build', 'e2e (chromium) / deploy']);
+  expect([labels.get(a), labels.get(b), labels.get(c), labels.get(d)]).toEqual(['Run changed specs against the staging build (worker, 1/5)', 'lint', 'e2e (chromium) / build', 'e2e (chromium) / deploy']);
 });
 
 test.if(hasDom)("an answer with no comments list, from an older server, leaves the bar's control standing", () => {
@@ -162,11 +162,11 @@ test.if(hasDom)('the details are read again when the PR moves (a new head), and 
 });
 
 test.if(hasDom)('a check name cut in its middle keeps more of its end, so two that share a long start stay apart', () => {
-  const start = 'Test new and changed tests when deployed to the preview environment with the adapter and the cache';
+  const start = 'Run changed specs against the staging build with the remote cache and the worker pool turned on';
   const linux = cutMiddle(`${start} (linux, 1/5)`, 40);
   const windows = cutMiddle(`${start} (windows, 1/5)`, 40);
   expect(linux).not.toBe(windows);
-  expect(linux.startsWith('Test new and')).toBe(true);
+  expect(linux.startsWith('Run changed')).toBe(true);
   expect(linux.endsWith('(linux, 1/5)')).toBe(true);
   expect(Array.from(linux.replace('…', '')).length).toBeLessThanOrEqual(40);
   // Short enough, it is whole; never half of a character.
