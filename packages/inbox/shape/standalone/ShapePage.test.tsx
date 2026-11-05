@@ -94,7 +94,8 @@ describe.skipIf(!hasDom)('the standalone Shape page', () => {
     expect(parseShapeHash('#shape=shp_01ABC&view=how&panel=ask')).toEqual({ shape: 'shp_01ABC', view: 'how', panel: 'ask' });
     expect(parseShapeHash('#shape=../x&view=nope&panel=thread')).toEqual({ shape: null, view: null, panel: null });
     expect(shapeHash({ shape: 'shp_1', view: 'picture', panel: null })).toBe('#shape=shp_1');
-    expect(shapeHash({ shape: 'shp_1', view: 'reqs', panel: 'refs' })).toBe('#shape=shp_1&view=reqs&panel=refs');
+    expect(shapeHash({ shape: 'shp_1', view: 'know', panel: 'refs' })).toBe('#shape=shp_1&view=know&panel=refs');
+    expect(parseShapeHash('#shape=shp_01ABC&view=reqs').view).toBe('know');
   });
 
   test('the grid: the header, every active board, Find filters as you type', async () => {

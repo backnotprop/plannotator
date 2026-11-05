@@ -496,6 +496,8 @@ test('full screen’s composer on a phone at 320: dictating, the status has the 
   for (const dy of [-21.5, 21.5]) {
     expect(await page.evaluate(([x, y]) => document.elementFromPoint(x!, y!)?.closest('[data-voice-cancel]') !== null, [cancelMiddle.x, cancelMiddle.y + dy])).toBe(true);
   }
+  // Long enough for the fake device's speech to be heard, or the stop ends the take with nothing sent.
+  await page.waitForTimeout(1200);
   await mic(card).click();
   await expect(card.locator('[data-fcomp-field] textarea')).toHaveValue('Looks right.');
   await context.close();
@@ -520,6 +522,8 @@ test('full screen’s composer on a phone at 320: the mic within “Sent to …�
   expect(clock!.x + clock!.width).toBeLessThanOrEqual(button!.x);
   expect(button!.x + button!.width).toBeLessThanOrEqual(box!.x + box!.width);
   await page.waitForTimeout(800);
+  // Long enough for the fake device's speech to be heard, or the stop ends the take with nothing sent.
+  await page.waitForTimeout(1200);
   await mic(card).click();
   await expect(card.locator('[data-fcomp-field] textarea')).toHaveValue('Looks right.');
   await context.close();

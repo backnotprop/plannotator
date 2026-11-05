@@ -28,7 +28,7 @@ import { storage } from '@plannotator/ui/utils/storage';
 import { setSidebarSectionOpen } from './sidebarSections';
 import type { SkillCatalogEntry } from '@plannotator/ui/utils/skillReferences';
 import { reloadSkillCatalog } from '@plannotator/ui/utils/skillCatalog';
-import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxCardWire, InboxDecision, InboxHealth, InboxListRow, InboxListSection, InboxQuestion, InboxReplyDraftRow, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { DecisionMode } from './decisions/DecisionMode';
 import { DecisionPill, decideEntryShown } from './decisions/entry';
 import { threadDecisions } from './decisions/model';
@@ -158,7 +158,7 @@ import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
-import { pullGroups } from './pulls/model';
+import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
@@ -303,6 +303,8 @@ interface Route {
   stack?: string | null;
   layer?: string | null;
   scope?: 'layer' | 'stack';
+  /** Pull requests' view (`&view=mine|review|others`; absent: All), beside `project`. */
+  view?: PullFilter;
   /**
    * Shape (approval "shape-inbox-placement"): the board open over its thread (`#thread=…&shape=shp_…`), or over
    * the grid for a board with no thread (`#shapes&shape=shp_…`). The grid alone is `#shapes`.
@@ -380,7 +382,7 @@ function routeOf(fullHash: string): Route {
   if (params.has('pulls')) {
     const stack = params.get('stack') || null;
     const layer = stack ? params.get('layer') || null : null;
-    return { page: 'pulls', project: params.get('project') || null, thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
+    return { page: 'pulls', project: params.get('project') || null, view: pullFilterOf(params.get('view')), thread: null, stack, layer, scope: layer && params.get('scope') === 'stack' ? 'stack' : 'layer' };
   }
   if (params.has('board'))
     return {
@@ -427,6 +429,7 @@ function hashOf(route: Route): string {
     hash =
       'pulls' +
       (route.project ? `&project=${encodeURIComponent(route.project)}` : '') +
+      (route.view && route.view !== 'all' ? `&view=${route.view}` : '') +
       (route.stack ? `&stack=${encodeURIComponent(route.stack)}` : '') +
       (route.stack && route.layer ? `&layer=${encodeURIComponent(route.layer)}${route.scope === 'stack' ? '&scope=stack' : ''}` : '');
   else if (route.page === 'tour') hash = `tour=${route.step ?? 1}`;
@@ -809,6 +812,8 @@ function Inbox() {
   const [thread, setThread] = useState<InboxThread | null>(null);
   /** The open thread's own list row, from its read: an archived thread has none in the list. */
   const [threadRow, setThreadRow] = useState<InboxListRow | null>(null);
+  // A launched thread's run line (the thread route's `run`; launch only): null while the agent rests.
+  const [threadRun, setThreadRun] = useState<{ threadId: string; run: InboxRun | null; attach: string | null } | null>(null);
   /** The open thread's read when it has not landed: failed (read again soon) or missing (a 404). */
   const [threadLoad, setThreadLoadState] = useState<ThreadLoad | null>(null);
   const threadLoadRef = useRef<ThreadLoad | null>(null);
@@ -833,6 +838,15 @@ function Inbox() {
     firstList.current = { done: false, promise, resolve };
   }
   const threadReadApplied = useRef(0);
+  /**
+   * The open thread's first read numbered after its open (`after`: the last number before it), and the ids of the
+   * messages that read had. Until it lands, the thread on screen may be a copy from an earlier visit (App keeps
+   * `thread` while another thread's read is out): a permission card is counted as arrived only against this read.
+   */
+  const openRead = useRef<{ threadId: string; after: number } | null>(null);
+  /** The thread the open effect last opened: Try again on the same thread is not a new open. */
+  const openedFor = useRef<string | null>(null);
+  const [openedWith, setOpenedWith] = useState<{ threadId: string; ids: ReadonlySet<string> } | null>(null);
   /** The open thread as last read, for the open effect when another read (the event stream's) landed first. */
   const threadLoaded = useRef<InboxThread | null>(null);
   /** When `threadLoaded` landed (Date.now()): an old read is read again on the next record (openThreadReads.ts). */
@@ -1420,8 +1434,15 @@ function Inbox() {
         stopLiveThreadRetry();
         setThread(next.thread);
         setThreadRow(next.row ?? null);
+        setThreadRun(next.run === undefined ? null : { threadId, run: next.run, attach: next.attach_command ?? null });
         setThreadLoad(null);
         perfThreadReadLanded(threadId, next.thread.messages.length, true);
+        // The open's first fresh read: what the thread opened with (never a stale copy shown before it landed).
+        const opening = openRead.current;
+        if (opening?.threadId === threadId && mine > opening.after) {
+          openRead.current = null;
+          setOpenedWith({ threadId, ids: new Set(next.thread.messages.map((m) => m.id)) });
+        }
         // What is new since the last look, from the first read of this thread:
         // it lands before the window records the look, and is kept until the person leaves the thread.
         setLook((current) => (current?.threadId === threadId ? current : { threadId, seq: lookBoundary(next.thread), through: latestAgentSeq(next.thread) }));
@@ -1964,6 +1985,9 @@ function Inbox() {
         // The live sessions moved (approval "inbox-row-delivery"): read the list again while a row's
         // delivery can still change (queued, sending, saved, not delivered), so its glyph follows.
         onDeliveries: (change) => {
+          // A launched thread's run line moves with the same signature: the open one is read again.
+          const open = routeRef.current.thread;
+          if (open && threadLoaded.current?.thread_id === open && threadLoaded.current.messages[0]?.launch) void refreshThread(open);
           // Whether a thread's agent can answer Ask AI moves with them.
           emitAskChange(null);
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
@@ -2092,9 +2116,19 @@ function Inbox() {
     if (!threadId) {
       setThread(null);
       setThreadRow(null);
+      setThreadRun(null);
       setLook(null);
       setThreadLoad(null);
+      openRead.current = null;
+      openedFor.current = null;
+      setOpenedWith(null);
       return;
+    }
+    // A new open (not Try again on the same thread): what it opened with comes from its first read numbered after now.
+    if (openedFor.current !== threadId) {
+      openedFor.current = threadId;
+      openRead.current = { threadId, after: threadReadSeq.current };
+      setOpenedWith(null);
     }
     let cancelled = false;
     let retry: ReturnType<typeof setTimeout> | null = null;
@@ -2562,10 +2596,13 @@ function Inbox() {
     showToast(
       {
         icon: 'check',
-        lead: `Sent to ${hostLabel(sent.host)}`,
+        // A launch (New <agent> session) starts the agent; its thread's run line says the rest.
+        lead: sent.launched ? `Starting ${hostLabel(sent.host)}` : `Sent to ${hostLabel(sent.host)}`,
         // The thread's own line says Queued / Sending / Delivered. A long project name is cut on screen (Toast.tsx), never in speech.
         detail: `in ${sent.projectName}`,
-        speech: `Sent to ${hostLabel(sent.host)} in ${sent.projectName}. It takes it as its next turn.`,
+        speech: sent.launched
+          ? `Starting ${hostLabel(sent.host)} in ${sent.projectName}. Your message is its first turn.`
+          : `Sent to ${hostLabel(sent.host)} in ${sent.projectName}. It takes it as its next turn.`,
         action: { label: 'Open', onPress: () => {
           dismissToast();
           go({ page: 'inbox', project: routeRef.current.page === 'inbox' ? routeRef.current.project : null, thread: sent.threadId });
@@ -3193,13 +3230,19 @@ function Inbox() {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
     snoozedThisLoad.current = true;
+    let answer: Awaited<ReturnType<typeof inboxApi.snooze>>;
     try {
-      await inboxApi.snooze(threadId, until);
+      answer = await inboxApi.snooze(threadId, until);
     } catch (cause) {
       showError(cause);
       return;
     }
     await afterWrite();
+    // A home machine whose clock is ahead of this one: the time has passed there, so the thread is not snoozed.
+    if (answer.snoozed === null) {
+      showError(new InboxApiError(409, 'snooze_past', 'That time has passed.'));
+      return;
+    }
     const drawnBefore = moveSnoozedRow(threadId);
     if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
     const when = inboxSnoozeWhen(until);
@@ -4384,7 +4427,7 @@ function Inbox() {
   // this computer's gh / glab).
   const codeReviewOn = settings?.code_review?.on === true;
   const pullsShown = codeReviewOn && !guestPage;
-  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown);
+  const pulls = usePulls(route.page === 'pulls' && pullsShown, pullsShown, route.page === 'pulls' && route.view === 'others');
   // A #pulls link while Code review is off (or on a guest's page): the Inbox, as if the page were not there.
   useEffect(() => {
     if (route.page === 'pulls' && settings !== null && !pullsShown) close({ page: 'inbox', project: null, thread: null });
@@ -4415,10 +4458,11 @@ function Inbox() {
   // first-run screen. The person's Inbox stays loaded underneath
   // and comes back as it was.
   const tourOn = route.page === 'tour';
-  // Ask AI (PLANNOTATOR_INBOX_ASK_AI): off, this reads nothing and draws nothing. A linked machine's thread has no chat here.
+  // Ask AI (PLANNOTATOR_INBOX_ASK_AI, and always while Code review is on: approval "shape-in-code-review"): off, this
+  // reads nothing and draws nothing. A linked machine's thread has no chat here.
   const [askReply, setAskReply] = useState<{ threadId: string; words: string } | null>(null);
   const ask = useInboxAsk({
-    on: settings?.ask_ai === true && !tourOn,
+    on: (settings?.ask_ai === true || settings?.code_review?.on === true) && !tourOn,
     threadId: route.thread && !machineOf(route.thread) ? route.thread : null,
     phone,
     openThread: (threadId) => writeRoute({ page: 'inbox', project: null, thread: threadId }),
@@ -5341,11 +5385,12 @@ function Inbox() {
         state={pulls}
         stackId={route.stack ?? null}
         project={route.project}
+        filter={route.view ?? 'all'}
         projects={projects}
         projectNames={projectNames}
         phone={phone}
         onOpenStack={(id) => (id ? writeRoute({ ...route, stack: id, layer: null }, { replace: !!route.stack && !phone }) : close({ ...route, stack: null, layer: null }))}
-        onProject={(project) => go({ page: 'pulls', project, thread: null, stack: null })}
+        onScope={({ filter, project }) => go({ page: 'pulls', project, view: filter, thread: null, stack: null })}
         onReview={(stack, layer, scope) => go({ ...route, stack, layer, scope })}
         onOpenThread={(threadId) => go({ page: 'inbox', project: null, thread: threadId })}
         onOpenCard={boardEnabled ? (cardId) => go({ page: 'board', project: null, thread: null, board: 'lanes', card: cardId }) : undefined}
@@ -5564,6 +5609,10 @@ function Inbox() {
             }
             sent={openThreadRow?.sent ?? null}
             row={openThreadRow}
+            run={threadRun?.threadId === thread.thread_id ? threadRun.run : undefined}
+            attachCommand={threadRun?.threadId === thread.thread_id ? threadRun.attach : null}
+            onRunChanged={() => void refreshThread(thread.thread_id)}
+            openedWith={openedWith?.threadId === thread.thread_id ? openedWith.ids : null}
             drawn={drawnSection(shown, thread.thread_id)}
             onMarkRead={(read) => void markRead(thread.thread_id, read)}
             onMarkUnread={() => void markUnread(thread.thread_id)}
@@ -5681,6 +5730,7 @@ function Inbox() {
             onFull={fromCard ? undefined : (on) => (on ? setThreadFull(true) : leaveFull())}
             fileStacked={stack.file}
             remote={settings ? (settings.via ?? 'local') === 'tailnet' : null}
+            guest={guestPage}
             onToast={(t) => showToast(t)}
             linkOf={(messageId) => threadLink(thread.thread_id, settings, window.location.origin, messageId)}
             onInboxLink={inboxLink}
@@ -6169,6 +6219,7 @@ function Inbox() {
             }}
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
+            onAsk={ask.askWith}
           />
         ) : (
           <GuidePane

@@ -1,7 +1,7 @@
 /**
- * Code review and Shape held for 0.28.50 (owner decision, 2026-11-04; inbox.ts
- * `heldSwitch`). In 0.28.49 their Settings → Capabilities switches show only to
- * a person who already has that feature on, or with PLANNOTATOR_INBOX_PREVIEW=1.
+ * Code review and Shape held until the next big release, 0.29 (owner decisions,
+ * 2026-11-04 and 2026-11-05; inbox.ts `heldSwitch`). Until then their Settings →
+ * Capabilities switches show only to a person who already has that feature on, or with PLANNOTATOR_INBOX_PREVIEW=1.
  * Settings draws a row only for a key the settings read carries, so the proof is
  * on the doors a window reads, on a real Inbox with config.json deciding:
  *
@@ -9,11 +9,12 @@
  *    `event: capabilities` names neither (a window would otherwise merge them in);
  *  - already on: both are there; turning one off answers `{ on: false }` and tells
  *    every window, then the next read leaves it out;
- *  - PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and the event.
+ *  - PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and the event;
+ *  - a release build, 0.28.50 included: the same, as the hold reads no version.
  *
- * What regresses: a normal user in 0.28.49 seeing either switch, or the owner
- * (on) losing the row, or a shown switch that cannot be turned off.
- * 0.28.50 deletes this file with `heldSwitch`.
+ * What regresses: a normal user seeing either switch before that release, or the
+ * owner (on) losing the row, or a shown switch that cannot be turned off.
+ * The next big release deletes this file with `heldSwitch`.
  */
 import { afterEach, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
@@ -36,7 +37,7 @@ afterEach(() => {
 
 type Frame = { board?: { on: boolean }; steps?: { on: boolean }; code_review?: { on: boolean }; shape?: { on: boolean } };
 
-async function world(config: Record<string, unknown> | null, preview: boolean) {
+async function world(config: Record<string, unknown> | null, preview: boolean, version?: string) {
   if (preview) process.env.PLANNOTATOR_INBOX_PREVIEW = "1";
   else delete process.env.PLANNOTATOR_INBOX_PREVIEW;
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-held-switches-")));
@@ -45,7 +46,7 @@ async function world(config: Record<string, unknown> | null, preview: boolean) {
   mkdirSync(dataDir, { recursive: true });
   if (config) writeFileSync(join(dataDir, "config.json"), JSON.stringify(config));
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, phones: false });
+  const server = await startInboxServer({ dataDir, phones: false, ...(version ? { version, binaryPath: null } : {}) });
   servers.push(server);
   const base = `http://127.0.0.1:${server.port}`;
   const read = async () => (await (await fetch(`${base}/api/inbox/settings`)).json()) as Frame;
@@ -146,4 +147,20 @@ test("PLANNOTATOR_INBOX_PREVIEW=1: both are there while off, in the read and in 
   await stream.next(1);
   expect(stream.frames).toEqual([{ board: { on: false }, steps: { on: true }, code_review: { on: false }, shape: { on: false } }]);
   await stream.stop();
+});
+
+test("a release build holds the same way: the hold reads no version, so 0.28.50 does not end it", async () => {
+  for (const version of ["0.28.49", "0.28.50"]) {
+    const off = await (await world({ updateCheck: false }, false, version)).read();
+    expect("code_review" in off).toBe(false);
+    expect("shape" in off).toBe(false);
+
+    const on = await (await world({ updateCheck: false, inboxCodeReview: true, inboxShape: true }, false, version)).read();
+    expect(on.code_review).toEqual({ on: true });
+    expect(on.shape).toEqual({ on: true });
+
+    const preview = await (await world({ updateCheck: false }, true, version)).read();
+    expect(preview.code_review).toEqual({ on: false });
+    expect(preview.shape).toEqual({ on: false });
+  }
 });
