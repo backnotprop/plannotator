@@ -245,7 +245,7 @@ export function handoffStack(stack: InboxPullStack, links: Readonly<Record<strin
 
 /**
  * Step 2's line on using the thread, every PR's (the owner on a teammate's PR: "You should also be encouraged to use the
- * review thread with the user"). Draft wording, not yet approved: awaits the owner in `pull-handoff-pushes`.
+ * review thread with the user"; approved in `pull-handoff-pushes`).
  */
 const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiting for me.';
 
@@ -253,6 +253,18 @@ const PULL_HANDOFF_TALK = 'Bring up what you notice or want to ask without waiti
 function forkWords(pull: Pick<InboxPull, 'repo' | 'head_repo'>): string {
   const fork = pull.head_repo;
   return fork && REPO.test(fork) && fork.toLowerCase() !== pull.repo.toLowerCase() ? ` on ${fork} (a fork)` : '';
+}
+
+/**
+ * The branch is the person's to push: they opened the PR (all `mine` says), and a head on a fork is under their own login,
+ * compared as `mine` compares logins, exactly. A fork in an organization they own reads as someone else's. Not
+ * `inboxReviewIsOf`'s rule, which counts every fork out: a PR from the person's own fork is still theirs to update.
+ */
+function branchIsMine(pull: Pick<InboxPull, 'mine' | 'author' | 'repo' | 'head_repo'>): boolean {
+  if (!pull.mine) return false;
+  const fork = pull.head_repo;
+  if (!fork || fork.toLowerCase() === pull.repo.toLowerCase()) return true;
+  return REPO.test(fork) && fork.split('/')[0] === pull.author;
 }
 
 /**
@@ -283,9 +295,9 @@ const pullNounOf = (stack: Pick<InboxPullStack, 'platform'>) => (stack.platform 
  * The opening message of the review thread a PR goes to (Review with an agent, a running one or a new one), the owner's approved
  * text (`.product/approved/pull-handoff-pushes/`, over `pull-handoff-message/`; a stack's step 1 in `stack-show-me`, the
  * rest of a stack's wording awaits approval): help me review and understand it; what it is; then the guided review
- * (`pullHandoffAskLine`) and the discussion. On the person's own PRs, feedback is made and pushed where the agent can, and
- * the next round comes in the same thread, as a local review's does (`localReviewMessage`). On a PR with any teammate's
- * layer, no code changes unless the person says so and no push. Never a comment, approval or merge. A head on a fork is
+ * (`pullHandoffAskLine`) and the discussion. On the person's own PRs (`branchIsMine`), feedback is made and pushed where the
+ * agent can, and the next round comes in the same thread, as a local review's does (`localReviewMessage`). With any open
+ * layer that isn't theirs to push, no code changes unless the person says so and no push. Never a comment, approval or merge. A head on a fork is
  * named (`forkWords`). Everything from the forge is its author's: titles through
  * `pullTitleLine`, branches only when safe, logins and links only when they are what they claim. A tree stack is
  * narrowed first (`handoffStack`).
@@ -298,11 +310,11 @@ export function pullHandoffMessage(stack: InboxPullStack, ask: PullHandoffAsk = 
   const where = REPO.test(stack.repo) ? (stack.host === 'github.com' ? stack.repo : `${stack.host}/${stack.repo}`) : null;
   const repository = where ? `- Repository: ${where}` : null;
   const heading = `${noun[0]!.toUpperCase()}${nouns.slice(1)}`;
-  const mine = layers.every((l) => l.mine);
-  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${mine ? '' : " Don't change any code unless I explicitly tell you to."}`;
+  const pushable = layers.every(branchIsMine);
+  const opening = `You're being asked to help me review and understand ${many ? `a stack of ${nouns}` : `a ${noun}`}.${pushable ? '' : " Don't change any code unless I explicitly tell you to."}`;
   const them = many ? 'them' : 'it';
   const branch = many ? 'branches' : 'branch';
-  const feedback = mine
+  const feedback = pushable
     ? `If I ask for changes, make them, push them to the ${branch} if you can, and send me the updated review here. Don't comment on the ${nouns}, approve ${them} or merge ${them}.`
     : `Don't push to the ${branch}, comment on the ${nouns}, approve ${them} or merge ${them}.`;
   const whatToDo = `What to do\n${pullHandoffAskLine(stack, ask)}\n2. After that, we discuss it in this thread. ${PULL_HANDOFF_TALK} ${feedback}`;

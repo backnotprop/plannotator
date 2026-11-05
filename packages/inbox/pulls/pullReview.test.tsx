@@ -1265,6 +1265,54 @@ test('a teammate whose login is unknown or not a plain login is "a teammate"', (
   }
 });
 
+const PUSH_WORDS = 'If I ask for changes, make them, push them to the branch if you can, and send me the updated review here.';
+const NO_CHANGE_WORDS = "Don't change any code unless I explicitly tell you to.";
+
+test("a PR I opened from someone else's fork isn't mine to push: only a fork under my own login takes the push words", () => {
+  // `mine` says only that dana opened it.
+  const fromTomas = handoffOf(LOCALE_PR({ head_repo: 'tomas/web-app' }));
+  expect(fromTomas).toContain(NO_CHANGE_WORDS);
+  expect(fromTomas).toContain("Don't push to the branch, comment on the pull request, approve it or merge it.");
+  expect(fromTomas).not.toContain(PUSH_WORDS);
+  // Still the person's PR, with the fork named.
+  expect(fromTomas).toContain('\n- Author: me\n');
+  expect(fromTomas).toContain('\n- Branch: locale-fallback on tomas/web-app (a fork), into main\n');
+  // Their own fork, and the repository itself in any case, are theirs.
+  expect(handoffOf(LOCALE_PR({ head_repo: 'dana/web-app' }))).toContain(PUSH_WORDS);
+  expect(handoffOf(LOCALE_PR({ head_repo: 'NorthWind/Web-App' }))).toContain(PUSH_WORDS);
+  // A fork in an organization, a login in another case, and a name that isn't plain all fall to the teammate's words.
+  for (const head_repo of ['northwind-labs/web-app', 'Dana/web-app', 'dana/x y']) expect(handoffOf(LOCALE_PR({ head_repo }))).not.toContain(PUSH_WORDS);
+  // One such layer is enough in a stack.
+  const stacked = inboxPullStacks([pull(412, { head: 'retry/a', base: 'main' }), pull(413, { head: 'retry/b', base: 'retry/a', head_repo: 'tomas/billing-svc' })])[0]!;
+  expect(pullHandoffMessage(stacked)).toContain("Don't push to the branches, comment on the pull requests, approve them or merge them.");
+});
+
+test("a teammate's merged layer under my open one: only the open layers decide, so it takes the push words", () => {
+  const text = pullHandoffMessage(inboxPullStacks([pull(411, { head: 'retry/base', state: 'merged', mine: false, author: 'tomas' }), pull(412, { head: 'retry/schedule', base: 'retry/base' })])[0]!);
+  expect(text).toContain(PUSH_WORDS);
+  expect(text).not.toContain(NO_CHANGE_WORDS);
+  expect(text).toContain('\n- Author: me\n');
+});
+
+test("GitLab and an Enterprise host: the same push rule on an own PR, a teammate's and a fork", () => {
+  const gitlab = (fields: Partial<InboxPull>) =>
+    LOCALE_PR({ platform: 'gitlab', host: 'gitlab.northwind.dev', repo: 'platform/web-app', head_repo: 'platform/web-app', number: 61, key: 'gitlab.northwind.dev/platform/web-app!61', url: 'https://gitlab.northwind.dev/platform/web-app/-/merge_requests/61', ...fields });
+  const mergeStep = `${PUSH_WORDS} Don't comment on the merge request, approve it or merge it.`;
+  const noMergePush = "Don't push to the branch, comment on the merge request, approve it or merge it.";
+  expect(handoffOf(gitlab({}))).toContain(mergeStep);
+  expect(handoffOf(gitlab({ head_repo: 'dana/web-app' }))).toContain(mergeStep);
+  expect(handoffOf(gitlab({ head_repo: 'tomas/web-app' }))).toContain(noMergePush);
+  expect(handoffOf(gitlab({ mine: false, author: 'tomas' }))).toContain(noMergePush);
+  const ghe = (fields: Partial<InboxPull>) =>
+    LOCALE_PR({ host: 'github.northwind.dev', key: 'github.northwind.dev/northwind/web-app#869', url: 'https://github.northwind.dev/northwind/web-app/pull/869', ...fields });
+  const pullStep = `${PUSH_WORDS} Don't comment on the pull request, approve it or merge it.`;
+  const noPullPush = "Don't push to the branch, comment on the pull request, approve it or merge it.";
+  expect(handoffOf(ghe({}))).toContain(pullStep);
+  expect(handoffOf(ghe({ head_repo: 'dana/web-app' }))).toContain(pullStep);
+  expect(handoffOf(ghe({ head_repo: 'tomas/web-app' }))).toContain(noPullPush);
+  expect(handoffOf(ghe({ mine: false, author: 'tomas' }))).toContain(noPullPush);
+});
+
 test('GitLab: "merge request" wherever the text says "pull request", the host before the repository, !N', () => {
   const gitlab = (fields: Partial<InboxPull>) =>
     LOCALE_PR({ platform: 'gitlab', host: 'gitlab.northwind.dev', repo: 'platform/web-app', number: 61, key: 'gitlab.northwind.dev/platform/web-app!61', url: 'https://gitlab.northwind.dev/platform/web-app/-/merge_requests/61', ...fields });
