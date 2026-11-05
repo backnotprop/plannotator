@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { INBOX_INITIATIVE_NAME_MAX, type InboxInitiative } from '@plannotator/core/inbox-types';
-import { InboxApiError, inboxApi } from '../api';
+import { inboxApi } from '../api';
+import { INITIATIVE_SAVE_FAILED, initiativeRefusal, restoreInitiatives } from './initiativeUndo';
 import { Icon } from '../icons';
 import { Tip } from '../components/Tip';
 import { InboxToast, type InboxToastModel } from '../components/Toast';
@@ -20,7 +21,6 @@ import { initiativeDeletedToast } from './model';
  * the Undo still up, `onCloseWithUndo` hands it to the window's.
  */
 /** The refusal whose server text the dialog shows as is (a 409): a name taken. */
-const INITIATIVE_REFUSALS: ReadonlySet<string> = new Set(['initiative_exists']);
 /** As long as the window's toast stays up (MARK_READ_UNDO_MS). */
 const DELETED_TOAST_MS = 7_000;
 
@@ -96,32 +96,27 @@ export function InitiativesDialog({
     armToast();
     onChanged();
   };
+  // The second click of a double click on Undo waits on the first, or it would answer for rows already settled.
+  const undoing = useRef(false);
   const undo = async () => {
+    if (undoing.current) return;
+    undoing.current = true;
     const back = deleted;
-    let done = 0;
-    let refused = false;
-    const ok = await run(async () => {
-      let last = back[0]!;
-      for (const i of back) {
-        try {
-          last = (await inboxApi.changeInitiative(i.id, { op: 'restore' })).initiative;
-        } catch (cause) {
-          refused = cause instanceof InboxApiError && INITIATIVE_REFUSALS.has(cause.code);
-          throw cause;
-        }
-        done++;
-      }
-      return last;
-    });
-    // A name taken since refuses its restore: the line says so, what came back stays back, and the toast stops
-    // offering that Undo. A failed save keeps it, to try again.
-    if (done > 0 || refused) onChanged();
-    if (!ok) {
-      setDeleted((now) => now.slice(done + (refused ? 1 : 0)));
-      return;
-    }
-    clearToast();
-    setFocusTo({ kind: 'row', id: back[back.length - 1]!.id });
+    setBusy(true);
+    setError(null);
+    const { restored, left, line } = await restoreInitiatives(back);
+    undoing.current = false;
+    setBusy(false);
+    setError(line);
+    // What came back shows on the next read; a refusal's read shows who took the name.
+    onChanged();
+    // By id, so one deleted meanwhile keeps its Undo. A failed save keeps it too, to try again.
+    const settled = new Set(back.filter((i) => !left.some((still) => still.id === i.id)).map((i) => i.id));
+    setDeleted((now) => now.filter((i) => !settled.has(i.id)));
+    if (left.length > 0) return;
+    // Undo's button is gone: focus never drops to the page.
+    const last = restored.at(-1);
+    setFocusTo(last ? { kind: 'row', id: last.id } : { kind: 'new' });
   };
   const close = () => {
     if (deleted.length > 0) onCloseWithUndo?.(deleted);
@@ -139,8 +134,7 @@ export function InitiativesDialog({
     try {
       return await work();
     } catch (cause) {
-      // Only a name taken says why (the server's words); anything else, a network failure too, the one line.
-      setError(cause instanceof InboxApiError && INITIATIVE_REFUSALS.has(cause.code) ? cause.message : 'That did not save. Try again.');
+      setError(initiativeRefusal(cause) ?? INITIATIVE_SAVE_FAILED);
       return null;
     } finally {
       setBusy(false);

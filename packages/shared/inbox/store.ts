@@ -6321,7 +6321,7 @@ export class InboxStore {
    * a card put in the wrong one can be moved, a deleted initiative cannot.
    */
   initiativeToDelete(value: string): InboxInitiative | null {
-    return this.initiativeAnswering(value, (name) => inboxInitiativeNameKey(inboxInitiativeBareName(name)).replace(/\s+/gu, ""));
+    return this.initiativeAnswering(value, (name) => inboxInitiativeNameKey(inboxInitiativeBareName(name)).normalize("NFC").replace(/\s+/gu, ""));
   }
 
   /** A live one by `ini_` id, else by name ignoring case, else the first made with `name`'s `key` (an empty key matches nothing). */

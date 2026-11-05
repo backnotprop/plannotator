@@ -1,7 +1,7 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from 'react';
 import { INBOX_CARD_COLUMN_LABELS, INBOX_CARD_LIVE_COLUMNS, displayInboxSubject, inboxCardMarkRef, type InboxCardColumn, type InboxCardMark, type InboxCardHistoryEntry, type InboxCardRef, type InboxCardWire, type InboxListRow, type InboxProjectRepo, type InboxInitiative } from '@plannotator/core/inbox-types';
 import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
-import { InboxApiError, inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
+import { inboxApi, type CardsModel, type ComposeSessionsModel, type ProjectFolder } from '../api';
 import { formatCount, fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip, isTextCut } from '../components/Tip';
@@ -23,6 +23,7 @@ import { BoardIntro, useCopyBoardPrompt } from './BoardIntro';
 import { TidyMenu, type TidyController } from '../components/Tidy';
 import { BoardFilter, BoardFilterTokens, initiativeLabel } from './BoardFilter';
 import { InitiativesDialog } from './InitiativesDialog';
+import { restoreInitiatives } from './initiativeUndo';
 import { projectNames } from '../search/model';
 import {
   agentState,
@@ -244,24 +245,16 @@ export function BoardPage(props: BoardPageProps) {
   };
   /**
    * The Initiatives dialog closed with its Undo still up: the window's toast takes it over, so Done never loses it.
-   * A name taken since refuses (only that says why, as the dialog's line; anything else the one line).
+   * Every restore is tried (`restoreInitiatives`); a failed save offers Undo again, a name taken since only says so.
    */
   const undoableInitiatives = (deleted: readonly InboxInitiative[]) => {
-    props.onToast?.({
-      icon: 'check',
-      ...initiativeDeletedToast(deleted),
-      onUndo: () => {
-        props.onToast?.(null);
-        void (async () => {
-          try {
-            for (const i of deleted) await inboxApi.changeInitiative(i.id, { op: 'restore' });
-          } catch (cause) {
-            props.onToast?.({ icon: 'warn', wrap: true, lead: cause instanceof InboxApiError && cause.code === 'initiative_exists' ? cause.message : 'That did not save. Try again.' });
-          }
-          props.onChanged();
-        })();
-      },
-    });
+    props.onToast?.({ icon: 'check', ...initiativeDeletedToast(deleted), onUndo: () => void undoInitiatives(deleted) });
+  };
+  const undoInitiatives = async (deleted: readonly InboxInitiative[]) => {
+    props.onToast?.(null);
+    const { left, line } = await restoreInitiatives(deleted);
+    if (line) props.onToast?.({ icon: 'warn', wrap: true, lead: line, ...(left.length > 0 ? { onUndo: () => void undoInitiatives(left) } : {}) });
+    props.onChanged();
   };
   /**
    * The toast's Undo (or `Z`): the move back through the same route, then focus on the card where it is now.

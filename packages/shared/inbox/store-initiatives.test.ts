@@ -300,6 +300,11 @@ describe("initiatives: an agent's card names one", () => {
     }
     expect(store.initiatives().length).toBe(1);
 
+    // One word in two spellings (a Mac's name for a file is often NFD) would be two rows that look identical.
+    const cafe = store.createInitiative({ name: "Caf\u00E9", by: PERSON });
+    expect(store.createCard({ project_id: project.id, by: AGENT, title: "NFD", initiative_name: "Cafe\u0301" }).card.initiative).toBe(cafe.id);
+    expect(store.initiativeToDelete("Cafe\u0301")!.id).toBe(cafe.id);
+
     for (const [live, wanted] of [["C++", "C#"], ["C++", "c"], ["QA", "Q&A"], ["v1.2", "v12"], ["AB", "A/B"], ["RD", "R&D"], [".NET", "NET"], ["Code review", "\uFF23ode review"]] as const) {
       if (!store.initiatives().some((i) => i.name === live)) store.createInitiative({ name: live, by: PERSON });
       const ini = store.initiatives().find((i) => i.name === live)!;

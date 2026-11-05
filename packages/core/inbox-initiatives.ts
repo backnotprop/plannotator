@@ -95,12 +95,12 @@ export function inboxInitiativeBareName(name: string): string {
 
 /**
  * What an agent's name joins a live initiative by: case, spaces, `-`, `_` and a
- * leading `#` ignored, nothing else. Narrower than a tag's key, which only has
+ * leading `#` ignored, and one spelling of the same letters (NFC), nothing else. Narrower than a tag's key, which only has
  * letters and digits to go on: here "C#" must not join "C++", "Q&A" "QA", or
  * "v12" "v1.2". Empty for a name of only those marks: that joins nothing.
  */
 export function inboxInitiativeJoinKey(name: string): string {
-  return inboxInitiativeBareName(name).toLowerCase().replace(/[\s_-]+/gu, "");
+  return inboxInitiativeBareName(name).normalize("NFC").toLowerCase().replace(/[\s_-]+/gu, "");
 }
 
 /** A hashtag's key: letters and digits only, lowercased (not locale-dependent, the same in the server and every browser), so `#CodeReview`, `#code-review` and "Code review" are one. */
