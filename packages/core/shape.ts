@@ -1153,15 +1153,17 @@ type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<P
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
   const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
-  const before = new Map(a.parts.map(now).map((p) => [key(p), p]));
-  const after = new Map(b.parts.map(now).map((p) => [key(p), p]));
+  const partsA = a.parts.map(now);
+  const partsB = b.parts.map(now);
+  const before = new Map(partsA.map((p) => [key(p), p]));
+  const after = new Map(partsB.map((p) => [key(p), p]));
   const changes: ShapeChange[] = [];
-  for (const p of b.parts) {
+  for (const p of partsB) {
     const old = before.get(key(p));
     if (!old) changes.push({ view: p.view, id: p.id, kind: 'added', after: p.text });
     else if (old.text !== p.text) changes.push({ view: p.view, id: p.id, kind: 'changed', before: old.text, after: p.text });
   }
-  for (const p of a.parts) if (!after.has(key(p))) changes.push({ view: p.view, id: p.id, kind: 'removed', before: p.text });
+  for (const p of partsA) if (!after.has(key(p))) changes.push({ view: p.view, id: p.id, kind: 'removed', before: p.text });
 
   const views = SHAPE_VIEWS.map((v) => v.id).filter((view) => {
     if (changes.some((c) => c.view === view)) return true;

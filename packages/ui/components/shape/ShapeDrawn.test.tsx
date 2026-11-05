@@ -241,6 +241,17 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
     expect(shadow.querySelector('[data-ref="3"]')!.classList.contains('own')).toBe(true);
   });
 
+  test('finger-sized numbers come with the bubble: a drawing with no peek keeps its size', async () => {
+    const refs = [{ n: 1, kind: 'file' as const, title: 'T', target: 'a.ts' }];
+    const plain = await draw({ html: '<span data-ref="1"></span>', refs });
+    expect(plain.board.classList.contains('peek')).toBe(false);
+    act(() => root!.unmount());
+    root = null;
+    container!.remove();
+    const peeking = await draw({ html: '<span data-ref="1"></span>', refs, onRefPeek: () => {} });
+    expect(peeking.board.classList.contains('peek')).toBe(true);
+  });
+
   test('a host URL cannot break out of the picture attribute', async () => {
     const { shadow } = await draw({ html: '<img src="files/a.png">', resolveSrc: () => '/x"><b id="out">y&z' });
     expect(shadow.querySelector('#out')).toBeNull();

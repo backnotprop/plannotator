@@ -145,6 +145,12 @@ describe('What to know', () => {
     }
   });
 
+  test('two old versions with raw reqs parts compare as What to know: same parts, no changes', () => {
+    const version = (text: string) => ({ n: 1, views: {}, refs: [], parts: [{ view: 'reqs', id: 'r-1', text }] }) as unknown as Parameters<typeof diffShapeVersions>[0];
+    expect(diffShapeVersions(version('Line'), version('Line')).changes).toEqual([]);
+    expect(diffShapeVersions(version('Line'), version('Other')).changes).toEqual([{ view: 'know', id: 'r-1', kind: 'changed', before: 'Line', after: 'Other' }]);
+  });
+
   test('a note from a tab older than What to know is taken, as What to know', () => {
     const r = checkShapeNoteInput({ kind: 'change', v: 1, view: 'reqs', part: 'r-1', text: 'Change this' });
     expect(r.ok).toBe(true);

@@ -138,7 +138,7 @@ svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
 @keyframes shp-rb-own-flash { 0%, 40% { transform: scale(1.3); } 100% { transform: none; } }
 @media (prefers-reduced-motion: reduce) { .shp-rb.own, .shp-rb.own:hover, .shp-rb.own.lit { transform: none; transition: none; } .shp-rb.own.flash { animation: none; } }
 /* A finger needs more than 16 px. */
-@media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
+@media (pointer: coarse) { .shp-rb.own:focus-visible { outline: none; } .board.peek .shp-rb:not(.own) { position: relative; min-width: 22px; height: 22px; font-size: 12px; } .board.peek .shp-rb:not(.own)::after { content: ""; position: absolute; inset: -11px; } }
 `;
 
 // One sanitizer of our own, so its hook reaches no other DOMPurify user.
@@ -295,7 +295,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
