@@ -5,7 +5,8 @@
  * work hiding the run (an agent left unticked is still offered, and its
  * progress never showed again); a run's agent that changed nothing not reading
  * "Nothing to change", and one whose session ended before delivery not
- * reading "Session ended".
+ * reading "Session ended"; and a stale plan still being read again
+ * (`pending`, #2593) drawn in the menu or the popover as if current.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from the test.yml DOM list.
  */
@@ -80,6 +81,25 @@ test.skipIf(!hasDom)('new work and the run show together: the menu offers "Tidy 
   act(() => item.click());
   await settle();
   expect(document.querySelector('[data-tidy-go]')).not.toBeNull();
+  expect(document.querySelector('[data-tidy-agent="ses-c"]')).not.toBeNull();
+  expect(document.querySelectorAll('[data-tidy-run-agent]')).toHaveLength(3);
+});
+
+test.skipIf(!hasDom)('a stale plan being read again (pending): the menu and the popover show Tidy as while first read, never the old plan or run', async () => {
+  const stale = { ...controller(plan(1)), pending: true };
+  const item = await openMenu(stale);
+  // No old count, and Tidy can still be opened (a phone taps ⋮, then Tidy, before the read lands).
+  expect(item.textContent).toBe('Tidy');
+  act(() => item.click());
+  await settle();
+  const panel = document.querySelector('[data-tidy-popover]')!;
+  expect(panel.textContent).toBe('Tidy');
+  expect(document.querySelectorAll('[data-tidy-run-agent]')).toHaveLength(0);
+  expect(document.querySelector('[data-tidy-agent]')).toBeNull();
+  expect(document.querySelector('[data-tidy-go]')).toBeNull();
+  // The read lands: the plan and the run show.
+  act(() => root!.render(<TidyMenu tidy={controller(plan(1))} phone={false} className="ib-lhead-more" onRefresh={() => {}} />));
+  await settle();
   expect(document.querySelector('[data-tidy-agent="ses-c"]')).not.toBeNull();
   expect(document.querySelectorAll('[data-tidy-run-agent]')).toHaveLength(3);
 });

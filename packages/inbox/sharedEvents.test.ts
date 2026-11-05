@@ -265,7 +265,7 @@ interface Tab {
   status: number;
   reach: number;
   deliveries: number;
-  drafts: string[];
+  drafts: (string | null)[];
   gone: { window: string; unloading: boolean }[];
   /** The page read its list and open thread again (`onCatchUp`). */
   listCatchUps: number;
