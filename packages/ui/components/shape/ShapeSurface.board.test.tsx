@@ -84,6 +84,43 @@ async function mount(views: ShapeVersion['views'], props: Partial<React.Componen
   await wait();
 }
 
+describe.if(hasDom)('a dragged box is opt-in', () => {
+  const press = (el: Element, type: string, x: number) =>
+    el.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, composed: true, button: 0, clientX: x, clientY: 10 }), { pointerType: 'mouse', pointerId: 1 }));
+  const dragAcross = async () => {
+    const stage = document.querySelector('.shp-stage')!;
+    await act(async () => {
+      press(stage, 'pointerdown', 10);
+      press(window as unknown as Element, 'pointermove', 90);
+    });
+  };
+
+  test('a host without boxSelect: no cross, no box, no words on its drawing', async () => {
+    await mount({ picture: PICTURE });
+    await click(dock('Annotate')!);
+    await wait();
+    await dragAcross();
+    expect(!!document.querySelector('.shp-stage.boxing')).toBe(false);
+    expect(!!inDrawing('.board.boxable')).toBe(false);
+    expect(!!document.querySelector('.shp-box-band')).toBe(false);
+  });
+
+  test('with it: one crosshair in place of Annotate and its tools; a drag draws the band only once it is on', async () => {
+    await mount({ picture: PICTURE }, { boxSelect: {} });
+    expect(dock('Annotate')).toBe(null);
+    expect(document.querySelectorAll('.shp-tstrip button').length).toBe(1);
+    expect(!!document.querySelector('.shp-stage.boxing')).toBe(false);
+    await dragAcross();
+    expect(!!document.querySelector('.shp-box-band')).toBe(false);
+    await click(document.querySelector('.shp-tstrip button[aria-label="Comment"]')!);
+    await wait();
+    expect(!!document.querySelector('.shp-stage.boxing')).toBe(true);
+    expect(!!inDrawing('.board.boxable')).toBe(true);
+    await dragAcross();
+    expect(!!document.querySelector('.shp-box-band')).toBe(true);
+  });
+});
+
 describe.if(hasDom)('a host that does not ask for readFirst keeps its board', () => {
   const asHost = { readFirst: undefined };
 

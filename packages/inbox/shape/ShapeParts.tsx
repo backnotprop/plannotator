@@ -12,6 +12,7 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
+import type { ShapeBoardProps } from './types';
 import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
@@ -67,7 +68,7 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * It covers the page's head, so the sidebar toggle every full page's head has
  * sits at its title's left: the board can take the window's width.
  */
-export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
+export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null; onAddToReply?: ShapeBoardProps['onAddToReply'] }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
   // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
@@ -91,6 +92,7 @@ export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id:
           onClose={onClose}
           renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
           headStart={isMobile ? undefined : <SidebarTrigger />}
+          onAddToReply={thread ? onAddToReply : undefined}
         />
       </PanePart>
     </section>

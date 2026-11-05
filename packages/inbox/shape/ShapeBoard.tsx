@@ -4,8 +4,8 @@
  * hover card. Checked under tsconfig.guide.json (it imports review-editor);
  * the window sees its shape in board-module.d.ts.
  */
-import { useContext } from 'react';
-import { ShapeSurface, type ShapeCodeGuideProps, type ShapeCodeHoverCardProps } from '@plannotator/ui/components/shape';
+import { useContext, useMemo } from 'react';
+import { ShapeSurface, type ShapeBoxOptions, type ShapeCodeGuideProps, type ShapeCodeHoverCardProps } from '@plannotator/ui/components/shape';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { GuideCodeSpanContext } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { ShapeCodeGuide } from '@plannotator/guide-viewer/ShapeCodeGuide';
@@ -34,7 +34,29 @@ function CodeGuide(props: ShapeCodeGuideProps) {
   );
 }
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart }: ShapeBoardProps) {
+/** A same-site image or font for a box's picture: the board itself makes no request. */
+async function readAsset(url: string): Promise<string | null> {
+  const answer = await fetch(url);
+  if (!answer.ok) return null;
+  const blob = await answer.blob();
+  return new Promise((done) => {
+    const reader = new FileReader();
+    reader.onload = () => done(typeof reader.result === 'string' ? reader.result : null);
+    reader.onerror = () => done(null);
+    reader.readAsDataURL(blob);
+  });
+}
+
+const BOX_SELECT: ShapeBoxOptions = {
+  readAsset,
+  // STUB (proto/shape-box-comment): the word is drawn; Show me on boards is another branch's (#2669). It logs what it would receive.
+  onShowMe: (selection, text) => {
+    void selection.picture.then((picture) => console.info('[shape-box] Show me stub', JSON.stringify({ ...selection, picture: picture ? `${picture.slice(0, 40)}… (${picture.length} chars)` : null, text })));
+  },
+};
+
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart, onAddToReply }: ShapeBoardProps) {
+  const boxSelect = useMemo<ShapeBoxOptions>(() => (onAddToReply ? { ...BOX_SELECT, onAddToReply } : BOX_SELECT), [onAddToReply]);
   return (
     <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
@@ -46,6 +68,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       CodeHoverCard={HoverCard}
       renderThread={renderThread}
       readFirst
+      boxSelect={boxSelect}
       initialView={initialView}
       initialPanel={initialPanel}
       onNavigate={onNavigate}

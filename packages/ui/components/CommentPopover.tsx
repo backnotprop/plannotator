@@ -100,6 +100,9 @@ interface CommentPopoverProps {
   submitLabel?: string;
   /** Opt-in: the Ask AI action's label (Shape: "Ask"). Absent → "Ask AI", as always. */
   askAILabel?: string;
+  /** Opt-in: more actions, drawn after the main one in this order (the right end; Tab reaches them last), each taking
+   *  whatever is typed (Shape's box: "Show me", "Add to reply"). Absent or empty → nothing drawn. */
+  extraActions?: readonly { label: string; onSelect: (text: string) => void }[];
   /** Opt-in: `/` and `$` skill-reference autocomplete (document UI surfaces). Off by default. */
   skillReferences?: boolean;
   /**
@@ -237,6 +240,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
   askAIDisabled = false,
   submitLabel,
   askAILabel,
+  extraActions,
   skillReferences = false,
   mentionSource,
   targetChips,
@@ -817,6 +821,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
                   {askAILabel ?? 'Ask AI'}
                 </button>
               )}
+              {extraActions?.map((action, i) => (
+                <button
+                  key={action.label}
+                  onClick={() => action.onSelect(text.trim())}
+                  style={{ order: -1 - i }}
+                  className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+                >
+                  {action.label}
+                </button>
+              ))}
             </div>
             <div className="flex items-center gap-2">
               {allowImages && (
@@ -974,6 +988,16 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               {askAILabel ?? 'Ask AI'}
             </button>
           )}
+          {extraActions?.map((action, i) => (
+            <button
+              key={action.label}
+              onClick={() => action.onSelect(text.trim())}
+              style={{ order: -1 - i }}
+              className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
+            >
+              {action.label}
+            </button>
+          ))}
         </div>
         <div className="flex items-center gap-2">
           {allowImages && (
