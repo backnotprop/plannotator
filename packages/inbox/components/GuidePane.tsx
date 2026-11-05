@@ -28,6 +28,7 @@ import { guideCommentOf } from '../attachments';
 import { agentName, whenTime, plural } from '../format';
 import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
+import { OpenInCodeSpans, OpenInFile } from './OpenIn';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -42,6 +43,8 @@ export interface GuidePaneProps {
   onBack: () => void;
   /** Close the guide and the thread. */
   onClose: () => void;
+  /** Settings → Capabilities → Code review: each diff header offers Open in. */
+  codeReview?: boolean;
 }
 
 /**
@@ -181,8 +184,9 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
 
-export function GuidePane({ thread, message, onBack, onClose, guest = false }: GuidePaneProps) {
+export function GuidePane({ thread, message, onBack, onClose, guest = false, codeReview = false }: GuidePaneProps) {
   const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);
@@ -269,13 +273,16 @@ export function GuidePane({ thread, message, onBack, onClose, guest = false }: G
             </div>
           ) : snapshot ? (
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <GuideReader
-                snapshot={snapshot}
-                reviewed={reviewed}
-                onReviewedChange={changeReviewed}
-                comments={readerComments}
-                {...(guest ? {} : { fileContents })}
-              />
+              <OpenInCodeSpans scope={{ thread: thread.thread_id, message: message.id }} on={codeReview === true}>
+                <GuideReader
+                  snapshot={snapshot}
+                  reviewed={reviewed}
+                  onReviewedChange={changeReviewed}
+                  comments={readerComments}
+                  fileOpenIn={codeReview ? fileOpenIn : undefined}
+                  {...(guest ? {} : { fileContents })}
+                />
+              </OpenInCodeSpans>
             </ReaderPart>
           ) : null}
         </div>

@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
 import type { InboxFileContents } from '@plannotator/core/inbox-types';
+import type { ReactNode } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -60,6 +60,8 @@ export interface GuideReaderProps {
   bare?: boolean;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
   fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
+  /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
+  fileOpenIn?: (path: string) => ReactNode;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */

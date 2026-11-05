@@ -1,21 +1,19 @@
 /**
  * Show me (approval "shape-in-code-review") gates every word it adds to an
- * agent on the Code review switch. With Code review off, what an agent can
- * read is byte-equal to the release before Show me (0.28.49): the Inbox's
- * MCP tool list, the guide brief, `plannotator inbox --help`, the top-level
- * help (Board off and on) and `plannotator review --help`; `plannotator review
- * draw …` and `review drawings …` are the review parse's (`review <DIRECTORY>`),
- * the drawings routes are the unknown route, and a version-3 guide snapshot is
- * refused with the release's own "Unsupported snapshot version" words.
+ * agent on the Code review switch. With Code review off, no Show me word is in
+ * what an agent can read: the Inbox's MCP tool list, the guide brief,
+ * `plannotator inbox --help`, the top-level help (Board off and on) and
+ * `plannotator review --help`; `plannotator review draw …` and `review drawings …`
+ * are the review parse's (`review <DIRECTORY>`), the drawings routes are the
+ * unknown route, and a version-3 guide snapshot is refused with the release's
+ * own "Unsupported snapshot version" words.
  *
  * What regresses: a Show me word (the `overview.diagram` rules, `review draw`,
  * the skills' drawing lines) reaching an agent whose person has Code review
- * off. The pins are sha256 of each text as 0.28.49 printed it; a change that
- * means to alter these texts for everyone updates them on purpose.
- * `SHOW_ME_OFF_PRINT=1` prints the current hashes.
+ * off. These texts change for everyone on purpose, so the test names the words
+ * and not the texts; a control proves each word is real, with Code review on.
  */
 import { afterAll, expect, test } from "bun:test";
-import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -24,7 +22,8 @@ import { startInboxServer } from "@plannotator/server/inbox";
 import { createAgentEnvironmentFor } from "@plannotator/server/inbox-agents";
 import { formatInboxHelp } from "./inbox-help";
 import { formatSubcommandHelp, formatTopLevelHelp } from "./cli";
-import { isReviewDrawCommand } from "./review-draw-command";
+import { isReviewDrawCommand, runReviewDrawCommand } from "./review-draw-command";
+import { INBOX_REVIEW_SKILLS } from "@plannotator/core/inbox-review";
 import { FIXTURE_V2_HTML } from "@plannotator/core/guide-format-fixtures";
 import { checkInboxGuide } from "../../../packages/server/inbox-guides";
 
@@ -34,33 +33,34 @@ mkdirSync(home, { recursive: true });
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 /**
- * sha256 of each text an agent reads, as 0.28.49 (main at 730fa68d2, before Show me) printed it; `--help` and
- * `inbox --help` as main printed them at b8feac46b (after `plannotator guide import` and other main changes for
- * everyone), still without Show me.
+ * The words Show me added, by the text that carries them with Code review on, copied from
+ * `packages/core/inbox-review.ts`. A word holds no double quote or line break: the MCP texts are JSON, where those are escaped.
  */
-const PINNED: Record<string, string> = {
-  "mcp tools/list": "ee76aa0665dd05fbfc32c08d84c10cd1bd20ac3e7b2b4358cd41fbbebd7f9ddd",
-  get_guide_brief: "906b6918c50a7639c3c5ca8094f499c14dd26f3556b9e74213a683236e937314",
-  "inbox --help": "ae7d97e0e307e5530f159cd68666022667a37ac71cacdb426a6931e6fe249a28",
-  "--help": "11552d2c297967261cda34fd6a40f7edb2f1689d3ec1562ef2c7f3123036be5f",
-  "--help (board)": "b9f1e115f1c9fb64454c547432a5069f5361f983c4132548c73721c4c44e99a3",
-  "review --help": "91cfedf817e69cdc1506dd8e49ca4e71918f37132286a2e6767faf1c909edd42",
+const SHOW_ME_WORDS = {
+  /** INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC */
+  get_guide_brief: ["overview.diagram", "one drawing of how the whole change works", "review draw"],
+  /** INBOX_REVIEW_DRAW_HELP */
+  "review draw --help": ["review draw", "review drawings", "Show me", "data-code", "data-mark", "data-step"],
+  /** INBOX_REVIEW_CURATE_DRAWING_LINE and INBOX_REVIEW_RECHECK_DRAWING_LINE */
+  "the review skills": ["overview.diagram", "give the overview one drawing", "redrawn, as this review's", "review drawings"],
 };
 
-const sha = (text: string) => createHash("sha256").update(text).digest("hex");
-
-test("Code review off: every agent text is byte-equal to the release before Show me", async () => {
-  const dataDir = join(root, "data");
+/** Each text an agent reads, with Code review on or off. */
+async function agentTexts(codeReview: boolean): Promise<Record<string, string>> {
+  const dataDir = join(root, codeReview ? "data-texts-on" : "data-texts-off");
   mkdirSync(dataDir, { recursive: true });
   const saved = process.env.PLANNOTATOR_DATA_DIR;
   process.env.PLANNOTATOR_DATA_DIR = dataDir;
-  const server = await startInboxServer({ dataDir, codeReview: false, phones: false });
+  const server = await startInboxServer({ dataDir, codeReview, phones: false });
   const client = new Client({ name: "show-me-off-test", version: "1.0.0" });
   try {
     await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
     const { tools } = await client.listTools();
     const brief = await client.callTool({ name: "get_guide_brief", arguments: {} });
-    const texts: Record<string, string> = {
+    // A failed call would hold no word at all: the off test must read the real texts.
+    expect(tools.map((tool) => tool.name)).toContain("get_guide_brief");
+    expect(brief.isError).toBeFalsy();
+    return {
       "mcp tools/list": JSON.stringify(tools),
       get_guide_brief: JSON.stringify(brief),
       "inbox --help": formatInboxHelp({
@@ -70,20 +70,44 @@ test("Code review off: every agent text is byte-equal to the release before Show
         agentEnvironment: createAgentEnvironmentFor({ platform: "linux", homeDir: home, env: { HOME: home, PATH: "" } }),
         board: true,
         steps: true,
-        codeReview: false,
+        codeReview,
       }),
       "--help": formatTopLevelHelp(),
       "--help (board)": formatTopLevelHelp({ board: true }),
       "review --help": formatSubcommandHelp("review"),
     };
-    const hashes = Object.fromEntries(Object.entries(texts).map(([name, text]) => [name, sha(text)]));
-    if (process.env.SHOW_ME_OFF_PRINT === "1") console.log(JSON.stringify(hashes, null, 2));
-    expect(hashes).toEqual(PINNED);
   } finally {
     await client.close().catch(() => {});
     server.stop();
-    process.env.PLANNOTATOR_DATA_DIR = saved;
+    if (saved === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+    else process.env.PLANNOTATOR_DATA_DIR = saved;
   }
+}
+
+test("Code review off: no agent text holds a Show me word", async () => {
+  const words = [...new Set(Object.values(SHOW_ME_WORDS).flat())];
+  const texts = await agentTexts(false);
+  const leaks = Object.entries(texts).flatMap(([name, text]) => words.filter((word) => text.includes(word)).map((word) => `${name}: ${word}`));
+  expect(leaks).toEqual([]);
+});
+
+test("Code review on: the text that carries each Show me word holds it, so a word misspelt in the list fails", async () => {
+  const printed: string[] = [];
+  const code = await runReviewDrawCommand(["draw", "--help"], {
+    cwd: root,
+    ensureRunning: () => Promise.reject(new Error("help reads no Inbox")),
+    stdout: (text) => printed.push(text),
+  });
+  expect(code).toBe(0);
+  const carriers: Record<keyof typeof SHOW_ME_WORDS, string> = {
+    get_guide_brief: (await agentTexts(true)).get_guide_brief!,
+    "review draw --help": printed.join("\n"),
+    "the review skills": INBOX_REVIEW_SKILLS.map((skill) => skill.body).join("\n"),
+  };
+  const missing = Object.entries(SHOW_ME_WORDS).flatMap(([name, words]) =>
+    words.filter((word) => !carriers[name as keyof typeof SHOW_ME_WORDS].includes(word)).map((word) => `${name}: ${word}`),
+  );
+  expect(missing).toEqual([]);
 });
 
 test("Code review off: `review draw` and `review drawings` are the review parse's, every form", () => {
