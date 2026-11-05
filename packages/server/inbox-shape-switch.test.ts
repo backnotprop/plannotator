@@ -85,7 +85,7 @@ test("unset and off: every Shape path is a 404 and the / list has no /shape; Set
     const w = await world(config);
     expect(await statuses(w)).toEqual({ list: 404, one: 404, note: 404, seen: 404, file: 404, events: 404 });
     expect(await w.skills()).not.toContain("shape");
-    // Held for 0.28.50 (inbox.ts heldSwitch): off, the settings read leaves Shape out, so Settings draws no row.
+    // Held until the next big release (inbox.ts heldSwitch): off, the settings read leaves Shape out, so Settings draws no row.
     expect(((await (await w.get("/api/inbox/settings")).json()) as { shape?: { on: boolean } }).shape).toBeUndefined();
 
     // The windows' stream says when it changes (Settings in another window turns it on).
