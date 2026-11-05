@@ -67,6 +67,7 @@ import { getCliVersion } from "./cli";
 import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
 import { runInboxLinkCommand } from "./inbox-link-command";
 import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -447,10 +448,11 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
     };
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
   }
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  let lines = "";
+  const out = (line: string) => void (lines += `${line}\n`);
   if (status.state === "missing") {
     out("Plannotator Inbox: not running (it has never run with this data dir)");
   } else if (status.state === "stopped") {
@@ -475,6 +477,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
         : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
     );
   }
+  await writeWholeToStdout(lines);
   return code;
 }
 

@@ -248,6 +248,7 @@ import { runInboxCallCommand } from "./inbox-call-command";
 import { runInboxStepsCommand } from "./inbox-steps-command";
 import { runFeedbackCommand } from "./feedback-command";
 import { formatInboxHelp } from "./inbox-help";
+import { writeWholeToStdout } from "./write-whole-stdout";
 import { INBOX_CARD_ACTION_ON } from "@plannotator/core/inbox-types";
 import { getPlannotatorDataDir, getUnusedPlannotatorDataDir } from "@plannotator/shared/data-dir";
 import { isAgentSdkEntrypoint } from "@plannotator/shared/t3-hook-command";
@@ -767,13 +768,6 @@ if (isTopLevelHelpInvocation(args)) {
 // otherwise `plannotator review --help` (commonly run by agents probing the
 // CLI) falls through to local review mode and launches the browser UI,
 // spawning a stray tab whose close injects a bogus "no feedback" signal.
-/**
- * Print output that can be bigger than a pipe holds (64 KiB), then exit only after this settles: it
- * does once everything is written or the reader has gone. Without the wait, or through console.log
- * on Bun 1.3, the end is lost and the CLI still exits 0 (cli-stdout-pipe.test.ts).
- */
-const writeWholeToStdout = (text: string) => new Promise<void>((done) => void process.stdout.write(text, () => done()));
-
 const helpSubcommand = isSubcommandHelpInvocation(args);
 if (helpSubcommand) {
   // `inbox --help` is the Plannotator Inbox guide for agents (inbox-help.ts).
