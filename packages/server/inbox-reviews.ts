@@ -161,6 +161,9 @@ export interface InboxPullStateAnswer {
   title: string;
   url: string;
   head: string | null;
+  head_sha: string | null;
+  /** The repository the head branch is on, when the forge says. */
+  head_repo: string | null;
   base: string | null;
   author: string | null;
 }
@@ -171,13 +174,26 @@ export async function readInboxPullState(run: RefRunner, cli: InboxPullHost["cli
   const read = await run(cli, ["api", "--hostname", ref.host, endpoint]).catch(() => null);
   if (!read || read.exitCode !== 0) return null;
   try {
-    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown }; source_branch?: unknown; base?: { ref?: unknown }; target_branch?: unknown; user?: { login?: unknown }; author?: { username?: unknown } };
+    const pr = JSON.parse(read.stdout) as { state?: unknown; merged_at?: unknown; closed_at?: unknown; title?: unknown; html_url?: unknown; web_url?: unknown; head?: { ref?: unknown; sha?: unknown; repo?: { full_name?: unknown } }; sha?: unknown; source_branch?: unknown; base?: { ref?: unknown }; target_branch?: unknown; user?: { login?: unknown }; author?: { username?: unknown } };
     const text = (value: unknown) => (typeof value === "string" && value ? value : null);
     const merged = text(pr.merged_at);
     const state = merged || pr.state === "merged" ? "merged" : pr.state === "closed" ? "closed" : pr.state === "open" || pr.state === "opened" ? "open" : null;
     const url = text(pr.html_url) ?? text(pr.web_url);
     if (!state || !url) return null;
-    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch), base: text(pr.base?.ref) ?? text(pr.target_branch), author: text(pr.user?.login) ?? text(pr.author?.username) };
+    return { state, at: merged ?? text(pr.closed_at), title: text(pr.title) ?? "", url, head: text(pr.head?.ref) ?? text(pr.source_branch), head_sha: text(pr.head?.sha) ?? text(pr.sha), head_repo: text(pr.head?.repo?.full_name), base: text(pr.base?.ref) ?? text(pr.target_branch), author: text(pr.user?.login) ?? text(pr.author?.username) };
+  } catch {
+    return null;
+  }
+}
+
+/** Who the CLI is signed in as on a host, when no list has said yet; null when it won't say. */
+async function readInboxForgeLogin(run: RefRunner, cli: InboxPullHost["cli"], host: string): Promise<string | null> {
+  const read = await run(cli, ["api", "--hostname", host, "user"]).catch(() => null);
+  if (!read || read.exitCode !== 0) return null;
+  try {
+    const user = JSON.parse(read.stdout) as { login?: unknown; username?: unknown };
+    const name = user.login ?? user.username;
+    return typeof name === "string" && name ? name : null;
   } catch {
     return null;
   }
@@ -190,8 +206,12 @@ export async function readInboxReviewLink(
   login: string | null,
 ): Promise<InboxPull | null> {
   const { ref } = link;
-  const state = await readInboxPullState(run ?? refCliRunner, ref.platform === "gitlab" ? "glab" : "gh", ref);
-  if (!state) return null;
+  const cli = ref.platform === "gitlab" ? "glab" : "gh";
+  const runner = run ?? refCliRunner;
+  const state = await readInboxPullState(runner, cli, ref);
+  // A host speaks only for its own PRs: an answer pointing elsewhere could take a PR from its thread.
+  if (!state || !URL.canParse(state.url) || new URL(state.url).host.toLowerCase() !== ref.host) return null;
+  const me = login ?? (await readInboxForgeLogin(runner, cli, ref.host));
   return {
     key: ref.key,
     platform: ref.platform,
@@ -201,12 +221,13 @@ export async function readInboxReviewLink(
     url: state.url,
     title: state.title,
     author: state.author,
-    mine: !!login && state.author === login,
+    mine: !!me && state.author === me,
     requested: false,
     state: state.state,
     base: state.base ?? "",
     head: state.head ?? "",
-    head_repo: null,
+    ...(state.head_sha ? { head_sha: state.head_sha } : {}),
+    head_repo: state.head_repo,
     additions: 0,
     deletions: 0,
     files: 0,

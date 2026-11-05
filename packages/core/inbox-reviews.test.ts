@@ -477,11 +477,16 @@ describe("a pull request link", () => {
     const of = (text: string) => inboxReviewLinkOf(text) as { url: string; ref: { key: string; platform: string } };
     expect(of("  northwind/payments#231 ")).toMatchObject({ url: "https://github.com/northwind/payments/pull/231", ref: { key: "github.com/northwind/payments#231", platform: "github" } });
     expect(of("https://github.com/northwind/payments/pull/231/files?diff=split").url).toBe("https://github.com/northwind/payments/pull/231");
-    expect(of("https://gitlab.example.com/group/sub/app/-/merge_requests/9").ref).toMatchObject({ key: "gitlab.example.com/group/sub/app#9", platform: "gitlab" });
+    expect(of("https://gitlab.example.com/group/sub/app/-/merge_requests/9").ref).toMatchObject({ key: "gitlab.example.com/group/sub/app#9:pull", platform: "gitlab" });
     expect(of("https://ghe.corp.example/o/r/pull/4").ref.key).toBe("ghe.corp.example/o/r#4");
   });
 
   test("Bitbucket and hosts it can't read say so; anything else isn't a link", () => {
+    // The key is the list's own, so a listed PR is found whatever its capitals; and what reads as a flag isn't a link.
+    const of = (text: string) => inboxReviewLinkOf(text) as { ref: { key: string } };
+    expect(of("https://gitlab.com/Northwind/Ledger/-/merge_requests/61").ref.key).toBe("gitlab.com/northwind/ledger#61:pull");
+    expect(of("Acme/Caps#8").ref.key).toBe(of("acme/caps#8").ref.key);
+    for (const text of ["https://--hostname/o/r/pull/1", "https://github.com/-o/r/pull/1", "https://github.com/o/-r/pull/1", "-o/r#1"]) expect(inboxReviewLinkOf(text)).toBeNull();
     expect(inboxReviewLinkOf("https://bitbucket.org/acme/mobile/pull-requests/88")).toEqual({ unsupported: "bitbucket" });
     expect(inboxReviewLinkOf("https://dev.azure.com/o/p/_git/r/pullrequest/5")).toEqual({ unsupported: "host" });
     for (const text of ["", "retries", "https://github.com/northwind/payments", "file:///etc/pull/1", "o/r#x"]) expect(inboxReviewLinkOf(text)).toBeNull();

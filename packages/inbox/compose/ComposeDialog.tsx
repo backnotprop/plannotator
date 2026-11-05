@@ -214,6 +214,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // A pull request link: what the picker's search holds while it looks like one, or the one chosen from it.
   const [reviewLink, setReviewLink] = useState(() => (box ? typed.link : ''));
   const [linkChosen, setLinkChosen] = useState(() => !!box && !!typed.link);
+  const linkKept = useRef(typed.link ?? '');
   const [linkRead, setLinkRead] = useState<InboxReviewLinkAnswer | null>(null);
   const [reviewChanges, setReviewChanges] = useState<InboxReviewChanges>('uncommitted');
   const [reviewPick, setReviewPick] = useState<ReviewBoxPull | null>(box?.pick ?? typed.pick);
@@ -327,12 +328,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
     const read = new AbortController();
     const pause = setTimeout(() => {
       inboxApi.reviewLink(reviewLink.trim(), read.signal).then(
-        (answer) => {
-          setLinkRead(answer);
-          toFollowsReview();
-        },
+        setLinkRead,
         () => {
-          if (!read.signal.aborted) setLinkRead({ ok: false, reason: 'not_a_link' });
+          if (!read.signal.aborted) setLinkRead({ ok: false, reason: 'failed' });
         },
       );
     }, REVIEW_LINK_PAUSE_MS);
@@ -847,6 +845,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setReviewPick(pull);
+        linkKept.current = '';
         toFollowsReview();
         textRef.current?.focus();
       }}
@@ -859,6 +858,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           return;
         }
         setLinkChosen(true);
+        linkKept.current = reviewLink;
         toFollowsReview();
         textRef.current?.focus();
       }}
@@ -875,6 +875,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
         setPicker(false);
         setFolderMenu(false);
         setReviewMenu(open);
+        // Closed without choosing: the link already chosen stays, as a list pick does.
+        if (!open && !linkChosen && linkKept.current) {
+          setReviewLink(linkKept.current);
+          setLinkChosen(true);
+        }
       }}
     />
   );

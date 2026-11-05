@@ -7745,7 +7745,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvsize b { font-weight: 500; }
 .ib-cp-rvpick :is(b, .ib-cp-tod) { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Narrow, the title keeps more of its room than the repository before it. */
-.ib-cp-rvpick .ib-cp-tod { flex-shrink: 3; }
+.ib-cp-rvpick .ib-cp-tod { flex-shrink: 3; max-width: 45%; }
 .ib-cp-rvnum { flex: none; color: var(--muted-foreground); }
 .ib-cp-rvread { padding: 2px 10px 8px; font-size: var(--ib-fs-13-5, 13.5px); }
 .ib-cp-rvread p { margin: 0; color: var(--muted-foreground); }
@@ -7762,7 +7762,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvopt { display: flex; gap: 8px; }
 .ib-cp-rvlabel { flex: none; color: var(--muted-foreground); }
 .ib-cp-rvopt .ib-cp-op { flex: 1; }
-.ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
+.ib-cp-rvwhere { flex: 0 1 auto; min-width: 0; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
 .ib-cp[data-phone] .ib-cp-choices { flex: 0 1 auto; }
 /* A slim toggle, as tall as the rows below it; its tap target still reaches 44px. */
