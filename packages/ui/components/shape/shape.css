@@ -544,6 +544,8 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-card.phone .shp-ex-type { display: none; }
 .shp-ex-card.phone .shp-ex-col.fn > .shp-ex-sig { order: 0; margin-top: 2px; }
 .shp-ex-card.phone .shp-ex-io.panes .shp-ex-ret { padding-top: 4px; }
+/* A phone's sentence is the step: never cut. */
+.shp-ex-card.phone.expanded .shp-ex-does { display: block; -webkit-line-clamp: unset; overflow: visible; }
 .shp-ex-checks li.two { row-gap: 0; }
 .shp-ex-checks li.two .got { flex: 1 0 100%; box-sizing: border-box; justify-content: flex-start; margin-left: 0; padding-left: 22px; text-align: left; column-gap: 8px; }
 .shp-ex-checks .cm { font: var(--ex-mono); color: var(--muted-foreground); }

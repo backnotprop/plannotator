@@ -68,7 +68,7 @@ const names = ['request.auth.tailnetIdentity.userLoginName', 'ownerConfig.tailne
 const LONG_STEP = {
   part: 'c',
   tag: 'guest, not the owner',
-  text: 'The Inbox checks who is asking, and turns a guest away before it stamps anything',
+  text: 'The Inbox checks who is asking, and turns a guest away before it stamps anything, then tells the page why in words it can show to the person who asked',
   inputs: [{ name: 'mayClaim', value: 'true', from: { step: 2 } }, ...names.map((name, i) => ({ name, value: i % 2 ? `'${name}-${i}'` : String(i), from: at(200 + i, LONG) }))],
   signature: 'resolveClaimEligibilityForTailnetIdentity(request: AuthenticatedInboxRequest<ClaimBody>, saved: SnoozeIntroSaved | undefined, options: { now: Date; release: string; policy: TailnetGuestPolicy }): Promise<ClaimDecision>',
   checks: Array.from({ length: 12 }, (_, i) => (i === 9 ? check(`request.auth.tailnetIdentity.userLoginName === ownerConfig.ownerLoginName || ownerConfig.tailnetGuestPolicy.allowSnoozeIntroClaims || rule${i}(request, saved, options.policy)`, { decides: true }) : i < 9 ? check(`rule${i}(request, saved, options.policy)`) : { code: `rule${i}(request)`, result: 'not-reached' })).map((c, i) => (i === 9 ? { ...c, result: 'fail', saw: 'false', short: 'a guest, and guests may not claim' } : c)),
@@ -244,6 +244,8 @@ for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { 
 
     // The long step, calm: of its twelve checks only the one that decided it, what comes out, and no signature or inputs.
     await press(page, 'Next step');
+    // Its long sentence is whole: the sentence is the step.
+    expect(await cur.page().locator('.shp-ex-text.cur .shp-ex-does').evaluate((p) => p.scrollHeight - p.clientHeight)).toBeLessThanOrEqual(0);
     await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(1);
     await expect(cur.locator('.decides')).toHaveCount(1);
     await expect(cur.locator('.shp-ex-ret')).toBeVisible();
