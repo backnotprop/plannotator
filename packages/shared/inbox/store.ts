@@ -286,6 +286,8 @@ export interface InboxReplyInput {
   words?: string;
   questions?: InboxAnswerEntry[];
   idempotency_key: string;
+  /** `to` takes the place of a session the server read as ended (`InboxMessage.took_over`). */
+  took_over?: boolean;
   /**
    * The person's annotations on the thread's attachments, as Plannotator's
    * feedback text (the window exports them), appended after the answers.
@@ -1875,6 +1877,14 @@ export class InboxStore {
     const statesOf = (message: InboxMessage) => askingStates?.get(message.id) ?? [];
     const asking = askingStates ? inboxAskingMessage(messages, statesOf, inboxDefaultSkip(messages, statesOf)) : null;
     const delivery = this.rowDelivery(root, lastReal, asking, sent, recipients, root.resolved_at !== null && !agentAfterArchive);
+    // "Session ended" on the row: the session this thread would reach, by the rule the thread's note uses (a waking
+    // connection, not heard from, with the grace). A person's reply with its own `to` is not owed to that session.
+    const presence = this.deliveryPresence;
+    const reached = asking ?? (lastReal.author.kind === "agent" ? lastReal : null);
+    const reachedSession = reached?.author.kind === "agent" ? reached.author.session : null;
+    const movedAway = lastReal.author.kind === "person" && !!lastReal.to;
+    const askerGone = !!presence && root.resolved_at === null && !movedAway && reached?.wakes === true && !!reachedSession && !presence.askerLive(reachedSession);
+    const sessionEnded = askerGone || delivery?.reason === "undelivered";
     const facts = {
       ...summary,
       unsent,
@@ -1904,7 +1914,7 @@ export class InboxStore {
     const section = inboxSectionOf(isInboxActionReport(lastReal) && unseen > 0 ? { ...facts, sent: null } : facts);
     // In New only for the person's own unsent words or comments: not bold.
     const draftOnly = section === "new" && unseen === 0 && !facts.answered_not_sent && inboxHasUnsent(unsent);
-    return { ...facts, section, unread: inboxRowUnread(section, draftOnly) };
+    return { ...facts, ...(sessionEnded && section !== "quiet" ? { session_ended: true } : {}), section, unread: inboxRowUnread(section, draftOnly) };
   }
 
   /** The live sessions the rows' delivery reads (the server's); null forgets them. */
@@ -2844,8 +2854,9 @@ export class InboxStore {
   /**
    * The session that owns a thread now (the one the person's plain reply
    * goes to): the new owner of its latest hand-off that was not taken back,
-   * else today's rule (the latest agent writer, else the session a thread
-   * the person started is addressed to). Null when there is none.
+   * else today's rule (the latest agent writer, or a session that took over
+   * from an ended one since, else the session a thread the person started is
+   * addressed to). Null when there is none.
    */
   threadOwner(threadId: string): { host: string | null; session: string } | null {
     const messages = this.threadMessages(threadId);
@@ -2856,6 +2867,7 @@ export class InboxStore {
     for (let index = messages.length - 1; index >= 0; index--) {
       const message = messages[index]!;
       if (message.author.kind === "agent" && message.author.session) return { host: message.author.host ?? null, session: message.author.session };
+      if (message.took_over && message.to) return { host: message.to.host, session: message.to.session };
     }
     const root = messages[0];
     return root?.to ? { host: root.to.host, session: root.to.session } : null;
@@ -4253,6 +4265,7 @@ export class InboxStore {
       resolved_at: null,
       idempotency_key: key,
       ...(to ? { to: { host: to.host, session: to.session } } : {}),
+      ...(to && input.took_over ? { took_over: true } : {}),
       ...(attachments.length > 0 ? { attachments: attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
       ...(tags.length > 0 ? { tags } : {}),
       ...(handoff
@@ -5988,21 +6001,34 @@ export class InboxStore {
    * The same message, a new snapshot with the new `to` (the last line wins).
    * Refused once delivered (`already_delivered`); `to` null means the chosen
    * session is not live (`session_not_live`). The same session writes nothing.
+   *
+   * `askerEnded`: the server read that the session the reply answers has ended
+   * (only a waking session can be known to). A plain reply moves only then (a
+   * live session's reply is still on its way: `not_addressed`), and the moved
+   * reply takes that session's place (`took_over`).
    */
-  readdressMessage(messageId: string, to: InboxAddressee | null): InboxMessage {
+  readdressMessage(messageId: string, to: InboxAddressee | null, options: { askerEnded?: boolean } = {}): InboxMessage {
     const message = this.messages.get(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
-    if (message.author.kind !== "person" || !message.to || isInboxNote(message)) {
+    const askerEnded = options.askerEnded === true;
+    if (message.author.kind !== "person" || (!message.to && !askerEnded) || isInboxNote(message)) {
       throw new InboxError("not_addressed", "Only a message you addressed to an agent session can be sent to another one.");
     }
     if (message.delivery) throw new InboxError("already_delivered", "That session already took this message.", { delivery: message.delivery });
     if (this.isResolved(message.thread_id)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
     if (!to) throw new InboxError("session_not_live", "That session is not live any more: nothing was changed. Pick another live session.");
-    if (message.to.session === to.session && message.to.host === to.host) return message;
+    if (message.to && message.to.session === to.session && message.to.host === to.host) return message;
     const at = this.stamp();
     // Moved to another session: an earlier mark (the person's Send now or the Inbox's own) belonged to the
     // old one, so it neither goes in at once nor stays blocked from going in by itself; its wait starts again.
-    const next: InboxMessage = { ...message, to: { host: to.host, session: to.session }, deliver_now_at: null, deliver_now_by: null, wait_started_at: null };
+    const next: InboxMessage = {
+      ...message,
+      to: { host: to.host, session: to.session },
+      deliver_now_at: null,
+      deliver_now_by: null,
+      wait_started_at: null,
+      ...(askerEnded ? { took_over: true } : {}),
+    };
     this.appendMessage(next, at);
     return next;
   }

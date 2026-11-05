@@ -7804,3 +7804,15 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   /* A phone has no gutter around the pane: the board covers it edge to edge. */
   .ib-shape-layer { inset: 0; border-radius: 0; }
 }
+
+/* "Session ended" on a row: quiet, beside the row's own words. */
+.ib-rended { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); white-space: nowrap; flex: none; }
+.ib-row .ib-cw:has(.ib-rended) { gap: 10px; }
+.ib-noproj .ib-row:has(.ib-rended) { --ib-words-track: max-content; }
+.ib-rended + .ib-c { margin-left: 8px; }
+
+/* Send to another session and Archive beside Reply when the session ended; a phone gives them their own line. */
+.ib-footended { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-width: 0; }
+@media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
+  .pn-inbox .ib-footended { flex: 1 0 100%; order: 1; }
+}

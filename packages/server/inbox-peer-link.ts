@@ -70,6 +70,8 @@ export interface PeerLinkOptions {
   onChange: () => void;
   /** That machine's snoozes changed and its list was read again: the windows read theirs. */
   onSnoozes?: () => void;
+  /** That machine's live sessions moved its rows (a delivery, "Session ended") and its list was read again: the windows read theirs. `sessions`: a session ended or came back there. */
+  onDeliveries?: (change: { sessions: boolean }) => void;
   /** That machine removed this one (401 device_revoked): the owner of the link cleans up. */
   onRevoked: () => void;
   timings?: Partial<PeerLinkTimings>;
@@ -225,8 +227,8 @@ export class PeerLink {
     }, this.t.silenceMs);
     let response: Response;
     try {
-      // `snoozes=1`: a snooze writes no record, so the stream tells this machine when to read the list again.
-      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1" : `?cursor=${this.cursor}&snoozes=1`, abort.signal);
+      // `snoozes=1`, `deliveries=1`: neither writes a record, so the stream tells this machine when to read the list again.
+      response = await this.options.transport.events(headers, this.cursor === null ? "?snoozes=1&deliveries=1" : `?cursor=${this.cursor}&snoozes=1&deliveries=1`, abort.signal);
     } catch (error) {
       if (this.stream === abort) this.stream = null;
       if (headersLate) return `the event stream did not answer for ${Math.round(this.t.silenceMs / 1000)} s`;
@@ -278,6 +280,9 @@ export class PeerLink {
           } else if (parsed.event === "snoozes") {
             // The list's cursor does not move, so the windows are told apart from a list that changes it.
             void this.refreshList().then(() => this.options.onSnoozes?.());
+          } else if (parsed.event === "deliveries") {
+            const sessions = (JSON.parse(parsed.data) as Json).sessions === true;
+            void this.refreshList().then(() => this.options.onDeliveries?.({ sessions }));
           }
         }
       }

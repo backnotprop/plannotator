@@ -196,7 +196,7 @@ describe('a thread with two sessions: the row and the thread line agree on who a
       expect(row.delivery!.send_now).toBe(line.sendNow === true);
       expect(rowDeliveryLine(row.delivery!, time)).toBe(line.text);
       expect(line.state).toBe(picked ? 'saved' : 'queued');
-      if (picked) expect(line.text).toStartWith('Saved for Pi. The session that asked has ended');
+      if (picked) expect(line.text).toStartWith('Saved for Pi. That session has ended');
       // The words answer Claude Code's message (ses_b), so they go to it, not to Pi, who started the thread.
       else expect(line.text).toContain('Claude Code is working');
     });

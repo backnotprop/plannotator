@@ -11,7 +11,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
-import type { InboxThread } from "@plannotator/core/inbox-types";
+import type { InboxListRow, InboxThread } from "@plannotator/core/inbox-types";
 import {
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
@@ -26,7 +26,7 @@ import {
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxLiveSessions, INBOX_ASKER_GRACE_MS } from "./inbox-sessions";
+import { createInboxLiveSessions, INBOX_ASKER_GRACE_MS, INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 
 const roots: string[] = [];
 const servers: InboxServer[] = [];
@@ -38,12 +38,12 @@ afterEach(async () => {
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
 
-async function setup() {
+async function setup(options: { sessionsNow?: () => number } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-ended-")));
   roots.push(root);
   const project = join(root, "ledger");
   mkdirSync(project, { recursive: true });
-  const server = await startInboxServer({ dataDir: join(root, "data") });
+  const server = await startInboxServer({ dataDir: join(root, "data"), ...options });
   servers.push(server);
   const client = new Client({ name: "inbox-ended-reply-test", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${server.port}/mcp`)));
@@ -293,7 +293,7 @@ describe("the asking session's grace", () => {
     done();
     expect(live.askerLive("ses-a")).toBe(true);
     expect(live.askerLive("ses-never")).toBe(true);
-    now += INBOX_ASKER_GRACE_MS + 1;
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     expect(live.askerLive("ses-a")).toBe(false);
     expect(live.askerLive("ses-never")).toBe(false);
     // Holding a poll open keeps it there however long the poll lasts.
@@ -305,7 +305,7 @@ describe("the asking session's grace", () => {
   test("MCP activity is presence: a tool call counts for the grace", () => {
     let now = 1_000_000;
     const live = createInboxLiveSessions({ store: {} as InboxStore, serverSession: "s", resolveRoot: async (path) => path, now: () => now });
-    now += INBOX_ASKER_GRACE_MS + 1;
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
     expect(live.askerLive("ses-mcp")).toBe(false);
     live.seenOverMcp("ses-mcp");
     expect(live.askerLive("ses-mcp")).toBe(true);
@@ -313,5 +313,159 @@ describe("the asking session's grace", () => {
     expect(live.askerLive("ses-mcp")).toBe(true);
     now += 2;
     expect(live.askerLive("ses-mcp")).toBe(false);
+  });
+
+  test("after an Inbox restart, a live session on its slowest retry (60 s, then a 1 s tick) is never called ended", async () => {
+    let now = 1_000_000;
+    const live = createInboxLiveSessions({ store: {} as InboxStore, serverSession: "s", resolveRoot: async (path) => path, now: () => now });
+    now += 60_000 + 1_000;
+    expect(live.askerLive("ses-retrying")).toBe(true);
+    const done = await live.pollStarted("ses-retrying", "claude-code", {});
+    done();
+    expect(live.askerLive("ses-retrying")).toBe(true);
+    now += INBOX_ASKER_RESTART_GRACE_MS;
+    expect(live.askerLive("ses-retrying")).toBe(false);
+  });
+});
+
+describe("a session that has ended: the row's mark, moving a saved reply, and who takes over", () => {
+  /** An Inbox on a clock the test moves, a waking asker's thread, and a way to let that session end. */
+  async function ended(options: { wakes?: boolean } = {}) {
+    let now = 1_000_000;
+    const { server, client, project } = await setup({ sessionsNow: () => now });
+    const waking = options.wakes === false ? {} : { _meta: { [INBOX_WAKES_META_KEY]: true } };
+    const asked = (
+      await client.callTool({ name: "send_message", arguments: { body: "Which target?", project_path: project, agent_session: "ses-asker", agent_host: "claude-code", agent_name: "Claude Code" }, ...waking })
+    ).structuredContent as { message_id: string; thread_id: string };
+    const row = async () => {
+      const list = (await (await fetch(`${base(server)}/api/inbox/threads?archived=exclude`)).json()) as { sections: { id: string; threads: InboxListRow[] }[] };
+      return list.sections.flatMap((section) => section.threads).find((r) => r.thread_id === asked.thread_id)!;
+    };
+    const move = (id: string, session: string) =>
+      fetch(`${base(server)}/api/inbox/messages/${id}/to`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ serverSession: server.serverSession, to: { session } }),
+      });
+    return { server, client, project, asked, row, move, pass: (ms = INBOX_ASKER_RESTART_GRACE_MS + 1) => void (now += ms) };
+  }
+
+  test("the row says so only once the session ended, and stops when that session comes back", async () => {
+    const { server, project, row, pass } = await ended();
+    await poll(server, "ses-asker", project);
+    expect((await row()).session_ended).toBeUndefined();
+    pass();
+    expect((await row()).session_ended).toBe(true);
+    await poll(server, "ses-asker", project);
+    expect((await row()).session_ended).toBeUndefined();
+  });
+
+  test("the windows are told when a session ends or comes back (they then read the list, whatever else the rows say), and not for a turn starting", async () => {
+    const { server, project, pass } = await ended();
+    const frames: { sessions?: boolean }[] = [];
+    const abort = new AbortController();
+    const stream = await fetch(`${base(server)}/api/inbox/events?deliveries=1`, { signal: abort.signal });
+    void (async () => {
+      let buffer = "";
+      for await (const chunk of stream.body as unknown as AsyncIterable<Uint8Array>) {
+        buffer += new TextDecoder().decode(chunk);
+        for (const match of buffer.matchAll(/event: deliveries\ndata: (.+)\n\n/g)) frames.push(JSON.parse(match[1]!));
+        buffer = buffer.slice(buffer.lastIndexOf("\n\n") + 2);
+      }
+    })().catch(() => {});
+    const next = async () => {
+      const seen = frames.length;
+      const deadline = Date.now() + 8_000;
+      while (frames.length === seen && Date.now() < deadline) await Bun.sleep(50);
+      return frames.at(-1);
+    };
+    try {
+      const first = next();
+      await poll(server, "ses-asker", project);
+      expect(await first).toEqual({ sessions: true });
+      const turn = next();
+      await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-asker", host: "claude-code", type: "state", busy: true, idle_since: null });
+      expect(await turn).toEqual({});
+      const gone = next();
+      pass();
+      expect(await gone).toEqual({ sessions: true });
+      const back = next();
+      await poll(server, "ses-asker", project);
+      expect(await back).toEqual({ sessions: true });
+    } finally {
+      abort.abort();
+    }
+  }, 40_000);
+
+  test("a host with no signal (an MCP agent, whose connection does not wake it) never shows it", async () => {
+    const { row, pass } = await ended({ wakes: false });
+    pass();
+    expect((await row()).session_ended).toBeUndefined();
+  });
+
+  test("a plain reply to a live session stays where it is going: moving it is refused, and nothing is written", async () => {
+    const { server, project, asked, move } = await ended();
+    await poll(server, "ses-asker", project);
+    await poll(server, "ses-other", project);
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    const refused = await move(written.id, "ses-other");
+    expect(refused.status).toBe(422);
+    expect(((await refused.json()) as { code: string }).code).toBe("not_addressed");
+    expect((await thread(server, asked.thread_id)).messages.at(-1)?.to ?? null).toBeNull();
+    expect((await poll(server, "ses-other", project)).map((c) => c.id)).toEqual([]);
+    expect((await poll(server, "ses-asker", project)).map((c) => c.id)).toEqual([written.id]);
+  });
+
+  test("a plain reply to an agent that cannot be known to have ended is refused too", async () => {
+    const { server, project, asked, move, pass } = await ended({ wakes: false });
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await poll(server, "ses-other", project);
+    const refused = await move(written.id, "ses-other");
+    expect(((await refused.json()) as { code: string }).code).toBe("not_addressed");
+  });
+
+  test("a reply saved for a session that ended moves to a live one: only that one is woken, and the old one back gets nothing", async () => {
+    const { server, project, asked, row, move, pass } = await ended();
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await poll(server, "ses-other", project);
+    expect((await row()).session_ended).toBe(true);
+
+    const moved = await move(written.id, "ses-other");
+    expect(moved.status).toBe(200);
+    expect((await row()).session_ended).toBeUndefined();
+    const commands = await poll(server, "ses-other", project);
+    expect(commands.map((c) => c.id)).toEqual([written.id]);
+    expect(commands[0]).toMatchObject({ redirected_from: "Claude Code" });
+    expect(await poll(server, "ses-asker", project)).toEqual([]);
+  });
+
+  test("the next reply stays with the session that took over, until an agent writes", async () => {
+    const { server, project, asked, move, pass } = await ended();
+    const written = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "The ARM one." })).json()) as { reply: { id: string } }).reply;
+    pass();
+    await poll(server, "ses-other", project);
+    await move(written.id, "ses-other");
+    await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-other", host: "claude-code", type: "delivered", id: written.id });
+    expect((await thread(server, asked.thread_id)).messages.at(-1)).toMatchObject({ id: written.id, took_over: true });
+
+    // What the window does: its next reply answers the reply that moved (wordsMessage), so it copies its `to`.
+    const next = ((await (await reply(server, written.id, { idempotency_key: "k2", words: "And cap the wait." })).json()) as { reply: { id: string; to: { session: string } } }).reply;
+    expect(next.to.session).toBe("ses-other");
+    expect((await poll(server, "ses-other", project)).map((c) => c.id)).toEqual([next.id]);
+    expect(await poll(server, "ses-asker", project)).toEqual([]);
+  });
+
+  test("a reply aimed at another session takes over only when the session it answers ended", async () => {
+    const { server, project, asked, pass } = await ended();
+    await poll(server, "ses-asker", project);
+    await poll(server, "ses-other", project);
+    const aimed = ((await (await reply(server, asked.message_id, { idempotency_key: "k1", words: "One.", to: { session: "ses-other" } })).json()) as { reply: { took_over?: boolean } }).reply;
+    expect(aimed.took_over).toBeUndefined();
+    pass();
+    await poll(server, "ses-other", project);
+    const taken = ((await (await reply(server, asked.message_id, { idempotency_key: "k2", words: "Two.", to: { session: "ses-other" } })).json()) as { reply: { took_over?: boolean } }).reply;
+    expect(taken.took_over).toBe(true);
   });
 });

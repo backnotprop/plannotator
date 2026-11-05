@@ -222,7 +222,7 @@ test.skipIf(!hasDom)('ended, live sessions exist: "session ended" on the asking 
   expect(el.querySelector(`[data-message-article="${M1}"] .ib-to`)?.textContent).toBe('to you · session ended');
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('live');
-  expect(note.textContent).toContain('The Claude Code session that asked has ended.');
+  expect(note.querySelector('b')?.textContent).toBe('This Claude Code session has ended.');
   // The note lives in one always-mounted status region.
   const region = el.querySelector('[data-asker-note]') as HTMLElement;
   expect(region.getAttribute('role')).toBe('status');
@@ -376,7 +376,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   await writeReply(el);
   const note = el.querySelector('[data-asker-ended]') as HTMLElement;
   expect(note.getAttribute('data-asker-ended')).toBe('none-live');
-  expect(note.textContent).toContain('and no agent is running in ledger now. Your reply will wait here until an agent reads this thread.');
+  expect(note.textContent).toContain('A reply waits here until that session is resumed.');
   act(() => button(el, 'Send').click());
   await settle();
   expect(el.querySelector('[data-route-choice]')).toBeNull();
@@ -387,7 +387,7 @@ test.skipIf(!hasDom)('none live: the note says the reply will wait, Send sends a
   host?.remove();
   const after = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
   expect(after.querySelector('[data-delivery]')?.textContent).toBe(
-    'Saved for Claude Code. The session that asked has ended, so it waits here until an agent reads this thread.',
+    "Saved for Claude Code. That session has ended; it gets this only if it's resumed.",
   );
   // The note is for before replying: once the reply is the last message, its own line says where it went.
   expect(after.querySelector('[data-asker-ended]')).toBeNull();
@@ -702,4 +702,71 @@ test.skipIf(!hasDom)('a comment only, Send from the foot with the list of commen
   expect(el.querySelector('[data-route-choice]')).toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(list()).toBeNull();
+});
+
+const inFoot = (el: HTMLElement, text: string) => [...el.querySelectorAll('[data-foot-buttons] button')].some((b) => b.textContent?.trim() === text);
+
+test.skipIf(!hasDom)('ended, another live: Send to another session and Archive sit with Reply; the first opens the box with the list, the second archives', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking()));
+  expect(inFoot(el, 'Reply')).toBe(true);
+  expect(inFoot(el, 'Send to another session')).toBe(true);
+  expect(inFoot(el, 'Archive')).toBe(true);
+
+  act(() => button(el, 'Send to another session').click());
+  await settle();
+  expect(el.querySelector('textarea')).not.toBeNull();
+  expect(pillList(el)).not.toBeNull();
+  expect(pillRows(el).map((r) => r[0])).toContain('ses_other');
+
+  act(() => root?.unmount());
+  host?.remove();
+  const again = await render(threadOf(asking()));
+  act(() => button(again, 'Archive').click());
+  await settle();
+  expect(posted.some((p) => p.path.endsWith(`/messages/${M1}/resolve`) && p.body.resolved === true)).toBe(true);
+});
+
+test.skipIf(!hasDom)('ended, nothing live: only Archive, since nothing could take the reply', async () => {
+  sessions = { sessions: [], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking()));
+  expect(inFoot(el, 'Send to another session')).toBe(false);
+  expect(inFoot(el, 'Archive')).toBe(true);
+});
+
+test.skipIf(!hasDom)('the session is live, or the host cannot tell: no note and neither button', async () => {
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: true } };
+  const alive = await render(threadOf(asking()));
+  expect(alive.querySelector('[data-foot-ended]')).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  sessions = { sessions: [live('ses_other', 'claude-code')], asker: { session: 'ses_asker', live: false } };
+  const noSignal = await render(threadOf(asking(false, false)));
+  expect(noSignal.querySelector('[data-foot-ended]')).toBeNull();
+  expect(noSignal.querySelector('[data-asker-ended]')).toBeNull();
+});
+
+test.skipIf(!hasDom)('a reply saved for a session that ended can move: the plain reply posts to its own `/to`', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_asker', live: false } };
+  const el = await render(threadOf(asking(), personReply()), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  act(() => (el.querySelector('[data-readdress-open]') as HTMLButtonElement).click());
+  await settle();
+  act(() => (el.querySelector('[data-readdress-send]') as HTMLButtonElement).click());
+  await settle();
+  expect(posted.find((p) => p.path.endsWith(`/messages/${R1}/to`))?.body.to).toEqual({ host: 'pi', session: 'ses_other' });
+});
+
+test.skipIf(!hasDom)('after a move: no ended note, the next reply answers the moved one, and it is to the new session', async () => {
+  sessions = { sessions: [live('ses_other', 'pi')], asker: { session: 'ses_other', live: true } };
+  const moved = personReply({ to: { host: 'pi', session: 'ses_other' }, took_over: true, delivery: { host: 'pi', session: 'ses_other', state: 'delivered', at: '2026-10-11T10:53:00.000Z' } });
+  const el = await render(threadOf(asking(), moved), { at: '2026-10-11T10:52:00.000Z', checked_at: null });
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  await writeReply(el);
+  expect(pill(el)?.getAttribute('aria-label')).toContain('To Pi');
+  expect(pill(el)?.getAttribute('aria-label')).not.toContain('ended');
+  act(() => button(el, 'Send').click());
+  await settle();
+  expect(pillList(el)).toBeNull();
+  expect(replies()).toHaveLength(1);
+  expect(replies()[0]!.path).toEndWith(`/messages/${R1}/reply`);
 });

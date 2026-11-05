@@ -6,7 +6,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxMessageWire, InboxThread } from '@plannotator/core/inbox-types';
-import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, type SentContents } from './sendTargets';
+import { replyKeysToRenew, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SentContents } from './sendTargets';
 
 type State = 'open' | 'picked' | 'sent';
 const message = (id: string, session: string | null, states: State[]): InboxMessageWire =>
@@ -157,5 +157,35 @@ describe('the words after a hand-off (approval "inbox-tag-handoff")', () => {
   test('a hand-off taken back moves nothing: the latest agent writer gets the words, as before', () => {
     const m = [message('msg_1', 'ses_old', []), handoff('msg_2', true), message('msg_3', 'ses_old', [])];
     expect(sendTargetsOf(thread(m)).map((t) => t.message.id)).toEqual(['msg_3']);
+  });
+});
+
+describe('wordsMessage: who the next reply goes to after a session ended', () => {
+  const reply = (id: string, extra: Partial<InboxMessageWire>): InboxMessageWire =>
+    ({ id, thread_id: 'msg_1', author: { kind: 'person' }, reply_to: 'msg_1', body: '', created_at: '2026-10-21T16:00:00.000Z', ...extra }) as unknown as InboxMessageWire;
+  const ended = message('msg_1', 'ses_ended', []);
+  const to = { host: 'pi', session: 'ses_new' };
+
+  test('the session that replaced an ended one takes the words, so the next reply copies its `to` and nothing asks about the old one', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    expect(wordsMessage(thread([ended, moved])).id).toBe('msg_2');
+    expect(sendTargetsOf(thread([ended, moved])).at(-1)!.message.id).toBe('msg_2');
+  });
+
+  test('a reply aimed at another session while the asker is live changes nothing: the next one answers the asker', () => {
+    expect(wordsMessage(thread([ended, reply('msg_2', { to })])).id).toBe('msg_1');
+  });
+
+  test('a further reply, aimed elsewhere after the takeover, is the one followed', () => {
+    const later = reply('msg_3', { to: { host: 'pi', session: 'ses_third' }, reply_to: 'msg_2' });
+    expect(wordsMessage(thread([ended, reply('msg_2', { to, took_over: true }), later])).id).toBe('msg_3');
+  });
+
+  test('any agent writing ends it: the latest writer takes the words again, the old session too if it was resumed', () => {
+    const moved = reply('msg_2', { to, took_over: true });
+    const writer = message('msg_3', 'ses_new', []);
+    expect(wordsMessage(thread([ended, moved, writer])).id).toBe('msg_3');
+    const back = message('msg_4', 'ses_ended', []);
+    expect(wordsMessage(thread([ended, moved, back])).id).toBe('msg_4');
   });
 });

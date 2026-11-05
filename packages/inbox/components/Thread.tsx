@@ -141,7 +141,7 @@ import { inboxThreadShortcuts } from '../shortcuts/thread.shortcuts';
 import { StepsButton } from '../steps/StepsButton';
 import { stepsCount, stepsWaitTarget } from '../steps/model';
 import { useThreadSteps, type StepsSubscribe } from '../steps/useThreadSteps';
-import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
+import { replyKeysToRenew, routeSendAnnotations, sendTargetAnswerIds, sendTargetsOf, tookOverReply, wordsMessage, type SendTarget, type SentContents } from '../sendTargets';
 
 export { routeSendAnnotations, sendTargetsOf, type SendTarget };
 
@@ -274,9 +274,11 @@ function emptyAnswerFor(message: InboxMessageWire, q: { key: string; prompt: str
 function askingSessionOf(thread: InboxThread, options: { skip: ReadonlySet<string>; carries: boolean }): AskingSession | null {
   // Nothing rides on the latest message: the shared rule the list row's delivery uses too (core
   // inbox-delivery), plus the questions the person chose to skip, when any.
-  const message = options.carries
+  const answered = options.carries
     ? sendTargetsOf(thread, options.skip).at(-1)!.message
     : (lastSkipOrPick(thread, options.skip) ?? inboxAskingMessage(thread.messages, questionStatesOf, false));
+  // A session took over from the one that ended: nothing asks about the old one any more, unless a pick still answers it.
+  const message = answered && !questionStatesOf(answered).includes('picked') && tookOverReply(thread) ? null : answered;
   if (!message) return null;
   if (message.author.kind !== 'agent' || !message.author.session) return null;
   return { message, session: message.author.session, host: message.author.host ?? '', name: agentName(message.author) };
@@ -2029,7 +2031,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // Tags (approval "inbox-tag-agents"): who the person can tag with `@`, read while the reply box is open. In a
   // thread with more than one agent, read with the box closed too: the recipient pill and the message heads name
   // agents by their folders (approval "inbox-reply-recipient"), and a head must not change when the box opens.
-  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null;
+  const multiAgent = participants.length > 1 || activeHandoff(thread) !== null || tookOverReply(thread) !== null;
   const taggable = useTaggable(thread.thread_id, (box.open || !!file || multiAgent) && !resolved);
   // Each session's label (issue #2450): an agent message's author reads it, as the list read it.
   const sessionLabels = useSessionLabels();
@@ -2112,7 +2114,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     const add = (host: string | null, session: string) => {
       if (!people.some((p) => p.session === session)) people.push({ host, session });
     };
-    const handed = activeHandoff(thread);
+    const handed = activeHandoff(thread) ?? tookOverReply(thread);
     if (handed?.to) add(handed.to.host, handed.to.session);
     // The agent asked has ended: the live sessions take its place in the list (its project's, and writers from other folders).
     if (askerEnded) for (const s of live?.sessions ?? []) add(s.host, s.session);
@@ -4786,7 +4788,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // another session's list adds or drops its "+1".
   const replyKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'reply' });
   const openItemsKeyShown = useShortcutHintShown({ scope: inboxThreadShortcuts, action: 'openItems' });
-  const footSig = [footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
+  const footSig = [showAskerNote, anyOtherLive, footStatusShown, draftKept, picksCount, records.length, unanswered.length, keepOpen, skipIds.size, openQShown, openQ.questions.length, openActions.length, phone, replyKeyShown, openItemsKeyShown, stepLists[0] ? stepsCount(stepLists[0]).text : '', stepLists.length].join('|');
   const rowFittedFor = useRef('');
   const fitRowRef = useRef<(force?: boolean) => void>(() => {});
   fitRowRef.current = (force = false) => {
@@ -5800,6 +5802,17 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {sendNowError}
                   </p>
                 )}
+                {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
+                {message === last && delivered?.ended && !lastTo && askedSession && (
+                  <SendToAnotherSession
+                    messageId={last.id}
+                    ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
+                    project={thread.project.name}
+                    live={live}
+                    onReload={loadLive}
+                    onMoved={onChanged}
+                  />
+                )}
                 {message === last && delivered?.state === 'undelivered' && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
@@ -6164,6 +6177,28 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     Looks good
                   </button>
                 </Tip>
+              )}
+              {/* The session ended (the note above says so): what the person can do about it, with Reply. */}
+              {showAskerNote && (
+                <div className="ib-footended" data-foot-ended="">
+                  {anyOtherLive && (
+                    <button
+                      type="button"
+                      className="ib-btn"
+                      data-ended-send=""
+                      onClick={() => {
+                        openBox();
+                        setRcptOpen(true);
+                      }}
+                    >
+                      <Icon name="forward" size={15} />
+                      Send to another session
+                    </button>
+                  )}
+                  <button type="button" className="ib-btn" data-ended-archive="" onClick={() => void resolve(true)}>
+                    Archive
+                  </button>
+                </div>
               )}
               {/* The agents' steps (approval "inbox-thread-steps", A1): beside the open questions, by their list's rules. */}
               {stepLists.length > 0 && (

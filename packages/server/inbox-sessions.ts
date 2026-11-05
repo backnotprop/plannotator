@@ -36,7 +36,7 @@
 
 import { homedir } from "node:os";
 import { basename } from "node:path";
-import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
+import { INBOX_AUTO_SEND_AFTER_MS, INBOX_TAGS_MAX, type InboxHostSessions, type InboxMessage, type InboxOpenSession, type InboxProject, type InboxRestartAgents, type InboxSessionOutdated, type InboxTag, type InboxToolHostId } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { INBOX_ASK_POLL_FIELD, INBOX_SEND_NOW_POLL_FIELD, INBOX_SESSION_LABEL_INPUT_MAX, INBOX_SESSION_LIVE_MS, INBOX_TAGS_POLL_FIELD } from "@plannotator/shared/inbox/connection";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -185,6 +185,22 @@ export const INBOX_MCP_AGENTS_MAX = 30;
  * does not show the note for a moment.
  */
 export const INBOX_ASKER_GRACE_MS = 60_000;
+
+/**
+ * How long after the Inbox starts a session it has not heard from counts as there: this Inbox knows nothing of the
+ * sessions from before it, and a session that kept trying a stopped Inbox tries again only every 60 s
+ * (`INBOX_RETRY_MS.max`), on a 1 s tick. Past that, so no list row says "Session ended" of a live session.
+ */
+export const INBOX_ASKER_RESTART_GRACE_MS = 90_000;
+
+/**
+ * Whether the agent message a reply answers came from a session that has ended: one that can be known to (its
+ * connection wakes it) and that the Inbox has not heard from, with the grace. A reply going elsewhere takes its place.
+ */
+export function replacesEndedAsker(asked: InboxMessage | null | undefined, live: { askerLive(session: string): boolean }): boolean {
+  if (asked?.author.kind !== "agent" || asked.wakes !== true || !asked.author.session) return false;
+  return !live.askerLive(asked.author.session);
+}
 
 /**
  * How long a session the Inbox wakes itself (Codex) is listed as live after
@@ -538,7 +554,7 @@ export function createInboxLiveSessions(options: {
     const recent = (entry: { holding?: number; lastSeen: number } | undefined) =>
       !!entry && ((entry.holding ?? 0) > 0 || now() - entry.lastSeen <= INBOX_ASKER_GRACE_MS);
     if (recent(sessions.get(session)) || recent(mcpSeen.get(session))) return true;
-    return now() - startedAt <= INBOX_ASKER_GRACE_MS;
+    return now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS;
   };
 
   /**
@@ -821,9 +837,21 @@ export function createInboxLiveSessions(options: {
    * out), so the server compares it on a short timer and tells the windows
    * when it moved (`event: deliveries`). O(sessions), from memory.
    */
+  /**
+   * Which sessions `askerLive` reads as there: a change means some session ended or came back, so a row's "Session
+   * ended" may have moved (`sessions` on `event: deliveries`). A session's turn starting or ending does not change it.
+   */
+  const presenceSignature = (): string => {
+    const t = now();
+    const parts: string[] = [t - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : ""];
+    for (const [id, entry] of sessions) if (entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(id);
+    for (const [id, entry] of mcpSeen) if (t - entry.lastSeen <= INBOX_ASKER_GRACE_MS) parts.push(`m:${id}`);
+    return parts.join("|");
+  };
+
   const deliverySignature = (): string => {
     const t = now();
-    const parts: string[] = [now() - startedAt <= INBOX_ASKER_GRACE_MS ? "g" : "", String(deliveryChanges)];
+    const parts: string[] = [now() - startedAt <= INBOX_ASKER_RESTART_GRACE_MS ? "g" : "", String(deliveryChanges)];
     for (const [id, entry] of sessions) {
       const recent = entry.holding > 0 || t - entry.lastSeen <= INBOX_ASKER_GRACE_MS;
       if (!recent) continue;
@@ -1097,6 +1125,7 @@ export function createInboxLiveSessions(options: {
     waitOf,
     deliveredIntoTurn,
     deliverySignature,
+    presenceSignature,
     hostSessions,
     restartCount,
     restartAgents,

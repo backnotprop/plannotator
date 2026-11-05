@@ -50,7 +50,7 @@ import {
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
 import { INBOX_CROSS_SITE_BODY, isCrossSiteRequest } from "./inbox-cross-site";
-import type { createInboxLiveSessions } from "./inbox-sessions";
+import { replacesEndedAsker, type createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
 const INBOX_REPLY_PREVIEW_MAX = 160;
@@ -191,7 +191,7 @@ export function createInboxCompose(options: {
     const message = store.message(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const target = live.replyTarget(message.thread_id, body.to);
-    const next = store.readdressMessage(messageId, target);
+    const next = store.readdressMessage(messageId, target, { askerEnded: !!message.reply_to && replacesEndedAsker(store.message(message.reply_to), live) });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 

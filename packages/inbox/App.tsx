@@ -1900,8 +1900,9 @@ function Inbox() {
           // So does each steps list's presence (the in-progress mark turns only while its session works): read
           // again only where a list shows.
           stepsBus.emit('presence');
-          // A session's label changed (issue #2450): the list carries the labels, so it is read again.
-          if (!change?.labels && !hasMovingDelivery(latestSectionsRef.current)) return;
+          // A session's label changed (issue #2450), or a session ended or came back (a row's "Session ended"):
+          // the list carries both, so it is read again.
+          if (!change?.labels && !change?.sessions && !hasMovingDelivery(latestSectionsRef.current)) return;
           if (deliveriesTimer) clearTimeout(deliveriesTimer);
           deliveriesTimer = setTimeout(() => void refreshList(false), 80);
         },

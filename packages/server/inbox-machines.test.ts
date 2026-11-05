@@ -31,6 +31,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
+import { INBOX_WAKES_META_KEY } from "@plannotator/shared/inbox/connection";
 import { InboxStore } from "@plannotator/shared/inbox/store";
 import { startInboxServer } from "./inbox";
 import { createInboxDevices, takeDownInboxTailnet, UNLINKED_REFUSAL_KEPT_MS } from "./inbox-devices";
@@ -345,6 +346,37 @@ describe("linked machines, on three real Inboxes", () => {
       await agent.client.close().catch(() => {});
     }
   }, 90_000);
+
+  test("2b. B's live sessions move its row on A with no record written: A's copy of the row does not go stale", async () => {
+    const agent = await agentOn(B);
+    try {
+      const sent = (
+        (await agent.client.callTool({
+          name: "send_message",
+          arguments: { project_path: B.w.project, agent_session: "ses_machines_wakes", agent_name: "Claude Code", agent_host: "claude-code", body: "Shipped. Anything else?", thread: "case-wakes" },
+          _meta: { [INBOX_WAKES_META_KEY]: true },
+        })) as { structuredContent: { thread_id: string; message_id: string } }
+      ).structuredContent;
+      const health = await getJson(B, "/api/inbox/health");
+      await waitFor("A has B's row", async () => (await mergedRows(A)).some((r) => r.thread_id === sent.thread_id));
+      const opened = await getJson(A, `/api/inbox/m/${B.id}/threads/${sent.thread_id}`);
+      expect((await windowPost(A, `/api/inbox/m/${B.id}/messages/${sent.message_id}/reply`, { idempotency_key: "wakes-1", words: "Bump the version too.", seen_through_seq: opened.cursor })).status).toBe(200);
+      const delivery = async () => (await mergedRows(A)).find((r) => r.thread_id === sent.thread_id)?.delivery;
+      await waitFor("the reply queued on A's copy", async () => (await delivery())?.reason === "away");
+      const cursor = (await getJson(B, "/api/inbox/threads")).cursor;
+      // The session comes back: a poll, which writes nothing on B.
+      const polled = await fetch(`${base(B)}/api/inbox/bridge/poll`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${registry(B.w).token}` },
+        body: JSON.stringify({ session: "ses_machines_wakes", host: "claude-code", waitMs: 0, project_path: B.w.project, busy: false, idle_since: Date.now(), serverSession: health.serverSession }),
+      });
+      expect(polled.status).toBe(200);
+      await waitFor("A's copy follows", async () => (await delivery())?.reason === "idle");
+      expect((await getJson(B, "/api/inbox/threads")).cursor).toBe(cursor);
+    } finally {
+      await agent.client.close().catch(() => {});
+    }
+  }, 60_000);
 
   test("3. B asleep: its rows stay, the answer is held, and lands exactly once when B is back", async () => {
     const agent = await agentOn(B);

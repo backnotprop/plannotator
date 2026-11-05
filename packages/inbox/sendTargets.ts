@@ -114,13 +114,33 @@ export function sendTargetsOf(thread: InboxThread, skip: ReadonlySet<string> = n
 }
 
 /**
+ * The person's reply that holds the thread now because a session that ended was replaced (`took_over`, set by the
+ * server), while no agent has written since: its latest addressed reply, so moving it or aiming the next one follows.
+ * Null otherwise: a reply aimed elsewhere while the asker is live never takes over.
+ */
+export function tookOverReply(thread: InboxThread): InboxMessageWire | null {
+  let latest: InboxMessageWire | null = null;
+  for (let index = thread.messages.length - 1; index >= 0; index--) {
+    const m = thread.messages[index]!;
+    if (m.author.kind === 'agent') return null;
+    if (m.to && !m.handoff?.undone_at) latest ??= m;
+    if (m.took_over && latest) return latest;
+  }
+  return null;
+}
+
+/**
  * The message the person's words answer: the latest agent message, except
- * in a thread handed to another session (approval "inbox-tag-handoff"): then
- * the new owner's latest message after the hand-off, else the hand-off reply
- * itself (a reply to it is addressed as it is, to the new owner). So the
- * former owner writing again never takes the person's words back.
+ * when a session took over from one that ended (`tookOverReply`: that reply,
+ * addressed as it is, until an agent writes), and in a thread handed to
+ * another session (approval "inbox-tag-handoff"): then the new owner's latest
+ * message after the hand-off, else the hand-off reply itself (a reply to it is
+ * addressed as it is, to the new owner). So the former owner writing again
+ * never takes the person's words back.
  */
 export function wordsMessage(thread: InboxThread): InboxMessageWire {
+  const tookOver = tookOverReply(thread);
+  if (tookOver) return tookOver;
   let handedAt = -1;
   for (let index = thread.messages.length - 1; index >= 0; index--) {
     const m = thread.messages[index]!;

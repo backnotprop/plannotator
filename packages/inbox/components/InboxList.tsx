@@ -429,6 +429,16 @@ function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip
   return tip ? <RowTip content={words.full}>{cell}</RowTip> : cell;
 }
 
+/** "Session ended": the session this row's thread would reach has ended (the server's `session_ended`; only a host that can tell). */
+function EndedMark({ row }: { row: InboxListRow }) {
+  if (!row.session_ended) return null;
+  return (
+    <span className="ib-gone ib-rended" data-row-ended="">
+      Session ended
+    </span>
+  );
+}
+
 /**
  * The row's count (approval "inbox-row-byline", 2026-10-29): at the right end of a three-line or phone row's line 3.
  * What waits on the person is the action pill and `?N` (`OpenCounts`); anything else in words (`CountWords`).
@@ -436,6 +446,7 @@ function CountWords({ row, tip = false, wide = false }: { row: InboxListRow; tip
 function LineCount({ row, tip = false }: { row: InboxListRow; tip?: boolean }) {
   return (
     <>
+      <EndedMark row={row} />
       <CountWords row={row} tip={tip} />
       <OpenCounts row={row} tip={tip} />
     </>
@@ -699,7 +710,10 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       </span>
       {/* Every column right of the words has a fixed width, so each lines up down the list. The words (a draft,
           Undelivered, Read …) take the width they need, between the title cell and the badge. */}
-      <span className="ib-cw">{row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} />}</span>
+      <span className="ib-cw">
+        <EndedMark row={row} />
+        {row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} />}
+      </span>
       <span className="ib-bcol">{badgeEl}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
       {pinColumn && <span className="ib-cpin">{pinned && <PinMark />}</span>}

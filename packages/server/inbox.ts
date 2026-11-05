@@ -177,7 +177,7 @@ import { createInboxAccountsFor } from "./inbox-accounts";
 import { createInboxOpenInRoute, systemOpenInLauncher, type InboxOpenInLauncher } from "./inbox-open-in";
 import { recordInboxAttachments, sweepStaleInboxSendTemps } from "@plannotator/shared/inbox/attachments";
 import { inboxBodyForAgent, inboxUploadAttachments, removeInboxAttachmentFiles, removeInboxUploads } from "@plannotator/shared/inbox/uploads";
-import { createInboxLiveSessions } from "./inbox-sessions";
+import { createInboxLiveSessions, replacesEndedAsker } from "./inbox-sessions";
 import { createInboxCodexWake, type InboxCodexWake } from "./inbox-codex-wake";
 import { createInboxVoice } from "./inbox-voice";
 import { createInboxQwenWake, type InboxQwenWake } from "./inbox-qwen-wake";
@@ -374,6 +374,8 @@ export interface InboxServerOptions {
   mcpNow?: () => number;
   /** Tests: the store's clock (what it stamps on messages, cards and deliveries), so a test can write what reads as hours old. Default: the wall clock. */
   storeNow?: () => Date;
+  /** A clock for the live sessions (their grace), for tests. */
+  sessionsNow?: () => number;
   /**
    * The argv that runs this CLI (the compiled binary's absolute path, or bun
    * plus the entry script), so the window's connect snippets name a command
@@ -2543,15 +2545,16 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         };
         if (windowId) capabilityListeners.add(onCapabilities);
         if (windowId) sendReach();
-        // A row's delivery moved with the live sessions (no store line): windows only, like `reach`.
+        // A row's delivery moved with the live sessions (no store line): windows, and a linked machine that asks
+        // (`deliveries=1`), whose copy of this machine's rows would otherwise keep a "Session ended" that is over.
         // `labels` (additive): a session's label changed; only the owner's windows hear it (they alone read labels).
         // A change of labels alone says nothing to a guest's window, so it gets no frame at all.
         const labelsHere = ownerOrLocal(req, via);
-        const sendDeliveries = (labels: boolean, moved: boolean) => {
+        const sendDeliveries = (labels: boolean, moved: boolean, sessions: boolean) => {
           if (!moved && !labelsHere) return;
-          send(`event: deliveries\ndata: ${labels && labelsHere ? '{"labels":true}' : "{}"}\n\n`);
+          send(`event: deliveries\ndata: ${JSON.stringify({ ...(labels && labelsHere ? { labels: true } : {}), ...(sessions ? { sessions: true } : {}) })}\n\n`);
         };
-        if (windowId) deliveryListeners.add(sendDeliveries);
+        if (windowId || url.searchParams.get("deliveries") === "1") deliveryListeners.add(sendDeliveries);
         // Linked machines (`machines=1`, the window only; the door refuses it to a machine): their records, states and
         // the outbox, each in its own frame and never with an `id:`, so the local seq and Last-Event-ID stay this Inbox's.
         // A `machines` snapshot opens every stream: a resync, never a notification.
@@ -2961,6 +2964,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // OpenCode 2's configured spec: `opencode2 plugin update` takes it as its target (only Plannotator), and a pinned one never moves.
   const openCodeSpec = createOpenCodeSpecReader(agentEnvironment);
   const live = createInboxLiveSessions({
+    ...(options.sessionsNow ? { now: options.sessionsNow } : {}),
     store,
     serverSession,
     resolveRoot: async (path) => (await projectRoots.resolve(path)).root,
@@ -3087,9 +3091,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   // timer, only while a window listens, and `event: deliveries` tells the windows to read the list again.
   // A poll that changed a session's label (issue #2450) says `labels` on the same frame: the rows' agents and the
   // open thread's authors read the list again.
-  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only).
-  const deliveryListeners = new Set<(labels: boolean, moved: boolean) => void>();
+  // `moved`: a row's delivery moved (every window hears it); `labels`: a label changed (the owner's windows only);
+  // `sessions`: a session ended or came back, which moves a row's "Session ended" whatever else it says.
+  const deliveryListeners = new Set<(labels: boolean, moved: boolean, sessions: boolean) => void>();
   let lastDeliverySignature = "";
+  let lastPresenceSignature = "";
   let lastLabelVersion = live.labelVersion();
   const deliveryWatch = setInterval(() => {
     if (deliveryListeners.size === 0) return;
@@ -3097,9 +3103,12 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     const moved = signature !== lastDeliverySignature;
     const labels = live.labelVersion() !== lastLabelVersion;
     if (!moved && !labels) return;
+    const presence = live.presenceSignature();
+    const sessions = presence !== lastPresenceSignature;
     lastDeliverySignature = signature;
+    lastPresenceSignature = presence;
     lastLabelVersion = live.labelVersion();
-    for (const listener of deliveryListeners) listener(labels, moved);
+    for (const listener of deliveryListeners) listener(labels, moved, sessions);
   }, INBOX_DELIVERY_WATCH_MS);
   (deliveryWatch as { unref?: () => void }).unref?.();
 
@@ -4500,6 +4509,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               result = store.sendReply(messageId, {
                 ...(attachments.length > 0 ? { attachments } : {}),
                 ...(to === undefined ? {} : { to }),
+                ...(to && replacesEndedAsker(asked, live) ? { took_over: true } : {}),
                 ...(tags && tags.length > 0 ? { tags } : {}),
                 ...(handoff ? { handoff } : {}),
                 words: typeof body.words === "string" ? body.words : undefined,

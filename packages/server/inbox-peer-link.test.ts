@@ -26,6 +26,8 @@ interface DoorScript {
   /** The event stream: hello's cursor, the records to replay, then what happens. */
   cursor?: number;
   records?: (since: number | null) => number[];
+  /** Frames sent right after hello and the records. */
+  frames?: string[];
   /** Keep the stream open with heartbeats (default), or go silent after hello. */
   silent?: boolean;
   /** The stream's answer never comes (the machine slept between health and events). */
@@ -62,6 +64,7 @@ function door(script: DoorScript) {
             for (const seq of script.records?.(since === null ? null : Number(since)) ?? []) {
               controller.enqueue(encoder.encode(`id: ${seq}\nevent: record\ndata: ${JSON.stringify({ seq, kind: "message" })}\n\n`));
             }
+            for (const frame of script.frames ?? []) controller.enqueue(encoder.encode(frame));
             if (!script.silent) timer = setInterval(() => controller.enqueue(encoder.encode(": ping\n\n")), 50);
           },
           cancel() {
@@ -188,6 +191,27 @@ describe("the line", () => {
 });
 
 describe("the list (rule 5)", () => {
+  test("that machine's live sessions moved its rows (no record, no cursor): the list is read again, then the windows are told", async () => {
+    let told = 0;
+    let rowsAtTold = -1;
+    const d = door({
+      cursor: 3,
+      frames: ['event: deliveries\ndata: {"sessions":true}\n\n'],
+      threads: () => Response.json({ cursor: 3, sections: [{ threads: [{ thread_id: "msg_a", session_ended: d.stats.threads > 1 }] }] }),
+    });
+    const { peer } = link(d.url, {
+      onDeliveries: (change) => {
+        expect(change.sessions).toBe(true);
+        told += 1;
+        rowsAtTold = d.stats.threads;
+      },
+    });
+    peer.start();
+    await until("told", () => told === 1);
+    expect(rowsAtTold).toBeGreaterThanOrEqual(2);
+    expect(peer.list!.rows[0]).toMatchObject({ thread_id: "msg_a", session_ended: true });
+  });
+
   test("a list older than the one held is dropped", () => {
     const { peer } = link("http://127.0.0.1:9");
     expect(peer.acceptList({ cursor: 10, sections: [{ threads: [{ thread_id: "new" }] }] })).toBe(true);
