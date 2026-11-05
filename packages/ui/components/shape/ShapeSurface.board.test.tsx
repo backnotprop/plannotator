@@ -194,6 +194,19 @@ describe.if(hasDom)('the words under the drawing (views.know)', () => {
     expect(document.querySelector('.shp-dock')?.textContent).not.toContain('Requirements');
   });
 
+  test('a number keeps the word before it and the punctuation after it, and no word is lost or doubled', async () => {
+    const words = 'Lift it off the base [^1]. Then **pour** [^1], see `src/a.ts:1`[^1]; done [^1][^1]! And the rest.';
+    await mount({ picture: PICTURE, know: words });
+    const know = document.querySelector('.shp-know')!;
+    const groups = [...know.querySelectorAll('.shp-rb-with')];
+    // Each number with its neighbours, joined by a no-break space where the words had a space.
+    expect(groups.map((g) => g.textContent)).toEqual(['base\u00a01.', 'pour\u00a01,', 'src/a.ts:11;', 'done\u00a011!', 'done\u00a01']);
+    // The punctuation sits in the part that cannot break, right after its number.
+    expect([...know.querySelectorAll('.shp-rb-end')].map((e) => e.textContent)).toEqual(['1.', '1,', '1;', '1', '1!']);
+    expect(know.textContent?.replace(/\u00a0/g, ' ')).toBe('Lift it off the base 1. Then pour 1, see src/a.ts:11; done 11! And the rest.');
+    expect(know.querySelectorAll('.shp-rb').length).toBe(5);
+  });
+
   // On purpose: the owner's words for the bar (Picture became Shape, What to know went).
   test('the bar says Shape, How it works, Code, with no tab for the words', async () => {
     await mount({ picture: PICTURE, how: PICTURE, know: 'Only this.', code: { stage: 'after', guide: { title: 'G', intent: 'I', sections: [] } } as unknown as NonNullable<ShapeVersion['views']['code']> });

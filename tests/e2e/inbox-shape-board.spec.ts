@@ -9,7 +9,8 @@
  *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
  *  - a number shows its bubble on hover, with its picture and line;
  *  - `views.know` reads as paragraphs under the drawing, with no tab of its own; a board saved with Requirements still opens, its words all there;
- *  - a phone pans a canvas with no tall drawing.
+ *  - a phone pans a canvas with no tall drawing;
+ *  - a number never lets its punctuation start a line, and never pushes the words past a 320 phone.
  *
  * Build first: see inbox.spec.ts.
  */
@@ -205,6 +206,56 @@ test('The words are paragraphs under the drawing, in its scroll, with no tab; a 
   for (const line of ['What I understand', 'Who gets it', 'At least 2 days', 'Never a guest', 'Open:', 'Nothing waits.']) await expect(words).toContainText(line);
   expect(old.problems).toEqual([]);
   await old.context.close();
+});
+
+test('a number stays with its word and punctuation at every width, and a long path beside it still fits a phone', async ({ browser }) => {
+  const id = store('marker-line', {
+    title: 'Numbers at a line end',
+    claim: 'Built.',
+    views: { know: `It stays quiet until you lift it off the base [^1]. Then \`packages/ui/components/shape/a/very/long/path/that/fills/the/phone/ShapeSurface.tsx:1234\` [^1], and a_very_long_word_with_no_place_at_all_to_break_it_on_a_small_phone_screen [^2]; the end.` },
+    refs: board.refs,
+  });
+  const { context, page, problems } = await openBoard(browser, id, { ...phone, viewport: { width: 320, height: 700 }, screen: { width: 320, height: 700 } });
+  const words = page.locator('.shp-know');
+  const sizes = [320, 330, 345, 360, 375, 390, 412, 430, 500, 640, 800, 1000, 1280, 1440];
+  for (const width of sizes) {
+    await page.setViewportSize({ width, height: 700 });
+    await page.waitForTimeout(120);
+    const seen = await words.evaluate((el) => {
+      const view = el.closest('.shp-view')!;
+      const room = view.getBoundingClientRect();
+      const rects = [...el.querySelectorAll('.shp-rb')].map((b) => b.getBoundingClientRect());
+      // A number on another line than the punctuation after it, or than the last letter before it. A word or path too
+      // wide to share one line with its number has to end somewhere: only then may the number start the next line.
+      const numbers = [...el.querySelectorAll('.shp-rb')];
+      const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+      const texts: Text[] = [];
+      while (walk.nextNode()) if (!numbers.some((n) => n.contains(walk.currentNode))) texts.push(walk.currentNode as Text);
+      const stray = numbers.filter((number) => {
+        const at = number.getBoundingClientRect();
+        const range = document.createRange();
+        const sameLine = (node: Text, index: number) => {
+          range.setStart(node, index);
+          range.setEnd(node, index + 1);
+          const r = range.getBoundingClientRect();
+          return r.top < at.bottom && r.bottom > at.top;
+        };
+        const isBefore = (t: Text) => number.compareDocumentPosition(t) & Node.DOCUMENT_POSITION_PRECEDING;
+        const before = texts.filter((t) => isBefore(t) && t.data.trim()).at(-1)!;
+        const after = texts.find((t) => !isBefore(t) && t.data)!;
+        const last = before.data.trimEnd().length;
+        range.setStart(before, before.data.slice(0, last).search(/\S+$/));
+        range.setEnd(before, last);
+        const word = [...range.getClientRects()].reduce((sum, r) => sum + r.width, 0);
+        const fits = word + at.width + 16 <= el.clientWidth;
+        return (fits && !sameLine(before, last - 1)) || !sameLine(after, 0);
+      }).length;
+      return { over: view.scrollWidth - view.clientWidth, past: rects.filter((r) => r.right > room.right + 0.5 || r.left < room.left - 0.5).length, stray };
+    });
+    expect(seen, `at ${width}`).toEqual({ over: 0, past: 0, stray: 0 });
+  }
+  expect(problems).toEqual([]);
+  await context.close();
 });
 
 test('a phone pans a canvas with no tall drawing', async ({ browser }) => {

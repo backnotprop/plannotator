@@ -205,6 +205,10 @@
 .shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
 
 /* ── reference bubbles and the References list ── */
+/* A number with its word and punctuation: no break between them. A word wider than the line still breaks inside itself, so a phone never overflows. */
+.shp-rb-with { overflow-wrap: anywhere; }
+.shp-rb-end { white-space: nowrap; }
+.shp-rb-end::before { content: "\2060"; }
 .shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;
   font: 600 10px/1 var(--font-mono); color: var(--primary); background: color-mix(in oklab, var(--primary) 12%, var(--background)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 30%, transparent);
   cursor: pointer; text-decoration: none !important; transition: transform .15s, background-color .15s, color .15s; font-style: normal; letter-spacing: 0; }
