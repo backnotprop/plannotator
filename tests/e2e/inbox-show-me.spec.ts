@@ -33,6 +33,8 @@
  *     the board's own viewer; a deleted file and a rename's old name: the file and the
  *     note, never a dead click; leaving the review closes the board.
  *
+ * 11. A Change it while the session answers another thread: quiet, then through, once.
+ *
  * HOME is a scratch folder and the sandbox env keeps the binary off the person's agents.
  * gh and glab are traps. Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-show-me.spec.ts`.
@@ -953,6 +955,66 @@ test("a part on a deleted file or a rename's old name: the file and the note, ne
   await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
   await expect(page.locator('[data-guide-file-shell="src/new-name.ts"]').first()).toBeVisible();
   await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
+});
+
+test('a Change it while the session answers another thread: no storm of requests, and it goes through once that turn ends, once', async () => {
+  test.setTimeout(120_000);
+  const { page } = world;
+  // Thread one: a Show me, the agent held on it.
+  await expect
+    .poll(() => page.evaluate(async (thread) => ((await (await fetch(`/api/inbox/threads/${thread}/ask`)).json()) as { running: string | null }).running, round1.thread_id))
+    .toBeNull();
+  await openReview(page, round1.thread_id);
+  await page.locator('[data-review-message] [data-review-chapters] li').nth(3).click();
+  world.hold = gate();
+  const hold = world.hold;
+  await selectLines(page, DUNNING, 2, 3);
+  await chooser(page).getByRole('button', { name: 'Show me' }).click();
+  await page.locator('[data-show-me-send]').click();
+  await expect.poll(() => page.evaluate(async (thread) => ((await (await fetch(`/api/inbox/threads/${thread}/ask`)).json()) as { running: string | null }).running, round1.thread_id)).not.toBeNull();
+
+  // Thread two, the same session, in a second window: its own board.
+  const other = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, thread: 'second-thread', subject: 'A second thread', body: 'Ready for review.' });
+  const path = join(world.boardDir, 'second-thread.json');
+  writeFileSync(path, JSON.stringify({ title: 'Second thread', claim: 'The second thread.', views: { picture: { width: 800, height: 300, html: '<div data-mark="it" style="padding:16px">it</div>', css: '' } } }));
+  const stored = world.shape(['update', '--file', path, '--thread', other.thread_id, '--through', other.message_id]);
+  expect(stored.status, stored.stderr).toBe(0);
+  const id = (JSON.parse(stored.stdout) as { id: string }).id;
+  const second = await world.context.newPage();
+  try {
+    const posts: string[] = [];
+    const reads: string[] = [];
+    second.on('request', (request) => {
+      if (!request.url().endsWith(`/api/inbox/threads/${other.thread_id}/ask`)) return;
+      (request.method() === 'POST' ? posts : reads).push(request.url());
+    });
+    await second.goto(`${world.url}#thread=${other.thread_id}&guide=${other.message_id}&shape=${encodeURIComponent(id)}`);
+    await expect(board(second)).toContainText('The second thread.');
+    const wakes = () => world.agent.asked.filter((text) => text.includes(`plannotator shape read ${id} --notes`)).length;
+    await board(second).getByRole('button', { name: 'Global comment' }).click();
+    await second.locator('textarea:visible').last().fill('Say what the customer sees.');
+    await second.getByRole('button', { name: 'Change it' }).click();
+    await expect.poll(() => posts.length).toBeGreaterThanOrEqual(1);
+
+    // Refused while the other turn holds the session: seven seconds, and at most a try a pause (the loop was 1,600 a second).
+    const readsBefore = reads.length;
+    await second.waitForTimeout(7_000);
+    expect(posts.length).toBeLessThanOrEqual(3);
+    expect(reads.length - readsBefore).toBeLessThanOrEqual(6);
+    expect(wakes()).toBe(0);
+
+    // That turn ends: the person's Change it goes through, once.
+    hold.release();
+    world.hold = null;
+    await expect.poll(wakes, { timeout: 30_000 }).toBe(1);
+    await expect(board(second).locator('.shp-claim')).toContainText('Version 2', { timeout: 30_000 });
+    await second.waitForTimeout(6_000);
+    expect(wakes()).toBe(1);
+  } finally {
+    await second.close();
+  }
+  await expect(board(page)).toBeVisible({ timeout: 30_000 });
   await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
