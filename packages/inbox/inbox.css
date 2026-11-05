@@ -6711,6 +6711,10 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); margin: max(24px, 
   :root[data-ib-keyboard] .ib-fbk-rel-h { margin: 8px 0 1px; }
   :root[data-ib-keyboard] .ib-fbk-rel li { margin: -10px 0; }
   :root[data-ib-keyboard] .ib-fbk-rel li + li { display: none; }
+  /* Cancel beside Send, the prompt button under them. */
+  :root[data-ib-keyboard] .ib-fbk-acts { flex-direction: row; }
+  :root[data-ib-keyboard] .ib-fbk-acts .ib-btn { flex: 1; }
+  :root[data-ib-keyboard] .ib-fbk-acts .ib-left { order: 1; flex-basis: 100%; }
   .ib-fbk-row { flex-direction: column; align-items: stretch; }
   .ib-fbk-cats { display: flex; }
   .pn-inbox .ib-fbk-cat { flex: 1; height: 44px; font-size: var(--ib-fs-15, 15px); }
