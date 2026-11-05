@@ -24,6 +24,7 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  statSync,
 } from "node:fs";
 import { join } from "node:path";
 import { inboxDecisionExcerpt, orderInboxDecisions, type InboxDecisionCandidate } from "./decisions";
@@ -137,6 +138,7 @@ import { isLineRangeInPatch, parseDiffToFiles, type DiffFile } from "@plannotato
 import { inboxBlobPath, inboxBlobSizes, removeUnusedInboxBlobs } from "./attachments";
 import { inboxMarkupNamesOf, removeInboxMarkups } from "./markups";
 import { INBOX_VIEWING_TIME, inboxViewingText, pendingInboxUploadBlobs, readInboxUpload, removeUnusedInboxUploadFiles } from "./uploads";
+import { DECISION_LINES_FILE, decisionLinesOf, type DecisionDataInput } from "./decision-data";
 import { inboxDraftsBytes } from "./drafts";
 import { pruneInboxAsks } from "./ask";
 import { checkInboxReplyDraftInput, type InboxReplyDraftInput, inboxReplyDraftFileIds, readInboxReplyDrafts, removeInboxReplyDraft, sameInboxUploadIds, writeInboxReplyDraft } from "./reply-drafts";
@@ -3300,7 +3302,7 @@ export class InboxStore {
     const blobSizes = inboxBlobSizes(this.dir);
     // Every blob once in the total; a project and a thread count each blob they use once.
     // Drafts count in the total (compose); their files, uploaded or not yet sent, are blobs already counted.
-    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes();
+    let total = [...blobSizes.values()].reduce((sum, size) => sum + size, 0) + inboxDraftsBytes(this.dir) + this.replyDraftsBytes() + this.decisionLinesBytes();
     // Size and Delete stay per folder: a combined project keeps its own files, so it keeps its own row, by its own name.
     for (const stored of this.allProjects()) {
       const head = this.canonicalProjectId(stored.id);
@@ -5438,6 +5440,15 @@ export class InboxStore {
     return out;
   }
 
+  /** Bytes Decision data's kept lines take on disk (Settings → Storage). */
+  private decisionLinesBytes(): number {
+    try {
+      return statSync(join(this.dir, DECISION_LINES_FILE)).size;
+    } catch {
+      return 0;
+    }
+  }
+
   /** Bytes the reply drafts take on disk (Settings → Storage). */
   private replyDraftsBytes(): number {
     let total = 0;
@@ -5459,6 +5470,7 @@ export class InboxStore {
     const messageIds = new Set(this.threadMembers.get(threadId) ?? []);
     const folder = this.projectFolder(project);
     const markups = this.markupsOf((record) => record.thread_id === threadId);
+    this.keepDecisionLines((question) => messageIds.has(question.message_id));
     this.keepSeqFloor();
     for (const name of [MESSAGES_FILE, QUESTIONS_FILE, ANNOTATIONS_FILE, STEPS_FILE]) {
       const path = join(folder, name);
@@ -5489,9 +5501,42 @@ export class InboxStore {
     const project = this.projectsById.get(projectId);
     if (!project) throw new InboxError("project_not_found", `No project ${projectId}.`);
     const markups = this.markupsOf((record) => record.project_id === projectId);
+    this.keepDecisionLines((question) => question.project_id === projectId);
     this.keepSeqFloor();
     rmSync(this.projectFolder(project), { recursive: true, force: true });
     this.reload(markups);
+  }
+
+  /**
+   * Settings -> Decision data keeps its numbers when a thread goes (the owner, round 2): one line per question, no
+   * words, written before the delete. A crash in between leaves a line beside a question still stored, which the count
+   * reads once. A line that cannot be written costs a number, never the person's delete.
+   */
+  private keepDecisionLines(which: (question: InboxQuestionRecord) => boolean): void {
+    const questions = [...this.questions.values()].filter(which);
+    const lines = decisionLinesOf(questions, this.messages, (id) => this.decisionProjectLabel(id));
+    if (!lines) return;
+    try {
+      appendFileSync(join(this.dir, DECISION_LINES_FILE), lines, { mode: 0o600 });
+    } catch {
+      // See above.
+    }
+  }
+
+  private decisionProjectLabel(id: string): string | null {
+    const project = this.projectsById.get(id);
+    return project ? this.labeled(project).name : null;
+  }
+
+  /** What Decision data counts, from memory: the store's records, not a copy of them. */
+  decisionDataInput(): DecisionDataInput {
+    return {
+      headOf: (id) => (this.projectsById.has(id) ? this.canonicalProjectId(id) : id),
+      labelOf: (id) => this.decisionProjectLabel(id),
+      messages: [...this.messages.values()],
+      byId: this.messages,
+      questions: [...this.questions.values()],
+    };
   }
 
   /** The marked-up images the annotations matching `which` name. */
