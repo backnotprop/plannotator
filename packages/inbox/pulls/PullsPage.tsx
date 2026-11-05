@@ -4,7 +4,7 @@
  * the Inline take): a sidebar row, shown only while Settings → Capabilities →
  * Code review is on. It needs no Board.
  *
- * - The head: "PRs", and on its right the filter mark (approval
+ * - The head: "Reviews", and on its right the filter mark (approval
  *   "pr-list-filters", round 7 take B; PullFilter.tsx): the view (All, Mine,
  *   To review, Others) and the project, kept in the address (`&view=`,
  *   `&project=`) and named once in a quiet line over the list.
@@ -125,11 +125,11 @@ export function PullsPage(given: PullsPageProps) {
   const projectName = props.project ? (props.projectNames.get(props.project) ?? offered.find((p) => p.id === props.project)?.name ?? null) : null;
 
   const list = (
-    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Pull requests" data-pulls-list="">
+    <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-pulls-list="">
       <div className="ib-lhead">
         <SidebarTrigger />
         <h1 dir="auto" tabIndex={-1} data-pulls-heading="">
-          PRs
+          Reviews
         </h1>
         {/* Shown once a first answer came: before it, there is nothing to filter. */}
         {model && (
@@ -176,6 +176,33 @@ export function PullsPage(given: PullsPageProps) {
             {model && groups && groups.on_you.length + groups.ready.length + groups.waiting.length > 0 ? 'Pick a pull request to see its layers.' : null}
           </div>
         ))}
+    </>
+  );
+}
+
+/** A `#reviews` or `#pulls` link while Settings → Capabilities → Code review is off: what is here, and the way to turn it on. Nothing is read. */
+export function ReviewsOff({ phone, onSettings }: { phone: boolean; onSettings: () => void }) {
+  return (
+    <>
+      <section className={`ib-listcol${phone ? '' : ' ib-narrow ib-resizable'} ib-prlist`} aria-label="Reviews" data-reviews-off="">
+        <div className="ib-lhead">
+          <SidebarTrigger />
+          <h1 dir="auto" tabIndex={-1}>
+            Reviews
+          </h1>
+        </div>
+        <div className="ib-lbody ib-pr-off">
+          <div className="ib-pr-empty">
+            <p className="ib-pr-empty-h">Code review is off</p>
+            <p>Reviews of your local changes and pull requests show here when it’s on.</p>
+            <button type="button" className="ib-btn" onClick={onSettings} data-reviews-off-settings="">
+              Open Settings
+            </button>
+          </div>
+        </div>
+        {!phone && <ListColumnEdge />}
+      </section>
+      {!phone && <div className="ib-pane ib-pempty" />}
     </>
   );
 }
@@ -597,7 +624,7 @@ function StackView(props: PullsPageProps & { item: InboxPullItem; model: InboxPu
     <section className="ib-pane ib-prpane" aria-labelledby={titleId} data-pulls-stack={stack.id}>
       <div className="ib-pr-bar">
         {phone && (
-          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to pull requests">
+          <button type="button" className="ib-iconbtn" onClick={props.onClose} aria-label="Back to reviews">
             <Icon name="back" />
           </button>
         )}
