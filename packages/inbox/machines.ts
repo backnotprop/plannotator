@@ -52,9 +52,9 @@ export function rowMachine(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
 }
 
 /**
- * Whether Snooze is offered on a row (approval "inbox-snooze"): this machine's own row always (the caller checks
- * that this Inbox keeps snoozes), a linked machine's only when that machine's Inbox keeps them too. A snooze sent to
- * an older one would never land.
+ * Whether the real Snooze is offered on a row (approval "inbox-snooze"): this machine's own row always (the caller
+ * checks that this Inbox keeps snoozes), a linked machine's only when that machine's Inbox keeps them too. A snooze
+ * sent to an older one would never land; `snoozeBlockedBy` is what Snooze says there instead.
  */
 export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesModel): boolean {
   const id = rowMachine(row, model);
