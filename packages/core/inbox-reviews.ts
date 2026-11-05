@@ -219,6 +219,61 @@ export function inboxReviewLandingOf(
 }
 
 /** One row of the Reviews page. */
+/** Which local changes a New review is of. */
+export type InboxReviewChanges = "uncommitted" | "last" | "branch";
+
+/** New review on local changes: what the box asked for, so its row shows "Curating…" before any review arrives. */
+export interface InboxReviewStart {
+  kind: "local";
+  changes: InboxReviewChanges;
+  branch: string | null;
+  base: string | null;
+  /** The words decide: none is a guided review, the person's own make it a custom curation. */
+  ask: "guide" | "custom";
+  /** The agent it went to. */
+  host: string;
+  at: string;
+  /** The thread's name now, for its row. On a row, not stored. */
+  name?: string | null;
+}
+
+/** A `review` field from a Send, checked; null when it isn't one. */
+export function inboxReviewStartOf(value: unknown, host: string, at: string): InboxReviewStart | null {
+  if (!value || typeof value !== "object") return null;
+  const review = value as Record<string, unknown>;
+  if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
+  const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
+  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", host, at };
+}
+
+/** `GET /api/inbox/reviews/changes`: the size of those changes. `git: false`: the project is not a repository. */
+export interface InboxReviewChangesAnswer {
+  git: boolean;
+  files: number;
+  additions: number;
+  deletions: number;
+  branch: string | null;
+  base: string | null;
+}
+
+/** The files and lines a unified patch changes. */
+export function inboxReviewPatchSize(patch: string): { files: number; additions: number; deletions: number } {
+  let files = 0;
+  let additions = 0;
+  let deletions = 0;
+  // Only inside a hunk: a file's own "--- a/x" and "+++ b/x" lines are not changes.
+  let inHunk = false;
+  for (const line of patch.split("\n")) {
+    if (line.startsWith("diff --git ")) {
+      files += 1;
+      inHunk = false;
+    } else if (line.startsWith("@@")) inHunk = true;
+    else if (inHunk && line.startsWith("+")) additions += 1;
+    else if (inHunk && line.startsWith("-")) deletions += 1;
+  }
+  return { files, additions, deletions };
+}
+
 export interface InboxReviewRow {
   /** The thread's id for a thread's row; the stack's id for a PR row. */
   id: string;
@@ -242,6 +297,8 @@ export interface InboxReviewRow {
   landed: InboxReviewLanding[];
   /** The latest activity: the thread's or any of its PRs'. */
   updated_at: string;
+  /** New review on local changes: what it asked for, kept once its review arrives. */
+  started?: InboxReviewStart | null;
 }
 
 /** `GET /api/inbox/reviews`. */
@@ -422,6 +479,8 @@ export function inboxReviewRows(input: {
   landed?: readonly InboxReviewLanding[];
   /** Every PR the person handed to a thread (pull key → thread), on the list or not: one with no record may still be open. */
   owners?: ReadonlyMap<string, { thread_id: string }>;
+  /** New reviews on local changes, by thread: open threads only. Each has a row from the moment it starts. */
+  started?: ReadonlyMap<string, InboxReviewStart>;
 }): InboxReviewRow[] {
   const byThread = new Map(input.threads.map((thread) => [thread.thread_id, thread]));
   const all = new Map<string, InboxPull>();
@@ -465,11 +524,13 @@ export function inboxReviewRows(input: {
       link: own?.link ?? null,
       pull_reason: reasonOf(stacks),
       landed,
-      updated_at: latest([review?.updated_at ?? own?.link.last?.at ?? "", ...open.map((p) => p.updated_at)]),
+      updated_at: latest([review?.updated_at ?? own?.link.last?.at ?? input.started?.get(threadId)?.at ?? "", ...open.map((p) => p.updated_at)]),
+      started: input.started?.get(threadId) ?? null,
     });
   };
   for (const thread of input.threads) push(thread.thread_id, thread, owned.get(thread.thread_id));
   for (const [threadId, own] of owned) if (!byThread.has(threadId)) push(threadId, null, own);
+  for (const threadId of input.started?.keys() ?? []) if (!byThread.has(threadId) && !owned.has(threadId)) push(threadId, null, undefined);
   for (const stack of input.stacks) {
     if (attached.has(stack.id)) continue;
     // The agent's own thread, when its message names one of the layers (topmost open first): shown, never a review.

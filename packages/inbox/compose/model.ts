@@ -306,6 +306,9 @@ const ACTION_WORDS = ['new', 'message', 'idea', 'ask', 'send'];
 /** A typed word that calls an action: the whole word, or 3 letters or more of its start ("mes", not "me"). */
 const callsAction = (word: string): boolean => ACTION_WORDS.some((action) => action === word || (word.length >= 3 && action.startsWith(word)));
 
+/** A typed word that calls "New review…". */
+const callsReview = (word: string): boolean => word.length >= 3 && ['review', 'pull'].some((action) => action.startsWith(word) || word === action);
+
 /**
  * The query names an action word whole ("new", "send"): its actions sit above
  * the search results. Otherwise they sit below any results.
@@ -317,7 +320,7 @@ export function namesActionWord(query: string): boolean {
     .some((word) => ACTION_WORDS.includes(word));
 }
 
-export type ComposeAction = { kind: 'new' } | { kind: 'message'; target: ComposeTarget };
+export type ComposeAction = { kind: 'new' } | { kind: 'review' } | { kind: 'message'; target: ComposeTarget };
 
 /**
  * The palette's Actions group. An empty query: "New message…" and the session
@@ -325,26 +328,28 @@ export type ComposeAction = { kind: 'new' } | { kind: 'message'; target: Compose
  * a word is one of the action words or 3 letters or more of one's start, and
  * each live session whose host or project matches every word (at most 4).
  */
-export function composeActions(query: string, targets: readonly ComposeTarget[], last: string | null): ComposeAction[] {
+export function composeActions(query: string, targets: readonly ComposeTarget[], last: string | null, reviews = false): ComposeAction[] {
   const words = query.toLowerCase().split(/\s+/).filter(Boolean);
   if (words.length === 0) {
     const lastTarget = last ? targets.find((t) => t.session === last) : undefined;
-    return [{ kind: 'new' }, ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
+    return [{ kind: 'new' }, ...(reviews ? [{ kind: 'review' as const }] : []), ...(lastTarget ? [{ kind: 'message' as const, target: lastTarget }] : [])];
   }
   const out: ComposeAction[] = [];
-  if (words.some(callsAction)) out.push({ kind: 'new' });
+  if (words.some(callsAction) && !words.some(callsReview)) out.push({ kind: 'new' });
+  // "New review…" (Settings → Capabilities → Code review): "review", "pull", and "new" as New message's own.
+  if (reviews && words.some((word) => callsReview(word) || word === 'new')) out.push({ kind: 'review' });
   const named = targets.filter((target) => {
     const hay = `${hostLabel(target.host)} ${target.host} ${target.project.name}`.toLowerCase();
     return words.every((word) => hay.includes(word) || callsAction(word));
   });
   // Only when a word names the session (not the action words alone).
-  const naming = words.filter((word) => !callsAction(word));
+  const naming = words.filter((word) => !callsAction(word) && !(reviews && callsReview(word)));
   if (naming.length > 0) for (const target of named.slice(0, 4)) out.push({ kind: 'message', target });
   return out;
 }
 
 export const actionLabel = (action: ComposeAction): string =>
-  action.kind === 'new' ? 'New message…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
+  action.kind === 'new' ? 'New message…' : action.kind === 'review' ? 'New review…' : `Message ${hostLabel(action.target.host)} in ${action.target.project.name}`;
 
 // ── Launch: start a new session from To (behind `inboxLaunch.enabled`; docs/agent-guides/inbox-launch.md) ──
 

@@ -924,14 +924,14 @@ export default function SearchPalette(props: SearchPaletteProps) {
             if (option.kind === 'action') {
               const action = option.action;
               return (
-                <div key={action.kind === 'new' ? 'action-new' : `action-${action.target.session}`} className="ib-sp-row" {...common} data-compose-action={action.kind}>
+                <div key={action.kind !== 'message' ? `action-${action.kind}` : `action-${action.target.session}`} className="ib-sp-row" {...common} data-compose-action={action.kind}>
                   <span className="ib-sp-mark" aria-hidden="true">
-                    {action.kind === 'new' ? <Icon name="compose" className="ib-sp-mk" /> : <HostMark host={action.target.host} />}
+                    {action.kind !== 'message' ? <Icon name={action.kind === 'new' ? 'compose' : 'code'} className="ib-sp-mk" /> : <HostMark host={action.target.host} />}
                   </span>
                   <span className="ib-sp-rs">
                     <span className="ib-sp-p">{actionLabel(action)}</span>
                     <span className="ib-sp-s">
-                      {action.kind === 'new' ? 'Start a thread with a live agent' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
+                      {action.kind === 'new' ? 'Start a thread with a live agent' : action.kind === 'review' ? 'Local changes or a pull request' : `${startedLine(action.target)} · ${busyWord(action.target).toLowerCase()}`}
                     </span>
                   </span>
                 </div>

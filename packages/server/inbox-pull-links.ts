@@ -18,7 +18,7 @@
  */
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { inboxReviewLandingId, type InboxReviewLanding } from "@plannotator/core/inbox-types";
+import { inboxReviewLandingId, type InboxReviewLanding, type InboxReviewStart } from "@plannotator/core/inbox-types";
 import { inboxDir } from "@plannotator/shared/inbox/schema";
 
 export const INBOX_PULL_LINKS_FILE = "pull-links.json";
@@ -50,6 +50,9 @@ export interface InboxPullLinks {
    * nothing, and one that cannot write (a read-only folder) keeps it in memory: a read of the list never fails for this.
    */
   land(record: readonly InboxReviewLanding[], forget?: readonly string[]): void;
+  /** New reviews on local changes, by thread. */
+  started(): ReadonlyMap<string, InboxReviewStart>;
+  start(threadId: string, start: InboxReviewStart): void;
 }
 
 export function createInboxPullLinks(dataDir: string): InboxPullLinks {
@@ -57,13 +60,14 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const file = join(dir, INBOX_PULL_LINKS_FILE);
   let links: Map<string, InboxPullOwner> | null = null;
   const landed = new Map<string, InboxReviewLanding>();
+  const started = new Map<string, InboxReviewStart>();
 
   const load = (): Map<string, InboxPullOwner> => {
     if (links) return links;
     links = new Map();
     if (!existsSync(file)) return links;
     try {
-      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding> };
+      const parsed = JSON.parse(readFileSync(file, "utf8")) as { v?: unknown; started?: Record<string, InboxReviewStart>; links?: Record<string, unknown>; landed?: Record<string, InboxReviewLanding> };
       if (parsed.v !== 1 || !parsed.links || typeof parsed.links !== "object") throw new Error("not a pull links file");
       for (const [key, value] of Object.entries(parsed.links)) {
         const owner = value as Partial<InboxPullOwner>;
@@ -75,6 +79,9 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
             ...(owner.theirs === true ? { theirs: true as const } : {}),
           });
         }
+      }
+      for (const [threadId, start] of Object.entries(parsed.started ?? {})) {
+        if (start?.kind === "local" && typeof start.at === "string") started.set(threadId, start);
       }
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
         if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
@@ -93,7 +100,7 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
   const save = (map: Map<string, InboxPullOwner>) => {
     mkdirSync(dir, { recursive: true });
     const temp = `${file}.${process.pid}.tmp`;
-    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}) })}\n`, { mode: 0o600 });
+    writeFileSync(temp, `${JSON.stringify({ v: 1, links: Object.fromEntries(map), ...(started.size > 0 ? { started: Object.fromEntries(started) } : {}), ...(landed.size > 0 ? { landed: Object.fromEntries(landed) } : {}) })}\n`, { mode: 0o600 });
     renameSync(temp, file);
   };
 
@@ -132,6 +139,17 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
       } catch (cause) {
         console.error(`inbox: could not save the landed pull requests: ${cause instanceof Error ? cause.message : String(cause)}`);
       }
+    },
+    started() {
+      load();
+      return started;
+    },
+    start(threadId, start) {
+      const map = load();
+      started.delete(threadId);
+      started.set(threadId, start);
+      while (started.size > INBOX_PULL_LINKS_MAX) started.delete(started.keys().next().value!);
+      save(map);
     },
     keys(threadId) {
       const out: string[] = [];

@@ -12,7 +12,7 @@
  *   GET  /api/inbox/sessions                 every live session, grouped by project;
  *                                            `?session=<id>` adds `session: { session, live }`
  *                                            (with the asker grace) for a thread's delivery line
- *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, board_request? }`:
+ *   POST /api/inbox/messages                 `{ to, body, idempotency_key, uploads?, draft_id?, thread_name?, thread_name_auto?, review?, board_request? }`:
  *                                            a new thread (409 `session_not_live`, nothing written). With
  *                                            `to.launch.trust` (Trust and start) only the owner's window: the
  *                                            Send saves the folder's trust, so this form alone is never a plain write
@@ -84,6 +84,8 @@ export function createInboxCompose(options: {
   now?: () => Date;
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
+  /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
+  onReviewStart?: (threadId: string, review: unknown, host: string, at: string) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
@@ -225,7 +227,10 @@ export function createInboxCompose(options: {
       if (prepared) options.launch!.abandon(prepared.launch, prepared.project);
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
-    else if (prepared) options.launch!.begin(result.message);
+    else {
+      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, target.host, at);
+      if (prepared) options.launch!.begin(result.message);
+    }
     // Sent: the uploads are attachments now, and the draft it came from is done.
     removeInboxUploads(store.dir, uploads.filter((id): id is string => typeof id === "string"));
     if (body.draft_id !== undefined && deleteInboxDraft(store.dir, body.draft_id)) options.onDraftsChange?.();

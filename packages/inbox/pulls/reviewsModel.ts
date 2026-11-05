@@ -16,6 +16,7 @@ import { holdingsOf } from '@plannotator/core/inbox-folding';
 import { inboxReviewTitleLine } from '@plannotator/core/inbox-review';
 import { checksWords, inboxPullLabel, linkAgentName, openLayers, pullViewOf, type PullFilter } from './model';
 import { startLayer } from './topology';
+import { hostLabel } from '../compose/model';
 
 /** The rows a project and a view keep: a local review is the person's own, and belongs to its thread's project. */
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
@@ -44,7 +45,7 @@ export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPull
   const stack = row.stacks[0];
   if (stack) return pullTitle(stack);
   if (row.review) return inboxReviewTitleLine(row.review.title);
-  return row.link?.thread_id ?? '';
+  return row.started?.name ?? row.link?.thread_id ?? '';
 }
 
 /** A row's third line: what it is, whose agent, and why it is where it is. */
@@ -112,8 +113,8 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
 
 export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const stack = row.stacks[0];
-  const name = row.review?.agent?.name ?? linkAgentName(row.link);
-  const host = row.review?.agent?.host ?? row.link?.agent?.host ?? null;
+  const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
+  const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
   const agent = row.reviewed && name ? { host, name } : null;
   const { status, tone } = statusOf(row);
   if (stack) {
@@ -129,19 +130,26 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, tone };
   const source = row.review?.source;
   if (source?.pr?.number) return { kind: 'pr', lead: `${source.pr.platform === 'gitlab' ? '!' : '#'}${source.pr.number}`, agent, status, tone };
-  return { kind: 'local', lead: source?.branch ?? '', agent, status, tone };
+  return { kind: 'local', lead: source?.branch ?? row.started?.branch ?? '', agent, status, tone };
 }
 
 /** The line over a review thread's title: "charges · Local changes on retry-jitter, against main". */
 export function reviewContextLine(row: InboxReviewRow, projectName: string | null): string {
   const source = row.review?.source;
   const line = reviewRowLine(row);
+  const started = row.started;
   const what =
     line.kind !== 'local'
       ? line.lead
       : source?.branch
         ? `Local changes on ${source.branch}${source.base ? `, against ${source.base.replace(/^origin\//, '')}` : ''}`
-        : 'Local changes';
+        : started?.branch
+          ? started.changes === 'uncommitted'
+            ? `Uncommitted changes on ${started.branch}`
+            : started.changes === 'last'
+              ? `Last commit on ${started.branch}`
+              : `Local changes on ${started.branch}${started.base ? `, against ${started.base}` : ''}`
+          : 'Local changes';
   return [projectName, what].filter(Boolean).join(' · ');
 }
 
@@ -156,6 +164,10 @@ export interface ReviewView {
   firstReviewId: string | null;
   /** The latest review: open in this view however long ago it was read. */
   latestReviewId: string | null;
+  /** An agent is still curating the first review: the thread says so under the request. */
+  curating: boolean;
+  /** New review's own label on the request: "New review · Guided review". */
+  asked: string | null;
   /** The thread the review came from, when it was an ordinary one. */
   fromThread: string | null;
   onWholeThread: () => void;
@@ -187,7 +199,8 @@ export function reviewViewOf(
   options: { projectName: string | null; onWholeThread: () => void; onOpenStack: (stackId: string) => void },
 ): ReviewView {
   const line = reviewRowLine(row);
-  const started = row.link?.via === 'owner';
+  const started = row.link?.via === 'owner' || !!row.started;
+  const ask = row.started?.ask ?? (row.link?.via === 'owner' ? row.link.ask : null);
   const first = row.review?.first_review_id ?? null;
   const earlier = first ? thread.messages.findIndex((message) => message.id === first) : -1;
   const folds = !started && first !== null && earlier > 0;
@@ -198,6 +211,8 @@ export function reviewViewOf(
     title: row.review ? inboxReviewTitleLine(row.review.title) : null,
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
+    curating: row.reason === 'curating',
+    asked: ask ? `New review · ${ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

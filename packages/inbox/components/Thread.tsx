@@ -5396,7 +5396,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
             )}
           </div>
         )}
-        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? thread.subject ?? '(no subject)'}</h2>
+        <h2 className="ib-subject" dir="auto" tabIndex={-1}>{reviewView?.title ?? (thread.pull_keys?.length || thread.review_started ? thread.thread_name : null) ?? thread.subject ?? '(no subject)'}</h2>
         {reviewView?.fromThread && (
           <p className="ib-rvfrom" data-review-from="">
             Review from thread{' '}
@@ -5877,6 +5877,8 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
                     picks={thread.messages.reduce((n, m) => n + (m.questions ?? []).filter((q) => q.sent_reply_id === message.id).length, 0)}
                   />
                 ) : (
+                <>
+                {reviewView?.asked && message.id === thread.messages[0]?.id && <p className="ib-rvasked" data-review-asked="">{reviewView.asked}</p>}
                 <MessageBody
                   message={message}
                   sentAnswers={message.author.kind === 'person' ? (sentAnswersByReply.get(message.id) ?? NO_SENT_ANSWERS) : undefined}
@@ -5924,6 +5926,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
                       : undefined
                   }
                 />
+                </>
                 )}
                 {/* An agent's files, and the person's own (compose): the same tiles and viewers. */}
                 {(message.attachments?.length ?? 0) > 0 && (
@@ -6059,6 +6062,7 @@ export function ThreadPane({ reviewView = null, onInReviews, notice, thread, thr
           );
           return before;
         })}
+        {reviewView?.curating && <p className="ib-rvcurating" data-review-curating="">Curating the review…</p>}
         {/* Linked machines: what the person sent here that the thread's machine has not taken yet (HeldWrites.tsx). */}
         <HeldWrites entries={outbox} machine={machine} onDismiss={onDismissOutbox} />
         {showNew && !phone && newPill}

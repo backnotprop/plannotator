@@ -777,7 +777,7 @@ test('the stack view with the Board off: layers from main up, Lands next, its re
   await expect(pane).not.toContainText('Board');
   await expect(pane.getByRole('button', { name: /merge/i })).toHaveCount(0);
   // It has a review thread: no picker, and no way to add a second agent; the diff is one button away.
-  await expect(pane.locator('[data-pulls-primary="review"], [data-pulls-picker]')).toHaveCount(0);
+  await expect(pane.locator('[data-pulls-primary="review"]')).toHaveCount(0);
   await expect(pane.getByRole('button', { name: 'Open the diff', exact: true })).toBeVisible();
   // The whole stack is the review's own switch: one Open the diff here.
   await expect(pane.getByRole('button', { name: 'Whole stack' })).toHaveCount(0);
@@ -819,7 +819,7 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
     await expect(page.locator('[data-pulls-stack]')).toBeVisible();
     if (openPicker) {
       await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
-      await expect(page.locator('[data-pulls-picker-session]').first()).toBeVisible();
+      await expect(page.locator('[data-review-box]')).toBeVisible();
     }
     // Nothing scrolls sideways, and each control is a full touch target.
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
@@ -834,10 +834,10 @@ async function phoneShot(browser: Browser, row: string, name: string, schemes: r
   }
 }
 
-/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, the picker's Ask for options, its rows and Start. */
-const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], [data-pulls-picker-session], [data-pulls-picker-new], [data-pulls-start], [data-pulls-picker-cancel], [data-pulls-ask-option]';
+/** The stack view's controls a phone must make full touch targets: the one button, Open the diff, and in New review the choices and Start. */
+const PHONE_TARGETS = '[data-pulls-primary], [data-pulls-open-diff], .ib-cp-choice, [data-compose-send]';
 
-test('a PR with no review thread: Review with an agent, the picker (Ask for, the running agents, Start a new agent), "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
+test('a PR with no review thread: Review with an agent, the New review box, "on the way", the guided review arriving, Open review thread, and Open the diff in each', async ({ browser }) => {
   const { page } = world;
   await offerLaunch(page);
   await page.goto(`${world.url}#pulls`);
@@ -849,52 +849,44 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   const primary = pane.locator('[data-pulls-primary]');
   await expect(primary).toHaveText('Review with an agent');
   await expect(primary).toHaveClass(/ib-pri/);
-  await expect(primary).toHaveAttribute('aria-expanded', 'false');
   expect((await pane.locator('[data-pulls-open-diff]').boundingBox())!.y).toBe((await primary.boundingBox())!.y);
-  await expect(pane.locator('[data-pulls-picker]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
   await expect(pane.locator('[data-pulls-reply]')).toHaveCount(0);
   await expect(pane).not.toContainText(/\bhand/i);
   await shot(page, '4-no-thread');
-  await primary.click();
-  // Inline under the button, no menu: Ask for, then one radio list of web-app's running agents and Start a new agent.
-  const picker = pane.locator('[data-pulls-picker]');
-  await expect(primary).toHaveAttribute('aria-expanded', 'true');
-  await expect(picker).toContainText('Ask for');
-  await expect(picker).toContainText('Running in web-app');
-  await expect(pane.locator('[role="menu"]')).toHaveCount(0);
-  expect((await picker.boundingBox())!.y).toBeGreaterThan((await primary.boundingBox())!.y);
-  const agents = picker.getByRole('radiogroup', { name: 'Agent, running in web-app' });
-  await expect(agents.getByRole('radio')).toHaveCount(3);
-  await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
-  await expect(picker.locator('[data-pulls-picker-session="ses-billing-claude"]')).toHaveCount(0);
-  await expect(picker.locator('[data-pulls-picker-session] input:checked')).toHaveCount(1);
-  await expect(picker.locator('[data-pulls-picker-new]')).toContainText('Start a new agent');
-  await expect(picker.locator('[data-pulls-ask-choice]')).toHaveAttribute('data-pulls-ask-choice', 'guide');
-  // A row only picks: nothing is sent until Start review thread.
-  await picker.locator('[data-pulls-picker-session="ses-web-claude"]').click();
-  await expect(picker.locator('[data-pulls-picker-session="ses-web-claude"] input')).toBeChecked();
-  await expect(picker.locator('[data-pulls-start]')).toHaveText('Start review thread');
-  await expect(picker.locator('[data-pulls-start]')).toHaveAttribute('data-pulls-start', 'ses-web-claude');
-  await expect(pane.locator('[data-pulls-thread]')).toHaveCount(0);
-  await shot(page, '4a-picker');
   // The row opens the diff too: "Open diff ›" at its end, under the pointer.
   const row = pane.locator(`[data-pulls-layer="${LOCALE}"] button`);
   await row.hover();
   await expect(row.locator('.ib-pr-lgo')).toHaveText('Open diff');
   await shot(page, '4b-row-hover', ['light']);
   await page.mouse.move(0, 0);
-  await picker.locator('[data-pulls-ask-option="custom"]').click();
-  await picker.locator('[data-pulls-ask-words]').fill('Check the fallback chain, and a test for a missing locale');
+  await primary.click();
+  // The New review box, filled in: this PR, an agent of its project in To, nothing asked of the person but Start.
+  const box = page.locator('[data-review-box]');
+  await expect(box.locator('[data-review-pick]')).toContainText('Fall back to English for missing strings');
+  await expect(box.locator('[data-review-choice="pr"]')).toBeChecked();
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', /^ses-web-/);
+  await expect(box).toContainText('from the pull request');
+  await expect(box.locator('[data-compose-thread-name] input, [data-compose-thread-name]').first()).toBeVisible();
+  // To offers only the PR's project.
+  await box.locator('[data-compose-to]').click();
+  await expect(box.locator('[data-compose-session]')).toHaveCount(2);
+  await expect(box.locator('[data-compose-session="ses-billing-claude"]')).toHaveCount(0);
+  await box.locator('[data-compose-session="ses-web-claude"]').click();
+  await expect(box.locator('[data-compose-to]')).toHaveAttribute('data-compose-to', 'ses-web-claude');
+  await shot(page, '4a-box');
+  const boxWords = box.locator('[data-compose-text] textarea');
+  await boxWords.fill('Check the fallback chain, and a test for a missing locale');
   await shot(page, '5-ask-custom');
-  await picker.locator('[data-pulls-ask-option="guide"]').click();
-  await picker.locator('[data-pulls-start]').click();
-  await expect(picker).toHaveCount(0);
-  // Focus lands on the line that names the review thread's agent.
-  const line = pane.locator('[data-pulls-thread-line]');
-  await expect(line).toBeFocused();
-  await expect(line).toHaveText(/^Review thread with Claude Code\s*Guided review on the way$/);
-  const threadId = String(await line.getAttribute('data-pulls-thread'));
+  await boxWords.fill('');
+  await box.locator('[data-compose-send]').click();
+  await expect(box).toHaveCount(0);
+  // The thread opens beside the list, Curating, the request labelled and its big title the thread's name.
+  await expect(page).toHaveURL(/#reviews.*thread=/);
+  const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
+  await expect(page.locator('.ib-subject')).toHaveText('Review #869: Fall back to English for missing strings');
+  await expect(page.locator('[data-review-curating]')).toHaveText('Curating the review…');
+  await expect(page.locator('[data-review-asked]')).toHaveText('New review · Guided review');
   const opening = await world.claude.nextReply(threadId);
   const words = String(opening.body);
   expect(words.startsWith("You're being asked to help me review and understand a pull request. Don't change any code unless I explicitly tell you to.\n")).toBe(true);
@@ -903,12 +895,12 @@ test('a PR with no review thread: Review with an agent, the picker (Ask for, the
   expect(words).toContain('\n1. Send me a guided review of its diff against main, using /review-curate (its instructions are at the end of this message).\n');
   expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
   // Kept: a fresh read still ties it to that thread, and says what was asked; the one button opens the thread.
+  await page.goto(`${world.url}#reviews&stack=${encodeURIComponent(LOCALE)}`);
   await page.reload();
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread]')).toHaveAttribute('data-pulls-thread', threadId);
   await expect(page.locator(`[data-pulls-row="${LOCALE}"]`)).toContainText('#869 · Curating…');
   await expect(page.locator('[data-pulls-stack] [data-pulls-thread-line="asked"]')).toContainText('Guided review on the way');
   await expect(page.locator('[data-pulls-stack] [data-pulls-primary]')).toHaveText('Open review thread');
-  await expect(page.locator('[data-pulls-stack] [data-pulls-picker]')).toHaveCount(0);
   await expect(page.locator('[data-pulls-stack] [data-pulls-open-diff]')).toBeVisible();
   await expect(page.locator('[data-pulls-stack]')).not.toContainText(/\bhand/i);
   await shot(page, '6-on-the-way');
@@ -1093,23 +1085,24 @@ test('a phone at 390 px: the list, a stack, a layer review; and off, no row', as
     const review = page.locator('[data-pull-review]');
     await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
     await shot(page, 'phone-3-layer-review');
-    // A teammate's PR with no review thread: Review with an agent, the picker inline, every row a touch target.
+    // A teammate's PR with no review thread: Review with an agent, the box as a sheet, every choice a touch target.
     await offerLaunch(page);
     await page.goto(`${world.url}#pulls`);
     await page.locator('[data-pulls-row="github.com/northwind/web-app#880"]').click();
     await shot(page, 'phone-4-no-thread');
     await page.locator('[data-pulls-stack] [data-pulls-primary]').click();
-    const picker = page.locator('[data-pulls-stack] [data-pulls-picker]');
-    await expect(picker.locator('[data-pulls-picker-session]')).toHaveCount(2);
+    const box = page.locator('[data-review-box]');
+    await expect(box.locator('[data-review-pick]')).toContainText('RTL layout');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
-    for (const box of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
-      expect(box.right).toBeLessThanOrEqual(390);
-      expect(box.height).toBeGreaterThanOrEqual(44);
+    for (const target of await page.locator(PHONE_TARGETS).evaluateAll((els) => els.map((el) => el.getBoundingClientRect()))) {
+      expect(target.right).toBeLessThanOrEqual(390);
+      expect(target.height).toBeGreaterThanOrEqual(44);
     }
-    await shot(page, 'phone-4a-picker');
-    await picker.locator('[data-pulls-ask-option="custom"]').click();
-    await picker.locator('[data-pulls-ask-words]').fill('what changes for Arabic and Hebrew');
+    await shot(page, 'phone-4a-box');
+    await box.locator('[data-compose-text] textarea').fill('what changes for Arabic and Hebrew');
     await shot(page, 'phone-5-ask-custom');
+    await box.locator('[data-compose-cancel]').click();
+    await expect(box).toHaveCount(0);
     // Every control in the review's strip and foot is a 44 px target or more on a phone.
     for (const box of await review.locator('.ib-prr-foot button, .ib-prr-scope .ib-seg-o').evaluateAll((els) => els.map((el) => el.getBoundingClientRect().height))) expect(box).toBeGreaterThanOrEqual(36);
     const width = await page.evaluate(() => document.documentElement.scrollWidth);
@@ -1301,19 +1294,14 @@ test('the walkthrough video (20 s or less): Review with an agent starts a review
     await pause(1300);
     await pane.locator('[data-pulls-primary]').click();
     await pause(900);
-    await pane.locator('[data-pulls-picker-session="ses-web-pi"]').hover();
-    await pause(300);
-    await pane.locator('[data-pulls-picker-session="ses-web-claude"]').click();
+    const box = page.locator('[data-review-box]');
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
     await pause(900);
-    await pane.locator('[data-pulls-start]').hover();
-    await pause(500);
-    await pane.locator('[data-pulls-start]').click();
-    const chip = pane.locator('[data-pulls-thread]');
-    await expect(chip).toBeVisible();
-    await expect(pane.locator('[data-pulls-thread-line]')).toContainText('Guided review on the way');
-    await pane.locator('[data-pulls-open-diff]').hover();
+    await box.locator('[data-compose-send]').click();
+    await expect(box).toHaveCount(0);
     await pause(2500);
-    const threadId = String(await chip.getAttribute('data-pulls-thread'));
+    const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
     const opening = await world.claude.nextReply(threadId);
     await sendReview(world.claude, world.projects.web, String(opening.id), world.patches.rtl, 'src/settings/Layout.tsx', 'RTL layout for the settings pages');
     await page.reload();
@@ -1397,6 +1385,70 @@ test('Reviews: a review from an ordinary thread is a local row, opens at its car
   await expect(page.locator('[data-pulls-list]')).toBeVisible();
   await shot(page, 'r-page-phone');
   await page.setViewportSize({ width: 1440, height: 900 });
+});
+
+test('New review, local changes: the + opens the box, the summary follows the changes and the project, Start opens it Curating, and the card moves it to On you', async () => {
+  const { page, claude } = world;
+  const file = join(world.projects.web, 'src/review-box.ts');
+  writeFileSync(file, 'export const one = 1;\nexport const two = 2;\n');
+  try {
+    await page.goto(`${world.url}#reviews`);
+    await page.reload();
+    await page.locator('[data-reviews-new]').first().click();
+    const box = page.locator('[data-review-box]');
+    await expect(box.locator('[data-review-choice="local"]')).toBeChecked();
+    await expect(box.locator('[data-review-choice="uncommitted"]')).toBeChecked();
+    // To is filled in, and the summary is that project's.
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
+    await expect(box.locator('[data-review-size]')).toContainText('1 file');
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: uncommitted on /);
+    await expect(box.locator('[data-compose-send]')).toContainText('Start review');
+    await shot(page, 'n-box-local');
+    // Another choice, another size: the working copy's new file is not in the last commit.
+    await box.locator('[data-review-choice="last"]').check({ force: true });
+    await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: last commit on /);
+    await expect(box.locator('[data-review-size]')).not.toHaveText(/^1 file \+2 -0$/);
+    await box.locator('[data-review-choice="uncommitted"]').check({ force: true });
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    // Open pull request: the picker lists what Reviews lists, not reviewed first.
+    await box.locator('[data-review-choice="pr"]').check({ force: true });
+    await expect(box.locator('[data-compose-send]')).toHaveClass(/ib-dis/);
+    await box.locator('[data-review-pick]').click();
+    await expect(box.locator('.ib-cp-rvpulls .ib-cp-cap').first()).toHaveText('Not reviewed yet');
+    await shot(page, 'n-box-pr');
+    await page.keyboard.press('Escape');
+    await expect(box).toBeVisible();
+    await box.locator('[data-review-choice="local"]').check({ force: true });
+    await box.locator('[data-compose-to]').click();
+    await box.locator('[data-compose-session="ses-web-claude"]').click();
+    await expect(box.locator('[data-review-size]')).toContainText('+2');
+    await box.locator('[data-compose-send]').click();
+    await expect(box).toHaveCount(0);
+    await expect(page).toHaveURL(/#reviews.*thread=/);
+    const threadId = decodeURIComponent(/thread=([^&]+)/.exec(page.url())![1]!);
+    const row = page.locator(`[data-pulls-row="${threadId}"], [data-reviews-row="${threadId}"]`).first();
+    await expect(row).toContainText('Review web-app: uncommitted on');
+    await expect(row).toContainText('Curating…');
+    await expect(page.locator('.ib-subject')).toContainText('Review web-app: uncommitted on');
+    await expect(page.locator('[data-review-curating]')).toHaveText('Curating the review…');
+    await expect(page.locator('[data-review-asked]')).toHaveText('New review · Guided review');
+    await shot(page, 'n-curating');
+    const opening = await claude.nextReply(threadId);
+    const words = String(opening.body);
+    expect(words).toMatch(/^Please send me a guided review of the uncommitted changes in web-app \(on [^)]+\), using \/review-curate\.\n\nIf I ask for changes, make them and send me the updated review in this thread\./);
+    expect(words).toContain('BEGIN SKILL INSTRUCTIONS: review-curate');
+    // A reload keeps it: the row comes from the server's record, not this window's memory.
+    await page.reload();
+    await expect(page.locator('[data-review-curating]')).toBeVisible();
+    await sendReview(claude, world.projects.web, String(opening.id), world.patches.locale, 'src/i18n/fallback.ts', 'The local one');
+    await expect(row).toContainText('Review ready');
+    await expect(page.locator('[data-review-curating]')).toHaveCount(0);
+    await expect(page.locator('.ib-subject')).toHaveText('The local one');
+  } finally {
+    rmSync(file, { force: true });
+  }
 });
 
 test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {

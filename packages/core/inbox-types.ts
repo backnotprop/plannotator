@@ -1690,6 +1690,8 @@ export interface InboxThread {
    * the owner's direction, "a teammate's PR shows its diff with no verdict". Absent otherwise.
    */
   pull_theirs?: true;
+  /** A New review on local changes started this thread: its first message is the box's words, not the person's own. */
+  review_started?: true;
   /**
    * The window's read only, with Code review on: the pull requests the person handed to this thread (their list
    * keys). Its review can be posted to one of them on GitHub/GitLab (`POST /api/inbox/pulls/review`). Absent otherwise.
