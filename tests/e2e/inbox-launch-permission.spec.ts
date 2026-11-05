@@ -753,8 +753,10 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     await shot(mobile, 'full-launch-safety-check-phone');
     // A deny counts. The host's view from before the answer still shows the prompt: never "waiting on a permission
     // prompt" after it, however briefly, from the click on (a look that starts once the hook has ended sees such a
-    // line only when the window's next read happens to be late).
+    // line only when the window's next read happens to be late). The next prompt waits meanwhile: a slow hook of its
+    // own would list that prompt with no card yet, which says nothing about this answer.
     await watchRunLine(page);
+    fake.configure({ holdPrompts: true });
     await answer(page, { choice: 'Deny' });
     expect(await waitFor('the safety check', () => fake.permissions()[asked + 1])).toMatchObject({ outcome: 'denied', mode: 'bypassPermissions' });
     await expect(record(page, 'deny')).toContainText('You chose Deny');
@@ -762,6 +764,7 @@ test('Full permissions, with the person\'s bypass consent: the launch record dec
     const lines = await runLinesSeen(page);
     expect(lines[0]).toBe('waiting_answer');
     expect(lines).not.toContain('waiting_terminal');
+    fake.configure({ holdPrompts: false });
     // Approve in Terminal: the hook says nothing, so Claude's own dialog comes up, and Terminal opens attached to it.
     await expect(card(page).locator('[data-perm-detail]')).toHaveText('rm -rf packages/inbox/build', { timeout: 30_000 });
     await armed(page);
