@@ -34,6 +34,7 @@ if (hasDom) {
 const { PostEnding } = (hasDom ? await import('./pulls/PostEnding') : {}) as typeof import('./pulls/PostEnding');
 const { SearchHost } = (hasDom ? await import('./components/SearchHost') : {}) as typeof import('./components/SearchHost');
 const { ShapeLayer } = (hasDom ? await import('./shape/ShapeParts') : {}) as typeof import('./shape/ShapeParts');
+const { SidebarProvider } = (hasDom ? await import('./shell/sidebar') : {}) as typeof import('./shell/sidebar');
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
@@ -160,7 +161,11 @@ test.skipIf(!hasDom)('a Shape board whose chunk cannot arrive says so, and the n
   function Window() {
     const [id, set] = useState<string | null>(null);
     setOpen = set;
-    return id ? <ShapeLayer host={{} as ShapeHost} id={id} thread={null} onClose={() => set(null)} /> : null;
+    return id ? (
+      <SidebarProvider open onOpenChange={() => {}}>
+        <ShapeLayer host={{} as ShapeHost} id={id} thread={null} onClose={() => set(null)} />
+      </SidebarProvider>
+    ) : null;
   }
   mount(<Window />);
   await act(async () => setOpen('shp_1'));
