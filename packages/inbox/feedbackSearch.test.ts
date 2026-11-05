@@ -9,6 +9,7 @@ const data: SearchData = {
     { title: 'Café lighthouse menu', path: 'pull/34' },
     { title: 'Harbor charts', path: 'releases/tag/v1.2.3' },
     { title: 'Lighthouse lamp', path: 'pull/56' },
+    { title: 'Beacon beacons glow', path: 'pull/78' },
   ],
 };
 const titles = (text: string) => searchFeedback(data, text).map((hit) => hit.title);
@@ -33,7 +34,7 @@ describe('searchFeedback', () => {
   });
 
   test('unrelated or short words find nothing', () => {
-    for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden']) expect(titles(text)).toEqual([]);
+    for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden', 'beacon zebras']) expect(titles(text)).toEqual([]);
   });
 
   test('the closest comes first, and only a handful show', () => {

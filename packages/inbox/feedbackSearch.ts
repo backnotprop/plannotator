@@ -54,7 +54,7 @@ export function searchFeedback(data: SearchData, text: string): SearchHit[] {
   /** Common words over the entry's length, so of two titles sharing as much, the shorter is closer. */
   const closeness = (entry: string) => {
     const words = wordsOf(entry);
-    const common = words.filter((word) => typed.some((other) => sameWord(other, word))).length;
+    const common = typed.filter((word) => words.some((other) => sameWord(other, word))).length;
     return common / Math.min(typed.length, words.length || 1) >= SIMILAR ? common + common / words.length : 0;
   };
   const hits = [
