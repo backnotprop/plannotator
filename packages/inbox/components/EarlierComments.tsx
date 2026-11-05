@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import type { EarlierReply } from '../earlierComments';
 import { Icon } from '../icons';
 import { peekSheetHost } from './AttachmentStepper';
+import { EarlierCommentsList } from './EarlierCommentsList';
 
 /**
  * What opens the panel. The one piece a change of entry point replaces: the pane draws it with these props and
@@ -36,17 +37,7 @@ function EarlierList({ replies, count, onClose, closeRef }: ListProps) {
       </div>
       {/* Reachable by Tab, so a long list scrolls from the keyboard. */}
       <div className="ib-earlier-list" tabIndex={0} data-earlier-list="">
-        {replies.map((reply) => (
-          <section key={reply.replyId} className="ib-earlier-reply">
-            <div className="ib-earlier-sub">{reply.label}</div>
-            {reply.comments.map((comment) => (
-              <div key={comment.id} className="ib-earlier-item" data-earlier-comment={comment.id}>
-                <p className="ib-earlier-t">{comment.words}</p>
-                {comment.spot && <span className="ib-earlier-m">{comment.spot}</span>}
-              </div>
-            ))}
-          </section>
-        ))}
+        <EarlierCommentsList replies={replies} />
       </div>
     </>
   );

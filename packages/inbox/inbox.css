@@ -6858,9 +6858,11 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 .ib-earlier-h b { font-size: var(--ib-fs-13, 13px); font-weight: 600; }
 .ib-earlier-n { font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .pn-inbox .ib-earlier-h .ib-iconbtn { margin-left: auto; }
-.ib-earlier-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px 12px; scrollbar-width: thin; outline: none; }
+.ib-earlier-list { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; outline: none; }
 .ib-earlier-list:focus-visible { box-shadow: inset 0 0 0 2px var(--ring); }
-.ib-earlier-sub { position: sticky; top: 0; z-index: 1; margin: 0 -16px; padding: 2px 16px 6px; background: var(--popover); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
+/* The list itself (EarlierCommentsList.tsx) fits any host: a host's scroller holds it, and a host on another surface sets --ib-earlier-bg for its sticky headings. */
+.ib-earlier-comments { padding: 0 var(--ib-earlier-pad, 16px) 12px; }
+.ib-earlier-sub { position: sticky; top: 0; z-index: 1; margin: 0 calc(-1 * var(--ib-earlier-pad, 16px)); padding: 2px var(--ib-earlier-pad, 16px) 6px; background: var(--ib-earlier-bg, var(--popover)); font-size: var(--ib-fs-11, 11px); color: var(--muted-foreground); }
 .ib-earlier-reply + .ib-earlier-reply { margin-top: 6px; }
 .ib-earlier-reply + .ib-earlier-reply .ib-earlier-sub { padding-top: 8px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .ib-earlier-item { padding: 7px 0 8px; }

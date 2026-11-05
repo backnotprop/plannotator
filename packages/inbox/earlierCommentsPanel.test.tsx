@@ -12,6 +12,8 @@ import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { attachmentSequence, type AttachmentStep } from './stepping';
 import type { InboxAnnotationRecord, InboxAttachmentState, InboxMessageWire } from '@plannotator/core/inbox-types';
+import { earlierCommentsOn } from './earlierComments';
+import { EarlierCommentsList } from './components/EarlierCommentsList';
 import type { EarlierEntryProps } from './components/EarlierComments';
 
 const hasDom = typeof document !== 'undefined';
@@ -147,6 +149,19 @@ const escape = async (target: EventTarget = document.body) => {
   await act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true })));
   await settle();
 };
+
+test.skipIf(!hasDom)('the list stands alone, with no panel around it, so any host can draw it', async () => {
+  const replies = earlierCommentsOn([EARLIER], notes);
+  host = document.createElement('div');
+  document.body.appendChild(host);
+  await act(async () => {
+    root = createRoot(host!);
+    root.render(<EarlierCommentsList replies={replies} />);
+  });
+  expect(host.querySelector('[data-earlier-comment="ann_old"]')!.textContent).toBe('Say why.on “Plan”');
+  expect(host.textContent).toContain('From your reply');
+  expect(host.querySelector('button')).toBeNull();
+});
 
 test.skipIf(!hasDom)('a file with no earlier comments draws neither the entry nor the panel', async () => {
   await render(<Pane harness={{ closed: 0, toggles: 0 }} earlier={[]} />);

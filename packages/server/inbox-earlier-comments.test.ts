@@ -69,6 +69,40 @@ test("the read returns the sent comments of this thread, and the same path keeps
   expect(onNewer[0]!.comments[0]!.spot).toBe("on “One”");
 });
 
+test("a sent comment keeps its reply's time, comes back after a restart, and goes with its thread", async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-inbox-earlier-")));
+  roots.push(root);
+  const dataDir = join(root, "data");
+  writeFileSync(join(root, "page.md"), "# One\n");
+  let server = await startInboxServer({ dataDir });
+  servers.push(server);
+  const project = server.store.ensureProject({ name: "shop", root });
+  const message = server.store.sendMessage({
+    project_id: project.id,
+    author: { kind: "agent", host: "claude-code", session: "a", name: "Claude Code" },
+    subject: "Page",
+    body: "First.",
+    attachments: await recordInboxAttachments(server.store.dir, ["page.md"], { base: root, at: new Date().toISOString() }),
+  }).message;
+  const attachment = message.attachments![0]!;
+  // Made on the version the agent sent, not on `current`: still the same file.
+  server.store.saveAnnotation({ attachment_id: attachment.id, version: attachment.sent_sha256, annotation: comment("ann-sent-version", "Say why.", "One") });
+  const reply = server.store.sendReply(message.id, { idempotency_key: "reply-1", words: "Notes.", feedback: "Notes.", annotation_ids: ["ann-sent-version"] }).reply;
+
+  // The panel's "From your reply · …" reads `updated_at`: it has to be the reply's own time.
+  const [sent] = server.store.earlierAnnotations(message.thread_id);
+  expect(sent!.updated_at).toBe(reply.created_at);
+  expect(sent!.sent_reply_id).toBe(reply.id);
+
+  server.stop();
+  server = await startInboxServer({ dataDir });
+  servers.push(server);
+  expect(server.store.earlierAnnotations(message.thread_id).map((r) => r.id)).toEqual(["ann-sent-version"]);
+
+  server.store.deleteThread(message.thread_id);
+  expect(server.store.earlierAnnotations(message.thread_id)).toEqual([]);
+});
+
 test("another thread's comment on the same path stays in its thread", async () => {
   const { store, project, author, write, files, read, send } = await world();
   write("page.md", "# One\n");
