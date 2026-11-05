@@ -4,7 +4,10 @@
  * The CLI keeps the host's pull-bridge token under `--tailscale` (it used to
  * discard it), so "Ask this session" answers a tab on this machine as in any
  * local session, and a tab that came through `tailscale serve` only when its
- * `Tailscale-User-Login` is the login that owns this machine. Everyone else
+ * `Tailscale-User-Login` is the login that owns this machine, or, when
+ * Tailscale names no owner (a tagged machine, or an untagged one whose owner
+ * it does not report), a login in config.json `inboxTailscaleAllow`: the rule
+ * the Inbox's `isOwnerRequest` follows. Everyone else
  * on the tailnet keeps what a `--tailscale` session always gave them: the
  * review, and Ask AI through the agent SDKs, never the agent session
  * (`createAIRuntime`'s `tailnetAudience`). The bridge's own poll and the
@@ -12,7 +15,8 @@
  *
  * One session per CLI process, so the state is the process's (like the served
  * hostname in request-host-guard.ts). Nothing here runs unless the CLI
- * publishes a session over the tailnet AND a host handed it a bridge.
+ * publishes a session over the tailnet. The owners are read for every such
+ * session: hover cards (ref-cards.ts) use this gate with or without a bridge.
  */
 
 import {
@@ -23,36 +27,51 @@ import {
   type TailscaleRunner,
 } from "@plannotator/shared/tailscale";
 import { isServedTailnetHost, normalizeTailnetLogin } from "@plannotator/shared/inbox/tailnet";
+import { loadConfig, resolveInboxTailscaleAllow } from "@plannotator/shared/config";
 import { tailnetAudience, type TailnetAudience } from "@plannotator/shared/tailnet-audience";
 
 export type { TailnetAudience } from "@plannotator/shared/tailnet-audience";
 
 interface SessionTailnetState {
-  /** The login that owns this machine, normalized; null when nobody could say. */
-  owner: string | null;
+  /** The logins that count as this machine's owner, normalized; empty when nobody does. */
+  owners: string[];
   /** The served MagicDNS name and HTTPS port, once serve reported them. */
   hostname: string | null;
   httpsPort: number | null;
 }
 
-let state: SessionTailnetState = { owner: null, hostname: null, httpsPort: null };
+let state: SessionTailnetState = { owners: [], hostname: null, httpsPort: null };
 
-/** The owner `tailscale status --json` names, or why there is none (a tagged device, Tailscale not answering). */
-export function readTailnetOwner(run: TailscaleRunner = runTailscale): { login: string } | { login: null; reason: string } {
+/** Who counts as this machine's owner over the tailnet, or why nobody does. */
+export type TailnetOwners =
+  | { logins: string[]; source: "tailscale" | "allowlist" }
+  | { logins: []; reason: string };
+
+/**
+ * The owner `tailscale status --json` names. When it names none (a tagged
+ * machine, or an untagged one whose owner it does not report), the logins in
+ * config.json `inboxTailscaleAllow` count as the owner, as they do for the
+ * Inbox (`isOwnerRequest` in inbox-tailscale.ts). Nobody when Tailscale does
+ * not answer, or names no owner and the allowlist is empty.
+ */
+export function readTailnetOwners(
+  run: TailscaleRunner = runTailscale,
+  allowlist: () => readonly string[] = () => resolveInboxTailscaleAllow(loadConfig()),
+): TailnetOwners {
   const status = run(["status", "--json"], TAILSCALE_CLI_TIMEOUT_MS);
-  if (status.error || status.status !== 0) return { login: null, reason: describeTailscaleFailure(status) };
+  if (status.error || status.status !== 0) return { logins: [], reason: describeTailscaleFailure(status) };
   const identity = parseTailscaleSelfIdentity(status.stdout);
-  if (!identity) return { login: null, reason: "could not read `tailscale status --json`" };
-  if (identity.login) return { login: normalizeTailnetLogin(identity.login) };
-  return {
-    login: null,
-    reason: identity.tagged ? "this machine is a tagged Tailscale device, so it has no owner" : "Tailscale did not say who owns this machine",
-  };
+  if (!identity) return { logins: [], reason: "could not read `tailscale status --json`" };
+  if (identity.login) return { logins: [normalizeTailnetLogin(identity.login)], source: "tailscale" };
+  const allowed = [...new Set(allowlist().map(normalizeTailnetLogin))];
+  if (allowed.length > 0) return { logins: allowed, source: "allowlist" };
+  const why = identity.tagged ? "this machine is a tagged Tailscale device, so it has no owner" : "Tailscale did not say who owns this machine";
+  return { logins: [], reason: `${why}; add your Tailscale login to inboxTailscaleAllow in config.json` };
 }
 
-/** The owner a tailnet tab must be, for this process's session. */
-export function setSessionTailnetOwner(login: string | null): void {
-  state = { ...state, owner: login ? normalizeTailnetLogin(login) : null };
+/** The logins a tailnet tab must be one of, for this process's session. */
+export function setSessionTailnetOwners(logins: readonly string[]): void {
+  state = { ...state, owners: [...new Set(logins.map(normalizeTailnetLogin))] };
 }
 
 /** The served address (the URL `tailscale serve` reported), for the Host an owner's tab must send. */
@@ -78,7 +97,7 @@ function isServedHost(hostHeader: string | null, hostname: string, httpsPort: nu
 
 /** Who sent a request to this process's tailnet-published session. */
 export function sessionTailnetAudience(req: Request): TailnetAudience {
-  return tailnetAudience(req.headers, state.owner);
+  return tailnetAudience(req.headers, state.owners);
 }
 
 /**
@@ -99,7 +118,7 @@ export function sessionTailnetAskAllowed(req: Request, localAllowed: (req: Reque
 
 /** Test-only: forget the owner and served address. */
 export function resetSessionTailnetForTests(): void {
-  state = { owner: null, hostname: null, httpsPort: null };
+  state = { owners: [], hostname: null, httpsPort: null };
 }
 
 /** What `createAIRuntime` takes for a tailnet-published session (`tailnet`). */

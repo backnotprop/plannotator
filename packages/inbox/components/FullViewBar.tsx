@@ -12,6 +12,7 @@ const TOOLS_KEYS: ShortcutRef = { scope: inboxFileViewerShortcuts, action: 'togg
 const exitKeys = shortcutAria(EXIT_KEYS);
 import { modKey } from '@plannotator/ui/utils/platform';
 import { Icon } from '../icons';
+import { CommentCount, commentsLabel } from './EarlierSection';
 import { Tip as HoverTip } from './Tip';
 
 /**
@@ -23,22 +24,20 @@ import { Tip as HoverTip } from './Tip';
  * comments drawer), the position `N/M ⌄` (opens the file peek; on a phone a
  * pill that opens the peek's bottom sheet in one tap), ⋯ (Open in, Download,
  * the other version), Side by side, × Exit full screen (desktop only: what
- * Escape's last step does, not a pick), and » Hide tools in the corner.
+ * Escape's last step does, not a pick), and » Hide tools.
  *
- * Hide tucks the toolbar into a handle flush with the corner (‹, the comment
- * count, an amber dot when the file changed since it was sent). A pointer in
- * the corner (a 96 × 64 px box that holds the handle) reveals it after
- * 120 ms; leaving tucks it again after 450 ms; while it is out that way the
- * last button is a pin that keeps it out. Tucked, the toolbar is `inert` and
- * the handle is a real button, so nothing invisible takes focus and focus is
- * never lost. Every opening of full screen starts with the toolbar showing.
+ * Hide gathers every floating control of full screen (this toolbar, the
+ * composer or its pill, the image's size bar, a text file's toolstrip and
+ * Contents button) into one small control in the bottom right corner
+ * (approval "inbox-fullscreen-gather"). The composer's own ⌄ does the same (FullScreenComposer.tsx),
+ * so either bar's minimize does one thing. The corner control carries what
+ * waits (the comment count, "Draft" while a reply draft waits, an amber dot
+ * when the file changed since it was sent); one press brings everything back.
+ * Gathered, the toolbar is `inert` and the corner control is a real button,
+ * so nothing invisible takes focus and focus is never lost. Every opening of
+ * full screen starts with the tools showing.
  */
-export type ToolbarState = 'pinned' | 'tucked' | 'revealed';
-
-/** The pointer rests in the corner this long before the toolbar comes out. */
-export const REVEAL_DELAY_MS = 120;
-/** And leaves it this long before the toolbar tucks again. */
-export const TUCK_DELAY_MS = 450;
+export type ToolbarState = 'pinned' | 'tucked';
 
 export interface FullViewBarProps {
   phone: boolean;
@@ -50,18 +49,24 @@ export interface FullViewBarProps {
   armed: boolean;
   /** The pen, on an HTML file that takes comments. */
   onToggleArmed?: () => void;
-  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and no other file has any. */
+  /** The comment count and its drawer (a sheet on a phone); absent when the file takes no comments and has none to list, here or on another file. */
   comments: {
     count: number;
+    /** Comments a Send already carried on this file (earlierComments.ts). Absent or 0: the count is today's. */
+    earlier?: number;
     open: boolean;
     controls: string;
     onToggle: () => void;
     buttonRef: RefObject<HTMLButtonElement | null>;
   } | null;
-  /** The handle's count: the open file's comments (also when the file takes none and the count button is gone). */
+  /** The corner control's count: the open file's comments (also when the file takes none and the count button is gone). */
   handleCount: number;
-  /** The file changed since it was sent (or is gone): an amber dot on the handle. */
+  /** The file changed since it was sent (or is gone): an amber dot on the corner control. */
   changed: boolean;
+  /** A reply draft waits in full screen's composer (words or files): the corner control says "Draft". */
+  draft?: boolean;
+  /** Where focus goes when the tools come back from the corner; absent or null: » (where Hide was pressed). */
+  restoreTarget?: () => HTMLElement | null;
   /**
    * The position and its peek (a thread with two or more files). On a phone it
    * is the `4/9 ⌄` pill that opens the peek's bottom sheet in one tap (the pane
@@ -79,6 +84,8 @@ export interface FullViewBarProps {
     /** The peek, drawn under the bar while open (desktop); it closes through `close` with its reason. */
     renderPeek?: (close: (reason: 'key' | 'outside') => void) => ReactNode;
   } | null;
+  /** Ask AI's icon, before ⋯. Absent: nothing there. */
+  ask?: ReactNode;
   /** ⋯: the trigger and its menu (OpenIn.tsx `FullScreenMore`), with whether its menu is open. */
   more: ReactNode;
   moreOpen: boolean;
@@ -89,8 +96,7 @@ export interface FullViewBarProps {
    */
   leave: { kind: 'exit' | 'back'; onLeave: () => void };
   /**
-   * × Exit full screen, just before » (the corner stays »'s: a pointer that
-   * reveals the toolbar there lands on the pin, never on ×). What Escape's
+   * × Exit full screen, just before » (the bar's end stays »'s). What Escape's
    * last step does, not a pick: back where full screen was opened from
    * (fullScreenOrigin.ts). Only where Side by side is the way out
    * (`leave.kind` `exit`, not a phone).
@@ -105,8 +111,10 @@ export interface FullViewBarProps {
 }
 
 export interface FullViewBarHandle {
-  /** ⌘⇧X: tuck a showing toolbar, show a tucked one. */
+  /** ⌘⇧X: gather showing tools into the corner, bring gathered ones back. */
   toggle: () => void;
+  /** Gather the tools into the corner (the composer's ⌄), focus on the corner control. */
+  hide: () => void;
 }
 
 function Tip({ text, note, keys, phone, passEscape, children }: { text: string; note?: string; keys?: ShortcutRef | readonly ShortcutRef[] | null; phone: boolean; passEscape?: boolean; children: React.ReactElement }) {
@@ -138,39 +146,38 @@ function Tip({ text, note, keys, phone, passEscape, children }: { text: string; 
 }
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
+/** What the live region says when the tools gather. */
+const HIDDEN_SAYING = 'Tools hidden. They are in the bottom right corner.';
+/**
+ * What floats over a file in full screen and gathers into the corner control (inbox.css): this toolbar, the composer
+ * or its pill, an image's size bar and its "Your marked-up copy" chip, a text file's toolstrip, its Contents button
+ * and ui's Contents rail (the ticks at the page's right edge, with the panel and its Hide). The changed chip is not
+ * here: it is a fact about the file.
+ */
+export const GATHERED =
+  '.ib-fvbar, .ib-fcomp, .ib-fcomp-pillwrap, .ib-imgbar, .ib-imgshowing, .ib-toolstrip, .ib-contents-open, .pn-contents-rail';
+/** Focus sits in something that is about to gather (and go inert or hidden). */
+const focusGathers = () => document.activeElement instanceof Element && document.activeElement.closest(GATHERED) !== null;
 
 export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(function FullViewBar(props, ref) {
   const { phone, comments, position, state } = props;
   const barId = `ib-fvbar-${useId().replace(/:/g, '')}`;
-  const dockRef = useRef<HTMLDivElement>(null);
   const barRef = useRef<HTMLDivElement>(null);
   const handleRef = useRef<HTMLButtonElement>(null);
+  const hideRef = useRef<HTMLButtonElement>(null);
   const posRef = useRef<HTMLButtonElement>(null);
   /** Where focus goes once the next state is drawn (the toolbar's inert flips first). */
   const pendingFocus = useRef<'handle' | 'bar' | null>(null);
-  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const tuckTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef(state);
   stateRef.current = state;
-  const popoverOpen = (position?.open ?? false) || props.moreOpen;
-  const popoverRef = useRef(popoverOpen);
-  popoverRef.current = popoverOpen;
-  const where = phone ? 'bottom right' : 'top right';
-
-  const clearTimers = () => {
-    if (revealTimer.current) clearTimeout(revealTimer.current);
-    if (tuckTimer.current) clearTimeout(tuckTimer.current);
-    revealTimer.current = null;
-    tuckTimer.current = null;
-  };
-  useEffect(() => clearTimers, []);
+  const restoreRef = useRef(props.restoreTarget);
+  restoreRef.current = props.restoreTarget;
 
   const set = (next: ToolbarState, focus: 'handle' | 'bar' | null = null, saying?: string) => {
-    clearTimers();
     pendingFocus.current = focus;
     props.onState(next);
     if (saying) props.announce(saying);
-    // The same state again (a pin pressed twice): the focus still lands.
+    // The same state again: the focus still lands.
     if (next === stateRef.current) applyFocus();
   };
   const setRef = useRef(set);
@@ -180,52 +187,33 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     const focus = pendingFocus.current;
     pendingFocus.current = null;
     if (focus === 'handle') handleRef.current?.focus({ preventScroll: true });
-    else if (focus === 'bar') barRef.current?.querySelector<HTMLElement>('button:not([disabled]), a[href]')?.focus({ preventScroll: true });
+    // Back from the corner: where the person gathered from (the composer's field, else »).
+    else if (focus === 'bar') (restoreRef.current?.() ?? hideRef.current)?.focus({ preventScroll: true });
   };
   // Inert flips with the state, before paint: focus lands once it has. Focus is never lost: what held it and goes inert hands it on.
   useLayoutEffect(() => {
     const active = document.activeElement;
     if (!pendingFocus.current && active && active !== document.body) {
-      if (state === 'tucked' && barRef.current?.contains(active)) pendingFocus.current = 'handle';
+      if (state === 'tucked' && active.closest(GATHERED)) pendingFocus.current = 'handle';
       else if (state !== 'tucked' && active === handleRef.current) pendingFocus.current = 'bar';
     }
     if (barRef.current) barRef.current.inert = state === 'tucked';
     if (handleRef.current) handleRef.current.inert = state !== 'tucked';
     applyFocus();
-    if (state !== 'revealed') clearTimers();
   }, [state]);
 
-  const hide = (focusHandle: boolean) => set('tucked', focusHandle ? 'handle' : null, `Tools hidden. They are in the ${where} corner.`);
   useImperativeHandle(
     ref,
     () => ({
       toggle: () => {
-        if (stateRef.current === 'pinned') setRef.current('tucked', dockRef.current?.contains(document.activeElement) ? 'handle' : null, `Tools hidden. They are in the ${where} corner.`);
+        // Focus in anything that gathers (the toolbar, a button of the card, the size bar) goes to the corner control, never to the body.
+        if (stateRef.current === 'pinned') setRef.current('tucked', focusGathers() ? 'handle' : null, HIDDEN_SAYING);
         else setRef.current('pinned', null, 'Tools shown.');
       },
+      hide: () => setRef.current('tucked', 'handle', HIDDEN_SAYING),
     }),
-    [where],
+    [],
   );
-
-  /** A revealed toolbar tucks again when the pointer has left, unless a popover is open or the keyboard is in it. */
-  const maybeTuck = () => {
-    if (stateRef.current !== 'revealed' || popoverRef.current) return;
-    const active = document.activeElement;
-    if (active && dockRef.current?.contains(active) && active.matches(':focus-visible')) return;
-    setRef.current('tucked');
-  };
-
-  // A press outside the revealed toolbar (and its popovers) tucks it again; a pinned toolbar never moves.
-  useEffect(() => {
-    if (state !== 'revealed') return;
-    const onDown = (event: PointerEvent) => {
-      const target = event.target as Element | null;
-      if (target?.closest?.('[data-full-view-dock], [data-full-view-menu], [data-step-list]')) return;
-      setRef.current('tucked');
-    };
-    document.addEventListener('pointerdown', onDown, true);
-    return () => document.removeEventListener('pointerdown', onDown, true);
-  }, [state]);
 
   /** The peek closed from the keyboard or by a choice: focus back on the position (not after a press elsewhere). A phone's sheet is the pane's, which puts focus back itself. */
   const refocus = useRef(false);
@@ -252,9 +240,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
     if (count > lastCount.current && !drawerOpen) setBump((n) => n + 1);
     lastCount.current = count;
   }, [count, drawerOpen]);
-  const handleLabel = `Show tools${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
-  const pinned = state === 'pinned';
-  const hideText = pinned ? 'Hide tools' : 'Keep tools out';
+  const handleLabel = `Show tools${props.draft ? ', reply draft' : ''}${count ? `, ${plural(count, 'comment')}` : ''}${props.changed ? ', file changed since sent' : ''}`;
   const iconSize = phone ? 18 : 15;
 
   // The way out of full screen names where it goes, "Side by side" (a pick: remembered); on a phone or a stacked window it is Back to the thread.
@@ -278,59 +264,26 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
 
   return (
     <div
-      ref={dockRef}
       className={`ib-fvdock${phone ? ' ib-fvdock-phone' : ''}${props.shifted ? ' ib-shift' : ''}`}
       data-full-view-dock=""
       data-bar={state}
-      onPointerEnter={(event) => {
-        if (event.pointerType === 'touch' || phone) return;
-        if (tuckTimer.current) clearTimeout(tuckTimer.current);
-        tuckTimer.current = null;
-        if (stateRef.current === 'tucked' && !revealTimer.current) revealTimer.current = setTimeout(() => {
-          revealTimer.current = null;
-          if (stateRef.current === 'tucked') setRef.current('revealed');
-        }, REVEAL_DELAY_MS);
-      }}
-      onPointerLeave={(event) => {
-        if (event.pointerType === 'touch' || phone) return;
-        if (revealTimer.current) clearTimeout(revealTimer.current);
-        revealTimer.current = null;
-        if (stateRef.current === 'revealed') tuckTimer.current = setTimeout(() => {
-          tuckTimer.current = null;
-          maybeTuck();
-        }, TUCK_DELAY_MS);
-      }}
-      onBlur={(event) => {
-        // Focus that leaves the revealed toolbar tucks it, without moving focus.
-        if (stateRef.current !== 'revealed') return;
-        const to = event.relatedTarget as Element | null;
-        if (!to || dockRef.current?.contains(to) || to.closest('[data-full-view-menu], [data-step-list]')) return;
-        setRef.current('tucked');
-      }}
-      // Capture: a tooltip open on the focused button would take Escape first, and the count's Escape closes its open drawer.
-      onKeyDownCapture={(event) => {
-        const onOpenCount = comments?.open && comments.buttonRef.current === event.target;
-        if (event.key === 'Escape' && stateRef.current === 'revealed' && !popoverRef.current && !onOpenCount) {
-          event.preventDefault();
-          setRef.current('tucked', 'handle');
-        }
-      }}
     >
-      {!phone && <div className="ib-fvzone" aria-hidden="true" />}
       <HoverTip content="Show tools">
         <button
           type="button"
           ref={handleRef}
           className="ib-fvhandle"
-          onClick={(event) => set('revealed', event.detail === 0 ? 'bar' : null)}
+          onClick={() => set('pinned', 'bar', 'Tools shown.')}
           aria-controls={barId}
           aria-expanded={state !== 'tucked'}
           aria-label={handleLabel}
           data-full-view-handle=""
         >
-          <Icon name="chevL" size={phone ? 18 : 14} />
+          <Icon name="chevsU" size={phone ? 18 : 14} />
+          {props.draft && <span className="ib-fvhandle-w">Draft</span>}
           {count > 0 && (
             <span key={bump} className={`ib-fvhandle-n${bump ? ' ib-bump' : ''}`}>
+              <Icon name="comment" size={phone ? 14 : 12} />
               {count}
             </span>
           )}
@@ -377,13 +330,11 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
               }}
               aria-expanded={comments.open}
               aria-controls={comments.controls}
-              aria-label={`Comments, ${comments.count}`}
+              aria-label={commentsLabel(comments.count, comments.earlier ?? 0)}
               data-full-view-comments=""
             >
               <Icon name="comment" size={iconSize} />
-              <span key={bump} className={bump ? 'ib-bump' : undefined}>
-                {comments.count}
-              </span>
+              <CommentCount count={comments.count} earlier={comments.earlier ?? 0} phone={phone} bump={bump} />
             </button>
           </Tip>
         )}
@@ -426,6 +377,7 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
           </span>
         )}
         <span className="ib-fvdv" aria-hidden="true" />
+        {props.ask}
         {props.more}
         {props.leave.kind === 'exit' && leaveButton}
         {props.onExitFull && props.leave.kind === 'exit' && !phone && (
@@ -443,20 +395,17 @@ export const FullViewBar = forwardRef<FullViewBarHandle, FullViewBarProps>(funct
             </button>
           </Tip>
         )}
-        <Tip text={hideText} keys={props.chord ? TOOLS_KEYS : null} phone={phone}>
+        <Tip text="Hide tools" note="Into the bottom right corner" keys={props.chord ? TOOLS_KEYS : null} phone={phone}>
           <button
             type="button"
+            ref={hideRef}
             className="ib-fvb ib-fvhide"
-            onClick={() => {
-              if (pinned) hide(true);
-              // The pin becomes » in place: focus stays on it.
-              else set('pinned', null, 'Tools pinned. They stay out.');
-            }}
-            aria-label={hideText}
+            onClick={() => set('tucked', 'handle', HIDDEN_SAYING)}
+            aria-label="Hide tools"
             aria-description={props.chord ? `Shortcut: ${formatShortcutBindingText(props.chord)}` : undefined}
-            data-full-view-hide={pinned ? 'hide' : 'pin'}
+            data-full-view-hide="hide"
           >
-            <Icon name={pinned ? 'chevsR' : 'pin'} size={iconSize} />
+            <Icon name="chevsR" size={iconSize} />
           </button>
         </Tip>
       </div>

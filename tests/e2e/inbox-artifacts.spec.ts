@@ -238,7 +238,8 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   await expect(button).toHaveAttribute('aria-label', 'Artifacts, 11');
   await expect(button).toHaveAttribute('aria-pressed', 'false');
   await expect(button).not.toHaveAttribute('title');
-  await expect(header().locator('[data-mark-read]')).toContainText('Mark read');
+  // The read button is an icon (approval "inbox-thread-header"): its words are its name.
+  await expect(header().locator('[data-mark-read]')).toHaveAccessibleName('Mark read');
   // Expand all is an icon now, named by its label.
   const expand = header().locator('[data-expand-all]');
   await expect(expand).toHaveAttribute('aria-label', /Expand all messages|Fold the earlier messages/);
@@ -246,11 +247,11 @@ test('the header: icons on the right with component tooltips, Artifacts with its
   // The order: the thread's full screen and its hairline lead (approval "inbox-files-tabs", amendment 2026-10-30, B);
   // at the right Artifacts, Expand, Archive, a hairline, the close.
   const order = await header().evaluate((head) =>
-    [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-archive], .ib-vsep, [aria-label="Close the thread"]')].map(
-      (el) => el.hasAttribute('data-full-in') ? 'full' : el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-archive') ? 'archive' : el.classList.contains('ib-vsep') ? '|' : 'close',
+    [...head.querySelectorAll('[data-full-in], [data-artifacts-button], [data-expand-all], [data-thread-more], .ib-vsep, [aria-label="Close the thread"]')].map(
+      (el) => el.hasAttribute('data-full-in') ? 'full' : el.getAttribute('data-artifacts-button') !== null ? 'artifacts' : el.hasAttribute('data-expand-all') ? 'expand' : el.hasAttribute('data-thread-more') ? 'more' : el.classList.contains('ib-vsep') ? '|' : 'close',
     ),
   );
-  expect(order).toEqual(['full', '|', 'artifacts', 'expand', 'archive', '|', 'close']);
+  expect(order).toEqual(['full', '|', 'artifacts', 'expand', 'more', '|', 'close']);
   await button.hover();
   await expect(page.locator('[data-pn-tooltip]')).toContainText('Artifacts: every file, image and guided review in this thread');
   await shot(page, '01-thread-header-desktop');
@@ -370,7 +371,7 @@ test("a guided review opens its reader; the reader's Back returns to the grid", 
 test('a thread with no artifact: no button; a link to the view says so', async () => {
   const page = world.page;
   await page.goto(`${world.url}#thread=${world.emptyThread}`);
-  await expect(page.locator('section.ib-pane [data-archive]')).toBeVisible();
+  await expect(page.locator('section.ib-pane [data-thread-more]')).toBeVisible();
   await expect(artifactsButton()).toHaveCount(0);
   await page.goto(`${world.url}#thread=${world.emptyThread}&artifacts`);
   await expect(page.locator('[data-artifacts-empty]')).toContainText('No artifacts in this thread yet');

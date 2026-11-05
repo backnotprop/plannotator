@@ -11,9 +11,9 @@
  * and the test asserts nothing ever ran it.
  *
  *  1. B offers, A links both ways; each sees the other online.
- *  2. An agent on B asks and long-polls B (wait_for_reply over MCP); A's
- *     merged list and event stream show it; the person answers from A
- *     through the forward; B's waiting agent wakes with the answer.
+ *  2. An agent on B asks; A's merged list and event stream show it; the
+ *     person answers from A through the forward; B's agent reads the answer
+ *     (read_thread over MCP).
  *  3. B sleeps (its Inbox killed): A shows it offline, keeps its rows, and
  *     holds the answer; B starts again, and the answer lands exactly once.
  *  4. Late words: an agent writes again after the person read; the held
@@ -26,13 +26,15 @@
  *     contact.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
 import type { TailscaleRunner } from "@plannotator/shared/tailscale";
 import { InboxStore } from "@plannotator/shared/inbox/store";
+import { heldWords } from "../inbox/api";
 import { startInboxServer } from "./inbox";
+import { machineHeldWords } from "./inbox-machines";
 import { createInboxDevices, takeDownInboxTailnet, UNLINKED_REFUSAL_KEPT_MS } from "./inbox-devices";
 import { readTailnetDoorRecord, writeTailnetDoorRecord } from "./inbox-tailnet-door";
 import {
@@ -104,7 +106,7 @@ function link(from: Machine, to: Machine): string {
   return code;
 }
 
-/** An agent session on a machine: send_message and wait_for_reply over the real MCP client. */
+/** An agent session on a machine: send_message and read_thread over the real MCP client. */
 async function agentOn(m: Machine) {
   const client = new Client({ name: "inbox-machines-e2e", version: "1.0.0" });
   await client.connect(new StreamableHTTPClientTransport(new URL(`${base(m)}/mcp`)));
@@ -117,10 +119,13 @@ async function agentOn(m: Machine) {
           arguments: { project_path: m.w.project, agent_session: SESSION, agent_name: "Claude Code", agent_host: "claude-code", body, ...extra },
         })) as { structuredContent: { thread_id: string; message_id: string } }
       ).structuredContent,
-    wait: (threadId: string, seconds: number) =>
-      client.callTool({ name: "wait_for_reply", arguments: { thread_id: threadId, agent_session: SESSION, timeout_seconds: seconds } }, undefined, {
-        timeout: (seconds + 30) * 1000,
-      }) as Promise<{ structuredContent: { status: string; reply?: { body: string; message_id: string } } }>,
+    /** The person's newest message in the thread, as this session reads it. */
+    lastReply: async (threadId: string) => {
+      const read = (await client.callTool({ name: "read_thread", arguments: { thread_id: threadId, agent_session: SESSION } })) as {
+        structuredContent: { thread: { messages: { id: string; body: string; author: { kind: string } }[] } };
+      };
+      return read.structuredContent.thread.messages.findLast((m) => m.author.kind === "person");
+    },
   };
 }
 
@@ -247,22 +252,21 @@ describe("linked machines, on three real Inboxes", () => {
     expect(own.err).toContain("own link code");
   }, 60_000);
 
-  test("2. an agent on B asks and waits; the person answers from A; B's agent wakes", async () => {
+  test("2. an agent on B asks; the person answers from A; B's agent reads the answer", async () => {
     const agent = await agentOn(B);
     try {
       // A's merged stream (opened first, as a window holds it) raises B's question as a live record of B's.
-      let sent!: { thread_id: string; message_id: string };
+      // The stream may outrun the send, so stop on B's first live message (a project record comes before it), not on `sent`.
       let listening!: () => void;
       const subscribed = new Promise<void>((resolve) => (listening = resolve));
       const watching = streamUntil(
         A,
-        (event, data) => event === "machine" && data.machine === B.id && data.live === true && data.record?.message?.id === sent?.message_id,
+        (event, data) => event === "machine" && data.machine === B.id && data.live === true && data.record?.message?.id !== undefined,
         15_000,
         listening,
       );
       await subscribed;
-      sent = await agent.send(QUESTION(1), { thread: "case-1" });
-      const waiting = agent.wait(sent.thread_id, 30);
+      const sent = await agent.send(QUESTION(1), { thread: "case-1" });
       const frames = await watching;
       expect(frames.find((f) => f.event === "machines")).toBeDefined();
       expect(frames.some((f) => f.event === "machine" && f.data.record?.message?.id === sent.message_id)).toBe(true);
@@ -272,6 +276,8 @@ describe("linked machines, on three real Inboxes", () => {
       const views = await machinesOf(A);
       expect(typeof views.find((x) => x.id === B.id)!.list_cursor).toBe("number");
       expect(views.find((x) => x.self)!.list_cursor).toBeNull();
+      // Both keep snoozes, and A says so of B (its list said so): A's window offers Snooze on B's rows.
+      expect(views.map((x) => x.snoozes)).toEqual([true, true]);
       // A's own list (no machines=1) stays A's own.
       expect(((await getJson(A, "/api/inbox/threads")).sections as Json[]).flatMap((s) => s.threads).some((r: Json) => r.thread_id === sent.thread_id)).toBe(false);
       // The person opens the thread from A (a read forwarded to B), then presses Send.
@@ -285,10 +291,9 @@ describe("linked machines, on three real Inboxes", () => {
       expect(answered.status).toBe(200);
       expect(answered.headers.get("x-plannotator-outbox")).toBe("delivered");
       const reply = (await answered.json()) as Json;
-      const woke = await waiting;
-      expect(woke.structuredContent.status).toBe("replied");
-      expect(woke.structuredContent.reply!.body).toContain("Retry with the same key.");
-      expect(woke.structuredContent.reply!.message_id).toBe(reply.reply.id);
+      const read = await agent.lastReply(sent.thread_id);
+      expect(read!.body).toContain("Retry with the same key.");
+      expect(read!.id).toBe(reply.reply.id);
       // A retried Send (the page lost the answer) answers the same reply and writes nothing.
       const again = await windowPost(A, `/api/inbox/m/${B.id}/messages/${sent.message_id}/reply`, {
         idempotency_key: "window-answer-1",
@@ -321,7 +326,7 @@ describe("linked machines, on three real Inboxes", () => {
       // A file sent to B from A's window: never held, streamed through by its route; A's page session is checked here, never sent on.
       const { serverSession } = await getJson(A, "/api/inbox/health");
       const upload = (session: string) =>
-        fetch(`${base(A)}/api/inbox/m/${B.id}/uploads?name=notes.txt&idempotency_key=window-upload-${session.slice(0, 4)}&serverSession=${session}`, {
+        fetch(`${base(A)}/api/inbox/m/${B.id}/uploads?name=pasted-text-2026-11-01-2110.txt&idempotency_key=window-upload-${session.slice(0, 4)}&serverSession=${session}`, {
           method: "POST",
           headers: { "Content-Type": "text/plain", Origin: base(A) },
           body: "notes for B",
@@ -330,7 +335,14 @@ describe("linked machines, on three real Inboxes", () => {
       const uploaded = await upload(serverSession);
       expect(uploaded.status).toBe(200);
       expect(uploaded.headers.get("x-plannotator-outbox")).toBeNull();
-      expect(((await uploaded.json()) as Json).upload).toBeDefined();
+      const upload_ = ((await uploaded.json()) as Json).upload as Json;
+      expect(upload_).toBeDefined();
+      // Its words read back from A's window (a long paste put back, approval "inbox-paste-attachment"): forwarded to B,
+      // whose pending upload it is; A holds no such upload.
+      const text = await fetch(`${base(A)}/api/inbox/m/${B.id}/uploads/${upload_.upload_id}/text`);
+      expect(text.status).toBe(200);
+      expect(((await text.json()) as Json).text).toBe("notes for B");
+      expect((await fetch(`${base(A)}/api/inbox/uploads/${upload_.upload_id}/text`)).status).toBe(404);
     } finally {
       await agent.client.close().catch(() => {});
     }
@@ -385,12 +397,10 @@ describe("linked machines, on three real Inboxes", () => {
     const replies = thread.thread.messages.filter((m: Json) => m.author.kind === "person");
     expect(replies).toHaveLength(1);
     expect(replies[0].body).toContain("Alert, do not retry.");
-    // The agent on B, back after the restart, gets the answer that waited: the wake.
+    // The agent on B, back after the restart, reads the answer that waited.
     const back = await agentOn(B);
     try {
-      const woke = await back.wait(sent.thread_id, 10);
-      expect(woke.structuredContent.status).toBe("replied");
-      expect(woke.structuredContent.reply!.body).toContain("Alert, do not retry.");
+      expect((await back.lastReply(sent.thread_id))!.body).toContain("Alert, do not retry.");
     } finally {
       await back.client.close().catch(() => {});
     }
@@ -1167,6 +1177,674 @@ describe("the tailnet door with Phones off, in process", () => {
       expect(tailscale.serve.get(8443)).toBe(theirs);
     } finally {
       inbox.stop();
+    }
+  }, 60_000);
+});
+
+describe("an agent's snooze_thread of a linked machine's thread", () => {
+  const dirs: string[] = [];
+  const sandboxWas = process.env.PLANNOTATOR_TEST_SANDBOX;
+  beforeAll(() => {
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+  });
+  afterAll(() => {
+    if (sandboxWas === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = sandboxWas;
+    for (const dir of dirs) rmSync(dir, { recursive: true, force: true });
+  });
+  const scratch = (prefix: string) => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    dirs.push(dir);
+    return dir;
+  };
+  const start = (dataDir: string) => startInboxServer({ dataDir, binaryPath: null, phones: false, tailscale: scriptedTailscale().run });
+  const mcp = async (port: number) => {
+    const client = new Client({ name: "inbox-machines-snooze", version: "1.0.0" });
+    await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${port}/mcp`)));
+    return client;
+  };
+  type Snoozed = { isError?: boolean; content: { text: string }[]; structuredContent?: Json };
+  const call = async (client: Client, thread_id: string, until: string | null) => (await client.callTool({ name: "snooze_thread", arguments: { thread_id, until } })) as Snoozed;
+  const inSoon = () => new Date(Date.now() + 86_400_000).toISOString();
+  const list = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/inbox/threads?archived=exclude&snoozed=exclude&machines=1`)).json()) as Json;
+  const snoozedIds = async (port: number) => ((await list(port)).snoozed as Json[]).map((row) => row.thread_id);
+  const rowOn = async (port: number, id: string) => JSON.stringify(((await list(port)).sections as Json[]).flatMap((s) => s.threads)).includes(id);
+
+  test("the agent on A snoozes B's thread: it lives on B, leaves A's list, and ends; B away, the call says it waits, and it applies when B is back", async () => {
+    const dataA = scratch("plannotator-snooze-agent-a-");
+    const dataB = scratch("plannotator-snooze-agent-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    const clients: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      const linked = await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) });
+      expect(linked.status).toBe(201);
+      const onB = await mcp(b.port);
+      const onA = await mcp(a.port);
+      clients.push(onA, onB);
+      const project = scratch("plannotator-snooze-agent-project-");
+      const sent = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
+      const thread = sent.structuredContent.thread_id;
+      await waitFor("B's thread on A", () => rowOn(a.port, thread));
+
+      const snoozed = await call(onA, thread, inSoon());
+      expect(snoozed.isError).toBeUndefined();
+      expect(snoozed.structuredContent!.snoozed.until).toEqual(expect.any(String));
+      expect(snoozed.content[0]!.text).toContain("is snoozed until");
+      // On B's store, not on A's, and out of A's sections.
+      expect(b.store.snoozes().map((s) => s.thread_id)).toEqual([thread]);
+      expect(a.store.snoozes()).toEqual([]);
+      await waitFor("the band on A", async () => (await snoozedIds(a.port)).includes(thread));
+      expect(await rowOn(a.port, thread)).toBe(false);
+
+      const ended = await call(onA, thread, null);
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+      expect(ended.structuredContent).toMatchObject({ snoozed: null, ended: ended.content[0]!.text });
+      expect(b.store.snoozes()).toEqual([]);
+      await waitFor("back in A's sections", () => rowOn(a.port, thread));
+      await waitFor("the band on A is empty", async () => !(await snoozedIds(a.port)).includes(thread));
+      // Nothing left to take off: not "ended".
+      const none = await call(onA, thread, null);
+      expect(none.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(none.structuredContent!.ended).toBeUndefined();
+
+      // B asleep: the words the window uses, nothing lost, and it lands when B is back.
+      await onB.close();
+      clients.pop();
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      // A time no snooze can take is refused now, with nothing held: never "this applies when it is back".
+      const bad = await call(onA, thread, new Date(Date.now() - 60_000).toISOString());
+      expect(bad.content[0]!.text).toStartWith("snooze_past: ");
+      expect(await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/outbox`)).json()).toMatchObject({ waiting: [], notices: [] });
+      const held = await call(onA, thread, inSoon());
+      expect(held.isError).toBeUndefined();
+      // Said in the structured result too: an MCP client may show the agent only that.
+      expect(held.structuredContent!.held).toBe(held.content[0]!.text);
+      expect(held.content[0]!.text).toMatch(/^Waiting for .+: this applies when .+ is back\.$/);
+      b = await start(dataB);
+      await waitFor("the held snooze on B", () => b.store.snoozes().some((s) => s.thread_id === thread), 45_000);
+    } finally {
+      for (const client of clients) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  /** A linked Inbox from before Snooze: its list says nothing of snoozes, its door has no such route. With `snoozes`, one that keeps them and answers `snooze`. */
+  const olderDoor = (id: string, thread: string, seen: string[], snoozes = false, options: { row?: Json; snooze?: () => Response; door?: () => Response | null; streams?: ReadableStreamDefaultController[] } = {}) =>
+    Bun.serve({
+      hostname: "127.0.0.1",
+      port: 0,
+      idleTimeout: 0,
+      fetch(req) {
+        const route = new URL(req.url).pathname.replace("/api/inbox/device/", "");
+        seen.push(`${req.method} ${route}`);
+        const refused = options.door?.();
+        if (refused) return refused;
+        if (route === "health") return Response.json({ ok: true, inbox_id: id, machine_links: 1, version: "0.28.45" });
+        if (route === "events") return new Response(new ReadableStream({ start: (c) => { options.streams?.push(c); c.enqueue(new TextEncoder().encode(`event: hello\ndata: {"cursor":0}\n\n`)); } }), { headers: { "Content-Type": "text/event-stream" } });
+        if (route === "threads") return Response.json({ cursor: 0, sections: [{ id: "new", threads: [{ thread_id: thread, project: { id: "prj_x" }, resolved_at: null, ...options.row }] }], projects: [], ...(snoozes ? { snoozes: true } : {}) });
+        if (options.snooze && route.endsWith("/snooze")) return options.snooze();
+        return Response.json({ code: "device_route_not_found", error: "Not a phone route." }, { status: 404 });
+      },
+    });
+  const linkTo = (dataDir: string, peers: { id: string; port: number }[]) => {
+    mkdirSync(join(dataDir, "inbox"), { recursive: true });
+    const links = peers.map(({ id, port }, i) => ({ id, name: `Mini ${i + 1}`, token: `tok_${i}`, transport: { kind: "tailnet", url: `http://127.0.0.1:${port}` }, device_id: null, linked_at: "2026-10-30T00:00:00Z" }));
+    writeFileSync(join(dataDir, "inbox", "machines.json"), JSON.stringify({ v: 1, self: { id: "ibx_01K00000000000000000000009" }, links }), { mode: 0o600 });
+  };
+
+  test("an older peer: refused in plain words before anything is sent, no notice left, and the viewer keeps working", async () => {
+    const OLD = "ibx_01K00000000000000000000001";
+    const thread = "msg_01K00000000000000000000001";
+    const seen: string[] = [];
+    const door = olderDoor(OLD, thread, seen);
+    const dataDir = scratch("plannotator-snooze-agent-older-");
+    linkTo(dataDir, [{ id: OLD, port: door.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      const view = async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => m.id === OLD);
+      await waitFor("the older machine's list", async () => (await view()).list_cursor !== null);
+      expect((await view()).snoozes).toBe(false);
+      const refused = await call(client, thread, inSoon());
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toBe("machine_needs_update: Update Plannotator on Mini 1: it cannot snooze threads yet. Nothing changed.");
+      expect(seen.some((line) => line.includes("snooze"))).toBe(false);
+      const outbox = (await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/outbox`)).json()) as Json;
+      expect(outbox).toMatchObject({ waiting: [], notices: [] });
+      expect((await view()).state).toBe("online");
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      door.stop(true);
+    }
+  });
+
+  /** A viewer linked to one stand-in door whose list has been read. */
+  const withDoor = async (prefix: string, thread: string, snoozes: boolean, options: Parameters<typeof olderDoor>[4], run: (inbox: { port: number }, client: Client, seen: string[]) => Promise<void>) => {
+    const id = "ibx_01K00000000000000000000004";
+    const seen: string[] = [];
+    const door = olderDoor(id, thread, seen, snoozes, options);
+    const dataDir = scratch(prefix);
+    linkTo(dataDir, [{ id, port: door.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      await waitFor("that machine's list", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => m.id === id && m.list_cursor !== null));
+      await run(inbox, client, seen);
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      door.stop(true);
+    }
+  };
+  const outboxOf = async (port: number) => (await (await fetch(`http://127.0.0.1:${port}/api/inbox/outbox`)).json()) as Json;
+
+  test("an agent's mistake never leaves the machine or the person a word: a bad, past or too-far time and an archived row are refused here", async () => {
+    await withDoor("plannotator-snooze-agent-mistake-", "msg_01K00000000000000000000005", true, { row: { resolved_at: "2026-11-01T00:00:00Z" } }, async (inbox, client, seen) => {
+      const thread = "msg_01K00000000000000000000005";
+      const year = new Date().getUTCFullYear();
+      expect((await call(client, thread, new Date(Date.now() - 60_000).toISOString())).content[0]!.text).toStartWith("snooze_past: ");
+      expect((await call(client, thread, `${year + 5}-01-01T00:00:00Z`)).content[0]!.text).toStartWith("validation_error: until: a time within");
+      expect((await call(client, thread, "Nov 12")).content[0]!.text).toStartWith("validation_error: until: an ISO 8601 time");
+      expect((await call(client, thread, inSoon())).content[0]!.text).toStartWith("thread_resolved: ");
+      expect(seen.some((line) => line.endsWith("/snooze"))).toBe(false);
+      expect(await outboxOf(inbox.port)).toMatchObject({ waiting: [], notices: [] });
+    });
+  });
+
+  test("a machine's own refusal comes back as its code, and only a snooze that went through marks the person as having used Snooze", async () => {
+    const was = process.env.PLANNOTATOR_DATA_DIR;
+    const configDir = scratch("plannotator-snooze-agent-config-");
+    process.env.PLANNOTATOR_DATA_DIR = configDir;
+    const mark = () => (existsSync(join(configDir, "config.json")) ? JSON.parse(readFileSync(join(configDir, "config.json"), "utf8")).inboxSnoozeIntro?.snoozedAt : undefined);
+    try {
+      let answer = () => Response.json({ error: "A newer Plannotator wrote these.", code: "snoozes_newer" }, { status: 409 });
+      await withDoor("plannotator-snooze-agent-refused-", "msg_01K00000000000000000000006", true, { snooze: () => answer() }, async (_inbox, client) => {
+        const thread = "msg_01K00000000000000000000006";
+        const refused = await call(client, thread, inSoon());
+        expect(refused.isError).toBe(true);
+        expect(refused.content[0]!.text).toBe("snoozes_newer: A newer Plannotator wrote these.");
+        expect(mark()).toBeUndefined();
+        answer = () => Response.json({ snoozed: null });
+        expect((await call(client, thread, null)).structuredContent!.snoozed).toBeNull();
+        expect(mark()).toBeUndefined();
+        const at = new Date().toISOString();
+        answer = () => Response.json({ snoozed: { until: inSoon(), at } });
+        expect((await call(client, thread, inSoon())).structuredContent!.snoozed.at).toBe(at);
+        expect(mark()).toEqual(expect.any(String));
+      });
+    } finally {
+      if (was === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = was;
+    }
+  });
+
+  test("the link is removed as the snooze arrives: the agent hears it was not delivered, not that it is waiting", async () => {
+    await withDoor("plannotator-snooze-agent-revoked-", "msg_01K00000000000000000000007", true, { snooze: () => Response.json({ code: "device_revoked", error: "Link removed." }, { status: 401 }) }, async (_inbox, client) => {
+      const refused = await call(client, "msg_01K00000000000000000000007", inSoon());
+      expect(refused.isError).toBe(true);
+      expect(refused.content[0]!.text).toStartWith("not_delivered: ");
+    });
+  });
+
+  test("a link the other machine removed is no success: the thread is simply gone from here, and nothing waits for it", async () => {
+    let gone = false;
+    const revoked = () => Response.json({ code: "device_revoked", error: "Link removed." }, { status: 401 });
+    const streams: ReadableStreamDefaultController[] = [];
+    await withDoor("plannotator-snooze-agent-link-gone-", "msg_01K0000000000000000000000E", true, { door: () => (gone ? revoked() : null), streams }, async (inbox, client) => {
+      gone = true;
+      for (const stream of streams) stream.close();
+      await waitFor("the link is gone", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.every((m: Json) => m.id !== "ibx_01K00000000000000000000004"), 30_000);
+      const refused = await call(client, "msg_01K0000000000000000000000E", inSoon());
+      expect(refused.content[0]!.text).toBe("thread_not_found: No thread msg_01K0000000000000000000000E.");
+      expect((await outboxOf(inbox.port)).waiting).toEqual([]);
+    });
+  }, 45_000);
+
+  test("what the listed row says decides: a thread that came back from its archive snoozes, and ending a snooze is never refused as archived", async () => {
+    const seen: string[] = [];
+    await withDoor("plannotator-snooze-agent-came-back-", "msg_01K00000000000000000000008", true, { row: { resolved_at: "2026-11-01T00:00:00Z", back_from_archive: true }, snooze: () => { seen.push("snooze"); return Response.json({ snoozed: { until: inSoon(), at: new Date().toISOString() } }); } }, async (_inbox, client) => {
+      expect((await call(client, "msg_01K00000000000000000000008", inSoon())).isError).toBeUndefined();
+    });
+    expect(seen).toEqual(["snooze"]);
+    await withDoor("plannotator-snooze-agent-archived-end-", "msg_01K00000000000000000000009", true, { row: { resolved_at: "2026-11-01T00:00:00Z" }, snooze: () => { seen.push("end"); return Response.json({ snoozed: null }); } }, async (_inbox, client) => {
+      expect((await call(client, "msg_01K00000000000000000000009", null)).isError).toBeUndefined();
+    });
+    expect(seen).toEqual(["snooze", "end"]);
+  });
+
+  test("only an explicit null says ended: a time that did not apply on a machine whose clock is ahead stays not snoozed, though a snooze was running", async () => {
+    const thread = "msg_01K0000000000000000000000F";
+    const running = { until: new Date(Date.now() + 30 * 86_400_000).toISOString(), at: new Date().toISOString() };
+    await withDoor("plannotator-snooze-agent-clock-ahead-", thread, true, { row: { snoozed: running }, snooze: () => Response.json({ snoozed: null }) }, async (_inbox, client) => {
+      const missed = await call(client, thread, inSoon());
+      expect(missed.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+ is not snoozed\\.$`));
+      expect(missed.structuredContent!.ended).toBeUndefined();
+      const ended = await call(client, thread, null);
+      expect(ended.content[0]!.text).toMatch(new RegExp(`^Thread ${thread} on .+: snooze ended\\.$`));
+    });
+  });
+
+  test("a machine still answering past its wait is on its way: said as held, not as refused", async () => {
+    let answered = () => {};
+    const slow = new Promise<Response>((resolve) => { answered = () => resolve(Response.json({ snoozed: null })); });
+    await withDoor("plannotator-snooze-agent-slow-", "msg_01K0000000000000000000000A", true, { snooze: () => slow as unknown as Response }, async (_inbox, client) => {
+      const answer = await call(client, "msg_01K0000000000000000000000A", inSoon());
+      answered();
+      expect(answer.isError).toBeUndefined();
+      expect(answer.structuredContent!.held).toBe(answer.content[0]!.text);
+      expect(answer.content[0]!.text).toStartWith("Sending to ");
+    });
+  }, 20_000);
+
+  test("an id that is no message id is not found, never maybe on a machine nothing is known of", async () => {
+    const dataDir = scratch("plannotator-snooze-agent-garbage-");
+    linkTo(dataDir, [{ id: "ibx_01K0000000000000000000000B", port: 9 }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      expect((await call(client, "not-an-id", inSoon())).content[0]!.text).toBe("thread_not_found: No thread not-an-id.");
+      expect((await call(client, "", inSoon())).content[0]!.text).toBe("validation_error: thread_id: required.");
+      expect((await call(client, "msg_01K0000000000000000000000C", inSoon())).content[0]!.text).toStartWith("machine_offline: ");
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+    }
+  });
+
+  test("a home machine that still refuses a lapsed time leaves its notice: the person hears, since it may still be hiding the thread", async () => {
+    await withDoor("plannotator-snooze-agent-older-home-", "msg_01K0000000000000000000000D", true, { snooze: () => Response.json({ error: "That time has passed.", code: "snooze_past" }, { status: 409 }) }, async (inbox, client) => {
+      expect((await call(client, "msg_01K0000000000000000000000D", inSoon())).content[0]!.text).toBe("snooze_past: That time has passed.");
+      expect((await outboxOf(inbox.port)).notices).toHaveLength(1);
+    });
+  });
+
+  test("the person moved a snooze earlier while its machine was away, and that time passed: it comes back, marked, not hidden for the old time", async () => {
+    const dataA = scratch("plannotator-snooze-lapse-a-");
+    const dataB = scratch("plannotator-snooze-lapse-b-");
+    const a = await start(dataA);
+    let b = await start(dataB);
+    const closing: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
+      const onB = await mcp(b.port);
+      const project = scratch("plannotator-snooze-lapse-project-");
+      const asked = async (session: string) => ((await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: session, body: "Plain news" } })) as { structuredContent: { thread_id: string } }).structuredContent.thread_id;
+      const moved = await asked("ses_moved");
+      const undone = await asked("ses_undone");
+      const agents = await asked("ses_agents");
+      const quiet = await asked("ses_quiet");
+      await onB.close();
+      for (const thread of [moved, undone, agents, quiet]) await waitFor("B's thread on A", () => rowOn(a.port, thread));
+      const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
+      const onA = await mcp(a.port);
+      closing.push(onA);
+      let key = 0;
+      const person = (thread: string, until: string, at?: string, idempotency_key = `person-${key++}`) => fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key, until, at }) });
+      const inMonth = (days = 30) => new Date(Date.now() + days * 86_400_000).toISOString();
+      const firstAt: Record<string, string> = {};
+      for (const thread of [moved, undone, agents]) {
+        const placed = await person(thread, inMonth());
+        expect(placed.status).toBe(200);
+        firstAt[thread] = ((await placed.json()) as Json).snoozed.at;
+      }
+      // Already gone when asked: refused now, nothing held, as it always was.
+      expect((await person(moved, new Date(Date.now() - 60_000).toISOString())).status).toBe(409);
+      expect((await outboxOf(a.port)).waiting).toEqual([]);
+
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      // Room for every write below to land before this time, on a slow machine too; the test waits for the time itself.
+      const soon = new Date(Date.now() + 10_000).toISOString();
+      expect((await person(moved, soon, undefined, "person-moved")).status).toBe(202);
+      expect((await person(undone, inMonth(40))).status).toBe(202);
+      expect((await person(undone, soon, firstAt[undone])).status).toBe(202);
+      expect((await call(onA, agents, soon)).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
+      expect((await person(quiet, soon)).status).toBe(202);
+      await Bun.sleep(Date.parse(soon) - Date.now() + 100);
+
+      // The window retries a write it holds, past that time too: still the held one, never refused here.
+      const retry = await person(moved, soon, undefined, "person-moved");
+      expect(retry.status).toBe(202);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
+
+      b = await start(dataB);
+      await waitFor("the held writes settled", async () => (await outboxOf(a.port)).waiting.length === 0, 45_000);
+      expect((await outboxOf(a.port)).notices).toEqual([]);
+      const home = b.store.snoozes();
+      for (const thread of [moved, undone, agents]) expect(home.find((s) => s.thread_id === thread)!.until).toBe(new Date(soon).toISOString());
+      expect(home.some((s) => s.thread_id === quiet)).toBe(false);
+      expect([...b.store.snoozedThreads()]).toEqual([]);
+      // Marked as back, as a return on time is.
+      const rows = ((await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/threads?snoozed=exclude`)).json()) as Json).sections.flatMap((section: Json) => section.threads) as Json[];
+      for (const thread of [moved, undone, agents]) expect(rows.find((row) => row.thread_id === thread)?.snooze_back).toBe(new Date(soon).toISOString());
+      expect(rows.find((row) => row.thread_id === quiet)?.snooze_back ?? null).toBeNull();
+    } finally {
+      for (const client of closing) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a held write says what the window's does, by the machine's state", () => {
+    for (const state of ["online", "connecting", "offline", "needs_update"] as const) {
+      expect([state, machineHeldWords("Mini", state)]).toEqual([state, heldWords({ name: "Mini", state })]);
+    }
+  });
+
+  test("this Inbox restarted with the home machine away: the agent hears the thread may be there, not that it does not exist; a time that lapses while it is away settles with no notice", async () => {
+    const dataA = scratch("plannotator-snooze-agent-restart-a-");
+    const dataB = scratch("plannotator-snooze-agent-restart-b-");
+    let a = await start(dataA);
+    let b = await start(dataB);
+    const clients: Client[] = [];
+    try {
+      const offered = (await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/machines/offer`, { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" })).json()) as Json;
+      expect((await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines/link`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ link: offered.link, address: `http://127.0.0.1:${b.port}`, back: `http://127.0.0.1:${a.port}` }) })).status).toBe(201);
+      const onB = await mcp(b.port);
+      const project = scratch("plannotator-snooze-agent-restart-project-");
+      const asked = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "Plain news" } })) as { structuredContent: { thread_id: string } };
+      const reply = (await onB.callTool({ name: "send_message", arguments: { project_path: project, agent_session: "ses_b", body: "More news" } })) as { structuredContent: { thread_id: string; message_id: string } };
+      const thread = asked.structuredContent.thread_id;
+      expect(reply.structuredContent.thread_id).toBe(thread);
+      await onB.close();
+      await waitFor("B's thread on A", () => rowOn(a.port, thread));
+      const name = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).name as string;
+      const onA = await mcp(a.port);
+      clients.push(onA);
+
+      // A message that is not the thread's own id, on another machine: the refusal says which id it needs.
+      expect((await call(onA, reply.structuredContent.message_id, inSoon())).content[0]!.text).toContain("use the thread's id, not a message's");
+
+      // Away, a time that runs out before it is back: the person's own snooze and the agent's both end quietly.
+      b.stop();
+      await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
+      const soon = () => new Date(Date.now() + 5_000).toISOString();
+      const last = Date.now() + 5_000;
+      const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
+      expect((await call(onA, thread, soon())).structuredContent!.held).toEqual(expect.stringMatching(/^Waiting for /));
+      const own = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key: "own-held", until: soon() }) });
+      expect(own.status).toBe(202);
+      expect((await outboxOf(a.port)).waiting).toHaveLength(2);
+      await Bun.sleep(Math.max(0, last - Date.now()) + 5_000);
+
+      // This Inbox restarts with B still away: B's rows are not known. Not "no such thread".
+      await onA.close();
+      clients.pop();
+      a.stop();
+      a = await start(dataA);
+      const onA2 = await mcp(a.port);
+      clients.push(onA2);
+      const unknown = await call(onA2, thread, inSoon());
+      expect(unknown.isError).toBe(true);
+      expect(unknown.content[0]!.text).toBe(`machine_offline: This thread may be on ${name}, whose threads are not known yet (away or still connecting). Nothing changed.`);
+
+      // B is back: both held snoozes reach it past their time, are not applied, and leave no notice. The thread is found again.
+      b = await start(dataB);
+      await waitFor("the held snoozes settled", async () => (await outboxOf(a.port)).waiting.length === 0, 45_000);
+      expect((await outboxOf(a.port)).notices).toEqual([]);
+      expect(b.store.snoozes()).toEqual([]);
+      await waitFor("B's thread on A again", () => rowOn(a.port, thread));
+      expect((await call(onA2, thread, inSoon())).isError).toBeUndefined();
+    } finally {
+      for (const client of clients) await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    }
+  }, 120_000);
+
+  test("a thread two linked machines claim goes to neither, and an id no machine lists is not found", async () => {
+    const thread = "msg_01K00000000000000000000002";
+    const seen: string[] = [];
+    const first = olderDoor("ibx_01K00000000000000000000002", thread, seen, true);
+    const second = olderDoor("ibx_01K00000000000000000000003", thread, seen, true);
+    const dataDir = scratch("plannotator-snooze-agent-clash-");
+    linkTo(dataDir, [{ id: "ibx_01K00000000000000000000002", port: first.port as number }, { id: "ibx_01K00000000000000000000003", port: second.port as number }]);
+    const inbox = await start(dataDir);
+    const client = await mcp(inbox.port);
+    try {
+      await waitFor("both machines' lists", async () => ((await (await fetch(`http://127.0.0.1:${inbox.port}/api/inbox/machines`)).json()) as Json).machines.filter((m: Json) => !m.self && m.snoozes === true).length === 2);
+      const clash = await call(client, thread, inSoon());
+      expect(clash.content[0]!.text).toStartWith("machine_conflict: ");
+      const none = await call(client, "msg_01K00000000000000000000099", inSoon());
+      expect(none.content[0]!.text).toStartWith("thread_not_found: ");
+      expect(none.content[0]!.text).toContain("use the thread's id, not a message's");
+      expect(seen.some((line) => line.includes("snooze"))).toBe(false);
+    } finally {
+      await client.close().catch(() => {});
+      inbox.stop();
+      first.stop(true);
+      second.stop(true);
+    }
+  });
+});
+
+describe("the forward takes no write from a tailnet guest", () => {
+  const MAGIC = "laptop.tail0000.ts.net";
+  const OWNER = "owner@example.com";
+  const GUEST = "guest@example.com";
+  const roots: string[] = [];
+  const restore: (() => void)[] = [];
+  afterAll(() => {
+    for (const undo of restore.splice(0)) undo();
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+  const tomorrow = () => new Date(Date.now() + 24 * 60 * 60_000).toISOString();
+
+  /** Tailscale as a script: who owns this machine (`status --json`; a tagged device has no owner), and serve on, off and status. */
+  function ownedTailscale(tagged = false) {
+    const serve = new Map<number, string>();
+    const run: TailscaleRunner = (args) => {
+      const ok = (stdout = "") => ({ status: 0, stdout, stderr: "" });
+      if (args[0] === "status") {
+        return ok(
+          JSON.stringify({
+            Self: { DNSName: `${MAGIC}.`, UserID: 42, ...(tagged ? { Tags: ["tag:server"] } : {}) },
+            User: { "42": { ID: 42, LoginName: tagged ? "tagged-devices" : OWNER, DisplayName: "Owner" } },
+          }),
+        );
+      }
+      if (args[1] === "status") {
+        if (serve.size === 0) return ok("{}");
+        const TCP = Object.fromEntries([...serve.keys()].map((p) => [String(p), { HTTPS: true }]));
+        const Web = Object.fromEntries([...serve].map(([p, proxy]) => [`${MAGIC}:${p}`, { Handlers: { "/": { Proxy: proxy } } }]));
+        return ok(JSON.stringify({ TCP, Web }));
+      }
+      const httpsPort = Number(/--https=(\d+)/.exec(args.join(" "))![1]);
+      if (args.includes("off")) {
+        serve.delete(httpsPort);
+        return ok();
+      }
+      serve.set(httpsPort, args.at(-1)!);
+      return ok(`Available within your tailnet:\n\nhttps://${MAGIC}:${httpsPort}/\n|-- proxy ${args.at(-1)}\n`);
+    };
+    return { serve, run };
+  }
+
+  /**
+   * A (the MacBook, `tagged`: a tagged Tailscale device with no owner) linked both ways to B (the Mini) on loopback,
+   * A's window published on the tailnet with GUEST in `inboxTailscaleAllow`, and an agent's question waiting on B.
+   */
+  async function linkedPair(prefix: string, tagged: boolean) {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), prefix)));
+    roots.push(root);
+    const dataA = join(root, "macbook");
+    const dataB = join(root, "mini");
+    // config.json (read from PLANNOTATOR_DATA_DIR) lets GUEST onto A's window over the tailnet.
+    mkdirSync(dataA, { recursive: true });
+    writeFileSync(join(dataA, "config.json"), JSON.stringify({ inboxTailscaleAllow: [GUEST] }));
+    const previous = process.env.PLANNOTATOR_DATA_DIR;
+    process.env.PLANNOTATOR_DATA_DIR = dataA;
+    restore.push(() => {
+      if (previous === undefined) delete process.env.PLANNOTATOR_DATA_DIR;
+      else process.env.PLANNOTATOR_DATA_DIR = previous;
+    });
+    const tsB = ownedTailscale();
+    const a = await startInboxServer({ dataDir: dataA, binaryPath: null, phones: false, tailscale: ownedTailscale(tagged).run });
+    const b = await startInboxServer({ dataDir: dataB, binaryPath: null, phones: false, tailscale: tsB.run });
+    const client = new Client({ name: "inbox-forward-owner", version: "1.0.0" });
+    const stop = async () => {
+      await client.close().catch(() => {});
+      a.stop();
+      b.stop();
+    };
+    try {
+      const sessionOf = async (port: number) => ((await (await fetch(`http://127.0.0.1:${port}/api/inbox/health`)).json()) as Json).serverSession as string;
+      const post = async (port: number, path: string, body: Json) =>
+        fetch(`http://127.0.0.1:${port}${path}`, { method: "POST", body: JSON.stringify({ serverSession: await sessionOf(port), ...body }) });
+      // B publishes its door and offers; A links to it both ways.
+      const offered = (await (await post(b.port, "/api/inbox/machines/offer", { tailscale: true })).json()) as Json;
+      const linked = await post(a.port, "/api/inbox/machines/link", { link: offered.link, address: tsB.serve.get(8443)!, back: `http://127.0.0.1:${a.port}` });
+      expect(linked.status).toBe(201);
+      const mini = offered.machine.id as string;
+      // An agent on B asks a question.
+      await client.connect(new StreamableHTTPClientTransport(new URL(`http://127.0.0.1:${b.port}/mcp`)));
+      const asked = (
+        (await client.callTool({
+          name: "send_message",
+          arguments: { project_path: root, agent_session: "ses_forward_owner", agent_name: "Claude Code", agent_host: "claude-code", body: QUESTION(1) },
+        })) as { structuredContent: { thread_id: string; message_id: string } }
+      ).structuredContent;
+      await waitFor("B's thread in A's merged list", async () => {
+        const model = (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/threads?machines=1`)).json()) as Json;
+        return (model.sections as Json[]).flatMap((s) => s.threads as Json[]).some((r) => r.thread_id === asked.thread_id && r.machine === mini);
+      });
+      // A's window over the tailnet.
+      expect((await post(a.port, "/api/inbox/settings", { tailscale: { on: true } })).status).toBe(200);
+      const listener = a.tailscale.listenerPort();
+      expect(listener).not.toBeNull();
+      expect(a.tailscale.state().owner).toBe(tagged ? null : OWNER);
+      const page = `https://${MAGIC}:${a.port}`;
+      const tailnetHeaders = (login: string, type: string) => ({ Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login, "Content-Type": type, Origin: page, "Sec-Fetch-Site": "same-origin" });
+      /** A read or a JSON write through serve, as that login's browser sends it. */
+      const throughServe = async (login: string, path: string, body?: Json) =>
+        fetch(`http://127.0.0.1:${listener}${path}`, {
+          method: body ? "POST" : "GET",
+          headers: body ? tailnetHeaders(login, "application/json") : { Host: `${MAGIC}:${a.port}`, "Tailscale-User-Login": login },
+          ...(body ? { body: JSON.stringify({ serverSession: await sessionOf(a.port), ...body }) } : {}),
+        });
+      /** A file through serve to B (an upload is never held). */
+      const uploadThroughServe = async (login: string, key: string) =>
+        fetch(`http://127.0.0.1:${listener}/api/inbox/m/${mini}/uploads?name=${key}.txt&idempotency_key=${key}&serverSession=${await sessionOf(a.port)}`, {
+          method: "POST",
+          headers: tailnetHeaders(login, "text/plain"),
+          body: `from ${login}`,
+        });
+      const thread = async () => (await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/threads/${asked.thread_id}`)).json()) as Json;
+      const onB = async () => ((await (await fetch(`http://127.0.0.1:${b.port}/api/inbox/threads/${asked.thread_id}`)).json()) as Json).thread as Json;
+      const personOnB = async () => ((await onB()).messages as Json[]).filter((m) => m.author.kind === "person");
+      /** The question's pick, at the revision the thread shows now. */
+      const pickBody = async (key: string, selected: string) => {
+        const question = ((await thread()).thread.messages[0].questions as Json[])[0]!;
+        return { idempotency_key: key, questions: [{ key: question.key, revision: question.revision, answer: { v: 1, key: question.key, kind: "single", prompt: question.prompt, selected: [selected] } }] };
+      };
+      return { a, b, dataA, mini, asked, listener, sessionOf, throughServe, uploadThroughServe, thread, onB, personOnB, pickBody, stop };
+    } catch (error) {
+      await stop();
+      throw error;
+    }
+  }
+
+  const delivered = async (answer: Response) => [answer.status, answer.headers.get("x-plannotator-outbox")];
+
+  test("a tailnet guest of this machine never writes to a linked machine, though it reads; the owner writes from every path: this window, another device, a plain local call", async () => {
+    const w = await linkedPair("plannotator-machines-forward-owner-", false);
+    try {
+      const { a, mini, asked } = w;
+      // Reads through the forward stay as they are, for the guest too.
+      const read = await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}`);
+      expect(read.status).toBe(200);
+      const cursor = ((await read.json()) as Json).cursor as number;
+
+      // The guest, from A's own page: every write to B is refused, and none reaches B.
+      for (const [route, body] of [
+        [`messages/${asked.message_id}/reply`, { idempotency_key: "guest-reply", words: "Guest says retry.", seen_through_seq: cursor }],
+        [`messages/${asked.message_id}/picks`, await w.pickBody("guest-pick", "Retry")],
+        [`threads/${asked.thread_id}/read`, { idempotency_key: "guest-read" }],
+        [`threads/${asked.thread_id}/snooze`, { idempotency_key: "guest-snooze", until: tomorrow() }],
+      ] as const) {
+        const answer = await w.throughServe(GUEST, `/api/inbox/m/${mini}/${route}`, body);
+        expect([route, answer.status, ((await answer.json()) as Json).code]).toEqual([route, 403, "owner_only"]);
+      }
+      const upload = await w.uploadThroughServe(GUEST, "guest-up");
+      expect([upload.status, ((await upload.json()) as Json).code]).toEqual([403, "owner_only"]);
+      expect(await w.personOnB()).toHaveLength(0);
+      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("open");
+      expect(existsSync(join(w.dataA, "inbox", "outbox", `${mini}.jsonl`))).toBe(false);
+
+      // The owner keeps everything through the forward, each answer delivered to B once.
+      // The owner's window on this machine.
+      const local = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: `http://127.0.0.1:${a.port}` },
+        body: JSON.stringify({ serverSession: await w.sessionOf(a.port), idempotency_key: "owner-local", words: "From the MacBook's window.", seen_through_seq: (await w.thread()).cursor }),
+      });
+      expect(await delivered(local)).toEqual([200, "delivered"]);
+      // The owner's window on another of their devices over the tailnet (the same login): a reply, a mark read, a file.
+      const remote = await w.throughServe(OWNER, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        idempotency_key: "owner-tailnet",
+        words: "From the owner's phone browser.",
+        seen_through_seq: (await w.thread()).cursor,
+      });
+      expect(await delivered(remote)).toEqual([200, "delivered"]);
+      expect(await delivered(await w.throughServe(OWNER, `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "owner-tailnet-read" }))).toEqual([200, "delivered"]);
+      expect((await w.uploadThroughServe(OWNER, "owner-up")).status).toBe(200);
+      // A plain local call with no Origin and no page session (an agent, a script, the CLI on this machine): a reply and a file.
+      const bare = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ idempotency_key: "owner-bare", words: "From a script on the MacBook.", seen_through_seq: (await w.thread()).cursor }),
+      });
+      expect(await delivered(bare)).toEqual([200, "delivered"]);
+      const bareUpload = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${mini}/uploads?name=bare.txt&idempotency_key=owner-bare-up`, {
+        method: "POST",
+        headers: { "Content-Type": "text/plain" },
+        body: "from a script",
+      });
+      expect(bareUpload.status).toBe(200);
+      const landed = (await w.personOnB()).map((m) => m.body as string);
+      expect(landed).toHaveLength(3);
+      expect(landed[0]).toStartWith("From the MacBook's window.");
+      expect(landed[1]).toStartWith("From the owner's phone browser.");
+      expect(landed[2]).toStartWith("From a script on the MacBook.");
+    } finally {
+      await w.stop();
+    }
+  }, 60_000);
+
+  test("on a tagged machine (no Tailscale owner), the login its allowlist names is the owner: it picks, replies, snoozes and uploads through the forward", async () => {
+    const w = await linkedPair("plannotator-machines-forward-tagged-", true);
+    try {
+      const { mini, asked } = w;
+      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/picks`, await w.pickBody("tagged-pick", "Alert")))).toEqual([
+        200,
+        "delivered",
+      ]);
+      expect(((await w.onB()).messages[0].questions as Json[])[0]!.state).toBe("picked");
+      const reply = await w.throughServe(GUEST, `/api/inbox/m/${mini}/messages/${asked.message_id}/reply`, {
+        idempotency_key: "tagged-reply",
+        words: "From the tagged machine's only user.",
+        seen_through_seq: (await w.thread()).cursor,
+      });
+      expect(await delivered(reply)).toEqual([200, "delivered"]);
+      expect(await delivered(await w.throughServe(GUEST, `/api/inbox/m/${mini}/threads/${asked.thread_id}/snooze`, { idempotency_key: "tagged-snooze", until: tomorrow() }))).toEqual([
+        200,
+        "delivered",
+      ]);
+      expect((await w.uploadThroughServe(GUEST, "tagged-up")).status).toBe(200);
+      const landed = await w.personOnB();
+      expect(landed).toHaveLength(1);
+      expect(landed[0]!.body).toStartWith("From the tagged machine's only user.");
+      // A login the allowlist does not name is still refused at the listener.
+      const stranger = await w.throughServe("someone@example.com", `/api/inbox/m/${mini}/threads/${asked.thread_id}/read`, { idempotency_key: "stranger-read" });
+      expect(stranger.status).toBe(403);
+    } finally {
+      await w.stop();
     }
   }, 60_000);
 });

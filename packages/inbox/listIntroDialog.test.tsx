@@ -138,7 +138,7 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     act(() => (dialog.querySelector('[data-list-intro-option="compact"]') as HTMLElement).click());
     expect(preview(dialog).classList.contains('ib-lk-compact')).toBe(true);
     act(() => (dialog.querySelector('[data-list-intro-done]') as HTMLElement).click());
-    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false, smallNames: false }]);
+    expect(seen).toEqual([{ ...LIST_LOOK_OFF, compact: true }]);
   });
 
   test('Tab stays inside the dialog and skips the picture: Done to the first switch, and back with Shift+Tab', () => {
@@ -167,7 +167,7 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
 
   test('options already set from the ⋮ menu: it opens at them, the preview returns to them, Done keeps them', async () => {
     motion(false);
-    const { dialog, seen } = render({ highlight: false, compact: true, hideAgents: false, smallNames: false });
+    const { dialog, seen } = render({ ...LIST_LOOK_OFF, compact: true });
     expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false, smallNames: false });
     await wait(450);
     expect(checked(dialog)).toEqual({ highlight: true, compact: true, hideAgents: false, smallNames: false });
@@ -176,7 +176,7 @@ describe.skipIf(!hasDom)('the list options dialog', () => {
     });
     expect(checked(dialog)).toEqual({ highlight: false, compact: true, hideAgents: false, smallNames: false });
     act(() => doneButton(dialog).click());
-    expect(seen).toEqual([{ highlight: false, compact: true, hideAgents: false, smallNames: false }]);
+    expect(seen).toEqual([{ ...LIST_LOOK_OFF, compact: true }]);
   });
 
   test('only the picture is light: a light scope on the light palette; the dialog and the window keep their mode', () => {

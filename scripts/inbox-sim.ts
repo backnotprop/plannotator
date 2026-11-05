@@ -109,9 +109,22 @@ export class SimAgent {
     return (await this.call('read_thread', { thread_id: threadId })).thread as Structured;
   }
 
-  /** `cursor`: the one a previous answer returned, to wait for a later reply only. */
-  waitForReply(threadId: string, timeoutSeconds = 50, cursor?: number): Promise<Structured> {
-    return this.call('wait_for_reply', { thread_id: threadId, timeout_seconds: timeoutSeconds, ...(cursor === undefined ? {} : { cursor }) });
+  /**
+   * The person's reply as the full record read_thread gives: the newest of their
+   * messages after `after` (a message id), or after this thread's last agent
+   * message. Reads again until one lands, as an agent that is not woken reads later.
+   */
+  async nextReply(threadId: string, timeoutSeconds = 50, after?: string): Promise<Structured> {
+    const deadline = Date.now() + timeoutSeconds * 1000;
+    for (;;) {
+      const { thread } = await this.call('read_thread', { thread_id: threadId, format: 'full' });
+      const messages = (thread as { messages: (Structured & { id: string; author: { kind: string } })[] }).messages;
+      const from = after ? messages.findIndex((m) => m.id === after) : messages.findLastIndex((m) => m.author.kind === 'agent');
+      const reply = messages.slice(from + 1).findLast((m) => m.author.kind === 'person');
+      if (reply) return reply;
+      if (Date.now() >= deadline) throw new Error(`No reply in ${threadId} after ${timeoutSeconds} seconds`);
+      await new Promise((done) => setTimeout(done, 200));
+    }
   }
 
   close(): Promise<void> {
@@ -203,7 +216,8 @@ async function main(): Promise<void> {
   const src = join(dirname(dataDir), 'src');
   const billing = scratchProject(src, 'billing-svc');
   const docs = scratchProject(src, 'docs-site');
-  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir };
+  // The sandbox gives the Inbox these agents start an empty agent PATH: a window opened on it must not run the person's real `cswap`.
+  const env = { PATH: process.env.PATH ?? '', HOME: process.env.HOME ?? dataDir, PLANNOTATOR_DATA_DIR: dataDir, PLANNOTATOR_TEST_SANDBOX: dataDir };
   const claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   const opencode = await SimAgent.connect({ binary, env, name: 'OpenCode', host: 'opencode' });
   const claude2 = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });

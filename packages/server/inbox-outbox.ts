@@ -139,6 +139,9 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   key on the line they write).
  * - `set` puts a state (read, archived, a pick under its revision, an
  *   annotation under its own id), so a second copy changes nothing more.
+ *   A snooze whose time has passed is the exception: it brings back a snooze
+ *   still running there (`setHeldSnooze`), so a copy after a newer snooze would
+ *   end that one. The owner's door answers a key it has seen without running it.
  * - `file` is an upload or a drawing: never held, sent only while online.
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
@@ -148,6 +151,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = 
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
   "POST threads/:id/mark-unread": "set",
+  "POST threads/:id/snooze": "set",
   "POST messages/:id/picks": "set",
   "POST messages/:id/reply": "append",
   "POST messages/:id/resolve": "set",

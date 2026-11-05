@@ -115,10 +115,10 @@ test('the keyboard reaches ⋯, Enter opens the menu, Escape gives focus back', 
   await page.keyboard.press('Enter');
   const menu = page.locator('[data-project-menu]');
   await expect(menu).toBeVisible();
-  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all']);
+  await expect(menu.getByRole('menuitem')).toHaveText(['Mark all as read', 'Archive all', 'Rename…']);
   await expect(menu.getByRole('menuitem').first()).toBeFocused();
   await page.keyboard.press('ArrowDown');
-  await expect(menu.getByRole('menuitem').last()).toBeFocused();
+  await expect(menu.getByRole('menuitem').nth(1)).toBeFocused();
   await page.screenshot({ path: join(proofDir, '01-menu-keyboard.png') });
   await page.keyboard.press('Escape');
   await expect(menu).toHaveCount(0);
@@ -155,7 +155,7 @@ test('Archive all hides the project, focus lands on Inbox, and the next reply br
   await expect(page.locator('[data-project-menu]')).toBeVisible();
   // Focus moves into the menu (its first item) a frame after it opens.
   await expect(page.locator('[data-project-action="read"]')).toBeFocused();
-  await page.keyboard.press('End');
+  await page.keyboard.press('ArrowDown');
   await expect(page.locator('[data-project-action="archive"]')).toBeFocused();
   await page.keyboard.press('Enter');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Archived 3 threads');

@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/server",
-  "version": "0.28.42",
+  "version": "0.28.50",
   "private": true,
   "description": "Shared server implementation for Plannotator plugins",
   "main": "index.ts",
@@ -35,11 +35,14 @@
     "./guide-cli": "./guide/guide-cli.ts",
     "./live-proxy": "./live-proxy.ts",
     "./inbox": "./inbox.ts",
+    "./shape": "./shape.ts",
+    "./inbox-project-root": "./inbox-project-root.ts",
     "./inbox-tailscale": "./inbox-tailscale.ts",
     "./inbox-mcp": "./inbox-mcp.ts",
     "./inbox-mcp-read": "./inbox-mcp-read.ts",
     "./inbox-mcp-search": "./inbox-mcp-search.ts",
     "./inbox-agents": "./inbox-agents.ts",
+    "./inbox-codex-wake": "./inbox-codex-wake.ts",
     "./inbox-agent-notes": "./inbox-agent-notes.ts"
   },
   "files": [
@@ -52,6 +55,7 @@
     "@plannotator/ai": "workspace:*",
     "@plannotator/core": "workspace:*",
     "@plannotator/shared": "workspace:*",
+    "@plannotator/t3-code": "workspace:*",
     "@plannotator/webtui": "0.1.0",
     "chokidar": "^5.0.0",
     "jsonc-parser": "^3.3.1",

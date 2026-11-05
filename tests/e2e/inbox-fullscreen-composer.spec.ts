@@ -9,13 +9,15 @@
  * Proves: an image in full screen has one floating card at its foot with two
  * tabs (Comment on this image, Reply to Claude Code); Reply writes the
  * thread's reply draft (saved on the server, the thread's box holds the same
- * words); minimize leaves the "Reply draft" pill with focus on it; Hide (»)
- * hides the card and the pill with the toolbar; the pill gives the card back
- * with focus in the field; Send goes from full screen, which stays, the card
- * says it went and the draft is gone. An HTML page is Reply only. At 390 px
- * (a phone) the card spans the width under the toolbar, the tabs read Comment
- * and Reply, Send is the icon, and minimized the pill sits left of the
- * toolbar, never under it.
+ * words). The card's ⌄ and the toolbar's » do one thing (approval
+ * "inbox-fullscreen-gather"): the card, the toolbar and the image's size bar
+ * gather into one control in the bottom right corner, which says "Draft"
+ * while a reply draft waits and takes focus; one press brings everything back
+ * with focus in the field and the words kept. Send goes from full screen,
+ * which stays, the card says it went and the draft is gone. An HTML page is
+ * Reply only. At 390 px (a phone) the card spans the width under the toolbar,
+ * the tabs read Comment and Reply, Send is the icon, ⌄ gathers into a 44 px
+ * corner control, and the reply comes back working after one tap.
  *
  * Build the binary first (see inbox.spec.ts), then
  * `bunx playwright test -c tests/e2e/playwright.config.ts inbox-fullscreen-composer.spec.ts`.
@@ -24,12 +26,13 @@
 
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 import { forgetFileViewChoice } from './file-view';
+import { finger } from './phone-touch';
 
 const repo = resolve(__dirname, '../..');
 const builtBinary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -76,6 +79,8 @@ interface World {
   errors: string[];
   threadId: string;
   ids: Record<string, string>;
+  project: string;
+  env: Record<string, string>;
 }
 
 let world: World;
@@ -94,6 +99,10 @@ const pane = (page = world.page) => page.locator('[data-attachment-pane]');
 const card = (page = world.page) => page.locator('[data-fcomp]');
 const pill = (page = world.page) => page.locator('[data-fcomp-pill]');
 const replyField = (page = world.page) => card(page).locator('[data-fcomp-field] textarea');
+const dock = (page = world.page) => page.locator('[data-full-view-dock]');
+const toolbar = (page = world.page) => page.locator('[data-full-view-bar]');
+/** The corner control everything gathers into (approval "inbox-fullscreen-gather"). */
+const corner = (page = world.page) => page.locator('[data-full-view-handle]');
 const fileUrl = (name: string) => `${world.url}#thread=${world.threadId}&file=${world.ids[name]}&view=full`;
 
 async function draftOnServer(): Promise<string | null> {
@@ -119,6 +128,11 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   const env = {
     PATH: `${trap}:${process.env.PATH ?? ''}`,
     HOME: home,
+    // No agent lookups (the voice setting probes Codex otherwise), and no agent config of the real computer.
+    PLANNOTATOR_TEST_SANDBOX: root,
+    CLAUDE_CONFIG_DIR: join(root, 'claude'),
+    CODEX_HOME: join(root, 'codex'),
+    OPENCODE_CONFIG_DIR: join(root, 'opencode'),
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_RELAY_URL: 'http://127.0.0.1:9',
     PLANNOTATOR_BROWSER: NO_BROWSER,
@@ -156,6 +170,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
     errors,
     threadId: '',
     ids: {},
+    project,
+    env,
   };
   const sent = await world.claude.send({
     project_path: project,
@@ -189,7 +205,8 @@ test('an image in full screen: one card at its foot, Comment and Reply as a radi
   await expect(radios).toHaveCount(2);
   await expect(card().getByRole('radio', { name: 'Comment on this image' })).toHaveAttribute('aria-checked', 'true');
   await expect(card().getByRole('radio', { name: 'Reply to Claude Code' })).toHaveAttribute('aria-checked', 'false');
-  await expect(card().getByRole('button', { name: 'Hide the composer' })).toBeVisible();
+  // ⌄ is named for what it does: it hides all the tools, as » does.
+  await expect(card().getByRole('button', { name: 'Hide tools' })).toBeVisible();
   // The comment row is the image's own (its field, Mark up, Comment), inside the card; no old band at the foot.
   await expect(card().getByRole('textbox', { name: 'Comment on checkout.png' })).toBeVisible();
   await expect(pane().locator('.ib-imgcompose')).toHaveCount(0);
@@ -222,62 +239,87 @@ test('Reply writes the thread’s reply draft: saved on the server, and the thre
   await page.mouse.move(200, 400);
   await shot(page, '2A-expanded-reply');
   await card().locator('[data-fcomp-minimize]').hover();
-  await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toContainText('Hide the composer');
+  await expect(page.getByRole('tooltip').or(page.locator('[data-pn-tooltip]')).first()).toContainText('Hide tools');
   await shot(page, '2A-expanded-reply-hover', ['dark']);
 });
 
-test('minimize leaves the "Reply draft" pill with focus on it; Hide hides the pill too; the pill gives the card back, focus in the field', async () => {
+test('⌄ gathers the card, the toolbar and the size bar into the bottom-right corner control, which says "Draft" and takes focus; one press brings everything back, focus in the field, the words kept', async () => {
   const page = world.page;
+  // The file's foot (`--ib-fvfoot`, the card's height) holds still through the flight: the card scales down on its way
+  // to the corner, and a measure taken then (any change in the pane re-measures) must not shrink the foot.
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'no-preference' });
+  const foot = () => pane().evaluate((el) => getComputedStyle(el).getPropertyValue('--ib-fvfoot').trim());
+  const footBefore = await foot();
+  expect(parseFloat(footBefore)).toBeGreaterThan(30);
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(card()).toHaveCount(0);
-  await expect(pill()).toBeFocused();
-  await expect(pill()).toHaveText(/Reply draft/);
-  await expect(pill()).toHaveAccessibleName('Show the composer: Reply draft');
-  const box = (await pill().boundingBox())!;
-  expect(Math.round(box.height)).toBe(30);
-  expect(Math.round(box.x + box.width / 2)).toBe(720);
-  // The pill is the file's foot now (the comment row is kept, hidden): the pane measures it, so the chip,
-  // the notes and a film's controls keep above it.
-  const foot = await pane().evaluate((el) => parseFloat(getComputedStyle(el).getPropertyValue('--ib-fvfoot')));
-  const wrap = (await page.locator('[data-fcomp-pillwrap]').boundingBox())!;
-  expect(foot).toBe(Math.round(wrap.height));
-  expect(foot).toBeGreaterThanOrEqual(30);
+  await page.waitForTimeout(170);
+  await pane().evaluate((el) => {
+    const nudge = document.createElement('span');
+    el.appendChild(nudge);
+    nudge.remove();
+  });
+  await page.waitForTimeout(50);
+  expect(await foot(), 'mid-flight').toBe(footBefore);
+  await page.waitForTimeout(500);
+  expect(await foot(), 'landed').toBe(footBefore);
+  await page.emulateMedia({ colorScheme: 'dark', reducedMotion: 'reduce' });
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  // Everything went: the card (kept, inert: no pill of its own), the toolbar and the image's size bar.
+  await expect(card()).toHaveJSProperty('inert', true);
+  await expect(card()).toBeHidden();
+  await expect(pill()).toHaveCount(0);
+  await expect(toolbar()).toHaveJSProperty('inert', true);
+  await expect(toolbar()).toBeHidden();
+  await expect(pane().locator('.ib-imgbar')).toBeHidden();
+  // The corner control: focused, bottom right, 32 px, and it says a reply draft waits.
+  await expect(corner()).toBeFocused();
+  await expect(corner()).toContainText('Draft');
+  await expect(corner()).toHaveAccessibleName(/^Show tools, reply draft/);
+  // Landed (it scales in from 0.6 after the tools leave): measured only once it has.
+  await expect.poll(async () => Math.round((await corner().boundingBox())!.height)).toBe(32);
+  const box = (await corner().boundingBox())!;
+  expect(box.x + box.width).toBeGreaterThan(1440 - 40);
+  expect(box.y + box.height).toBeGreaterThan(900 - 40);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(200, 400);
-  await shot(page, '2A-min-draft');
+  await shot(page, '2A-gathered-draft');
 
-  // Hide (») takes the pill away with the toolbar; showing the tools brings it back.
-  await page.locator('[data-full-view-hide]').click();
-  await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'tucked');
-  await expect(pill()).toBeHidden();
-  await expect(page.locator('[data-fcomp-pillwrap]')).toHaveJSProperty('inert', true);
-  await page.locator('[data-full-view-handle]').click();
-  await page.locator('[data-full-view-hide]').click();
-  await page.mouse.move(200, 400);
-  await expect(page.locator('[data-full-view-dock]')).toHaveAttribute('data-bar', 'pinned');
-  await expect(pill()).toBeVisible();
+  // One press: the card, the toolbar and the size bar come back; focus is back in the field it was gathered from.
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(card()).toHaveJSProperty('inert', false);
+  await expect(card()).toBeVisible();
+  await expect(toolbar()).toBeVisible();
+  await expect(pane().locator('.ib-imgbar')).toBeVisible();
+  await expect(replyField()).toBeFocused();
+  await expect(replyField()).toHaveValue(WORDS);
 
-  // Kept for the thread: leaving full screen and coming back finds the pill.
+  // Gathered, then away and back: every opening of full screen starts with the tools showing, the draft kept.
+  await card().locator('[data-fcomp-minimize]').click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await page.goto(`${world.url}#thread=${world.threadId}`);
   await page.goto(fileUrl('checkout.png'));
-  await expect(pill()).toBeVisible();
-
-  await pill().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await expect(card()).toBeVisible();
-  await expect(replyField()).toBeFocused();
+  await card().getByRole('radio', { name: 'Reply to Claude Code' }).click();
   await expect(replyField()).toHaveValue(WORDS);
 });
 
-test('Hide (») hides the card and the size chip with the toolbar', async () => {
+test('Hide (») gathers the card and the size bar with the toolbar; one press brings them back, focus on »', async () => {
   const page = world.page;
   await page.locator('[data-full-view-hide]').click();
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
   await expect(card()).toBeHidden();
   await expect(card()).toHaveJSProperty('inert', true);
   await expect(pane().locator('.ib-imgbar')).toBeHidden();
-  await page.locator('[data-full-view-handle]').click();
-  await page.locator('[data-full-view-hide]').click();
+  await expect(corner()).toBeFocused();
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
+  await expect(page.locator('[data-full-view-hide]')).toBeFocused();
   await page.mouse.move(200, 400);
   await expect(card()).toBeVisible();
+  await expect(card()).toHaveJSProperty('inert', false);
+  await expect(pane().locator('.ib-imgbar')).toBeVisible();
 });
 
 test('the paperclip attaches to the reply; Send goes from full screen with the file: it stays, the card says it went, the reply is in the thread and the draft is gone', async () => {
@@ -309,19 +351,22 @@ test('the paperclip attaches to the reply; Send goes from full screen with the f
   const mine = thread.messages.filter((m) => m.author.kind === 'person').at(-1) as { attachments?: { name: string }[] };
   expect(mine.attachments?.map((a) => a.name)).toEqual(['footer-over-cvc.png']);
   await expect(card().locator('[data-fcomp-files]')).toHaveCount(0);
-  // Empty again: Send is dimmed, and minimized the pill says what the card is for.
+  // Empty again: Send is dimmed, and gathered, the corner control no longer says "Draft".
   await expect(card().locator('[data-fcomp-send]')).toBeDisabled();
   await card().getByRole('radio', { name: 'Comment on this image' }).click();
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(pill()).toHaveText(/Comment on this image/);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await expect(corner()).not.toContainText('Draft');
+  await expect(corner()).not.toHaveAccessibleName(/reply draft/);
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(200, 400);
-  await shot(page, '2A-min-nodraft');
-  await pill().click();
+  await shot(page, '2A-gathered-nodraft');
+  await corner().click();
+  await expect(card()).toBeVisible();
   expect(world.errors).toEqual([]);
 });
 
-test('an HTML page is Reply only: no tabs, the reply field, and its pill', async () => {
+test('an HTML page is Reply only: no tabs, the reply field; ⌄ gathers it with the toolbar, and one press gives the field back', async () => {
   const page = world.page;
   await page.goto(fileUrl('checkout.html'));
   await expect(pane()).toHaveAttribute('data-full-view', '');
@@ -332,15 +377,22 @@ test('an HTML page is Reply only: no tabs, the reply field, and its pill', async
   await page.keyboard.type('The footer should stay, with room under the form.');
   await expect.poll(draftOnServer).toBe('The footer should stay, with room under the form.');
   await card().locator('[data-fcomp-minimize]').click();
-  await expect(pill()).toHaveText(/Reply draft/);
+  await expect(dock()).toHaveAttribute('data-bar', 'tucked');
+  await expect(card()).toHaveJSProperty('inert', true);
+  await expect(toolbar()).toHaveJSProperty('inert', true);
+  await expect(pill()).toHaveCount(0);
+  await expect(corner()).toBeFocused();
+  await expect(corner()).toContainText('Draft');
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
   await page.mouse.move(700, 400);
-  await shot(page, '2A-html-min');
-  await pill().click();
+  await shot(page, '2A-html-gathered');
+  await corner().click();
+  await expect(dock()).toHaveAttribute('data-bar', 'pinned');
   await expect(replyField()).toBeFocused();
+  await expect(replyField()).toHaveValue('The footer should stay, with room under the form.');
 });
 
-test('a phone (390 px): the card spans the width under the toolbar, Comment and Reply, Send the icon; minimized, the pill sits left of the toolbar', async ({ browser }: { browser: Browser }) => {
+test('a phone (390 px): the card spans the width under the toolbar, Comment and Reply, Send the icon; ⌄ gathers everything into a 44 px corner control', async ({ browser }: { browser: Browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
   try {
     const page = await context.newPage();
@@ -387,16 +439,425 @@ test('a phone (390 px): the card spans the width under the toolbar, Comment and 
     await expect(card(page).locator('[data-fcomp-files]')).toHaveCount(0);
 
     await card(page).locator('[data-fcomp-minimize]').click();
-    await expect(pill(page)).toHaveText('Draft');
-    const pillBox = (await pill(page).boundingBox())!;
-    const bar = (await page.locator('[data-full-view-bar]').boundingBox())!;
-    expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(bar.x);
-    expect(Math.abs(pillBox.y + pillBox.height - (bar.y + bar.height))).toBeLessThanOrEqual(1);
+    await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+    await expect(card(page)).toBeHidden();
+    await expect(toolbar(page)).toBeHidden();
+    await expect(pill(page)).toHaveCount(0);
+    await expect(corner(page)).toHaveAccessibleName(/^Show tools, reply draft/);
+    await expect.poll(async () => Math.round((await corner(page).boundingBox())!.height)).toBeGreaterThanOrEqual(44);
+    const cornerBox = (await corner(page).boundingBox())!;
+    expect(cornerBox.width).toBeGreaterThanOrEqual(44);
+    expect(cornerBox.height).toBeGreaterThanOrEqual(44);
+    expect(cornerBox.x + cornerBox.width).toBeGreaterThan(390 - 40);
+    expect(cornerBox.y + cornerBox.height).toBeGreaterThan(844 - 80);
     await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
-    await shot(page, '2A-phone-min');
-    await pill(page).click();
+    await shot(page, '2A-phone-gathered');
+    await corner(page).click();
+    await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
     await expect(replyField(page)).toBeFocused();
+    await expect(replyField(page)).toHaveValue(WORDS);
   } finally {
     await context.close();
+  }
+});
+
+/** The open questions pill in the card's foot: one line, inside the row, clear of its neighbours (owner's iPhone, 2026-11-01). */
+async function pillLayout(page: Page) {
+  return card(page).evaluate((root) => {
+    const q = root.querySelector<HTMLElement>('[data-fcomp-questions]')!;
+    // The words are the text inside the pill, whatever wraps them.
+    const range = document.createRange();
+    const text = document.createTreeWalker(q, NodeFilter.SHOW_TEXT, { acceptNode: (n) => (n.textContent!.trim() ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT) }).nextNode()!;
+    range.selectNodeContents(text);
+    const box = q.getBoundingClientRect();
+    const chips = q.parentElement!.getBoundingClientRect();
+    const link = root.querySelector('[data-fcomp-open-thread]')!.getBoundingClientRect();
+    const mic = root.querySelector('[data-voice-mic]')?.getBoundingClientRect() ?? null;
+    return {
+      text: q.textContent!.trim(),
+      form: q.getAttribute('data-label-form'),
+      lines: range.getClientRects().length,
+      height: Math.round(box.height),
+      left: box.left,
+      right: box.right,
+      chipsLeft: chips.left,
+      chipsRight: chips.right,
+      next: Math.min(link.left, mic?.left ?? Infinity),
+      mic: !!mic,
+    };
+  });
+}
+
+test('the open questions pill in the card’s foot never wraps: one line, inside the row, from 320 to 430 px, with and without the mic', async ({ browser }: { browser: Browser }) => {
+  const manyBody = [
+    ...Array.from({ length: 12 }, (_, i) => [':::question', `Question ${i + 1}: which way?`, '', '- [ ] This', '- [ ] That', ':::', ''].join('\n')),
+    ':::action',
+    'Run the migration',
+    'Needs your badge.',
+    ':::',
+    '',
+    ':::action',
+    'Rotate the key',
+    'Needs your badge.',
+    ':::',
+  ].join('\n');
+  const oneAndAction = [BODY, '', ':::action', 'Run the migration', 'Needs your badge.', ':::'].join('\n');
+  const send = async (subject: string, body: string) => {
+    const sent = await world.claude.send({ project_path: world.project, thread: subject.toLowerCase().replace(/\W+/g, '-'), subject, body, attachments: ['shots/checkout.png'] });
+    const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
+    return `${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`;
+  };
+  const cases: { name: string; url: string; full: string }[] = [
+    { name: 'one question', url: await send('Pill: one', BODY), full: '1 open question' },
+    { name: 'one question, one action item', url: await send('Pill: one and one', oneAndAction), full: '1 question, 1 action item' },
+    { name: 'twelve questions, two action items', url: await send('Pill: many', manyBody), full: '12 questions, 2 action items' },
+  ];
+  const settings = (await (await fetch(new URL('/api/inbox/settings', world.url))).json()) as { serverSession: string };
+  const voice = async (on: boolean) => {
+    const answer = await fetch(new URL('/api/inbox/settings', world.url), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Origin: new URL(world.url).origin },
+      body: JSON.stringify({ serverSession: settings.serverSession, voice: { on } }),
+    });
+    expect(answer.status).toBe(200);
+  };
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await context.grantPermissions(['microphone'], { origin: new URL(world.url).origin });
+    for (const withMic of [false, true]) {
+      await voice(withMic);
+      for (const c of cases) {
+        await page.setViewportSize({ width: 390, height: 844 });
+        await page.goto(c.url);
+        await page.reload();
+        await expect(card(page)).toBeVisible();
+        await card(page).getByRole('radio', { name: 'Reply' }).tap();
+        await expect(card(page).locator('[data-fcomp-questions]')).toBeVisible();
+        for (const width of [430, 390, 360, 320]) {
+          await page.setViewportSize({ width, height: 844 });
+          await expect.poll(async () => (await pillLayout(page)).mic, { message: `mic ${withMic} at ${width}` }).toBe(withMic);
+          const where = `${c.name}, ${width} px, mic ${withMic}`;
+          // The fit runs on a resize: let it settle.
+          await expect
+            .poll(async () => {
+              const now = await pillLayout(page);
+              return now.lines === 1 && now.right <= now.chipsRight + 1 && now.right <= now.next + 1;
+            }, { message: where })
+            .toBe(true);
+          const got = await pillLayout(page);
+          expect(got.height, where).toBeLessThanOrEqual(24);
+          expect(got.right, `${where}: past the row's end (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.chipsRight + 1);
+          expect(got.right, `${where}: over the next button (${JSON.stringify(got)})`).toBeLessThanOrEqual(got.next + 1);
+          // Short words only when the long ones do not fit: with the room (no mic, 430) the whole words show.
+          if (!withMic && width === 430 && c.name === 'one question') expect(got.text, where).toBe(c.full);
+          if (got.form && got.form !== 'full') expect(await card(page).locator('[data-fcomp-questions]').getAttribute('aria-label'), where).toBe(c.full);
+        }
+      }
+    }
+  } finally {
+    await voice(false);
+    await context.close();
+  }
+});
+
+test('on a computer the pill keeps its whole words', async () => {
+  const sent = await world.claude.send({ project_path: world.project, thread: 'pill-computer', subject: 'Pill: computer', body: BODY, attachments: ['shots/checkout.png'] });
+  const model = (await (await fetch(new URL(`/api/inbox/threads/${sent.thread_id}/attachments`, world.url))).json()) as { attachments: { id: string }[] };
+  await world.page.goto(`${world.url}#thread=${sent.thread_id}&file=${model.attachments[0]!.id}&view=full`);
+  await expect(card()).toBeVisible();
+  await card().getByRole('radio', { name: 'Reply' }).click();
+  await expect(card().locator('[data-fcomp-questions]')).toHaveText('1 open question');
+  await expect(card().locator('[data-fcomp-questions]')).toHaveAttribute('data-label-form', 'full');
+});
+
+test('a phone: » or ⌄ gathers, then one tap on the corner control brings the reply back working', async ({ browser }: { browser: Browser }) => {
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const page = await context.newPage();
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.goto(fileUrl('checkout.png'));
+    await expect(pane(page)).toHaveAttribute('data-full-view', '');
+    for (const from of ['[data-full-view-hide]', '[data-fcomp-minimize]']) {
+      await expect(card(page)).toBeVisible();
+      await page.locator(from).tap({ timeout: 10_000 });
+      await expect(dock(page)).toHaveAttribute('data-bar', 'tucked');
+      // Gathered: the reply goes with the tools, whichever bar's button did it.
+      await expect(card(page)).toHaveJSProperty('inert', true);
+      await expect(toolbar(page)).toHaveJSProperty('inert', true);
+      await corner(page).tap({ timeout: 10_000 });
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
+      // The reply works as it is: not inert, and a tap in it types.
+      await expect(card(page)).toHaveJSProperty('inert', false);
+      // A tap, then a real finger (touch events from the DevTools protocol), each focus the field and leave the
+      // tools out: nothing gathers them again but a press on » or ⌄.
+      await replyField(page).tap({ timeout: 10_000 });
+      await expect(replyField(page)).toBeFocused();
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+      const box = (await replyField(page).boundingBox())!;
+      const touch = await finger(page, 'chromium');
+      await touch.down(box.x + box.width / 2, box.y + box.height / 2, 0, 0, 0);
+      await touch.up();
+      await expect(replyField(page)).toBeFocused();
+      await expect(dock(page)).toHaveAttribute('data-bar', 'pinned');
+      await page.keyboard.type(' ok');
+      // The words land where the finger put the caret.
+      await expect(replyField(page)).toHaveValue(/ ok/);
+      await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test('an HTML page: the reply box never runs over the drawer’s foot, at any width, with one line or many, and a phone’s sheet hides it', async ({ browser }: { browser: Browser }) => {
+  const res = await fetch(new URL('/api/inbox/annotations', world.url), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ attachment_id: world.ids['checkout.html'], version: 'current', annotation: { id: 'foot-guard', type: 'COMMENT', text: 'A thought', originalText: 'Almost yours.', blockId: '', startOffset: 0, endOffset: 0, createdA: Date.now() } }),
+  });
+  expect(res.status).toBe(200);
+  const long = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n');
+  for (const width of [1440, 1280, 1100, 900, 768, 390]) {
+    const phone = width === 390;
+    const context = await browser.newContext({ viewport: { width, height: phone ? 844 : 800 }, hasTouch: phone, isMobile: phone, reducedMotion: 'reduce' });
+    try {
+      const page = await context.newPage();
+      await page.goto(fileUrl('checkout.html'));
+      await expect(pane(page)).toHaveAttribute('data-full-view', '');
+      if (await pill(page).isVisible()) await pill(page).click();
+      await replyField(page).fill(WORDS);
+      await page.locator('[data-full-view-comments]').first().click();
+      const foot = page.locator('[data-full-view-foot]');
+      await expect(foot).toContainText('your next Send');
+      for (const words of [WORDS, long]) {
+        if (await replyField(page).isVisible()) await replyField(page).fill(words);
+        // Hidden under a phone's sheet is fine; a box that shows must clear the foot.
+        if (!(await card(page).isVisible())) {
+          expect(phone, `${width}: a computer keeps its reply box beside the drawer`).toBe(true);
+          continue;
+        }
+        expect(phone, `${width}: a phone's sheet hides the reply box`).toBe(false);
+        const box = (await card(page).boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(box.x + box.width, `${width}: the reply box ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+      }
+      if (width <= 1100 && !phone) {
+        // The comment list over the box: beside the drawer, centred over the box. Zero height by design; x and width are what it is placed by.
+        await card(page).locator('[data-fcomp-comments]').click();
+        const list = (await page.locator('.ib-anncard').boundingBox())!;
+        const box = (await card(page).boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(list.x + list.width, `${width}: the list ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+        expect(Math.abs(list.x + list.width / 2 - (box.x + box.width / 2)), `${width}: the list is centred over the box`).toBeLessThanOrEqual(1);
+      }
+    } finally {
+      await context.close();
+    }
+  }
+});
+
+test('the unsaved comment question stays beside the drawer: its foot and Write the reply can still be pressed', async ({ browser }: { browser: Browser }) => {
+  for (const name of ['checkout.html', 'checkout.png']) {
+    for (const width of [900, 1100, 768]) {
+      const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: 'reduce' });
+      try {
+        const page = await context.newPage();
+        await page.goto(fileUrl(name));
+        await expect(pane(page)).toHaveAttribute('data-full-view', '');
+        await page.locator('[data-full-view-comments]').first().click();
+        const foot = page.locator('[data-full-view-foot]');
+        await expect(foot).toBeVisible();
+        const field =
+          name === 'checkout.html'
+            ? page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last()
+            : pane(page).getByRole('textbox', { name: 'Comment on checkout.png' });
+        if (name === 'checkout.html') await page.frameLocator('[data-attachment-pane] iframe').first().locator('h1').click();
+        else await card(page).getByRole('radio', { name: /Comment/ }).click();
+        await expect(field).toBeVisible();
+        await page.waitForTimeout(200);
+        await field.fill('Not saved yet');
+        // HTML asks on Escape; an image asks when the file would close.
+        if (name === 'checkout.html') await field.press('Escape');
+        else await foot.getByRole('button', { name: 'Write the reply' }).click();
+        const guard = page.locator('[data-step-guard]');
+        await expect(guard).toBeVisible();
+        if (width === 900) await page.screenshot({ path: join(process.env.PLANNOTATOR_E2E_GUARD_SHOTS ?? shotsDir, `question-${name}-${width}.png`) });
+        const box = (await guard.boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(box.x + box.width, `${name} ${width}: the question ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+        await foot.getByRole('button', { name: 'Write the reply' }).click({ trial: true, timeout: 3_000 });
+      } finally {
+        await context.close();
+      }
+    }
+  }
+});
+
+type Read = { id: string; author: { kind: string }; body: string; viewing?: string };
+
+/** A thread of its own for what a floating box's Send tells the agent, and the steps those tests repeat. */
+async function takes(name: string, attachments: string[], body = 'Takes of the checkout.') {
+  const sent = await world.claude.send({ project_path: world.project, thread: name, body, attachments });
+  const threadId = sent.thread_id as string;
+  const model = (await (await fetch(new URL(`/api/inbox/threads/${threadId}/attachments`, world.url))).json()) as { attachments: { id: string; name: string }[] };
+  const open = (file: string) => `${world.url}#thread=${threadId}&file=${model.attachments.find((a) => a.name === file)!.id}&view=full`;
+  const people = async (): Promise<Read[]> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.filter((m) => m.author.kind === 'person');
+  const newest = async (): Promise<Read> => ((await world.claude.readThread(threadId)) as { messages: Read[] }).messages.at(-1)!;
+  /** Writes `words` in the card over what is on screen and sends them. */
+  const send = async (target: Page, words: string): Promise<Read> => {
+    await expect(card(target)).toBeVisible();
+    const radio = card(target).getByRole('radio', { name: 'Reply', exact: false });
+    if ((await radio.count()) > 0) await radio.click();
+    await replyField(target).fill(words);
+    await card(target).locator('[data-fcomp-send]').click();
+    await expect(card(target).locator('[data-fcomp-sent]')).toBeVisible();
+    await expect.poll(async () => (await newest()).body).toContain(words);
+    return newest();
+  };
+  const reply = async (target: Page, file: string, words: string): Promise<Read> => {
+    await target.goto(open(file));
+    return send(target, words);
+  };
+  return { threadId, messageId: sent.message_id as string, open, people, newest, send, reply };
+}
+
+test('a Send from the floating box tells the agent which file was on screen, and only the agent; the Comment tab and the thread’s own box stay as they were', async ({ browser }: { browser: Browser }) => {
+  const page = world.page;
+  const { threadId, messageId, open, newest, reply } = await takes('Which take', ['shots/checkout.png', 'shots/checkout.html']);
+
+  // An image: the words stay the person's, and the agent reads the name beside them.
+  const onImage = await reply(page, 'checkout.png', 'This one reads best.');
+  expect(onImage.viewing).toContain(`while viewing \`checkout.png\`, from the `);
+  expect(onImage.viewing!.endsWith(` message ${messageId}.)`), onImage.viewing).toBe(true);
+  // An HTML page: the same line, naming the page.
+  expect((await reply(page, 'checkout.html', 'Or this page.')).viewing).toContain('`checkout.html`');
+
+  // A comment on the file on screen, then the Reply tab: the comment names the file, so no second line.
+  await page.goto(open('checkout.png'));
+  await card().getByRole('radio', { name: 'Comment on this image' }).click();
+  await card().getByRole('textbox', { name: 'Comment on checkout.png' }).fill('The footer is too tall.');
+  await card().getByRole('button', { name: 'Comment', exact: true }).click();
+  await expect(card().getByRole('textbox', { name: 'Comment on checkout.png' })).toHaveValue('');
+  await card().getByRole('radio', { name: 'Reply to Claude Code' }).click();
+  await replyField().fill('And see my comment.');
+  await card().locator('[data-fcomp-send]').click();
+  await expect(card().locator('[data-fcomp-sent]')).toBeVisible();
+  const commented = await newest();
+  expect(commented.body).toContain('The footer is too tall.');
+  expect(commented.viewing).toBeUndefined();
+
+  // A phone's card: the same line.
+  const phone = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, colorScheme: 'dark' });
+  try {
+    const phonePage = await phone.newPage();
+    expect((await reply(phonePage, 'checkout.png', 'From the phone, this one.')).viewing).toContain('`checkout.png`');
+  } finally {
+    await phone.close();
+  }
+
+  // The thread's own box, with no file open and with one open beside it: exactly as it always was.
+  const fromBox = async (url: string, words: string): Promise<Read> => {
+    await page.goto(url);
+    await page.getByRole('button', { name: 'Reply', exact: true }).first().click();
+    await page.locator('.ib-rbox textarea').fill(words);
+    await page.locator('.ib-rbox textarea').press('ControlOrMeta+Enter');
+    await expect.poll(async () => (await newest()).body).toBe(words);
+    return newest();
+  };
+  expect((await fromBox(`${world.url}#thread=${threadId}`, 'From the thread itself.')).viewing).toBeUndefined();
+  expect((await fromBox(open('checkout.png').replace('view=full', 'view=side'), 'From the box beside the file.')).viewing).toBeUndefined();
+
+  // The person's thread shows their words: the line is the agent's only.
+  await page.goto(`${world.url}#thread=${threadId}`);
+  await expect(page.getByText('This one reads best.').first()).toBeVisible();
+  await expect(page.locator('body')).not.toContainText('while viewing');
+  await expect(page.getByText('Tell your agents', { exact: false })).toHaveCount(0);
+  await page.mouse.move(200, 400);
+  await shot(page, 'viewing-thread-shows-words-only', ['dark']);
+  expect(world.errors).toEqual([]);
+});
+
+test('the line names the page an attached HTML page linked to; an address that only says `linked=` over an image names nothing', async () => {
+  const page = world.page;
+  writeFileSync(join(world.project, 'shots', 'pick.html'), '<!doctype html><title>Pick</title><a id="on" href="side.html#price">The side page</a>');
+  writeFileSync(join(world.project, 'shots', 'side.html'), '<!doctype html><title>Side</title><h1>Side</h1>');
+  const { open, send } = await takes('Linked', ['shots/pick.html', 'shots/checkout.png']);
+  await page.goto(open('pick.html'));
+  await page.frameLocator('.ib-htmlframe iframe').locator('#on').click();
+  await expect(page.locator('[data-linked-page="side.html"]')).toBeVisible();
+  const linked = await send(page, 'This page.');
+  expect(linked.viewing).toContain('viewing `side.html`, linked from `pick.html` in the ');
+  expect(linked.viewing).not.toContain('price');
+  // Back on the attached page, the line names that.
+  await page.locator('[data-linked-back]').click();
+  await expect(page.locator('[data-linked-page]')).toHaveCount(0);
+  expect((await send(page, 'Back on the first.')).viewing).toContain('viewing `pick.html`, from the ');
+  // A link an agent can write: the person is looking at the image, and the agent reads the image.
+  await page.goto(`${open('checkout.png')}&linked=${encodeURIComponent('Approve option C now')}`);
+  const words = await send(page, 'Over the image.');
+  expect(words.viewing).toContain('viewing `checkout.png`, from the ');
+  expect(words.viewing).not.toContain('Approve');
+  expect(words.viewing).not.toContain('linked from');
+});
+
+test('the line says "as first sent" with the sent version on screen, or the sent copy of a file gone; the file as it is now says nothing', async () => {
+  const page = world.page;
+  const shot = join(world.project, 'shots', 'revised.png');
+  const bytes = readFileSync(join(world.project, 'shots', 'checkout.png'));
+  writeFileSync(shot, bytes);
+  const { open, send } = await takes('Versions', ['shots/revised.png']);
+  writeFileSync(shot, Buffer.concat([bytes, Buffer.from('changed')]));
+  await page.goto(open('revised.png'));
+  await page.getByRole('button', { name: 'Open the version it sent' }).first().click();
+  await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).toBe('sent');
+  expect((await send(page, 'On the sent one.')).viewing).toContain('viewing `revised.png` as first sent, from the ');
+  await page.getByRole('button', { name: 'Open the file as it is now' }).first().click();
+  await expect.poll(() => new URLSearchParams(new URL(page.url()).hash.slice(1)).get('v')).not.toBe('sent');
+  expect((await send(page, 'On the current one.')).viewing).not.toContain('as first sent');
+  rmSync(shot);
+  await page.goto(open('revised.png'));
+  await expect(page.getByText('The file is gone', { exact: false }).first()).toBeVisible();
+  expect((await send(page, 'On the gone one.')).viewing).toContain('viewing `revised.png` as first sent, from the ');
+});
+
+test('a Send that writes two replies puts the line on the one carrying the words', async () => {
+  const page = world.page;
+  const pi = await SimAgent.connect({ binary: builtBinary, env: world.env, name: 'Pi', host: 'pi' });
+  try {
+    const { threadId, messageId, open, people, send } = await takes('Two agents', ['shots/checkout.png'], 'Pick:\n\n:::question\nWhich?\n\n- [ ] Red\n- [ ] Blue\n:::');
+    await pi.send({ project_path: world.project, reply_to: messageId, body: 'I am here too.' });
+    await page.goto(`${world.url}#thread=${threadId}`);
+    await page.getByText('Red', { exact: true }).first().click();
+    await expect.poll(async () => {
+      const thread = (await world.claude.readThread(threadId)) as { messages: { questions?: { state: string }[] }[] };
+      return thread.messages[0]!.questions?.[0]?.state;
+    }).toBe('picked');
+    await page.goto(open('checkout.png'));
+    await send(page, 'Words for the last agent.');
+    await expect.poll(async () => (await people()).length).toBe(2);
+    const [picks, words] = await people();
+    expect(picks!.body).not.toContain('Words for the last agent.');
+    expect(picks!.viewing).toBeUndefined();
+    expect(words!.body).toContain('Words for the last agent.');
+    expect(words!.viewing).toContain('`checkout.png`');
+  } finally {
+    await pi.close().catch(() => {});
+  }
+});
+
+test('the line says the time in the person’s own time zone, not the server’s', async ({ browser }: { browser: Browser }) => {
+  const zone = Intl.DateTimeFormat().resolvedOptions().timeZone === 'Asia/Tokyo' ? 'Pacific/Honolulu' : 'Asia/Tokyo';
+  const elsewhere = await browser.newContext({ viewport: { width: 1440, height: 900 }, timezoneId: zone });
+  try {
+    const { threadId, reply } = await takes('Time zone', ['shots/checkout.png']);
+    const read = await reply(await elsewhere.newPage(), 'checkout.png', 'From far away.');
+    const thread = (await world.claude.readThread(threadId)) as { messages: { created_at: string }[] };
+    const there = new Intl.DateTimeFormat('en-US', { hour: 'numeric', minute: '2-digit', timeZone: zone }).format(new Date(thread.messages[0]!.created_at)).replace(/\s/g, ' ');
+    expect(read.viewing).toContain(`from the ${there} message`);
+  } finally {
+    await elsewhere.close();
   }
 });

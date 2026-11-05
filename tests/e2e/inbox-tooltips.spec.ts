@@ -16,6 +16,8 @@
  *   a 0.06 px overflow), and a title cut by a fraction of a pixel still opens
  *   its tooltip;
  * - Escape with a tooltip open still closes the thread;
+ * - a press with no hover before it (a mouse's or a pen's first contact) on a
+ *   row's tooltip trigger still opens the row (RowTip.tsx);
  * - a disabled control still shows its tooltip (the pointer reaches its
  *   wrapper).
  *
@@ -172,6 +174,11 @@ test('no wide title loses a fraction of a pixel to the preview, and a title cut 
 
     // Force the owner's case: the title's box 0.06 px narrower than its text, both integer widths equal.
     const chip = page.locator('.ib-lbody .ib-row .ib-title', { hasText: 'reconciliation-run' }).first();
+    // A row's tooltip mounts on the pointer's first entry and draws its trigger again (RowTip.tsx): enter once
+    // first, and wait for it to arm (base-ui's trigger id), so the styles below go on the element the tooltip measures.
+    await chip.hover();
+    await expect(chip).toHaveAttribute('id', /.+/);
+    await page.mouse.move(700, 880);
     const forced = await chip.evaluate((el) => {
       const range = document.createRange();
       range.selectNodeContents(el);
@@ -224,7 +231,7 @@ test("a tooltip floats with no visible border (owner's ruling q4), Soft's float 
 test('Escape with a tooltip open still closes the thread (the tooltip does not swallow the key)', async ({ browser }) => {
   const { context, page } = await openPage(browser);
   try {
-    await page.locator('section.ib-pane [data-archive]').hover();
+    await page.locator('section.ib-pane [data-thread-more]').hover();
     await expect(tooltip(page)).toBeVisible({ timeout: 1000 });
     await page.keyboard.press('Escape');
     await expect(page.locator('section.ib-pane')).toHaveCount(0);
@@ -234,17 +241,52 @@ test('Escape with a tooltip open still closes the thread (the tooltip does not s
   }
 });
 
-test('a wrapped control keeps its width: Mark read never spills over Archive, from 320 px to 1440 px', async ({ browser }) => {
+test("a press with no hover before it opens the row: a mouse's and a pen's first contact on a row's agent tiles", async ({ browser }) => {
+  // A row's tooltips mount on first use (RowTip.tsx). The press brings its own over events; a trigger drawn again in
+  // them took the press's down with the old element, and no click reached the row.
   const { context, page } = await openPage(browser);
   try {
-    for (const width of [320, 390, 600, 810, 1024, 1280, 1440]) {
+    const cdp = await context.newCDPSession(page);
+    for (const pointerType of ['mouse', 'pen'] as const) {
+      const id = await page.evaluate(
+        (open) =>
+          [...document.querySelectorAll<HTMLElement>('.ib-lbody button[data-thread-id]')]
+            .filter((row) => row.querySelector('[data-row-agents]'))
+            .map((row) => row.dataset.threadId!)
+            .find((row) => row !== open && !location.hash.includes(row))!,
+        threadId,
+      );
+      const box = (await page.locator(`.ib-lbody button[data-thread-id="${id}"] [data-row-agents]`).boundingBox())!;
+      const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+      // The pointer away from the list, then a press with no move between.
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseMoved', x: 5, y: 5, pointerType });
+      await page.waitForTimeout(300);
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mousePressed', ...at, button: 'left', buttons: 1, clickCount: 1, pointerType });
+      await cdp.send('Input.dispatchMouseEvent', { type: 'mouseReleased', ...at, button: 'left', buttons: 0, clickCount: 1, pointerType });
+      await expect(page.locator(`section.ib-pane[data-thread-id="${id}"]`), `${pointerType}: the press opens the row`).toHaveCount(1);
+    }
+  } finally {
+    await context.close();
+  }
+});
+
+test('a wrapped control keeps its width: Mark read never spills over the icons after it, from 810 px to 1440 px; a phone has it in ⋯', async ({ browser }) => {
+  const { context, page } = await openPage(browser);
+  try {
+    // A phone's bar has no read button (approval "inbox-thread-header"): its ⋯ sheet leads with it.
+    for (const width of [320, 390, 600]) {
+      await page.setViewportSize({ width, height: 800 });
+      await page.waitForTimeout(150);
+      await expect(page.locator('section.ib-pane .ib-phead [data-mark-read]'), `no read button in the bar at ${width}px`).toHaveCount(0);
+    }
+    for (const width of [810, 1024, 1280, 1440]) {
       await page.setViewportSize({ width, height: 800 });
       await page.waitForTimeout(150);
       const boxes = await page.evaluate(() => {
         const box = (sel: string) => document.querySelector(`section.ib-pane ${sel}`)?.getBoundingClientRect() ?? null;
         const mark = box('[data-mark-read]');
         const wrap = box('[data-tip-wrap]:has(> [data-mark-read])');
-        const archive = box('[data-archive]');
+        const archive = box('[data-thread-more]');
         const button = document.querySelector<HTMLElement>('section.ib-pane [data-mark-read]');
         const style = button ? getComputedStyle(button) : null;
         const margins = style ? parseFloat(style.marginLeft) + parseFloat(style.marginRight) : 0;
@@ -253,7 +295,7 @@ test('a wrapped control keeps its width: Mark read never spills over Archive, fr
           : null;
       });
       expect(boxes, `the header at ${width}px`).not.toBeNull();
-      expect(boxes!.markRight, `Mark read ends before Archive at ${width}px`).toBeLessThanOrEqual(boxes!.archiveLeft);
+      expect(boxes!.markRight, `Mark read ends before ⋯ More at ${width}px`).toBeLessThanOrEqual(boxes!.archiveLeft);
       // The wrapper is exactly as wide as the button it holds (with its margins), and the button is never squeezed.
       expect(Math.abs(boxes!.wrapWidth - boxes!.markWidth), `the wrapper at ${width}px`).toBeLessThan(0.5);
       expect(boxes!.cut, `Mark read squeezed at ${width}px`).toBe(false);

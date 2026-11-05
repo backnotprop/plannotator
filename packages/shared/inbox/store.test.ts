@@ -118,7 +118,7 @@ type Op =
   | { op: "read"; target: number; read: boolean }
   // Mark unread (POST /api/inbox/threads/:id/mark-unread): the latest agent message is new again.
   | { op: "unread"; target: number }
-  // An agent read the thread (read_thread, or wait_for_reply handed it the reply).
+  // An agent read the thread (read_thread).
   | { op: "agentRead"; target: number }
   // The Undo window passed: the server tells the asking agent what a Mark read set aside.
   | { op: "tell"; target: number }
@@ -149,7 +149,8 @@ const cardOpArb: fc.Arbitrary<CardOp> = fc.oneof(
   fc.record({
     kind: fc.constant("move" as const),
     n: fc.nat(),
-    column: fc.constantFrom("backlog", "designing", "your_look", "building", "your_review", "shipped", "icebox", "dropped"),
+    // The v2 columns, and two ids from before v2 an older agent still sends (read through the aliases).
+    column: fc.constantFrom("backlog", "todo", "in_progress", "in_review", "shipped", "dropped", "building", "icebox"),
     person: fc.boolean(),
     you: fc.boolean(),
     reason: fc.boolean(),

@@ -278,7 +278,7 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     win.getSelection = () => ({ toString: () => selection });
     const commands: string[] = [];
     const doc = {
-      activeElement: null as Element | null,
+      activeElement: null as Pick<HTMLInputElement, "tagName" | "selectionStart" | "select"> | null,
       execCommand: (name: string) => {
         commands.push(name);
         return true;
@@ -292,6 +292,7 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     );
     return {
       win,
+      doc,
       bridge,
       posted,
       commands,
@@ -408,7 +409,49 @@ describe("KEY_BRIDGE_SOURCE: forwarding only keys the page did not take", () => 
     expect(keydowns(t.posted)).toEqual([]);
   });
 
-  it("select-all, undo and redo stay native: not prevented, not forwarded", async () => {
+  it("selects the active text field for Cmd/Ctrl+A without forwarding", async () => {
+    for (const tagName of ["INPUT", "TEXTAREA"]) {
+      for (const modifier of ["metaKey", "ctrlKey"]) {
+        const t = install();
+        const select = mock(() => {});
+        t.doc.activeElement = { tagName, selectionStart: 0, select };
+        expect(t.press({ key: "a", [modifier]: true }).defaultPrevented).toBe(true);
+        expect(select).toHaveBeenCalledTimes(1);
+        await afterDispatch();
+        expect(t.posted).toEqual([]);
+      }
+    }
+  });
+
+  it("does not override composition or a select-all event already taken by the page", async () => {
+    const t = install();
+    const select = mock(() => {});
+    t.doc.activeElement = { tagName: "TEXTAREA", selectionStart: 0, select };
+    const composing = keydown({ key: "a", metaKey: true, isComposing: true });
+    t.win.dispatchEvent(composing);
+    expect(composing.defaultPrevented).toBe(false);
+    const cancelled = keydown({ key: "a", ctrlKey: true });
+    cancelled.preventDefault();
+    t.win.dispatchEvent(cancelled);
+    expect(select).not.toHaveBeenCalled();
+    await afterDispatch();
+    expect(t.posted).toEqual([]);
+  });
+
+  it("leaves unsupported inputs and modified select-all native", async () => {
+    const t = install();
+    const select = mock(() => {});
+    t.doc.activeElement = { tagName: "INPUT", selectionStart: null, select };
+    expect(t.press({ key: "a", metaKey: true }).defaultPrevented).toBe(false);
+    t.doc.activeElement = { tagName: "TEXTAREA", selectionStart: 0, select };
+    expect(t.press({ key: "a", metaKey: true, shiftKey: true }).defaultPrevented).toBe(false);
+    expect(t.press({ key: "a", ctrlKey: true, altKey: true }).defaultPrevented).toBe(false);
+    expect(select).not.toHaveBeenCalled();
+    await afterDispatch();
+    expect(keydowns(t.posted)).toHaveLength(1); // Ctrl+Alt+A follows normal key routing.
+  });
+
+  it("page select-all, undo and redo stay native: not prevented, not forwarded", async () => {
     const t = install();
     for (const key of ["a", "z", "y"]) {
       expect(t.press({ key, metaKey: true }).defaultPrevented).toBe(false);

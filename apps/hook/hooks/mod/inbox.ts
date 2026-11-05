@@ -49,24 +49,33 @@
  * for reviews); a delivery is also claimed once per reply (mkdir), so a lease
  * race can never deliver twice. A reply another process claimed and never
  * delivered (it quit while the turn waited) is said once, with a toast.
+ *
+ * Ask AI: a poll answer can say a question waits on this session, and only
+ * then does this link start a client on the session's Ask AI bridge
+ * (`startAskClient`; the Inbox's setting off means none ever waits).
  */
 
+import { bridgeBaseUrl, createBridge, type BridgeHandle } from './bridge'
 import type { Host, HttpResult, LoadedPluginInfo } from './host'
 import {
+  INBOX_ASK_POLL_FIELD,
   INBOX_BRIDGE_EVENT_PATH,
   INBOX_BRIDGE_POLL_PATH,
+  inboxAskBridgeBase,
   inboxReminderFor,
   inboxToolCall,
   inboxToolCallParams,
   inboxToolResultText,
   INBOX_SEND_NOW_POLL_FIELD,
   INBOX_TAGS_POLL_FIELD,
+  INBOX_SESSION_LABEL_INPUT_MAX,
   inboxSentNowFollowUpText,
   inboxHealthPeeks,
   inboxSessionThreadsParams,
   inboxSessionThreadsText,
   inboxWakeText,
   mcpAnswerOfResponse,
+  parseInboxAskWaits,
   parseInboxBridgeCommands,
   parseInboxRegistry,
   parseInboxToolList,
@@ -76,6 +85,7 @@ import {
 } from './inbox-contract'
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { privateDirArgv } from './launch'
+import type { TurnTracker } from './turns'
 
 /**
  * The first Claude Code whose published hooks-module API documents
@@ -210,6 +220,36 @@ export const INBOX_SESSION_THREADS_TIMEOUT_MS = 1_500
  */
 export const INBOX_PROJECT_FOLLOWS_SLASH_CD = true
 
+/**
+ * The variable the mod exports beside PLANNOTATOR_SESSION_TAG: the folder
+ * this session files under in the Inbox (`sessionProjectFolder`), as
+ * `claude-code:<session id>:<folder>`. A `plannotator inbox call` or
+ * `plannotator card` the session runs files there when it names no project,
+ * so a shell `cd` never splits one session into two projects
+ * (`inboxSessionProjectFromEnv` in apps/hook/server/inbox-mcp-shim.ts reads
+ * it, only for a call filed as this very session). `$.env.set` needs the
+ * name spelled as a literal in register.ts.
+ */
+export const INBOX_SESSION_PROJECT_ENV = 'PLANNOTATOR_SESSION_PROJECT'
+
+/** PLANNOTATOR_SESSION_PROJECT's value for this session and folder. */
+export function inboxSessionProjectEnvValue(sessionId: string, folder: string): string {
+  return `${INBOX_HOST}:${sessionId}:${folder}`
+}
+
+/**
+ * The folder a session files under (`InboxLink.projectFolder`'s rule): `live`
+ * (the root now, while INBOX_PROJECT_FOLLOWS_SLASH_CD), else `first` (the root
+ * first seen), each only while it exists; else the working folder. Null when
+ * nothing answers with an absolute path.
+ */
+export async function sessionProjectFolder(host: Host, live: string | null, first: string | null, cwd: string | null): Promise<string | null> {
+  const usable = async (folder: string | null): Promise<boolean> => !!folder && folder.startsWith('/') && (await host.exists(folder).catch(() => false))
+  if (live && (await usable(live))) return live
+  if (first && (await usable(first))) return first
+  return cwd && cwd.startsWith('/') ? cwd : null
+}
+
 /** The Inbox tools whose relative paths resolve against the folder the agent works in (INBOX_WORKING_FOLDER_META_KEY). */
 const INBOX_WORKING_FOLDER_ACTIONS: ReadonlySet<string> = new Set(['send_message', 'submit_guide'])
 
@@ -264,12 +304,6 @@ export const STORE_INBOX_TOOLS = 'inboxTools'
 export const INBOX_POLL_WAIT_MS = 20_000
 /** After a failed poll: 5 s, doubling to 60 s while the Inbox stays away, never giving up. */
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
-/**
- * wait_for_reply's longest hold through this tool: `$.http.fetch` gives up at
- * 30 s, so the call asks the Inbox for at most 25 s (the Inbox's own default
- * is 50 s, for MCP hosts with a 60 s tool timeout).
- */
-export const INBOX_WAIT_MAX_SECONDS = 25
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
 /** How often the lease is renewed or re-read. */
@@ -296,6 +330,275 @@ export function inboxRegistryPathOf(dataDir: string): string {
 /** This session's inbox folder in the mod's data: the lease and the delivery claims. */
 export function inboxSessionDirOf(dataDir: string, sessionId: string): string {
   return `${dataDir}/claude-code-mod/${sessionId}/inbox`
+}
+
+/**
+ * `$.store` key: what each session was named, for the Inbox's To picker. Kept in
+ * the store, by session id, because the engine tells a plugin a session's name
+ * nowhere else: no `$` call reads it and no module event carries it, and a
+ * `--resume` restores it for the engine alone. Kept to the newest
+ * INBOX_SESSION_NAMES_MAX.
+ */
+export const STORE_INBOX_SESSION_NAMES = 'inboxSessionNames'
+export const INBOX_SESSION_NAMES_MAX = 500
+
+/** The slash commands that change a session's name. `command.run` resolves their aliases (`/name`, `/reset`, `/new`). */
+export const INBOX_SESSION_NAME_COMMANDS = ['clear', 'rename'] as const
+
+export type InboxSessionNames = Record<string, { name: string; at: number }>
+
+/** The stored record: session id → its name and when it was set, anything else dropped. */
+export function readSessionNames(value: unknown): InboxSessionNames {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {}
+  const out: InboxSessionNames = {}
+  for (const [id, entry] of Object.entries(value as Record<string, unknown>)) {
+    const { name, at } = (entry ?? {}) as { name?: unknown; at?: unknown }
+    if (id && name && typeof name === 'string' && typeof at === 'number' && Number.isFinite(at)) out[id] = { name, at }
+  }
+  return out
+}
+
+function withSessionName(record: InboxSessionNames, sessionId: string, given: string, now: number): InboxSessionNames {
+  // The server reads no further, so a longer name only grows the store and every poll.
+  const name = Array.from(given.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trimEnd()
+  if ((record[sessionId]?.name ?? '') === name) return record
+  const { [sessionId]: _old, ...rest } = record
+  const entries = Object.entries(name ? { ...rest, [sessionId]: { name, at: now } } : rest).sort((a, b) => b[1].at - a[1].at)
+  return Object.fromEntries(entries.slice(0, INBOX_SESSION_NAMES_MAX))
+}
+
+/**
+ * The record after a `/rename` or `/clear` ran. `before` and `after` are the
+ * session's id either side of it, since `/clear` moves it. The engine's rules:
+ * - `/rename <name>` names the session. A bare `/rename` also names it, with a
+ *   name the model makes up, which reaches no hook and no answer here: the session
+ *   then reads as unnamed, since the name it had is no longer its name.
+ * - `/clear` writes the name onto the new session id, so the name goes with it.
+ * - `/clear <name>` names the session it left, and the new one has no name.
+ */
+export function sessionNamesAfterCommand(
+  record: InboxSessionNames,
+  run: { command: unknown; args: unknown; before: string; after: string },
+  now: number,
+): InboxSessionNames {
+  const args = typeof run.args === 'string' ? run.args.trim() : ''
+  if (run.command === 'rename') return withSessionName(record, run.after, args, now)
+  // A `/clear` that left the session where it was did nothing to its name.
+  if (run.command !== 'clear' || run.before === run.after) return record
+  if (args) return withSessionName(record, run.before, args, now)
+  const carried = record[run.before]?.name
+  return carried ? withSessionName(record, run.after, carried, now) : record
+}
+
+/**
+ * The session's title as Claude Code itself shows it: the latest
+ * `{"type":"custom-title","customTitle":…}` line of its transcript. `/rename`
+ * writes one, and so do `claude --name`, a rename from a phone or the resume
+ * picker, and a hook or tool that appends one (#2450). The engine gives a plugin
+ * no transcript path, so it is worked out from Claude Code's own layout
+ * (`claudeTranscriptPaths`). Because the session's own model can append such a
+ * line too, the label it gives is display only; the server refuses one that
+ * reads as "You".
+ *
+ * Cheap on purpose, since every poll asks: a stat, and nothing more while the
+ * file has not changed size. When it did, one `/bin/sh` reads only the bytes
+ * added since the last read (the first read, and any read past that many new
+ * bytes: the file's last TRANSCRIPT_TITLE_FIRST_READ_BYTES, where Claude Code
+ * keeps a resumed session's title), and `awk` hands back only the title lines,
+ * so a long transcript is never copied into the module. A last line with no
+ * newline yet is read again once the file grows, never on every poll. Another
+ * inode under the path is a rewrite: its end is read as new. A read that fails
+ * or times out waits longer each time, and a region that fails
+ * TRANSCRIPT_TITLE_FAILURES_MAX times is skipped. No `/bin/sh` (Windows), no
+ * file found, or a read that fails: the last title, else null, and the
+ * `/rename` store answers.
+ */
+export const TRANSCRIPT_TITLE_FIRST_READ_BYTES = 4 * 1024 * 1024
+/** How long a transcript that was not found waits before it is looked for again. */
+export const TRANSCRIPT_TITLE_LOCATE_RETRY_MS = 60_000
+/** The longest title line read: a real one is short, and anything longer is cut and refused. */
+const TRANSCRIPT_TITLE_LINE_MAX = 4_096
+/** After a failed or timed-out read, the first wait before the next try; it doubles up to the most. */
+export const TRANSCRIPT_TITLE_RETRY_MS = 5_000
+export const TRANSCRIPT_TITLE_RETRY_MAX_MS = 5 * 60_000
+/** Failed reads in a row of one region before it is skipped, so a region that always times out is not tried forever. */
+export const TRANSCRIPT_TITLE_FAILURES_MAX = 3
+/**
+ * `$1` the 1-based byte to start at, `$2` the file, `$3` how many bytes:
+ * `id:<inode>` (`ls -di`, on macOS and Linux alike), each title line (the
+ * last few), then `end:<bytes counted>:<last line's bytes>`. `awk` in the C
+ * locale counts bytes on every platform. A title's quotes are bare only in a
+ * real record: inside any other line's string they are escaped
+ * (`\"type\":…`), so the pattern finds no message text.
+ */
+export const TRANSCRIPT_TITLE_SCRIPT = `ls -di -- "$2" 2>/dev/null | LC_ALL=C awk 'NR == 1 { print "id:" $1 }'; tail -c +"$1" -- "$2" 2>/dev/null | head -c "$3" | LC_ALL=C awk 'index($0, "\\"type\\":\\"custom-title\\"") { print substr($0, 1, ${TRANSCRIPT_TITLE_LINE_MAX}) } { o += length($0) + 1; last = length($0) } END { print "end:" o ":" last }' | tail -n 20; exit 0`
+
+/** The file's identity in TRANSCRIPT_TITLE_SCRIPT's output (its inode), or null when the output has none. */
+export function transcriptFileIdOf(output: string): string | null {
+  return /^id:(\d+)$/m.exec(output)?.[1] ?? null
+}
+
+/** Claude Code's folder name for a project: every character but a letter or digit is `-`. Null past 200 (Claude Code adds a hash there). */
+export function claudeProjectSlug(folder: string): string | null {
+  const slug = folder.replace(/[^a-zA-Z0-9]/g, '-')
+  return slug && slug.length <= 200 ? slug : null
+}
+
+/** Where Claude Code keeps `sessionId`'s transcript for each folder it may have started in, first first. */
+export function claudeTranscriptPaths(configDir: string, folders: readonly string[], sessionId: string): string[] {
+  if (!configDir || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(sessionId)) return []
+  const base = configDir.replace(/\/+$/, '')
+  const out: string[] = []
+  for (const folder of folders) {
+    const slug = folder ? claudeProjectSlug(folder) : null
+    const path = slug ? `${base}/projects/${slug}/${sessionId}.jsonl` : null
+    if (path && !out.includes(path)) out.push(path)
+  }
+  return out
+}
+
+/**
+ * The newest title in TRANSCRIPT_TITLE_SCRIPT's output for a read from `start`
+ * over `length` bytes, and where the next read starts: past the region, or at
+ * its last line when the region ended inside it (Claude Code was still writing
+ * it), so that line is read again whole. Null when the output has no `end:`
+ * (the read did not run through). `title`: undefined when the region had none.
+ */
+export function transcriptTitleOf(output: string, sessionId: string, start: number, length: number): { title: string | undefined; next: number } | null {
+  let title: string | undefined
+  let end: { counted: number; last: number } | null = null
+  for (const line of output.split('\n')) {
+    const counts = /^end:(\d*):(\d*)$/.exec(line)
+    if (counts) {
+      end = { counted: Number(counts[1] || 0), last: Number(counts[2] || 0) }
+      continue
+    }
+    let record: { type?: unknown; customTitle?: unknown; sessionId?: unknown } | null = null
+    try {
+      const parsed = JSON.parse(line)
+      record = parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : null
+    } catch {
+      // Cut short (the region's end, or the line cap): never a title.
+      continue
+    }
+    if (record?.type !== 'custom-title' || typeof record.customTitle !== 'string') continue
+    if (typeof record.sessionId === 'string' && record.sessionId !== sessionId) continue
+    title = Array.from(record.customTitle.slice(0, INBOX_SESSION_LABEL_INPUT_MAX * 2)).slice(0, INBOX_SESSION_LABEL_INPUT_MAX).join('').trim()
+  }
+  if (!end) return null
+  // Every line but the last ended with a newline; one more byte counted than read says the last did not.
+  const cut = end.counted > length ? end.last : 0
+  return { title, next: start + length - cut }
+}
+
+export class TranscriptTitle {
+  private path: string | null = null
+  private lookedAt = Number.NEGATIVE_INFINITY
+  /** Nothing read from this file yet: the first read takes its end only. */
+  private fresh = true
+  /** Where the next read starts. */
+  private offset = 0
+  /** The size last read through (a partial last line included: it is read again once the file grows); -1: read. */
+  private readThrough = -1
+  /** The file's inode at the last read: another one is a rewrite (a new file under the same name). */
+  private fileId: string | null = null
+  /** Failed reads in a row of this region (reset when it is skipped), of any region (reset only by a read that works), and when the next may run. */
+  private failures = 0
+  private streak = 0
+  private retryAt = Number.NEGATIVE_INFINITY
+  private title: string | null = null
+
+  constructor(
+    private readonly host: Pick<Host, 'fileSize' | 'run' | 'now'>,
+    private readonly sessionId: string,
+    /** Where the transcript may be (`claudeTranscriptPaths`), asked only while it is not found. */
+    private readonly candidates: () => Promise<readonly string[]>,
+  ) {}
+
+  /** The latest title (`''`: the transcript says none), or null when the transcript says nothing or cannot be read. */
+  async read(): Promise<string | null> {
+    const path = await this.locate()
+    if (!path) return this.title
+    const size = await this.host.fileSize(path).catch(() => null)
+    if (size === null) {
+      // Gone (moved, deleted): looked for again after the wait.
+      this.path = null
+      return this.title
+    }
+    if (size === this.readThrough) return this.title
+    // A read failed (a timeout, no shell): wait before the next, longer each time.
+    if ((await this.host.now()) < this.retryAt) return this.title
+    return this.readFrom(path, size, true)
+  }
+
+  private async readFrom(path: string, size: number, again: boolean): Promise<string | null> {
+    // A file that shrank was rewritten: read its end again, as if new. One that grew past a first read's worth is
+    // read from its end too, so no read is ever longer than the first.
+    if (size < this.offset || size - this.offset > TRANSCRIPT_TITLE_FIRST_READ_BYTES) this.fresh = true
+    const start = this.fresh ? Math.max(0, size - TRANSCRIPT_TITLE_FIRST_READ_BYTES) : this.offset
+    const length = size - start
+    const result = await this.host.run(['/bin/sh', '-c', TRANSCRIPT_TITLE_SCRIPT, 'sh', String(start + 1), path, String(length)], { timeoutMs: 5_000 }).catch(() => null)
+    const found = result && result.exitCode === 0 ? transcriptTitleOf(result.stdout, this.sessionId, start, length) : null
+    if (!found) return this.failed(size)
+    const id = transcriptFileIdOf(result!.stdout)
+    const rewritten = id !== null && this.fileId !== null && id !== this.fileId
+    if (id !== null) this.fileId = id
+    if (rewritten) {
+      // Another file under the same name (rewritten, at any size): the old file's title is not its title. Read its
+      // end as new, once, when this read was not that already.
+      this.title = null
+      if (!this.fresh) {
+        this.fresh = true
+        return again ? this.readFrom(path, size, false) : this.title
+      }
+    }
+    if (found.title !== undefined) this.title = found.title
+    this.fresh = false
+    this.offset = found.next
+    // Read through: a last line with no newline yet starts the next read (`offset`), but only once the file grows.
+    this.readThrough = size
+    this.failures = 0
+    this.streak = 0
+    this.retryAt = Number.NEGATIVE_INFINITY
+    return this.title
+  }
+
+  /**
+   * A read that failed keeps the last title. The wait doubles with every failure in a row (`streak`, which only a
+   * read that works resets) up to TRANSCRIPT_TITLE_RETRY_MAX_MS, and a region that fails
+   * TRANSCRIPT_TITLE_FAILURES_MAX times in a row (`failures`, reset when it is skipped) is skipped.
+   */
+  private async failed(size: number): Promise<string | null> {
+    this.failures += 1
+    this.streak += 1
+    if (this.failures >= TRANSCRIPT_TITLE_FAILURES_MAX) {
+      this.offset = size
+      this.fresh = false
+      this.readThrough = size
+      this.failures = 0
+    }
+    const wait = Math.min(TRANSCRIPT_TITLE_RETRY_MAX_MS, TRANSCRIPT_TITLE_RETRY_MS * 2 ** Math.min(30, this.streak - 1))
+    this.retryAt = (await this.host.now()) + wait
+    return this.title
+  }
+
+  private async locate(): Promise<string | null> {
+    if (this.path) return this.path
+    const now = await this.host.now()
+    if (now - this.lookedAt < TRANSCRIPT_TITLE_LOCATE_RETRY_MS) return null
+    this.lookedAt = now
+    for (const path of await this.candidates().catch(() => [] as string[])) {
+      if ((await this.host.fileSize(path).catch(() => null)) === null) continue
+      this.fresh = true
+      this.offset = 0
+      this.readThrough = -1
+      this.fileId = null
+      this.failures = 0
+      this.path = path
+      return path
+    }
+    return null
+  }
 }
 
 /** Exit codes of `INBOX_CLAIM_SCRIPT`. */
@@ -451,8 +754,18 @@ export interface InboxLinkOptions {
    * INBOX_PROJECT_FOLLOWS_SLASH_CD.
    */
   root?: () => Promise<string>
+  /**
+   * The name the person gave the session (`STORE_INBOX_SESSION_NAMES`), read
+   * for every poll, so a `/rename` reaches the Inbox with the next one. `''`
+   * says it has none, which clears it. A rejection says it is not known: the poll
+   * repeats the last word, since sending nothing would clear the label too. Set
+   * by the host, never by the model: it is no tool argument. Absent: no `label`.
+   */
+  label?: () => string | Promise<string>
   /** Names this process in the lease and the claims. */
   instanceId: string
+  /** The session's turns, which a question from Ask AI runs in. Absent: the connection never offers to answer one. */
+  turns?: TurnTracker
 }
 
 export class InboxLink {
@@ -494,6 +807,8 @@ export class InboxLink {
   private delivering = false
   /** When this link started (the session, near enough), and the turn state last told the Inbox (step 8). */
   private startedAt = 0
+  /** The last title that was known; what a poll repeats when it is not. */
+  private lastLabel = ''
   private busy: boolean | null = null
   private idleSince = 0
   /**
@@ -515,6 +830,8 @@ export class InboxLink {
   private loaded: Promise<{ plugin: LoadedPluginInfo | null; engine: string | null }> | null = null
   /** Where the session started, read once (`folderNow`). */
   private folder: Promise<string | null> | null = null
+  /** The Ask AI client, from a poll saying a question waits until it stops (`startAskClient`). */
+  private askClient: BridgeHandle | null = null
 
   constructor(private readonly options: InboxLinkOptions) {
     this.host = options.host
@@ -618,10 +935,6 @@ export class InboxLink {
       if (Array.isArray(attachments)) {
         call.arguments.attachments = attachments.map((path) => (typeof path === 'string' && path !== '' && !path.startsWith('/') ? `${cwd}/${path}` : path))
       }
-    }
-    if (call.name === 'wait_for_reply') {
-      const asked = typeof call.arguments.timeout_seconds === 'number' ? call.arguments.timeout_seconds : INBOX_WAIT_MAX_SECONDS
-      call.arguments.timeout_seconds = Math.max(1, Math.min(asked, INBOX_WAIT_MAX_SECONDS))
     }
     const running = await this.ensureRunning()
     if ('error' in running) return { deny: running.error }
@@ -752,14 +1065,10 @@ export class InboxLink {
    * folder. Null when nothing answers with an absolute path.
    */
   async projectFolder(): Promise<string | null> {
-    const usable = async (folder: string | null): Promise<boolean> =>
-      !!folder && folder.startsWith('/') && (await this.host.exists(folder).catch(() => false))
     const live = INBOX_PROJECT_FOLLOWS_SLASH_CD && this.options.root ? await this.options.root().catch(() => null) : null
-    if (live && (await usable(live))) return live
     const first = await this.folderNow()
-    if (first && (await usable(first))) return first
     const cwd = this.options.cwd ? await this.options.cwd().catch(() => null) : null
-    return cwd && cwd.startsWith('/') ? cwd : null
+    return sessionProjectFolder(this.host, live, first, cwd)
   }
 
   /** Where the session started, asked once (the first answer stands; a later /cd, host directory change or worktree move moves `$.session.root()`). */
@@ -836,6 +1145,17 @@ export class InboxLink {
       .catch(() => null)
   }
 
+  /** The name this poll sends: the host's word, or the last one when it cannot tell. Null: a link with no name source. */
+  private async labelNow(): Promise<string | null> {
+    if (!this.options.label) return null
+    try {
+      this.lastLabel = await this.options.label()
+    } catch {
+      // Not known now: the last word stands.
+    }
+    return this.lastLabel
+  }
+
   /**
    * The replies and messages the Inbox has for this session now (waitMs 0),
    * or null when it did not answer. The poll says where the session works and
@@ -846,9 +1166,12 @@ export class InboxLink {
     const project = await this.projectFolder()
     const loaded = await this.loadedNow()
     const folder = await this.folderNow()
+    const label = await this.labelNow()
     const response = await this.bridge(INBOX_BRIDGE_POLL_PATH, {
       waitMs,
       ...(project ? { project_path: project } : {}),
+      // The session's title (additive): the To picker's name for it; empty clears it.
+      ...(label === null ? {} : { label }),
       ...(this.startedAt ? { started_at: this.startedAt } : {}),
       ...(this.busy === null ? {} : { busy: this.busy, idle_since: this.idleSince }),
       // Send now: this engine can put a reply into a running turn (`$.session.append`).
@@ -859,8 +1182,47 @@ export class InboxLink {
       ...(loaded.plugin ? { plugin: loaded.plugin } : {}),
       ...(loaded.engine ? { engine: loaded.engine } : {}),
       ...(folder ? { session_folder: folder } : {}),
+      // Ask AI: a question for this session can run here, and `ask_waits` will be read.
+      ...(this.options.turns ? { [INBOX_ASK_POLL_FIELD]: true } : {}),
     })
-    return response && response.status === 200 ? parseInboxBridgeCommands(response.text) : null
+    if (!response || response.status !== 200) return null
+    if (parseInboxAskWaits(response.text)) void this.startAskClient()
+    return parseInboxBridgeCommands(response.text)
+  }
+
+  /**
+   * A question from Ask AI waits on this session: the same client as a review
+   * server's "Ask this session", on the Inbox's own bridge for the session. It
+   * runs in the lease holder, the only process that polls, and stays while its
+   * process has a question running, so a lease move does not strand the answer.
+   */
+  private async startAskClient(): Promise<void> {
+    const { turns } = this.options
+    if (!turns) return
+    const registry = await this.registry()
+    // After the read: two polls can answer together, and the lease or the session can move.
+    if (!registry || this.askClient || this.disposed || !this.leader) return
+    const client = createBridge({
+      host: this.host,
+      baseUrl: `${bridgeBaseUrl(registry.port)}${inboxAskBridgeBase(this.options.sessionId)}`,
+      token: registry.token,
+      turns,
+      isLive: () => !this.disposed && (this.leader || turns.askInFlight),
+    })
+    this.askClient = client
+    this.host.debug('inbox: a question waits on this session; Ask AI client started')
+    void client.run().then(async (end) => {
+      this.host.debug(`inbox: Ask AI client stopped (${end.reason})`)
+      // This process let go: the next question makes a new bridge, and the Inbox
+      // tells the lease holder. Never when another client polls this bridge now.
+      if (end.reason === 'ended' && end.connected && !end.superseded) await client.leave()
+      if (this.askClient === client) this.askClient = null
+    })
+  }
+
+  /** A turn started or ended: the Ask AI client says so now, not at its next poll. */
+  pushAskStatus(): void {
+    this.askClient?.pushStatus()
   }
 
   private async poll(): Promise<void> {

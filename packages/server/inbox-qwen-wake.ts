@@ -271,8 +271,8 @@ export function createInboxQwenWake(options: {
   dataDir: string;
   /** The wake command for an item and the session it goes to (the bridge's `replyCommand`). */
   commandOf: (item: InboxMessage, session: string) => InboxReplyCommand;
-  /** The session holds a wait_for_reply open now that returns items of this thread: those are not sent as well. */
-  waitingOverMcp?: (session: string, threadId: string) => boolean;
+  /** An item not to hand at all (a steps-only Tidy wake once steps are off: the server withdraws it). */
+  skip?: (item: InboxMessage, session: string) => boolean;
   now?: () => number;
   sendTimeoutMs?: number;
   receiptTimeoutMs?: number;
@@ -764,11 +764,10 @@ export function createInboxQwenWake(options: {
     let waitsForComeback = false;
     for (const [session, items] of pending) {
       for (const item of items) {
-        if (!wakesItem(item, session)) continue;
+        if (!wakesItem(item, session) || options.skip?.(item, session)) continue;
         const key = keyOf(item.id, session);
         pendingKeys.add(key);
         if (claims.has(key) || refused.has(session)) continue;
-        if (options.waitingOverMcp?.(session, item.thread_id)) continue;
         const record = ended.has(session) ? null : recordOf(session);
         if (!record) {
           waitsForComeback = true;

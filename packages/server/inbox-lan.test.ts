@@ -220,6 +220,10 @@ describe("Reach from this Wi-Fi, on the binary", () => {
       ["GET", "/api/inbox/devices"],
       ["POST", "/api/inbox/tailnet"],
       ["POST", "/api/inbox/lan"],
+      ["POST", "/api/inbox/update"],
+      ["GET", "/api/inbox/agents"],
+      ["POST", "/api/inbox/cards/marks"],
+      ["POST", "/api/inbox/voice/key"],
       ["GET", "/api/inbox/attachments/att_x"],
       // Encoded and dotted paths that a lax router could resolve outside the door.
       ["GET", "/api/inbox/device/../threads"],
@@ -233,15 +237,16 @@ describe("Reach from this Wi-Fi, on the binary", () => {
     const seen: string[] = [];
     for (const host of hosts) {
       for (const [method, path] of outside) {
-        for (const headers of [{ Host: host }, { Host: host, ...auth }, { Host: host, ...auth, "X-Forwarded-Host": "localhost" }]) {
+        // A forged Tailscale login too: it counts only on the tailnet listener, so here it opens nothing.
+        for (const headers of [{ Host: host }, { Host: host, ...auth }, { Host: host, ...auth, "X-Forwarded-Host": "localhost" }, { Host: host, ...auth, "Tailscale-User-Login": "owner@example.com" }]) {
           const answer = await phone(path, { method, headers, body: method === "POST" ? {} : undefined });
           seen.push(`${host} ${method} ${path} ${answer.status} ${JSON.parse(answer.text).code}`);
           expect([host, path, answer.status, JSON.parse(answer.text).code]).toEqual([host, path, 404, "device_route_not_found"]);
         }
       }
       // A door path that is not on the allowlist, with a valid token: the door's own 404.
-      for (const path of ["/api/inbox/device/..%2fsettings", "/api/inbox/device/settings", "/api/inbox/device/restart", "/api/inbox/device/pairing", "/api/inbox/device/devices", "/api/inbox/device/bridge/poll"]) {
-        const answer = await phone(path, { method: "POST", headers: { Host: host, ...auth }, body: { idempotency_key: "spoof" } });
+      for (const path of ["/api/inbox/device/..%2fsettings", "/api/inbox/device/settings", "/api/inbox/device/restart", "/api/inbox/device/pairing", "/api/inbox/device/devices", "/api/inbox/device/bridge/poll", "/api/inbox/device/update", "/api/inbox/device/agents", "/api/inbox/device/voice/key"]) {
+        const answer = await phone(path, { method: "POST", headers: { Host: host, ...auth, "Tailscale-User-Login": "owner@example.com" }, body: { idempotency_key: "spoof" } });
         expect([path, answer.status, JSON.parse(answer.text).code]).toEqual([path, 404, "device_route_not_found"]);
       }
       // An encoded id on an allowed route reaches only that route's handler, which finds no such thread.

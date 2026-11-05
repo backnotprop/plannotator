@@ -31,21 +31,38 @@ export function useCopyBoardPrompt(mcpCommand: readonly string[] | null | undefi
 /**
  * The Board's first-visit dialog (approval "inbox-board", intro amendment, as
  * mocked): a small animated board (a card walks through the stages; under
- * reduced motion it rests in Your look), "Your Board", one line, the quiet
+ * reduced motion it rests in In review), "Your Board", one line, the quiet
  * line about the prompt, Copy prompt (check and "Copied" for 2 s; "Not now"
  * becomes "Done") and Not now. The Inbox's Modal shell, as the sound dialog.
  * Shown once per machine; the header's "?" opens it again.
+ *
+ * `onTurnOn`: the reveal's offer (the owner, 2026-11-04: reveals are opt-in), shown while the Board is still off. The
+ * same picture, title and first line, without the prompt line, and "Not now" and "Turn it on" in place of Copy prompt:
+ * Turn it on is the only way this dialog turns the Board on; Not now, Escape and a click outside leave it off.
  */
-export function BoardIntro({ mcpCommand, phone, onClose }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void }) {
+export function BoardIntro({ mcpCommand, phone, onClose, onTurnOn }: { mcpCommand: readonly string[] | null | undefined; phone: boolean; onClose: () => void; onTurnOn?: () => void }) {
   const { state, copiedOnce, copy } = useCopyBoardPrompt(mcpCommand);
+  if (onTurnOn) {
+    return (
+      <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
+        <BoardIntroArt />
+        <BoardIntroText prompt={false} />
+        <div className="ib-bi-acts">
+          <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
+            Not now
+          </button>
+          <span className="ib-bsp" />
+          <button type="button" className="ib-btn ib-pri ib-bi-copy" onClick={onTurnOn} data-board-intro-on="">
+            Turn it on
+          </button>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal labelledBy="ib-bi-title" describedBy="ib-bi-desc" testId="board-intro" onClose={onClose} ownKeys className={`ib-bi${phone ? ' ib-bi-phone' : ''}`}>
       <BoardIntroArt />
-      <div className="ib-bi-text">
-        <h2 id="ib-bi-title">Your Board</h2>
-        <p id="ib-bi-desc">Work in flight, by stage. Agents keep their cards current.</p>
-        <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>
-      </div>
+      <BoardIntroText prompt />
       <div className="ib-bi-acts">
         <button type="button" className="ib-btn ib-ghost" onClick={onClose} data-board-intro-close="">
           {copiedOnce ? 'Done' : 'Not now'}
@@ -63,14 +80,25 @@ export function BoardIntro({ mcpCommand, phone, onClose }: { mcpCommand: readonl
   );
 }
 
+/** The title and lines. `prompt`: the line about Copy prompt, only where that button is (never in the offer). */
+function BoardIntroText({ prompt }: { prompt: boolean }) {
+  return (
+    <div className="ib-bi-text">
+      <h2 id="ib-bi-title">Your Board</h2>
+      <p id="ib-bi-desc">Work in flight, by stage. Agents keep their cards current.</p>
+      {prompt && <p className="ib-bi-q">The prompt asks an agent to add the work it knows about.</p>}
+    </div>
+  );
+}
+
 const LANES: { col: string; cards: { host: string | null; you?: boolean; w: [number, number] }[] }[] = [
   { col: 'backlog', cards: [{ host: null, w: [72, 52] }] },
-  { col: 'designing', cards: [{ host: 'codex', w: [64, 44] }] },
-  { col: 'your_look', cards: [{ host: 'pi', you: true, w: [78, 58] }] },
-  { col: 'building', cards: [{ host: 'opencode', w: [60, 48] }, { host: 'claude-code', w: [70, 40] }] },
-  { col: 'your_review', cards: [{ host: 'codex', you: true, w: [66, 50] }] },
+  { col: 'todo', cards: [{ host: 'codex', w: [64, 44] }] },
+  { col: 'in_progress', cards: [{ host: 'opencode', w: [60, 48] }] },
+  { col: 'in_review', cards: [{ host: 'pi', you: true, w: [78, 58] }, { host: 'codex', you: true, w: [66, 50] }] },
+  { col: 'done', cards: [{ host: 'claude-code', w: [70, 40] }] },
 ];
-const NAMES: Record<string, string> = { backlog: 'Backlog', designing: 'Designing', your_look: 'Your look', building: 'Building', your_review: 'Your review' };
+const NAMES: Record<string, string> = { backlog: 'Backlog', todo: 'Todo', in_progress: 'In progress', in_review: 'In review', done: 'Done' };
 
 /** The picture: a small board, one card walking through its stages. Decoration only (aria-hidden). */
 function BoardIntroArt() {

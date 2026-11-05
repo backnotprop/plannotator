@@ -10,8 +10,12 @@
  * Settings' Colors row picks the palette for the light half and the dark half
  * (useInboxPalettes), the same choices as plan review's Theme tab. Only the
  * part the person changed goes to the server: a mode, or one half's palette.
+ *
+ * Every switch lands in one frame, with no colour fade: @plannotator/ui's
+ * ThemeProvider holds `pn-theme-switching` on <html> while it lands (theme.css).
  */
 
+import { perfInteraction } from './perfMarks';
 import { useCallback } from 'react';
 import { useTheme } from '@plannotator/ui/components/ThemeProvider';
 import { useThemePaletteHalves, type ThemePaletteHalves } from '@plannotator/ui/hooks/useThemePaletteHalves';
@@ -107,18 +111,6 @@ export function resetInboxThemeForTests(): void {
   changedThemeFields.clear();
 }
 
-/**
- * Under reduced motion the switch lands in one frame: the global colour
- * crossfade (theme.css's 150 ms `*` transition) is held off until the new
- * colours are painted. Otherwise it crossfades, as plan review does.
- */
-function landInstantlyIfReducedMotion(): void {
-  if (typeof window === 'undefined' || !window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return;
-  const root = document.documentElement;
-  root.classList.add('ib-theme-instant');
-  requestAnimationFrame(() => requestAnimationFrame(() => root.classList.remove('ib-theme-instant')));
-}
-
 export interface InboxTheme {
   /** The stored choice: light, dark, or system (follow this computer). */
   mode: Mode;
@@ -134,7 +126,7 @@ export function useInboxTheme(): InboxTheme {
   const choose = useCallback(
     (next: Mode) => {
       markChosen('mode');
-      landInstantlyIfReducedMotion();
+      perfInteraction('theme');
       setMode(next);
     },
     [setMode],
@@ -162,7 +154,6 @@ export function useInboxPalettes(): InboxPalettes {
       // A palette that cannot draw this half is refused by the provider, so nothing would be written.
       if (!themeSupportsHalf(id, half)) return;
       markChosen(half);
-      landInstantlyIfReducedMotion();
       assign(half, id);
     },
     [assign],

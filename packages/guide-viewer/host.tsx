@@ -41,11 +41,41 @@ export interface GuideDiffRendererProps {
   /** The focused card is the keyboard/annotation target. */
   isActive: boolean;
   allowScrollChaining: true;
+  /**
+   * Passed only when the guide fits each file's box to its content (GuideView `fitFileHeights`): the renderer reports the
+   * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
+   */
+  onContentHeightChange?: (height: number) => void;
 }
 
 export interface GuideDiffRendererContext {
   file: DiffFile;
   focused: boolean;
+}
+
+/** A comment about the whole guided review, not tied to a line or a file. */
+export interface GuideGlobalComment {
+  id: string;
+  text: string;
+}
+
+/**
+ * A host that takes comments on the review (the Inbox, the review app) passes
+ * its global comments here. The chain draws the "Global comment" button in
+ * the header's actions and the comments under the header, before the first
+ * section; the host owns the composer and where a comment is kept.
+ */
+export interface GuideGlobalComments {
+  comments: readonly GuideGlobalComment[];
+  /**
+   * Open the host's composer for a new global comment, anchored to the
+   * chain's button. Absent: the comments are shown and no button is drawn
+   * (a read-only review).
+   */
+  onAdd?: (anchor: HTMLElement) => void;
+  /** The comment chosen in the list: the host shows it where it lists comments. */
+  onSelect?: (id: string) => void;
+  selectedId?: string | null;
 }
 
 export interface GuideHostValue<P extends object = Record<string, unknown>> {
@@ -80,6 +110,12 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewDiagram?: (diagram: GuideOverviewDiagram) => React.ReactNode | null;
   /**
+   * A picture slot under the title when the guide's overview has no diagram
+   * (the Inbox's code review: "Show me" asks the agent for one). Answering
+   * null (or absent) leaves the guide exactly as it is.
+   */
+  renderOverviewFigure?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
    * edge (the Inbox: its Split | Unified switch on the first card). Called with
    * each card's index (the "Everything else" card's is the number of
@@ -103,12 +139,30 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderSectionFooter?: (index: number) => React.ReactNode | null;
   /**
+   * A section card's file column when the chapter has no files in the diff (a
+   * guide written before the change exists: Shape's Code view lists the files
+   * each step plans). Called with the card's index; answering null (or
+   * absent) shows the usual "No chapter files in the current diff".
+   */
+  renderSectionEmpty?: (index: number) => React.ReactNode | null;
+  /**
    * Draws a guide link the chain cannot follow itself (a `symbol:` link, a
    * `code:` link to a file outside the guide): the VS Code extension asks
    * the language server. Answering null (or absent) shows the link's label
    * as plain text, as before.
    */
   renderLink?: (href: string, label: React.ReactNode, key: string | number) => React.ReactNode | null;
+  /**
+   * Global comments: comments on the whole review, not a line or a file.
+   * Absent (guides.show, the VS Code reader): no button and no list.
+   */
+  globalComments?: GuideGlobalComments;
+  /**
+   * The layout the host's renderer draws, for a content-fit box's first estimate (GuideView `fitFileHeights`):
+   * Split pairs a removed line with an added one on one row. Absent: counted as Unified (an over-estimate in Split,
+   * which the renderer's measured height then corrects).
+   */
+  diffStyle?: 'split' | 'unified';
 }
 
 // The context erases the renderer's extra-prop generic; hosts recover typing at the provider site.

@@ -16,7 +16,7 @@
  * header, which closes the file and brings the list back (focus on its row); a node
  * comment on a Mermaid diagram; the file edited on disk and the changed line,
  * with "Open the version it sent" showing the bytes sent; Send carrying the
- * picks and the annotations, read back by wait_for_reply; a path outside the
+ * picks and the annotations, read back by read_thread; a path outside the
  * project, a symlink retargeted to a directory, `.env` and a request by path
  * each refused; delete thread removing its blobs and the store size falling.
  *
@@ -429,9 +429,9 @@ test('a selection comment on the plan is saved and listed in the reply box chip'
   // The chip inside the reply box lists each annotation with its file, quote and comment.
   await page.getByRole('button', { name: 'Reply', exact: true }).click();
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('2 annotations');
+  await expect(chip).toHaveText('2 comments');
   await chip.click();
-  const pop = page.getByRole('dialog', { name: '2 annotations ride this reply' });
+  const pop = page.getByRole('dialog', { name: '2 comments' });
   await expect(pop.locator('[data-annotation-row]')).toHaveCount(2);
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('retry-plan.md');
   await expect(pop.locator('[data-annotation-row]').first()).toContainText('"retries them one by one"');
@@ -540,6 +540,39 @@ async function replyChipProblems(page: Page, sentenceMayWrap = false): Promise<s
   }, sentenceMayWrap);
 }
 
+/**
+ * A phone's open reply box foot (approval "inbox-reply-foot-phone"): one row inside the box (the paperclip, the line
+ * naming the questions and comments, the mic), no chip, and the line's words on one line. Problems as text.
+ */
+async function phoneFootProblems(page: Page): Promise<string[]> {
+  return page.evaluate(() => {
+    const box = [...document.querySelectorAll<HTMLElement>('section.ib-pane .ib-rbox')].find((b) => b.getClientRects().length > 0);
+    if (!box) return ['no reply box on screen'];
+    const foot = box.querySelector<HTMLElement>('.ib-rfoot[data-reply-foot-phone]');
+    if (!foot) return ['no phone foot in the reply box'];
+    const problems: string[] = [];
+    if (box.querySelector('.ib-rfoot .ib-rchip, .ib-rfoot .ib-skipchip')) problems.push('a chip in the phone foot');
+    const outer = box.getBoundingClientRect();
+    const controls = [...foot.querySelectorAll<HTMLElement>('button, label')].filter((el) => el.getClientRects().length > 0);
+    if (!controls.some((el) => el.matches('[data-foot-summary]'))) problems.push('no line for the questions and comments');
+    const middles = controls.map((el) => {
+      const r = el.getBoundingClientRect();
+      const name = el.getAttribute('aria-label') ?? el.textContent?.trim() ?? '?';
+      if (r.left < outer.left - 0.5 || r.right > outer.right + 0.5) problems.push(`"${name}" leaves the reply box`);
+      return { name, middle: r.top + r.height / 2 };
+    });
+    for (const m of middles) if (Math.abs(m.middle - middles[0]!.middle) > 2) problems.push(`"${m.name}" is not on the row`);
+    const text = foot.querySelector('[data-foot-summary-text]');
+    if (text) {
+      const range = document.createRange();
+      range.selectNodeContents(text);
+      const tops = new Set([...range.getClientRects()].filter((r) => r.width > 0).map((r) => Math.round(r.top)));
+      if (tops.size > 1) problems.push('the line breaks across lines');
+    }
+    return problems;
+  });
+}
+
 /** Wait until the open reply box keeps its place and size for 150 ms: the layout a new window size settles on. */
 async function replyBoxSettled(page: Page): Promise<void> {
   const rect = () =>
@@ -561,14 +594,20 @@ async function replyBoxSettled(page: Page): Promise<void> {
 }
 
 /**
- * The "N annotations ride this reply" list, opened from the reply box's chip:
+ * The list of comments, opened from the reply box's chip:
  * inside the window (its close button too), and every quote and comment
  * wrapped inside the list, the long ones over more than one line.
  */
 async function annotationListProblems(page: Page, shotName?: string): Promise<string[]> {
   const chip = page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]');
-  await chip.click();
-  const list = page.getByRole('dialog', { name: /ride this reply/ });
+  if (await chip.count()) await chip.click();
+  else {
+    // A phone: the foot's line, then (with questions too) its sheet's Review (approval "inbox-reply-foot-phone").
+    await page.locator('section.ib-pane .ib-rfoot [data-foot-summary]').click();
+    const sheet = page.getByRole('dialog', { name: 'Goes with this reply' });
+    if (await sheet.count()) await sheet.getByRole('button', { name: 'Review comments' }).click();
+  }
+  const list = page.getByRole('dialog', { name: /^\d+ comments?$/ });
   await expect(list).toBeVisible();
   const problems = await list.evaluate((pop) => {
     const out: string[] = [];
@@ -593,7 +632,7 @@ async function annotationListProblems(page: Page, shotName?: string): Promise<st
   return problems;
 }
 
-test("the reply box's chips wrap inside it beside a file, stacked and on a phone; no chip breaks its own label", async () => {
+test("the reply box's chips wrap inside it beside a file and stacked, a phone's foot is one row; no chip breaks its own label", async () => {
   const page = world.page;
   // The reply box is open (picks, the skip chip, 3 annotations) from the tests above.
   await page.getByRole('button', { name: 'Open admin-view.html' }).click();
@@ -601,7 +640,7 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
   await pane.getByRole('button', { name: 'Side by side' }).click();
   await expect(pane).not.toHaveClass(/ib-full/);
   // The 440 px thread column beside the file.
-  await expect(page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]')).toHaveText('3 annotations');
+  await expect(page.locator('section.ib-pane .ib-rfoot [data-annotations-chip]')).toHaveText('3 comments');
   expect(await replyChipProblems(page)).toEqual([]);
   expect(await annotationListProblems(page)).toEqual([]);
   await pane.getByRole('button', { name: 'Close admin-view.html' }).click();
@@ -620,7 +659,8 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       // Measure the layout this size settles on, not the frame before the window's own resize reaches React
       // (the docked sidebar still beside a 134 px reply box at 390 px; the narrow-box step below proves that frame).
       await replyBoxSettled(page);
-      expect(await replyChipProblems(page, 'phone' in size), `${size.width} by ${size.height}`).toEqual([]);
+      // A phone draws one row instead of chips: the paperclip, one line, the mic (approval "inbox-reply-foot-phone").
+      expect(await ('phone' in size ? phoneFootProblems(page) : replyChipProblems(page)), `${size.width} by ${size.height}`).toEqual([]);
       expect(await annotationListProblems(page, size.width === 1440 ? '2.4f-annotation-list-inside-the-window' : undefined), `the list at ${size.width} by ${size.height}`).toEqual([]);
       if (size.width === 1440) {
         // The two-pane desktop draws the chips as before: one row, each 26 px tall.
@@ -636,11 +676,11 @@ test("the reply box's chips wrap inside it beside a file, stacked and on a phone
       if (size.width === 390) {
         await page.locator('section.ib-pane .ib-rbox').filter({ visible: true }).scrollIntoViewIfNeeded();
         await shot('2.4e-reply-chips-phone');
-        // A reply box narrower than the skip chip's sentence and its button side by side (on CI, the frame after a
-        // resize to 390 px before the phone layout lands): the chip wraps inside itself, whatever the font's metrics.
+        // A reply box far narrower than its line (on CI, the frame after a resize to 390 px before the layout settles):
+        // the row stays one row inside the box, the line cut short rather than pushed out.
         const narrow = await page.addStyleTag({ content: 'section.ib-pane .ib-rbox { width: 134px !important; }' });
         try {
-          expect(await replyChipProblems(page, true), 'a 134 px reply box').toEqual([]);
+          expect(await phoneFootProblems(page), 'a 134 px reply box').toEqual([]);
           await shot('2.4h-reply-chips-narrow-box');
         } finally {
           await narrow.evaluate((el) => el.remove());
@@ -676,7 +716,7 @@ test('leaving full screen keeps the file beside the thread with ‹ Inbox leadin
   await expect(thread.locator('.ib-phead > *').first()).toHaveAttribute('data-file-back', '');
   // Archive, then ⋯ More (the copy menu, design record "inbox-copy-message"), end the header.
   await expect(thread.locator('.ib-phead > *').last()).toHaveAttribute('data-thread-more', '');
-  await expect(thread.locator('.ib-phead > *').nth(-2)).toHaveAttribute('data-archive', '');
+  await expect(thread.locator('.ib-phead [data-archive]')).toHaveCount(0);
   await expect(thread.getByRole('button', { name: 'Close the thread' })).toHaveCount(0);
   await expect(nav).toBeHidden();
   await expect(page.locator('.ib-listcol')).toHaveCount(0);
@@ -905,7 +945,7 @@ test('the header says the message has files: its count opens the same tiles unde
   }
 });
 
-test('Send carries the picks and then the annotations as feedback; wait_for_reply returns both', async () => {
+test('Send carries the picks and then the annotations as feedback; read_thread returns both', async () => {
   const page = world.page;
   await page.getByRole('radio', { name: /Retry with the same idempotency key/ }).click();
   await page.getByRole('radio', { name: /^Yes/ }).click();
@@ -913,10 +953,10 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   await page.getByRole('button', { name: 'Edit draft' }).click();
   await expect(page.locator('[data-picks-chip]')).toHaveText('2 picks');
   const chip = page.locator('[data-annotations-chip]');
-  await expect(chip).toHaveText('3 annotations');
+  await expect(chip).toHaveText('3 comments');
   await shot('2.6-picks-and-annotations-ride-the-reply');
   await chip.click();
-  const pop = page.getByRole('dialog', { name: '3 annotations ride this reply' });
+  const pop = page.getByRole('dialog', { name: '3 comments' });
   await expect(pop.locator('[data-annotation-row]')).toHaveCount(3);
   await expect(pop.locator('[data-annotation-row]').nth(2)).toContainText('admin-view.html');
   await expect(pop.locator('[data-annotation-row]').nth(2)).toContainText('button');
@@ -932,12 +972,10 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   await page.locator(`[data-attachment-pane="${world.attachments.html}"]`).getByRole('button', { name: 'Write the reply' }).click();
   await expect(page.locator(`[data-attachment-pane="${world.attachments.html}"]`)).not.toHaveClass(/ib-full/);
 
-  const waiting = world.claude.waitForReply(world.threads.billing, 40);
   await page.getByRole('textbox', { name: 'Reply to Claude Code' }).fill('Two notes on the files below.');
   await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  const reply = await waiting;
-  expect(reply.status).toBe('replied');
-  const body = reply.reply.body as string;
+  const reply = await world.claude.nextReply(world.threads.billing, 40);
+  const body = reply.body as string;
   // The picks first ...
   expect(body).toContain('Answered 2 questions.');
   expect(body).toContain('Two notes on the files below.');
@@ -950,9 +988,6 @@ test('Send carries the picks and then the annotations as feedback; wait_for_repl
   expect(body).toContain('## proto/admin-view.html');
   expect(body).toContain('Retry all should ask first. Forty charges at once is a lot to undo.');
   expect(body).toContain('button');
-  // read_thread returns the same reply.
-  const thread = await world.claude.readThread(world.threads.billing);
-  expect(thread.messages.at(-1).body).toBe(body);
   // Sent annotations leave the chip and the tiles.
   await expect(page.locator('.ib-delivered')).toBeVisible();
   const after = (await (await inboxFetch(`/api/inbox/threads/${world.threads.billing}/attachments`)).json()) as { annotations: unknown[] };

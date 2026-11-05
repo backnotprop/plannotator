@@ -317,7 +317,7 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
     const tool = sent.toolDefinitions.find((definition) => definition.name === "plannotator_inbox")!;
     const actions = (tool.parameters as { properties: { action: { enum: string[] } } }).properties.action.enum;
     expect(actions).toContain("send_message");
-    expect(tool.description).toContain("Plannotator Inbox: <subject> (<reply id>)");
+    expect(tool.description).toContain("Plannotator Inbox: <title> (<reply id>)");
     w.proof(`Inbox running (port ${registry(w).port}), switch on for opencode: plannotator_inbox sent with actions ${JSON.stringify(actions)}`);
 
     // The reminder: one fixed system line from the first request, the same bytes on the next one.
@@ -452,10 +452,12 @@ describe.skipIf(!opencodeBin || !tarball)("OpenCode 2 ↔ Plannotator Inbox (the
 
     const wake = await waitFor("the wake turn at the model", () => wakeRequests(m)[0], 60_000);
     const lines = wake.split("\n");
-    expect(lines[0]).toBe(`Plannotator Inbox: ${SUBJECT} (${replyId})`);
+    // A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+    expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`);
+    expect(wake).not.toContain(SUBJECT);
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION);
     const reply = (await thread(w, asked.thread_id)).messages.find((message) => message.id === replyId)!;
-    expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: SUBJECT, body: reply.body }));
+    expect(wake).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }));
     // The closing line: the thread and the tool as this host registered it (plannotator_inbox).
     expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: plannotator_inbox read_thread · how it works: plannotator inbox --help]`);
     const rows = wakeRows(host, session);

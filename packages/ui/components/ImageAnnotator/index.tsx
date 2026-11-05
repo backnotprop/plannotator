@@ -3,6 +3,7 @@ import { Canvas } from './Canvas';
 import { Toolbar } from './Toolbar';
 import { renderStroke } from './utils';
 import type { Point } from './types';
+import { newUuid } from '../../utils/uuid';
 import { useImageAnnotatorShortcuts } from '../../shortcuts';
 import {
   DEFAULT_STROKE_HISTORY_STATE,
@@ -54,7 +55,7 @@ export const ImageAnnotator: React.FC<ImageAnnotatorProps> = ({
   }, [isOpen, initialName]);
 
   const handleStrokeStart = useCallback((point: Point) => {
-    const id = crypto.randomUUID();
+    const id = newUuid();
     setState(s => ({
       ...s,
       currentStroke: {

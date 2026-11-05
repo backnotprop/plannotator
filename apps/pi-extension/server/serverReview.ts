@@ -1,8 +1,8 @@
 import { piUpdateAdvert } from "./update-advert.ts";
+import { schedulePiDailyPing } from "./daily-ping.ts";
 import { createPackageChangesService, MAX_PACKAGE_FILE_BYTES, PACKAGE_CHECKOUT_WAIT_MS, prSettingsSource, REMOTE_PACKAGE_READS, waitAtMost } from "../generated/package-changes-service.ts";
 import { parseDiffToFiles } from "../generated/diff-files.ts";
 import { isSameOriginOrNoOrigin } from "../generated/request-origin.ts";
-import { spawn } from "node:child_process";
 import { likelyAppHtmlEncoding, prewarmAppHtml } from "../generated/app-html.ts";
 import { openPackedApp } from "../generated/packed-app.ts";
 import {
@@ -231,14 +231,13 @@ import {
 import { resolveWorkspaceFilePath } from "../generated/review-workspace-node.ts";
 import {
 	type CodeNavRequest,
-	type CodeNavRuntime,
-	CODE_NAV_MAX_FILE_BYTES,
 	resolveCodeNav,
 	resolveCodeNavHover,
 	validateCodeNavRequest,
 	extractChangedFiles,
 } from "../generated/code-nav.ts";
-import { readFileCapped, readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { readRepoFile, repoFileErrorBody, REPO_FILE_ERROR_STATUS } from "../generated/repo-file.ts";
+import { piCodeNavRuntime } from "./code-nav-runtime.ts";
 import { readRepoWorkingTreeFile } from "../generated/repo-files-node.ts";
 import {
 	createDefaultSemanticDiffRuntime,
@@ -281,44 +280,6 @@ import {
 	vcsSupportsSnapshot,
 } from "./vcs.ts";
 
-const piCodeNavRuntime: CodeNavRuntime = {
-	runCommand(command, args, options) {
-		return new Promise((resolve) => {
-			const proc = spawn(command, args, {
-				cwd: options?.cwd,
-				stdio: ["ignore", "pipe", "pipe"],
-			});
-			let timer: ReturnType<typeof setTimeout> | undefined;
-			if (options?.timeoutMs) {
-				timer = setTimeout(() => proc.kill(), options.timeoutMs);
-			}
-			const stdoutChunks: Buffer[] = [];
-			const stderrChunks: Buffer[] = [];
-			proc.stdout!.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-			proc.stderr!.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
-			proc.on("close", (code: number | null) => {
-				if (timer) clearTimeout(timer);
-				resolve({
-					stdout: Buffer.concat(stdoutChunks).toString("utf-8"),
-					stderr: Buffer.concat(stderrChunks).toString("utf-8"),
-					exitCode: code ?? 1,
-				});
-			});
-			proc.on("error", () => {
-				if (timer) clearTimeout(timer);
-				resolve({ stdout: "", stderr: "command not found", exitCode: 1 });
-			});
-		});
-	},
-
-	async readFile(path, options) {
-		// Capped at what rg searches, non-blocking (repo-file.ts).
-		const read = await readFileCapped(options?.cwd ? resolvePath(options.cwd, path) : path, {
-			maxBytes: CODE_NAV_MAX_FILE_BYTES,
-		});
-		return read.ok ? read.content : null;
-	},
-};
 
 // Review ingestion completion semantics (REVIEW_OUTPUT_FAILED,
 // markJobReviewFailed) now live in the shared agent-jobs module.
@@ -476,6 +437,8 @@ export async function startReviewServer(options: {
 	/** Called when server starts with the URL, remote status, and port */
 	onReady?: (url: string, isRemote: boolean, port: number) => void;
 }): Promise<ReviewServerResult> {
+	// The daily ping (server/daily-ping.ts): in the background, never awaited.
+	schedulePiDailyPing("review");
 	const gitUser = detectGitUser(options.workspace?.root ?? options.gitContext?.cwd);
 	const aiEnabled = resolveAIEnabled();
 	const submitPlatformReview = options.prReviewSubmitter ?? submitPRReview;

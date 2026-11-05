@@ -1,16 +1,20 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { Menu } from '@base-ui/react/menu';
 import {
   INBOX_CARD_COLUMN_LABELS,
+  INBOX_CARD_LIVE_COLUMNS,
   INBOX_CARD_NOTES_MAX,
   INBOX_CARD_REASON_MAX,
   INBOX_SECTIONS,
   inboxAgentName,
+  inboxCardLinkLabel,
+  inboxCardRefIsLinkOnly,
   inboxCardRefsOf,
   type InboxCardColumn,
   type InboxCardHistoryEntry,
   type InboxCardRef,
   type InboxCardWire,
+  type InboxInitiative,
   type InboxListRow,
 } from '@plannotator/core/inbox-types';
 import type { InboxProjectRepo } from '@plannotator/core/inbox-types';
@@ -20,9 +24,16 @@ import { checksText, useRefHoverCards } from '@plannotator/ui/components/RefHove
 import { fullTime, whenTime } from '../format';
 import { AuthorMark, Icon } from '../icons';
 import { Tip } from '../components/Tip';
+import { inboxUrl } from '../inboxUrl';
+import { useInboxTextSize } from '../textSize';
+import { clearCardTop, fitCardTop } from './cardTopFit';
 import { OnceButton } from './OnceButton';
 import { RefMarkIcon } from './RefMark';
+import { CardInitiativeMenu } from './BoardFilter';
 import { cardAge, cardFoot, cardYou, columnChoices, historyWords, refState, sentTo, youThread } from './model';
+import { StepsLists } from '../steps/StepsList';
+import { stepsAsCardHeadSays } from '../steps/model';
+import type { InboxStepsWire } from '@plannotator/core/inbox-types';
 
 export interface CardPanelProps {
   card: InboxCardWire;
@@ -39,12 +50,13 @@ export interface CardPanelProps {
   /** Said with "Ask for an update" when it goes to another session (the card's own agent ended). */
   askNote?: string | null;
   rowOf: (threadId: string) => InboxListRow | null;
+  /** The card's threads' checklists, the latest first (approval "inbox-thread-steps", part 4); none while the switch is off. Read only. */
+  steps?: readonly InboxStepsWire[];
   phone: boolean;
   now: number;
   onClose: () => void;
   onColumn: (column: InboxCardColumn) => void;
   onShip: () => void;
-  onIcebox: () => void;
   onRestore: () => unknown;
   /** `fromMenu`: the reason field was opened by Drop… on the card's right-click menu (and not closed since). */
   onDrop: (reason: string | null, fromMenu: boolean) => void;
@@ -62,6 +74,12 @@ export interface CardPanelProps {
   onOpenThread: (threadId: string) => void;
   /** Create thread (a card with no thread): compose to the card's agent (or a live session in its project); the Send links the thread. */
   onCreateThread: (opener: HTMLElement) => void;
+  /**
+   * The Board's initiatives, deleted ones too (approval "board-initiatives"): the history names them, and
+   * the who line's menu offers the live ones. Absent or none live: no menu (unless the card is in one).
+   */
+  initiatives?: readonly InboxInitiative[];
+  onInitiative?: (initiative: string | null) => void;
 }
 
 /**
@@ -74,9 +92,9 @@ export interface CardPanelProps {
  * agent is working; the "You: …" band; notes; threads (a click opens the
  * thread in the Inbox, with a way back); links (PRs, issues), their live
  * state read when the card opens and never acted on; history, with a quiet
- * "Ask for an update"; and at the foot Ship · Icebox · Drop… (with a reason),
- * Send to an agent for a Backlog card nobody was asked about, Restore in the
- * Icebox or Dropped.
+ * "Ask for an update"; and at the foot Mark done · Cancel… (with a reason),
+ * Send to an agent for a Backlog or Todo card nobody was asked about,
+ * Restore on a Cancelled card.
  */
 export function CardPanel(props: CardPanelProps) {
   const { card, phone } = props;
@@ -112,14 +130,40 @@ export function CardPanel(props: CardPanelProps) {
   const sent = sentTo(card);
   const refs = inboxCardRefsOf(card);
   const agent = card.agent?.kind === 'agent' ? card.agent : null;
+  const liveInitiatives = (props.initiatives ?? []).filter((i) => i.deleted_at === null);
   const notSent = card.column === 'backlog' && !agent && !card.sent;
   // What the person owes, and the thread where they make that call (the lane card's "You: …" goes there too).
   const you = cardYou(card);
   const threadAt = youThread(card, props.rowOf);
-  const live = card.column !== 'dropped' && card.column !== 'icebox' && card.column !== 'shipped';
+  const live = card.column !== 'dropped' && card.column !== 'done';
   const askable = (agent !== null || props.canAsk) && live;
   // Create thread: a card that links no thread, unless it is dropped (nothing is said about a dropped card).
   const creatable = threadAt === null && card.column !== 'dropped' && (agent !== null || props.canAsk);
+  // A phone's top bar gives way so it stays on one line (cardTopFit.ts): the thread action's icon alone, then the way back's chevron alone.
+  const topRef = useRef<HTMLDivElement>(null);
+  const textSize = useInboxTextSize();
+  const topSig = [phone, card.column, sent !== null, threadAt, creatable, you !== null, textSize].join('|');
+  const topFittedFor = useRef('');
+  const fitTopRef = useRef<(force?: boolean) => void>(() => {});
+  fitTopRef.current = (force = false) => {
+    const top = topRef.current;
+    if (!top) return;
+    const key = `${top.getBoundingClientRect().width}|${topSig}`;
+    if (!force && key === topFittedFor.current) return;
+    topFittedFor.current = key;
+    if (phone) fitCardTop(top);
+    else clearCardTop(top);
+  };
+  useLayoutEffect(() => fitTopRef.current());
+  useEffect(() => {
+    const top = topRef.current;
+    if (!top || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(() => fitTopRef.current());
+    observer.observe(top);
+    // Words measured in a fallback font fit differently once the real one loads.
+    void document.fonts?.ready.then(() => fitTopRef.current(true));
+    return () => observer.disconnect();
+  }, []);
   return (
     <aside
       className={`ib-crdp${phone ? ' ib-crdp-phone' : ''}`}
@@ -132,11 +176,11 @@ export function CardPanel(props: CardPanelProps) {
         }
       }}
     >
-      <div className="ib-crdp-top">
+      <div className="ib-crdp-top" ref={topRef}>
         {phone && (
           <button type="button" className="ib-bback" onClick={props.onClose} data-card-back="">
             <Icon name="chevL" size={16} />
-            Board
+            <span className="ib-bback-l">Board</span>
           </button>
         )}
         <ColumnMenu card={card} sent={sent !== null} onColumn={props.onColumn} onRestore={props.onRestore} />
@@ -150,7 +194,7 @@ export function CardPanel(props: CardPanelProps) {
               aria-describedby={you ? `${headingId}-you` : undefined}
               onClick={() => props.onOpenThread(threadAt)}
             >
-              Open thread
+              <span className="ib-crdp-open-l">Open thread</span>
               <Icon name="arrowUpRight" size={14} />
             </button>
           </Tip>
@@ -199,6 +243,12 @@ export function CardPanel(props: CardPanelProps) {
               )}
             </>
           )}
+          {props.onInitiative && card.column !== 'dropped' && (liveInitiatives.length > 0 || card.initiative) && (
+            <>
+              <span className="ib-tdot" aria-hidden="true" />
+              <CardInitiativeMenu initiatives={liveInitiatives} value={card.initiative ?? null} onPick={props.onInitiative} />
+            </>
+          )}
         </div>
         {you && (
           <p className="ib-crdp-you" data-card-you="" id={`${headingId}-you`}>
@@ -207,9 +257,17 @@ export function CardPanel(props: CardPanelProps) {
         )}
         {card.column === 'dropped' && card.dropped && (
           <p className="ib-crdp-dropped">
-            Dropped {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
+            Cancelled {whenTime(card.dropped.at)} by {card.dropped.by.kind === 'person' ? 'you' : inboxAgentName(card.dropped.by)}
             {card.dropped.reason ? `: ${card.dropped.reason}` : ''}
           </p>
+        )}
+        {props.steps && props.steps.length > 0 && (
+          // The checklist (approval "inbox-thread-steps", part 4): the thread's steps as its foot shows them, read
+          // only. "Waiting on you ›" opens that list's thread, where the question is (with the way back here).
+          // Each list is its own named section (StepsLists), so the wrapper is not one more.
+          <div className="ib-crdp-sec ib-crdp-steps" data-card-checklist="">
+            <StepsLists lists={stepsAsCardHeadSays(props.steps, agent?.session ?? null, props.state)} heading now={new Date(props.now)} onWaiting={(list) => () => props.onOpenThread(list.thread_id)} />
+          </div>
         )}
         <Notes card={card} onSave={props.onNotes} text={text} />
         {card.threads.length > 0 && (
@@ -231,11 +289,11 @@ export function CardPanel(props: CardPanelProps) {
           {refs.length > 0 && (
             <ul className="ib-crdp-refs">
               {refs.map((ref) => (
-                <RefRow key={ref.url} refItem={ref} resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null} loading={props.refs === null} />
+                <RefRow key={ref.url} cardId={card.id} refItem={ref} resolved={props.refs?.find((r) => r.ref.url === ref.url)?.result ?? null} loading={props.refs === null} />
               ))}
             </ul>
           )}
-          <LinkField onLink={props.onLink} />
+          <LinkField onLink={props.onLink} phone={props.phone} />
         </section>
         <section className="ib-crdp-sec" aria-label="History">
           <h3 className="ib-crdp-hhead">
@@ -257,7 +315,7 @@ export function CardPanel(props: CardPanelProps) {
           ) : (
             <ol className="ib-crdp-hist">
               {props.history.map((entry, index) => {
-                const words = historyWords(entry);
+                const words = historyWords(entry, (id) => props.initiatives?.find((i) => i.id === id)?.name ?? null);
                 return (
                   <li key={`${entry.at}-${index}`}>
                     <span className="ib-crdp-hdot" aria-hidden="true" />
@@ -292,7 +350,7 @@ export function CardPanel(props: CardPanelProps) {
           }}
         >
           <label htmlFor={`${headingId}-reason`} dir="auto">
-            Drop “{card.title}”
+            Cancel “{card.title}”
           </label>
           <input
             id={`${headingId}-reason`}
@@ -315,11 +373,11 @@ export function CardPanel(props: CardPanelProps) {
           />
           <div className="ib-crdp-dropacts">
             <button type="button" className="ib-btn ib-ghost" onClick={stopDropping}>
-              Cancel
+              Keep
             </button>
             <button type="submit" className="ib-btn ib-danger" data-drop-confirm="">
               <Icon name="xCircle" size={15} />
-              Drop
+              Cancel card
             </button>
           </div>
         </form>
@@ -343,7 +401,7 @@ export function CardPanel(props: CardPanelProps) {
           {foot.primary === 'ship' && (
             <button type="button" className="ib-btn ib-soft" onClick={props.onShip} data-card-ship="">
               <Icon name="checkCircle" size={15} />
-              Ship
+              Mark done
             </button>
           )}
           {foot.primary === 'restore' && (
@@ -353,12 +411,6 @@ export function CardPanel(props: CardPanelProps) {
             </OnceButton>
           )}
           <span className="ib-bsp" />
-          {foot.icebox && (
-            <button type="button" className="ib-btn ib-ghost" onClick={props.onIcebox} data-card-icebox="">
-              <Icon name="snowflake" size={15} />
-              Icebox
-            </button>
-          )}
           {foot.drop && (
             <button type="button" className="ib-btn ib-ghost" onClick={() => {
                 // The foot's own Drop…: a move from the opened card, never the menu's (no toast).
@@ -368,7 +420,7 @@ export function CardPanel(props: CardPanelProps) {
               data-card-drop=""
             >
               <Icon name="xCircle" size={15} />
-              Drop…
+              Cancel…
             </button>
           )}
         </div>
@@ -380,19 +432,20 @@ export function CardPanel(props: CardPanelProps) {
   );
 }
 
-/** The card's column, as a Move menu: the five lanes (its own checked), then Shipped and Icebox; Restore when it is aside. */
+/** The card's column, as a Move menu: the live lanes (its own checked), then Done; Restore when it is Cancelled. */
 function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; sent: boolean; onColumn: (column: InboxCardColumn) => void; onRestore: () => void }) {
   const [open, setOpen] = useState(false);
   const trigger = useRef<HTMLButtonElement>(null);
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
   const choices = columnChoices(card);
-  const aside = card.column === 'icebox' || card.column === 'dropped';
+  const aside = card.column === 'dropped';
+  const lanes = INBOX_CARD_LIVE_COLUMNS.length;
   return (
     <Menu.Root open={open} onOpenChange={setOpen} modal={false}>
       <Menu.Trigger ref={trigger} className="ib-crdp-col" aria-label={`Column: ${INBOX_CARD_COLUMN_LABELS[card.column]}${sent ? ', sent' : ''}. Move`} data-card-column={card.column}>
         <span className="ib-lane-dot" data-col={card.column} aria-hidden="true" />
-        <b>{INBOX_CARD_COLUMN_LABELS[card.column]}</b>
+        <b className="ib-crdp-col-l">{INBOX_CARD_COLUMN_LABELS[card.column]}</b>
         {sent && <span className="ib-crdp-colsent">· sent</span>}
         <Icon name="chevD" size={14} />
       </Menu.Trigger>
@@ -410,7 +463,7 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
             )}
             {/* One choice, so radio items: a screen reader hears the card's column as checked. */}
             <Menu.RadioGroup value={card.column} onValueChange={(value: InboxCardColumn) => value !== card.column && onColumn(value)} aria-label="Column">
-              {choices.slice(0, 5).map((choice) => (
+              {choices.slice(0, lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
                   <span className="ib-lane-dot" data-col={choice.column} aria-hidden="true" />
                   {choice.label}
@@ -418,9 +471,9 @@ function ColumnMenu({ card, sent, onColumn, onRestore }: { card: InboxCardWire; 
                 </Menu.RadioItem>
               ))}
               <Menu.Separator className="ib-pm-sep" />
-              {choices.slice(5).map((choice) => (
+              {choices.slice(lanes).map((choice) => (
                 <Menu.RadioItem key={choice.column} value={choice.column} closeOnClick className="ib-pmi" label={choice.label} data-card-move-to={choice.column}>
-                  <Icon name={choice.column === 'shipped' ? 'checkCircle' : 'snowflake'} size={15} />
+                  <Icon name="checkCircle" size={15} />
                   {choice.label}
                   {choice.current && <Icon name="check" size={15} className="ib-pmi-check" />}
                 </Menu.RadioItem>
@@ -493,7 +546,7 @@ function CreateThreadButton({ primary, disabled, onCreate }: { primary: boolean;
         onClick={(event) => onCreate(event.currentTarget)}
       >
         <Icon name="plus" size={14} />
-        Create thread
+        <span className="ib-crdp-open-l">Create thread</span>
       </button>
     </Tip>
   );
@@ -600,21 +653,46 @@ function ThreadRow({ threadId, row, sent, now, onOpen }: { threadId: string; row
   );
 }
 
+/** What a link-only source's key is called, for its link's accessible name. */
+const LINK_ONLY_KIND: Record<string, string> = { jira: 'Jira issue', youtrack: 'YouTrack issue', web: 'Link' };
+
 /** One link: its number and, once read, its title and live state (open, draft, checks, merged or closed, with dates). */
-function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
+function RefRow({ cardId, refItem, resolved, loading }: { cardId: string; refItem: InboxCardRef; resolved: ForgeRefCardResult | null; loading: boolean }) {
   const data = resolved?.ok ? resolved.data : null;
   const state = data ? refState(data) : null;
-  const kind = refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind;
-  const number = refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
+  // A link-only source (a Jira or YouTrack issue, any web link): the key or label links, beside the source's mark; no state is read.
+  const linkOnly = inboxCardRefIsLinkOnly(refItem);
+  const web = refItem.source === 'web';
+  const kind = LINK_ONLY_KIND[refItem.source] ?? (refItem.kind === 'pr' ? 'Pull request' : refItem.kind === 'issue' ? 'Issue' : refItem.kind);
+  // A web link reads as its short label (host and path, cut in the middle), drawn from the URL.
+  const number = web ? inboxCardLinkLabel(refItem.url) : refItem.ref.replace(/^.*?(?=[#!]\d+$)/, '');
+  const link = (
+    <a
+      href={refItem.url}
+      target="_blank"
+      rel="noreferrer noopener"
+      className={web ? 'ib-crdp-rn ib-crdp-rweb' : 'ib-crdp-rn'}
+      dir={web ? 'ltr' : undefined}
+      aria-label={web ? `${kind} ${number}` : `${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}
+    >
+      {number}
+    </a>
+  );
   return (
-    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-state={state?.tone ?? (loading ? 'loading' : 'quiet')}>
-      <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
-      <a href={refItem.url} target="_blank" rel="noreferrer noopener" className="ib-crdp-rn" aria-label={`${kind} ${refItem.ref}${data ? `: ${data.title}` : ''}`}>
-        {number}
-      </a>
-      <span className="ib-crdp-rt" dir="auto">
-        {data ? data.title : <span className="ib-crdp-rref">{refItem.ref}</span>}
-      </span>
+    <li className="ib-crdp-ref" data-card-ref={refItem.ref} data-ref-source={refItem.source} data-ref-state={state?.tone ?? (linkOnly ? 'quiet' : loading ? 'loading' : 'quiet')}>
+      {linkOnly ? (
+        refItem.source === 'jira' ? <JiraMark /> : refItem.source === 'youtrack' ? <YouTrackMark /> : <LinkFavicon src={cardLinkFaviconUrl(cardId, refItem)} />
+      ) : (
+        <RefMarkIcon kind={refItem.kind === 'issue' ? 'issue' : 'pr'} state={data ? data.state : 'unknown'} size={15} />
+      )}
+      {/* A link-only ref has no hover card: its tooltip says where the key goes. */}
+      {linkOnly ? <Tip content={<UrlTip url={refItem.url} />}>{link}</Tip> : link}
+      {/* A web link's label already names its site; a tracker's key is followed by its site. */}
+      {!web && (
+        <span className="ib-crdp-rt" dir="auto">
+          {data ? data.title : <span className="ib-crdp-rref">{linkOnly ? siteOf(refItem.url) : refItem.ref}</span>}
+        </span>
+      )}
       {state && (
         <span className="ib-crdp-rs" data-tone={state.tone}>
           {state.label}
@@ -623,6 +701,139 @@ function RefRow({ refItem, resolved, loading }: { refItem: InboxCardRef; resolve
       )}
     </li>
   );
+}
+
+/**
+ * The Jira mark (Simple Icons `jira`, CC0-1.0), one colour in currentColor as
+ * the forge marks beside it are. Drawn in a 15 px box like them, with a
+ * little room around it: the mark fills its square, an Octicon does not.
+ */
+const JIRA_MARK =
+  'M11.571 11.513H0a5.218 5.218 0 0 0 5.232 5.215h2.13v2.057A5.215 5.215 0 0 0 12.575 24V12.518a1.005 1.005 0 0 0-1.005-1.005zm5.723-5.756H5.736a5.215 5.215 0 0 0 5.215 5.214h2.129v2.058a5.218 5.218 0 0 0 5.215 5.214V6.758a1.001 1.001 0 0 0-1.001-1.001zM23.013 0H11.455a5.215 5.215 0 0 0 5.215 5.215h2.129v2.057A5.215 5.215 0 0 0 24 12.483V1.005A1.001 1.001 0 0 0 23.013 0Z';
+
+function JiraMark() {
+  return (
+    <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="jira" width={15} height={15} viewBox="-1.5 -1.5 27 27" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d={JIRA_MARK} />
+    </svg>
+  );
+}
+
+/**
+ * The YouTrack mark, one colour in currentColor like Jira's: the black square
+ * of JetBrains' own YouTrack product icon with its "YT" and bar cut out, the
+ * gradient behind it dropped. Source: JetBrains' YouTrack_icon.svg
+ * (resources.jetbrains.com/storage/products/company/brand/logos/). YouTrack
+ * and its icon are JetBrains trademarks, used here only to name the product;
+ * not CC0 (Simple Icons has no `youtrack` icon: simple-icons#14456 waits on
+ * JetBrains' permission). The square fills its box, so it gets the same room
+ * around it as Jira's mark.
+ */
+const YOUTRACK_MARK =
+  'M12 12h40v40H12ZM21.4666 26.3709l-5.4881-9.3787h3.1513l3.3981 5.9919.3969.8575.3968-.8682 3.3119-5.9812h3.0975l-5.4025 9.3575v5.6487h-2.8619v-5.6275ZM33 43.9984H17v3h16v-3ZM42.3248 16.9922H30.2879l-.0006 2.6369h4.5662v12.3693h2.9263V19.6291h4.545v-2.6369Z';
+
+function YouTrackMark() {
+  return (
+    <svg className="ib-refmark ib-crdp-rjira" data-ref-mark="youtrack" width={15} height={15} viewBox="9.5 9.5 45 45" aria-hidden="true" focusable="false">
+      <path fill="currentColor" fillRule="evenodd" d={YOUTRACK_MARK} />
+    </svg>
+  );
+}
+
+/**
+ * Where a web link's favicon is read (the owner's answer, 2026-11-02): the
+ * Inbox's own route, which fetches `https://<host>/favicon.ico` for a link
+ * the person added and serves it from this origin. Null (the link icon
+ * alone, nothing asked) for an agent's link, an http link, and a host that
+ * is an IP address, `localhost` or one label: the server refuses those, so
+ * the window does not ask.
+ */
+export function cardLinkFaviconUrl(cardId: string, ref: InboxCardRef): string | null {
+  if (ref.source !== 'web' || ref.by !== 'person') return null;
+  let host: string;
+  try {
+    const url = new URL(ref.url);
+    if (url.protocol !== 'https:') return null;
+    host = url.hostname;
+  } catch {
+    return null;
+  }
+  if (!host.includes('.') || host.startsWith('[') || /^\d+(\.\d+){3}$/.test(host) || host === 'localhost' || host.endsWith('.localhost')) return null;
+  return inboxUrl(`/cards/${encodeURIComponent(cardId)}/favicon`, `url=${encodeURIComponent(ref.url)}`);
+}
+
+/** Favicon addresses that failed or drew nothing in this window, so a row drawn again never asks twice. */
+const failedFavicons = new Set<string>();
+
+/**
+ * A web link's mark: the generic link icon, drawn at once and kept while a
+ * favicon (`src`) loads; the favicon takes its place only once it has loaded
+ * with a real size (more than 1 px each way), so a failed, empty or 1×1
+ * image never shows, and nothing moves: both sit in the same 15 px box.
+ * `src` is the Inbox's own route (`cardLinkFaviconUrl`): the window's CSP
+ * (`img-src 'self' data: blob:`) never loads a remote site's icon itself.
+ * Null draws the link icon alone.
+ */
+export function LinkFavicon({ src }: { src: string | null }) {
+  const [shown, setShown] = useState(false);
+  const [failed, setFailed] = useState(() => (src ? failedFavicons.has(src) : false));
+  useEffect(() => {
+    setShown(false);
+    setFailed(src ? failedFavicons.has(src) : false);
+  }, [src]);
+  const fail = () => {
+    if (src) failedFavicons.add(src);
+    setFailed(true);
+  };
+  const tryImage = src !== null && !failed;
+  return (
+    <span className="ib-refmark ib-crdp-rfav" data-ref-mark="web" data-favicon={tryImage ? (shown ? 'shown' : 'loading') : 'none'} aria-hidden="true">
+      {!shown && <Icon name="link" size={15} className="ib-crdp-rlink" />}
+      {tryImage && (
+        <img
+          src={src}
+          alt=""
+          width={15}
+          height={15}
+          loading="lazy"
+          decoding="async"
+          referrerPolicy="no-referrer"
+          draggable={false}
+          data-shown={shown ? '' : undefined}
+          onLoad={(event) => {
+            const img = event.currentTarget;
+            if (img.naturalWidth > 1 && img.naturalHeight > 1) setShown(true);
+            else fail();
+          }}
+          onError={fail}
+        />
+      )}
+    </span>
+  );
+}
+
+/** A URL in a tooltip: it may wrap after a `/`, never inside a segment (the key). */
+function UrlTip({ url }: { url: string }) {
+  const parts = url.split('/').map((part, i, all) => (i < all.length - 1 ? `${part}/` : part));
+  return (
+    <span className="ib-tip-url">
+      {parts.map((part, i) => (
+        <span key={i}>
+          {part}
+          {i < parts.length - 1 && <wbr />}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** A link's host (`example.atlassian.net`), or the URL as written when it does not parse. */
+function siteOf(url: string): string {
+  try {
+    return new URL(url).host;
+  } catch {
+    return url;
+  }
 }
 
 /**
@@ -635,7 +846,7 @@ function CardText({ text, repo }: { text: string; repo: InboxProjectRepo | null 
 }
 
 /** Link an issue or PR from the opened card. */
-function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null> }) {
+function LinkField({ onLink, phone }: { onLink: (ref: string) => Promise<string | null>; phone: boolean }) {
   const [text, setText] = useState('');
   const [error, setError] = useState<string | null>(null);
   return (
@@ -650,9 +861,14 @@ function LinkField({ onLink }: { onLink: (ref: string) => Promise<string | null>
       }}
     >
       <label className="ib-sr" htmlFor="ib-card-link">
-        Link an issue or PR
+        Add a link
       </label>
-      <input id="ib-card-link" type="text" placeholder="Link an issue or PR (owner/repo#123 or its URL)" value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
+      <input
+        id="ib-card-link"
+        type="text"
+        // Any web link, or GitHub's owner/repo#123; a phone's narrow field keeps the short form whole.
+        placeholder={phone ? 'Paste a link' : 'Paste a link, or owner/repo#123'}
+        value={text} onChange={(event) => setText(event.target.value)} data-card-link-field="" />
       {error && (
         <p className="ib-error" role="alert">
           {error}

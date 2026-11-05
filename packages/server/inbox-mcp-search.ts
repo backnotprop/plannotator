@@ -88,7 +88,8 @@ export function registerInboxSearchTool(server: McpServer, context: InboxMcpCont
           if (!input.project_path) throw new InboxError("validation_error", "project_path: required unless all_projects (the connection fills it).");
           // Looked up, never made: a search writes nothing, and a folder the Inbox has never seen has no messages.
           const found = context.findProjects ? await context.findProjects(input.project_path) : { projects: [], unresolved: false };
-          projectIds = found.projects.map((project) => project.id);
+          // One search per group: a search of one folder of a combined project covers them all.
+          projectIds = [...new Set(found.projects.map((project) => context.store.canonicalProjectId(project.id)))];
           scope = found.projects[0]?.name ?? input.project_path;
           if (found.unresolved) note = " Git did not answer in time, so the project of this folder is not known yet: nothing was searched. Try again, or pass all_projects.";
           else if (projectIds.length === 0) note = " No Inbox thread has been written from this folder's project yet; pass all_projects to search every project.";

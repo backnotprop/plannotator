@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path'
 import { inboxAckLine, inboxAgentTool, inboxSentNowFollowUpText, INBOX_MESSAGE_INSTRUCTION, INBOX_NAME_THREAD_LINE, INBOX_NEW_THREAD_INSTRUCTION, INBOX_TOOL_ACTIONS, INBOX_WAKE_INSTRUCTION, INBOX_TAGGED_INSTRUCTION, inboxAlsoTaggedLine, inboxRedirectedLine, inboxTaggedLine, inboxWakeText, mcpAnswerOf } from './inbox-contract'
 import { CLAUDE_INBOX_TOOL_NAME, ClaudeSession } from './testing/claude-session'
 import { removeStubbedHtml, stubBuiltHtml } from '../../../../tests/helpers/inbox-world'
+import { stubbedAgentClis } from '../../../../tests/helpers/agent-cli-guard'
 import { inboxEntryOf, isAlive, mustSignalInbox, stopProvenInboxes } from '../../../../tests/helpers/inbox-process'
 import { INBOX_DISCOVER_TIMEOUT_MS, STORE_INBOX_TOOLS } from './inbox'
 
@@ -41,6 +42,8 @@ afterEach(async () => {
     rmSync(root, { recursive: true, force: true })
   }
 })
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis()
 
 /** SIGKILL the world's Inbox, once proven to be the one it started, and wait for it to die. */
 async function killInbox(w: World): Promise<number> {
@@ -88,7 +91,8 @@ function world(name: string): World {
     browserMarker,
     store: new Map(),
     env: {
-      PATH: `${bin}:${process.env.PATH ?? '/usr/bin:/bin'}`,
+      ...agents.env,
+      PATH: `${bin}:${agents.env.PATH}`,
       HOME: home,
       TMPDIR: tmpdir(),
       PLANNOTATOR_DATA_DIR: dataDir,
@@ -178,7 +182,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const w = world('01-registry-and-tool-list')
     const silent = await open(w, 'session-silent')
     // Before this computer ever ran the Inbox: the list bundled with the mod (pinned to a real Inbox by inbox-default-tools.test.ts).
-    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card'))
+    expect(silent.inboxTools?.map((tool) => tool.name)).toEqual(INBOX_TOOL_ACTIONS.filter((name) => name !== 'card' && name !== 'steps'))
     expect(silent.mod.inbox).not.toBeNull()
     await Bun.sleep(2_500)
     expect(silent.host.fetches).toEqual([])
@@ -234,7 +238,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     // The mod's wake delivers the reply as a turn: the result says to end the turn, never to wait.
     const next = await session.callInbox({ action: 'send_message', body: 'A second note.' }, w.project)
     expect('text' in next && next.text).toContain('arrives in this session by itself')
-    expect('text' in next && next.text).not.toContain('wait_for_reply with this thread_id')
+    expect('text' in next && next.text).not.toContain('call read_thread')
     w.proof(`thread ${sent.thread_id}: project ${t.project.root}, author ${JSON.stringify(t.messages[0]?.author)}`)
   }, 60_000)
 
@@ -279,10 +283,11 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(session.host.submits).toHaveLength(1)
     const text = session.host.submits[0]!
     const lines = text.split('\n')
-    expect(lines[0]).toBe(`Plannotator Inbox: What should the worker do on a Stripe 409? (${replyId})`)
+    // A plain reply in a thread with no short name: the subject stays out of the wake (#2464).
+    expect(lines[0]).toBe(`Plannotator Inbox: a reply (${replyId})`)
     expect(lines[1]).toBe(INBOX_WAKE_INSTRUCTION)
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(text).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: 'What should the worker do on a Stripe 409?', body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
+    expect(text).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
     // The closing line names the thread and the tool by the full name the engine registered.
     expect(lines.at(-1)).toBe(`[thread ${asked.thread_id} · more: mcp__plannotator__plannotator_inbox read_thread · how it works: plannotator inbox --help]`)
     // The body sits whole above the closing line, after the first lines.
@@ -583,9 +588,6 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
         body: JSON.stringify({ serverSession: health.serverSession, session, body, idempotency_key: key }),
       })
     const words = 'While you are in there, add a header row to the CSV export.'
-    // The writer waits on the thread while the person picks the other session (review blocker B1, PR 1764).
-    const writerWait = writer.callInbox({ action: 'wait_for_reply', thread_id: asked.thread_id, timeout_seconds: 8 }, w.project)
-    await Bun.sleep(500)
     const response = await post('session-other', words, 'nm-1')
     expect(response.status).toBe(200)
     const message = ((await response.json()) as { message: { id: string; to: unknown; reply_to: unknown } }).message
@@ -601,11 +603,6 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     expect(lines[1]).toBe(INBOX_MESSAGE_INSTRUCTION)
     expect(other.host.submits[0]!.endsWith(`\n\n${words}\n\n[thread ${asked.thread_id} · more: ${CLAUDE_INBOX_TOOL_NAME} read_thread · how it works: plannotator inbox --help]`)).toBe(true)
     expect(writer.host.submits).toEqual([])
-    const waited = await writerWait
-    // The wait's text is complete (the Inbox marks it), so the mod hands the model the text alone.
-    expect('text' in waited && waited.text).toStartWith('No reply yet.')
-    expect('text' in waited && waited.text).not.toContain('"status"')
-    w.proof(`session-writer's wait_for_reply on the same thread kept waiting: ${('text' in waited ? waited.text : waited.deny).split('\n')[0]}`)
     w.proof(`turn.start ${turn.id} in session-other:\n${turn.text}\n\nsession-writer submits: ${writer.host.submits.length}`)
 
     const delivered = await waitFor('the delivery record', async () => (await thread(w, asked.thread_id)).messages.find((m) => m.id === message.id)?.delivery)
@@ -718,7 +715,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const ownerTurn = await waitFor('the owner turn', () => owner.turns.find((t) => t.text.includes(reply.id)))
     await Bun.sleep(3_000)
     expect(owner.host.submits).toEqual([
-      inboxWakeText({ id: reply.id, subject: 'What should the worker do on a Stripe 409?', thread_id: asked.thread_id, body: reply.body, also_tagged: ['Claude Code'] }, CLAUDE_INBOX_TOOL_NAME),
+      inboxWakeText({ id: reply.id, subject: null, thread_id: asked.thread_id, body: reply.body, also_tagged: ['Claude Code'] }, CLAUDE_INBOX_TOOL_NAME),
     ])
     expect(owner.host.submits[0]!.split('\n')[2]).toBe(inboxAlsoTaggedLine(['Claude Code']))
     // Each woken once, no more.
@@ -817,7 +814,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     w.proof(`> the person presses Send now on ${replyId}`)
     const row = await waitFor('the row in the running turn', () => session.host.appended[0])
     const reply = (await thread(w, asked.thread_id)).messages.find((m) => m.id === replyId)!
-    expect(row).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: 'What should the worker do on a Stripe 409?', body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
+    expect(row).toBe(inboxWakeText({ id: replyId, thread_id: asked.thread_id, subject: null, body: reply.body }, CLAUDE_INBOX_TOOL_NAME))
     expect(session.host.notices).toHaveLength(1)
     expect(session.host.submits).toEqual([])
     w.proof(`$.session.append (user row, into the running turn):\n${row}\n`)
@@ -862,7 +859,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     // The turn ends with no model request after the row.
     session.endTurn()
     const follow = await waitFor('the follow-up turn', () => session.host.submits[0])
-    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: 'What should the worker do on a Stripe 409?', type: 'reply' }))
+    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: null, type: 'reply' }))
     await Bun.sleep(2_000)
     expect(session.host.submits).toHaveLength(1)
     w.proof(`the turn ended before reading it: one follow-up turn:\n${follow}\n`)
@@ -906,7 +903,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     const turn = await waitFor('the wake turn', () => session.turns.find((t) => t.text.includes(replyId)))
     expect(session.host.appended).toEqual([])
     expect(session.host.submits).toHaveLength(1)
-    expect(session.host.submits[0]!.startsWith(`Plannotator Inbox: What should the worker do on a Stripe 409? (${replyId})`)).toBe(true)
+    expect(session.host.submits[0]!.startsWith(`Plannotator Inbox: a reply (${replyId})`)).toBe(true)
     w.proof(`the turn ended before the append: delivered as turn ${turn.id}, 0 rows`)
   }, 120_000)
 
@@ -924,7 +921,7 @@ describe('Claude Code ↔ Plannotator Inbox (real Inbox, real processes)', () =>
     await pressSendNow(w, replyId)
     const follow = await waitFor('the pointer turn', () => session.host.submits[0])
     expect(session.host.appended).toHaveLength(1)
-    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: 'What should the worker do on a Stripe 409?', type: 'reply' }))
+    expect(follow).toBe(inboxSentNowFollowUpText({ id: replyId, subject: null, type: 'reply' }))
     // A later turn's step does not swallow it, and nothing is sent twice.
     await session.startTurn('Next thing.')
     session.step()

@@ -42,6 +42,8 @@ process.env.PLANNOTATOR_RELAY_URL = "http://127.0.0.1:9";
 // who set it in their shell must not make every Inbox test run the real
 // `tailscale` CLI. Tests that need it inject a scripted runner.
 delete process.env.PLANNOTATOR_INBOX_TAILSCALE;
+// The same for sessions: every spawned review/annotate would run `tailscale serve`.
+delete process.env.PLANNOTATOR_TAILSCALE;
 
 // `plannotator inbox` connects the agents it finds on PATH (packages/server/
 // inbox-agents.ts) by running their own CLIs. Tests never run a real agent
@@ -63,6 +65,13 @@ process.env.PLANNOTATOR_UPDATE_API_URL = "http://127.0.0.1:9/releases/latest";
 // send point it (or the Inbox's `feedbackUrl` option) at a local fake in their
 // own bodies or spawned env. tests/feedback-live-url.test.ts guards both.
 process.env.PLANNOTATOR_FEEDBACK_URL = "http://127.0.0.1:9/feedback";
+
+// The daily ping (packages/shared/daily-ping.ts): off in every test and every
+// child that inherits this environment. A test run is never a release build
+// anyway (only release CI marks one), so a child with a replaced environment
+// cannot reach the live host either. Ping tests delete it in their own bodies
+// and send only to a loopback receiver. tests/daily-ping-live-guard.test.ts.
+process.env.NO_ANON_PING = "1";
 
 // The install script the update wrapper downloads: never the real one. A closed
 // loopback port refuses at once, so an unintended Update now fails fast.

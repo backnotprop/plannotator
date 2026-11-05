@@ -69,11 +69,11 @@ function call(port: number, path: string, method = 'GET', body?: string): Promis
   });
 }
 
-async function spawnServer(name: string, extra: string[]): Promise<Server> {
+async function spawnServer(name: string, extra: string[], env: Record<string, string> = {}): Promise<Server> {
   const dataDir = join(dir!, name, 'data');
   mkdirSync(join(dir!, name, 'projects'), { recursive: true });
   const child = Bun.spawn(['bun', SERVER_SCRIPT, dataDir, join(dir!, name, 'projects'), '1', ...extra], {
-    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: dataDir, HOME: join(dir!, name) },
+    env: { ...process.env, DOM_TESTS: '0', PLANNOTATOR_DATA_DIR: dataDir, HOME: join(dir!, name), ...env },
     stdout: 'pipe',
     // A paired phone makes the server try the relay, which tests point at a closed port; its refusals are noise here.
     stderr: 'ignore',
@@ -199,15 +199,20 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   expect(navLink(el, 'general').getAttribute('aria-current')).toBe('page');
   // Capabilities' row comes with the settings read (it shows only while the Inbox has a capability to switch).
   await until(() => navLink(el, 'capabilities') !== null, 'the Capabilities row');
+  // Machines' comes with the first list read, its own read a moment after the settings'.
+  await until(() => navLink(el, 'machines') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('.ib-snav a')];
-  // Machines right after Devices, then Capabilities (the owner, 2026-10-27); Experimental is a group inside it, not a row of its own.
-  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Agents', 'Prompts', 'Devices', 'Machines', 'Capabilities', 'Archived', 'Storage', 'About']);
+  // Machines right after Devices, then Capabilities (the owner, 2026-10-27), with Voice between them (inbox-voice); Experimental is a group inside it, not a row of its own.
+  expect(links.map((a) => a.textContent?.trim())).toEqual(['General', 'Rows', 'Agents', 'Prompts', 'Devices', 'Machines', 'Accounts', 'Voice', 'Capabilities', 'Archived', 'Storage', 'About']);
   expect(links.map((a) => a.getAttribute('href'))).toEqual([
     '#settings/general',
+    '#settings/rows',
     '#settings/agents',
     '#settings/prompts',
     '#settings/devices',
     '#settings/machines',
+    '#settings/accounts',
+    '#settings/voice',
     '#settings/capabilities',
     '#settings/archived',
     '#settings/storage',
@@ -310,6 +315,71 @@ test.skipIf(!hasDom)('every control lands in the section the design puts it in',
   expect(board.contains(switchNamed(el, 'Decision mode'))).toBe(false);
 });
 
+test.skipIf(!hasDom)('Storage asks for its sizes only when shown: the card holds its place, "Counting what is stored…" only after 0.4 s, then the numbers; a second visit shows them at once', async () => {
+  const { STORE_SLOW_MS } = await import('./components/Settings');
+  // The storage read is held until the test lets it go, as a slow count would be.
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  let asked = 0;
+  const inner = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (String(input).endsWith('/api/inbox/settings/storage')) {
+      asked += 1;
+      await held;
+    }
+    return inner(input, init);
+  }) as typeof fetch;
+  const counting = (el: ParentNode) => el.textContent?.includes('Counting what is stored…') === true;
+
+  const el = await renderApp('#settings/general');
+  await until(() => el.querySelector('[data-settings-notifications]') !== null, 'General');
+  // Settings itself never asks for the walk: no storage read, and its own reads carry the marker that leaves it out.
+  expect(asked).toBe(0);
+  const settingsReads = requests.filter((r) => /^GET \/api\/inbox\/settings(\?|$)/.test(r));
+  expect(settingsReads.length).toBeGreaterThan(0);
+  expect(settingsReads.every((r) => r === 'GET /api/inbox/settings?store=0')).toBe(true);
+
+  // When the words first show, by the page's own clock (an observer, not this test's polling, so a slow machine
+  // cannot make them look early). The clock starts before the click, so it can only make them look later.
+  let wordsAt: number | null = null;
+  const watch = new MutationObserver(() => {
+    if (wordsAt === null && counting(el)) wordsAt = performance.now();
+  });
+  watch.observe(el, { subtree: true, childList: true, characterData: true });
+  const opened = performance.now();
+  act(() => navLink(el, 'storage').click());
+  await until(() => heading(el) === 'Storage' && asked === 1, 'Storage asking for its sizes');
+  // While the count runs: the card in its place, a bar for the total, no numbers.
+  expect(el.querySelector('[data-store-wait]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')!.getAttribute('aria-busy')).toBe('true');
+  expect(el.querySelector('[data-store-bar]')).not.toBeNull();
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+  expect(el.querySelector('.ib-lede')?.textContent).toContain('/data/inbox: messages, attached files');
+
+  await until(() => counting(el), '"Counting what is stored…"');
+  watch.disconnect();
+  // Not before 0.4 s.
+  expect(wordsAt! - opened).toBeGreaterThanOrEqual(STORE_SLOW_MS);
+  expect(el.querySelector('[data-store-bytes]')).toBeNull();
+
+  release();
+  await until(() => el.querySelector('[data-store-bytes]') !== null, 'the sizes');
+  const onDisk = JSON.parse((await call(current!.port, '/api/inbox/settings/storage')).text) as { bytes: number; projects: { name: string }[] };
+  expect(Number(el.querySelector('[data-store-bytes]')!.getAttribute('data-store-bytes'))).toBe(onDisk.bytes);
+  expect([...el.querySelectorAll('[data-store-project]')].map((row) => row.getAttribute('data-store-project'))).toEqual(onDisk.projects.slice(0, 2).map((p) => p.name));
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  expect(el.querySelector('[data-store-bar]')).toBeNull();
+  expect(counting(el)).toBe(false);
+
+  // Back again: the sizes kept from this visit show at once, and are read again quietly.
+  act(() => navLink(el, 'about').click());
+  await until(() => heading(el) === 'About', 'About');
+  act(() => navLink(el, 'storage').click());
+  expect(el.querySelector('[data-store-bytes]')).not.toBeNull();
+  expect(el.querySelector('[data-store-wait]')).toBeNull();
+  await until(() => asked === 2, 'a second read');
+});
+
 test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switch saves inboxBoard to config.json, both ways', async () => {
   const config = () => {
     try {
@@ -336,6 +406,114 @@ test.skipIf(!hasDom)('#settings/capabilities opens Capabilities; the Board switc
     await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ board: { on: false } }));
   }
 });
+
+// The checklist (approval "inbox-thread-steps"): off by default, under the Board, saving config.json `inboxSteps`.
+test.skipIf(!hasDom)('Capabilities: the Checklist switch, off by default under the Board, saves inboxSteps to config.json, both ways', async () => {
+  const config = () => {
+    try {
+      return (JSON.parse(readFileSync(join(current!.dataDir, 'config.json'), 'utf8')) as { inboxSteps?: boolean }).inboxSteps;
+    } catch {
+      return undefined;
+    }
+  };
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  const group = el.querySelector('[data-settings-capabilities]')!;
+  const rows = [...group.querySelectorAll('.ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
+  // Code review and Shape are held until the next big release: off, and without PLANNOTATOR_INBOX_PREVIEW, they have no row.
+  expect(rows).toEqual(['Board', 'Checklist']);
+  // Peers: each switch has its own element, so the Board's selector finds one switch (e2e inbox-board, inbox-tailnet-owner).
+  expect(el.querySelectorAll('[data-settings-board] [role="switch"]').length).toBe(1);
+  expect(el.querySelector('[data-settings-steps]')?.contains(switchNamed(el, 'Checklist'))).toBe(true);
+  expect(switchNamed(el, 'Checklist')!.getAttribute('aria-checked')).toBe('false');
+  try {
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === true, 'config.json inboxSteps true');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'true', 'the switch on');
+    act(() => switchNamed(el, 'Checklist')!.click());
+    await until(() => config() === false, 'config.json inboxSteps false');
+    await until(() => switchNamed(el, 'Checklist')!.getAttribute('aria-checked') === 'false', 'the switch off');
+  } finally {
+    await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ steps: { on: false } }));
+  }
+});
+
+// Code review (approval "inbox-code-review-direction") and Shape (approval "shape-inbox-placement"), held until the
+// next big release (owner decision 2026-11-04; packages/server/inbox.ts `heldSwitch`): a person who never turned them on sees no row;
+// one who has them on keeps the row and can turn it off (the row then goes at the next load); PLANNOTATOR_INBOX_PREVIEW=1
+// shows both. Each saves config.json `inboxCodeReview` / `inboxShape`. That release restores "off by default, shown".
+const HELD = [
+  { name: 'Code review', key: 'inboxCodeReview', wire: 'code_review', selector: '[data-settings-code-review]' },
+  { name: 'Shape', key: 'inboxShape', wire: 'shape', selector: '[data-settings-shape]' },
+] as const;
+
+function readConfig(server: Server): Record<string, unknown> {
+  try {
+    return JSON.parse(readFileSync(join(server.dataDir, 'config.json'), 'utf8')) as Record<string, unknown>;
+  } catch {
+    return {};
+  }
+}
+
+test.skipIf(!hasDom)('Capabilities: Code review and Shape, never turned on and no preview, have no row', async () => {
+  const el = await renderApp('#settings/capabilities');
+  await until(() => switchNamed(el, 'Checklist') !== null, 'the Checklist switch');
+  for (const held of HELD) {
+    expect(readConfig(current!)[held.key]).toBeUndefined();
+    expect(switchNamed(el, held.name)).toBeNull();
+    expect(el.querySelector(held.selector)).toBeNull();
+  }
+});
+
+for (const held of HELD) {
+  test.skipIf(!hasDom)(`Capabilities: ${held.name} already on keeps its row, on; turning it off saves ${held.key} false, and the next load has no row`, async () => {
+    writeFileSync(join(current!.dataDir, 'config.json'), JSON.stringify({ ...readConfig(current!), [held.key]: true }));
+    try {
+      const el = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(el, held.name) !== null, `the ${held.name} switch`);
+      expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
+      expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('true');
+      act(() => switchNamed(el, held.name)!.click());
+      await until(() => readConfig(current!)[held.key] === false, `config.json ${held.key} false`);
+      await until(() => switchNamed(el, held.name)?.getAttribute('aria-checked') === 'false', 'the switch off');
+      act(() => root?.unmount());
+      host?.remove();
+      const again = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(again, 'Checklist') !== null, 'the Checklist switch');
+      expect(switchNamed(again, held.name)).toBeNull();
+    } finally {
+      await call(current!.port, '/api/inbox/settings', 'POST', JSON.stringify({ [held.wire]: { on: false } }));
+    }
+  });
+}
+
+// Read only: the window keeps the first server session it saw, so a save to this second Inbox would be refused. The
+// server test (packages/server/inbox-held-switches.test.ts) proves the preview's saves and events.
+test.skipIf(!hasDom)(
+  'Capabilities: PLANNOTATOR_INBOX_PREVIEW=1 shows the Code review and Shape rows while off',
+  async () => {
+    const preview = await spawnServer('preview', [], { PLANNOTATOR_INBOX_PREVIEW: '1' });
+    current = preview;
+    try {
+      const el = await renderApp('#settings/capabilities');
+      await until(() => switchNamed(el, 'Shape') !== null, 'the Shape switch');
+      const rows = [...el.querySelectorAll('[data-settings-capabilities] .ib-prow')].map((row) => row.querySelector('.ib-l')?.textContent);
+      expect(rows).toEqual(['Board', 'Checklist', 'Code review', 'Shape']);
+      for (const held of HELD) {
+        expect(el.querySelector(held.selector)?.contains(switchNamed(el, held.name))).toBe(true);
+        expect(switchNamed(el, held.name)!.getAttribute('aria-checked')).toBe('false');
+      }
+    } finally {
+      // The window first, so nothing it still asks reaches a stopped Inbox.
+      act(() => root?.unmount());
+      root = null;
+      preview.child.kill();
+      await preview.child.exited;
+    }
+  },
+  30_000,
+);
+
 
 test.skipIf(!hasDom)('#settings/experimental (an old link) becomes Capabilities, focused on its Experimental group; decision mode saves to config.json, both ways', async () => {
   const config = () => {
@@ -382,7 +560,7 @@ test.skipIf(!hasDom)('Capabilities: no row for an Inbox with nothing to switch (
     inbox_tool: { hosts: { 'claude-code': true, pi: false, opencode: false }, env: null },
     notifications: { enabled: true, dismissed: false, allowed_origin: null },
     phones: false,
-    store: { dir: '/home/u/.plannotator/inbox', bytes: 0, projects: [] },
+    store_dir: '/home/u/.plannotator/inbox',
   };
   const noop = () => {};
   const page = (section: 'general' | 'capabilities' | null, phoneList = false, settings: object = model) => (
@@ -572,12 +750,13 @@ test.skipIf(!hasDom)('on a phone: #settings is the list of sections; a section o
   await until(() => el.querySelector('[data-settings-list]') !== null, 'the list of sections');
   expect(el.querySelector('.ib-snav')).toBeNull();
   await until(() => el.querySelector('[data-settings-list] [data-settings-link="capabilities"]') !== null, 'the Capabilities row');
+  await until(() => el.querySelector('[data-settings-list] [data-settings-link="machines"]') !== null, 'the Machines row');
   const links = [...el.querySelectorAll<HTMLAnchorElement>('[data-settings-list] a')];
-  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'capabilities', 'archived', 'storage', 'about']);
+  expect(links.map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities', 'archived', 'storage', 'about']);
   // Capabilities is the last row of the first group, above Archived, Storage and About; no Experimental row or group.
   const groups = [...el.querySelectorAll<HTMLUListElement>('[data-settings-list] ul')];
   expect(groups.map((g) => g.getAttribute('aria-label'))).toEqual(['Settings', 'Your data and Plannotator']);
-  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'agents', 'prompts', 'devices', 'machines', 'capabilities']);
+  expect([...groups[0]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['general', 'rows', 'agents', 'prompts', 'devices', 'machines', 'accounts', 'voice', 'capabilities']);
   expect([...groups[1]!.querySelectorAll('a')].map((a) => a.getAttribute('data-settings-link'))).toEqual(['archived', 'storage', 'about']);
   const capabilitiesRow = groups[0]!.querySelector<HTMLAnchorElement>('[data-settings-link="capabilities"]')!;
   expect(capabilitiesRow.querySelector('.ib-v')?.textContent).toBe('Off');

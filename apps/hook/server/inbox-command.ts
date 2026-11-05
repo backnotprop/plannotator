@@ -23,6 +23,7 @@
  *                                   the URL
  *   plannotator inbox link …        link this Inbox with another machine's,
  *   plannotator inbox unlink …      or remove the link (inbox-link-command.ts)
+ *   plannotator inbox projects …    list, combine and undo (inbox-projects-command.ts)
  *
  * The status, stop and restart commands follow rmohta's port
  * (rmohta/plannotator, branch feat/plan-library), rebuilt on today's stop
@@ -61,9 +62,13 @@ import { agentSpec, createAgentEnvironment, formatConnectReport, inboxConnectDis
 import { addInboxNote, INBOX_NOTE_BODY, inboxNotesDisabled, markNotesAsked } from "@plannotator/server/inbox-agent-notes";
 import { INBOX_AGENT_LABELS, INBOX_AUTO_SEND_AFTER_MS, INBOX_NOTE_AGENT_IDS, type InboxConnectReport, type InboxNoteAgentId } from "@plannotator/core/inbox-types";
 import { writeUrlQr } from "@plannotator/server/qr";
+import { shellLine } from "@plannotator/inbox/harnesses";
 import { getCliVersion } from "./cli";
-import { inboxHostSessionFromEnv, inboxQwenShimContext, runInboxMcpShim } from "./inbox-mcp-shim";
+import { inboxHostSessionFromEnv, inboxQwenShimContext, inboxSessionProjectFromEnv, inboxT3EntryIdle, runInboxMcpShim } from "./inbox-mcp-shim";
+import { runPermissionHook } from "./inbox-permission-hook";
 import { runInboxLinkCommand } from "./inbox-link-command";
+import { runInboxProjectsCommand } from "./inbox-projects-command";
+import { writeWholeToStdout } from "./write-whole-stdout";
 
 export const INBOX_LOG_FILE = "inbox.log";
 /** Set by a starter that holds the start lock for the detached Inbox it spawns. */
@@ -273,6 +278,14 @@ async function connectRunningInbox(entry: InboxRegistryEntry): Promise<void> {
   }
 }
 
+/** The debug log is decided at start, so the variable cannot reach an Inbox that is already up: say so, on stderr. */
+async function reportDebugNeedsStart(dataDir: string): Promise<void> {
+  if (process.env.PLANNOTATOR_INBOX_DEBUG !== "1") return;
+  const status = await inboxStatus(dataDir);
+  if (status.state !== "running" && status.state !== "busy") return;
+  process.stderr.write("PLANNOTATOR_INBOX_DEBUG is read at start, so it does nothing for the Inbox already running. Run plannotator inbox stop first, or set inboxDebug: true in config.json and Restart.\n");
+}
+
 /** Run the Inbox server in this process until a signal or the stop route ends it. */
 async function serveInbox(dataDir: string, open: boolean, htmlContent: string | undefined, tailscale: boolean, connect: boolean): Promise<never> {
   // A detached Inbox runs under its starter's lock; anyone else takes it, so
@@ -436,10 +449,11 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
       record: inboxRegistryPath(dataDir),
       cli_version: cliVersion,
     };
-    process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+    await writeWholeToStdout(`${JSON.stringify(report, null, 2)}\n`);
     return code;
   }
-  const out = (line: string) => process.stdout.write(`${line}\n`);
+  let lines = "";
+  const out = (line: string) => void (lines += `${line}\n`);
   if (status.state === "missing") {
     out("Plannotator Inbox: not running (it has never run with this data dir)");
   } else if (status.state === "stopped") {
@@ -464,6 +478,7 @@ async function statusCommand(dataDir: string, asJson: boolean): Promise<number> 
         : `This plannotator is ${cliVersion}; the Inbox runs ${status.health.version}.`,
     );
   }
+  await writeWholeToStdout(lines);
   return code;
 }
 
@@ -607,6 +622,11 @@ export interface InboxCommandAssets {
 
 export async function runInboxCommand(args: readonly string[], assets: InboxCommandAssets = {}): Promise<never> {
   const dataDir = getPlannotatorDataDir();
+  // A launched Claude Code session's PermissionRequest hook (inbox-permission-hook.ts): never starts or connects anything.
+  if (args[0] === "permission-hook") {
+    if (args.length > 1) usageError(`Unknown inbox permission-hook option: ${args[1]}`);
+    return runPermissionHook(dataDir);
+  }
   // Only a person's `plannotator inbox` connects agents, never a detached start.
   // An Inbox older than DETACHED_ENV (0.28.17 and before) spawns its detached
   // starts (its Restart into an updated binary, --background, a connection)
@@ -618,14 +638,18 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   const connect = !detached && !inboxConnectDisabled(process.env);
 
   if (args[0] === "mcp") {
-    if (args.length > 1) usageError(`Unknown inbox mcp option: ${args[1]}`);
+    // `--t3`: the entry the T3 Code setup adds (`plannotator t3 --help`). It lists its tools only inside a T3 thread.
+    const unknown = args.slice(1).find((arg) => arg !== "--t3");
+    if (unknown !== undefined) usageError(`Unknown inbox mcp option: ${unknown}`);
     await runInboxMcpShim({
       dataDir,
       cwd: process.env.PLANNOTATOR_CWD || process.cwd(),
       ensureRunning: () => ensureInboxRunning(dataDir),
       hostSession: inboxHostSessionFromEnv(process.env),
+      sessionProject: inboxSessionProjectFromEnv(process.env),
       qwen: inboxQwenShimContext(process.env, homedir(), process.cwd(), process.ppid),
       askAiChild: isAskAiChild(process.env),
+      t3EntryIdle: inboxT3EntryIdle(args.includes("--t3"), process.env),
     });
     process.exit(0);
   }
@@ -650,6 +674,10 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
     const unknown = rest.find((arg) => arg !== "--tailscale");
     if (unknown) usageError(`Unknown inbox restart option: ${unknown} (restart takes only --tailscale)`);
     process.exit(await restartCommand(dataDir, rest.includes("--tailscale")));
+  }
+
+  if (args[0] === "projects") {
+    process.exit(await runInboxProjectsCommand(args.slice(1), { json: assets.json === true, self: shellLine(selfCommand()), ensureRunning: () => ensureInboxRunning(dataDir) }));
   }
 
   if (args[0] === "link" || args[0] === "unlink") {
@@ -677,6 +705,8 @@ export async function runInboxCommand(args: readonly string[], assets: InboxComm
   if (open && (background || noOpen)) {
     usageError(`--open does not go with ${background ? "--background" : "--no-open"}: it starts the Inbox in the background itself and opens it.`);
   }
+
+  await reportDebugNeedsStart(dataDir);
 
   if (background || open) {
     try {

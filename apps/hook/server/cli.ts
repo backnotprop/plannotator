@@ -1,8 +1,9 @@
 import { GUIDE_CLI_USAGE } from "@plannotator/server/guide-cli";
 import { T3_CLI_USAGE } from "@plannotator/t3-code/usage";
-import { INBOX_CARD_COLUMNS } from "@plannotator/core/inbox-types";
-import { INBOX_REF_LINK_RULE } from "@plannotator/shared/inbox/connection";
+import { INBOX_CARD_COLUMNS, INBOX_CARD_INITIATIVE_CLEAR_OUT, INBOX_CARD_INITIATIVE_FIELD, INBOX_CARD_INITIATIVE_RULE } from "@plannotator/core/inbox-types";
+import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inbox/connection";
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
+import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
@@ -114,6 +115,48 @@ export function parseStrictAnnotateOptions(
   return { requireApproval, resultFile, remainingArgs };
 }
 
+/** The subcommands that take `--title`: the ones that open a page in a tab. */
+export const TITLE_COMMANDS: ReadonlySet<string> = new Set(["review", "annotate", "annotate-last", "last"]);
+
+export interface ParsedTitleOption {
+  /** The tab title the caller chose, whitespace collapsed; absent when not given or blank. */
+  title?: string;
+  remainingArgs: string[];
+}
+
+/**
+ * Take `--title <text>` out of the arguments (#2289). The text becomes the
+ * whole tab title, as given: runs of whitespace (a newline included) collapse
+ * to one space, the ends are trimmed, and nothing is cut, so the browser
+ * truncates a long title the way it truncates any other. A blank title is the
+ * same as none. Throws on a missing value, a second `--title`, or a command
+ * that opens no page.
+ */
+export function parseTitleOption(args: string[]): ParsedTitleOption {
+  let title: string | undefined;
+  let seen = false;
+  const remainingArgs: string[] = [];
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (arg !== "--title") {
+      remainingArgs.push(arg);
+      continue;
+    }
+    if (seen) throw new Error("--title may only be specified once");
+    seen = true;
+    const value = args[index + 1];
+    // Like --result-file: a following flag is a forgotten value, not a title.
+    if (value === undefined || value.startsWith("--")) throw new Error("Missing value for --title");
+    const collapsed = value.replace(/\s+/g, " ").trim();
+    if (collapsed) title = collapsed;
+    index += 1;
+  }
+  if (seen && !TITLE_COMMANDS.has(remainingArgs[0] ?? "")) {
+    throw new Error("--title is only supported with: plannotator review, annotate, annotate-last (last)");
+  }
+  return title === undefined ? { remainingArgs } : { title, remainingArgs };
+}
+
 /** True when any token is a help flag (`--help` / `-h`). */
 export function hasHelpFlag(args: string[]): boolean {
   return args.some((arg) => HELP_FLAGS.has(arg));
@@ -156,9 +199,9 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator --help",
     "  plannotator --version, -v",
     "  plannotator [--browser <name>]",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--patch-file <path | ->] [--title <text>] [--tailscale] [--gate] [DIRECTORY | PR_URL]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/>  [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "  plannotator copilot-last [--gate] [--json] [--hook]",
     "  plannotator setup-goal <interview|facts> <bundle.json | -> [--json]",
     "  plannotator last",
@@ -167,12 +210,16 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "  plannotator guide export --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--out <file.html>]",
     "  plannotator guide share --id <savedGuideId> | --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--public] [--ttl <7d>] [--json]",
     "  plannotator guide unshare <id> --token <deleteToken>",
+    "  plannotator guide import --guide <guide.json> --patch <diff.patch> | --snapshot <snapshot.json> [--pr <url>]",
     "  plannotator sessions",
     "  plannotator data-dir",
     "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-    "  plannotator inbox mcp",
+    "  plannotator inbox mcp [--t3]",
     "  plannotator inbox status [--json] | stop | restart",
-    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list> ..."] : []),
+    "  plannotator inbox projects [combine <project id> --into <project id> | undo <project id>] [--json]",
+    "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+    "  plannotator t3 login | logout --url <T3 MCP URL>",
+    ...(options.board === true ? ["  plannotator card <create|move|say|link|ship|drop|list|initiative_delete> ..."] : []),
     `  plannotator feedback --stdin [--category <bug|idea|other>] [--contact '<text>'] <<'${FEEDBACK_HEREDOC_END}'`,
     "  plannotator update [--check]",
     "  plannotator uninstall [--purge] [--yes] [--dry-run]",
@@ -181,6 +228,7 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
     "Run 'plannotator <command> --help' for command-specific usage.",
     "Agents: run 'plannotator inbox --help' for the full guide to the Plannotator Inbox",
     "(what it is, when to use it, its MCP tools, threads, questions, connecting agents).",
+    "Using T3 Code? Run 'plannotator t3 --help'.",
     "",
     "Note:",
     "  running 'plannotator' without arguments is for hook integration and expects JSON on stdin",
@@ -198,12 +246,11 @@ export function formatTopLevelHelp(options: { board?: boolean } = {}): string {
  * To launch one, delete it from this set, add its usage lines to
  * formatTopLevelHelp() and document it in apps/skills/core/plannotator/SKILL.md.
  *
- * `inbox` (the Plannotator Inbox) was the last one to launch. Today: the
- * opt-in T3 Code connection (`t3`, and `t3-hook`, its Claude hook), and
- * `card`, the Board's card call from a shell (approval "inbox-board", step 1),
- * hidden until the Board page ships.
+ * `t3` (the T3 Code connection) was the last one to launch. Today:
+ * `t3-hook`, the T3 Claude hook's settings helper, which only the installer
+ * runs.
  */
-export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t3-hook"]);
+export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3-hook", "shape"]);
 
 /**
  * `plannotator card …` (card-command.ts): the Board's card call from a shell,
@@ -211,25 +258,38 @@ export const HIDDEN_SUBCOMMANDS: ReadonlySet<string> = new Set<string>(["t3", "t
  */
 export const CARD_COMMAND_USAGE = [
   "Usage:",
-  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>]",
+  "  plannotator card create <title> [--column <column>] [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--key <key>] [--initiative <name>]",
   "  plannotator card create --thread <id> [...]      (the thread's subject is the title; pass a short <title> too, as subjects run long)",
   "  plannotator card move <crd_id> <column> [--say <text>] [--you <text>] [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--reason <text>]",
-  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>]",
+  "  plannotator card say <crd_id> [<text>] [--you <text>] [--title <text>] [--initiative <name>]",
   "  plannotator card link <crd_id> [--thread <id>] [--pr <ref>] [--ref <issue or PR>] [--say <text>]",
-  "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]",
+  "  plannotator card ship <crd_id> [--say <text>] [--pr <ref>] [--thread <id>]      (moves it to done)",
   "  plannotator card drop <crd_id> <reason> [--say <text>]",
+  "  plannotator card initiative_delete <name or ini_id>      (its cards stay, in no initiative)",
   "  plannotator card list [--anyone | --mine] [--all]",
   "",
-  "Every command takes [--project <folder>] (default: this folder) and [--json].",
-  `Columns: ${INBOX_CARD_COLUMNS.join(", ")} (icebox is the person's only).`,
+  "Every command takes [--project <folder>] (default: your Claude Code or Pi session's project, else this folder) and [--json].",
+  `Columns: ${INBOX_CARD_COLUMNS.join(", ")}. A column is where the work stands: todo (asked, not started; the default),`,
+  "in_progress (you are on it), in_review (your part handed over; give --you), done (merged, live or finished), dropped (cancelled), backlog (not asked for yet).",
+  "A card the person put in backlog is theirs to move. Ship a card when you see its PR merge (the Board may also move it to done once every --pr PR merged).",
   "",
   "Keeps a card on the person's Board in the Plannotator Inbox for work that outlasts a reply.",
   "A title is 2–5 words naming the work (\"Pi update fix\"), never a sentence; status goes in --say.",
-  "When a card waits on the person, link the Inbox thread where they make the call (--thread), so \"You: …\" opens it.",
+  `--initiative: ${INBOX_CARD_INITIATIVE_FIELD} ${INBOX_CARD_INITIATIVE_RULE} ${INBOX_CARD_INITIATIVE_CLEAR_OUT}`,
+  "When you move a card to in_review, link the Inbox thread where the person makes the call (--thread), so \"You: …\" opens it.",
+  "--ref: an issue or PR as owner/repo#123, or any http(s) link with its scheme (https://…). GitHub and GitLab issues and PRs show their live state; a Jira or YouTrack issue link shows its key; any other link shows as a plain link.",
   `In --say and --you: ${INBOX_REF_LINK_RULE.replace(/^A/, "a")}`,
   "Works only while the person has the Board on (Inbox Settings → Capabilities); off, it exits 1 with board_off.",
   "Run 'plannotator inbox --help' for the full guide (its card section, shown while the Board is on).",
 ].join("\n");
+
+/**
+ * `plannotator shape …` (shape-command.ts): an agent's side of Shape.
+ * Unreleased (HIDDEN_SUBCOMMANDS). Built from the one source of Shape's agent
+ * text (packages/core/shape-skill.ts): the welcome and the commands, then the
+ * drawing guide the Inbox's `/shape` skill ends with too.
+ */
+export const SHAPE_COMMAND_USAGE = `${SHAPE_HELP_INTRO}\n\n${SHAPE_GUIDE}`.trimEnd();
 
 /**
  * `plannotator feedback` (feedback-command.ts): sends the person's feedback
@@ -275,6 +335,46 @@ export const FEEDBACK_COMMAND_USAGE = [
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
 ].join("\n");
 
+/** `plannotator inbox projects …` (inbox-projects-command.ts): list, combine and undo, on the person's request. */
+export const INBOX_PROJECTS_USAGE = [
+  "Usage:",
+  "  plannotator inbox projects [--json]",
+  "  plannotator inbox projects combine <project id> --into <project id> [--json]",
+  "  plannotator inbox projects undo <project id> [--json]",
+  "",
+  "Lists the Inbox's projects, combines one into another, and undoes a combine.",
+  "A combine applies right away, and an undo works at any time, from any session.",
+  "Run 'plannotator inbox --help' for when to use it.",
+].join("\n");
+
+/** What `plannotator inbox call` runs: the Inbox tool's actions. */
+export const INBOX_CALL_ACTIONS: readonly string[] = INBOX_TOOL_ACTIONS;
+
+/** `plannotator inbox call …` (inbox-call-command.ts): the Inbox tool from a script. */
+export const INBOX_CALL_USAGE = [
+  "Usage:",
+  "  plannotator inbox call [--session <id>] <action> [<json> | -]",
+  "",
+  "Runs one Inbox action from a shell, so a script can make many fixes in one go.",
+  // `steps` is left out: it is served only while the person has thread steps on, and the guide names it then.
+  `Actions: ${INBOX_CALL_ACTIONS.filter((action) => action !== "steps").join(", ")}. The JSON holds the action's fields, as in`,
+  "'plannotator inbox --help'; - reads it from stdin (for PowerShell and for loops, where",
+  "quoting JSON is painful). A stopped Inbox starts in the background.",
+  "",
+  "  plannotator inbox call card '{\"op\":\"list\"}'",
+  "  plannotator inbox call card '{\"op\":\"ship\",\"card_id\":\"crd_1\"}'",
+  "  plannotator inbox call send_message '{\"reply_to\":\"msg_2\",\"body\":\"Settled.\",\"supersedes\":[\"msg_1\"],\"done\":[\"msg_2\"],\"idempotency_key\":\"tidy-1\"}'",
+  "  plannotator inbox call send_message - < reply.json",
+  "  Get-Content reply.json -Raw | plannotator inbox call send_message -     (PowerShell)",
+  "",
+  "--session <id>  Who is calling, when your Tidy gave you the value. Otherwise the session",
+  "                this shell names, else nobody in particular (as a raw MCP client).",
+  "",
+  "stdout is the result as one JSON value, and nothing on failure. Pass an idempotency_key",
+  "on each send_message and card create, so a rerun cannot post twice.",
+  "Exit 0 ok, 1 refused or no Inbox (<code>: <message> on stderr), 2 bad usage.",
+].join("\n");
+
 /**
  * `plannotator inbox`'s commands and flags. `plannotator inbox --help` prints
  * the full agent guide (inbox-help.ts), which carries this block as its
@@ -285,13 +385,18 @@ export const FEEDBACK_COMMAND_USAGE = [
 export const INBOX_COMMAND_USAGE = [
   "Usage:",
   "  plannotator inbox [--background | --no-open | --open] [--tailscale]",
-  "  plannotator inbox mcp",
+  "  plannotator inbox mcp [--t3]",
   "  plannotator inbox status [--json]",
   "  plannotator inbox stop",
   "  plannotator inbox restart [--tailscale]",
+  "  plannotator inbox projects [--json]",
+  "  plannotator inbox projects combine <project id> --into <project id> [--json]",
+  "  plannotator inbox projects undo <project id> [--json]",
+  "  plannotator inbox call [--session <id>] <action> [<json> | -]",
   "  plannotator inbox link --offer [--tailscale] | link <code> | link --list",
   "  plannotator inbox unlink <machine>",
   "  plannotator inbox --notes <ids>",
+  "  plannotator inbox permission-hook",
   "",
   "  plannotator inbox               Start the Inbox and open it in the browser,",
   "                                  or open the one already running",
@@ -308,6 +413,8 @@ export const INBOX_COMMAND_USAGE = [
   "                                  an Inbox already running, asks it to publish.",
   "  plannotator inbox mcp           The stdio MCP server for agents. Starts a stopped",
   "                                  Inbox in the background (no browser tab).",
+  "                                  --t3: for T3 Code (plannotator t3 --help); lists",
+  "                                  its tools only inside a T3 Code thread.",
   "  plannotator inbox status        Whether the Inbox runs: URL, pid, version, data dir.",
   "                                  Exit 0 running, 1 not running, 2 not answering.",
   "                                  --json prints the same as one JSON object.",
@@ -319,11 +426,18 @@ export const INBOX_COMMAND_USAGE = [
   "  plannotator inbox restart       Stop it, then start it in the background (no",
   "                                  browser tab) and print its URL. A run published by",
   "                                  --tailscale is published again.",
+  "  plannotator inbox projects      List the projects, combine one into another, undo a",
+  "                                  combine: when the person asks to clean them up.",
+  "  plannotator inbox call          Run one Inbox action from a script: JSON in, one JSON",
+  "                                  result on stdout. See 'Scripting the Inbox'.",
   ...INBOX_LINK_USAGE,
   "  plannotator inbox --notes <ids> Add the Inbox note to these agents' instructions",
   "                                  files (claude-code, codex, gemini, qwen, pi,",
   "                                  opencode, comma-separated). Only with the",
   "                                  person's yes; starts nothing.",
+  "  plannotator inbox permission-hook",
+  "                                  Claude Code's permission hook in sessions the Inbox",
+  "                                  started (their settings file runs it). Never run it.",
   "",
   "Over the tailnet at every start: the Inbox's Settings, PLANNOTATOR_INBOX_TAILSCALE=1,",
   "or { \"inboxTailscale\": true } in config.json. Agents and MCP stay on this computer;",
@@ -387,7 +501,7 @@ export const UPDATE_COMMAND_USAGE = [
 export const SUBCOMMAND_HELP: Record<string, string> = {
   review: [
     "Usage:",
-    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
+    "  plannotator review [--git | --gitbutler] [--base <ref>] [--diff-type <type>] [--local | --no-local] [--patch-file <path | ->] [--no-git-remote-check] [--title <text>] [--tailscale] [--gate] [--json] [DIRECTORY | PR_URL]",
     "",
     "Review local VCS changes or a GitHub, GitLab or Bitbucket Cloud pull request in the browser.",
     "",
@@ -409,6 +523,8 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "                stays what local refs resolve to; Fetch still works. Useful when",
     "                SSH auth costs a hardware-key touch. Also PLANNOTATOR_GIT_REMOTE_CHECK=0",
     "                or { \"gitRemoteCheck\": false } in the data dir's config.json.",
+    "  --title <text>",
+    "                Name the browser tab this, in place of \"<repo> · Code Review\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        You wait for the sign-off: a bare Approve reaches you too. The approval",
     "                is printed either way; an agent host that only logs a bare Approve",
@@ -441,7 +557,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   annotate: [
     "Usage:",
-    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
+    "  plannotator annotate <file.md | file.txt | file.html | https://... | folder/> [--markdown] [--no-jina] [--title <text>] [--tailscale] [--gate] [--json] [--hook] [--require-approval] [--result-file <path>]",
     "",
     "Open a markdown/text/HTML file, a URL, or a folder of documents in the annotation UI.",
     "Several existing file paths (plannotator annotate spec.md mock.html notes.md) open",
@@ -450,6 +566,9 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
     "Options:",
     "  --markdown    Convert HTML input to markdown instead of rendering it raw",
     "  --no-jina     Fetch URLs with fetch+Turndown instead of Jina Reader",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of the file",
+    "                or folder name, whichever document is open",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
@@ -462,13 +581,15 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   ].join("\n"),
   "annotate-last": [
     "Usage:",
-    "  plannotator annotate-last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
-    "  plannotator last [--stdin] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator annotate-last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
+    "  plannotator last [--stdin] [--title <text>] [--tailscale] [--gate] [--json] [--hook]",
     "",
     "Annotate the last assistant message from the current agent session.",
     "",
     "Options:",
     "  --stdin       Read the message content from stdin instead of session logs",
+    "  --title <text>",
+    "                Name the browser tab and the header this, in place of \"Last message\"",
     "  --tailscale   Publish the loopback session over your tailnet via tailscale serve (HTTPS)",
     "  --gate        Add an Approve button (review-gate UX)",
     "  --json        Emit a structured decision JSON on stdout",
@@ -547,6 +668,7 @@ export const SUBCOMMAND_HELP: Record<string, string> = {
   // The Board's cards; and, unreleased (HIDDEN_SUBCOMMANDS), the opt-in T3 Code connection.
   t3: T3_CLI_USAGE,
   card: CARD_COMMAND_USAGE,
+  shape: SHAPE_COMMAND_USAGE,
   feedback: FEEDBACK_COMMAND_USAGE,
   "t3-hook": [
     "Usage:",
@@ -574,6 +696,8 @@ export function isSubcommandHelpInvocation(args: string[]): string | null {
   if (!sub) return null;
   const canonical = SUBCOMMAND_HELP_ALIASES[sub] ?? sub;
   if (!(canonical in SUBCOMMAND_HELP)) return null;
+  // `inbox projects --help` is that command's own usage, not the whole guide.
+  if (canonical === "inbox" && args[1] === "projects") return null;
   return hasHelpFlag(args.slice(1)) ? canonical : null;
 }
 

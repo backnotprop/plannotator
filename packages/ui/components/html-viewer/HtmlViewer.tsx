@@ -22,6 +22,7 @@ import { getRichCopyEnabled } from "../../utils/richCopyPolicy";
 import { elementIdentityForAskAI } from "../../utils/parser";
 import { getIdentity } from "../../utils/identity";
 import { THUMBS_UP_LABEL } from "../../utils/quickLabels";
+import { hashDraftScope } from "../../utils/draftScopeHash";
 import {
   createVimHudCommand,
   getVimHudPhase,
@@ -59,6 +60,7 @@ import {
   buildThemeTokenPayload,
   hasHostThemeOptIn,
   injectIntoHead,
+  injectPrintDefaults,
   resolveBridgeScriptUrl,
 } from "./srcdoc";
 
@@ -377,6 +379,13 @@ export interface HtmlViewerProps {
    */
   onHostDraft?: (draft: HostDraft | null) => void;
   /**
+   * Opt-in: on a touch screen (`pointer: coarse`), a text selection made with
+   * a finger counts, read from `selectionchange` once it rests (a long press
+   * sends no mouseup). The Inbox's phone layout turns it on. Absent → only a
+   * mouseup reports a selection, unchanged.
+   */
+  touchSelection?: boolean;
+  /**
    * Opt-in host capability for a native shell whose web view decides every
    * navigation itself (the Inbox surface in the iPhone app). A link the
    * person taps in Interact opens as a new window (`window.open`, the sandbox
@@ -462,6 +471,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onBridgeUnavailable,
       bridgeErrorDisplay = "banner",
       onHostDraft,
+      touchSelection = false,
       hostNavigates = false,
       sandbox = HTML_VIEWER_SANDBOX,
     },
@@ -473,6 +483,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     // Increment on every bridge-ready event so srcdoc navigations re-send
     // state even though the iframe element and its WindowProxy are reused.
     const [iframeReadyVersion, setIframeReadyVersion] = useState(0);
+    const [printReady, setPrintReady] = useState(false);
     const [iframeFocused, setIframeFocused] = useState(false);
     const [vimBridgePhase, setVimBridgePhase] =
       useState<VimSelectionHudContext>("inactive");
@@ -483,6 +494,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     const [globalCommentPopover, setGlobalCommentPopover] = useState<{
       anchorEl: HTMLElement;
       contextText: string;
+      draftKey: string;
     } | null>(null);
 
     // Live proxied-app mode: the iframe navigates a real origin, so the
@@ -553,8 +565,12 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
         diffActive: !!diffActive,
         bridgeScriptUrl: bridgeUrl,
       });
-      return injectIntoHead(rawHtml, injection);
+      return injectIntoHead(injectPrintDefaults(rawHtml, { sectionBreaks: hostTheme }), injection);
     }, [liveMode, rawHtml, hostTheme, diffActive, bridgeUrl]);
+
+    useLayoutEffect(() => {
+      setPrintReady(false);
+    }, [srcdoc]);
 
     // Error state for the bridgeScriptUrl path only: the inline path never
     // sets it (no timer, and a version mismatch there can only be a forged
@@ -819,6 +835,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             );
           }
           setIframeReadyVersion((version) => version + 1);
+          setPrintReady(true);
           setVimBridgePhase("inactive");
           setVimHudCommand(null);
           setVimHelpOpen(false);
@@ -1055,6 +1072,15 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       postToBridge({ type: `${PREFIX}set-host-navigates`, active: true });
     }, [iframeReadyVersion, hostNavigates]);
 
+    // Selections made with a finger (`touchSelection`). A viewer that never
+    // asked posts nothing.
+    const touchSelectionAskedRef = useRef(false);
+    useEffect(() => {
+      if (iframeReadyVersion === 0 || (!touchSelection && !touchSelectionAskedRef.current)) return;
+      touchSelectionAskedRef.current = touchSelection;
+      postToBridge({ type: `${PREFIX}set-touch-selection`, active: touchSelection });
+    }, [iframeReadyVersion, touchSelection]);
+
     // The hidden composer's Escape rung: with focus outside the iframe,
     // Escape closes the hidden draft (its text stays in the draft store) and
     // is used, so the next press reaches the rest of the ladder. Capture
@@ -1170,12 +1196,17 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     useImperativeHandle(ref, () => ({
       removeHighlight: hook.removeHighlight,
       clearAllHighlights: hook.clearAllHighlights,
+      print: !liveMode && printReady ? () => postToBridge({ type: `${PREFIX}print` }) : undefined,
       // Shared/draft restores respect the live page filter too.
       applySharedAnnotations: (anns: Annotation[]) =>
         hook.applyAnnotations(forCurrentPage(anns)),
       stepPin: (direction: "parent" | "child") =>
         postToBridge({ type: `${PREFIX}step-pin`, direction }),
-      revealPin: () => postToBridge({ type: `${PREFIX}reveal-pin` }),
+      revealPin: (options?: { clearBottom?: number }) =>
+        postToBridge({
+          type: `${PREFIX}reveal-pin`,
+          ...(options?.clearBottom ? { clearBottom: options.clearBottom } : {}),
+        }),
     }));
 
     const handleGlobalCommentSubmit = useCallback(
@@ -1236,7 +1267,11 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
             onClick={() => {
               const anchorEl = globalCommentButtonRef.current;
               if (!anchorEl) return;
-              setGlobalCommentPopover({ anchorEl, contextText: "" });
+              // One kept draft per live-app URL (src), else per document: a
+              // hash of its text, taken only when the composer opens, so two
+              // documents never share a draft.
+              const draftKey = `html:global:${src ? `src:${src}` : `doc:${hashDraftScope(rawHtml)}`}`;
+              setGlobalCommentPopover({ anchorEl, contextText: "", draftKey });
             }}
             className="flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium text-muted-foreground hover:text-foreground bg-muted/50 hover:bg-muted rounded-md transition-colors cursor-pointer"
             title="Add global comment"
@@ -1253,6 +1288,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
     return (
       <>
         <div
+          data-print-html={liveMode ? undefined : ""}
           className={`relative w-full${fullViewport ? " h-full flex flex-col" : ""}`}
           style={fullViewport ? undefined : { maxWidth: maxWidth ?? undefined }}
         >
@@ -1334,6 +1370,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               style={{
                 width: "100%",
                 height: fullViewport ? "100%" : `${iframeHeight}px`,
+                ...(!liveMode ? { "--pn-html-print-height": `${iframeHeight}px` } : {}),
                 border: "none",
                 display: "block",
                 colorScheme: "auto",
@@ -1451,6 +1488,8 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
               anchorEl={globalCommentPopover.anchorEl}
               contextText={globalCommentPopover.contextText}
               isGlobal={true}
+              // The words typed survive a close (Escape, X) and come back on reopen.
+              draftKey={globalCommentPopover.draftKey}
               onSubmit={handleGlobalCommentSubmit}
               onClose={() => setGlobalCommentPopover(null)}
               mentionSource={mentionSource}

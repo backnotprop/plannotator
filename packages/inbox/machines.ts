@@ -52,6 +52,16 @@ export function rowMachine(row: Pick<InboxListRow, 'machine'>, model: MachinesMo
 }
 
 /**
+ * Whether Snooze is offered on a row (approval "inbox-snooze"): this machine's own row always (the caller checks
+ * that this Inbox keeps snoozes), a linked machine's only when that machine's Inbox keeps them too. A snooze sent to
+ * an older one would never land.
+ */
+export function rowSnoozes(row: Pick<InboxListRow, 'machine'>, model: MachinesModel): boolean {
+  const id = rowMachine(row, model);
+  return id === null || model.linked.some((machine) => machine.id === id && machine.snoozes === true);
+}
+
+/**
  * The line for a machine that cannot show its threads now: "MacBook asleep since 10:42 AM", or what to do when it
  * runs an older Plannotator (rule 22: "update", never "reconnecting"). Null for a machine that is there.
  */
@@ -115,7 +125,7 @@ export function machineCounts(sections: readonly InboxListSection[], model: Mach
   return counts;
 }
 
-type NamedProject = { id: string; root: string; name: string; machine?: string };
+type NamedProject = { id: string; root: string; name: string; display_name?: unknown; machine?: string };
 
 /**
  * The window's one name per project (`windowProjectNames`), told apart within each machine only: the same folder
@@ -185,10 +195,8 @@ export function outboxPending(entry: Pick<OutboxView, 'state'>): boolean {
 export function outboxLine(entry: OutboxView, machine: Pick<MachineView, 'name' | 'state'> | null): { tone: 'waiting' | 'failed'; text: string } | null {
   const name = machine?.name ?? 'the other machine';
   if (outboxPending(entry)) {
-    // Online or still connecting: on its way. Asleep or out of date: it waits for the machine. Removed there: it
-    // cannot go until the link is made again, said so rather than promised.
+    // Online or still connecting: on its way. Asleep or out of date: it waits for the machine.
     if (!machine || machine.state === 'online' || machine.state === 'connecting') return { tone: 'waiting', text: `Sending to ${name}…` };
-    if (machine.state === 'revoked') return { tone: 'waiting', text: `Not sent: ${name} removed the link. Link it again to send.` };
     if (machine.state === 'needs_update') return { tone: 'waiting', text: `Will send when ${name} is updated` };
     return { tone: 'waiting', text: `Will send when ${name} is back` };
   }

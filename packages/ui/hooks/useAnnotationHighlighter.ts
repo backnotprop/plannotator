@@ -12,6 +12,7 @@ import { metaWithBelowTitle, metaWithoutBelowTitle, snapRangeOutOfBelowTitle } f
 import { AnnotationType } from '../types';
 import type { QuickLabel } from '../utils/quickLabels';
 import {
+  dropEmptyNodes,
   trimWhitespaceOnlyBoundaryNodes,
   type SelectedNodeLike,
 } from '../utils/selectionBoundary';
@@ -19,6 +20,7 @@ import { getIdentity } from '../utils/identity';
 import { annotationOwnsHighlight } from '../utils/annotationOwnsHighlight';
 import { transformPlainText } from '../utils/inlineTransforms';
 import { richCopySourceFromRange, type RichCopySource } from '../utils/richClipboard';
+import { TOUCH_PRIMARY_QUERY, TOUCH_SELECTION_SETTLE_MS } from '../utils/touchSelection';
 
 // --- Exported state types ---
 
@@ -41,6 +43,11 @@ export interface CommentPopoverState {
   /** `data-block-id`s of the blocks the pending selection covers, in
    *  document order (a host maps them to source lines for Ask AI). */
   blockIds?: string[];
+  /** Where the selection starts in its first block's text. Set only when
+   *  that block marks its text as its source (`data-content-start-line`, a
+   *  whole-file code document), so a repeated line names the copy that was
+   *  selected. */
+  startOffset?: number;
 }
 
 export interface QuickLabelPickerState {
@@ -326,6 +333,43 @@ const blockElementOf = (dom: Node | null | undefined): HTMLElement | null => {
   while (parent && !parent.dataset.blockId) parent = parent.parentElement;
   return parent;
 };
+
+/** Where a painted node starts in its block's text, measured from the DOM.
+ *  Only a block that marks its text as its source (`data-content-start-line`,
+ *  set by a whole-file code document) is measured, so its offset names the
+ *  copy that was painted when the same line appears twice. `undefined` for
+ *  every other block, which keeps the first-match offset it always stored. */
+const sourceOffsetOf = (blockEl: HTMLElement | null, firstDom: Node | null | undefined): number | undefined => {
+  if (!blockEl || !firstDom || blockEl.dataset.contentStartLine === undefined) return undefined;
+  if (!blockEl.contains(firstDom)) return undefined;
+  const code = blockEl.querySelector('code');
+  const base = code && code.contains(firstDom) ? code : blockEl;
+  try {
+    const range = document.createRange();
+    range.setStart(base, 0);
+    range.setEndBefore(firstDom);
+    return range.toString().length;
+  } catch {
+    return undefined;
+  }
+};
+
+/** `sourceOffsetOf` for a pending selection: its first painted node. */
+function selectionSourceOffset(highlighter: any, source: any): number | undefined {
+  if (isMathAnnotationSource(source) || !highlighter || !source?.id) return undefined;
+  let doms: unknown[] = [];
+  try {
+    doms = highlighter.getDoms(source.id) ?? [];
+  } catch {
+    return undefined;
+  }
+  const first = doms[0];
+  return first instanceof HTMLElement ? sourceOffsetOf(blockElementOf(first), first) : undefined;
+}
+
+/** The popover's `startOffset` key, only when one was measured. */
+const withStartOffset = (startOffset: number | undefined): { startOffset?: number } =>
+  startOffset === undefined ? {} : { startOffset };
 
 /** Where `quote` starts in `text`, matching whitespace-insensitively (the
  *  same comparison the restore verification uses: a quote that crossed a
@@ -1064,7 +1108,7 @@ export function useAnnotationHighlighter({
         blockId = parent.dataset.blockId;
         const blockText = parent.textContent || '';
         const beforeText = blockText.split(source.text)[0];
-        startOffset = beforeText?.length || 0;
+        startOffset = sourceOffsetOf(parent, el) ?? (beforeText?.length || 0);
       }
     }
 
@@ -1252,7 +1296,12 @@ export function useAnnotationHighlighter({
       );
       const quote = compactText(ann.originalText);
       if (stored && quote && compactText(stored.textContent ?? '').includes(quote)) return;
-      moved.push({ id: ann.id, blockId, startOffset: quoteOffsetIn(blockEl.textContent ?? '', ann.originalText), positionsStale });
+      moved.push({
+        id: ann.id,
+        blockId,
+        startOffset: sourceOffsetOf(blockEl, firstDom) ?? quoteOffsetIn(blockEl.textContent ?? '', ann.originalText),
+        positionsStale,
+      });
     };
 
     anns.forEach(ann => {
@@ -1511,12 +1560,14 @@ export function useAnnotationHighlighter({
 
     // Chromium can extend a triple-clicked line into empty or indentation nodes of the next block.
     // Trim only boundary whitespace so spacing inside genuine multi-node selections stays highlighted.
+    // Empty text nodes go wherever they are: a selection over a highlight inside a highlight takes the
+    // empty halves the library's own splits left in the inner wrapper, and wrapping them throws.
     // The hook's callback type is `(...args: unknown[]) => SelectedNode[]`; a SelectedNode
     // structurally satisfies SelectedNodeLike, so the trimmed subset goes back through the
     // hook's own callback type rather than importing SelectedNode from the package's dist/.
     type SelectedNodesTap = Parameters<typeof highlighter.hooks.Render.SelectedNodes.tap>[0];
     highlighter.hooks.Render.SelectedNodes.tap(((...args: unknown[]) =>
-      trimWhitespaceOnlyBoundaryNodes(args[1] as SelectedNodeLike[])) as SelectedNodesTap);
+      trimWhitespaceOnlyBoundaryNodes(dropEmptyNodes(args[1] as SelectedNodeLike[]))) as SelectedNodesTap);
 
     highlighterRef.current = highlighter;
     // Whether the library's pointer-end handler is attached (`run()`), and whether this effect was cleaned up.
@@ -1600,6 +1651,7 @@ export function useAnnotationHighlighter({
               source,
               draftKey: commentDraftTargetKey(source, source.text),
               blockIds: selectionBlockIds(highlighter, source),
+              ...withStartOffset(selectionSourceOffset(highlighter, source)),
             });
           } else if (effectiveMode === 'quickLabel') {
             pendingSourceRef.current = source;
@@ -1708,7 +1760,7 @@ export function useAnnotationHighlighter({
     // On a touch screen a host that composes takes the selection when the
     // person chooses its Comment (takeSelection); the library painting it at
     // touchend would end the system selection and its edit menu first.
-    const isTouchPrimary = window.matchMedia('(pointer: coarse)').matches;
+    const isTouchPrimary = window.matchMedia(TOUCH_PRIMARY_QUERY).matches;
     if (!(isTouchPrimary && hostComposesRef.current)) {
       highlighter.run();
       listening = true;
@@ -1831,7 +1883,7 @@ export function useAnnotationHighlighter({
       ? () => {
           clearTimeout(selectionTimer);
           if (hostComposesRef.current) return;
-          selectionTimer = setTimeout(takeTouchSelection, 400);
+          selectionTimer = setTimeout(takeTouchSelection, TOUCH_SELECTION_SETTLE_MS);
         }
       : null;
 
@@ -2076,6 +2128,7 @@ export function useAnnotationHighlighter({
       source: toolbarState.source,
       draftKey: commentDraftTargetKey(toolbarState.source, toolbarState.selectionText),
       blockIds: selectionBlockIds(highlighterRef.current, toolbarState.source),
+      ...withStartOffset(selectionSourceOffset(highlighterRef.current, toolbarState.source)),
     });
     setToolbarState(null);
   };

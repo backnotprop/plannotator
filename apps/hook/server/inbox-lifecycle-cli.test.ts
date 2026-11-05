@@ -15,6 +15,7 @@ import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/cli
 import type { InboxMessageWire } from "@plannotator/core/inbox-types";
 import { InboxAgentConnection, InboxWake } from "@plannotator/shared/inbox/agent-link";
 import { inboxStatus, isPidAlive, readInboxRegistry, writeInboxRegistry } from "@plannotator/shared/inbox/registry";
+import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { type InboxEntry, inboxEntryOf, mustSignalInbox, signalProvenInbox, stopProvenInboxes } from "../../../tests/helpers/inbox-process";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -38,6 +39,8 @@ afterEach(async () => {
   await stopProvenInboxes(started.splice(0), { signal: "SIGKILL" });
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
 });
+// After the cleanup hooks: a stub's failure stops the hooks registered behind it.
+const agents = stubbedAgentClis();
 
 interface Sandbox {
   root: string;
@@ -55,7 +58,7 @@ function sandbox(): Sandbox {
     root,
     dataDir,
     env: {
-      PATH: process.env.PATH ?? "/usr/bin:/bin",
+      ...agents.env,
       HOME: home,
       USERPROFILE: home,
       TMPDIR: tmpdir(),
@@ -64,7 +67,6 @@ function sandbox(): Sandbox {
       BROWSER: NO_BROWSER,
       PLANNOTATOR_INBOX_CONNECT: "0",
       PLANNOTATOR_UPDATE_CHECK: "0",
-      ...(process.env.PLANNOTATOR_TEST_SANDBOX ? { PLANNOTATOR_TEST_SANDBOX: process.env.PLANNOTATOR_TEST_SANDBOX } : {}),
     },
   };
 }
@@ -104,6 +106,25 @@ function standIn(argv: string[]): number {
   children.push(proc);
   return proc.pid;
 }
+
+describe("PLANNOTATOR_INBOX_DEBUG", () => {
+  test("names the way to turn it on when an Inbox is already running; agents still read just the URL, and otherwise there is no note", async () => {
+    const box = sandbox();
+    const debug = { ...box, env: { ...box.env, PLANNOTATOR_INBOX_DEBUG: "1" } };
+    const first = await cli(debug, ["inbox", "--background"]);
+    expect(first.code).toBe(0);
+    track(box);
+    expect(first.stderr).not.toContain("PLANNOTATOR_INBOX_DEBUG");
+
+    const again = await cli(debug, ["inbox", "--background"]);
+    expect(again.code).toBe(0);
+    expect(again.stdout.trim()).toBe(first.stdout.trim());
+    expect(again.stderr).toContain("plannotator inbox stop");
+    expect(again.stderr).toContain("inboxDebug");
+
+    expect((await cli(box, ["inbox", "--background"])).stderr).not.toContain("PLANNOTATOR_INBOX_DEBUG");
+  });
+});
 
 describe("plannotator inbox status", () => {
   test("an Inbox that never ran: exit 1, and stop starts nothing and exits 0", async () => {

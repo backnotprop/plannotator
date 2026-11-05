@@ -246,8 +246,12 @@ for (const phone of PHONES) {
       await expect(second.getByRole('button', { name: 'Accept recommended' })).toBeVisible();
       await first.scrollIntoViewIfNeeded();
       await shot(page, `${phone.tag}-card-footer-390`);
+      // Narrower, never shorter or taller: Linux WebKit fires `resize` with the new visual viewport height while
+      // documentElement.clientHeight still holds the old one, and sends nothing once it catches up. Back from 844 px
+      // to the phone's 659, the Inbox read that as a keyboard (phone.ts trackKeyboard) and kept
+      // `data-ib-keyboard-pin`, so the radio picked next hid the reply foot (inbox.css) and Reply never showed.
       for (const width of [390, 320]) {
-        await page.setViewportSize({ width, height: 844 });
+        await page.setViewportSize({ width, height: phone.device.viewport.height });
         await page.waitForTimeout(150);
         check(await footerProblems(page), `at ${width} px`).toEqual([]);
         expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
@@ -332,9 +336,8 @@ for (const phone of PHONES) {
       const names = await box.locator('[data-compose-file]').evaluateAll((els) => els.map((el) => el.getAttribute('data-compose-file-name')!));
       await pane.getByRole('button', { name: 'Send', exact: true }).click();
       await expect(box).toHaveCount(0);
-      const answer = await world.agent.waitForReply(threadId, 10);
-      const body = (answer.reply as { body: string }).body;
-      for (const n of names) expect(body).toContain(`Attached: ${n} (`);
+      const answer = await world.agent.nextReply(threadId, 10);
+      expect((answer.attachments as { name: string }[]).map((a) => a.name)).toEqual(names);
       expect(errors).toEqual([]);
     });
 

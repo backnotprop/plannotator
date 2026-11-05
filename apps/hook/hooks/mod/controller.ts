@@ -10,7 +10,7 @@
 import { BRIDGE_HOST, BRIDGE_MODES, bridgeBaseUrl, createBridge, type BridgeEnd, type BridgeHandle } from './bridge'
 import { deliveryFor, legacyResult, parseHostResult, type HostResultRecord, type SessionKind } from './delivery'
 import type { Host, HttpResult } from './host'
-import { InboxLink } from './inbox'
+import { InboxLink, inboxSessionProjectEnvValue, sessionProjectFolder } from './inbox'
 import { inboxCommandBriefing, type InboxToolInfo } from './inbox-contract'
 import {
   aliveArgv,
@@ -319,6 +319,8 @@ export interface SessionInfo {
   cwd?: () => Promise<string>
   /** The session's root folder (`$.session.root()`), read once at the link's start: where `claude --resume` runs. */
   root?: () => Promise<string>
+  /** The name the person gave the session, read for each Inbox poll (`InboxLinkOptions.label`). */
+  label?: () => string | Promise<string>
 }
 
 export class PlannotatorMod {
@@ -380,10 +382,48 @@ export class PlannotatorMod {
           },
           ...(session.cwd ? { cwd: session.cwd } : {}),
           ...(session.root ? { root: session.root } : {}),
+          ...(session.label ? { label: session.label } : {}),
           instanceId: this.instanceId,
+          turns: this.turns,
         })
       : null
     this.inbox?.start()
+  }
+
+  /** The PLANNOTATOR_SESSION_PROJECT value last exported (null: none yet, or the write failed). */
+  private exportedProject: string | null = null
+
+  /**
+   * Exports the folder this session files under in the Inbox
+   * (PLANNOTATOR_SESSION_PROJECT, beside PLANNOTATOR_SESSION_TAG), so a
+   * `plannotator inbox call` or `plannotator card` its shell runs lands in the
+   * same project as its `plannotator_inbox` tool, wherever the shell has
+   * `cd`'d to. The Inbox link's own folder when there is one, else the same
+   * rule on the session's root and working folder. Called when the instance
+   * starts, at each main-loop turn start and before each Bash call (a `/cd`
+   * or a worktree move changes it); written only when it changed. Never
+   * throws.
+   */
+  async exportSessionProject(): Promise<void> {
+    if (!this.host.setSessionProject || this.disposed) return
+    try {
+      const folder = this.inbox
+        ? await this.inbox.projectFolder()
+        : await sessionProjectFolder(
+            this.host,
+            this.session.root ? await this.session.root().catch(() => null) : null,
+            null,
+            this.session.cwd ? await this.session.cwd().catch(() => null) : null,
+          )
+      if (!folder) return
+      const value = inboxSessionProjectEnvValue(this.session.sessionId, folder)
+      if (value === this.exportedProject) return
+      this.exportedProject = value
+      await this.host.setSessionProject(value)
+    } catch {
+      // Not exported now: the next call tries again.
+      this.exportedProject = null
+    }
   }
 
   // --- Lifecycle -----------------------------------------------------------
@@ -555,6 +595,19 @@ export class PlannotatorMod {
 
   get isDisposed(): boolean {
     return this.disposed
+  }
+
+  /**
+   * The process moved here from `previous`'s session (`/clear`, an in-process
+   * resume): question prompts still waiting in the engine run as turns of
+   * THIS session, so this instance aborts them when they start
+   * (`TurnTracker.queuedPrompts`). `previous` is usually disposed already
+   * (`session.end`): reading its tracker then is intended, and stays safe
+   * only while `dispose()` leaves `turns` alone. register.ts `currentMod` and
+   * `ClaudeSession.clear` both call this.
+   */
+  carryQueued(previous: PlannotatorMod | null): void {
+    if (previous && previous !== this) this.turns.dropQueued(previous.turns.queuedPrompts())
   }
 
   private adopt(record: LaunchRecord, touchedAt = 0): LiveLaunch {
@@ -1738,6 +1791,7 @@ export class PlannotatorMod {
 
   private pushBridgeStatus(): void {
     for (const launch of this.launches.values()) launch.bridge?.pushStatus()
+    this.inbox?.pushAskStatus()
   }
 
   // --- Names ----------------------------------------------------------------------

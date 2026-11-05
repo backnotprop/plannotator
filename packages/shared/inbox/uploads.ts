@@ -50,36 +50,80 @@ import {
   THREAD_NAME_BIDI,
   THREAD_NAME_CONTROL,
   type InboxAttachment,
+  type InboxReplyViewing,
   type InboxUpload,
 } from "@plannotator/core/inbox-types";
+import { cutText } from "@plannotator/core/inbox-questions";
 import { decideInboxAttachmentKind, inboxBlobPath, inboxBlobsDir, scanInboxFile } from "./attachments";
 import { InboxError } from "./schema";
 
 export const INBOX_UPLOADS_DIR = "uploads";
 
+/** The name the window gives a long paste it attaches (packages/inbox/compose/pastedText.ts pastedTextName). */
+const PASTED_TEXT_NAME = /^pasted-text-[^/\\]+\.txt$/;
+
 /**
  * The lines an agent reads under a message's words for the files the person
  * attached, each with its path so the agent can open it: `Attached: name (path)`.
- * Empty when it carries none. The wake and `wait_for_reply` both append them.
+ * Empty when it carries none. The wake appends them; read_thread gives the attachment records.
  */
 export function inboxAttachedLines(message: { attachments?: readonly InboxAttachment[] | null }): string {
   return (message.attachments ?? []).map((attachment) => `Attached: ${attachment.name} (${attachment.path})`).join("\n");
 }
 
+/** The longest file name `inboxViewingLine` prints; a longer one is cut. */
+const VIEWING_NAME_MAX = 120;
+/** The longest time `inboxViewingLine` prints. */
+const VIEWING_TIME_MAX = 24;
+/** A time as the window words it (`whenTime`, always en-US): "8:47 PM", "Nov 5, 8:47 PM", "Nov 5, 2025, 8:47 PM". It is the one part of the line outside its quotes. */
+export const INBOX_VIEWING_TIME = /^(?:[A-Z][a-z]{2} \d{1,2}, (?:\d{4}, )?)?\d{1,2}:\d{2} [AP]M$/;
+
 /**
- * The words an agent reads for a person's message: its body, then
- * `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
- * the Board request (`inboxBoardRequestBlock`). The stored body never holds it.
+ * A file name or a time for `inboxViewingLine`: text anyone can write (an agent names its files, a page names its links)
+ * going into an agent's prompt. One line, no controls or invisible format characters, no backtick to close the quote around it, a sane length.
  */
-export function inboxBodyForAgent(
-  message: { body: string; thread_id?: string; attachments?: readonly InboxAttachment[] | null; board_request?: true },
-  options: { boardRequest?: boolean } = {},
-): string {
-  const attached = inboxAttachedLines(message);
+export function inboxViewingText(text: string, max = VIEWING_NAME_MAX): string {
+  const line = text
+    .replace(/\p{Cf}/gu, "")
+    .replace(new RegExp(THREAD_NAME_CONTROL.source, "g"), " ")
+    .replace(/\s+/g, " ")
+    .replace(/`/g, "'")
+    .trim();
+  return cutText(line, max);
+}
+
+/**
+ * The one line an agent reads for a reply sent from full screen's floating box: what was on screen. It explains itself
+ * and is no more than that: never a pick, an annotation or an answer. Empty when the reply has none.
+ */
+export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }): string {
+  const viewing = message.viewing;
+  // A record of another shape (a newer Inbox wrote it) must not take the session's poll or read_thread down with it.
+  if (!viewing || typeof viewing.name !== "string" || typeof viewing.message_id !== "string") return "";
+  const name = inboxViewingText(viewing.name) || "a file";
+  const page = typeof viewing.page === "string" ? inboxViewingText(viewing.page) : "";
+  const time = typeof viewing.time === "string" ? inboxViewingText(viewing.time, VIEWING_TIME_MAX) : "";
+  const from = `the ${time ? `${time} ` : ""}message ${inboxViewingText(viewing.message_id)}`;
+  const what = page ? `\`${page}\`, linked from \`${name}\` in ${from}` : `\`${name}\`${viewing.as_sent ? " as first sent" : ""}, from ${from}`;
+  return `(They sent this while viewing ${what}.)`;
+}
+
+/**
+ * The words an agent reads for a person's message: its body, then `inboxViewingLine`,
+ * then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
+ * the Board request (`inboxBoardRequestBlock`). The stored body never holds them.
+ */
+export function inboxBodyForAgent(message: {
+  body: string;
+  thread_id?: string;
+  attachments?: readonly InboxAttachment[] | null;
+  board_request?: true;
+  viewing?: InboxReplyViewing | null;
+}): string {
+  const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
-  let words = !attached ? message.body : message.body.trim() ? `${message.body}\n\n${attached}` : attached;
-  // `boardRequest: false`: a JSON field that keeps the person's words (the block is in the text beside it).
-  if (options.boardRequest !== false && message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
+  let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
+  if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
   return words;
 }
 const PENDING_DIR = "pending";
@@ -132,6 +176,23 @@ export function readInboxUpload(inboxDirPath: string, id: unknown): InboxUpload 
   if (!isInboxId("upl", id)) return null;
   try {
     return parseUpload(readFileSync(join(pendingDir(inboxDirPath), `${id}.json`), "utf8"));
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * The words of one pending long paste (a pasted-text-….txt upload the window
+ * attached, approval "inbox-paste-attachment"), so Put back works after a
+ * reload or in another window. Null when the id is not a pending pasted text
+ * (sent, swept, never was, a text file the person dropped, or another kind of
+ * file) or its bytes are gone.
+ */
+export function readInboxUploadText(inboxDirPath: string, id: unknown): string | null {
+  const upload = readInboxUpload(inboxDirPath, id);
+  if (!upload || upload.kind !== "text" || !PASTED_TEXT_NAME.test(upload.name)) return null;
+  try {
+    return readFileSync(inboxBlobPath(inboxDirPath, upload.sha256), "utf8");
   } catch {
     return null;
   }

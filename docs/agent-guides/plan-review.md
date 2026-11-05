@@ -224,6 +224,22 @@ names every file (`Files:` + `annotateBundleTargetText`). A session without
 UI (print/JSON mode) never has the tool active (see above), and a call that
 reaches it anyway is refused, since nothing could deliver the decision later.
 
+**Tab loss and feedback delivery.** Annotation sessions opened by the
+`plannotator` tool and the slash commands do not enable the blocking CLI's
+client lease, even with `gate: true`: they return at once, so closing a tab or
+losing a tunnel leaves the review open until an explicit decision or close.
+They pass `clientLease: false` to `startMarkdownAnnotationSession` /
+`startLastMessageAnnotationSession`. Callers that await the decision (the
+`plannotator:request` event bus, `openMarkdownAnnotation`,
+`openLastMessageAnnotation`) keep the default, so a gated review whose tab is
+gone still settles as dismissed after 30 s (#1143). Feedback tries the
+opener's `pi.sendUserMessage` first. Only if that throws does it use the
+current-session fallback, so an Oh My Pi in-process subagent cannot take
+feedback from a still-live opener. A known-dead opener (its
+`session_shutdown` ran, or its `ctx` throws) goes to the current session
+first, so a host whose replaced `pi` never throws still delivers to the
+replacement, with the switched-session header.
+
 **Sessions, list and close.** Every review the extension opens (tool,
 commands, `plannotator_submit_plan`) is recorded in ONE process-wide registry
 (`getProcessPiReviewRegistry` in `apps/pi-extension/plannotator-tool-host.ts`,
@@ -316,3 +332,54 @@ widget (`InteractiveMode.MAX_WIDGET_LINES`), so `updateWidget` sends
 all items when there are 10 or fewer, else 10 items ending on the first open
 one (the first 10 until it is past them), and the last 10 once everything is
 done. `setWidget` only; the status line keeps the full count.
+
+### DeepSeek Harness: plan review, the `plannotator` tool and commands
+
+`@plannotator/dsh` (`apps/dsh-plugin/`, a Cordis plugin; DSH is never run in
+tests, which use a fake `ctx`).
+
+- **Plan review still blocks.** `exit_plan_mode` asks on the
+  `user-questions/request` waterfall, and the plugin answers it by waiting for
+  `plannotator dsh-plan` (`plan-review.ts`). The session waits inside that tool
+  call until the person decides. A non-blocking plan review (answer at once,
+  then `ctx.planMode.set(agent, false)` and `agent.followup` on approval)
+  changes shipped behavior and is a later step.
+- **The `plannotator` tool** is the shared contract, registered with
+  `ctx.tools.register` in the `inject(['agents', 'tools'])` child
+  (`tool.ts`). It is off by default (`AGENT_TOOL_DEFAULTS.dsh`, owner's
+  call): `PLANNOTATOR_AGENT_TOOL=1` or `{ "agentTool": true }` turns it on,
+  read once when the plugin loads. The `parameters` are
+  `PLANNOTATOR_TOOL_INPUT_SCHEMA` as is (DSH checks only the `output`
+  schema against its JSON Schema subset). In DSH's code-execution (PTC)
+  mode the tool's arguments show as `unknown`: that mode's types use the
+  same subset, which has no `anyOf` or `minItems`. Native mode is unaffected.
+- **`/plannotator-review`, `/plannotator-annotate`, `/plannotator-last`**
+  are registered with `ctx.commands.register` (`inject(['agents',
+  'commands'])`) whatever the tool switch says. DSH runs a registered
+  command instead of sending the line to the model, so the shared skill of
+  the same name no longer runs (and blocks a bash call) for these lines.
+- **Neither waits for the person** (`reviews.ts`). Each review is a CLI child
+  the plugin owns, with `PLANNOTATOR_ORIGIN=dsh`, the top-level session's
+  `DSH_SESSION_ID` and `PLANNOTATOR_SESSION_TAG=dsh:<id>` set explicitly
+  (DSH's process env is shared by every session), `DSH_HOME` from
+  `profileContext.home` (for `last`), and a ready file and host result file
+  under `<data dir>/dsh/<pn-id>/` (`isAllowedHostResultPath` allows `dsh/`).
+  The call answers once the page is up (15 s, 45 s for a review; then
+  "starting"). On exit the plugin sends the decision to the top-level session
+  with `agent.followup`, headed as on the other hosts; a bare approval and a
+  close send nothing unless the review was gated. A CLI that stops without a
+  decision after the call answered sends "Did not open" (it answered
+  "starting") or "Ended with no decision" (the page was up), so the agent
+  never waits forever. A subagent's review runs in the subagent's own
+  working directory, and its decision goes to the session it works for;
+  `last` from a subagent is refused.
+- **`list` and `close`** see only the asking session's reviews. Close stops
+  the plugin's own child, open or still starting (SIGTERM, then SIGKILL a
+  second later; the draft is kept), and `unsent` is unknown: host close
+  needs the session-bridge token, which comes with Ask this session.
+  Cancelling a call while its page is starting stops the child the same way,
+  and the call settles once the child has exited. Unloading the plugin stops
+  every open review.
+- Not in the `headless`, `sdk`, `sdk-minimal` or `acp` profiles; there the
+  shared skills run the CLI. Tests: `apps/dsh-plugin/tool.test.ts` (a fake CLI,
+  `fixtures/fake-cli.ts`).

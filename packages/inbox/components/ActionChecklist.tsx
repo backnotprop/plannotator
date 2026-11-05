@@ -28,6 +28,7 @@ import { actionCardState, type ActionCardState } from '../actions';
 import { clockTime } from '../format';
 import { Icon } from '../icons';
 import { registerActionFlush, trackActionSave } from '../actionSaves';
+import { registerReloadFlush } from '../stalePage';
 import { inboxApi } from '../api';
 
 /** A Done or Can't do it as the window marks it: always into the reply draft (`staged` on the wire). */
@@ -126,10 +127,15 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
   const [openKey, setOpenKey] = useState<string | null>(() => openItems[0]?.key ?? null);
   const toggles = useRef(new Map<string, HTMLButtonElement>());
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  // What held focus when the mark was pressed. The mark's row (and its note) draws before the save has finished
+  // (the window still reads the list), so the person can already be in the note, or back in the reply, by now.
+  const focusAtMark = useRef<Element | null>(null);
   useEffect(() => {
     if (!focusKey) return;
-    toggles.current.get(focusKey)?.focus();
     setFocusKey(null);
+    const now = document.activeElement;
+    const wentOn = now && now !== document.body && now !== focusAtMark.current && now.isConnected && !now.closest('[hidden]');
+    if (!wentOn) toggles.current.get(focusKey)?.focus();
   }, [focusKey]);
 
   const headId = useId();
@@ -184,8 +190,12 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
               else toggles.current.delete(action.key);
             }}
             onMark={async (mark, from) => {
+              const atMark = document.activeElement;
               const ok = await onMark(action, mark);
-              if (ok) marked(action, mark, from);
+              if (ok) {
+                focusAtMark.current = atMark;
+                marked(action, mark, from);
+              }
               return ok;
             }}
           />
@@ -240,6 +250,11 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
   useEffect(() => {
     if (!live) setComposing(null);
   }, [live]);
+  // The stale page notice's Reload (stalePage.ts): a "Can't do it" reason typed and not yet given is kept nowhere,
+  // so it stops the reload (the toast offers Reload anyway).
+  const unsentReason = useRef(false);
+  unsentReason.current = composing !== null && text.trim() !== '';
+  useEffect(() => registerReloadFlush(async () => !unsentReason.current), []);
 
   const mark = async (next: ActionMark | null, from: 'tick' | 'panel') => {
     if (busy) return;
@@ -446,6 +461,10 @@ function ActionRow({ action, state, agent, refRepo, readOnly, open, onToggle, to
                   event.preventDefault();
                   event.stopPropagation();
                   setComposing(null);
+                } else if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
+                  // The reason counts only once "Can't do it" is pressed: a thread-wide Send from here would go with the
+                  // pick and leave the reason behind. The key stands down (the default is taken, so the thread's Send passes).
+                  event.preventDefault();
                 }
               }}
             />

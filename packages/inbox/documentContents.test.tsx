@@ -321,6 +321,22 @@ test.skipIf(!hasDom)('full screen: Escape closes the open rail panel, not full s
   expect(left).toBe(1);
 });
 
+test.skipIf(!hasDom)('full screen: Hide gathers the rail into the corner control too, flying by its ticks, not by the box that holds its panel', async () => {
+  await renderPane(PLAN, { full: true });
+  await layOutPage(1000, 820);
+  const nav = railOf()!;
+  // The rail's box: [panel 256][gap 6][dock 36], the ticks in the dock at its right.
+  nav.getBoundingClientRect = () => new DOMRect(582, 300, 298, 200);
+  nav.querySelector<HTMLElement>('.pn-contents-rail-dock')!.getBoundingClientRect = () => new DOMRect(844, 300, 36, 200);
+  host!.querySelector<HTMLElement>('[data-full-view-handle]')!.getBoundingClientRect = () => new DOMRect(952, 752, 32, 32);
+  click(host!.querySelector('[data-full-view-hide]'));
+  expect(host!.querySelector('[data-attachment-pane]')!.getAttribute('data-tools')).toBe('tucked');
+  // From the ticks' centre (862, 400) to the corner control's (968, 768), and no larger than 0.6 of itself on the way.
+  expect(nav.style.getPropertyValue('--ib-gx')).toBe('106px');
+  expect(nav.style.getPropertyValue('--ib-gy')).toBe('368px');
+  expect(nav.style.getPropertyValue('--ib-gs')).toBe('0.600');
+});
+
 test.skipIf(!hasDom)('on a phone a Contents button opens the list as a sheet; a pick scrolls there and closes it', async () => {
   await renderPane(PLAN, { phone: true });
   await layOutPage(390, 380);

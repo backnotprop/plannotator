@@ -5,6 +5,10 @@ import { whenTime, tildePath } from '../format';
 import { HostMark, Icon } from '../icons';
 import { INBOX_MESSAGE_SKILL_AUDIENCE, inboxSkillsBlock, withSkillsBlock } from '../skills';
 import { InboxComposerField } from './ComposerField';
+import { VoiceFootRow } from './VoiceMic';
+import { usePhone } from '../phone';
+import { useVoiceSession } from '../voice';
+import { newUuid } from '../uuid';
 
 /**
  * New message (record 5.x, PLAN step 8; owner Q4: "just another button next
@@ -95,6 +99,7 @@ export function NewMessagePopover({
   thread,
   asker,
   askerHost,
+  replyTo = asker,
   live,
   mode,
   onPick,
@@ -104,6 +109,8 @@ export function NewMessagePopover({
   thread: InboxThread;
   asker: string;
   askerHost: string | null;
+  /** Whom "Reply instead" goes to (the session the box's words answer): `asker` in a thread with one agent. */
+  replyTo?: string;
   live: LiveSessionsModel | null;
   mode: NewMessageMode;
   onPick: (session: LiveSession) => void;
@@ -160,8 +167,8 @@ export function NewMessagePopover({
         <h5>{connected ? `${asker} is not running in ${thread.project.name}` : `No agent is running in ${thread.project.name}`}</h5>
         <p>
           {connected
-            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`
-            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${asker} reads replies when it next checks the Inbox.`}
+            ? `A new message goes to a live session. Start ${asker} in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`
+            : `A new message goes to a live Claude Code, Pi or OpenCode session with Plannotator. Start one in ${path} and press New message again, or reply here: ${replyTo} reads replies when it next checks the Inbox.`}
         </p>
         <div className="ib-acts">
           <button type="button" className="ib-btn ib-sm" onClick={onReplyInstead}>
@@ -190,13 +197,15 @@ export function NewMessageComposer({
   const [text, setText] = useState('');
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const key = useRef(crypto.randomUUID());
+  const key = useRef(newUuid());
   const textRef = useRef<HTMLTextAreaElement>(null);
   const name = hostName(target.host);
+  const phone = usePhone();
+  const voice = useVoiceSession();
   useEffect(() => textRef.current?.focus(), []);
 
   const send = async () => {
-    if (sending) return;
+    if (sending || voice.busy) return;
     const body = text.trim();
     if (!body) {
       setError('Write a message first.');
@@ -225,6 +234,7 @@ export function NewMessageComposer({
       <div className="ib-rbox">
         <InboxComposerField
           textareaRef={textRef}
+          voice={voice}
           ariaLabel={`New message to ${name}`}
           placeholder="Write a message"
           destination="your message"
@@ -240,9 +250,10 @@ export function NewMessageComposer({
             }
           }}
         />
+        <VoiceFootRow voice={voice} phone={phone} />
       </div>
       <div className="ib-acts">
-        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending}>
+        <button type="button" className="ib-btn ib-pri" onClick={() => void send()} disabled={sending || voice.busy}>
           <Icon name="send" size={15} />
           Send
         </button>

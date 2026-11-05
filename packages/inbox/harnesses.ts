@@ -21,6 +21,7 @@ export type HarnessId =
   | 'cline'
   | 'pi'
   | 'opencode'
+  | 'dsh'
   | 'zed'
   | 'kiro'
   | 'jetbrains'
@@ -46,6 +47,7 @@ export const HARNESSES: readonly Harness[] = [
   { id: 'cline', label: 'Cline' },
   { id: 'pi', label: 'Pi' },
   { id: 'opencode', label: 'OpenCode' },
+  { id: 'dsh', label: 'DeepSeek Harness' },
   { id: 'zed', label: 'Zed' },
   { id: 'kiro', label: 'Kiro' },
   { id: 'jetbrains', label: 'JetBrains' },
@@ -78,6 +80,11 @@ export interface ConnectContext {
 }
 
 const SERVER = 'plannotator-inbox';
+/** Plannotator's DeepSeek Harness plugin package (apps/dsh-plugin). */
+const DSH_PLUGIN = '@plannotator/dsh';
+
+/** When a DSH tool switch takes effect: the plugin decides once, when DSH starts, never per session. */
+export const DSH_APPLIES = 'It applies when DeepSeek Harness next starts.';
 
 /** POSIX single-quoting where a word needs it; plain words stay bare. */
 export function shellWord(word: string): string {
@@ -171,7 +178,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
       return {
         artefacts: [{ kind: 'link', label: 'Add to Cursor', href: cursorInstallLink(ctx) }],
         note: 'Opens Cursor, which asks before it adds the server.',
-        another: { summary: 'add it to ~/.cursor/mcp.json by hand', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
+        another: { summary: 'add it to ~/.cursor/mcp.json yourself', body: { kind: 'code', label: '~/.cursor/mcp.json', text: mcpServersSnippet(ctx) } },
       };
     case 'vscode':
       return {
@@ -187,7 +194,7 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
         artefacts: [{ kind: 'code', text: `devin mcp add -s user ${SERVER} -- ${cmd}` }],
         note: 'Adds it to Devin Desktop (formerly Windsurf) in every project.',
         another: {
-          summary: 'add it to ~/.config/devin/config.json by hand',
+          summary: 'add it to ~/.config/devin/config.json yourself',
           body: { kind: 'code', label: '~/.config/devin/config.json', text: mcpServersSnippet(ctx) },
         },
       };
@@ -241,6 +248,18 @@ export function harnessPanel(id: HarnessId, ctx: ConnectContext): HarnessPanel {
           },
         ],
         note: "Use the project's opencode.json or ~/.config/opencode/opencode.json.",
+      };
+    case 'dsh':
+      // Plannotator's DSH plugin, not MCP: DSH's MCP client strips every DSH_* variable and sends no session,
+      // so over MCP the Inbox cannot tell which DSH session wrote, and a reply can never wake it.
+      return {
+        artefacts: [{ kind: 'code', text: `dsh plugin --profile <profile> add ${DSH_PLUGIN}` }],
+        note: `Plannotator's DeepSeek Harness plugin. Its Inbox tool starts off: turn it on for DeepSeek Harness in Settings > Agents. ${DSH_APPLIES} Your replies then come back into each DeepSeek Harness session by themselves.`,
+        another: {
+          // A summary is a label: no comma (house rule, tests/e2e/inbox.spec.ts). Wording: the owner's (#2529).
+          summary: 'for DSH Desktop: open and quit it once before you run this',
+          body: { kind: 'code', text: `dsh plugin --profile desktop add ${DSH_PLUGIN}` },
+        },
       };
     case 'zed':
       return {

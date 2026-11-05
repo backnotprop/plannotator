@@ -24,13 +24,16 @@
  *    (`link-back`, `unlink`).
  */
 
-import type { InboxListRow } from "@plannotator/core/inbox-types";
+import { inboxRowArchived, isInboxId, type InboxListRow, type InboxMachineAccountsRead } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { inboxSnoozeRefusal, inboxSnoozeRunning } from "@plannotator/core/inbox-snooze";
+import { refuseInboxSnoozeUntil } from "@plannotator/shared/inbox/snoozes";
 import { isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
+import { INBOX_MACHINE_ACCOUNTS_MAX_BYTES, INBOX_MACHINE_ACCOUNTS_WAIT_MS, parsePeerAccounts } from "./inbox-accounts";
 import { buildLinkOffer, InboxLinks, parseLinkOffer, type InboxLinkRecord } from "./inbox-links";
 import { doorWriteKind, InboxOutbox, type OutboxEntry } from "./inbox-outbox";
-import { MACHINE_LINKS_PROTOCOL, PeerLink, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
+import { MACHINE_LINKS_PROTOCOL, PEER_LINK_TIMINGS, PeerLink, readCapped, type PeerLinkTimings, type PeerRecord } from "./inbox-peer-link";
 import { openTransport, type InboxTransportSpec } from "./inbox-transport";
 import { checkTailnetAddress } from "./inbox-transport-tailnet";
 
@@ -105,13 +108,18 @@ export interface InboxMachinesContext {
    * whose thread, message, file, comment or project is this machine's: whatever a window believes, it never goes to a peer.
    */
   holds: (kind: HeldKind, id: string) => boolean;
+  /** A tailnet request from someone other than this computer's owner (a login from `inboxTailscaleAllow`). */
+  isGuest: (req: Request, via: "local" | "tailnet") => boolean;
   /** Tests: the links' clocks. */
-  timings?: Partial<PeerLinkTimings>;
+  timings?: MachineLinkTimings;
   now?: () => Date;
 }
 
+/** The links' clocks, and `accountsMs`: how long a read of a machine's accounts waits. */
+export type MachineLinkTimings = Partial<PeerLinkTimings> & { accountsMs?: number };
+
 /** A frame for the window's event stream: other machines' records and states never share the local seq (design review, change 2). */
-export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView };
+export type MachineFrame = { event: "machine"; data: PeerRecord } | { event: "machines"; data: { machines: MachineView[] } } | { event: "outbox"; data: OutboxView } | { event: "snoozes"; data: Record<string, never> };
 
 export interface MachineView {
   id: string;
@@ -135,6 +143,23 @@ export interface MachineView {
    * read the merged list once the far rows changed, not before.
    */
   list_cursor: number | null;
+  /** Its Inbox keeps snoozes (approval "inbox-snooze"): a write there would land. False until its list is read, and for an older Inbox. */
+  snoozes: boolean;
+}
+
+/** An agent's snooze of a linked machine's thread: its answer there, or `held`, the words for a write that waits. */
+export interface MachineSnoozeAnswer {
+  machine: string;
+  name: string;
+  snoozed: { until: string; at: string } | null;
+  held: string | null;
+  /** `until: null` took off a snooze this machine's list showed running. */
+  ended: boolean;
+}
+
+/** What a held write says, by its machine's state: the same words as the window's `heldWords` (packages/inbox/api.ts). A revoked machine is forgotten as it is revoked, so it never holds one here. */
+export function machineHeldWords(name: string, state: string | null): string {
+  return state !== null && state !== "online" && state !== "connecting" ? `Waiting for ${name}: this applies when ${name} is back.` : `Sending to ${name}: this applies once ${name} confirms.`;
 }
 
 export interface OutboxView {
@@ -183,6 +208,7 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 });
 
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
+const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
 /** A thread id the window names in `X-Plannotator-Thread`: kept on the outbox entry only, never sent on. */
 const THREAD_HINT = /^[A-Za-z0-9_-]{8,80}$/;
@@ -261,6 +287,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       both_ways: true,
       waiting: 0,
       list_cursor: null,
+      snoozes: true,
     },
     ...links.list().map((link) => {
       const peer = peers.get(link.id);
@@ -276,6 +303,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
         both_ways: link.device_id !== null,
         waiting: outbox.list(link.id, "pending").length,
         list_cursor: peer?.list?.cursor ?? null,
+        snoozes: peer?.list?.snoozes ?? false,
       } satisfies MachineView;
     }),
   ];
@@ -311,6 +339,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       timings: context.timings,
       onRecord: (record) => emit({ event: "machine", data: record }),
       onChange: machinesChanged,
+      // A snooze moves no cursor, so nothing in the machines block changes: the windows are told in a frame of its own.
+      onSnoozes: () => emit({ event: "snoozes", data: {} }),
       onRevoked: () => forget(link.id),
     });
     peers.set(link.id, peer);
@@ -561,7 +591,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
 
   // ── The forward: /api/inbox/m/<machine>/<door route> ──
 
-  const forward = async (req: Request, url: URL, machine: string, route: string): Promise<Response> => {
+  const forward = async (req: Request, url: URL, machine: string, route: string, via: "local" | "tailnet"): Promise<Response> => {
     const peer = peers.get(machine);
     if (!peer) return json({ error: "That machine is not linked.", code: "machine_not_linked" }, 404);
     // The window's own stream carries other machines' records; a merged view is never asked of a machine.
@@ -570,7 +600,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (/%2e|%2f|%5c|\\/i.test(route) || segments.some((segment) => segment === "" || segment === "." || segment === "..")) {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
-    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke") {
+    // Accounts go by `accountsOf` alone: a forward would pass the far answer as it came, past the owner's check.
+    if (route === "events" || route === "pair" || route === "link-back" || route === "unlink" || route === "revoke" || safeDecode(route) === "accounts") {
       return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
     }
     // This machine's own thread, message, file or project never goes to a peer, whatever the window learned: a
@@ -589,6 +620,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
+    // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
+    if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
     // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -627,6 +660,8 @@ export function createInboxMachines(context: InboxMachinesContext) {
     if (REPLY_ROUTE.test(route) && (typeof body.seen_through_seq !== "number" || !Number.isSafeInteger(body.seen_through_seq))) {
       throw new InboxError("validation_error", "seen_through_seq: a reply to another machine carries the newest seq of the thread the person saw.", { field: "seen_through_seq" });
     }
+    // A time already gone when it is asked for is the asker's to hear now. One that goes by in the queue is for that machine to settle.
+    if (SNOOZE_ROUTE.test(route) && !outbox.get(String(body.idempotency_key)) && inboxSnoozeRefusal(body.until) === "past") throw new InboxError("snooze_past", "That time has passed.", { field: "until" });
     // The window names the thread a write is about, so a held answer shows even where that thread cannot open.
     const named = req.headers.get("X-Plannotator-Thread")?.trim() ?? "";
     const { entry, fresh } = outbox.submit(machine, route, body, THREAD_HINT.test(named) ? named : null);
@@ -647,6 +682,94 @@ export function createInboxMachines(context: InboxMachinesContext) {
     return new Response(JSON.stringify({ outbox: outboxView(entry), machine }), { status: 202, headers });
   };
 
+  // ── An agent's snooze of a linked machine's thread ──
+
+  /**
+   * The window's own write: the forward and the outbox, so a machine that is away gets it when it is back. Null: no
+   * linked machine lists the thread. A machine too old to keep snoozes is refused here, with nothing held or noticed.
+   */
+  const snoozeThread = async (threadId: string, until: string | null): Promise<MachineSnoozeAnswer | null> => {
+    const owners = [...peers.values()].flatMap((peer) => {
+      const row = peer.list?.rows.find((candidate) => candidate.thread_id === threadId);
+      return row ? [{ peer, row }] : [];
+    });
+    if (owners.length === 0) {
+      if (peers.size === 0 || !isInboxId("msg", threadId)) return null;
+      // Right after this Inbox starts, a machine that is away has sent no list, so the thread may be there.
+      const unknown = [...peers.values()].filter((peer) => peer.list === null && peer.state !== "needs_update" && peer.state !== "revoked").map((peer) => links.get(peer.id)?.name ?? "A linked machine");
+      if (unknown.length > 0) throw new InboxError("machine_offline", `This thread may be on ${unknown.join(" or ")}, whose threads are not known yet (away or still connecting). Nothing changed.`);
+      throw new InboxError("thread_not_found", `No thread ${threadId}. On a linked machine, use the thread's id, not a message's.`);
+    }
+    if (owners.length > 1) throw new InboxError("machine_conflict", "Two linked machines both claim this thread, so it opens on neither.");
+    const { peer, row } = owners[0]!;
+    const machine = peer.id;
+    const name = links.get(machine)?.name ?? "that machine";
+    if (!peer.list!.snoozes) throw new InboxError("machine_needs_update", `Update Plannotator on ${name}: it cannot snooze threads yet. Nothing changed.`);
+    // Refused here, as that machine's store would: sent, an agent's mistake would wait as if it will apply, then leave the person a notice.
+    if (until !== null) {
+      refuseInboxSnoozeUntil(until, new Date());
+      if (inboxRowArchived(row)) throw new InboxError("thread_resolved", "This thread is archived; unarchive it first.");
+    }
+    const route = `threads/${encodeURIComponent(threadId)}/snooze`;
+    const url = new URL(`http://inbox.local/api/inbox/m/${machine}/${route}`);
+    const asked = new Request(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Plannotator-Thread": threadId },
+      body: JSON.stringify({ idempotency_key: `agent-${crypto.randomUUID()}`, until }),
+    });
+    const response = await forward(asked, url, machine, route, "local");
+    const body = (await response.json().catch(() => ({}))) as { snoozed?: MachineSnoozeAnswer["snoozed"]; code?: unknown; error?: unknown; machine?: { state?: string } | null; outbox?: OutboxView };
+    if (response.status === 202) {
+      const state = body.outbox?.state;
+      if (state === "queued" || state === "sending") return { machine, name, snoozed: null, held: machineHeldWords(name, body.machine?.state ?? null), ended: false };
+      const why = (body.outbox?.answer as { error?: unknown } | null | undefined)?.error;
+      throw new InboxError("not_delivered", typeof why === "string" && why ? why : `Not delivered to ${name}.`);
+    }
+    if (!response.ok) throw new InboxError(typeof body.code === "string" ? body.code : "machine_refused", typeof body.error === "string" ? body.error : `${name} refused it.`);
+    return { machine, name, snoozed: body.snoozed ?? null, held: null, ended: until === null && !!row.snoozed && inboxSnoozeRunning(row.snoozed.until) };
+  };
+
+  // ── A linked machine's accounts (Settings → Accounts, the Usage peek) ──
+
+  /**
+   * Its door's read, asked for only when a window asks (nothing polls), kept
+   * nowhere, and picked by name again. Each machine is its own request, so a
+   * slow one holds up only itself. It waits past the far run's own limit, so a
+   * slow run comes back as its real `timed_out`, and only a machine that does
+   * not answer at all is offline. A door that hangs while its line stays up is
+   * awake, and so is one that revoked this link: the wait outlasts the line's
+   * silence limit, so a machine truly asleep has lost its line by the end of
+   * it. A door that does not know the route is an older Plannotator. An answer
+   * past the cap is a failed read, and read no further.
+   */
+  const accountsOf = async (machine: string, fresh: boolean, signal: AbortSignal): Promise<InboxMachineAccountsRead> => {
+    const peer = peers.get(machine);
+    if (!peer) throw new InboxError("machine_not_linked", "That machine is not linked.");
+    if (peer.state === "needs_update") return { state: "needs_update" };
+    if (peer.state === "revoked") return { state: "unreachable" };
+    if (peer.state === "offline") {
+      peer.poke();
+      return { state: "offline" };
+    }
+    try {
+      const waitMs = context.timings?.accountsMs ?? INBOX_MACHINE_ACCOUNTS_WAIT_MS;
+      // `timeoutMs` stops at the answer's headers: this signal covers its body too.
+      const response = await peer.request("accounts", fresh ? "?fresh=1" : "", { method: "GET", headers: {}, timeoutMs: waitMs, signal: AbortSignal.any([signal, AbortSignal.timeout(waitMs)]) });
+      const raw = await readCapped(response, INBOX_MACHINE_ACCOUNTS_MAX_BYTES);
+      if (raw === null) return { state: "failed", reason: "bad_output" };
+      let body: unknown = null;
+      try {
+        body = JSON.parse(raw);
+      } catch {
+        // Not JSON: no answer to this read, below.
+      }
+      if (response.status === 404 && (body as { code?: unknown } | null)?.code === "device_route_not_found") return { state: "needs_update" };
+      return response.ok ? parsePeerAccounts(body) : { state: "unreachable" };
+    } catch {
+      return { state: peer.state === "online" ? "unreachable" : "offline" };
+    }
+  };
+
   // ── The window's routes and the CLI's ──
 
   const staleTab = (body: Record<string, unknown>) =>
@@ -660,7 +783,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
     }
     const forwarded = FORWARD.exec(path);
-    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!);
+    if (forwarded) return forward(req, url, forwarded[1]!, forwarded[2]!, via);
     if (path === "/api/inbox/machines") {
       if (req.method !== "GET") return json({ error: "Use GET." }, 405);
       return json({ self: links.selfId, machines: machinesView() });
@@ -746,12 +869,14 @@ export function createInboxMachines(context: InboxMachinesContext) {
     rows,
     projects,
     projectOwner,
+    snoozeThread,
     subscribe: (listener: (frame: MachineFrame) => void) => {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
     route,
     control,
+    accountsOf,
     linkBack,
     unlinkedBy,
     start,

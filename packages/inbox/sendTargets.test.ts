@@ -59,6 +59,21 @@ describe('sendTargetsOf', () => {
     expect(targets.map((t) => t.message.id)).toEqual(['msg_b1', 'msg_a1']);
   });
 
+  test("a launched agent's permission question takes only its answer: the words go to the agent's own latest message", () => {
+    const m = [message('msg_a1', 'ses_a', []), message('msg_p1', 'perm:ses_a', ['picked'])];
+    const targets = sendTargetsOf(thread(m));
+    expect(targets.map((t) => [t.message.id, t.questions.length])).toEqual([
+      ['msg_p1', 1],
+      ['msg_a1', 0],
+    ]);
+  });
+
+  test('before the launched agent wrote, the words go to the thread the person started for it, never to the permission question', () => {
+    const root = { id: 'msg_1', thread_id: 'msg_1', author: { kind: 'person' }, body: 'Fix it', to: { host: 'claude-code', session: 'ses_a' } } as unknown as InboxMessageWire;
+    const targets = sendTargetsOf(thread([root, message('msg_p1', 'perm:ses_a', ['open'])]));
+    expect(targets.map((t) => t.message.id)).toEqual(['msg_1']);
+  });
+
   test('the latest agent message from a session with nothing to send comes last, empty, for the words', () => {
     const m = [message('msg_a1', 'ses_a', ['picked']), message('msg_b1', 'ses_b', [])];
     const targets = sendTargetsOf(thread(m));

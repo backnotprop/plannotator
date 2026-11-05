@@ -1,0 +1,311 @@
+/* A drawing's pictures follow the app's light or dark, not the computer's (a shadow root reads this through inheritance). */
+:root:not(.light) { --shp-is-dark: 1; }
+/*
+ * Shape: the living board. Lifted from the approved prototype, every class
+ * prefixed `shp-`. Colours come only from the theme's variables, so light and
+ * dark follow the app. A drawn view's own CSS lives in its shadow root
+ * (ShapeDrawn.tsx, SHAPE_FRAME_CSS); these rules are the frame around it.
+ */
+@property --e { syntax: '<percentage>'; inherits: false; initial-value: -30%; }
+@property --s { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+
+.shp-root {
+  --shp-paper: color-mix(in oklab, var(--background) 92%, var(--muted));
+  --pw: clamp(360px, 31vw, 440px);
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.shp-grow { flex: 1; }
+.shp-icon-btn, .shp-quiet-btn, .shp-general { appearance: none; border: 0; background: transparent; color: var(--muted-foreground); border-radius: 8px; cursor: pointer; font: inherit; }
+.shp-icon-btn { width: 30px; height: 30px; display: grid; place-items: center; font-size: 18px; }
+.shp-icon-btn:hover, .shp-quiet-btn:hover, .shp-general:hover { background: var(--muted); color: var(--foreground); }
+.shp-quiet-btn { height: 30px; padding: 0 10px; font-size: 13px; font-weight: 500; }
+.shp-quiet-btn:disabled, .shp-general:disabled { opacity: .5; cursor: default; }
+.shp-root :is(button, a, [tabindex]):focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
+
+/* "Global comment": the look of the document viewer's and the guide's button. */
+.shp-general { display: inline-flex; align-items: center; gap: 6px; padding: 6px 10px; border-radius: 6px; background: color-mix(in oklab, var(--muted) 50%, transparent); font-size: 12px; font-weight: 500; white-space: nowrap; flex: none; transition: background-color .15s, color .15s; }
+
+/* ── the Pebble ── */
+.shp-pebble { overflow: visible; display: block; }
+.shp-pebble path { fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linejoin: round; transition: fill .4s, stroke .4s; }
+.shp-pill .shp-pebble[data-on] path { fill: color-mix(in oklab, var(--primary) 24%, transparent); stroke: var(--primary); }
+.shp-pebble[data-busy] path { fill: color-mix(in oklab, var(--primary) 34%, transparent); }
+
+.shp-loading, .shp-failed { flex: 1; display: grid; place-items: center; color: var(--muted-foreground); font-size: 14px; padding: 24px; }
+.shp-loading .shp-pebble path { stroke: var(--primary); }
+
+/* ── the board ── */
+.shp-surface { position: relative; flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--shp-paper); }
+.shp-head { padding: 22px 28px 0 40px; }
+/* The title first; Global comment (and Bring it up to date) on its first line, at the right. */
+.shp-title-row { display: flex; align-items: flex-start; gap: 10px; }
+.shp-head-side { flex: none; display: flex; align-items: center; gap: 8px; min-height: 30px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 30px) / 2); }
+.shp-head-side:empty { display: none; }
+/* A host's control before the title (the Inbox: its sidebar toggle), centred on the title's first line. */
+.shp-head-start { flex: none; display: flex; align-items: center; min-height: 32px; margin-top: calc((clamp(28px, 2.5vw, 38px) * 1.1 - 32px) / 2); }
+/* The agent is drawing the next version: the reshaping Pebble (fill only under reduced motion: Pebble.tsx) and its words. */
+.shp-drawing { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.shp-drawing .shp-pebble path { stroke: var(--primary); }
+.shp-finished { font-size: 12px; font-weight: 500; color: var(--muted-foreground); white-space: nowrap; }
+.shp-close { font-size: 20px; }
+.shp-sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.shp-head h1 { flex: 1; min-width: 0; font-size: clamp(28px, 2.5vw, 38px); line-height: 1.1; letter-spacing: -0.025em; font-weight: 700; margin: 0 0 6px; text-wrap: balance; }
+.shp-claim { margin: 0; font-size: 16.5px; line-height: 1.5; color: color-mix(in oklab, var(--foreground) 78%, transparent); max-width: 64ch; text-wrap: pretty; }
+.shp-claim a, .shp-know a, .shp-file-src a { color: var(--primary); text-decoration: none; font-weight: 500; }
+.shp-claim code, .shp-know code { font: 500 .88em var(--font-mono); padding: 1px 4px; border-radius: 4px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
+.shp-fresh-text { animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both; }
+
+/* ── the stage: views erase out and draw in ── */
+.shp-stage { position: relative; flex: 1; min-height: 0; margin-top: 8px; }
+.shp-view { position: absolute; inset: 0; overflow: auto; padding: 14px 28px 92px 40px; }
+.shp-view.v-code { padding: 0; overflow: hidden; }
+.shp-view.leaving { pointer-events: none; animation: shp-erase .42s cubic-bezier(.55,0,.45,1) forwards; -webkit-mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); }
+@keyframes shp-erase { from { --e: -30%; } to { --e: 105%; opacity: .2; } }
+.shp-view.entering [data-step] { animation: shp-draw-in .5s cubic-bezier(.2,.7,.2,1) both; animation-delay: calc(.32s + var(--i, 0) * 110ms); }
+.shp-view.v-code.entering { animation: shp-fade-only .4s ease both; }
+@keyframes shp-draw-in { from { opacity: 0; transform: translateY(8px); filter: blur(2px); } }
+@keyframes shp-fade-only { from { opacity: 0; } }
+@keyframes shp-fade-out { to { opacity: 0; } }
+.shp-stage.skip .shp-view.entering [data-step], .shp-stage.skip .shp-view, .shp-stage.skip .mk { animation: none !important; }
+.shp-stage.skip .shp-view.leaving { display: none; }
+.shp-stage.reduce .shp-view.leaving { animation: shp-fade-out .16s linear forwards; -webkit-mask-image: none; mask-image: none; }
+.shp-stage.reduce .shp-view.entering [data-step], .shp-stage.reduce .shp-view.v-code.entering { animation: shp-fade-only .16s linear both; animation-delay: 0s; }
+
+/* A marked part (What to know; drawn views carry the same rules in their shadow root). */
+.shp-know .mk { border-radius: 6px; transition: box-shadow .25s, background-color .25s; }
+.shp-stage.pinpointing .shp-know [data-mark] { cursor: pointer; }
+.shp-know .mk.noted { box-shadow: 0 0 0 2px color-mix(in oklab, var(--primary) 70%, transparent); background-color: color-mix(in oklab, var(--primary) 7%, transparent); }
+.shp-know .mk.erasing { animation: shp-erase .42s cubic-bezier(.55,0,.45,1) forwards; -webkit-mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); mask-image: linear-gradient(90deg, transparent var(--e), #000 calc(var(--e) + 26%)); }
+.shp-know .mk.fresh { background-image: linear-gradient(color-mix(in oklab, var(--primary) 16%, transparent), color-mix(in oklab, var(--primary) 16%, transparent)); background-repeat: no-repeat; background-size: var(--s) 100%; animation: shp-redraw .55s cubic-bezier(.2,.7,.2,1) both, shp-swash 2.6s cubic-bezier(.3,.6,.2,1) both; transition: background-size 0s; }
+@keyframes shp-redraw { from { opacity: 0; transform: translateY(5px); filter: blur(2px); } }
+@keyframes shp-swash { 0% { --s: 0%; } 22% { --s: 100%; } 70% { --s: 100%; opacity: 1; } 100% { --s: 100%; background-color: transparent; } }
+.shp-stage.reduce .shp-know .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
+.shp-stage.reduce .shp-know .mk.fresh { animation: none; background-size: 100% 100%; }
+
+.shp-pin-hover { position: fixed; pointer-events: none; border-radius: 8px; box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--primary) 75%, transparent); background: color-mix(in oklab, var(--primary) 5%, transparent); z-index: 30; transition: all .12s ease-out; }
+
+/* ── a drawn view: free-flowing, or a fixed canvas scaled to fit ── */
+.shp-drawn { min-height: 100%; }
+.shp-diagram { height: 100%; min-height: 0; color: var(--foreground); }
+.shp-drawn.canvas:not(.tall) { height: 100%; display: flex; align-items: center; justify-content: center; }
+.shp-drawn-fit { position: relative; flex: none; }
+/* A wide canvas on a phone, with no tall drawing: readable, and it pans. */
+.shp-drawn.canvas.pan:not(.tall) { justify-content: flex-start; overflow-x: auto; overscroll-behavior-x: contain; }
+.shp-drawn.canvas.pan:not(.tall) .shp-drawn-fit { overflow: clip; }
+.shp-drawn.canvas:not(.tall) .shp-drawn-host { position: absolute; left: 0; top: 0; }
+
+/* ── the pill: "Board updated", "1 change waits for the agent" ── */
+.shp-pill { position: absolute; left: 50%; bottom: 76px; transform: translateX(-50%); display: flex; align-items: center; gap: 8px; padding: 7px 14px 7px 10px; border-radius: 999px; background: var(--popover); color: var(--foreground); font-size: 13px; font-weight: 500; box-shadow: 0 6px 24px -8px rgb(0 0 0 / .25), 0 0 0 1px var(--border); animation: shp-rise .35s cubic-bezier(.2,.9,.3,1.2) both; z-index: 20; white-space: nowrap; max-width: calc(100% - 24px); overflow: hidden; text-overflow: ellipsis; }
+.shp-pill button { appearance: none; border: 0; background: color-mix(in oklab, var(--primary) 12%, transparent); color: var(--primary); font: 600 12px/1 var(--font-sans); padding: 5px 9px; border-radius: 999px; cursor: pointer; margin-left: 2px; }
+.shp-pill.waits { color: var(--muted-foreground); }
+@keyframes shp-rise { from { opacity: 0; transform: translate(-50%, 10px) scale(.96); } }
+
+/* ── the dock ── */
+.shp-dock { position: absolute; left: 50%; bottom: 18px; transform: translateX(-50%); display: flex; align-items: center; gap: 6px; padding: 5px; border-radius: 14px; background: color-mix(in oklab, var(--popover) 94%, transparent); backdrop-filter: blur(10px); box-shadow: 0 10px 30px -12px rgb(0 0 0 / .3), 0 0 0 1px var(--border); z-index: 25; max-width: calc(100% - 24px); }
+.shp-dock > * { flex: none; }
+.shp-tgroup { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: color-mix(in oklab, var(--muted) 50%, transparent); }
+.shp-tgroup.side { background: transparent; padding: 0; }
+.shp-tbtn { position: relative; appearance: none; border: 0; background: transparent; color: var(--muted-foreground); height: 30px; padding: 0 10px; border-radius: 8px; display: inline-flex; align-items: center; gap: 6px; font: 500 12.5px/1 var(--font-sans); cursor: pointer; white-space: nowrap; transition: background-color .15s, color .15s; }
+.shp-tbtn:hover { color: var(--foreground); }
+.shp-tbtn:disabled { opacity: .5; cursor: default; }
+.shp-tbtn.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.shp-tbtn.chat.ready { color: var(--primary); background: color-mix(in oklab, var(--primary) 11%, transparent); }
+.shp-tdot { position: absolute; top: 4px; right: 4px; width: 6px; height: 6px; border-radius: 50%; background: var(--primary); box-shadow: 0 0 0 2px var(--popover); }
+.shp-tcount { font: 600 10.5px/1 var(--font-mono); color: var(--muted-foreground); padding: 2px 5px; border-radius: 6px; background: color-mix(in oklab, var(--muted) 80%, transparent); }
+.shp-ready-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); animation: shp-ready 1.6s ease-out 2; }
+@keyframes shp-ready { 0% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 50%, transparent); } 100% { box-shadow: 0 0 0 7px transparent; } }
+.shp-tstrip { padding-left: 6px; border-left: 1px solid var(--border); display: inline-flex; align-items: center; gap: 6px; }
+.shp-tstrip > div { flex-wrap: nowrap !important; }
+.shp-tstrip button { flex-shrink: 0; }
+
+/* ── What to know: prose, set for reading ── */
+.shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
+.shp-know p { margin: 0 0 1em; padding: 2px 0; }
+.shp-know p:last-child { margin-bottom: 0; }
+/* An old board's Requirements: plain lines under their group's name. */
+.shp-know h3 { margin: 1.4em 0 .25em; font-size: inherit; font-weight: 600; }
+.shp-know section p, .shp-know section ~ p { margin-bottom: .2em; }
+.shp-know section + p { margin-top: 1.4em; }
+.shp-to-code { appearance: none; border: 0; background: transparent; margin-left: 8px; padding: 2px 4px; border-radius: 5px; font: 500 12px/1 var(--font-mono); color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity .15s; }
+.shp-know p:hover .shp-to-code, .shp-to-code:focus-visible { opacity: 1; }
+.shp-to-code:hover { color: var(--primary); background: color-mix(in oklab, var(--primary) 8%, transparent); }
+@media (hover: none) { .shp-to-code { opacity: 1; } }
+
+/* ── Code: the Guided Review, and the whole file over it ── */
+.shp-guidewrap { position: absolute; inset: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 12px 88px 32px; }
+.shp-guidewrap > div { padding-top: 4px; }
+.shp-gdiff { height: 100%; overflow: auto; }
+.shp-proposed { font: 600 10.5px/1 var(--font-mono); letter-spacing: .04em; text-transform: uppercase; color: color-mix(in oklab, var(--warning, #b7791f) 90%, var(--foreground)); border: 1px dashed currentColor; border-radius: 6px; padding: 4px 7px; white-space: nowrap; }
+.shp-guidewrap[data-stage="before"] [data-guide-code-view-mounted] { border-style: dashed !important; border-color: color-mix(in oklab, var(--warning, #b7791f) 55%, transparent) !important; }
+.shp-g-open { appearance: none; border: 1px solid var(--border); background: var(--card); color: var(--muted-foreground); font: 500 11.5px/1 var(--font-sans); padding: 5px 8px; border-radius: 7px; cursor: pointer; white-space: nowrap; }
+.shp-g-open:hover { color: var(--foreground); border-color: color-mix(in oklab, var(--primary) 40%, var(--border)); }
+.shp-g-planned { margin: 18px; padding: 16px 18px; border: 1px dashed color-mix(in oklab, var(--border) 100%, var(--muted-foreground) 25%); border-radius: 10px; }
+.shp-g-planned-h { margin: 0 0 10px; font-size: 13px; font-weight: 500; color: var(--muted-foreground); }
+.shp-g-planned ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 7px; }
+.shp-g-planned li { display: flex; align-items: baseline; gap: 10px; }
+.shp-g-planned code { font: 500 12.5px/1.3 var(--font-mono); color: var(--foreground); overflow-wrap: anywhere; }
+.shp-g-kind { flex: none; width: 58px; font: 600 10px/1 var(--font-mono); letter-spacing: .06em; text-transform: uppercase; color: var(--muted-foreground); }
+.shp-g-kind.new { color: color-mix(in oklab, var(--success, #16a34a) 80%, var(--foreground)); }
+.shp-guide-fallback-acts { display: flex; justify-content: flex-end; padding: 8px 0 0; }
+.shp-guide-fallback { max-width: 860px; margin: 0 auto; padding: 8px 0; font-size: 15px; line-height: 1.5; }
+.shp-guide-fallback h2 { font-size: 20px; margin: 0 0 6px; }
+.shp-guide-fallback ol { padding-left: 20px; display: grid; gap: 14px; }
+.shp-guide-fallback p { margin: 4px 0; color: color-mix(in oklab, var(--foreground) 80%, transparent); }
+.shp-guide-fallback code { font: 500 13px var(--font-mono); }
+
+.shp-file-over { position: absolute; inset: 0; z-index: 3; background: var(--shp-paper); }
+.shp-file-bar { position: absolute; left: 40px; right: 20px; top: 0; height: 34px; display: flex; align-items: center; gap: 14px; font-size: 12.5px; color: var(--muted-foreground); min-width: 0; }
+.shp-file-bar button { appearance: none; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: 12.5px; font-weight: 500; padding: 6px 10px; border-radius: 8px; cursor: pointer; flex: none; }
+.shp-file-src { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-codeview { position: absolute; inset: 42px 0 0; display: grid; grid-template-columns: 236px 1fr; gap: 18px; padding: 0 20px 84px 40px; }
+.shp-codeview:not(:has(.shp-files)) { grid-template-columns: 1fr; }
+.shp-files { display: flex; flex-direction: column; gap: 2px; overflow: auto; }
+.shp-files button { appearance: none; border: 0; background: transparent; text-align: left; padding: 9px 10px; border-radius: 9px; cursor: pointer; color: var(--foreground); display: flex; flex-direction: column; gap: 3px; }
+.shp-files button:hover { background: color-mix(in oklab, var(--muted) 70%, transparent); }
+.shp-files button.on { background: var(--card); box-shadow: 0 0 0 1px var(--border); }
+.shp-files .fn { font: 500 13px/1.2 var(--font-mono); }
+.shp-files .fr { font-size: 12.5px; color: var(--muted-foreground); }
+.shp-files select { font: 500 13px var(--font-mono); padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); width: 100%; }
+.shp-code-main { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--background); border-radius: 12px; box-shadow: 0 0 0 1px var(--border); overflow: hidden; }
+.shp-code-head { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; font: 500 12.5px/1 var(--font-mono); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+.shp-code-file { flex: 1; min-height: 0; overflow: auto; }
+.shp-diff-pop { min-height: 0; overflow: auto; padding: 4px 0 8px; }
+.shp-empty-note { margin: 0; padding: 18px; font-size: 13.5px; color: var(--muted-foreground); }
+
+/* ── the one floating panel: Ask · Thread · References ── */
+.shp-sidep { position: absolute; top: 12px; right: 12px; bottom: 12px; width: var(--pw); display: flex; flex-direction: column; background: var(--popover); color: var(--popover-foreground, var(--foreground)); border-radius: 14px; box-shadow: 0 22px 60px -20px rgb(0 0 0 / .38), 0 0 0 1px var(--border); z-index: 30; overflow: hidden;
+  transform: translateX(calc(100% + 24px)); opacity: 0; visibility: hidden; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .2s ease, visibility 0s .32s; }
+.shp-sidep.open { transform: none; opacity: 1; visibility: visible; transition: transform .32s cubic-bezier(.2,.8,.2,1), opacity .16s ease, visibility 0s; }
+.shp-sidep-head { display: flex; align-items: center; gap: 6px; padding: 8px 8px 8px 10px; border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
+.shp-tabs { display: inline-flex; gap: 2px; padding: 2px; border-radius: 10px; background: color-mix(in oklab, var(--muted) 55%, transparent); flex: 1; }
+.shp-tabs button { flex: 1; appearance: none; border: 0; background: transparent; height: 28px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font: 500 12.5px/1 var(--font-sans); color: var(--muted-foreground); cursor: pointer; }
+.shp-tabs button.on { background: var(--background); color: var(--foreground); box-shadow: 0 1px 2px rgb(0 0 0 / .08); }
+.shp-sidep-body { flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
+.shp-sidep-body > * { flex: 1; min-height: 0; }
+.shp-thread-in { display: flex; flex-direction: column; overflow: auto; }
+.shp-sidep.sheet { top: auto; left: 0; right: 0; bottom: 0; width: auto; height: 84%; border-radius: 18px 18px 0 0; transform: translateY(100%); }
+.shp-sidep.sheet.open { transform: none; }
+.shp-grab { width: 38px; height: 4px; border-radius: 4px; background: color-mix(in oklab, var(--foreground) 22%, transparent); margin: 8px auto 0; flex: none; }
+.shp-scrim { position: absolute; inset: 0; background: rgb(0 0 0 / .28); z-index: 29; animation: shp-fade-only .2s ease both; }
+.shp-root.panel-open:not(.phone) .shp-dock, .shp-root.panel-open:not(.phone) .shp-pill { left: calc((100% - var(--pw) - 12px) / 2); }
+.shp-dock, .shp-pill { transition: left .32s cubic-bezier(.2,.8,.2,1); }
+
+/* ── reference bubbles and the References list ── */
+.shp-rb { appearance: none; border: 0; display: inline-grid; place-items: center; min-width: 16px; height: 16px; padding: 0 4px; margin: 0 0 0 5px; border-radius: 999px; vertical-align: 2px;
+  font: 600 10px/1 var(--font-mono); color: var(--primary); background: color-mix(in oklab, var(--primary) 12%, var(--background)); box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--primary) 30%, transparent);
+  cursor: pointer; text-decoration: none !important; transition: transform .15s, background-color .15s, color .15s; font-style: normal; letter-spacing: 0; }
+.shp-rb:hover, .shp-rb.lit { background: var(--primary); color: var(--primary-foreground); }
+.shp-rb.flash { animation: shp-rb-flash 1.6s ease-out; }
+@keyframes shp-rb-flash { 0%, 40% { background: var(--primary); color: var(--primary-foreground); box-shadow: 0 0 0 0 color-mix(in oklab, var(--primary) 55%, transparent); transform: scale(1.35); } 100% { box-shadow: 0 0 0 12px transparent; transform: none; } }
+.shp-rb.static { cursor: inherit; margin: 0; }
+.shp-ref-list { list-style: none; margin: 0; padding: 8px; overflow: auto; display: flex; flex-direction: column; gap: 2px; }
+.shp-ref-list li { display: flex; align-items: center; gap: 4px; border-radius: 10px; transition: background-color .15s; }
+.shp-ref-list li.lit { background: color-mix(in oklab, var(--primary) 9%, transparent); }
+.shp-ref-list li.lit .shp-rb { background: var(--primary); color: var(--primary-foreground); }
+.shp-ref-row { flex: 1; min-width: 0; appearance: none; border: 0; background: transparent; text-align: left; display: grid; grid-template-columns: 22px 18px 1fr; align-items: start; gap: 8px; padding: 9px 6px 9px 8px; cursor: pointer; font: inherit; color: inherit; }
+.shp-ref-row .shp-rb { margin-top: 1px; }
+.shp-ref-kind { color: var(--muted-foreground); padding-top: 1px; }
+.shp-ref-txt { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.shp-ref-txt b { font-weight: 500; font-size: 13.5px; line-height: 1.3; }
+.shp-ref-txt span { font: 11.5px/1.35 var(--font-mono); color: var(--muted-foreground); overflow-wrap: anywhere; }
+.shp-ref-open { flex: none; appearance: none; border: 0; background: transparent; font: 500 12px/1 var(--font-sans); color: var(--primary); padding: 7px 9px; border-radius: 8px; cursor: pointer; text-decoration: none; opacity: .75; }
+.shp-ref-open:hover, .shp-ref-list li.lit .shp-ref-open { opacity: 1; background: color-mix(in oklab, var(--primary) 10%, transparent); }
+.shp-ref-list + .shp-empty-note, .shp-sidep-body > .shp-empty-note { flex: none; }
+
+/* A message a reference points at, in the host's Thread. */
+[data-shape-message] { border-radius: 10px; transition: background-color .6s; }
+[data-shape-message].shp-flash { background: color-mix(in oklab, var(--primary) 14%, transparent); transition: background-color .15s; }
+
+/* ── phone: 390 px, the panel is a bottom sheet ── */
+.shp-root.phone .shp-head { padding: 14px 16px 0 10px; }
+.shp-root.phone .shp-title-row .shp-quiet-btn { display: none; }
+.shp-root.phone .shp-head-side { margin-top: 1px; gap: 4px; }
+.shp-root.phone .shp-head-start { margin-top: calc((27px * 1.1 - 32px) / 2); }
+.shp-root.phone .shp-head h1, .shp-root.phone .shp-claim { padding-left: 6px; }
+.shp-root.phone .shp-head h1 { font-size: 27px; }
+.shp-root.phone .shp-claim { font-size: 15px; }
+.shp-root.phone .shp-view { padding: 14px 16px 90px; }
+.shp-root.phone .shp-view.v-code { padding: 0; }
+.shp-root.phone .shp-req-group { grid-template-columns: 1fr; gap: 6px; padding: 12px 0; }
+.shp-root.phone .shp-req-group li { font-size: 15.5px; }
+.shp-root.phone .shp-to-code { display: none; }
+.shp-root.phone .shp-guidewrap { padding: 0 0 80px; }
+.shp-root.phone .shp-codeview { grid-template-columns: 1fr; grid-template-rows: auto 1fr; padding: 0 12px 84px; gap: 10px; }
+.shp-root.phone .shp-file-bar { left: 12px; right: 12px; }
+.shp-root.phone .shp-dock { bottom: max(12px, env(safe-area-inset-bottom)); gap: 4px; padding: 4px; }
+.shp-root.phone .shp-tbtn { padding: 0 8px; }
+.shp-root.phone .shp-pill { bottom: 70px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .shp-rb.flash { animation: none; background: var(--primary); color: var(--primary-foreground); }
+  .shp-ready-dot, .shp-pill, .shp-fresh-text, .shp-scrim { animation: none; }
+  .shp-sidep, .shp-sidep.open { transition: opacity .16s; }
+  .shp-dock, .shp-pill, .shp-pin-hover { transition: none; }
+}
+
+/* ── the grid: Shape's landing (approved "shape-landing-grid") ── */
+.shp-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(232px, 1fr)); gap: 18px 16px; padding: 4px 20px 80px; align-content: start; }
+.shp-gcard { min-width: 0; border-radius: 12px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent); cursor: pointer; overflow: hidden; transition: box-shadow .15s; color: var(--foreground); }
+.shp-gcard:hover { box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent), 0 6px 18px -10px color-mix(in oklab, var(--foreground) 30%, transparent); }
+.shp-gcard:focus-visible { outline: 2px solid var(--ring, var(--primary)); outline-offset: 2px; }
+.shp-thumb { position: relative; overflow: hidden; pointer-events: none; }
+.shp-thumb-in { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
+.shp-gprev { aspect-ratio: 16 / 10; background: color-mix(in oklab, var(--background) 92%, var(--muted)); border-bottom: 1px solid color-mix(in oklab, var(--border) 70%, transparent); }
+.shp-gprev .shp-drawn { --shp-paper: transparent; }
+.shp-glab { padding: 9px 12px 11px; }
+.shp-gt { display: flex; align-items: center; gap: 7px; min-width: 0; font-size: 14px; font-weight: 500; }
+.shp-gt span:last-child { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-gdot { width: 7px; height: 7px; border-radius: 50%; background: var(--primary); flex: none; }
+.shp-gm { margin-top: 2px; font-size: 12.5px; color: var(--muted-foreground); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.shp-grid-empty { padding: 48px 20px; color: var(--muted-foreground); font-size: 14px; text-align: center; }
+@container (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }
+@media (max-width: 767px) { .shp-grid { grid-template-columns: 1fr 1fr; gap: 12px 10px; padding: 0 12px 80px; } .shp-gt { font-size: 13.5px; } .shp-gm { font-size: 12px; } }
+
+/* ── a reference's bubble: pops out beside its number; the picture or the title opens the full view ── */
+.shp-peek { position: fixed; z-index: 60; width: 288px; padding: 6px; border-radius: 16px; background: var(--popover); color: var(--popover-foreground, var(--foreground)); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent), 0 14px 38px -10px rgb(0 0 0 / .32); }
+.shp-peek::before, .shp-peek::after { content: ""; position: absolute; border-radius: 50%; background: var(--popover); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 90%, transparent); }
+.shp-peek::before { width: 9px; height: 9px; }
+.shp-peek::after { width: 5px; height: 5px; }
+.shp-peek[data-side="right"]::before { left: -12px; top: var(--dot, 50%); }
+.shp-peek[data-side="right"]::after { left: -20px; top: var(--dot, 50%); margin-top: 2px; }
+.shp-peek[data-side="left"]::before { right: -12px; top: var(--dot, 50%); }
+.shp-peek[data-side="left"]::after { right: -20px; top: var(--dot, 50%); margin-top: 2px; }
+.shp-peek[data-side="over"]::before { bottom: -12px; left: var(--dot, 50%); }
+.shp-peek[data-side="over"]::after { bottom: -20px; left: var(--dot, 50%); margin-left: 2px; }
+.shp-peek[data-side="under"]::before { top: -12px; left: var(--dot, 50%); }
+.shp-peek[data-side="under"]::after { top: -20px; left: var(--dot, 50%); margin-left: 2px; }
+.shp-peek[data-placed] { animation: shp-peek-in .16s cubic-bezier(.2,.8,.2,1) both; }
+@keyframes shp-peek-in { from { opacity: 0; transform: scale(.92); } }
+.shp-peek-pic, .shp-peek-code { appearance: none; border: 0; padding: 0; display: block; width: 100%; aspect-ratio: 16 / 10; overflow: hidden; border-radius: 11px; background: var(--muted); cursor: zoom-in; }
+.shp-peek-crop { display: block; width: 100%; height: 100%; background-repeat: no-repeat; }
+.shp-peek-pic img { width: 100%; height: 100%; object-fit: cover; object-position: top left; display: block; transition: transform .25s cubic-bezier(.2,.8,.2,1); }
+.shp-peek-pic:hover img { transform: scale(1.03); }
+.shp-peek-code { aspect-ratio: auto; padding: 8px 10px; text-align: left; cursor: pointer; }
+.shp-peek-code code { display: block; font: 500 11px/1.55 var(--font-mono); color: var(--foreground); }
+.shp-peek-code code span { display: block; white-space: pre; overflow: hidden; text-overflow: ellipsis; }
+.shp-peek-txt { padding: 8px 8px 4px; }
+.shp-peek-t { display: flex; align-items: flex-start; gap: 7px; font-size: 13.5px; line-height: 1.3; }
+.shp-peek-t b { font-weight: 600; min-width: 0; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.shp-peek-t .shp-rb { flex: none; margin-top: 1px; }
+.shp-peek-txt p { margin: 3px 0 0 23px; font-size: 12.5px; line-height: 1.4; color: var(--muted-foreground); display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.shp-peek-acts { display: flex; gap: 2px; margin: 4px 0 0 17px; }
+.shp-peek-acts:empty { display: none; }
+.shp-peek-acts button { appearance: none; border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; color: var(--primary); font: 500 12.5px/1.2 var(--font-sans); cursor: pointer; }
+.shp-peek-acts button:hover { background: color-mix(in oklab, var(--primary) 10%, transparent); }
+.shp-root.phone .shp-peek { width: min(288px, calc(100% - 20px)); }
+.shp-root.phone .shp-peek-acts button { padding: 10px 8px; }
+@media (prefers-reduced-motion: reduce) { .shp-peek[data-placed] { animation: shp-peek-fade .12s linear both; } .shp-peek-pic img { transition: none; } }
+@keyframes shp-peek-fade { from { opacity: 0; } }
+
+/* "Show more": the board's corner, only when there is more to draw. */
+.shp-more { position: absolute; right: 28px; bottom: 22px; z-index: 5; appearance: none; border: 0; height: 30px; padding: 0 12px; border-radius: 999px; background: color-mix(in oklab, var(--popover) 94%, transparent); color: var(--foreground); box-shadow: 0 0 0 1px color-mix(in oklab, var(--border) 85%, transparent); font: 500 12.5px/1 var(--font-sans); cursor: pointer; }
+.shp-more:hover { background: var(--muted); }
+.shp-root.panel-open:not(.phone) .shp-more { right: calc(var(--pw) + 28px); }
+.shp-root.phone .shp-more { right: 12px; bottom: 66px; }

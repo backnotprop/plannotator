@@ -74,7 +74,7 @@ test('MCP agents come after every Plannotator host; one the person turned off or
   const plan = connectPlan(model);
   expect(ids(plan.steps)).toEqual(['pi', 'opencode', 'codex', 'cline']);
   expect(stepTitle(plan.steps[2]!)).toBe('Connect Codex');
-  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline by hand');
+  expect(stepTitle(plan.steps[3]!)).toBe('Connect Cline yourself');
   expect(stepText(plan.steps[3]!).text).toBe("Only you can add it here: Cline's MCP command is not verified.");
 });
 
@@ -99,6 +99,23 @@ test('an older Inbox without the plugin field: the tool means the plugin is inst
   const tool = { ...agentsModel({ pi: toolOff() }).agents.find((agent) => agent.id === 'pi')! };
   delete tool.plugin;
   expect(connectRowOf(tool)?.state).toBe('tool-off');
+});
+
+test("DeepSeek Harness through Plannotator's plugin: ready with the tool on, a step to turn it on when off, never 'MCP'", () => {
+  const off = agentsModel({ dsh: toolOff() }).agents.find((agent) => agent.id === 'dsh')!;
+  expect(connectRowOf(off)?.state).toBe('tool-off');
+  expect(stepTitle(connectRowOf(off)!)).toBe("Turn on DeepSeek Harness's Inbox tool");
+  expect(stepText(connectRowOf(off)!).cost).toBe(inboxToolCostText('dsh'));
+  expect(connectPlan(agentsModel({ dsh: toolOff() })).next?.id).toBe('dsh');
+  const on = agentsModel({ dsh: ready() }).agents.find((agent) => agent.id === 'dsh')!;
+  expect(connectRowOf(on)?.state).toBe('ready');
+  expect(doneNote(connectRowOf(on)!, { live: false, turnedOn: false })).toBe('plugin');
+  // A person turned it off: left alone, not offered as a step.
+  const chosen = { ...off, tool: { on: false, locked: false, chosen_off: true } };
+  expect(connectPlan({ ...agentsModel({}), agents: [chosen] }).next).toBeNull();
+  // The owner's call (#2529): the first-run wake line stays main's words and names no DeepSeek Harness, here or not.
+  expect(WAKE_LINE).not.toContain('DeepSeek Harness');
+  expect(wakeLine(['codex'])).not.toContain('DeepSeek Harness');
 });
 
 test('the cost the screen states is the measured one', () => {
@@ -211,6 +228,10 @@ test('the wake line names the hosts a reply wakes, and what other agents do inst
   expect(mcpWakingHostsHere(SCENARIOS.none())).toEqual([]);
   expect(mcpWakingHostsHere(agentsModel({ 'claude-code': ready() }))).toEqual([]);
   expect(wakeLine(mcpWakingHostsHere(agentsModel({ 'claude-code': ready() })))).toBe(WAKE_LINE);
+  // T3 Code wakes through MCP but has no agent row: the first-run lines never name it, here or not.
+  expect(mcpWakingHostsHere(SCENARIOS.typical())).not.toContain('t3');
+  expect(WAKE_LINE).not.toContain('T3');
+  expect(MCP_WAKE_LINE).not.toContain('T3');
 });
 
 test('a Connect step for an MCP agent says it is not woken (Codex 0.149+ is: the Inbox queues the reply into its thread)', () => {

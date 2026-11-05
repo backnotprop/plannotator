@@ -337,7 +337,7 @@ export async function seedThreadParity(binary: string, root: string, stop: (data
       return Boolean(t.messages.find((m) => m.id === merged.message_id)?.ack?.settled_at);
     });
     // Pi picks it up: the pill reads "Delivered to Pi" and the row's tick is Delivered.
-    await pi.waitForReply(merged.thread_id, 20);
+    await pi.readThread(merged.thread_id);
   } finally {
     await Promise.all(agents.map((a) => a.close().catch(() => {})));
     await stop(dataDir);

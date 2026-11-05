@@ -53,6 +53,7 @@ import path from "path";
 import { resolveValidatedTargetAgent } from "./agent-switch";
 import { deliverOpenCodePrompt } from "./prompt-delivery-error";
 import { announceSessionUrl } from "./session-url";
+import { scheduleOpenCodeDailyPing } from "./daily-ping";
 import { decideListed } from "./session-registry";
 import {
   readLastUserAgent,
@@ -277,6 +278,8 @@ export async function handleReviewCommand(
   const sessionId = event.properties?.sessionID;
 
   const startServer = deps.startReviewServer ?? startReviewServer;
+  // The daily ping (daily-ping.ts): in the background, never awaited.
+  scheduleOpenCodeDailyPing("review");
   const reviewProject = (await detectProjectName(reviewDirectory ? reviewCwd : undefined)) ?? undefined;
   const server = await startServer({
     rawPatch,
@@ -366,6 +369,7 @@ export async function handleAnnotateCommand(
 ) {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
+  scheduleOpenCodeDailyPing("annotate");
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";
@@ -635,6 +639,7 @@ export async function handleAnnotateLastCommand(
 ): Promise<{ approved: boolean; feedback: string; agent?: string } | null> {
   const { client, htmlContent, getSharingEnabled, getShareBaseUrl, getPasteApiUrl, directory } = deps;
   const startServer = deps.startAnnotateServer ?? startAnnotateServer;
+  scheduleOpenCodeDailyPing("last");
 
   // @ts-ignore - Event properties contain arguments
   const rawArgs = event.properties?.arguments || event.arguments || "";

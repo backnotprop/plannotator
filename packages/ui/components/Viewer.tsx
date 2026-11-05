@@ -404,12 +404,14 @@ export interface ViewerProps {
    * Opt-in host capability, with `answerOnly`: the reader may comment on the
    * text. A text selection opens the selection toolbar, comment-only
    * (Comment and the one-click 👍; no Delete, no label picker), and its
-   * comment composer; `annotations` are drawn as highlights. Question cards
-   * are left out of selection (their text is not commented on), and nothing
-   * else of authoring comes back (no pinpoint, code-block toolbar, Global
-   * comment or Copy, no Vim). For a host that shows a message whose words
-   * can be commented on (the Plannotator Inbox's agent messages). Ignored
-   * without `answerOnly` and under `readOnly`. Absent → unchanged.
+   * comment composer; `annotations` are drawn as highlights. A rendered
+   * diagram takes comments on its parts the same way (`onAddAnnotation` gets
+   * a row with `diagramAnchor`). Question cards are left out of selection
+   * (their text is not commented on), and nothing else of authoring comes
+   * back (no pinpoint, code-block toolbar, Global comment or Copy, no Vim).
+   * For a host that shows a message whose words can be commented on (the
+   * Plannotator Inbox's agent messages). Ignored without `answerOnly` and
+   * under `readOnly`. Absent → unchanged.
    */
   textComments?: boolean;
   /**
@@ -467,13 +469,18 @@ export interface ViewerHandle {
   /** Markdown `Viewer` only: scroll a heading anchor (`#id`) into view.
    *  Returns false when it is not in this document. */
   scrollToAnchor?: (hash: string) => boolean;
+  /** Raw-HTML `HtmlViewer` only: print the document itself so its page breaks
+   *  paginate instead of being flattened inside the host's iframe. */
+  print?: () => void;
   /** `HtmlViewer` only: move a pinned draft to the element around it
    *  (`'parent'`) or back in (`'child'`), for a host that composes
    *  (`onHostDraft`). The markdown `Viewer` does not implement it. */
   stepPin?: (direction: 'parent' | 'child') => void;
   /** `HtmlViewer` only: scroll the pinned draft into the middle of the
-   *  frame, for a host whose panel covers part of it. */
-  revealPin?: () => void;
+   *  frame, for a host whose panel covers part of it. `clearBottom`: the
+   *  panel floats over the frame's last pixels instead of shrinking it, so the
+   *  pin goes into the part left, and stays put if it is already there. */
+  revealPin?: (options?: { clearBottom?: number }) => void;
   /** Markdown `Viewer` only, for a host that composes (`onHostDraft`) on a
    *  touch screen: make the page's text selection a draft now (the host's own
    *  Comment action), reported through `onHostDraft` as `'selection'`.
@@ -1864,10 +1871,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
@@ -1880,10 +1887,10 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                   annotations={annotations}
                   selectedAnnotationId={selectedAnnotationId}
                   onSelectAnnotation={onSelectAnnotation}
-                  onAddAnnotation={authoringOff ? undefined : onAddAnnotation}
-                  readOnly={authoringOff}
+                  onAddAnnotation={selectionCommentsOn ? onAddAnnotation : undefined}
+                  readOnly={!selectionCommentsOn}
                   onRestoreReport={onRestoreReport}
-                  onAskAI={authoringOff ? undefined : onAskAI}
+                  onAskAI={selectionCommentsOn ? onAskAI : undefined}
                   askAISourcePath={linkedDocInfo?.filepath ?? sourceInfo}
                 />
               </Suspense>
@@ -2187,7 +2194,12 @@ export const Viewer = forwardRef<ViewerHandle, ViewerProps>(({
                 label: 'Selected text',
                 text: hookCommentPopover.selectedText ?? hookCommentPopover.contextText,
                 sourcePath: linkedDocInfo?.filepath ?? sourceInfo,
-                ...selectionSourceLines(blocks, hookCommentPopover.blockIds ?? []),
+                ...selectionSourceLines(
+                  blocks,
+                  hookCommentPopover.blockIds ?? [],
+                  hookCommentPopover.selectedText,
+                  hookCommentPopover.startOffset,
+                ),
               }}
             />
           )}

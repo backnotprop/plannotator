@@ -172,7 +172,8 @@ test('the archived open thread keeps its row until the person leaves; then no se
   await shot('02-list-before');
 
   await page.locator(`.ib-lbody [data-thread-id="${threads.build}"]`).click();
-  await page.locator('section.ib-pane').getByRole('button', { name: 'Archive the thread' }).click();
+  await page.locator('section.ib-pane [data-thread-more]').click();
+  await page.getByRole('menuitem', { name: 'Archive thread' }).click();
   await expect(page.locator('.ib-pfoot')).toContainText('Archived. The next message from');
   const held = page.locator(`.ib-lbody [data-row="${threads.build}"]`);
   await expect(held).toBeVisible();

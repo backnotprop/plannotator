@@ -63,7 +63,7 @@ async function serverSections(): Promise<Map<string, string>> {
   return new Map(model.sections.flatMap((s) => s.threads.map((r) => [r.thread_id, s.id] as const)));
 }
 
-const TESTS = 16;
+const TESTS = 22;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -168,7 +168,7 @@ async function renderApp(hash = '') {
   });
   await until(() => !!rowButton(ids.waiting), 'the list');
   // The settings carry the Inbox's one address.
-  await until(() => fetched.includes('/api/inbox/settings'), 'the settings');
+  await until(() => fetched.some((path) => path.split('?')[0] === '/api/inbox/settings'), 'the settings');
   await act(async () => {
     await new Promise((r) => setTimeout(r, 50));
   });
@@ -224,6 +224,11 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
   // An Inbox that keeps pins (approval "inbox-pinned-threads"): Pin or Unpin leads, an archived row's too.
   expect(rowMenuActions(base, true, false)).toEqual(['pin', 'copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
   expect(rowMenuActions({ ...base, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, true)).toEqual(['unpin', 'copy-thread', 'copy-link', 'copy-id']);
+  // An Inbox that keeps snoozes (approval "inbox-snooze"): Snooze on a thread not archived, Unsnooze too on a snoozed one.
+  expect(rowMenuActions(base, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'snooze', 'read', 'archive']);
+  const snoozedRow = { ...base, snoozed: { until: '2026-10-21T12:00:00Z', at: '2026-10-20T00:00:00Z' } } as typeof base;
+  expect(rowMenuActions(snoozedRow, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id', 'snooze', 'unsnooze', 'read', 'archive']);
+  expect(rowMenuActions({ ...snoozedRow, section: 'quiet', resolved_at: '2026-10-20T00:00:00Z' }, true, null, null, true)).toEqual(['copy-thread', 'copy-link', 'copy-id']);
   // A seen update the held list still draws in New keeps Mark read; drawn in Quiet, or marked read, or archived, it does not.
   const seen = { ...base, section: 'quiet' } as typeof base;
   expect(rowMenuActions(seen, true, null, 'new')).toEqual(['copy-thread', 'copy-link', 'copy-id', 'read', 'archive']);
@@ -252,7 +257,7 @@ test('the link is the Inbox one address plus #thread=, and the items follow the 
 test.skipIf(!hasDom)('a right-click opens the menu on that row, without opening the thread; Copy link writes its address', async () => {
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Archive']);
   expect(menu()!.querySelector('[role="separator"]')).not.toBeNull();
   // The row keeps a muted background while its menu is open; nothing opened, nothing selected.
   expect(rowWrap(ids.waiting)!.hasAttribute('data-menu')).toBe(true);
@@ -313,7 +318,7 @@ test.skipIf(!hasDom)('Mark read moves the row to Quiet with its toast; the menu 
   });
   await until(() => !!rowButton(ids.waiting), 'the row in Quiet');
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark unread', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark unread', 'Move back', 'Archive']);
   const before = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
   await choose('mark-unread');
   expect(posted.some((p) => p.path === `/api/inbox/threads/${ids.waiting}/mark-unread`)).toBe(true);
@@ -343,7 +348,7 @@ test.skipIf(!hasDom)('a row Mark unread brought back keeps Move back in its menu
   await loopback(`/api/inbox/threads/${ids.waiting}/mark-unread`, 'POST', '{}');
   await renderApp();
   await openMenu(ids.waiting);
-  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Mark read', 'Move back', 'Archive']);
+  expect(items()).toEqual(['Pin thread', 'Copy thread', 'Copy link', 'Copy thread ID', 'Snooze', 'Mark read', 'Move back', 'Archive']);
   await choose('unread');
   await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the question reopened');
   const thread = JSON.parse((await loopback(`/api/inbox/threads/${ids.waiting}`)).text) as { thread: { messages: { questions?: { state: string }[] }[] } };
@@ -390,6 +395,35 @@ test.skipIf(!hasDom)('Escape closes the menu and puts focus back on the row; the
   await until(() => document.activeElement === rowButton(ids.mixed), 'focus on the row after Tab');
   // Nothing opened.
   expect(window.location.hash).not.toContain('thread=');
+});
+
+test.skipIf(!hasDom)('Snooze by keyboard: focus lands on the first time, and Back puts it on Snooze again, never on the page', async () => {
+  await renderApp();
+  const row = rowButton(ids.waiting)!;
+  act(() => row.focus());
+  await act(async () => {
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  await until(() => menu()?.getAttribute('data-row-menu') === ids.waiting, 'the menu');
+  await choose('snooze');
+  await until(() => !!menu()?.querySelector('[data-snooze-view="times"]'), 'the times');
+  await until(() => document.activeElement === menu()!.querySelector('[data-snooze-choice]'), 'focus on the first time');
+  // The menu's own arrows go on from there: Down is the second time.
+  await act(async () => {
+    document.activeElement!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true }));
+  });
+  await until(() => document.activeElement === menu()!.querySelectorAll('[data-snooze-choice]')[1], 'focus on the second time');
+  await act(async () => {
+    menu()!.querySelector<HTMLElement>('[data-snooze-back]')!.click();
+  });
+  await until(() => !!item('snooze'), 'the menu again');
+  await until(() => document.activeElement === item('snooze'), 'focus on Snooze after Back');
+  // Still the menu's: Escape closes it and focus goes back to the row.
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !menu(), 'the menu to close');
+  await until(() => document.activeElement === rowButton(ids.waiting), 'focus on the row');
 });
 
 test.skipIf(!hasDom)('a touch never opens it, and outside the rows the browser keeps its own menu', async () => {
@@ -607,4 +641,130 @@ test.skipIf(!hasDom)('the row leaves while its menu is open: focus goes to the r
   });
   await until(() => !menu(), 'the menu to close');
   await until(() => document.activeElement === document.querySelector('[data-thread-id="c"]'), 'focus on the row in its slot');
+});
+
+/** Pick Tomorrow (8:00 AM, always offered) in an open Snooze menu. */
+async function snoozeTomorrow(popup: string) {
+  await until(() => !!document.querySelector(`${popup} [data-snooze-choice="tomorrow"]`), 'the times');
+  await act(async () => {
+    document.querySelector<HTMLElement>(`${popup} [data-snooze-choice="tomorrow"]`)!.click();
+  });
+}
+const groupOfRow = (id: string) => rowWrap(id)?.closest('[data-section-id]')?.getAttribute('data-section-id') ?? null;
+const snoozedBand = () => document.querySelector<HTMLElement>('[data-section-id="snoozed"] button.ib-band');
+const placedRows = () => [...document.querySelectorAll('.ib-listcol [data-row]')].map((el) => el.getAttribute('data-row'));
+
+test.skipIf(!hasDom)("with a thread open: Snooze from another row moves only that row into the Snoozed band at once; other held changes stay held; Undo puts it back in its slot", async () => {
+  await renderApp(`#thread=${ids.stopped}`);
+  await until(() => !!document.querySelector('section.ib-pane'), 'the thread');
+  // An own write the held list keeps in place while a thread is open: Mark read on another row.
+  const markedFrom = groupOfRow(ids.mixed);
+  await openMenu(ids.mixed);
+  await choose('read');
+  await until(async () => (await serverSections()).get(ids.mixed) === 'quiet', 'Mark read written');
+  await until(() => !!toast(), 'the toast');
+  expect(groupOfRow(ids.mixed)).toBe(markedFrom);
+  const before = placedRows();
+  await openMenu(ids.waiting);
+  await choose('snooze');
+  await snoozeTomorrow(`[data-row-menu="${ids.waiting}"]`);
+  await until(() => toast()?.textContent?.includes('Snoozed') === true, 'the toast');
+  // At once, with the thread still open: the row is in the folded band, every other row where it was.
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  expect(snoozedBand()?.getAttribute('aria-expanded')).toBe('false');
+  expect(placedRows()).toEqual(before.filter((id) => id !== ids.waiting));
+  // The Mark read before it still waits for the close: one row moved, not the list.
+  expect(groupOfRow(ids.mixed)).toBe(markedFrom);
+  expect(window.location.hash).toContain(`thread=${ids.stopped}`);
+  // Undo: no snooze, and the row back between the same neighbours.
+  await act(async () => {
+    toast()!.querySelector<HTMLButtonElement>('[data-toast-undo]')!.click();
+  });
+  await until(() => !!rowButton(ids.waiting), 'the row back');
+  expect(placedRows()).toEqual(before);
+  expect(snoozedBand()).toBeNull();
+  expect((await serverSections()).get(ids.waiting)).toBe('waiting');
+});
+
+test.skipIf(!hasDom)("Snooze from the open thread's header clock: its row leaves for the Snoozed band at once and the thread stays open, saying until when", async () => {
+  await renderApp(`#thread=${ids.waiting}`);
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!rowButton(ids.waiting), 'the open row');
+  const before = placedRows();
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
+  });
+  await snoozeTomorrow('[data-thread-snooze-menu]');
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  expect(placedRows()).toEqual(before.filter((id) => id !== ids.waiting));
+  expect(snoozedBand()).not.toBeNull();
+  expect(window.location.hash).toContain(`thread=${ids.waiting}`);
+  await until(() => !!document.querySelector('section.ib-pane [data-snooze-line]'), 'the snooze line');
+});
+
+test.skipIf(!hasDom)('Snooze the open thread, then Unsnooze in it: its row comes back between the same neighbours at once, the band as it was', async () => {
+  await renderApp(`#thread=${ids.waiting}`);
+  await until(() => !!document.querySelector('section.ib-pane [data-thread-snooze]'), 'the header clock');
+  await until(() => !!rowButton(ids.waiting), 'the open row');
+  const before = placedRows();
+  // Another test's world may have left a snooze: the band's count, not its absence.
+  const band = () => snoozedBand()?.textContent ?? null;
+  const bandBefore = band();
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-thread-snooze]')!.click();
+  });
+  await snoozeTomorrow('[data-thread-snooze-menu]');
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  await until(() => !!document.querySelector('section.ib-pane [data-unsnooze]'), 'Unsnooze in the thread');
+  await act(async () => {
+    document.querySelector<HTMLElement>('section.ib-pane [data-unsnooze]')!.click();
+  });
+  await until(async () => (await serverSections()).get(ids.waiting) === 'waiting', 'the unsnooze written');
+  await until(() => !!rowButton(ids.waiting), 'the row back');
+  expect(placedRows()).toEqual(before);
+  expect(band()).toBe(bandBefore);
+  expect(window.location.hash).toContain(`thread=${ids.waiting}`);
+});
+
+test.skipIf(!hasDom)('with a thread open, a mouse Snooze from another row whose write is slow: when the row leaves, focus goes to the row now in its slot', async () => {
+  await renderApp(`#thread=${ids.stopped}`);
+  await until(() => !!document.querySelector('section.ib-pane'), 'the thread');
+  const order = [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!);
+  const at = order.indexOf(ids.waiting);
+  const next = order[at + 1] ?? order[at - 1]!;
+  // A slow write: the menu has closed and put focus back on the row well before the row leaves.
+  const fast = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    if (init?.method === 'POST' && String(input).includes('/snooze')) await new Promise((r) => setTimeout(r, 600));
+    return fast(input, init);
+  }) as typeof fetch;
+  act(() => {
+    window.dispatchEvent(new Event('pointerdown'));
+  });
+  await openMenu(ids.waiting);
+  mouseClick(item('snooze')!);
+  await until(() => !!document.querySelector(`[data-row-menu="${ids.waiting}"] [data-snooze-choice="tomorrow"]`), 'the times');
+  mouseClick(document.querySelector<HTMLElement>(`[data-row-menu="${ids.waiting}"] [data-snooze-choice="tomorrow"]`)!);
+  await until(() => !menu(), 'the menu to close');
+  expect(rowButton(ids.waiting)).not.toBeNull();
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  await until(() => document.activeElement === rowButton(next), 'focus on the row in its slot');
+});
+
+test.skipIf(!hasDom)('with a thread open, Snooze by keyboard from another row: focus goes to the row now in its slot, never the page', async () => {
+  await renderApp(`#thread=${ids.stopped}`);
+  await until(() => !!document.querySelector('section.ib-pane'), 'the thread');
+  const order = [...document.querySelectorAll('.ib-lbody [data-thread-id]')].map((el) => el.getAttribute('data-thread-id')!);
+  const at = order.indexOf(ids.waiting);
+  const next = order[at + 1] ?? order[at - 1]!;
+  const row = rowButton(ids.waiting)!;
+  act(() => row.focus());
+  await act(async () => {
+    row.dispatchEvent(new KeyboardEvent('keydown', { key: 'F10', shiftKey: true, bubbles: true, cancelable: true }));
+  });
+  await until(() => menu()?.getAttribute('data-row-menu') === ids.waiting, 'the menu');
+  await choose('snooze');
+  await snoozeTomorrow(`[data-row-menu="${ids.waiting}"]`);
+  await until(() => !rowButton(ids.waiting), 'the row to leave');
+  await until(() => document.activeElement === rowButton(next), 'focus on the row in its slot');
 });

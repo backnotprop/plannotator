@@ -27,10 +27,13 @@ export const OPEN_QUESTIONS_LABEL_FORMS: readonly OpenQuestionsLabelForm[] = ['f
  * The visible words of each form: "6 open questions" / "6 open" / "6". With
  * action items: "2 open action items" alone, "6 questions, 2 action items"
  * with questions (`openItemsLabel`); the short forms count both ("8 open", "8").
+ * `permission` (only a launched agent's permission prompts wait): "1 permission
+ * waiting" / "1 waiting" / "1".
  */
-export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0): string {
+export function openQuestionsFormText(questions: number, form: OpenQuestionsLabelForm, actions = 0, permission = false): string {
   const n = questions + actions;
   if (form === 'count') return String(n);
+  if (permission) return form === 'short' ? `${n} waiting` : `${n} permission${n === 1 ? '' : 's'} waiting`;
   if (form === 'short') return `${n} open`;
   return openItemsLabel(questions, actions);
 }
@@ -52,6 +55,44 @@ export function footFitCandidates(max: OpenQuestionsLabelForm): FootFit[] {
     { form, tight: false },
     { form, tight: true },
   ]);
+}
+
+/**
+ * A way to draw the foot of full screen's card on a phone. `fit` is the foot's `data-fit` (inbox.css), its tokens:
+ * `chips`: "2 comments" becomes its icon and the number; `link`: "Open in thread" becomes "Thread"; `stack`: the chips
+ * take a row of their own over the paperclip, the mic and the link; `wrap`: the chips may wrap in that row.
+ */
+export interface CardFootFit extends FootFit {
+  fit: string;
+}
+
+/**
+ * What yields on the card's foot, in order, until the row holds: the open questions' words (as in the thread's foot),
+ * then the comments' word, then the link's first words; the icons, numbers and targets never shrink. Only then, with
+ * text sizes a phone's row cannot hold, do the chips take their own row, with their words back as far as they fit.
+ */
+export function cardFootFitCandidates(): CardFootFit[] {
+  const count: FootFit = { form: 'count', tight: false };
+  const rows = (forms: readonly FootFit[], fit: string) => forms.map((form) => ({ ...form, fit }));
+  const words = footFitCandidates('full').filter((c) => !c.tight);
+  return [...rows(words, ''), ...rows([count], 'chips'), ...rows([count], 'chips link'), ...rows(words, 'stack'), ...rows([count], 'stack chips'), ...rows([count], 'stack chips link wrap')];
+}
+
+/** A way to draw the row's buttons with the checklist button beside them: `steps`, its chevron gone. */
+export type FootFitWithSteps = FootFit & { steps: boolean };
+
+/**
+ * `footFitCandidates` with the checklist button beside the open questions: before the open questions button
+ * changes at all, the checklist drops its chevron (it is read only; the open items should "say both").
+ */
+export function footFitCandidatesWithSteps(max: OpenQuestionsLabelForm): FootFitWithSteps[] {
+  const [first, ...rest] = footFitCandidates(max);
+  return [{ ...first!, steps: false }, { ...first!, steps: true }, ...rest.map((fit) => ({ ...fit, steps: true }))];
+}
+
+/** Where the row's own fitting left the checklist button narrow (`data-steps-fit` on the buttons, inbox.css). */
+export function drawStepsFit(buttons: HTMLElement, narrow: boolean): void {
+  buttons.toggleAttribute('data-steps-fit', narrow);
 }
 
 /** All on one line: every box starts within a pixel of the first. */
@@ -99,13 +140,15 @@ export function laidOutChildren(row: Element): HTMLElement[] {
  * Tries each way in turn on the page itself (before paint: the caller runs in
  * a layout effect) and leaves the button drawn the first way that keeps the
  * row on one line; none does: the last. `apply` draws one way on the button.
- * Null where there is no layout (a test DOM, a hidden pane).
+ * Null where there is no layout (a test DOM, a hidden pane). `fits` is an
+ * extra test of the page drawn that way (the full-screen composer's chips,
+ * which cannot wrap a lone pill, ask that nothing runs past the row's end).
  */
-export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[], apply: (fit: FootFit) => void): FootFit | null {
+export function fitFootRow<T>(buttons: HTMLElement, candidates: readonly T[], apply: (fit: T) => void, fits: () => boolean = () => true): T | null {
   if (buttons.getBoundingClientRect().width <= 0 || candidates.length === 0) return null;
   for (const fit of candidates) {
     apply(fit);
-    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top))) return fit;
+    if (onOneLine(laidOutChildren(buttons).map((el) => el.getBoundingClientRect().top)) && fits()) return fit;
   }
   return candidates[candidates.length - 1]!;
 }
@@ -121,20 +164,22 @@ export function fitFootRow(buttons: HTMLElement, candidates: readonly FootFit[],
 //             (approval "inbox-keyboard-shortcuts"; the key stays in aria-keyshortcuts and the map)
 //   1. skip   the skip chip: "1 question stays open · Skip it" → "1 open · Skip"
 //   2. edit   "Edit draft" → "Edit"
-//   3. oq     "2 open questions ⌄" → the icon, "2" and the chevron
-//   4. draft  the pick words after the Draft pill go; the comment count stays,
+//   3. steps  the checklist button "◑ 10/12 ⌄" → "◑ 10/12": it is read only, so it gives way
+//             before the open questions' words ("it should say both")
+//   4. oq     "2 open questions ⌄" → the icon, "2" and the chevron
+//   5. draft  the pick words after the Draft pill go; the comment count stays,
 //             as a comment glyph and the number inside the pill ("Draft 💬3";
 //             with no comments, "Draft" alone)
-//   5. tight  the buttons' side padding and the gaps (the status's too) get smaller
-//   6. icon   a phone only: "Edit draft" becomes its pencil, the gaps 4 px
+//   6. tight  the buttons' side padding and the gaps (the status's too) get smaller
+//   7. icon   a phone only: "Edit draft" becomes its pencil, the gaps 4 px
 // Each step keeps the ones before it. The long words stay in the page as
 // visually hidden text (inbox.css), so names and descriptions are whole.
 
 /** One step of shortening; a level is the first N of them. */
-export type FootRowStep = 'keys' | 'skip' | 'edit' | 'oq' | 'draft' | 'tight' | 'icon';
+export type FootRowStep = 'keys' | 'skip' | 'edit' | 'steps' | 'oq' | 'draft' | 'tight' | 'icon';
 
 /** The steps every window takes. */
-export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'skip', 'edit', 'oq', 'draft', 'tight'];
+export const FOOT_ROW_STEPS: readonly FootRowStep[] = ['keys', 'skip', 'edit', 'steps', 'oq', 'draft', 'tight'];
 
 /** A phone's steps: the same, then Edit draft as its pencil. */
 export const PHONE_FOOT_ROW_STEPS: readonly FootRowStep[] = [...FOOT_ROW_STEPS, 'icon'];
@@ -166,12 +211,13 @@ function rowMids(row: Element): number[] {
     .map((r) => r.top + r.height / 2);
 }
 
-/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-label`). */
+/** Draws one form on the open questions button, from the counts it carries (`data-oq-n`, `data-oq-actions`, `data-oq-permission`, `data-oq-label`). */
 export function drawOpenQuestionsForm(button: HTMLElement, fit: FootFit): void {
   const words = button.querySelector<HTMLElement>('[data-oq-words]');
   const n = Number(button.getAttribute('data-oq-n') ?? '0');
   const actions = Number(button.getAttribute('data-oq-actions') ?? '0');
-  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions);
+  const permission = button.hasAttribute('data-oq-permission');
+  if (words) words.textContent = openQuestionsFormText(n, fit.form, actions, permission);
   button.setAttribute('data-label-form', fit.form);
   button.toggleAttribute('data-fit-tight', fit.tight);
   const label = button.getAttribute('data-oq-label');

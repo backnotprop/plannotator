@@ -20,7 +20,7 @@ import { readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 
 export const repoRoot = resolve(import.meta.dir, '..');
-export const E2E_SHARDS = 8;
+export const E2E_SHARDS = 16;
 export const E2E_CONFIG = 'tests/e2e/playwright.config.ts';
 /** Seconds shard 1 spends on the release-numbered binary's update specs. */
 export const SHARD_1_EXTRA_S = 90;

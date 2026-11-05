@@ -1,4 +1,4 @@
-import { useId, useState, type ReactNode } from 'react';
+import { useEffect, useId, useState, type ReactNode } from 'react';
 import {
   INBOX_AGENT_LABELS,
   inboxToolCostText,
@@ -9,7 +9,7 @@ import {
   type InboxOpenSession,
   type InboxToolHostId,
 } from '@plannotator/core/inbox-types';
-import { inboxApi } from '../api';
+import { inboxApi, type InboxLaunchSettings } from '../api';
 import { CURSOR_RULES_PLACE, noteCopiedByHand, noteWithoutMarkers } from '../agents';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon } from '../icons';
@@ -242,7 +242,7 @@ function Switch({ on, label, disabled, busy, onClick }: { on: boolean; label: st
 function viaOf(row: InboxAgentRow): string {
   if (row.reach.kind === 'tool') return row.id === 'pi' ? "Plannotator's extension" : "Plannotator's plugin";
   if (row.reach.kind === 'mcp') return 'MCP server';
-  return 'connected by hand';
+  return 'connected yourself';
 }
 
 function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad' } {
@@ -258,7 +258,7 @@ function stateOf(row: InboxAgentRow): { text: string; tone: 'on' | 'off' | 'bad'
     case 'unreadable':
       return { text: "Can't read its config", tone: 'bad' };
     case 'manual':
-      return { text: 'Connect by hand', tone: 'off' };
+      return { text: 'Connect yourself', tone: 'off' };
     case 'not_connected':
       return { text: 'Not connected', tone: 'off' };
     default:
@@ -317,8 +317,11 @@ function AgentGroup({
   busy,
   sessions,
   platform,
+  extra,
 }: {
   row: InboxAgentRow;
+  /** Rows after its own (Claude Code: "Start new sessions with full permissions", launch only). */
+  extra?: ReactNode;
   /** This computer's platform (the window's), for what wakes a session. */
   platform?: ConnectContext['platform'];
   noteText: string;
@@ -333,7 +336,8 @@ function AgentGroup({
   const base = row.detected ? stateOf(row) : { text: 'Not found on this computer', tone: 'off' as const };
   const needs = row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode' ? sessionsState(row.id, sessions) : null;
   const state = needs ? { text: `${base.text} · ${needs}`, tone: 'bad' as const } : base;
-  const next = `${row.label}'s next session`;
+  // DeepSeek Harness decides once, when it starts (its plugin), never per session.
+  const next = row.id === 'dsh' ? 'when DeepSeek Harness next starts' : `${row.label}'s next session`;
   const reach = row.reach;
   const reachValue =
     reach.kind === 'tool' ? (
@@ -369,7 +373,7 @@ function AgentGroup({
         </>
       )
     ) : (
-      'Add it by hand: "Not found on this computer" below has its command.'
+      'Add it yourself: "Not found on this computer" below has its command.'
     );
   // Pi and OpenCode send the tool whole with every request (Claude Code defers it behind tool search): the measured cost.
   const cost = row.id === 'pi' || row.id === 'opencode' ? `Adds the tool to every ${row.label} request: ${inboxToolCostText(row.id)}.` : null;
@@ -391,7 +395,7 @@ function AgentGroup({
           ? 'would create'
           : 'no note yet'
         : note.state === 'manual'
-          ? 'copy by hand'
+          ? 'copy yourself'
           : note.state === 'unavailable'
           ? 'no file yet'
           : ''
@@ -511,6 +515,7 @@ function AgentGroup({
       ) : NO_NOTE_FILE[row.id] ? (
         <Row k="Note in its instructions" v={NO_NOTE_FILE[row.id]} na />
       ) : null}
+      {extra}
       {sessions && sessions.running > 0 && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && (
         <OpenSessions id={row.id} sessions={sessions} />
       )}
@@ -525,7 +530,140 @@ function AgentGroup({
  * and Note in its instructions; the agents not found folded behind the
  * harness picker. Every change applies to that agent's next session.
  */
-export function AgentsSettings({ model, onModel, context }: { model: InboxAgentsModel; onModel: (next: InboxAgentsModel) => void; context: ConnectContext | null }) {
+export function AgentsSettings({
+  model,
+  onModel,
+  context,
+  launch,
+}: {
+  model: InboxAgentsModel;
+  onModel: (next: InboxAgentsModel) => void;
+  context: ConnectContext | null;
+  /** Starting agents from New message (`SettingsModel.launch`, only while `inboxLaunch.enabled`). Absent: no row. */
+  launch?: InboxLaunchSettings | null;
+}) {
+  const [launchState, setLaunchState] = useState(launch ?? null);
+  const [launchBusy, setLaunchBusy] = useState(false);
+  useEffect(() => setLaunchState(launch ?? null), [launch?.enabled, launch?.full_permissions, launch?.follows, launch?.needs_consent, launch?.bypass_off, launch?.own_mode, launch?.scratch_dir]);
+  // Shown: the switch as it stands now (never set, it follows the login shell, read again here).
+  useEffect(() => {
+    if (!launch?.enabled) return;
+    let live = true;
+    inboxApi
+      .launchSettingsRead()
+      .then((read) => live && setLaunchState(read.launch))
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, [launch?.enabled]);
+  const toggleFull = async () => {
+    if (!launchState || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      setLaunchState((await inboxApi.launchSettings(!launchState.full_permissions)).launch);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const launchRow = launchState?.enabled ? (
+    <Row
+      k="Sessions you start"
+      v={launchState.full_permissions && !launchState.needs_consent && !launchState.bypass_off ? 'Full permissions' : launchState.own_mode ? 'Your default mode' : 'Auto mode'}
+      sub={
+        <>
+          Start new sessions with full permissions: Claude Code you start from New message runs without asking (bypass mode); only a safety check, such as deleting files, still comes to you here. Otherwise it starts in your default mode, or auto mode. Applies to the next session you start.
+          {launchState.follows && (
+            <span className="block" data-launch-follows={launchState.follows}>
+              {launchState.follows === 'shell' ? "Follows your shell's setting until you change it." : 'Follows your Claude Code settings until you change it.'}
+            </span>
+          )}
+          {launchState.full_permissions && launchState.bypass_off && (
+            <span className="block" data-launch-bypass-off="">
+              Bypass mode is turned off in your Claude Code settings, so sessions start without it.
+            </span>
+          )}
+          {launchState.full_permissions && launchState.needs_consent && (
+            <span className="block" data-launch-needs-consent="">
+              Accept Claude Code's bypass notice once in Terminal to use this. Until then sessions start without it.
+            </span>
+          )}
+        </>
+      }
+      data={{ 'data-launch-full-row': '' }}
+      r={<Switch on={launchState.full_permissions} label="Start new sessions with full permissions" busy={launchBusy} onClick={() => void toggleFull()} />}
+    />
+  ) : null;
+  // "Scratch folders": where New message's "New scratch folder" makes each one (`inboxLaunch.scratchDir`).
+  const [scratchEdit, setScratchEdit] = useState<string | null>(null);
+  const saveScratch = async () => {
+    if (scratchEdit === null || launchBusy) return;
+    setLaunchBusy(true);
+    setError(null);
+    try {
+      setLaunchState((await inboxApi.launchScratchDir(scratchEdit.trim() || null)).launch);
+      setScratchEdit(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setLaunchBusy(false);
+    }
+  };
+  const scratchRow =
+    launchState?.enabled && launchState.scratch_dir_shown !== undefined ? (
+      <Row
+        k="Scratch folders"
+        v={
+          scratchEdit === null ? (
+            <code data-launch-scratch-dir="">{launchState.scratch_dir_shown}</code>
+          ) : (
+            <input
+              className="ib-agpath"
+              type="text"
+              aria-label="Scratch folders"
+              placeholder="Empty: the default"
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              value={scratchEdit}
+              readOnly={launchBusy}
+              data-launch-scratch-input=""
+              onChange={(event) => setScratchEdit(event.target.value)}
+              // Enter does not save (no new keys in the Inbox): only the Save button does.
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') event.preventDefault();
+              }}
+            />
+          )
+        }
+        sub={
+          <>
+            New scratch folders are made here, named after their thread. A change applies to new folders only. Pick a folder outside any git
+            repository.
+          </>
+        }
+        data={{ 'data-launch-scratch-row': '' }}
+        r={
+          scratchEdit === null ? (
+            <button type="button" className="ib-btn ib-sm" data-launch-scratch-change="" onClick={() => setScratchEdit(launchState.scratch_dir_shown ?? '')}>
+              Change
+            </button>
+          ) : (
+            <>
+              <button type="button" className="ib-btn ib-sm ib-ghost" onClick={() => setScratchEdit(null)}>
+                Cancel
+              </button>
+              <button type="button" className="ib-btn ib-sm ib-pri" disabled={launchBusy} data-launch-scratch-save="" onClick={() => void saveScratch()}>
+                Save
+              </button>
+            </>
+          )
+        }
+      />
+    ) : null;
   const [pending, setPending] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
   const [more, setMore] = useState(false);
@@ -597,6 +735,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
             busy={busy.has(row.id)}
             onChange={(input) => void change(row.id, input)}
             {...(context ? { platform: context.platform } : {})}
+            {...(row.id === 'claude-code' && launchRow ? { extra: <>{launchRow}{scratchRow}</> } : {})}
             {...(model.sessions && (row.id === 'claude-code' || row.id === 'pi' || row.id === 'opencode') && model.sessions[row.id] ? { sessions: model.sessions[row.id] } : {})}
           />
         ))}
@@ -609,7 +748,7 @@ export function AgentsSettings({ model, onModel, context }: { model: InboxAgents
           <Icon name="chevR" />
           Not found on this computer
           <span className="ib-mut">
-            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one by hand
+            {undetected.length} agent{undetected.length === 1 ? '' : 's'} · connect one yourself
           </span>
         </button>
         {more && context && (

@@ -2,12 +2,13 @@ import { useEffect, useRef, useState, type MouseEvent, type ReactNode, type RefO
 import { KeyboardSettings } from './KeyboardSettings';
 import { INBOX_SOUND_MAX_VOLUME, INBOX_SOUND_MIN_VOLUME, INBOX_TEXT_SIZES } from '@plannotator/core/inbox-types';
 import type { InboxSound } from '../sound';
-import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, MachineView, SettingsModel } from '../api';
+import type { AgentToolHost, InboxCookieHost, InboxExperimentalSettings, InboxStorageModel, MachineView, SettingsModel } from '../api';
 import { cookieHostDescription } from '@plannotator/ui/hooks/useCookieHostSetting';
 import { formatBytes, formatCount, plural, tildePath } from '../format';
 import { HARNESSES, type ConnectContext } from '../harnesses';
 import { HostMark, Icon, type IconName } from '../icons';
 import { ConnectPicker } from './ConnectPicker';
+import { AccountsSection } from './Accounts';
 import { AgentsSettings, agentsNeedRestart } from './AgentsSettings';
 import { PromptsSection, promptsSummary } from './PromptsSettings';
 import type { InboxPromptsSettings } from '@plannotator/core/inbox-types';
@@ -22,19 +23,27 @@ import { PaletteRow } from './Palettes';
 import { DEFAULT_COLOR_THEME } from '@plannotator/ui/utils/themeRegistry';
 import { chooseTextSize, useInboxTextSize } from '../textSize';
 import { SETTINGS_SECTION_LABEL, SETTINGS_SECTIONS, settingsHash, type SettingsSection } from '../settingsRoute';
+import { VoiceSettings } from './VoiceSettings';
+import { useVoiceSettings } from '../voice';
+import { RowsSection, rowsSummary } from './RowsSettings';
+import { useListLook } from '../listLook';
 
 const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'claude-code', name: 'Claude Code' },
   { host: 'pi', name: 'Pi' },
   { host: 'opencode', name: 'OpenCode' },
+  { host: 'dsh', name: 'DeepSeek Harness' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
   general: 'settings',
+  rows: 'contents',
   agents: 'chip',
+  accounts: 'user',
   prompts: 'prompt',
   devices: 'phone',
   machines: 'system',
+  voice: 'mic',
   archived: 'archive',
   storage: 'disk',
   about: 'info',
@@ -43,6 +52,8 @@ const SECTION_ICON: Record<SettingsSection, IconName> = {
 
 /** Projects listed before the rest fold under "N more projects". */
 const SHOWN_PROJECTS = 2;
+/** Settings → Storage says "Counting what is stored…" only when its sizes take longer than this to come. */
+export const STORE_SLOW_MS = 400;
 
 export interface SettingsPageProps {
   settings: SettingsModel | null;
@@ -62,6 +73,12 @@ export interface SettingsPageProps {
   landOnExperimental?: boolean;
   /** Settings → Capabilities → Board: the Board's switch. Absent (or an Inbox without the switch): no Board group. */
   onToggleBoard?: (next: boolean) => void;
+  /** Settings → Capabilities → Code review (approval "inbox-code-review-direction"). Absent (or an Inbox without it): no row. */
+  onToggleCodeReview?: (next: boolean) => void;
+  /** Settings → Capabilities → Shape (approval "shape-inbox-placement"). Absent (or an Inbox without it): no row. */
+  onToggleShape?: (next: boolean) => void;
+  /** Settings → Capabilities → Checklist (thread steps, approval "inbox-thread-steps"). Absent (or an Inbox without it): no row. */
+  onToggleSteps?: (next: boolean) => void;
   /** Over your tailnet: the switch, and whether a change is in flight. */
   onToggleTailscale: (next: boolean, replaceExposed?: boolean) => void;
   tailscaleBusy: boolean;
@@ -74,6 +91,15 @@ export interface SettingsPageProps {
   /** Delete a thread or a project with its files as they were sent (blobs no other thread uses). */
   onDeleteThread: (threadId: string) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
+  /**
+   * Settings → Storage's sizes (GET /api/inbox/settings/storage): null until first read. Kept by the window for the
+   * visit, so a second visit shows them at once while `onReadStore` reads them again.
+   */
+  store?: InboxStorageModel | null;
+  /** The last storage read failed and there is nothing to show: why. */
+  storeError?: string | null;
+  /** Read the storage sizes again: asked each time Storage is shown, never for another section. */
+  onReadStore?: () => void;
   /** Settings → About: the version, Check now and the two update switches (components/Updates.tsx). */
   about?: ReactNode;
   /** The About nav row's dot: a new version is available, ready or failed, or checking has failed for hours. */
@@ -81,7 +107,7 @@ export interface SettingsPageProps {
   /**
    * Settings → General's first row: the version and the sidebar's update
    * action, Check now (components/Updates.tsx GeneralUpdateRow). Absent: none
-   * (a page opened over the tailnet).
+   * (a tailnet guest's page).
    */
   updateRow?: ReactNode;
   /** The question sound's row, under the notifications switch (sound.ts). */
@@ -122,14 +148,15 @@ export interface SettingsPageProps {
  * code review and annotate show in their Settings too: config.json
  * `urlHost: "plannotator.localhost"`. Locked (with the reason) while
  * PLANNOTATOR_URL_HOST is set or config.json holds another `urlHost`, which it
- * never replaces. The server leaves it out for a page that came through the tailnet.
+ * never replaces. The server leaves it out for a tailnet guest's page. From the owner's
+ * phone (`remote`) it is still the computer's browser that the switch changes, so the heading says so.
  */
-function CookieHostGroup({ cookieHost, onToggle }: { cookieHost: InboxCookieHost; onToggle: (next: boolean) => void }) {
+function CookieHostGroup({ cookieHost, remote, onToggle }: { cookieHost: InboxCookieHost; remote: boolean; onToggle: (next: boolean) => void }) {
   const locked = cookieHost.env !== null || cookieHost.url_host !== null;
   const state = cookieHost.env !== null ? 'locked-env' : cookieHost.url_host !== null ? 'locked-url-host' : cookieHost.on ? 'on' : 'off';
   return (
     <section className="ib-sgroup" data-settings-cookie-host={state} aria-labelledby="ib-g-browser">
-      <h2 id="ib-g-browser">This browser</h2>
+      <h2 id="ib-g-browser">{remote ? 'The computer’s browser' : 'This browser'}</h2>
       <div className="ib-card">
         <div className="ib-prow">
           <span className="ib-txt">
@@ -420,7 +447,7 @@ function GeneralSection({
           Notifications are allowed per address, so a browser on another device asks once there.
         </div>
       </section>
-      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} onToggle={onToggleCookieHost} />}
+      {settings.cookie_host && onToggleCookieHost && <CookieHostGroup cookieHost={settings.cookie_host} remote={settings.via === 'tailnet'} onToggle={onToggleCookieHost} />}
     </>
   );
 }
@@ -437,35 +464,101 @@ function GeneralSection({
 function CapabilitiesSection({
   board,
   onToggleBoard,
+  steps,
+  onToggleSteps,
+  codeReview,
+  onToggleCodeReview,
+  shape,
+  onToggleShape,
   experimental,
   onToggleExperimental,
   experimentalHeading,
 }: {
   board: { on: boolean } | null;
   onToggleBoard?: (next: boolean) => void;
+  /** The checklist (thread steps, approval "inbox-thread-steps"), null on an Inbox without it. */
+  steps: { on: boolean } | null;
+  onToggleSteps?: (next: boolean) => void;
+  /** Code review in the Inbox (approval "inbox-code-review-direction"), null on an Inbox without it. */
+  codeReview: { on: boolean } | null;
+  onToggleCodeReview?: (next: boolean) => void;
+  /** Shape (approval "shape-inbox-placement"), null on an Inbox without it. */
+  shape: { on: boolean } | null;
+  onToggleShape?: (next: boolean) => void;
   experimental: InboxExperimentalSettings | null;
   onToggleExperimental?: (next: boolean) => void;
   /** The Experimental group's heading, where `#settings/experimental` lands. */
   experimentalHeading: RefObject<HTMLHeadingElement | null>;
 }) {
+  const boardRow = board && onToggleBoard;
+  const stepsRow = steps && onToggleSteps;
+  const codeReviewRow = codeReview && onToggleCodeReview;
+  const shapeRow = shape && onToggleShape;
   return (
     <>
-      {board && onToggleBoard && (
-        <section className="ib-sgroup" data-settings-board="" aria-label="Capabilities">
+      {(boardRow || stepsRow || codeReviewRow || shapeRow) && (
+        <section className="ib-sgroup" data-settings-capabilities="" aria-label="Capabilities">
           <div className="ib-card">
-            <div className="ib-prow">
-              <span className="ib-txt">
-                <span className="ib-l" id="ib-board-label">
-                  Board
+            {boardRow && (
+              <div className="ib-prow" data-settings-board="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-board-label">
+                    Board
+                  </span>
+                  <span className="ib-desc">
+                    A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                  </span>
                 </span>
-                <span className="ib-desc">
-                  A page of the work in flight, one card per piece, that your agents keep current. Off, there is no Board page and agents are not offered cards; every card is kept. Agents pick this up in their next session.
+                <span className="ib-ctl">
+                  <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
                 </span>
-              </span>
-              <span className="ib-ctl">
-                <Switch on={board.on} labelledBy="ib-board-label" onClick={() => onToggleBoard(!board.on)} />
-              </span>
-            </div>
+              </div>
+            )}
+            {stepsRow && (
+              <div className="ib-prow" data-settings-steps="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-steps-label">
+                    Checklist
+                  </span>
+                  <span className="ib-desc">
+                    Your agents' plan for the work in a thread as a checklist, one step per line, under a button at the thread's foot. Off, agents are not offered a checklist and none shows; every checklist is kept. Agents pick this up in their next session.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={steps.on} labelledBy="ib-steps-label" onClick={() => onToggleSteps(!steps.on)} />
+                </span>
+              </div>
+            )}
+            {codeReviewRow && (
+              <div className="ib-prow" data-settings-code-review="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-code-review-label">
+                    Code review
+                  </span>
+                  <span className="ib-desc">
+                    Review your agents' code changes in the thread: type / in a reply to ask for a review, then approve it or send feedback from the review itself. Off, agents are not offered reviews and the review skills leave the / list; guided reviews and <code>plannotator review</code> work as before either way. Agents pick this up in their next session.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={codeReview.on} labelledBy="ib-code-review-label" onClick={() => onToggleCodeReview(!codeReview.on)} />
+                </span>
+              </div>
+            )}
+            {shapeRow && (
+              <div className="ib-prow" data-settings-shape="">
+                <span className="ib-txt">
+                  <span className="ib-l" id="ib-shape-label">
+                    Shape
+                  </span>
+                  <span className="ib-desc">
+                    Boards your agents draw and keep current: a picture of the work you can point at to change or ask. Type /shape in a reply to ask for one; it opens from the thread's header. Off, agents are not offered boards and none shows; every board is kept.
+                  </span>
+                </span>
+                <span className="ib-ctl">
+                  <Switch on={shape.on} labelledBy="ib-shape-label" onClick={() => onToggleShape(!shape.on)} />
+                </span>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -525,7 +618,7 @@ function AgentsSection({
   if (agents && onAgents) {
     return (
       <section className="ib-sgroup" aria-label="Agents">
-        <AgentsSettings model={agents} onModel={onAgents} context={context} />
+        <AgentsSettings model={agents} onModel={onAgents} context={context} launch={settings.launch ?? null} />
       </section>
     );
   }
@@ -535,7 +628,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi and OpenCode send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode and DeepSeek Harness send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (
@@ -563,7 +656,7 @@ function AgentsSection({
         {env === null && (
           <div className="ib-note">
             <Icon name="info" />
-            Applies to the next session. Sessions already running keep what they started with.
+            Applies to the next session; for DeepSeek Harness, it applies when DeepSeek Harness next starts. Sessions already running keep what they started with.
           </div>
         )}
       </section>
@@ -611,7 +704,7 @@ function StoreTable({
   onDeleteThread,
   onDeleteProject,
 }: {
-  store: SettingsModel['store'];
+  store: InboxStorageModel;
   onDeleteThread: (threadId: string) => Promise<void>;
   onDeleteProject: (projectId: string) => Promise<void>;
 }) {
@@ -630,6 +723,9 @@ function StoreTable({
                 <button type="button" className="ib-fold" onClick={() => setOpen(isOpen ? null : project.id)} aria-expanded={isOpen}>
                   <Icon name={isOpen ? 'chevD' : 'chevR'} size={13} /> {project.name}
                 </button>
+                {/* Each folder keeps its own size and Delete: Delete project never reaches a combined project's threads. */}
+                {project.combined_into && <div className="ib-store-note">In {project.combined_into}</div>}
+                {project.combined && <div className="ib-store-note">Deleting it leaves {project.combined.join(', ')}, as {project.combined.length === 1 ? 'its own project' : 'their own projects'}</div>}
               </td>
               <td className="ib-n ib-n-threads">{plural(project.threads.length, 'thread')}</td>
               <td className="ib-n">{formatBytes(project.bytes)}</td>
@@ -670,10 +766,14 @@ function StoreTable({
 
 const LEDE: Record<SettingsSection, string> = {
   general: 'How the Inbox looks, and how it gets your attention.',
+  // Rows draws its own lede, with the presets beside it (RowsSettings.tsx).
+  rows: '',
   agents: "How each agent on this computer reaches the Inbox and learns when to use it. A change applies to that agent's next session; sessions already running keep what they started with.",
+  accounts: '',
   prompts: "What Plannotator tells your agents. A change applies to each agent's next session.",
   devices: 'Your phone, and browsers on your other devices.',
   machines: 'Your other computers with Plannotator. Each keeps its own Inbox; this one shows their threads too.',
+  voice: 'Speak a reply instead of typing it.',
   archived: 'Threads you archived stay out of the list. Unarchive one to put it back and open it.',
   storage: '',
   about: 'The version, and how Plannotator keeps itself up to date.',
@@ -716,6 +816,27 @@ export function SettingsPage(props: SettingsPageProps) {
     phone = false,
   } = props;
   const section: SettingsSection | null = props.section ?? (phone ? null : 'general');
+  // Settings → Storage's sizes walk every file on the server, so they are read only here, each time Storage is shown.
+  // The calm wait: nothing moves, and words show only when the count takes longer than STORE_SLOW_MS. Numbers that
+  // come after a wait fade in; numbers kept from an earlier visit are there at once.
+  const store = props.store ?? null;
+  const storageShown = section === 'storage';
+  const readStore = useRef(props.onReadStore);
+  readStore.current = props.onReadStore;
+  const [storeSlow, setStoreSlow] = useState(false);
+  const storeWaited = useRef(false);
+  if (!storageShown) {
+    storeWaited.current = false;
+    // Reset on leaving, not on the next open: an open would draw the last visit's words for a frame first.
+    if (storeSlow) setStoreSlow(false);
+  } else if (!store) storeWaited.current = true;
+  useEffect(() => {
+    if (!storageShown) return;
+    readStore.current?.();
+    const slow = setTimeout(() => setStoreSlow(true), STORE_SLOW_MS);
+    return () => clearTimeout(slow);
+  }, [storageShown]);
+  const storeFade = storeWaited.current ? 'ib-store-in' : undefined;
   const phonesOn = settings?.phones === true;
   const phones = usePhones(phonesOn);
   const via = settings?.via ?? 'local';
@@ -767,11 +888,16 @@ export function SettingsPage(props: SettingsPageProps) {
   // of them (an older Inbox has neither, and an empty page is worse than no row); its address still opens.
   const experimental = settings?.experimental && props.onToggleExperimental ? settings.experimental : null;
   const board = settings?.board && props.onToggleBoard ? settings.board : null;
+  const steps = settings?.steps && props.onToggleSteps ? settings.steps : null;
+  const codeReview = settings?.code_review && props.onToggleCodeReview ? settings.code_review : null;
+  const shape = settings?.shape && props.onToggleShape ? settings.shape : null;
   // Machines shows while this Inbox can link one (its merged view names this machine); an older Inbox has no such page.
   const machines = props.machines ?? [];
   const linkedMachines = machines.filter((machine) => !machine.self);
+  const voice = useVoiceSettings();
+  const [look] = useListLook();
   const sections = SETTINGS_SECTIONS.filter(
-    (id) => (id !== 'capabilities' || board !== null || experimental !== null) && (id !== 'machines' || machines.length > 0),
+    (id) => (id !== 'capabilities' || board !== null || steps !== null || codeReview !== null || shape !== null || experimental !== null) && (id !== 'machines' || machines.length > 0) && (id !== 'voice' || voice !== null),
   );
   /** The phone's list of sections, in its groups: settings (Capabilities last of them), then your data and Plannotator. */
   const phoneGroups: { label: string; ids: SettingsSection[] }[] = [
@@ -818,6 +944,10 @@ export function SettingsPage(props: SettingsPageProps) {
         const on = TOOL_HOSTS.filter(({ host }) => settings.inbox_tool.hosts[host]).map(({ name }) => name);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} agents`;
       }
+      case 'rows':
+        return rowsSummary(look);
+      case 'accounts':
+        return '';
       case 'prompts':
         return settings.prompts ? promptsSummary(settings.prompts) : '';
       case 'devices':
@@ -828,12 +958,15 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'archived':
         return archivedTotal ? formatCount(archivedTotal) : '';
       case 'storage':
-        return formatBytes(settings.store.bytes);
+        // Only once Storage was opened this visit: the list never asks for the walk.
+        return store ? formatBytes(store.bytes) : '';
       case 'about':
         return settings.version;
+      case 'voice':
+        return !voice?.on ? 'Off' : voice.engine === 'api' ? 'API key' : 'Codex login';
       case 'capabilities': {
         // What is on, by name: "Off", "Board", "Decision mode", or "2 on".
-        const on = [board?.on ? 'Board' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
+        const on = [board?.on ? 'Board' : null, steps?.on ? 'Checklist' : null, codeReview?.on ? 'Code review' : null, experimental?.decision_mode.on ? 'Decision mode' : null].filter((name): name is string => name !== null);
         return on.length === 0 ? 'Off' : on.length === 1 ? on[0]! : `${on.length} on`;
       }
     }
@@ -857,8 +990,14 @@ export function SettingsPage(props: SettingsPageProps) {
           />
         );
         break;
+      case 'rows':
+        body = <RowsSection phone={phone} onGeneral={() => onSection?.('general')} />;
+        break;
       case 'agents':
         body = <AgentsSection settings={settings} context={context} onToggleTool={onToggleTool} agents={props.agents} onAgents={props.onAgents} />;
+        break;
+      case 'accounts':
+        body = <AccountsSection machine={machines.find((machine) => machine.self)?.name} />;
         break;
       case 'prompts':
         body = settings.prompts ? (
@@ -899,12 +1038,25 @@ export function SettingsPage(props: SettingsPageProps) {
           <section className="ib-sgroup" aria-labelledby="ib-g-store">
             <h2 id="ib-g-store">By project</h2>
             <p>Delete asks twice. A deleted thread or project cannot be brought back.</p>
-            {settings.store.projects.length > 0 ? (
-              <div className="ib-card">
-                <StoreTable store={settings.store} onDeleteThread={onDeleteThread} onDeleteProject={onDeleteProject} />
+            {!store ? (
+              <div className="ib-card ib-store-wait" data-store-wait="" aria-busy={props.storeError ? undefined : true}>
+                {props.storeError ? (
+                  <span className="ib-store-wait-t" role="alert" data-store-error="">
+                    The sizes could not be read. {props.storeError}{' '}
+                    <button type="button" className="ib-lnk" onClick={() => props.onReadStore?.()}>
+                      Try again
+                    </button>
+                  </span>
+                ) : (
+                  storeSlow && <span className="ib-store-wait-t">Counting what is stored…</span>
+                )}
+              </div>
+            ) : store.projects.length > 0 ? (
+              <div className={storeFade ? `ib-card ${storeFade}` : 'ib-card'}>
+                <StoreTable store={store} onDeleteThread={onDeleteThread} onDeleteProject={onDeleteProject} />
               </div>
             ) : (
-              <div className="ib-card ib-sempty">
+              <div className={storeFade ? `ib-card ib-sempty ${storeFade}` : 'ib-card ib-sempty'}>
                 <Icon name="disk" />
                 Nothing stored yet.
               </div>
@@ -915,12 +1067,21 @@ export function SettingsPage(props: SettingsPageProps) {
       case 'about':
         body = about;
         break;
+      case 'voice':
+        body = <VoiceSettings />;
+        break;
       case 'capabilities':
         body =
-          (board && props.onToggleBoard) || experimental ? (
+          (board && props.onToggleBoard) || steps || codeReview || shape || experimental ? (
             <CapabilitiesSection
               board={board}
               onToggleBoard={props.onToggleBoard}
+              steps={steps}
+              onToggleSteps={props.onToggleSteps}
+              codeReview={codeReview}
+              onToggleCodeReview={props.onToggleCodeReview}
+              shape={shape}
+              onToggleShape={props.onToggleShape}
               experimental={experimental}
               onToggleExperimental={props.onToggleExperimental}
               experimentalHeading={experimentalHeading}
@@ -938,12 +1099,18 @@ export function SettingsPage(props: SettingsPageProps) {
   const lede =
     section === 'storage' && settings ? (
       <p className="ib-lede">
-        <b data-store-bytes={settings.store.bytes}>{formatBytes(settings.store.bytes)}</b> in {tildePath(settings.store.dir, settings.home)}: messages, attached
-        files as they were sent, and annotations.
+        {store ? (
+          <b data-store-bytes={store.bytes} className={storeFade}>
+            {formatBytes(store.bytes)}
+          </b>
+        ) : (
+          <span className="ib-store-bar" data-store-bar="" aria-hidden="true" />
+        )}{' '}
+        in {tildePath(store?.dir ?? settings.store_dir ?? settings.store?.dir ?? '', settings.home)}: messages, attached files as they were sent, and annotations.
       </p>
     ) : section === 'devices' && settings && !phonesOn ? (
       <p className="ib-lede">Browsers on your other devices.</p>
-    ) : section ? (
+    ) : section && LEDE[section] ? (
       <p className="ib-lede">{LEDE[section]}</p>
     ) : null;
 

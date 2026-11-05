@@ -5,6 +5,7 @@
 /* Theme files — each defines .theme-{name} (dark) and .theme-{name}.light */
 @import "./themes/plannotator.css";
 @import "./themes/plannotator-graphite.css";
+@import "./themes/plannotator-modern.css";
 @import "./themes/claude-plus.css";
 @import "./themes/soft-pop.css";
 @import "./themes/adwaita.css";
@@ -1297,6 +1298,20 @@ html:not(.transitions-ready) * {
   transition-property: color, background-color, border-color, box-shadow;
   transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
   transition-duration: 150ms;
+}
+
+/* A theme switch lands in one frame. ThemeProvider holds .pn-theme-switching
+   on <html> from the moment it swaps the theme classes until two frames after
+   the redraw commits. Without it, the rule above starts a colour transition on
+   every element at once, which froze the page before it faded. Only timing
+   changes here: a transition already running (a sheet sliding, a menu fading)
+   keeps going, and hover fades come back with the class gone. */
+html.pn-theme-switching,
+html.pn-theme-switching *,
+html.pn-theme-switching *::before,
+html.pn-theme-switching *::after {
+  transition-duration: 0s !important;
+  transition-delay: 0s !important;
 }
 
 /* Focus states */

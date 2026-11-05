@@ -168,6 +168,25 @@ const go = async (hash: string) => {
   await settle();
 };
 
+/** Base UI opens a menu on the pointer's press, as a person's click does. */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
+
+/** The header's ⋯ opened; its Archive / Unarchive item (Archive left the header for this menu). */
+async function archiveItem(el: HTMLElement): Promise<HTMLElement> {
+  await until(() => el.querySelector('section.ib-pane [data-thread-more]') !== null, 'the header ⋯');
+  await press(el.querySelector<HTMLElement>('section.ib-pane [data-thread-more]')!);
+  await until(() => document.querySelector('[data-thread-menu] [data-thread-archive-item]') !== null, 'the Archive item in the ⋯ menu');
+  return document.querySelector<HTMLElement>('[data-thread-menu] [data-thread-archive-item]')!;
+}
+
 // First, while the server holds nothing archived.
 test.skipIf(!hasDom)('Settings says when nothing is archived', async () => {
   const el = await renderApp('#settings/archived');
@@ -179,9 +198,11 @@ test.skipIf(!hasDom)('Settings says when nothing is archived', async () => {
 test.skipIf(!hasDom)('archive the open thread: its row stays until the person leaves; Settings lists it; Unarchive puts it back and opens it', async () => {
   const world = worlds[0]!;
   const el = await renderApp(`#thread=${world.waiting}`);
-  await until(() => listRow(el, world.waiting) !== null && el.querySelector('[aria-label="Archive the thread"]') !== null, 'the thread and its row');
+  await until(() => listRow(el, world.waiting) !== null && el.querySelector('section.ib-pane [data-thread-more]') !== null, 'the thread and its row');
 
-  act(() => (el.querySelector('[aria-label="Archive the thread"]') as HTMLButtonElement).click());
+  const item = await archiveItem(el);
+  expect(item.textContent).toContain('Archive thread');
+  await act(async () => item.click());
   await until(() => el.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
   // The person's own write never reorders the list while the thread is open: the row stays, shown archived.
   const held = listRow(el, world.waiting)!;
@@ -204,8 +225,35 @@ test.skipIf(!hasDom)('archive the open thread: its row stays until the person le
   act(() => button(row, 'Unarchive').click());
   await until(() => window.location.hash === `#thread=${world.waiting}`, 'the thread opened');
   await until(() => listRow(el, world.waiting) !== null, 'the row back in the list');
-  await until(() => el.querySelector('[aria-label="Archive the thread"]') !== null, 'the thread open, not archived');
+  await until(() => el.querySelector('section.ib-pane [data-thread-more]') !== null && !(el.textContent?.includes('Archived. The next message from') ?? false), 'the thread open, not archived');
   expect(el.querySelector('[data-inbox-toast]')?.textContent).toContain('Back in your Inbox');
+  const archived = JSON.parse((await loopback('/api/inbox/threads/archived')).text) as { total: number };
+  expect(archived.total).toBe(0);
+});
+
+test.skipIf(!hasDom)('Archive lives in the header ⋯ menu, not the header: it archives with Undo, and reads Unarchive once archived', async () => {
+  const world = worlds[0]!;
+  const el = await renderApp(`#thread=${world.stopped}`);
+  await until(() => el.querySelector('section.ib-pane [data-thread-more]') !== null, 'the header');
+  // No Archive icon in the header, by its hook or its name.
+  expect(el.querySelector('section.ib-pane .ib-phead [data-archive]')).toBeNull();
+  expect(el.querySelector('section.ib-pane .ib-phead [aria-label="Archive the thread"]')).toBeNull();
+
+  const item = await archiveItem(el);
+  expect(item.textContent).toContain('Archive thread');
+  expect(item.getAttribute('role')).toBe('menuitem');
+  await act(async () => item.click());
+  await until(() => el.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
+  expect((await loopback('/api/inbox/threads/archived')).text).toContain(world.stopped);
+
+  // The same item now says Unarchive.
+  expect((await archiveItem(el)).textContent).toContain('Unarchive thread');
+  act(() => document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+
+  // The toast's Undo puts it back.
+  await until(() => el.querySelector('[data-toast-undo]') !== null, 'the toast Undo');
+  await act(async () => (el.querySelector('[data-toast-undo]') as HTMLButtonElement).click());
+  await until(() => !(el.textContent?.includes('Archived. The next message from') ?? false), 'the thread back');
   const archived = JSON.parse((await loopback('/api/inbox/threads/archived')).text) as { total: number };
   expect(archived.total).toBe(0);
 });
@@ -218,7 +266,7 @@ test.skipIf(!hasDom)('a deep link opens an archived thread with Unarchive in its
     await until(() => el.textContent?.includes('Archived. The next message from') ?? false, 'the archived foot');
     expect(listRow(el, world.mixed)).toBeNull();
     act(() => button(el.querySelector('.ib-acts')!, 'Unarchive').click());
-    await until(() => el.querySelector('[aria-label="Archive the thread"]') !== null, 'the thread unarchived');
+    await until(() => !(el.textContent?.includes('Archived. The next message from') ?? false), 'the thread unarchived');
     act(() => (el.querySelector('.ib-phead [aria-label="Close the thread"]') as HTMLButtonElement).click());
     await until(() => listRow(el, world.mixed) !== null, 'the row back in the list');
   } finally {

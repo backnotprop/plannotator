@@ -1,5 +1,6 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { InboxHealth, InboxListRow, InboxRestartAgents } from '@plannotator/core/inbox-types';
+import { inboxRowSnoozed } from '@plannotator/core/inbox-snooze';
 import { restartAgentsDescription, restartAgentsLabel, restartAgentsOf } from '../restartAgents';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { ClaudeIcon, CodexIcon, OpenCodeIcon, PiIcon } from '@plannotator/ui/components/icons/AgentIcons';
@@ -12,7 +13,9 @@ import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
 import { usePhone } from '../phone';
+import { shortProjectNames } from '../projectLabels';
 import { shownProjects, type ProjectAction } from '../projectMenu';
+import { selfMachineId } from '../inboxUrl';
 import { ProjectRow } from './ProjectRow';
 import { PinnedRow, type PinnedAction } from './PinnedRow';
 import { useInboxTheme } from '../theme';
@@ -20,19 +23,33 @@ import { TaterMark } from './TaterMark';
 import { ProjectTip } from './ProjectRow';
 import { Tip } from './Tip';
 import { CheckFailingRow, UpdateButton } from './Updates';
+import { UsageRow } from './Usage';
 import type { UpdateCheckFailing } from '../api';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
 import { ShortcutHint, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxAppShortcuts } from '../shortcuts/app.shortcuts';
+import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 
 export interface SidebarProps {
-  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board';
+  page: 'inbox' | 'settings' | 'whats-new' | 'drafts' | 'board' | 'pulls' | 'shapes';
   /**
    * The Board (approval "inbox-board", step 2): the row under Inbox, always
    * shown with `onBoard`. No count: the approval keeps the count in the
    * Board's header ("N in flight · N on you").
    */
   onBoard?: () => void;
+  /**
+   * Pull requests (approval "inbox-code-review-direction", item 4): a row of its own (after Board when the Board is on; it needs none), shown only with
+   * `onPulls` (Settings → Capabilities → Code review on). `pullsCount`: the last read's "On you".
+   */
+  onPulls?: () => void;
+  pullsCount?: number;
+  /**
+   * Shape (approval "shape-inbox-placement"): the row directly under Board (under Inbox with the Board off),
+   * given only while Shape is on and there are 3 or more boards. `shapeChanged`: the boards changed since you looked.
+   */
+  onShape?: () => void;
+  shapeChanged?: number;
   projectId: string | null;
   /** The machine the list shows (the Machines filter), or null for every machine. */
   machineId?: string | null;
@@ -60,6 +77,15 @@ export interface SidebarProps {
    */
   projectsReadable?: ReadonlySet<string>;
   onProjectAction?: (projectId: string, action: ProjectAction) => void;
+  /**
+   * The project menu's Rename… and Reset name: a name, or null for the folder's name. Offered on this
+   * machine's projects only (names stay per machine). Resolves true once the list shows the new name.
+   */
+  onProjectRename?: (projectId: string, name: string | null) => Promise<boolean>;
+  /** One step of combining: `from` into `into`. Resolves true once the list shows it. */
+  onProjectCombine?: (pair: { from: string; into: string; intoName: string }) => Promise<boolean>;
+  /** Says a line in the window's live region (the rename field's refusals). */
+  announce?: (text: string) => void;
   /** The update control's model (packages/server/inbox-updates.ts): the Update button above Settings. */
   update: InboxHealth['update'];
   restarting: boolean;
@@ -68,7 +94,7 @@ export interface SidebarProps {
   /**
    * Checking for updates has failed for hours (and no Update button shows):
    * the quiet "Can't check for updates" row, opening Settings → About.
-   * Null on a page opened over the tailnet.
+   * Null on a tailnet guest's page.
    */
   checkFailing?: UpdateCheckFailing | null;
   onCheckFailing?: () => void;
@@ -126,6 +152,13 @@ export interface SidebarProps {
   connectPrompt?: boolean;
   /** Opens the Feedback dialog (components/FeedbackDialog.tsx): the row above Settings. Absent: no row. */
   onFeedback?: () => void;
+  /** Opens or closes the Usage peek from its row (components/Usage.tsx), which shows only where `cswap` is. Absent: no row. */
+  onUsage?: (row: HTMLElement) => void;
+  usageOpen?: boolean;
+  /** `cswap` is on this computer: the row is there before the first read answers. */
+  usageInstalled?: boolean;
+  /** The foot stays hidden until it knows every row it will hold, so none arrives late and moves the others. */
+  footHeld?: boolean;
   /**
    * Pinned and Projects open and close as this browser last left them (the
    * cookie in sidebarSections.ts; default true). The onboarding tour's
@@ -168,6 +201,8 @@ export function Sidebar(props: SidebarProps) {
   const { setOpenMobile } = useSidebar();
   const searchKeys = useShortcutAria({ scope: inboxSearchShortcuts, action: 'openSearch' });
   const phone = usePhone();
+  // Another machine's project keeps what that machine gives it: only this machine's are renamed or combined.
+  const local = (project: ProjectFolder) => !project.machine || project.machine === selfMachineId();
   // A project with nothing in the list leaves the sidebar (automatic hiding); the one the list shows stays until the person leaves it.
   const held = props.page === 'inbox' ? props.projectId : null;
   // Each project by the window's one name for it (windowProjectNames, App.tsx), as the rows name it.
@@ -182,7 +217,8 @@ export function Sidebar(props: SidebarProps) {
   const projectsClosed = sections.closed('projects');
   const pinOn = (row: InboxListRow) => props.page === 'inbox' && props.openThreadId === row.thread_id;
   // A closed Pinned counts the pins waiting on the person (a question, Stopped, Holds), so a Stopped thread never hides.
-  const pinsWaiting = pinnedClosed ? pins.filter((row) => ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
+  // A snoozed pin stays pinned but waits with the rest of its snooze, so it is no count here.
+  const pinsWaiting = pinnedClosed ? pins.filter((row) => !inboxRowSnoozed(row) && ['stop', 'hold', 'wait'].includes(pinnedState(row).kind)).length : 0;
   // One scroll area holds Pinned and Projects (no limit on pins: a long Pinned section scrolls with the projects).
   const [projsRef, moreProjects] = useMoreBelow<HTMLDivElement>(`${shown.length}:${pins.length}:${pinnedClosed}:${projectsClosed}`);
   /**
@@ -235,7 +271,14 @@ export function Sidebar(props: SidebarProps) {
   const machinesClosed = sections.closed('machines');
   /** The project a menu action ran on: once its row is gone (Archive all hid it), focus goes to Inbox, never the page. */
   const actedOn = useRef<string | null>(null);
+  /** A project combined from its rename field: its row goes, and focus lands on the ⋯ of the project it went into. */
+  const combinedInto = useRef<{ from: string; into: string } | null>(null);
   useLayoutEffect(() => {
+    const combined = combinedInto.current;
+    if (combined && !shown.some((p) => p.id === combined.from)) {
+      combinedInto.current = null;
+      asideRef.current?.querySelector<HTMLElement>(`[data-pmore="${combined.into}"]`)?.focus({ preventScroll: true });
+    }
     const id = actedOn.current;
     if (!id || shown.some((p) => p.id === id)) return;
     actedOn.current = null;
@@ -351,6 +394,42 @@ export function Sidebar(props: SidebarProps) {
         >
           <Icon name="board" />
           Board
+        </button>
+      )}
+      {props.onShape && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'shapes' ? ' ib-on' : ''}`}
+          onClick={pick(props.onShape)}
+          aria-current={props.page === 'shapes' ? 'page' : undefined}
+          data-shape-nav=""
+        >
+          <span className="ib-pebble-ico" aria-hidden="true">
+            <Pebble alive={false} size={18} />
+          </span>
+          Shape
+          {(props.shapeChanged ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.shapeChanged} changed since you looked`}>
+              {formatCount(props.shapeChanged ?? 0)}
+            </span>
+          )}
+        </button>
+      )}
+      {props.onPulls && (
+        <button
+          type="button"
+          className={`ib-nav${props.page === 'pulls' ? ' ib-on' : ''}`}
+          onClick={pick(props.onPulls)}
+          aria-current={props.page === 'pulls' ? 'page' : undefined}
+          data-pulls-nav=""
+        >
+          <Icon name="pullRequest" />
+          Pull requests
+          {(props.pullsCount ?? 0) > 0 && (
+            <span className="ib-n" aria-label={`${props.pullsCount} on you`}>
+              {formatCount(props.pullsCount ?? 0)}
+            </span>
+          )}
         </button>
       )}
       {(props.draftsCount ?? 0) > 0 && props.onDrafts && (
@@ -503,13 +582,35 @@ export function Sidebar(props: SidebarProps) {
                     setOpenMobile(false);
                     props.onProjectAction?.(project.id, action);
                   }}
+                  // Another machine's project keeps the name that machine gives it. The sheet stays open on a phone: the field is in it.
+                  onRename={
+                    props.onProjectRename && (!project.machine || project.machine === selfMachineId())
+                      ? (name) => props.onProjectRename!(project.id, name)
+                      : undefined
+                  }
+                  announce={props.announce}
+                  // This machine's projects only: combining never crosses machines.
+                  others={local(project) ? props.projects.filter((p) => p.id !== project.id && local(p)).map((p) => ({ ...p, name: props.projectNames?.get(p.id) ?? p.name })) : []}
+                  onCombine={
+                    props.onProjectCombine && local(project)
+                      ? async (into) => {
+                          combinedInto.current = { from: project.id, into: into.id };
+                          setOpenMobile(false);
+                          // The name it will have: alone again, it loses a clash's parent.
+                          const intoName = shortProjectNames([into]).get(into.id) ?? into.name;
+                          const done = await props.onProjectCombine!({ from: project.id, into: into.id, intoName });
+                          if (!done) combinedInto.current = null;
+                          return done;
+                        }
+                      : undefined
+                  }
                 />
               );
             })
           )}
         </div>
       </div>
-      <div className="ib-side-foot">
+      <div className="ib-side-foot" data-held={props.footHeld ? '' : undefined}>
         {/* Copy prompt first, then the Update button or "What's new in X", then Feedback and the Settings row. */}
         {props.connectPrompt !== false && !phone && <CopyConnectPrompt mcpCommand={props.mcpCommand ?? null} />}
         <UpdateButton
@@ -529,6 +630,7 @@ export function Sidebar(props: SidebarProps) {
             Feedback
           </button>
         )}
+        {props.onUsage && <UsageRow installed={props.usageInstalled ?? false} open={props.usageOpen ?? false} onOpen={(row) => pick(() => props.onUsage?.(row))()} />}
         {/* Two controls side by side, never one inside the other: the row opens Settings, the icon flips light and dark. */}
         <div className="ib-setrow">
           <button

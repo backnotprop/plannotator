@@ -14,7 +14,7 @@ import {
   type InboxSearchStatus,
   type InboxSearchThreadRow,
 } from '@plannotator/core/inbox-search';
-import { INBOX_SECTIONS, type InboxSectionId } from '@plannotator/core/inbox-types';
+import { INBOX_SECTIONS, inboxProjectDisplayName, type InboxSectionId } from '@plannotator/core/inbox-types';
 import { threadChipName } from '../threadChip';
 
 export const GROUP_LABELS: Readonly<Record<InboxSearchGroupId, { heading: string; noun: string; one: string }>> = {
@@ -30,10 +30,25 @@ export type SearchOption =
   // Compose's actions (the "Actions" group): "New message…" and "Message <host> in <project>".
   | { kind: 'action'; action: ComposeAction }
   | { kind: 'more'; group: InboxSearchGroupId; total: number; shown: number }
-  | { kind: 'recent-q'; q: string };
+  | { kind: 'recent-q'; q: string }
+  // Shape's boards (approval "shape-inbox-placement": the "Shape" group, a small preview, the title, "project · …").
+  | { kind: 'shape'; shape: SearchShape };
+
+/** A board the search found by its title or project. */
+export interface SearchShape {
+  id: string;
+  title: string;
+  project: string;
+  /** The right-hand words: "no thread", or when it changed. */
+  meta: string;
+  /** The window's hash that opens it. */
+  hash: string;
+  picture: import('@plannotator/core/shape').ShapeDrawnView | null;
+  refs: readonly import('@plannotator/core/shape').ShapeRef[];
+}
 
 export interface SearchGroupView {
-  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions';
+  id: InboxSearchGroupId | 'recent' | 'recent-searches' | 'actions' | 'shapes';
   heading: string;
   /** The group's total when it holds more than it shows (the heading's quiet count). */
   total: number | null;
@@ -131,12 +146,20 @@ export function chipText(kind: keyof SearchFilters, filters: SearchFilters, proj
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
 }
 
-/** Project names as the person reads them: a second project with the same name gets its parent folder ("api · work"). */
-export function projectNames(projects: readonly { id: string; name: string; root: string }[]): Map<string, string> {
+/**
+ * Project names as the person reads them: a second project with the same name gets its parent folder ("api · work").
+ * A project the person renamed (`display_name`) reads that name as it is.
+ */
+export function projectNames(projects: readonly { id: string; name: string; root: string; display_name?: unknown }[]): Map<string, string> {
   const counts = new Map<string, number>();
-  for (const p of projects) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
+  for (const p of projects) if (inboxProjectDisplayName(p) === null) counts.set(p.name, (counts.get(p.name) ?? 0) + 1);
   const out = new Map<string, string>();
   for (const p of projects) {
+    const given = inboxProjectDisplayName(p);
+    if (given !== null) {
+      out.set(p.id, given);
+      continue;
+    }
     const parts = p.root.split(/[\\/]+/).filter(Boolean);
     const parent = parts.length >= 2 ? parts[parts.length - 2] : null;
     out.set(p.id, (counts.get(p.name) ?? 0) > 1 && parent ? `${p.name} · ${parent}` : p.name);
