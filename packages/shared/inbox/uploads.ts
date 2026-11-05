@@ -88,6 +88,8 @@ export const INBOX_UPLOAD_KEEP_MS = 24 * 60 * 60 * 1000;
 export const INBOX_UPLOAD_NAME_MAX_BYTES = 255;
 const ATTACHMENT_DIR_RE = /^att_[0-9A-HJKMNP-TV-Z]{26}$/;
 const UPLOAD_TEMP_RE = /^\.upload\..*\.tmp$/;
+/** How a thread's listing names a big changed file it did not read: `stat:<size>:<mtimeMs>` (`hash: "small"`). */
+const INBOX_STAT_HASH_RE = /^stat:\d+:\d+(\.\d+)?$/;
 
 function uploadsDir(inboxDirPath: string): string {
   return join(inboxDirPath, INBOX_UPLOADS_DIR);
@@ -175,11 +177,23 @@ export function pendingInboxUploadBlobs(inboxDirPath: string): Set<string> {
 }
 
 function recordPendingUpload(inboxDirPath: string, upload: InboxUpload): void {
-  const dir = pendingDir(inboxDirPath);
-  ensureDir(dir);
-  const file = join(dir, `${upload.upload_id}.json`);
-  writeFileSync(`${file}.tmp`, `${JSON.stringify(upload)}\n`, { mode: 0o600 });
-  renameSync(`${file}.tmp`, file);
+  try {
+    const dir = pendingDir(inboxDirPath);
+    ensureDir(dir);
+    const file = join(dir, `${upload.upload_id}.json`);
+    writeFileSync(`${file}.tmp`, `${JSON.stringify(upload)}\n`, { mode: 0o600 });
+    renameSync(`${file}.tmp`, file);
+  } catch (error) {
+    throw inboxDiskFullError(error, INBOX_FILE_NOT_ADDED) ?? error;
+  }
+}
+
+const INBOX_FILE_NOT_ADDED = "The disk is full, so the file could not be added. Free some space and try again.";
+
+/** The error for a write the disk had no room for, or null for any other failure. Every path that writes says the same. */
+export function inboxDiskFullError(error: unknown, words = "The disk is full, so that could not be saved. Free some space and try again."): InboxError | null {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOSPC" || code === "EDQUOT" ? new InboxError("upload_no_space", words) : null;
 }
 
 /**
@@ -192,7 +206,7 @@ export async function receiveInboxUpload(
   inboxDirPath: string,
   name: unknown,
   body: ReadableStream<Uint8Array> | null,
-  options: { at: string; maxBytes?: number },
+  options: { at: string; maxBytes?: number; shownSha256?: string },
 ): Promise<InboxUpload> {
   const refusal = inboxUploadNameRefusal(name);
   if (refusal) throw new InboxError("upload_refused", refusal, { field: "name" });
@@ -234,6 +248,7 @@ export async function receiveInboxUpload(
       created_at: options.at,
       ...(decided.media_type ? { media_type: decided.media_type } : {}),
       ...(decided.width !== undefined && decided.height !== undefined ? { width: decided.width, height: decided.height } : {}),
+      ...(options.shownSha256 ? { shown_sha256: options.shownSha256 } : {}),
     };
     recordPendingUpload(inboxDirPath, upload);
     return upload;
@@ -245,7 +260,7 @@ export async function receiveInboxUpload(
       // Renamed, or never written.
     }
     if (error instanceof InboxError) throw error;
-    throw new InboxError("upload_refused", "The file could not be received; try again.", { field: "body" });
+    throw inboxDiskFullError(error, INBOX_FILE_NOT_ADDED) ?? new InboxError("upload_refused", "The file could not be received; try again.", { field: "body" });
   }
 }
 
@@ -297,7 +312,7 @@ export async function inboxUploadFromAttachment(
       const opened = await openInboxAttachmentVersion(inboxDirPath, attachment, "current", { hash: "none" });
       if (!opened.ok) throw new InboxError("upload_not_found", opened.message);
       try {
-        return await receiveInboxUpload(inboxDirPath, attachment.name, streamOfFile(opened.handle), { at: options.at, maxBytes: Number.MAX_SAFE_INTEGER });
+        return await receiveInboxUpload(inboxDirPath, attachment.name, streamOfFile(opened.handle), { at: options.at, maxBytes: Number.MAX_SAFE_INTEGER, ...(options.sha256 && INBOX_STAT_HASH_RE.test(options.sha256) ? { shownSha256: options.sha256 } : {}) });
       } finally {
         await opened.handle.close().catch(() => {});
       }
@@ -341,28 +356,34 @@ export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly
   });
   const made: string[] = [];
   const attachments: InboxAttachment[] = [];
+  const blobsDir = inboxBlobsDir(inboxDirPath);
+  let temp: string | null = null;
   try {
     for (const upload of uploads) {
       const id = inboxAttachmentId();
       const dir = join(uploadsDir(inboxDirPath), id);
-      ensureDir(dir);
-      made.push(dir);
       const target = join(dir, upload.name);
       const blob = inboxBlobPath(inboxDirPath, upload.sha256);
       // A clone where the disk has them, else a full copy. Never a hard link: the read-only mode stops no agent that
       // chmods the file and writes it in place, and with a link that write would change the blob and every other
       // message's copy of these bytes, in any project (uploads-reuse.test.ts).
       // Not the sync call: where a disk has no clones, a big file would stop the whole Inbox while it copies.
-      await copyFile(blob, target, constants.COPYFILE_FICLONE);
+      // Under a temp name the upload sweep knows, so a crash mid-copy leaves nothing in uploads/, which no sweep reads.
+      temp = join(blobsDir, `.upload.${process.pid}.${Date.now()}.${randomBytes(6).toString("hex")}.tmp`);
+      await copyFile(blob, temp, constants.COPYFILE_FICLONE);
       // Read-only, so the file reads as the version sent. Not on Windows,
       // where a read-only file cannot be deleted by the sweep.
       if (process.platform !== "win32") {
         try {
-          chmodSync(target, 0o400);
+          chmodSync(temp, 0o400);
         } catch {
           // Best effort (a filesystem without modes).
         }
       }
+      ensureDir(dir);
+      made.push(dir);
+      renameSync(temp, target);
+      temp = null;
       const real = realpathSync(target);
       attachments.push({
         id,
@@ -382,11 +403,21 @@ export async function inboxUploadAttachments(inboxDirPath: string, ids: readonly
     return attachments;
   } catch (error) {
     for (const dir of made) rmSync(dir, { recursive: true, force: true });
+    if (temp) rmSync(temp, { force: true });
     if (error instanceof InboxError) throw error;
-    const code = (error as NodeJS.ErrnoException).code;
-    if (code === "ENOSPC" || code === "EDQUOT") throw new InboxError("upload_no_space", "The disk is full, so the file could not be attached and nothing was sent. Free some space and send again.");
-    throw new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
+    throw inboxDiskFullError(error, "The disk is full, so the file could not be attached and nothing was sent. Free some space and send again.") ?? new InboxError("upload_not_found", "An uploaded file could not be attached; attach it again.");
   }
+}
+
+/**
+ * Whether these uploads are still pending after their files were copied. A Send that took them while this one
+ * copied has them, so this one refuses, as it would have had the copy not left the event loop.
+ */
+export function assertInboxUploadsPending(inboxDirPath: string, ids: readonly unknown[], attachments: readonly InboxAttachment[]): void {
+  const gone = ids.findIndex((id) => !readInboxUpload(inboxDirPath, id));
+  if (gone < 0) return;
+  removeInboxAttachmentFiles(inboxDirPath, attachments);
+  throw new InboxError("upload_not_found", `uploads[${gone}]: that file was just sent; attach it again.`, { field: `uploads[${gone}]` });
 }
 
 /** Remove the files `inboxUploadAttachments` wrote, for a message that was not written (a replay, a refusal). */

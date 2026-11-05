@@ -142,11 +142,14 @@ test("a name an upload could not have is refused, so nothing reaches a path", as
 });
 
 /** This test's disk: `node:fs` as it is, but for what `disk` replaces. Always restored, so no other test sees it. */
-async function onDisk<T>(disk: { copyFile?: typeof realFsPromises.copyFile; linkSync?: typeof realFs.linkSync; link?: typeof realFsPromises.link }, run: () => Promise<T>): Promise<T> {
+async function onDisk<T>(
+  disk: { copyFile?: typeof realFsPromises.copyFile; open?: typeof realFsPromises.open; link?: typeof realFsPromises.link; linkSync?: typeof realFs.linkSync; writeFileSync?: typeof realFs.writeFileSync },
+  run: () => Promise<T>,
+): Promise<T> {
   const fs = { ...realFs };
   const promises = { ...realFsPromises };
-  mock.module("node:fs", () => ({ ...fs, ...(disk.linkSync ? { linkSync: disk.linkSync } : {}) }));
-  mock.module("node:fs/promises", () => ({ ...promises, ...(disk.copyFile ? { copyFile: disk.copyFile } : {}), ...(disk.link ? { link: disk.link } : {}) }));
+  mock.module("node:fs", () => ({ ...fs, ...(disk.linkSync ? { linkSync: disk.linkSync } : {}), ...(disk.writeFileSync ? { writeFileSync: disk.writeFileSync } : {}) }));
+  mock.module("node:fs/promises", () => ({ ...promises, ...(disk.copyFile ? { copyFile: disk.copyFile } : {}), ...(disk.link ? { link: disk.link } : {}), ...(disk.open ? { open: disk.open } : {}) }));
   try {
     return await run();
   } finally {
@@ -176,16 +179,81 @@ test("a disk with no clones still gets a copy, never a hard link, whatever the d
   expect(statSync(made!.path).nlink).toBe(1);
 });
 
-test("a full disk says so, keeps nothing half made, and the upload can go again", async () => {
+test("a full disk says so at Send, keeps nothing half made, and the upload can go again", async () => {
   const upload = await inboxUploadFromAttachment(dir, (await agentThread("harbor", "hero")).attachments![0]!, "sent", { at: AT });
   const before = readdirSync(join(dir, "uploads")).sort();
-  const refused = await onDisk({ copyFile: (async () => { throw Object.assign(new Error("no room"), { code: "ENOSPC" }); }) as never }, () =>
-    inboxUploadAttachments(dir, [upload.upload_id], AT).catch((error) => error),
+  const blobsBefore = blobs();
+  const refused = await onDisk(
+    {
+      copyFile: (async (_from: string, to: string) => {
+        writeFileSync(to, "half a fi");
+        throw Object.assign(new Error("no room"), { code: "ENOSPC" });
+      }) as never,
+    },
+    () => inboxUploadAttachments(dir, [upload.upload_id], AT).catch((error) => error),
   );
   expect(refused.code).toBe("upload_no_space");
   expect(refused.message).toContain("disk is full");
   expect(readdirSync(join(dir, "uploads")).sort()).toEqual(before);
+  expect(readdirSync(join(dir, "blobs")).filter((name) => name.startsWith("."))).toEqual([]);
+  expect(blobs()).toEqual(blobsBefore);
   expect(await inboxUploadAttachments(dir, [upload.upload_id], AT)).toHaveLength(1);
+});
+
+test("a crash mid-copy leaves only a temp the upload sweep takes: nothing half made in uploads/", async () => {
+  const upload = await inboxUploadFromAttachment(dir, (await agentThread("harbor", "hero")).attachments![0]!, "sent", { at: AT });
+  const before = readdirSync(join(dir, "uploads")).sort();
+  let during: string[] = [];
+  let half = "";
+  await onDisk(
+    {
+      copyFile: (async (_from: string, to: string) => {
+        // The moment a crash would leave behind.
+        half = to;
+        realFs.writeFileSync(to, "half a fi");
+        during = readdirSync(join(dir, "uploads")).sort();
+        throw Object.assign(new Error("gone"), { code: "EIO" });
+      }) as never,
+    },
+    () => inboxUploadAttachments(dir, [upload.upload_id], AT).catch(() => null),
+  );
+  expect(during).toEqual(before);
+  // Had the process died there, that name is left in the blob folder; a later sweep removes it once it is old.
+  writeFileSync(half, "half a fi");
+  sweepInboxUploads(dir, { keep: new Set([upload.upload_id]), usedBlobs: new Set(), now: Date.now() + 11 * 60_000 });
+  expect(existsSync(half)).toBe(false);
+});
+
+test("a full disk says so when adding too: a changed file's bytes, or the record of one already held", async () => {
+  const source = (await agentThread("harbor", "hero")).attachments![0]!;
+  writeFileSync(file, V2);
+  const trueOpen = realFsPromises.open;
+  const trueWrite = realFs.writeFileSync;
+  const changed = await onDisk(
+    { open: (async (path: string, ...rest: unknown[]) => {
+        if (!String(path).includes(".upload.")) return (trueOpen as (...a: unknown[]) => unknown)(path, ...rest);
+        throw Object.assign(new Error("no room"), { code: "ENOSPC" });
+      }) as never },
+    () => inboxUploadFromAttachment(dir, source, "current", { at: AT }).catch((error) => error),
+  );
+  expect([changed.code, changed.message]).toEqual(["upload_no_space", "The disk is full, so the file could not be added. Free some space and try again."]);
+  const record = await onDisk(
+    { writeFileSync: ((path: string, ...rest: unknown[]) => {
+        if (String(path).includes("/pending/")) throw Object.assign(new Error("no room"), { code: "EDQUOT" });
+        return (trueWrite as (...a: unknown[]) => unknown)(path, ...rest);
+      }) as never },
+    () => inboxUploadFromAttachment(dir, source, "sent", { at: AT }).catch((error) => error),
+  );
+  expect(record.code).toBe("upload_no_space");
+});
+
+test("a big changed file's upload keeps the listing's stat name; anything else from the request is not kept", async () => {
+  const source = (await agentThread("harbor", "hero")).attachments![0]!;
+  writeFileSync(file, V2);
+  const named = await inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: "stat:12:34.5" });
+  expect(readInboxUpload(dir, named.upload_id)!.shown_sha256).toBe("stat:12:34.5");
+  const junk = await inboxUploadFromAttachment(dir, source, "current", { at: AT, sha256: "stat:../../x" });
+  expect(junk.shown_sha256).toBeUndefined();
 });
 
 test("a stale tab gets the bytes it showed, or a refusal: never newer bytes under the same tile", async () => {

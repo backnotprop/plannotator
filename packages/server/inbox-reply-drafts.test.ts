@@ -429,6 +429,17 @@ describe("reply drafts keep long pastes", () => {
     expect(kept).toEqual([replies[0]!.attachments![0]!.id]);
   });
 
+  test("two windows send one draft's files under two keys while they copy: one reply has them, the other is told", async () => {
+    const { server, send } = await setup();
+    const { thread_id, message_id } = await send("The nightly import failed.", "ses_s");
+    const file = await upload(server, "shot.txt", LOG);
+    const reply = (key: string) => post(server, `/api/inbox/messages/${message_id}/reply`, { idempotency_key: key, words: "Here:", uploads: [file.upload_id] });
+    const answers = await Promise.all([reply("window-a"), reply("window-b")]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+    expect(server.store.thread(thread_id)!.messages.filter((message) => message.author.kind === "person")).toHaveLength(1);
+    expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
+  });
+
   test("the text route reads only long pastes: a .txt the person dropped is 404", async () => {
     const { server } = await setup();
     const dropped = await upload(server, "notes.txt", "my private notes\n");

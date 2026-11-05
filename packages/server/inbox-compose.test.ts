@@ -7,7 +7,8 @@
  * attachments. Every test uses its own temp data dir; the connections are
  * plain HTTP calls with the registry's token, never a real agent.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, mock, test } from "bun:test";
+import * as realFs from "node:fs";
 import { chmodSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -380,6 +381,40 @@ describe("uploads", () => {
     // The agent's line is the one any upload gets, with no word of where it came from.
     const commands = await poll(server, "ses-pi", "pi", billing);
     expect(commands.find((command) => command.id === sent.message.id)!.body).toBe(`Again.\n\nAttached: ref02.png (${made.path})`);
+  });
+
+  test("two windows send one draft's files under two keys while they copy: one thread has them, the other is told", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const file = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const send = (key: string) => post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: key, uploads: [file.upload_id] });
+    const answers = await Promise.all([send("window-a"), send("window-b")]);
+    expect(answers.map((answer) => answer.status).sort()).toEqual([200, 404]);
+    expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
+  });
+
+  test("a full disk is answered 507 in words, when adding a file and when saving a draft", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const first = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const started = (await (await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "f0", uploads: [first.upload_id] })).json()) as { message: InboxMessage };
+    const trueWrite = realFs.writeFileSync;
+    const fs = { ...realFs };
+    mock.module("node:fs", () => ({
+      ...fs,
+      writeFileSync: (path: string, ...rest: unknown[]) => {
+        if (/\/(pending|drafts)\//.test(String(path))) throw Object.assign(new Error("no room"), { code: "ENOSPC" });
+        return (trueWrite as (...args: unknown[]) => unknown)(path, ...rest);
+      },
+    }));
+    try {
+      const added = await post(server, "/api/inbox/uploads/reuse", { attachment_id: started.message.attachments![0]!.id, version: "sent" });
+      expect([added.status, ((await added.json()) as { error: string }).error]).toEqual([507, "The disk is full, so the file could not be added. Free some space and try again."]);
+      const draft = await post(server, `/api/inbox/drafts/${inboxId("drf")}`, { body: "A thought.", to: null, project: { id: null, root: billing, name: "billing" }, files: [], base: null });
+      expect([draft.status, ((await draft.json()) as { error: string }).error]).toEqual([507, "The disk is full, so that could not be saved. Free some space and try again."]);
+    } finally {
+      mock.module("node:fs", () => fs);
+    }
   });
 
   test("reuse refuses a stale tab, another site, an unknown or malformed id, and a GET", async () => {

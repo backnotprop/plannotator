@@ -574,6 +574,75 @@ test('a reload keeps the check: the restored tile is known by its bytes, and the
   await expect(replyTiles(page)).toHaveCount(0);
 });
 
+/**
+ * A big changed file. Once the add has read it the Inbox caches its hash, so only an Inbox started since lists it by
+ * its stat again: `listedByStat` draws that listing for this tab, the stat name the Inbox itself answered before the read.
+ */
+async function bigChanged(name: string, tint: [number, number, number]) {
+  const path = art(name, png(400, 300, [200, 200, 200]));
+  const { thread_id } = await threadWithFiles({ attachments: [path] });
+  writeFileSync(path, Buffer.concat([png(400, 300, tint), Buffer.alloc(9 * 1024 * 1024)]));
+  const listed = (await (await fetch(`${studio.url}/api/inbox/threads/${thread_id}/attachments`)).text());
+  const stat = /stat:\d+:[\d.]+/.exec(listed)![0];
+  const hash = sha(readFileSync(path));
+  return {
+    thread_id,
+    listedByStat: () =>
+      page.route(/\/api\/inbox\/threads\/[^/]+\/attachments/, async (route) => {
+        const response = await route.fetch();
+        await route.fulfill({ response, body: (await response.text()).replaceAll(`"sha256":"${hash}"`, `"sha256":"${stat}"`) });
+      }),
+    notListedByStat: () => page.unroute(/\/api\/inbox\/threads\/[^/]+\/attachments/),
+  };
+}
+
+test('a big changed file, listed by its stat after a reload: the check stays, and the button takes it out', async () => {
+  const name = 'big-after-reload.png';
+  const big = await bigChanged(name, [10, 80, 200]);
+  await big.listedByStat();
+  await open(page, big.thread_id);
+  await tile(page, name).hover();
+  await button(page, 'tile', name).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await page.reload();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await tile(page, name).hover();
+  const held = page.locator(`[data-reuse-surface="tile"][aria-label^="${name} is in your reply"]`).first();
+  await expect(held).toHaveAttribute('aria-pressed', 'true');
+  await held.click();
+  await expect(replyTiles(page)).toHaveCount(0);
+  await big.notListedByStat();
+});
+
+test('the draft already holds those bytes under another name: one tile, and the button knows it', async () => {
+  const name = 'big-held.png';
+  const big = await bigChanged(name, [90, 10, 200]);
+  await open(page, big.thread_id);
+  // A tile that knows only the bytes, as one pasted has.
+  const reuse = '**/api/inbox/uploads/reuse';
+  await page.route(reuse, async (route) => {
+    const { sha256: _shown, ...body } = route.request().postDataJSON() as Record<string, unknown>;
+    await route.continue({ postData: JSON.stringify(body) });
+  });
+  await tile(page, name).hover();
+  await button(page, 'tile', name).click();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await page.unroute(reuse);
+  await expect(page.locator('section.ib-pane')).toContainText(/Saved \d/);
+  await big.listedByStat();
+  await page.reload();
+  await expect(page.locator('[data-reply-files] [data-compose-file="done"]')).toHaveCount(1);
+  await tile(page, name).hover();
+  const add = page.locator(`[data-reuse-surface="tile"][aria-label="Add ${name} to your reply"]`).first();
+  const asked = page.waitForResponse(reuse);
+  await add.click();
+  await asked;
+  await expect(page.locator(`[data-reuse-surface="tile"][aria-label^="${name} is in your reply"]`).first()).toHaveAttribute('aria-pressed', 'true');
+  await expect(replyTiles(page)).toHaveCount(1);
+  await big.notListedByStat();
+});
+
 test('a very small picture in the text has no button; a big one has', async () => {
   art('tiny.png', png(40, 40, [120, 20, 20]));
   const { thread_id } = await threadWithFiles({ body: 'Small and big.\n\n![Tiny](art/tiny.png)\n\n![Big](art/inline-a.png)', attachments: [] });
