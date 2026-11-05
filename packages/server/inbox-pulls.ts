@@ -52,6 +52,7 @@ import {
   type InboxPullChecks,
   type InboxPullCliState,
   inboxPullCompareBranch,
+  type InboxPullDetailsAnswer,
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
@@ -62,7 +63,9 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRContextWithReviewers, reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import type { PRRef, PRRuntime } from "@plannotator/shared/pr-types";
+import { pullDetailsOf, type PullDetailsRead } from "./inbox-pull-details";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -73,6 +76,8 @@ export const INBOX_PULLS_REFRESH_MS = 20_000;
 export const INBOX_PULLS_RATE_FLOOR = 100;
 /** A patch larger than this is refused (the review says to open it on the forge). */
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
+/** A PR's details are kept this long (keyed by the PR's last update too): opening the page again does not ask again. */
+const INBOX_PULL_DETAILS_FRESH_MS = 60_000;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
 
@@ -623,7 +628,7 @@ interface HostState {
 
 export class InboxPullsError extends Error {
   constructor(
-    readonly code: "pull_unknown" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
+    readonly code: "pull_unknown" | "pull_details_failed" | "pull_diff_failed" | "pull_diff_too_large" | "pull_diff_fork" | "validation_error",
     message: string,
   ) {
     super(message);
@@ -651,6 +656,8 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
+  /** What the forge has beside the diff: reviewers, checks, labels, comments. Only for a PR the last list named. */
+  details(key: string): Promise<InboxPullDetailsAnswer>;
   /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
 }
@@ -735,6 +742,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  /** One read a PR, while it is fresh; the people's pictures it named stay allowed while the PR is on the list. */
+  const detailReads = new Map<string, { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string> }>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -1044,7 +1053,42 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       await Promise.all([...hosts.values()].map((state) => state.others.pending));
     },
     avatarUrls(host) {
-      return { ...(avatars.get(host.toLowerCase()) ?? {}) };
+      const named: Record<string, string> = {};
+      const asked = host.toLowerCase();
+      for (const [key, entry] of detailReads) {
+        if (known.get(key)?.host.toLowerCase() === asked && entry.avatars) Object.assign(named, entry.avatars);
+      }
+      return { ...named, ...(avatars.get(asked) ?? {}) };
+    },
+    async details(key) {
+      const pull = known.get(key);
+      if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list.");
+      const hit = detailReads.get(key);
+      if (hit && hit.updated === pull.updated_at && now() - hit.at < INBOX_PULL_DETAILS_FRESH_MS) return (await hit.read).answer;
+      const forge = pull.platform === "github" ? "GitHub" : "GitLab";
+      const failed = () => new InboxPullsError("pull_details_failed", `${forge} did not answer. Try again in a minute.`);
+      if (now() < (holdUntil.get(pull.host) ?? 0)) throw failed();
+      const parts = splitPath(pull.repo);
+      if (!parts) throw failed();
+      const ref: PRRef = pull.platform === "github"
+        ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
+        : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+      const runtime: PRRuntime = { runCommand: (cmd, args, options) => run(cmd as RefCli, args, options?.env) };
+      const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string> } = {
+        at: now(),
+        updated: pull.updated_at,
+        read: fetchPRContextWithReviewers(runtime, ref).then((context) => pullDetailsOf(key, context, pull.author)),
+      };
+      detailReads.set(key, entry);
+      try {
+        const read = await entry.read;
+        entry.avatars = read.avatars;
+        return read.answer;
+      } catch {
+        // A failure is not kept: the next opening asks again.
+        if (detailReads.get(key) === entry) detailReads.delete(key);
+        throw failed();
+      }
     },
     readHead: (key) => readHeads.get(key) ?? null,
     async diff(key, scope) {

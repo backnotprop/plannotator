@@ -515,6 +515,13 @@ export async function fetchGlMRContext(
     }
   }
 
+  const requestedReviewers: NonNullable<PRContext["requestedReviewers"]> = arr(mr.reviewers).flatMap((user: any) => {
+    const login = str(user?.username);
+    if (!login) return [];
+    const avatarUrl = resolveAvatar(user?.avatar_url);
+    return [{ login, ...(avatarUrl ? { avatarUrl } : {}), ...(isGitlabBot(user) ? { isBot: true } : {}) }];
+  });
+
   return {
     body: str(mr.description),
     state,
@@ -528,6 +535,7 @@ export async function fetchGlMRContext(
     reviewThreads,
     checks,
     linkedIssues,
+    requestedReviewers,
   };
 }
 

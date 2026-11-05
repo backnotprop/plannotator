@@ -145,12 +145,14 @@ async function settle() {
   }
 }
 
+const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
+
 function mount(node: React.ReactNode) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox">{node}</div>);
+    root.render(<SidebarProvider><div className="pn-inbox">{node}</div></SidebarProvider>);
   });
 }
 

@@ -3741,7 +3741,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/avatar") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/details" || path === "/api/inbox/pulls/avatar") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -3767,6 +3767,21 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               "cross-origin-resource-policy": "same-origin",
             },
           });
+        }
+        // Reviewers, checks, labels and comments beside the diff, from the forge's own answer. The pictures of the people
+        // it names join the avatar route's allow-list, and stay while the PR is on the list.
+        if (path === "/api/inbox/pulls/details") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          try {
+            const answer = await pulls.details(key);
+            const host = pulls.find(key)?.host;
+            if (host) pullAvatars.allow(host, pulls.avatarUrls(host));
+            return json({ serverSession, ...answer });
+          } catch (cause) {
+            if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, cause.code === "pull_unknown" ? 404 : 502);
+            throw cause;
+          }
         }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";

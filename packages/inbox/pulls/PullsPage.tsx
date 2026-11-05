@@ -371,7 +371,7 @@ function RowLead({ item }: { item: InboxPullItem }) {
   };
   return (
     <Tip content={author}>
-      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
+      <span className="ib-pr-av" role="img" aria-label={author} data-pulls-author={author} data-pulls-bot={author.endsWith('[bot]') ? '' : undefined} data-pulls-avatar={failed ? 'none' : shown ? 'shown' : 'loading'}>
         {!shown && <span aria-hidden="true">{initials(author)}</span>}
         {!failed && (
           <img

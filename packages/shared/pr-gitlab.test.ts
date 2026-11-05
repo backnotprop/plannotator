@@ -345,6 +345,19 @@ describe("fetchGlMR raw_diffs fallback", () => {
 });
 
 describe("fetchGlMRContext", () => {
+  test("names who is asked to review, its picture absolute, a bot as a bot", async () => {
+    const runtime: PRRuntime = {
+      async runCommand(_command, args) {
+        if (args[1] === "projects/g%2Fp/merge_requests/1") {
+          return { stdout: JSON.stringify({ state: "opened", reviewers: [{ username: "ana", avatar_url: "/uploads/a.png" }, { username: "project_1_bot" }, { username: "" }] }), stderr: "", exitCode: 0 };
+        }
+        return { stdout: "[]", stderr: "", exitCode: 0 };
+      },
+    };
+    const context = await fetchGlMRContext(runtime, REF);
+    expect(context.requestedReviewers).toEqual([{ login: "ana", avatarUrl: `https://${REF.host}/uploads/a.png` }, { login: "project_1_bot", isBot: true }]);
+  });
+
   test("throws when the primary MR details request fails", async () => {
     const runtime: PRRuntime = {
       async runCommand(_command, args) {

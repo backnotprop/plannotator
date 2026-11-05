@@ -51,6 +51,25 @@ function keepInPage(event: MouseEvent) {
   }
 }
 
+/** Words a stranger wrote on the forge, in the page: a picture is its words, a link never replaces the window. */
+export function ForgeMarkdown({ markdown, layer, headSha }: { markdown: string; layer: InboxPull; headSha?: string | null }) {
+  const resolveLink = useMemo<LocalLinkResolver>(() => {
+    const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
+    return (href) => {
+      const url = forgeFileUrl(layer, headSha, href);
+      if (!url) return { kind: 'unavailable', title: `Not a file on ${forge}` };
+      return { kind: 'open', href: url, title: `Open on ${forge}`, open: () => window.open(url, '_blank', 'noopener,noreferrer') };
+    };
+  }, [layer, headSha]);
+  return (
+    <div onClickCapture={keepInPage} onAuxClickCapture={keepInPage}>
+      <ImageResolverContext.Provider value={resolveImage}>
+        <ContextMarkdown markdown={markdown} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
+      </ImageResolverContext.Provider>
+    </div>
+  );
+}
+
 export function PullDescription({ markdown, layer, headSha }: { markdown: string | null | undefined; layer: InboxPull; headSha?: string | null }) {
   const body = useRef<HTMLDivElement>(null);
   // Whether it is taller than its fold (--ib-desc-fold), measured while folded and on every change of width.
@@ -74,14 +93,6 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
     observer.observe(inner);
     return () => observer.disconnect();
   }, [markdown]);
-  const resolveLink = useMemo<LocalLinkResolver>(() => {
-    const forge = layer.platform === 'gitlab' ? 'GitLab' : 'GitHub';
-    return (href) => {
-      const url = forgeFileUrl(layer, headSha, href);
-      if (!url) return { kind: 'unavailable', title: `Not a file on ${forge}` };
-      return { kind: 'open', href: url, title: `Open on ${forge}`, open: () => window.open(url, '_blank', 'noopener,noreferrer') };
-    };
-  }, [layer, headSha]);
   const cut = (markdown?.length ?? 0) > FOLDED_CHARS;
   const long = tall || cut;
   const folded = long && !open;
@@ -94,16 +105,12 @@ export function PullDescription({ markdown, layer, headSha }: { markdown: string
       data-pull-description={folded ? 'folded' : open && long ? 'open' : 'whole'}
       onClick={folded ? () => setOpen(true) : undefined}
       onClickCapture={(event) => {
-        keepInPage(event);
         if ((event.target as Element).closest?.('summary')) summaryUsed.current = true;
       }}
-      onAuxClickCapture={keepInPage}
     >
       {/* Folded, what is clipped takes no Tab stops; a click anywhere on it opens it. */}
       <div ref={body} className="ib-prr-desc-body" inert={folded}>
-        <ImageResolverContext.Provider value={resolveImage}>
-          <ContextMarkdown markdown={shown} className="ib-body" refRepo={{ display: layer.repo, host: layer.host }} resolveLocalLink={resolveLink} />
-        </ImageResolverContext.Provider>
+        <ForgeMarkdown markdown={shown} layer={layer} headSha={headSha} />
       </div>
       {long && (
         <button

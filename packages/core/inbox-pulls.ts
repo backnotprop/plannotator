@@ -151,6 +151,53 @@ export interface InboxPullsAnswer {
 }
 
 /** `GET /api/inbox/pulls/diff`: the patch of one layer, or of the stack up to that layer. */
+/** Where a reviewer stands: their last review that counts, or asked and not yet. */
+export type InboxPullReviewState = 'approved' | 'changes' | 'commented' | 'waiting';
+export type InboxPullCheckState = 'pass' | 'fail' | 'pending';
+
+export interface InboxPullReviewer {
+  /** A person's or an app's login; a team as `org/team`. */
+  login: string;
+  state: InboxPullReviewState;
+  bot?: boolean;
+  team?: boolean;
+}
+
+export interface InboxPullCheck {
+  name: string;
+  /** The workflow it belongs to, when the forge names one. */
+  workflow?: string;
+  state: InboxPullCheckState;
+  /** Set when it passed by not running: "Skipped", "Neutral". */
+  note?: string;
+  /** Its page on the forge: https only. */
+  url?: string;
+}
+
+export interface InboxPullDetailComment {
+  id: string;
+  /** Empty when the account is gone. */
+  author: string;
+  bot?: boolean;
+  /** When: ISO 8601, or empty when the forge did not say. */
+  at: string;
+  body: string;
+  url: string;
+  /** A comment on a line of a file. */
+  file?: string;
+  line?: number;
+}
+
+/** `GET /api/inbox/pulls/details`: what the forge has about a PR beside its diff. */
+export interface InboxPullDetailsAnswer {
+  key: string;
+  description: string | null;
+  labels: string[];
+  reviewers: InboxPullReviewer[];
+  checks: InboxPullCheck[];
+  comments: InboxPullDetailComment[];
+}
+
 export interface InboxPullDiffAnswer {
   key: string;
   scope: InboxPullDiffScope;

@@ -4,7 +4,7 @@
  * All functions use the `gh` CLI via the PRRuntime abstraction.
  */
 
-import type { PRRuntime, PRMetadata, PRContext, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
+import type { PRRuntime, PRMetadata, PRContext, PRRequestedReviewer, PRReviewThread, PRThreadComment, PRReviewFileComment, PRReviewFileLevelComment, PRReviewAction, PRReviewSubmissionResult, CommandResult, PRStackTree, PRStackNode, PRListItem } from "./pr-types";
 import { decodeBase64Bytes, encodeApiFilePath, isNotFoundCommandFailure, type PRFileBytesResult, type PRTreeResult } from "./pr-types";
 import { parsePaginatedArray } from "./cli-pagination";
 import { listGhAccounts } from "./pr-github-account";
@@ -337,12 +337,13 @@ function parseGhPRContext(raw: Record<string, unknown>): PRContext {
       ...(r?.url ? { url: str(r.url) } : {}),
     })),
     reviewThreads: [],  // populated via GraphQL after initial fetch
+    // A commit status (not a check run) has `context`, `state` and `targetUrl` in their place.
     checks: arr(raw.statusCheckRollup).map((c: any) => ({
-      name: str(c?.name),
-      status: str(c?.status),
-      conclusion: typeof c?.conclusion === "string" ? c.conclusion : null,
+      name: str(c?.name) || str(c?.context),
+      status: str(c?.status) || (typeof c?.state === "string" ? (c.state === "PENDING" || c.state === "EXPECTED" ? "IN_PROGRESS" : "COMPLETED") : ""),
+      conclusion: typeof c?.conclusion === "string" ? c.conclusion : typeof c?.state === "string" && c.state !== "PENDING" && c.state !== "EXPECTED" ? c.state : null,
       workflowName: str(c?.workflowName),
-      detailsUrl: str(c?.detailsUrl),
+      detailsUrl: str(c?.detailsUrl) || str(c?.targetUrl),
     })),
     linkedIssues: arr(raw.closingIssuesReferences).map((i: any) => ({
       number: typeof i?.number === "number" ? i.number : 0,
@@ -498,6 +499,39 @@ async function fetchGhThreadsAndBots(
     : [];
 
   return { threads, botLogins, avatarByLogin };
+}
+
+// --- Requested reviewers ---
+
+/**
+ * Who is asked to review and has not yet: a read of its own, so a token that cannot read this one (or an older forge)
+ * costs only these names, never the PR's context. REST, as `gh pr view --json reviewRequests` needs `read:org` for a team.
+ */
+export async function fetchGhRequestedReviewers(runtime: PRRuntime, ref: GhPRRef): Promise<PRRequestedReviewer[]> {
+  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
+    "api", `repos/${ref.owner}/${ref.repo}/pulls/${ref.number}/requested_reviewers`,
+  ]));
+  if (result.exitCode !== 0) return [];
+  let answer: unknown;
+  try {
+    answer = JSON.parse(result.stdout);
+  } catch {
+    return [];
+  }
+  const rows = (value: unknown): Record<string, unknown>[] => (Array.isArray(value) ? value.filter((row) => typeof row === "object" && row !== null) : []);
+  const { users, teams } = (answer ?? {}) as { users?: unknown; teams?: unknown };
+  const people = rows(users).flatMap((user): PRRequestedReviewer[] => {
+    if (typeof user.login !== "string" || !user.login) return [];
+    return [{
+      login: user.login,
+      ...(typeof user.avatar_url === "string" && user.avatar_url ? { avatarUrl: user.avatar_url } : {}),
+      ...(user.type === "Bot" ? { isBot: true } : {}),
+    }];
+  });
+  const groups = rows(teams).flatMap((team): PRRequestedReviewer[] =>
+    typeof team.slug === "string" && team.slug ? [{ login: `${ref.owner}/${team.slug}`, isTeam: true }] : [],
+  );
+  return [...people, ...groups];
 }
 
 // --- File Content ---
