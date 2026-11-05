@@ -20,12 +20,16 @@ const resolveImage: ImageResolver = (src) => (src.startsWith('data:image/') ? { 
 /** How much of a body is parsed while folded: far past what the fold shows. */
 const FOLDED_CHARS = 4000;
 
-/** The start of a long body. A `<details>` the cut leaves open is closed, or the folded lines would draw outside its box. */
+/** The start of a long body. A `<details>` the cut leaves open is closed, or its lines would draw outside its box. */
 function foldedStart(markdown: string): string {
   const line = markdown.lastIndexOf('\n', FOLDED_CHARS);
   const start = markdown.slice(0, line > FOLDED_CHARS / 2 ? line : FOLDED_CHARS);
   const unclosed = (start.match(/<details(?:\s|>|\/|$)/gi)?.length ?? 0) - (start.match(/<\/details\s*>/gi)?.length ?? 0);
-  return unclosed > 0 ? `${start}\n${'</details>'.repeat(unclosed)}` : start;
+  if (unclosed <= 0) return start;
+  // A log in a fence, cut mid-way: the fence ends first, or the closing tag would be one more line of it.
+  const fences = start.match(/^ *`{3,}/gm) ?? [];
+  const fence = fences.length % 2 ? `\n${fences[fences.length - 1]!.trim()}` : '';
+  return `${start}${fence}\n${'</details>'.repeat(unclosed)}`;
 }
 
 /**
