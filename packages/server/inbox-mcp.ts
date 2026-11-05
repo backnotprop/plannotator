@@ -82,7 +82,7 @@ export const INBOX_MCP_INSTRUCTIONS = [
   "",
   "- send_message posts markdown. Messages join your session's thread until the person resolves it; pass `thread` (a short name) to keep separate work apart, or reply_to (an id from the Inbox, never from memory) to answer a message. Question syntax: send_message's description.",
   "- attachments: files to open beside the thread (link one: `[the mock](mock.html)`); pictures go in the body, `![alt](path)`.",
-  "- send_message's result says whether the reply arrives in this session by itself. When it does not, read the thread later.",
+  "- send_message's result says whether the reply arrives in this session by itself. If not, go on and read the thread later.",
   "- read_thread reads one thread (thread_id); without an id it lists yours (asked_by \"anyone\": all), and `unread` marks a thread the person wrote in. search finds older messages. resolve_message archives the thread, only when nothing in it is left for the person to read or answer.",
   "- A guided review of a code change: get_guide_brief, write the guide, then submit_guide with the exact patch.",
   "",
