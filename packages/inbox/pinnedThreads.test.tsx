@@ -79,7 +79,7 @@ async function serverPin(threadId: string, pinned: boolean) {
   expect(answer.status).toBe(200);
 }
 
-const TESTS = 10;
+const TESTS = 11;
 
 beforeAll(async () => {
   if (!hasDom) return;
@@ -295,6 +295,35 @@ test.skipIf(!hasDom)('no section when nothing is pinned; Star thread leads the r
     rowButton(ids.stopped)!.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, button: 2, clientX: 300, clientY: 200 }));
   });
   await until(() => !!rowMenu()?.querySelector('[data-row-action="unpin"]'), 'Unstar thread');
+});
+
+test.skipIf(!hasDom)("a click on the star a row shows unstars it, without opening the thread or marking it read; the toast and Z work", async () => {
+  await serverPin(ids.waiting, true);
+  await renderApp();
+  await until(() => !!rowButton(ids.waiting)?.querySelector('[data-pin-mark]'), 'the star');
+  const serverRow = async (id: string) => {
+    const model = JSON.parse((await loopback('/api/inbox/threads?archived=exclude')).text) as { sections: { threads: InboxListRow[] }[] };
+    return model.sections.flatMap((section) => section.threads).find((row) => row.thread_id === id)!;
+  };
+  const before = await serverRow(ids.waiting);
+  expect(before.unread).toBe(true);
+  await act(async () => {
+    rowButton(ids.waiting)!.querySelector('[data-pin-mark]')!.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, detail: 1 }));
+  });
+  await until(() => pinnedOrder().length === 0, 'the unstar');
+  expect(await serverPins()).toEqual([]);
+  await until(() => !!toast(), 'the Unstarred toast');
+  expect(toast()!.textContent).toContain('Unstarred');
+  expect(window.location.hash).not.toContain('thread=');
+  expect(document.querySelector('[data-thread-more]')).toBeNull();
+  const after = await serverRow(ids.waiting);
+  expect(after.unread).toBe(true);
+  expect(after.unseen).toBe(before.unseen);
+  expect(after.section).toBe(before.section);
+  await act(async () => {
+    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'z', bubbles: true }));
+  });
+  await until(async () => (await serverPins()).length === 1, 'Z puts the star back');
 });
 
 test.skipIf(!hasDom)("the header ⋯ menu's Star thread pins and Unstar thread unpins the open thread, and the header has no pin button", async () => {

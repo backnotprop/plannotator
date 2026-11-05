@@ -583,7 +583,14 @@ button.ib-mut { border-radius: 6px; }
 .pn-inbox { --ib-star: oklch(0.74 0.17 72); }
 :root:not(.light) .pn-inbox { --ib-star: oklch(0.83 0.15 86); }
 .ib-pinmark { display: inline-flex; flex: none; color: var(--ib-star); }
-.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; fill: currentColor; }
+.pn-inbox .ib-pinmark svg.ib-ic { width: 13px; height: 13px; stroke-width: 1.8; fill: currentColor; transition: transform 120ms ease-out; }
+/* A star showing can be pressed to unstar (pressedStar in InboxList.tsx). */
+@media (hover: hover) {
+  .pn-inbox .ib-pinmark[data-star-press]:hover svg.ib-ic { transform: scale(1.2); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .pn-inbox .ib-pinmark svg.ib-ic { transition: none; }
+}
 .pn-inbox :is(.ib-side-sec > svg, .ib-pmi svg).ib-star-on { color: var(--ib-star); fill: currentColor; }
 /* Starring: the star lands, one small pop and a settle, only just after the person starred (starPop.ts). */
 @keyframes ib-star-pop {

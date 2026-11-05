@@ -3400,6 +3400,16 @@ function Inbox() {
     dismissToast();
     say(`Starred “${subject}” again.`);
   };
+  /**
+   * A press on the star a list row shows (the owner, 2026-11-05): Unstar, with what the menus' item does (the toast and
+   * `Z`). It opens nothing and marks nothing read. One press at a time per thread: a double click is one unstar.
+   */
+  const unstarring = useRef(new Set<string>());
+  const unstarRow = (row: InboxListRow) => {
+    if (unstarring.current.has(row.thread_id)) return;
+    unstarring.current.add(row.thread_id);
+    void setPin(row, false).finally(() => unstarring.current.delete(row.thread_id));
+  };
   /** A pinned row's menu: Unpin, Move up, Move down, Copy link. */
   const pinAction = async (row: InboxListRow, action: PinnedAction) => {
     if (action === 'unpin') return void setPin(row, false);
@@ -5523,6 +5533,7 @@ function Inbox() {
           onSnooze={snoozeOn ? (row, until) => void snooze(row, until) : undefined}
           snoozesOf={(row) => rowSnoozes(row, machines)}
           pinned={pinsOn ? pinnedIds : undefined}
+          onUnstar={pinsOn ? unstarRow : undefined}
           tidy={{
             ...listTidy,
             combine: async (pairs) => {

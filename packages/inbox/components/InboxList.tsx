@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
+import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type FocusEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode } from 'react';
 import { inboxListShortcuts } from '../shortcuts/list.shortcuts';
 import { shortcutAria, useShortcutAria, withShortcut } from '../shortcuts/hint';
 import { inboxSearchShortcuts } from '../search/searchShortcut';
@@ -113,6 +113,8 @@ export interface InboxListProps {
    * Move back, Archive). Absent: no menu, the browser's own.
    */
   onRowAction?: (row: InboxListRow, action: RowMenuAction) => void;
+  /** A press on a starred row's star. Absent (an older Inbox keeps no pins): the star is only a mark. */
+  onUnstar?: (row: InboxListRow) => void;
   /** Snooze a row until a moment, from its menu (approval "inbox-snooze"). Absent (an older Inbox keeps no snoozes): no Snooze. */
   onSnooze?: (row: InboxListRow, until: string) => void;
   /** Whether a row can be snoozed (a linked machine on an older Inbox keeps no snoozes). Absent: every row can. */
@@ -559,12 +561,39 @@ function TitleCell({ row, pill = false, noPreview = false }: { row: InboxListRow
  * preview. A three-line or phone row has it on line 3 before the badge and the counts; a wide row in a column of its
  * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
-function PinMark({ threadId }: { threadId: string }) {
-  return (
-    <span className="ib-pinmark" data-pin-mark="" data-pop={starPopping(threadId) ? '' : undefined} aria-hidden="true">
+function PinMark({ threadId, press = false }: { threadId: string; press?: boolean }) {
+  const mark = (
+    <span className="ib-pinmark" data-pin-mark="" data-star-press={press ? '' : undefined} data-pop={starPopping(threadId) ? '' : undefined} aria-hidden="true">
       <Icon name="star" size={13} />
     </span>
   );
+  // To the star's left, its top level with the star's: never over Mark read, which is right of it or above it, and never
+  // past the list's edge.
+  return press ? (
+    <RowTip content="Unstar thread" side="left" align="start">
+      {mark}
+    </RowTip>
+  ) : (
+    mark
+  );
+}
+
+/** How far past the 13 px star a press still counts: a 45 px target on a phone, a forgiving one under a mouse. */
+const STAR_REACH = { pointer: 7, phone: 16 } as const;
+
+/**
+ * Whether a press on a row lands on its star (the owner, 2026-11-05: a star showing can be clicked to unstar). The star
+ * is drawn inside the row's own button (a button cannot hold a button), so the row's click decides: by the target, and by
+ * where the press fell for the reach around the star. Enter and Space (a click with no pointer) always open the thread:
+ * the keyboard unstars from the row's menu.
+ */
+function pressedStar(event: ReactMouseEvent<HTMLElement>, reach: number): boolean {
+  const star = event.currentTarget.querySelector<HTMLElement>('[data-star-press]');
+  if (!star) return false;
+  if (event.target instanceof Element && event.target.closest('[data-star-press]')) return true;
+  if (event.detail === 0) return false;
+  const box = star.getBoundingClientRect();
+  return event.clientX >= box.left - reach && event.clientX <= box.right + reach && event.clientY >= box.top - reach && event.clientY <= box.bottom + reach;
 }
 
 /** The end of a pinned row's accessible name. */
@@ -675,7 +704,7 @@ interface RowLook {
   titleFirst: boolean;
 }
 
-function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst'>) {
+function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColumn, keys, full, pill, noPreview, relative, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; pinColumn: boolean; keys?: string; full: boolean; pill: boolean; onOpen: () => void } & Omit<RowLook, 'titleFirst'>) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badgeEl = badgeOf(row, kbd, full);
@@ -685,7 +714,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
     <button
       type="button"
       className={`ib-row${row.unread ? ' ib-u' : ''}${sent ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={onOpen}
+      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.pointer) ? onUnstar() : onOpen())}
       aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
@@ -705,7 +734,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       <span className="ib-cw">{row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} />}</span>
       <span className="ib-bcol">{badgeEl}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
-      {pinColumn && <span className="ib-cpin">{pinned && <PinMark threadId={row.thread_id} />}</span>}
+      {pinColumn && <span className="ib-cpin">{pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}</span>}
       <span className="ib-cq">
         <OpenCounts row={row} tip />
       </span>
@@ -839,7 +868,7 @@ function RowWithAction({
   );
 }
 
-function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen }: { row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; selected: boolean; filtered: boolean; lit: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const [kbd, focus] = useKeyboardFocus(rowHasBadge(row));
   const wordsId = useId();
   const badge = badgeOf(row, kbd);
@@ -854,7 +883,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
     <button
       type="button"
       className={`ib-nrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}${selected ? ' ib-sel' : ''}`}
-      onClick={onOpen}
+      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.pointer) ? onUnstar() : onOpen())}
       aria-current={selected ? 'true' : undefined}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
@@ -899,7 +928,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <div className="ib-l3">
         {!noPreview && <Preview row={row} />}
         <GuideMark row={row} />
-        {pinned && <PinMark threadId={row.thread_id} />}
+        {pinned && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
         {badge}
         <SnoozedUntil row={row} />
         <LineCount row={row} tip />
@@ -919,7 +948,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
  * at the right end of line 3. A pin with nothing else for line 3 stays at the
  * right end of line 1, before the time.
  */
-function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen }: { row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
+function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill, compact, noPreview, relative, titleFirst, onOpen, onUnstar }: { onUnstar?: () => void; row: InboxListRow; project: string; away: boolean; filtered: boolean; lit: boolean; menu: boolean; pinned: boolean; keys?: string; pill: boolean; compact: boolean; onOpen: () => void } & RowLook) {
   const wordsId = useId();
   // A phone: the icons only, no card (the thread shows the details).
   const badge = rowHasBadge(row) ? <RowBadge row={row} /> : null;
@@ -933,7 +962,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
     <button
       type="button"
       className={`ib-mrow${row.unread ? ' ib-u' : ''}${row.section === 'sent' ? ' ib-sent' : ''}`}
-      onClick={onOpen}
+      onClick={(event) => (onUnstar && pressedStar(event, STAR_REACH.phone) ? onUnstar() : onOpen())}
       data-thread-id={row.thread_id}
       // The row's menu (RowMenu.tsx); a click opens the thread, so no aria-haspopup.
       aria-keyshortcuts={keys}
@@ -949,7 +978,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           <span className="ib-m1">
             <RowTitle row={row} className="ib-m2" pill={pill} />
             {compact && <LeadLine row={row} project={project} filtered={filtered} tip={false} />}
-            {pinOnLine1 && <PinMark threadId={row.thread_id} />}
+            {pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
             <span className="ib-t">
               <RowTime row={row} relative={relative} />
             </span>
@@ -965,7 +994,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           <span className="ib-m1">
             <LeadLine row={row} project={project} filtered={filtered} tip={false} />
             {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
-            {pinOnLine1 && <PinMark threadId={row.thread_id} />}
+            {pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
             <span className="ib-t">
               <RowTime row={row} relative={relative} />
             </span>
@@ -986,7 +1015,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             <Icon name="book" size={13} />
           </span>
         )}
-        {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} />}
+        {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} press={!!onUnstar} />}
         {badge}
         <SnoozedUntil row={row} />
         <LineCount row={row} />
@@ -1181,6 +1210,7 @@ export function InboxList(props: InboxListProps) {
   const markRead = useCallback((row: InboxListRow) => latest.current.onMarkRead?.(row), []);
   const markUnread = useCallback((row: InboxListRow) => latest.current.onMarkUnread?.(row), []);
   const sendNow = useCallback((row: InboxListRow) => latest.current.onSendNow?.(row), []);
+  const unstar = useCallback((row: InboxListRow) => latest.current.onUnstar?.(row), []);
   // A row's time reads "8:22 PM" today and "Oct 19" after midnight: a new day renders every row again.
   const day = new Date().toDateString();
   return (
@@ -1342,6 +1372,8 @@ export function InboxList(props: InboxListProps) {
                       onMarkRead={props.onMarkRead ? markRead : undefined}
                       onMarkUnread={props.onMarkUnread ? markUnread : undefined}
                       onSendNow={props.onSendNow ? sendNow : undefined}
+                      // Pins are this Inbox's own: another machine's thread has no star to press here.
+                      onUnstar={props.onUnstar && !(row.machine && props.machines?.names.has(row.machine)) ? unstar : undefined}
                       day={day}
                       menu={menuRow === row.thread_id}
                       pinned={props.pinned?.has(row.thread_id) === true}
@@ -1387,6 +1419,7 @@ interface ListRowProps {
   onMarkRead?: (row: InboxListRow) => void;
   onMarkUnread?: (row: InboxListRow) => void;
   onSendNow?: (row: InboxListRow) => void;
+  onUnstar?: (row: InboxListRow) => void;
   /** Today's date: the row's time is written against it (shortTime). */
   day: string;
   /** Its right-click menu is open (RowMenu.tsx): the muted background. */
@@ -1415,16 +1448,17 @@ interface ListRowProps {
  * list update renders only the rows that changed.
  */
 export const ListRow = memo(
-  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false }: ListRowProps) {
+  function ListRow({ row, project, away, drawn, shape, full, filtered, selected, lit, onOpen, onMarkRead, onMarkUnread, onSendNow, onUnstar, menu, pinned, pinColumn, keys, pill, compact, noPreview = false, relative = false, titleFirst = false }: ListRowProps) {
     const open = () => onOpen(row);
+    const unstarRow = onUnstar && pinned ? () => onUnstar(row) : undefined;
     const rowLook: RowLook = { noPreview, relative, titleFirst };
-    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} />;
+    if (shape === 'phone') return <PhoneRow row={row} project={project} away={away} filtered={filtered} lit={lit} menu={menu} pinned={pinned} keys={keys} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} />;
     return (
       <RowWithAction row={row} drawn={drawn} menu={menu} onMarkRead={onMarkRead} onMarkUnread={onMarkUnread} onSendNow={onSendNow}>
         {shape === 'narrow' ? (
-          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} onOpen={open} />
+          <NarrowRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} keys={keys} selected={selected} pill={pill} compact={compact} {...rowLook} onOpen={open} onUnstar={unstarRow} />
         ) : (
-          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} onOpen={open} />
+          <WideRow row={row} project={project} away={away} filtered={filtered} lit={lit} pinned={pinned} pinColumn={pinColumn} keys={keys} selected={selected} full={full} pill={pill} noPreview={noPreview} relative={relative} onOpen={open} onUnstar={unstarRow} />
         )}
       </RowWithAction>
     );
@@ -1452,6 +1486,7 @@ export const ListRow = memo(
     a.onMarkRead === b.onMarkRead &&
     a.onMarkUnread === b.onMarkUnread &&
     a.onSendNow === b.onSendNow &&
+    a.onUnstar === b.onUnstar &&
     sameValue(a.row, b.row),
 );
 
