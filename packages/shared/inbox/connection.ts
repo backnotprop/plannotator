@@ -35,6 +35,20 @@ export function inboxClaimName(replyId: string, session: string): string {
   return `${replyId}.${session.replace(/[^A-Za-z0-9._-]/g, "_").slice(0, 120)}`;
 }
 
+/**
+ * The stop notice of a thread handed to another session goes by its own id, not the reply's. A connection only keeps the
+ * id and reports it, so what any connection or wake keeps per id (settled, claims, a T3 request), and its report, can
+ * never stand for the person's words when the reply moves back to that session. Older connections included.
+ */
+export function inboxStopNoticeId(replyId: string): string {
+  return `${replyId}-stop`;
+}
+
+/** The reply a stop notice's id belongs to; null for any other id. */
+export function inboxStopNoticeReply(id: string): string | null {
+  return id.endsWith('-stop') ? id.slice(0, -'-stop'.length) : null;
+}
+
 // --- CONTRACT (copied byte for byte into apps/hook/hooks/mod/inbox-contract.ts; edit packages/shared/inbox/connection.ts, then paste) ---
 
 /** The agent tool every connection registers. */

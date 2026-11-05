@@ -1288,14 +1288,18 @@ export class InboxLink {
    * the running turn while one runs (`appendUserRow`), else as a turn.
    */
   private async deliverNext(urgent = false): Promise<void> {
-    const command = this.pending.values().next().value as InboxReplyCommand | undefined
-    if (!command) return
+    const waiting = this.pending.values().next().value as InboxReplyCommand | undefined
+    if (!waiting) return
     // Still waiting? An agent may have read it through the tool meanwhile, or
     // another process delivered it.
     const fresh = await this.pendingNow(0)
     if (fresh === null) return
-    if (!fresh.some((candidate) => candidate.id === command.id)) {
-      this.settle(command.id)
+    // What the Inbox says now is what goes in: a reply can have moved here since it was first handed out.
+    const command = fresh.find((candidate) => candidate.id === waiting.id)
+    if (!command) {
+      // Not settled: nothing went in here, so if the reply moves back before the next poll, it goes in.
+      this.pending.delete(waiting.id)
+      this.held.delete(waiting.id)
       return
     }
     if (this.disposed || !(await this.holdLease(await this.host.now()))) return

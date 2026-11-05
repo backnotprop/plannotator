@@ -25,6 +25,7 @@ import {
   inboxHandoffLine,
   inboxWakeText,
   parseInboxBridgeCommands,
+  inboxStopNoticeId,
 } from "@plannotator/shared/inbox/connection";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer, type InboxServer } from "./inbox";
@@ -163,7 +164,7 @@ describe("Hand off", () => {
 
     const told = await poll(server, OWNER, project);
     expect(told).toHaveLength(1);
-    expect(told[0]).toMatchObject({ id: stored.id, handed_away: { to: "Claude Code" } });
+    expect(told[0]).toMatchObject({ id: inboxStopNoticeId(stored.id), handed_away: { to: "Claude Code" } });
     expect(told[0]!.body).toBe(inboxHandedAwayLine("Claude Code"));
     // The former owner is told to stop; it never gets the words meant for the new owner.
     const notice = inboxWakeText(told[0]!);
@@ -235,7 +236,7 @@ describe("Hand off", () => {
     expect(commands[0]!.handoff).toEqual({ from: "Claude Code" });
     // The former owner is told to stop, and never handed the follow-up.
     const told = await poll(server, OWNER, project);
-    expect(told.map((c) => c.id)).toEqual([id]);
+    expect(told.map((c) => c.id)).toEqual([inboxStopNoticeId(id)]);
     expect(told[0]!.handed_away).toEqual({ to: "Claude Code" });
     // Undo can no longer send the thread back past a reply the new owner has.
     expect((await post(server, `/api/inbox/messages/${id}/handoff/undo`, {})).status).toBe(409);
@@ -249,11 +250,11 @@ describe("Hand off", () => {
     await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
     // The former owner took its notice.
     const notice = await poll(server, OWNER, project);
-    expect(notice.map((c) => c.id)).toEqual([stored.id]);
+    expect(notice.map((c) => c.id)).toEqual([inboxStopNoticeId(stored.id)]);
     const taken = await fetch(`${base(server)}${INBOX_BRIDGE_EVENT_PATH}`, {
       method: "POST",
       headers: { "Content-Type": "application/json", Authorization: `Bearer ${server.token}` },
-      body: JSON.stringify({ session: OWNER, host: "claude-code", type: "delivered", id: stored.id }),
+      body: JSON.stringify({ session: OWNER, host: "claude-code", type: "delivered", id: notice[0]!.id }),
     });
     expect(taken.status).toBe(200);
     now += INBOX_ASKER_RESTART_GRACE_MS + 1;
@@ -261,10 +262,30 @@ describe("Hand off", () => {
     const moved = await post(server, `/api/inbox/messages/${stored.id}/to`, { to: { host: "claude-code", session: OWNER } });
     expect(moved.status).toBe(200);
     expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.to).toEqual({ host: "claude-code", session: OWNER });
-    expect((await poll(server, OWNER, project)).map((c) => c.id)).toEqual([stored.id]);
+    const words = await poll(server, OWNER, project);
+    expect(words.map((c) => c.id)).toEqual([stored.id]);
+    // Its own again: the wake says nothing of another session having had it, and the thread no longer reads handed off.
+    expect(words[0]!.handoff).toBeUndefined();
     expect(await poll(server, HERDR, herdr)).toEqual([]);
+    const back = (await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)!;
+    expect(back.handoff?.undone_at).toBeTruthy();
     // The thread reads one line for it: no "was told to stop" beside its delivery.
-    expect((await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)?.tags ?? []).toEqual([]);
+    expect(back.tags ?? []).toEqual([]);
+  });
+
+  test("moved on to a third session: still a hand-off, and the label picked for the one that stopped does not name it", async () => {
+    let now = 1_000_000;
+    const { server, project, herdr, asked } = await world(100, () => now);
+    const stored = (await reply(server, asked.message_id, { idempotency_key: "k1", words: "@Claude Code (herdr) yours.", tags: [{ ...HERDR_TAG, mode: "handoff" }] })).json.reply as InboxMessageWire;
+    expect(stored.handoff?.label).toBeTruthy();
+    await until(async () => (await poll(server, HERDR, herdr)).length > 0, "the hand-off to settle");
+    now += INBOX_ASKER_RESTART_GRACE_MS + 1;
+    await poll(server, "ses-c", project);
+    expect((await post(server, `/api/inbox/messages/${stored.id}/to`, { to: { host: "claude-code", session: "ses-c" } })).status).toBe(200);
+    const moved = (await thread(server, asked.thread_id)).messages.find((m) => m.id === stored.id)!;
+    expect(moved.handoff?.undone_at ?? null).toBeNull();
+    expect(moved.handoff?.label ?? null).toBeNull();
+    expect((await poll(server, "ses-c", project))[0]!.handoff).toBeTruthy();
   });
 
   test("words after a hand-off, moved when the new owner stopped: the hand-off goes along", async () => {

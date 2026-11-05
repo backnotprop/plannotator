@@ -106,7 +106,7 @@ import {
 } from "@plannotator/core/inbox-types";
 import { inboxHasUnsent, inboxListSections, inboxRowUnread, inboxSectionOf } from "./list";
 import { inboxProjectLabels } from "./project-name";
-import { inboxAckLine, inboxClaimName } from "./connection";
+import { inboxAckLine, inboxClaimName, inboxStopNoticeId, inboxStopNoticeReply } from "./connection";
 import type { QuestionAnswer } from "@plannotator/core/question-block";
 import { inboxProjectKey } from "./project-key";
 import { parseDiagramAnchor } from "@plannotator/core/diagram-anchor";
@@ -5488,6 +5488,11 @@ export class InboxStore {
     return withdrawn;
   }
 
+  /** What a delivery of this message to `session` goes by: the message's id, or a former owner's stop notice's own. */
+  deliveryIdOf(message: InboxMessage, session: string): string {
+    return tagOf(message, session)?.handed_away ? inboxStopNoticeId(message.id) : message.id;
+  }
+
   /**
    * A connection delivered a reply into a session as a turn: the reply
    * records it (`delivery` for its owner, the tag's own `delivery` for a
@@ -5495,9 +5500,13 @@ export class InboxStore {
    * agent up to it (the Sent band's "Delivered to <agent>, <time>"). A tagged
    * session's delivery marks nothing for the owner. Idempotent per session.
    */
-  recordDelivery(replyId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
+  recordDelivery(deliveryId: string, by: { host: string; session: string; intoTurn?: boolean }): InboxMessage {
+    const noticeOf = inboxStopNoticeReply(deliveryId);
+    const replyId = noticeOf ?? deliveryId;
     const reply = this.messages.get(replyId);
     if (!reply || reply.author.kind !== "person" || (!reply.reply_to && !reply.to)) throw new InboxError("message_not_found", `No reply ${replyId}.`);
+    // A stop notice says nothing about the words, and nothing at all once the reply moved back to this session.
+    if (noticeOf && !tagOf(reply, by.session)?.handed_away) return reply;
     if (!this.isFor(reply, by.session)) {
       throw new InboxError("validation_error", "session: this reply answers another session's message.", { field: "session" });
     }
@@ -6057,6 +6066,10 @@ export class InboxStore {
         deliver_now_by: null,
         wait_started_at: null,
         ...(options.tookOver ? { took_over: true } : {}),
+        // A hand-off's new owner is not this session: back with the former owner it is taken back, else no old label stands.
+        ...(m.handoff && !m.handoff.undone_at
+          ? { handoff: m.handoff.from?.session === to.session ? { ...m.handoff, undone_at: at } : { ...m.handoff, label: null } }
+          : {}),
       };
     };
     const owedTo = (m: InboxMessage): string | null => {
