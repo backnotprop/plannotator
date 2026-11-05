@@ -21,6 +21,7 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
 import { act, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { INBOX_THREAD_NAME_MAX, inboxPullStacks, type InboxPull, type InboxPullLink, type InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { ComposeSent } from '../compose/ComposeDialog';
 import type { ReviewBoxPull } from '../compose/reviewBox';
 import type { StartThreadInput } from '../api';
 import { handoffKeys, handoffStack, PULL_HANDOFF_TITLE_MAX, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk, pullTitleLine } from './model';
@@ -771,6 +772,78 @@ test.skipIf(!hasDom)('a review thread: "Review thread with Claude Code", the ask
   expect(document.querySelector('[data-pulls-ask]')).toBeNull();
   expect([...document.querySelectorAll('.ib-pr-actions button')].map((b) => b.textContent)).toEqual(['Open review thread', 'Open the diff']);
   expect(document.querySelector('[data-pulls-reply]')).not.toBeNull();
+});
+
+const boxTransport = (started: StartThreadInput[], session = 'ses_web') => ({
+  sessions: async () => ({ serverSession: 's', home: '/home/dana', projects: [{ project: { id: 'prj_2', name: 'web-app', root: '/home/dana/web-app' }, sessions: [liveSession(session, 'prj_2')] }, { project: { id: 'prj_9', name: 'other', root: '/home/dana/other' }, sessions: [liveSession('ses_other', 'prj_9')] }] }),
+  startThread: async (input: StartThreadInput) => (started.push(input), { thread_id: 'thr_box' }),
+  drafts: false,
+  uploads: false,
+});
+const boxPick = (keys = 1): ReviewBoxPull => {
+  const pulls = keys === 1 ? [model.pulls.find((p) => p.number === 869)!] : Array.from({ length: keys }, (_, i) => ({ ...model.pulls.find((p) => p.number === 869)!, key: `github.com/o/r#${i + 1}`, number: i + 1, head: `b${i + 1}`, base: i === 0 ? 'main' : `b${i}` }));
+  const single = inboxPullStacks(pulls)[0]!;
+  return { id: single.id, stack: single, label: '#869', title: 'Layer 869', projects: ['prj_2'], thread: null, project: 'web-app' };
+};
+
+test.skipIf(!hasDom)('the box, filled in: To is the PR project\'s agent with no choice to make, and empty words start a guided review tied to that PR', async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  const pick = boxPick();
+  mount(<ComposeDialog request={{ review: { pick } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_web');
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
+  expect(posted[0]!.body).toMatchObject({ keys: [pick.stack.layers[0]!.key], project_id: 'prj_2', validate_only: true });
+  expect(started).toHaveLength(1);
+  expect(started[0]!.body).toContain('using /review-curate');
+  expect(started[0]!.review).toBeUndefined();
+  expect(started[0]!.thread_name).toBe('Review #869: Layer 869');
+  expect(sent[0]).toMatchObject({ threadId: 'thr_box', pullKeys: [pick.stack.layers[0]!.key], pullAsk: 'guide' });
+});
+
+test.skipIf(!hasDom)("the box: the person's words make it a custom curation, and travel in the hand-off", async () => {
+  const started: StartThreadInput[] = [];
+  const sent: ComposeSent[] = [];
+  mount(<ComposeDialog request={{ review: { pick: boxPick() } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={(s) => sent.push(s)} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  const words = el<HTMLTextAreaElement>('[data-compose-text] textarea');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(words, 'just the retries');
+    words.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.body).toContain('just the retries');
+  expect(sent[0]!.pullAsk).toBe('custom');
+});
+
+test.skipIf(!hasDom)('the box: a stack past the limit of one review thread is refused before anything is sent or checked', async () => {
+  const started: StartThreadInput[] = [];
+  mount(<ComposeDialog request={{ review: { pick: boxPick(21) } }} phone={false} current={null} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started).toEqual([]);
+  expect(posted).toEqual([]);
+  expect(document.querySelector('[data-review-box]')!.textContent).toContain("can't go to one review thread");
+});
+
+test.skipIf(!hasDom)('the box on local changes: no PR choice needed, a session in another project may be picked, and the Send says what it reviews', async () => {
+  const started: StartThreadInput[] = [];
+  mount(<ComposeDialog request={{ review: {} }} phone={false} current={{ id: 'prj_9', root: '/home/dana/other', name: 'other' }} lastSent={null} home={null} transport={boxTransport(started) as never} onSent={() => {}} onSaved={() => {}} onDeleted={() => {}} onClose={() => {}} />);
+  await settle();
+  // The project in view.
+  expect(el('[data-compose-to]').getAttribute('data-compose-to')).toBe('ses_other');
+  await act(async () => el('[data-review-choice="branch"]').click());
+  await act(async () => el('[data-compose-send]').click());
+  await settle();
+  expect(started[0]!.review).toMatchObject({ kind: 'local', changes: 'branch', ask: 'guide' });
+  expect(started[0]!.body).toContain('the whole branch in other');
+  expect(started[0]!.thread_name_auto).toBe(true);
+  expect(posted).toEqual([]);
 });
 
 test.skipIf(!hasDom)("Start a new agent's compose opens with the review thread's name as the person's own, and its Send carries it", async () => {

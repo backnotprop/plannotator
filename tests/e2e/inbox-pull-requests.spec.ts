@@ -21,9 +21,8 @@
  *     the agent's own message) and Open review thread, no Board UI, no merge
  *     button.
  *  4. A PR with no review thread (approval "pr-page-review-with-agent"): one
- *     button, Review with an agent, opens the picker inline: Ask for, the
- *     project's running agents as one radio list, Start a new agent; Start
- *     review thread sends the first message to the picked one, and the PR is
+ *     button, Review with an agent, opens the New review box filled in; Start
+ *     review sends the first message to the agent in To, and the PR is
  *     that thread's from then on ("Review thread with Claude Code", Open
  *     review thread, also once the guided review arrived). "Open the diff"
  *     sits beside the button in every state, and each row opens its diff.
@@ -596,6 +595,8 @@ const LOCALE = 'github.com/northwind/web-app#869';
 
 test('off (the default): no row, a #pulls link says Code review is off, and no gh or glab query runs', async () => {
   const { page } = world;
+  // New review's summary runs git: refused too.
+  expect((await page.request.get(`${world.url}api/inbox/reviews/changes?project=prj_x&changes=uncommitted`)).status()).toBe(409);
   const reads: string[] = [];
   const watch = (request: import('@playwright/test').Request) => {
     if (new URL(request.url()).pathname.startsWith('/api/inbox/pulls')) reads.push(request.url());
@@ -1406,6 +1407,9 @@ test('New review, local changes: the + opens the box, the summary follows the ch
     await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: uncommitted on /);
     await expect(box.locator('[data-compose-send]')).toContainText('Start review');
     await shot(page, 'n-box-local');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-box-local-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
     // Another choice, another size: the working copy's new file is not in the last commit.
     await box.locator('[data-review-choice="last"]').check({ force: true });
     await expect(box.locator('[data-compose-thread-name] input')).toHaveValue(/^Review web-app: last commit on /);
@@ -1418,6 +1422,9 @@ test('New review, local changes: the + opens the box, the summary follows the ch
     await box.locator('[data-review-pick]').click();
     await expect(box.locator('.ib-cp-rvpulls .ib-cp-cap').first()).toHaveText('Not reviewed yet');
     await shot(page, 'n-box-pr');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-box-pr-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
     await page.keyboard.press('Escape');
     await expect(box).toBeVisible();
     await box.locator('[data-review-choice="local"]').check({ force: true });
@@ -1431,10 +1438,16 @@ test('New review, local changes: the + opens the box, the summary follows the ch
     const row = page.locator(`[data-pulls-row="${threadId}"], [data-reviews-row="${threadId}"]`).first();
     await expect(row).toContainText('Review web-app: uncommitted on');
     await expect(row).toContainText('Curating…');
+    // The row sits in its project, by name, before any review says so; so does the line over the title.
+    await expect(row.locator('[data-pulls-repo]')).toHaveText('web-app');
+    await expect(page.locator('[data-review-context], .ib-rvctx').first()).toContainText('web-app · Uncommitted changes on');
     await expect(page.locator('.ib-subject')).toContainText('Review web-app: uncommitted on');
     await expect(page.locator('[data-review-curating]')).toHaveText('Curating the review…');
     await expect(page.locator('[data-review-asked]')).toHaveText('New review · Guided review');
     await shot(page, 'n-curating');
+    await page.setViewportSize({ width: 390, height: 844 });
+    await shot(page, 'n-curating-phone');
+    await page.setViewportSize({ width: 1440, height: 900 });
     const opening = await claude.nextReply(threadId);
     const words = String(opening.body);
     expect(words).toMatch(/^Please send me a guided review of the uncommitted changes in web-app \(on [^)]+\), using \/review-curate\.\n\nIf I ask for changes, make them and send me the updated review in this thread\./);
@@ -1449,6 +1462,60 @@ test('New review, local changes: the + opens the box, the summary follows the ch
   } finally {
     rmSync(file, { force: true });
   }
+});
+
+test('New review: a local review with no card yet leaves the page when its thread is archived, and a thread started with Code review off gets no row', async () => {
+  const { page } = world;
+  const rows = async () => ((await (await page.request.get(`${world.url}api/inbox/reviews?cached=1`)).json()) as { rows: { thread_id: string | null }[] }).rows.map((row) => row.thread_id);
+  const start = async (key: string) => {
+    const sent = await page.request.post(`${world.url}api/inbox/messages`, {
+      data: { to: { host: 'claude-code', session: 'ses-web-claude' }, body: `Please review ${key}`, idempotency_key: key, review: { kind: 'local', changes: 'uncommitted', branch: 'main', base: 'main' } },
+    });
+    expect(sent.status()).toBe(200);
+    return (await sent.json()) as { thread_id: string; message: { id: string } };
+  };
+  const on = await start('archive-me');
+  expect(await rows()).toContain(on.thread_id);
+  expect((await page.request.post(`${world.url}api/inbox/messages/${on.message.id}/resolve`, { data: { resolved: true } })).status()).toBe(200);
+  expect(await rows()).not.toContain(on.thread_id);
+  await setCodeReview(false);
+  const off = await start('off-start');
+  await setCodeReview(true);
+  expect(await rows()).not.toContain(off.thread_id);
+});
+
+test('New review, its other doors: #reviews&new, ⌘K from the Inbox, and a PR already in review opens its thread instead of a second one', async () => {
+  const { page } = world;
+  await page.goto(`${world.url}#reviews&new`);
+  await page.reload();
+  const box = page.locator('[data-review-box]');
+  await expect(box).toBeVisible();
+  await expect(page).toHaveURL(/#reviews$/);
+  await box.locator('[data-compose-cancel]').click();
+  await expect(box).toHaveCount(0);
+
+  await page.goto(`${world.url}#`);
+  await page.reload();
+  await page.keyboard.press('ControlOrMeta+k');
+  await page.keyboard.type('new review');
+  await page.locator('[data-compose-action="review"]').click();
+  await expect(box).toBeVisible();
+  await expect(page).toHaveURL(/#reviews$/);
+
+  await box.locator('[data-review-choice="pr"]').check({ force: true });
+  await box.locator('[data-review-pick]').click();
+  const reviewed = box.locator('[data-review-pull][data-in-review]').first();
+  const threads = await page.evaluate(async () => {
+    const answer = (await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; stacks: { id: string }[] }[] };
+    return answer.rows;
+  });
+  const stackId = await reviewed.getAttribute('data-review-pull');
+  const threadId = threads.find((row) => row.stacks.some((stack) => stack.id === stackId))!.thread_id!;
+  await reviewed.click();
+  await expect(box).toHaveCount(0);
+  await expect(page).toHaveURL(new RegExp(`#reviews.*thread=${threadId}`));
+  const threadCount = await page.evaluate(async () => ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: unknown[] }).rows.length);
+  expect(threadCount).toBe(threads.length);
 });
 
 test('Reviews: an open question from before the review never stays out of the view, and a card says its chapters on one line', async () => {

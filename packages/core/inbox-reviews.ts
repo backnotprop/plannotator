@@ -230,20 +230,21 @@ export interface InboxReviewStart {
   base: string | null;
   /** The words decide: none is a guided review, the person's own make it a custom curation. */
   ask: "guide" | "custom";
-  /** The agent it went to. */
+  /** The agent it went to, and the project it works in. */
   host: string;
+  project_id: string;
   at: string;
   /** The thread's name now, for its row. On a row, not stored. */
   name?: string | null;
 }
 
 /** A `review` field from a Send, checked; null when it isn't one. */
-export function inboxReviewStartOf(value: unknown, host: string, at: string): InboxReviewStart | null {
+export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart, "host" | "project_id" | "at">): InboxReviewStart | null {
   if (!value || typeof value !== "object") return null;
   const review = value as Record<string, unknown>;
   if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
   const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
-  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", host, at };
+  return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
 }
 
 /** `GET /api/inbox/reviews/changes`: the size of those changes. `git: false`: the project is not a repository. */

@@ -215,7 +215,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // The Board chip: a draft's own choice, else this browser's last one. Never in Create thread (the card is the Board's
   // already), and shown only while the Board is on; a draft keeps its choice while the Board is off.
   const [boardOn, setBoardOn] = useState(() => (request.draft ? request.draft.board_request === true : composeBoardChoice()));
-  const boardChip = props.board === true && !card;
+  const boardChip = props.board === true && !card && !box;
   const boardRequest = !card && boardOn;
   // The thread's name (its chip): follows the message until the person types in it (ThreadNameChip).
   const [nameState, setNameState] = useState<ThreadNameState>(() => threadNameStateOf(request.draft ?? (request.threadName ? { thread_name: request.threadName } : null)));
@@ -757,7 +757,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           </button>
         </span>
       )}
-      {boxPull && (target || start) && <span className="ib-cp-rvfrompull">· from the pull request</span>}
+      {boxPull && (target || start) && !phone && <span className="ib-cp-rvfrompull">· from the pull request</span>}
       {draft && !phone && <span className="ib-cp-dsaved">Draft · saved {whenTime(draft.updated_at)}</span>}
     </div>
   );
@@ -1128,6 +1128,11 @@ export function ComposeDialog(props: ComposeDialogProps) {
           )}
           {/* The mic where the reply box has it, at the row's right end; Send keeps the end itself. */}
           <VoiceFoot voice={voice} phone={phone}>
+            {box && !phone && (
+              <button type="button" className="ib-btn ib-ghost" onClick={requestClose} data-compose-cancel="">
+                Cancel
+              </button>
+            )}
             {saveOffered && !phone && (
               <button type="button" className="ib-btn" onClick={() => void keepDraft()} disabled={busy !== null || voice.busy} data-compose-save="">
                 Save draft

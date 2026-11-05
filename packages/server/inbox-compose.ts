@@ -85,7 +85,7 @@ export function createInboxCompose(options: {
   /** Whether the person has the Board on: a Send's `board_request` is kept only then. Absent: off. */
   boardOn?: () => boolean;
   /** A New review on local changes started this thread (`review` on a Send): its row shows from now on. */
-  onReviewStart?: (threadId: string, review: unknown, host: string, at: string) => void;
+  onReviewStart?: (threadId: string, review: unknown, where: { host: string; project_id: string; at: string }) => void;
   /** This Inbox's stable id (linked machines): the sessions answer says whose sessions they are. */
   machine?: () => string;
   /** A compose draft was saved, deleted or sent: every window's stream says `event: drafts`, so its Drafts count follows (#2593). */
@@ -228,7 +228,7 @@ export function createInboxCompose(options: {
     }
     // The thread is written: only now does the agent start (in the background; the answer comes at once).
     else {
-      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, target.host, at);
+      if (body.review) options.onReviewStart?.(result.message.thread_id, body.review, { host: target.host, project_id: project.id, at });
       if (prepared) options.launch!.begin(result.message);
     }
     // Sent: the uploads are attachments now, and the draft it came from is done.

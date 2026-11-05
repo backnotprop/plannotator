@@ -429,6 +429,10 @@ describe("the record", () => {
     roots.push(dir);
     const landing: InboxReviewLanding = { key: "github.com/o/r#1", thread_id: "t", state: "closed", at: null, url: "https://github.com/o/r/pull/1", number: 1, title: "T", platform: "github", head: null, through_review: "t_r1" };
     createInboxPullLinks(dir).land([landing]);
+    // New review's record sits beside it, and a new read keeps both.
+    const begun = { kind: "local", changes: "last", branch: "main", base: "main", ask: "guide", host: "pi", project_id: "prj_1", at: "2026-11-04T10:00:00.000Z" } as const;
+    createInboxPullLinks(dir).start("t_new", begun);
+    expect(createInboxPullLinks(dir).started().get("t_new")).toEqual(begun);
     expect(createInboxPullLinks(dir).landings()).toEqual([landing]);
     const file = join(inboxDir(dir), INBOX_PULL_LINKS_FILE);
     const whole = JSON.parse(readFileSync(file, "utf8"));

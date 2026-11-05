@@ -22,7 +22,7 @@ import { hostLabel } from '../compose/model';
 export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null, filter: PullFilter): InboxReviewRow[] {
   const inProject = (row: InboxReviewRow) => {
     if (!project) return true;
-    if (row.review?.project_id === project) return true;
+    if (reviewRowProject(row) === project) return true;
     return row.stacks.some((stack) => (answer.projects[inboxPullRepoKey(stack.host, stack.repo)] ?? []).includes(project));
   };
   const inView = (row: InboxReviewRow) => {
@@ -36,11 +36,19 @@ export function reviewRowsIn(answer: InboxReviewsAnswer, project: string | null,
 /** The projects a row's filter can offer: the reviews' own, beside the ones with a remote. */
 export function reviewRowProjects(answer: InboxReviewsAnswer): Set<string> {
   const ids = new Set(Object.values(answer.projects).flat());
-  for (const row of answer.rows) if (row.review) ids.add(row.review.project_id);
+  for (const row of answer.rows) {
+    const id = reviewRowProject(row);
+    if (id) ids.add(id);
+  }
   return ids;
 }
 
 /** The row's title: its PR's, else its review's. */
+/** The project a thread's row is in; null for a PR row. */
+export function reviewRowProject(row: InboxReviewRow): string | null {
+  return row.review?.project_id ?? row.started?.project_id ?? null;
+}
+
 export function reviewRowTitle(row: InboxReviewRow, pullTitle: (stack: InboxPullStack) => string): string {
   const stack = row.stacks[0];
   if (stack) return pullTitle(stack);

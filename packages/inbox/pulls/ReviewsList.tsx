@@ -16,7 +16,7 @@ import { pullFilterEmptyWords, pullNounWord, stackTitle, type PullFilter } from 
 import { initials, repoLabels, repoName } from './labels';
 import { pullsEmptyWords, pullsNotices } from './notices';
 import { chainMarks } from './topology';
-import { readReviewFolds, reviewRowLine, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
+import { readReviewFolds, reviewRowLine, reviewRowProject, reviewRowTitle, saveReviewFolds, type ReviewFolds } from './reviewsModel';
 
 /** Pictures that failed or drew nothing in this window, so a row drawn again never asks twice. */
 const failedAvatars = new Set<string>();
@@ -305,7 +305,8 @@ export function ReviewsList({
   const placeOf = (row: InboxReviewRow) => {
     const stack = row.stacks[0];
     if (stack) return labels.get(inboxPullRepoKey(stack.host, stack.repo)) ?? repoName(stack.repo);
-    const project = row.review ? projectNames.get(row.review.project_id) : null;
+    const id = reviewRowProject(row);
+    const project = id ? projectNames.get(id) : null;
     return project ?? row.review?.source?.repo ?? 'A project';
   };
   const links = { ...model.links, ...Object.fromEntries(answer.rows.flatMap((row) => (row.link ? row.pull_keys.map((key) => [key, row.link!] as const) : []))) };

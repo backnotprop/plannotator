@@ -159,7 +159,7 @@ import { PullsPage, ReviewsOff } from './pulls/PullsPage';
 import { PullReview } from './pulls/PullReview';
 import { usePulls } from './pulls/usePulls';
 import { pullFilterOf, type PullFilter } from './pulls/model';
-import { reviewViewOf } from './pulls/reviewsModel';
+import { reviewRowProject, reviewViewOf } from './pulls/reviewsModel';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
@@ -5215,7 +5215,7 @@ function Inbox() {
   const reviewView =
     reviewRow && thread && thread.thread_id === route.thread
       ? reviewViewOf(reviewRow, thread, {
-          projectName: reviewRow.review ? (projectNames.get(reviewRow.review.project_id) ?? null) : null,
+          projectName: projectNames.get(reviewRowProject(reviewRow) ?? '') ?? null,
           onWholeThread: () => go({ page: 'inbox', project: null, thread: reviewRow.thread_id }),
           onOpenStack: (stackId) => go({ page: 'reviews', project: route.reviews?.project ?? null, view: route.reviews?.view, thread: null, stack: stackId }),
         })

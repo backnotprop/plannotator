@@ -7703,6 +7703,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-picker.ib-cp-rvpulls { top: calc(100% + 4px); left: 110px; width: min(600px, calc(100% - 124px)); }
 .ib-cp-rvpulls .ib-cp-list { display: block; }
 .ib-cp-rvopt { display: flex; gap: 8px; }
+.ib-cp-rvrow .ib-cp-tobtn .ib-cp-tod { flex: none; }
 .ib-cp-rvlabel { flex: none; color: var(--muted-foreground); }
 .ib-cp-rvopt .ib-cp-op { flex: 1; }
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
@@ -7712,7 +7713,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp[data-phone] .ib-cp-rvsize { margin-left: 0; }
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
 .ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
-.ib-rvcurating { margin: 14px 0 0; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
+.ib-rvcurating { margin: 14px 0 0 34px; color: var(--muted-foreground); font-size: var(--ib-fs-14, 14px); }
 .ib-rvfrom { margin: -6px 0 14px; color: var(--muted-foreground); font-size: var(--ib-fs-13-5, 13.5px); }
 .pn-inbox .ib-rvc-link { display: inline-flex; align-items: center; gap: 5px; margin-left: 10px; color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); }
 .pn-inbox .ib-rvc-link:hover { color: var(--foreground); }
