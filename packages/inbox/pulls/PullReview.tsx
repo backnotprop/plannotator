@@ -27,7 +27,8 @@
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { buildDiffFileTree, getVisualFileOrder } from '@plannotator/ui/utils/diffFileTree';
+import { plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
@@ -40,13 +41,12 @@ import { Icon } from '../icons';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
-import { Tip } from '../components/Tip';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
 import { PostEnding, reviewEnding, useReviewDestination } from './PostEnding';
 import { postablePull, postedWords } from './postRules';
 import { findStack, inboxPullLabel, linkAgentName, pullGroups, pullNounWord, pullVerdictReply } from './model';
 import { forgeName } from './labels';
-import { railRows } from './rail';
+import { ReviewRailTree } from './ReviewRailTree';
 import { isOpen, layerPosition, layerVerdictLink, nextLayer, stackVerdictLink } from './topology';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -244,20 +244,24 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // global comments do.
   const readerComments = canDecide || canPost ? { annotations: comments, selectedId, onSelect: setSelectedId, onSave: async (annotation: CodeAnnotation) => (save(annotation), true), onDelete: remove, scrollTarget, draftScope: `${layerKey}:${scope}`, onShowGlobalComment: showGlobalComment } : undefined;
 
-  const files = useMemo(() => (diff ? parseDiffToFiles(diff.patch) : []), [diff]);
-  const rail = useMemo(() => railRows(files.map((file) => file.path)), [files]);
-  const byPath = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
+  // The files in the rail's order, as the review app has them: the diffs below follow it.
+  const { files, tree, patch } = useMemo(() => {
+    const parsed = diff ? parseDiffToFiles(diff.patch) : [];
+    const built = buildDiffFileTree(parsed);
+    const ordered = getVisualFileOrder(built).map((index) => parsed[index]!);
+    return { files: ordered, tree: built, patch: ordered.map((file) => (file.patch.endsWith('\n') ? file.patch : `${file.patch}\n`)).join('') };
+  }, [diff]);
   const snapshot = useMemo(
     () =>
       diff && layer
         ? buildGuideSnapshot({
             guide: { title: layer.title, intent: '', sections: [] },
             reviewed: [],
-            review: { rawPatch: diff.patch, gitRef: `${diff.base}...${diff.head}`, source: { kind: 'pr', repo: stack?.repo, branch: layer.head, pr: { url: layer.url, number: layer.number, title: layer.title, platform: layer.platform } } },
+            review: { rawPatch: patch, gitRef: `${diff.base}...${diff.head}`, source: { kind: 'pr', repo: stack?.repo, branch: layer.head, pr: { url: layer.url, number: layer.number, title: layer.title, platform: layer.platform } } },
             exportedAt: new Date(0).toISOString(),
           })
         : null,
-    [diff, layer, stack?.repo],
+    [diff, patch, layer, stack?.repo],
   );
   const viewedSet = useMemo(() => new Set(viewed), [viewed]);
   const toggleViewed = useCallback((path: string) => write({ viewed: viewed.includes(path) ? viewed.filter((p) => p !== path) : [...viewed, path] }), [viewed, comments]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -470,42 +474,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           {!phone && <div ref={setControlsHost} className="ib-prr-controls" data-pull-controls="" />}
         </div>
         <nav className="ib-rrail" aria-label="Changed files">
-          {/* The files, then a folder heading over each group when names repeat in deep folders (`railRows`). */}
-          <ul className="ib-rv-list" data-review-files="">
-            {rail.map((row) => {
-              if (row.kind === 'folder') {
-                return (
-                  <li key={`dir:${row.key}`} className="ib-rv-folder" aria-hidden="true" title={row.full} data-review-folder={row.full}>
-                    <bdi dir="ltr">{row.text}</bdi>
-                  </li>
-                );
-              }
-              const stats = byPath.get(row.path);
-              const seen = viewedSet.has(row.path);
-              return (
-                <li key={row.path}>
-                  <button type="button" className="ib-rv-row ib-rv-file" onClick={() => move(row.path)} aria-label={`${row.path}${seen ? ', viewed' : ''}`}>
-                    <span className="ib-rv-mark" data-done={seen ? '' : undefined} aria-hidden="true">
-                      {seen ? <Icon name="check" size={12} /> : null}
-                    </span>
-                    <span className="ib-rv-t">
-                      <Tip content={row.path} cut>
-                        <span className="ib-rv-path">
-                          <bdi dir="ltr">
-                            {row.dir && <span className="ib-rv-dir">{row.dir}</span>}
-                            {row.name}
-                          </bdi>
-                        </span>
-                      </Tip>
-                    </span>
-                    <span className="ib-rv-n">
-                      <span className="ib-add">+{formatCount(stats?.additions ?? 0)}</span> <span className="ib-del">-{formatCount(stats?.deletions ?? 0)}</span>
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
+          <ReviewRailTree
+            tree={tree}
+            files={files}
+            viewed={viewedSet}
+            commentCount={(path) => comments.filter((comment) => comment.filePath === path).length}
+            onSelect={move}
+            onToggleViewed={toggleViewed}
+          />
           <div className="ib-rv-progress" aria-live="polite">
             {diff ? `${viewed.filter((path) => files.some((file) => file.path === path)).length} of ${plural(files.length, 'file')} viewed` : ''}
           </div>

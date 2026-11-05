@@ -886,15 +886,30 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   const review = page.locator('[data-pull-review]');
   await expect(review).toHaveAttribute('data-pull-review', LAYER_412);
   await expect(review.locator('[data-guide-file-shell="src/charges/schedule.ts"]')).toBeVisible({ timeout: 30_000 });
-  await expect(review.locator('[data-review-files] li')).toHaveCount(3);
+  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(3);
   await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 1 of 3 · only what this layer changes');
   await expect(review.getByRole('button', { name: /merge/i })).toHaveCount(0);
   expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/pulls/412');
   // No chapter card repeating the rail: the diffs take the width.
   await expect(review.locator('[data-guide-section-narrative]')).toBeHidden();
-  // The rail's paths are cut at their start inside the rail, the +/- still in view.
+  // The rail is the review app's tree: folders over their files, rows of 28 px touching, in the app's sans, a zero count
+  // left out; the diffs follow its order. The +/- stay in the rail.
+  await expect(review.locator('[data-review-folder="migrations"]')).toBeVisible();
+  const railRow = await review.locator('[data-review-file]').first().evaluate((row) => {
+    const name = row.querySelector('.truncate')!;
+    return { height: row.getBoundingClientRect().height, font: getComputedStyle(name).fontFamily, size: getComputedStyle(name).fontSize, circle: row.querySelector('[role="checkbox"] svg')!.getBoundingClientRect().width, text: row.textContent };
+  });
+  expect(railRow).toMatchObject({ height: 28, size: '13px', circle: 14 });
+  expect(railRow.font).not.toMatch(/mono/i);
+  expect(railRow.text).toContain('A');
+  expect(railRow.text).not.toContain('-0');
+  const railOrder = await review.locator('[data-review-file]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-review-file')));
+  const diffOrder = await review.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => shell.getAttribute('data-guide-file-shell')));
+  // (Within a section the viewer draws tests after code, whatever the patch's order, so tests sit out of this check.)
+  const code = (paths: (string | null)[]) => paths.filter((path) => !path?.includes('.test.'));
+  expect(code(diffOrder)).toEqual(code(railOrder));
   const rail = await review.locator('.ib-rrail').boundingBox();
-  for (const row of await review.locator('[data-review-files] .ib-rv-n').all()) {
+  for (const row of await review.locator('[data-review-files] .review-count-columns').all()) {
     const box = (await row.boundingBox())!;
     expect(box.x + box.width).toBeLessThanOrEqual(rail!.x + rail!.width);
   }
@@ -1021,19 +1036,19 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
 
   await review.locator(`[data-pull-next-layer="${LAYER_413}"]`).click();
   await expect(review).toHaveAttribute('data-pull-review', LAYER_413);
-  await expect(review.locator('[data-review-files] li')).toHaveCount(1);
+  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
   await expect(review.locator('[data-pull-review-foot]')).toContainText('Layer 2 of 3');
 
   // Whole stack up to #413: from the lowest open layer's base, so #412's files and #413's, not the merged #411's.
   await review.locator('[data-pull-scope-choice="stack"]').click();
   await expect(review).toHaveAttribute('data-pull-scope', 'stack');
-  await expect(review.locator('[data-review-files] li')).toHaveCount(3);
+  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(3);
   await expect(review.locator('[data-guide-file-shell="migrations/0042_retry_schedule.sql"]')).toBeVisible({ timeout: 30_000 });
   await expect(review.locator('[data-guide-file-shell="src/charges/client.ts"]')).toHaveCount(0);
   expect(forgeCalls()).toContain('gh diff repos/northwind/billing-svc/compare/retry/charge-client...retry/backoff');
   await shot(page, '8-whole-stack', ['light']);
   await review.locator('[data-pull-scope-choice="layer"]').click();
-  await expect(review.locator('[data-review-files] li')).toHaveCount(1);
+  await expect(review.locator('[data-review-files] [data-review-file]')).toHaveCount(1);
   expect(asked).toEqual([`${LAYER_412} layer`, `${LAYER_413} layer`, `${LAYER_413} stack`]);
   page.off('request', watch);
 
@@ -1224,6 +1239,8 @@ async function commentOn(page: Page, file: string, line: number, words: string):
   await expect(composer).toBeVisible();
   await composer.fill(words);
   await page.getByRole('button', { name: 'Add Comment' }).click();
+  // The card's name line, as in the review app: the person's own name from the same source, marked as theirs.
+  await expect(page.locator('.review-comment-header', { hasText: '(me)' }).first()).toBeVisible();
 }
 
 test("Post to GitHub (the owner's answer C): the choice beside the decision, a teammate's approval posted with its comment, a refusal shown", async ({ browser }) => {

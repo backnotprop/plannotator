@@ -21,7 +21,6 @@ import { inboxPullItems } from '@plannotator/core/inbox-types';
 import { initials, repoLabels } from './labels';
 import { ladderHeading, rowLine, rowMeta, stackTitle } from './model';
 import { pullsEmptyWords, pullsNotices } from './notices';
-import { railRows } from './rail';
 import { chainMarks, landsNextLayer, layerBaseWords, layerPosition, layerVerdictLink, nextLayer, stackLink, stackVerdictLink } from './topology';
 
 function pr(fields: Partial<InboxPull> & { number: number; head: string }): InboxPull {
@@ -275,25 +274,5 @@ describe('names in the list (#14, #27)', () => {
     expect(initials('mara.reyes')).toBe('M');
     expect(initials('mara-lee')).toBe('ML');
     expect(initials('tomas')).toBe('T');
-  });
-});
-
-describe('the review rail (#17)', () => {
-  const regions = ['us-east-1', 'us-west-2', 'eu-west-1'].map((r) => `infra/terraform/environments/production/${r}/networking/vpc-peering/main.tf`);
-
-  test('files that share their name and last folder are grouped under distinct folder headings', () => {
-    const rows = railRows([...regions, 'README.md']);
-    const folders = rows.filter((r) => r.kind === 'folder').map((r) => r.text);
-    expect(new Set(folders).size).toBe(folders.length);
-    expect(folders).toContain('us-east-1/…/vpc-peering/');
-    expect(rows.filter((r) => r.kind === 'file')).toHaveLength(4);
-  });
-
-  test('distinct files stay a flat list, each with its folder', () => {
-    const rows = railRows(['src/a.ts', 'src/b.ts']);
-    expect(rows).toEqual([
-      { kind: 'file', path: 'src/a.ts', dir: 'src/', name: 'a.ts' },
-      { kind: 'file', path: 'src/b.ts', dir: 'src/', name: 'b.ts' },
-    ]);
   });
 });

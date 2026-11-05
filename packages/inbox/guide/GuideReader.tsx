@@ -40,6 +40,7 @@ import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
+import { getIdentity } from '@plannotator/ui/utils/identity';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { usePhone } from '../phone';
 
@@ -206,7 +207,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
     const draftKey = `guide-global:${wiring.draftScope}`;
     // The review app's general comment: no file and no lines (its '' / 0 / 0 sentinels).
     void wiring
-      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, createdAt: Date.now() })
+      .onSave({ id: newCommentId(), type: 'comment', scope: 'general', filePath: '', lineStart: 0, lineEnd: 0, side: 'new', text: trimmed, author: getIdentity(), createdAt: Date.now() })
       // Refused (too long, the thread resolved elsewhere, offline): the words wait in the composer for the next open.
       .then((saved) => {
         if (!saved) restoreCommentDraft(draftKey, text);
@@ -237,6 +238,7 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
         createdAt: Date.now(),
+        author: getIdentity(),
         conventionalLabel,
         decorations,
       });

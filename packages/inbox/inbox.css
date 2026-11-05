@@ -7729,6 +7729,23 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr) 300px; }
 .ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: 256px minmax(0, 1fr); }
 .ib-prr-wide:not(.ib-railfold) .ib-rrail { grid-column: 1; grid-row: 1 / -1; }
+/* The rail's rows, from the review app's sidebar (review-editor's index.css, which this window does not load): rows 28
+   px and touching, sans 13/500, its 14 px circle, its letter, its folder rows and its two +/- columns. */
+.ib-prreview .ib-rrail { --ib-rail-fill: color-mix(in oklab, var(--foreground) 6%, transparent); --ib-rail-quiet: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); padding: 8px 8px 12px; gap: 0; }
+.ib-prreview .ib-rrail .ib-rv-list { gap: 0; }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item { width: 100%; min-height: 28px; padding-block: 0; padding-right: 8px; gap: 6px; border-radius: 6px; font-size: 13px; font-weight: 500; text-align: left; color: var(--muted-foreground); }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item:hover { background: var(--ib-rail-fill); color: var(--foreground); }
+.pn-inbox .ib-prreview .ib-rrail .file-tree-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-rv-file-main { display: flex; flex: 1 1 auto; align-items: center; gap: 6px; min-width: 0; }
+.ib-rv-file-main [role="checkbox"] { position: relative; margin-right: 2px; }
+.ib-rv-file-main [role="checkbox"]::after { content: ""; position: absolute; inset: -4px; }
+.ib-rv-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-rv-file-main > .truncate ~ * { margin-left: -2px; }
+.pn-inbox .ib-rv-tree-folder { display: flex; width: 100%; min-width: 0; height: 28px; align-items: center; gap: 6px; padding-right: 8px; border-radius: 6px; font-size: 13px; font-weight: 500; text-align: left; color: var(--ib-rail-quiet); transition: background-color 120ms, color 120ms; }
+.pn-inbox .ib-rv-tree-folder:hover { background: var(--ib-rail-fill); color: var(--foreground); }
+.pn-inbox .ib-rv-tree-folder:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-rrail .review-count-columns { display: grid; flex-shrink: 0; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; margin-left: auto; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-rrail .review-count-columns[data-count-columns="quiet"], .ib-rrail .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: var(--ib-rail-quiet); }
 .ib-prr-wide:not(.ib-railfold) .ib-prr-strip { grid-column: 2; grid-row: 1; }
 .ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
 .ib-prr-wide:not(.ib-railfold) .ib-prr-foot { grid-column: 2; grid-row: 3; }
@@ -7778,8 +7795,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 /* A branch named in a layer's line can be long and unbroken. */
 .ib-pr-basew { min-width: 0; overflow-wrap: anywhere; }
 /* The review rail grouped by folder (names repeat in deep folders): a quiet heading over each group. */
-.ib-rv-folder { padding: 8px 8px 2px; font-family: var(--font-mono, ui-monospace, monospace); font-size: var(--ib-fs-11-5, 11.5px); color: var(--muted-foreground); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; direction: rtl; text-align: left; }
-.ib-rv-folder:first-child { padding-top: 0; }
 
 @media (max-width: 767px), (max-height: 500px) and (max-width: 1023px) and (pointer: coarse) {
   .ib-prlist { width: 100%; }
