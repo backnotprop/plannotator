@@ -6313,24 +6313,38 @@ export class InboxStore {
    * stale id included.
    */
   initiativeNamed(value: string): InboxInitiative | null {
+    return this.initiativeAnswering(value, (name, live) => inboxInitiativeOfTag(inboxInitiativeTagKey(name), live));
+  }
+
+  /**
+   * The live initiative `initiative_delete` means: its `ini_` id, or its name
+   * ignoring case and spaces only. Narrower than initiativeNamed: a card put in
+   * the wrong one can be moved, but "C#" (the tag key "c") must never delete "C++".
+   */
+  initiativeToDelete(value: string): InboxInitiative | null {
+    const spaceless = (name: string) => inboxInitiativeNameKey(name).replace(/\s+/gu, "");
+    return this.initiativeAnswering(value, (name, live) => live.find((i) => spaceless(i.name) === spaceless(name)) ?? null);
+  }
+
+  /** A live one by `ini_` id, else by name ignoring case, else whatever `wider` finds among the live ones. */
+  private initiativeAnswering(value: string, wider: (name: string, live: InboxInitiative[]) => InboxInitiative | null): InboxInitiative | null {
     const text = value.trim();
     const byId = isInboxInitiativeId(text) ? this.initiativesById.get(text) : undefined;
     if (byId?.deleted_at === null) return byId;
-    const live = this.initiatives().filter((i) => i.deleted_at === null);
+    // In the order they were made, as a tag reads them (`initiatives()` breaks a same-millisecond tie by random id).
+    const live = [...this.initiativesById.values()].filter((i) => i.deleted_at === null);
     const name = text.replace(/\s+/g, " ");
-    return (
-      live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name)) ??
-      inboxInitiativeOfTag(inboxInitiativeTagKey(name), live)
-    );
+    return live.find((i) => inboxInitiativeNameKey(i.name) === inboxInitiativeNameKey(name)) ?? wider(name, live);
   }
 
   /**
    * A card's initiative given by the card tool's `initiative`: `""` is none;
    * a live initiative it names (initiativeNamed) is that one; a stale `ini_`
    * id is ignored (null: the card's initiative stays as it is, never one named
-   * after the id); anything else is a new one's name, checked here (one line,
-   * the length) and made by `initiativeOfPick` only once the card write can no
-   * longer be refused, so a refused card leaves no initiative behind.
+   * after the id); anything else is a new one's name, without a leading `#`
+   * ("#Billing" makes "Billing"; "#" alone is refused as an empty name), checked
+   * here (one line, the length) and made by `initiativeOfPick` only once the card
+   * write can no longer be refused, so a refused card leaves no initiative behind.
    */
   private initiativePick(value: unknown): { id: string | null } | { make: string } | null {
     if (typeof value !== "string") throw new InboxError("validation_error", "initiative: a name, or \"\" for none.", { field: "initiative" });
@@ -6338,7 +6352,10 @@ export class InboxStore {
     const named = this.initiativeNamed(value);
     if (named) return { id: named.id };
     if (isInboxInitiativeId(value.trim())) return null;
-    return { make: this.cardText(value, "initiative", INBOX_INITIATIVE_NAME_MAX) };
+    const name = value.trim().replace(/^#+\s*/u, "");
+    // Without the `#` it may be a live name after all ("#!!!" has no tag key, "!!!" is that name).
+    const bare = this.initiativeNamed(name);
+    return bare ? { id: bare.id } : { make: this.cardText(name, "initiative", INBOX_INITIATIVE_NAME_MAX) };
   }
 
   private initiativeOfPick(pick: { id: string | null } | { make: string }, by: InboxAuthor): string | null {

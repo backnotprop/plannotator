@@ -182,7 +182,7 @@ export async function runCardCall(context: InboxMcpContext, input: CardCallInput
   // An initiative crosses projects, so deleting one needs no project of the caller's.
   if (input.op === "initiative_delete") {
     if (!input.initiative?.trim()) throw new InboxError("validation_error", "initiative: the one to delete, by name or id (list shows them).", { field: "initiative" });
-    const named = store.initiativeNamed(input.initiative);
+    const named = store.initiativeToDelete(input.initiative);
     if (!named) throw new InboxError("initiative_not_found", `No initiative ${input.initiative.trim()}.`, { field: "initiative" });
     const cards = store.listCards().filter((card) => store.cardWire(card).initiative === named.id).length;
     const gone = store.deleteInitiative(named.id);

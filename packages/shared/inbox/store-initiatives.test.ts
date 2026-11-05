@@ -315,6 +315,54 @@ describe("initiatives: an agent's card names one", () => {
     expect(store.initiatives().some((i) => i.name === "???")).toBe(true);
   });
 
+  // "#Billing" is how the Inbox writes a tag, so an agent may well pass it: the name must not carry the mark.
+  test("a new name loses its leading #; # alone makes nothing; a # inside the name stays", () => {
+    const { store, project } = world();
+    const made = (initiative_name: string) => {
+      const { card } = store.createCard({ project_id: project.id, by: AGENT, title: initiative_name, initiative_name });
+      return store.initiative(card.initiative!)!.name;
+    };
+    expect(made("#Billing")).toBe("Billing");
+    expect(made("  ## Auth flow ")).toBe("Auth flow");
+    expect(made("C#")).toBe("C#");
+    // The limit reads the name without the mark.
+    expect(made(`#${"x".repeat(40)}`)).toBe("x".repeat(40));
+
+    const before = store.initiatives().length;
+    const cards = store.listCards().length;
+    for (const initiative_name of ["#", " ## ", "# "]) {
+      expect(() => store.createCard({ project_id: project.id, by: AGENT, title: "Empty", initiative_name })).toThrow();
+    }
+    const { card } = store.createCard({ project_id: project.id, by: AGENT, title: "Kept", initiative_name: "Billing" });
+    expect(() => store.updateCard(card.id, { by: AGENT, initiative_name: "#" })).toThrow();
+    expect(store.cardWire(store.card(card.id)!).initiative).toBe(card.initiative);
+    expect(store.initiatives().length).toBe(before);
+    expect(store.listCards().length).toBe(cards + 1);
+
+    // Without the mark it may name a live one with no tag key: joined, no second "!!!".
+    const marks = store.createInitiative({ name: "!!!", by: PERSON });
+    expect(store.createCard({ project_id: project.id, by: AGENT, title: "Marks", initiative_name: "#!!!" }).card.initiative).toBe(marks.id);
+    expect(store.initiatives().filter((i) => i.name === "!!!").length).toBe(1);
+  });
+
+  test("the name to delete matches ignoring case and spaces only; the id too; never by the tag key", () => {
+    const { store } = world();
+    const plus = store.createInitiative({ name: "C++", by: PERSON });
+    const review = store.createInitiative({ name: "Code review", by: PERSON });
+    const tight = store.createInitiative({ name: "CodeReview", by: PERSON });
+    for (const miss of ["C#", "c", "Code-Review", "#CodeReview", "code_review", "\uFF23ode review"]) {
+      expect([miss, store.initiativeToDelete(miss)]).toEqual([miss, null]);
+    }
+    expect(store.initiativeToDelete("  c++ ")!.id).toBe(plus.id);
+    expect(store.initiativeToDelete("CODE  REVIEW")!.id).toBe(review.id);
+    expect(store.initiativeToDelete("codereview")!.id).toBe(tight.id);
+    expect(store.initiativeToDelete("C O D E R E V I E W")!.id).toBe(review.id);
+    expect(store.initiativeToDelete(plus.id)!.id).toBe(plus.id);
+    store.deleteInitiative(plus.id);
+    expect(store.initiativeToDelete(plus.id)).toBeNull();
+    expect(store.initiativeToDelete("C++")).toBeNull();
+  });
+
   test("the last change wins, the person's or an agent's", () => {
     const { store, project } = world();
     const shape = store.createInitiative({ name: "Shape", by: PERSON });

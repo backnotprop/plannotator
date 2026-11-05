@@ -542,6 +542,12 @@ describe("the Board page's routes: New card and the look", () => {
     expect(((await (await fetch(`${base}/api/inbox/cards/${id}`)).json()) as { card: { id: string } }).card.id).toBe(id);
 
     expect((await card({ op: "initiative_delete", initiative: "Billing" })).content[0]!.text).toContain("No initiative Billing.");
+    // Never by the wider key a card's name joins by: "C#" and "C++" share it, and the delete has no Undo for an agent.
+    const plus = (await card({ op: "create", title: "Bindings", initiative: "C++" })).structuredContent.card.initiative as string;
+    const near = await card({ op: "initiative_delete", initiative: "C#" });
+    expect(near.isError).toBe(true);
+    expect(near.content[0]!.text).toContain("No initiative C#.");
+    expect((await card({ op: "list" })).structuredContent.initiatives).toEqual([{ id: plus, name: "C++", cards: 1 }]);
     expect((await card({ op: "initiative_delete" })).isError).toBe(true);
   });
 });
