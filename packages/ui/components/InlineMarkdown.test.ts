@@ -471,3 +471,27 @@ describe('code spans: a run of N backticks closes at the next run of exactly N',
     expect(html).toContain('>b</code>');
   });
 });
+
+describe('a link label is markdown too, without links inside it', () => {
+  test('code in a label renders as code inside the link', () => {
+    const html = renderInline('[`README.md`](https://example.com/readme)');
+    expect(html).toMatch(/<a [^>]*href="https:\/\/example.com\/readme"[^>]*><code [^>]*>README.md<\/code><\/a>/);
+    expect(html).not.toContain('`');
+  });
+
+  test('code among words in a label', () => {
+    const html = renderInline('[the `card --help` page](https://example.com/help)');
+    expect(html).toMatch(/<a [^>]*>the <code [^>]*>card --help<\/code> page<\/a>/);
+  });
+
+  test('emphasis in a label', () => {
+    expect(renderInline('[**bold** text](https://example.com)')).toMatch(/<a [^>]*><strong[^>]*>bold<\/strong> text<\/a>/);
+  });
+
+  test('a URL, a ref or a nested link in a label stays text: one link, never a link in a link', () => {
+    for (const label of ['see https://x.com', 'issue #12', '[inner](https://inner.example)', '<https://x.com>', '@someone']) {
+      const html = renderInline(`[${label}](https://example.com)`);
+      expect(html.match(/<a /g)?.length).toBe(1);
+    }
+  });
+});
