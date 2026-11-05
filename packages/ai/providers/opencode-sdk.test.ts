@@ -365,7 +365,7 @@ describe("OpenCode Ask AI event stream", () => {
 		for await (const _ of (await provider.createSession({ context, oneShot: { systemPrompt: "JUDGE" } } as never)).query("x")) void _;
 		for await (const _ of (await provider.createSession({ context } as never)).query("x")) void _;
 		provider.dispose();
-		expect(bodies[0]).toMatchObject({ system: "JUDGE", tools: { "*": false } });
+		expect(bodies[0]).toMatchObject({ system: "JUDGE", tools: { "*": false }, variant: "low" });
 		expect(bodies[1]!.tools).toBeUndefined();
 	});
 

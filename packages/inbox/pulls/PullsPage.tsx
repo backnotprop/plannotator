@@ -134,9 +134,10 @@ export function PullsPage(props: PullsPageProps) {
         )}
         <span className="ib-sp" />
         {offered.length > 1 && <ProjectFilter projects={offered} names={props.projectNames} value={props.project} phone={phone} onChange={props.onProject} />}
-        {rulesSet && (
+        {risk.answer && (
           <RiskFilter
-            value={riskFilter}
+            value={activeFilter}
+            rulesSet={rulesSet}
             phone={phone}
             onChange={(next) => {
               setRiskFilter(next);
@@ -153,11 +154,6 @@ export function PullsPage(props: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && risk.answer && !rulesSet && groups && pullRows(groups).length > 0 && (
-          <button type="button" className="ib-pr-riskhint" onClick={() => setRulesOpen(true)} data-pulls-risk-hint="">
-            Rank pull requests by risk: set your no slop rules.
-          </button>
-        )}
         {model && filtered && <PullList model={model} groups={filtered.groups} filter={activeFilter} notJudged={filtered.notJudged} judgments={judgments} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
@@ -227,7 +223,7 @@ function PullList({
   const notJudgedLine =
     notJudged > 0 ? (
       <p className="ib-pr-risknote" data-pulls-risk-not-judged={notJudged}>
-        {plural(notJudged, 'pull request')} not checked yet.
+        {plural(notJudged, 'pull request')} not ranked yet.
       </p>
     ) : null;
   if (total === 0 && filter !== 'all') {

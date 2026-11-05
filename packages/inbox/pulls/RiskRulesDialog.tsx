@@ -1,5 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { INBOX_PULL_RISK_RULES_MAX, type InboxPullRiskAnswer, type InboxPullRiskModels } from '@plannotator/core/inbox-types';
+import type { InboxPullRiskAnswer, InboxPullRiskModels } from '@plannotator/core/inbox-types';
 import { inboxApi } from '../api';
 import { Modal } from '../components/Updates';
 
@@ -7,7 +7,7 @@ const PLACEHOLDER = 'It touches billing or auth.\nIt changes how we store user d
 
 /**
  * "No slop rules": the person's words for what a high-risk pull request is, and the
- * agent that judges each new one against them. Saved to the Inbox's config, never to a
+ * agent that ranks the open ones against them. Saved to the Inbox's config, never to a
  * repository. Empty rules turn the judging off.
  */
 export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPullRiskAnswer; onSaved: (next: InboxPullRiskAnswer) => void; onClose: () => void }) {
@@ -51,6 +51,8 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       setSaving(false);
     }
   };
+  // No model yet: wait for the list and its cheap pick, or Save would leave the agent on the person's own default.
+  const readingModel = !!provider && !list && !model;
   const agentName = answer.agents.find((a) => a.id === provider)?.label;
   return (
     <Modal labelledBy={titleId} onClose={onClose} testId="pull-risk-rules" className="ib-riskd" ownKeys>
@@ -63,12 +65,12 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
       >
         <h2 id={titleId}>No slop rules</h2>
         <label className="ib-sub ib-riskd-l" htmlFor={rulesId}>
-          What makes a pull request high risk for you? Each new one is checked against this: not touched is low, maybe is medium, definitely is high.
+          What makes a pull request high risk for you? Every open one is ranked against this: not touched is low, maybe is medium, definitely is high.
         </label>
-        <textarea ref={field} id={rulesId} className="ib-riskd-t" rows={5} maxLength={INBOX_PULL_RISK_RULES_MAX} placeholder={PLACEHOLDER} value={rules} onChange={(event) => setRules(event.target.value)} data-pull-risk-rules-text="" />
+        <textarea ref={field} id={rulesId} className="ib-riskd-t" rows={5} placeholder={PLACEHOLDER} value={rules} onChange={(event) => setRules(event.target.value)} data-pull-risk-rules-text="" />
         {answer.agents.length === 0 ? (
           <p className="ib-quietline" data-pull-risk-no-agent="">
-            No agent found on this computer. Install Claude Code, Codex, Pi or OpenCode to run the checks.
+            No agent found on this computer. Install Claude Code, Codex, Pi or OpenCode to rank pull requests.
           </p>
         ) : (
           <>
@@ -108,7 +110,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
             <p className="ib-quietline">A cheap model is plenty: Sonnet, Terra or similar. Diffs go only to the provider you choose here.</p>
             {answer.agent_failed && (
               <p className="ib-quietline" data-pull-risk-failed="">
-                The last check didn&rsquo;t finish. Check that {agentName ?? 'the agent'} works on this computer.
+                The last ranking didn&rsquo;t finish. Make sure {agentName ?? 'the agent'} works on this computer.
               </p>
             )}
           </>
@@ -122,7 +124,7 @@ export function RiskRulesDialog({ answer, onSaved, onClose }: { answer: InboxPul
           <button type="button" className="ib-btn" onClick={onClose}>
             Cancel
           </button>
-          <button type="submit" className="ib-btn ib-pri" disabled={saving} data-pull-risk-save="">
+          <button type="submit" className="ib-btn ib-pri" disabled={saving || readingModel} data-pull-risk-save="">
             Save
           </button>
         </div>

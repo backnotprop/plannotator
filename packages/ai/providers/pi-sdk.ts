@@ -374,16 +374,18 @@ interface SessionConfig {
 }
 
 /**
- * Pi's arguments for a single judgment: no tools and no saved session. The
- * model and thinking level go here too, not over RPC: before pi 0.84.3 RPC
- * `set_model` rewrote the person's default model, which a background run must
- * never do.
+ * Pi's arguments for a single judgment: no tools, no saved session, and none of
+ * the person's extensions, skills or context files, which would load on every
+ * PR. The model and thinking level go here too, not over RPC: before pi 0.84.3
+ * RPC `set_model` rewrote the person's default model, which a background run
+ * must never do. Low thinking unless told otherwise: Pi lowers it further for a
+ * model that can't do it.
  */
 export function piOneShotArgs(model: string | undefined, level: string | undefined): string[] {
-	const args = ["--no-tools", "--no-session"];
+	const args = ["--no-tools", "--no-session", "--no-extensions", "--no-skills", "--no-context-files"];
 	const [provider, ...rest] = (model ?? "").split("/");
 	if (provider && rest.length > 0) args.push("--provider", provider, "--model", rest.join("/"));
-	if (level) args.push("--thinking", level);
+	args.push("--thinking", level ?? "low");
 	return args;
 }
 

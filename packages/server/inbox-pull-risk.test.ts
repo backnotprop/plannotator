@@ -4,13 +4,13 @@
  * not (off, no rules, an agent the person didn't choose); a run allowed to act; a big diff hiding what the rules ask about.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
+import { chmodSync, writeFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AIMessage, AIProvider, CreateSessionOptions } from "@plannotator/ai/types";
 import type { InboxPull, InboxPullDiffAnswer } from "@plannotator/core/inbox-types";
 import { saveConfig } from "@plannotator/shared/config";
-import { INBOX_PULL_RISK_FILE, RISK_CONCURRENCY, RISK_RETRY_MAX_MS, RISK_RETRY_MS, createPullRisk, defaultRiskModel, runRiskAgent, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
+import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, defaultRiskModel, installedPath, runRiskAgent, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
 import { buildRiskPrompt, parseRiskAnswer, trimDiffForRisk } from "./inbox-pull-risk-prompt";
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
@@ -36,8 +36,9 @@ const settled = async () => {
 };
 
 /** An engine with a scripted agent and a scripted diff read; every run is kept in `runs`. */
-function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean } = {}) {
+function engine(options: { answer?: RiskRunner; agents?: { id: string; label: string }[]; on?: () => boolean; now?: () => number; head?: (key: string) => string | null; patch?: string; diffFails?: boolean | string; diffGate?: Promise<void> } = {}) {
   const runs: RiskRun[] = [];
+  const reads: string[] = [];
   const risk = createPullRisk({
     dataDir,
     isOn: options.on ?? (() => true),
@@ -45,7 +46,9 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
     agents: () => options.agents ?? AGENTS,
     pulls: {
       diff: async (key) => {
-        if (options.diffFails) throw new Error("gh failed");
+        reads.push(key);
+        await options.diffGate;
+        if (options.diffFails) throw Object.assign(new Error("gh failed"), typeof options.diffFails === "string" ? { code: options.diffFails } : {});
         const number = key.split("#")[1];
         return { key, scope: "layer", base: "main", head: "x", patch: options.patch ?? "diff --git a/x b/x\n", head_sha: options.head ? options.head(key) : `head-${number}` } as InboxPullDiffAnswer;
       },
@@ -55,7 +58,7 @@ function engine(options: { answer?: RiskRunner; agents?: { id: string; label: st
       return (options.answer ?? (async () => ({ text: HIGH })))(run);
     },
   });
-  return { risk, runs };
+  return { risk, runs, reads };
 }
 
 const setRules = (rules = "Anything in billing.", provider: string | null = "pi-sdk", model: string | null = "anthropic/claude-sonnet-5") => saveConfig({ inboxPullRisk: { rules, provider, model } });
@@ -99,6 +102,23 @@ describe("what the agent reads", () => {
     expect(out).toContain("more lines of this file not shown");
     expect(out).toContain("+line 0 of src/huge.ts");
     expect(out).toContain("+line 0 of src/other.ts");
+  });
+  test("the limit holds however many files: a list and notes count too", () => {
+    for (const count of [500, 3_000]) {
+      const patch = Array.from({ length: count }, (_, i) => file(`src/f${i}.ts`, 3)).join("");
+      expect(trimDiffForRisk(patch, 40_000).length).toBeLessThanOrEqual(40_000);
+    }
+    const big = Array.from({ length: 40 }, (_, i) => file(`src/f${i}.ts`, 2_000)).join("");
+    expect(trimDiffForRisk(big, 40_000).length).toBeLessThanOrEqual(40_000);
+  });
+  test("a PR padded with hundreds of small files can't push the file that matters out of the list", () => {
+    const padded = Array.from({ length: 400 }, (_, i) => file(`docs/p${i}.md`, 3)).join("") + file("src/billing/charge.ts", 1) + file("src/billing/refund.ts", 40);
+    const out = trimDiffForRisk(padded, 40_000);
+    expect(out.length).toBeLessThanOrEqual(40_000);
+    expect(out).toContain("src/billing/charge.ts (+1 -0)");
+    expect(out).toContain("src/billing/refund.ts (+40 -0)");
+    // The room goes to what it can show, smallest first, not to nobody.
+    expect(out).toContain("+line 0 of src/billing/charge.ts");
   });
   test("a lockfile is named, not shown, even in a diff that would fit", () => {
     const out = trimDiffForRisk(file("bun.lock", 50) + file("src/a.ts", 2));
@@ -245,7 +265,7 @@ describe("no cost repeats", () => {
     expect(risk.answer().judgments["github.com/n/b#1"]).toBeDefined();
   });
 
-  test("a failed run shows nothing and tries again later, waiting longer each time", async () => {
+  test("a failed run shows nothing, and that PR waits the same time before each try", async () => {
     setRules();
     let now = 1_000_000;
     let text = "I think this is low risk.";
@@ -266,22 +286,151 @@ describe("no cost repeats", () => {
     await go();
     expect(runs).toHaveLength(2);
     now += RISK_RETRY_MS;
-    await go();
-    expect(runs).toHaveLength(2);
-    now += RISK_RETRY_MS;
+    text = HIGH;
     await go();
     expect(runs).toHaveLength(3);
-    // However long it has failed, it still comes back.
-    for (let i = 0; i < 8; i++) {
-      now += RISK_RETRY_MAX_MS;
-      await go();
-    }
-    expect(runs).toHaveLength(11);
-    text = HIGH;
-    now += RISK_RETRY_MAX_MS;
-    await go();
     expect(risk.answer().judgments["github.com/n/b#1"]?.level).toBe("high");
     expect(risk.answer().agent_failed).toBe(false);
+  });
+
+  const many = Array.from({ length: 30 }, (_, i) => pull(i + 1));
+
+  test("a broken agent stops everything for a while: a few runs, not one per PR, and the window stops waiting", async () => {
+    setRules();
+    let now = 1_000_000;
+    const { risk, runs, reads } = engine({ now: () => now, answer: async () => null });
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    expect(reads).toHaveLength(RISK_CONCURRENCY);
+    expect(risk.answer().pending).toBe(0);
+    expect(risk.answer().agent_failed).toBe(true);
+
+    now += RISK_AGENT_PAUSE_MS - 1;
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+
+    // After the pause, the next few, not the same ones.
+    now += 1;
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY * 2);
+    expect(new Set(runs.map((r) => r.prompt)).size).toBe(RISK_CONCURRENCY * 2);
+  });
+
+  test("one PR that keeps failing can't stop the others", async () => {
+    setRules();
+    const { risk, runs } = engine({ answer: async (run) => (run.prompt.includes("Title: PR 1\n") ? { text: "not json" } : { text: HIGH }) });
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(many.length);
+    expect(Object.keys(risk.answer().judgments)).toHaveLength(many.length - 1);
+  });
+
+  test("saving starts over at once: the person just looked at it", async () => {
+    setRules();
+    let answer: { text: string } | null = null;
+    const { risk, runs } = engine({ answer: async () => answer });
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    answer = { text: HIGH };
+    risk.save({ rules: "Anything in billing.", provider: "pi-sdk", model: null });
+    expect(risk.answer().agent_failed).toBe(false);
+    risk.assess(many);
+    await settled();
+    expect(Object.keys(risk.answer().judgments)).toHaveLength(many.length);
+  });
+
+  test("a diff too large to read isn't read again at this head; another failed read is, later", async () => {
+    setRules();
+    let now = 1_000_000;
+    const large = engine({ now: () => now, diffFails: "pull_diff_too_large" });
+    large.risk.assess([pull(1)]);
+    await settled();
+    now += RISK_RETRY_MS * 100;
+    large.risk.assess([pull(1)]);
+    await settled();
+    expect(large.reads).toHaveLength(1);
+    expect(large.runs).toEqual([]);
+
+    const flaky = engine({ now: () => now, diffFails: true });
+    flaky.risk.assess([pull(2)]);
+    await settled();
+    now += RISK_RETRY_MS;
+    flaky.risk.assess([pull(2)]);
+    await settled();
+    expect(flaky.reads).toHaveLength(2);
+  });
+
+  /** The first runs hold the line, so the rest wait in the queue; `release` lets them go. */
+  const held = (on: () => boolean = () => true) => {
+    let release = () => {};
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const made = engine({
+      on,
+      answer: async () => {
+        await gate;
+        return { text: HIGH };
+      },
+    });
+    return { ...made, release };
+  };
+
+  test("the switch going off while PRs wait: those run nothing", async () => {
+    setRules();
+    let on = true;
+    const { risk, runs, release } = held(() => on);
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    on = false;
+    release();
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    expect(risk.answer().pending).toBe(0);
+  });
+
+  test("the rules changing while PRs wait: those run nothing against the old ones", async () => {
+    setRules();
+    const { risk, runs, release } = held();
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    setRules("Something else.");
+    release();
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+  });
+
+  test("the Inbox stopping during a diff read: no agent starts", async () => {
+    setRules();
+    let release = () => {};
+    const { risk, runs, reads } = engine({ diffGate: new Promise<void>((resolve) => (release = resolve)) });
+    risk.assess([pull(1)]);
+    await settled();
+    expect(reads).toHaveLength(1);
+    risk.stop();
+    release();
+    await settled();
+    expect(runs).toEqual([]);
+  });
+
+  test("the Inbox stopping: nothing more runs, nothing is written, and a later list starts nothing", async () => {
+    setRules();
+    const { risk, runs, release } = held();
+    risk.assess(many);
+    await settled();
+    risk.stop();
+    release();
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    expect(existsSync(join(dataDir, "inbox", INBOX_PULL_RISK_FILE))).toBe(false);
+    risk.assess(many);
+    await settled();
+    expect(runs).toHaveLength(RISK_CONCURRENCY);
+    expect(risk.answer().pending).toBe(0);
   });
 
   test("a diff that can't be read, or whose head moved, costs no agent run", async () => {
@@ -309,11 +458,18 @@ describe("the person's rules", () => {
     expect(readFileSync(file, "utf8")).not.toContain("merger");
   });
 
+  test("long rules are the person's to write: a paste isn't cut", () => {
+    const { risk } = engine();
+    const long = "Anything in billing. ".repeat(2_000).trim();
+    risk.save({ rules: long, provider: "pi-sdk", model: null });
+    expect(risk.answer().rules).toBe(long);
+  });
+
   test("save takes the dialog's three fields and refuses anything else", () => {
     const { risk } = engine();
     risk.save({ rules: "  Billing.  ", provider: "pi-sdk", model: "a/b" });
     expect(risk.answer()).toMatchObject({ rules: "Billing.", provider: "pi-sdk", model: "a/b" });
-    for (const bad of [{ rules: 1, provider: null, model: null }, { rules: "x".repeat(8_001), provider: null, model: null }, { rules: "x", provider: "rm -rf", model: null }, { rules: "x", provider: null, model: 3 }]) {
+    for (const bad of [{ rules: 1, provider: null, model: null }, { rules: "x", provider: "rm -rf", model: null }, { rules: "x", provider: null, model: 3 }]) {
       expect(() => risk.save(bad)).toThrow();
     }
     expect(risk.answer().rules).toBe("Billing.");
@@ -337,8 +493,8 @@ describe("one run on a provider", () => {
 
   test("no tools, one turn, the empty folder, the cheap default at its lowest effort", async () => {
     const seen: { options?: CreateSessionOptions } = {};
-    const answer = await runRiskAgent(provider([{ type: "result", sessionId: "s", success: true, result: HIGH, costUsd: 0.01 }], seen), run);
-    expect(answer).toEqual({ text: HIGH, costUsd: 0.01 });
+    const answer = await runRiskAgent(provider([{ type: "result", sessionId: "s", success: true, result: HIGH }], seen), run);
+    expect(answer).toEqual({ text: HIGH });
     expect(seen.options).toMatchObject({ cwd: "/empty", model: "claude-sonnet-5", reasoningEffort: "low", maxTurns: 1, oneShot: { systemPrompt: "SYSTEM" } });
   });
 
@@ -365,6 +521,31 @@ describe("one run on a provider", () => {
     });
     expect(await runRiskAgent(hung, run, 5)).toBeNull();
   });
+
+  test("an agent that never opens its session ends at the timeout too, and the session is closed if it comes late", async () => {
+    let open = (_: unknown) => {};
+    let closed = 0;
+    const hung = {
+      name: "stub",
+      models: [],
+      createSession: () => new Promise((resolve) => (open = resolve)),
+    } as unknown as AIProvider;
+    expect(await runRiskAgent(hung, run, 5)).toBeNull();
+    open({ abort: () => closed++, dispose: () => closed++, query: async function* () {} });
+    await Bun.sleep(5);
+    expect(closed).toBe(2);
+  });
+
+  test("no model saved and none known yet: it reads the list and takes the cheap one, instead of the person's default", async () => {
+    const seen: { options?: CreateSessionOptions } = {};
+    const stub = provider([{ type: "result", sessionId: "s", success: true, result: HIGH }], seen) as unknown as { models: unknown[]; fetchModels: () => Promise<void> };
+    stub.models = [];
+    stub.fetchModels = async () => {
+      stub.models = [{ id: "a/claude-opus" }, { id: "a/claude-sonnet-5" }];
+    };
+    await runRiskAgent(stub as unknown as AIProvider, run);
+    expect(seen.options!.model).toBe("a/claude-sonnet-5");
+  });
 });
 
 describe("the model it starts on", () => {
@@ -373,6 +554,31 @@ describe("the model it starts on", () => {
     expect(defaultRiskModel([{ id: "gpt-6-sol", default: true }, { id: "gpt-5.6-terra" }, { id: "gpt-5.6-luna" }])).toBe("gpt-5.6-terra");
     expect(defaultRiskModel([{ id: "google/gemini-pro" }, { id: "google/gemini-flash" }])).toBe("google/gemini-flash");
     expect(defaultRiskModel([{ id: "big" }, { id: "bigger", default: true }])).toBe("bigger");
+    // Gemini has "mini" in it; a mini model is another thing.
+    expect(defaultRiskModel([{ id: "opus", default: true }, { id: "google/gemini-3-pro" }])).toBe("opus");
+    expect(defaultRiskModel([{ id: "opus", default: true }, { id: "o4-mini" }])).toBe("o4-mini");
     expect(defaultRiskModel([])).toBeNull();
+  });
+});
+
+describe("finding the agent", () => {
+  const savedPath = process.env.PATH;
+  const savedSandbox = process.env.PLANNOTATOR_TEST_SANDBOX;
+  afterEach(() => {
+    process.env.PATH = savedPath;
+    if (savedSandbox === undefined) delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    else process.env.PLANNOTATOR_TEST_SANDBOX = savedSandbox;
+  });
+
+  test("a test Inbox finds its fake in a temp folder, and never a CLI outside one", () => {
+    const fake = join(dataDir, "fake-agent");
+    writeFileSync(fake, "#!/bin/sh\n");
+    chmodSync(fake, 0o755);
+    process.env.PATH = `${dataDir}:/bin:/usr/bin`;
+    process.env.PLANNOTATOR_TEST_SANDBOX = "1";
+    expect(installedPath("fake-agent")).toBe(fake);
+    expect(installedPath("sh")).toBeNull();
+    delete process.env.PLANNOTATOR_TEST_SANDBOX;
+    expect(installedPath("sh")).not.toBeNull();
   });
 });

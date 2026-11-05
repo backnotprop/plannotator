@@ -20,6 +20,7 @@
  */
 import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
+import { tmpdir } from 'node:os';
 import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
@@ -222,6 +223,8 @@ test.beforeAll(async ({ browser }) => {
     NO_ANON_PING: '1',
     PLANNOTATOR_INBOX_NOTES: '0',
     PLANNOTATOR_TEST_SANDBOX: '1',
+    // The sandbox finds an agent only in a temp folder, and this one is where the fake `pi` is.
+    TMPDIR: tmpdir(),
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),
     XDG_CONFIG_HOME: join(root, 'xdg'),
@@ -240,27 +243,33 @@ test.afterAll(async () => {
   }
 });
 
-test('Code review off: the route refuses, and no line, filter or agent run shows', async () => {
+test('Code review off: the route refuses, and no chip or agent run shows', async () => {
   await page.goto(url);
   const refused = await page.request.get(`${url}api/inbox/pulls/risk`);
   expect(refused.status()).toBe(409);
-  await expect(page.locator('[data-pulls-risk-hint]')).toHaveCount(0);
+  await expect(page.locator('[data-pulls-risk-chip]')).toHaveCount(0);
   expect(piLog()).toEqual([]);
 });
 
-test('on with no rules: one quiet line, no filter, no agent run', async () => {
+test('on with no rules: the chip holds only the way to the rules; no agent run', async () => {
   const on = await page.request.post(`${url}api/inbox/settings`, { data: { code_review: { on: true } } });
   expect(on.status()).toBe(200);
   await openPulls();
-  await expect(page.locator('[data-pulls-risk-hint]')).toBeVisible();
-  await expect(page.locator('[data-pulls-risk-chip]')).toHaveCount(0);
+  await expect(page.locator('[data-pulls-risk-chip]')).toHaveText(/Risk/);
   await expect(row(501).locator('[data-pull-risk]')).toHaveCount(0);
   expect(prompts()).toEqual([]);
   await shots('no-rules');
+  await page.locator('[data-pulls-risk-chip]').click();
+  await expect(page.locator('[data-pulls-risk-rules]')).toBeVisible();
+  await expect(page.locator('[data-pulls-risk-option]')).toHaveCount(0);
+  await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
+  await page.screenshot({ path: join(proofDir, 'no-rules-menu-1440-light.png') });
+  await page.keyboard.press('Escape');
 });
 
 test('the dialog: the installed agent, its models from the agent, the cheap one picked; saving starts the judgments', async () => {
-  await page.locator('[data-pulls-risk-hint]').click();
+  await page.locator('[data-pulls-risk-chip]').click();
+  await page.locator('[data-pulls-risk-rules]').click();
   const dialog = page.locator('[data-dialog="pull-risk-rules"]');
   await expect(dialog.getByRole('heading', { name: 'No slop rules' })).toBeVisible();
   await expect(dialog.locator('[data-pull-risk-agent] option')).toHaveText(['Pi']);
@@ -274,7 +283,6 @@ test('the dialog: the installed agent, its models from the agent, the cheap one 
   expect(prompts()).toEqual([]);
   await dialog.locator('[data-pull-risk-save]').click();
   await expect(dialog).toHaveCount(0);
-  await expect(page.locator('[data-pulls-risk-hint]')).toHaveCount(0);
 });
 
 test('the rows: all three levels, no mark for an answer that makes no sense, and how the agent ran', async () => {
@@ -287,7 +295,7 @@ test('the rows: all three levels, no mark for an answer that makes no sense, and
   await expect(row(504).locator('[data-pull-risk]')).toHaveCount(0);
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
   expect(judged).toHaveLength(6);
-  expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --provider anthropic --model claude-sonnet-5');
+  expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
   const asked = prompts().find((l) => l.prompt!.includes('Title: Retry failed charges'))!.prompt!;
   expect(asked).toContain('Anything in billing or charges.');
   expect(asked).toContain('+new');
@@ -309,13 +317,17 @@ test('the filter: High, Medium and up, remembered; what has no judgment is count
   await expect(page.locator('[data-pulls-risk-menu]')).toBeVisible();
   await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'reduce' });
   await page.screenshot({ path: join(proofDir, 'filter-menu-1440-light.png') });
+  // A key pressed first is the hard case: the browser then draws a ring on whatever gets the focus next.
   await page.keyboard.press('Escape');
   await pick('high');
+  await expect(page.locator('[data-pulls-risk-menu]')).toHaveCount(0);
+  // After a click, no ring stays on the chip.
+  expect(await page.locator('[data-pulls-risk-chip]').evaluate((el) => el.matches(':focus-visible'))).toBe(false);
   await expect(row(501)).toBeVisible();
   await expect(row(506)).toBeVisible();
   await expect(row(502)).toHaveCount(0);
   await expect(row(503)).toHaveCount(0);
-  await expect(page.locator('[data-pulls-risk-not-judged="1"]')).toHaveText('1 pull request not checked yet.');
+  await expect(page.locator('[data-pulls-risk-not-judged="1"]')).toHaveText('1 pull request not ranked yet.');
   await shots('filter-high');
   await page.reload();
   await expect(row(501)).toBeVisible();
@@ -370,18 +382,20 @@ test("a phone: tapping a mark shows the sentence and doesn't open the row", asyn
   await mark.tap();
   await expect(tab.locator('[data-pn-tooltip]')).toContainText('It changes the charge retry schedule');
   await expect(tab.locator('[data-pulls-risk-line]')).toHaveCount(0);
+  // Past its fade: the picture has to show the sentence.
+  await expect.poll(() => tab.locator('[data-pn-tooltip]').evaluate((el) => getComputedStyle(el).opacity)).toBe('1');
   await tab.screenshot({ path: join(proofDir, 'tap-390-light.png') });
   await phone.close();
 });
 
-test('empty rules turn it off again: the marks and the filter go, the line comes back', async () => {
+test('empty rules turn it off again: the marks and the filter choices go, the chip stays', async () => {
   await page.locator('[data-pulls-risk-chip]').click();
   await page.locator('[data-pulls-risk-rules]').click();
   const dialog = page.locator('[data-dialog="pull-risk-rules"]');
   await expect(dialog.locator('[data-pull-risk-rules-text]')).toHaveValue(RULES);
   await dialog.locator('[data-pull-risk-rules-text]').fill('');
   await dialog.locator('[data-pull-risk-save]').click();
-  await expect(page.locator('[data-pulls-risk-hint]')).toBeVisible();
-  await expect(page.locator('[data-pulls-risk-chip]')).toHaveCount(0);
   await expect(row(501).locator('[data-pull-risk]')).toHaveCount(0);
+  await page.locator('[data-pulls-risk-chip]').click();
+  await expect(page.locator('[data-pulls-risk-option]')).toHaveCount(0);
 });

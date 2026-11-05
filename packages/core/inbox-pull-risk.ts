@@ -8,8 +8,6 @@ export type InboxPullRiskLevel = "low" | "medium" | "high";
 
 export const INBOX_PULL_RISK_LEVELS: readonly InboxPullRiskLevel[] = ["low", "medium", "high"];
 
-/** The longest rules text kept: it goes into every judgment's prompt. */
-export const INBOX_PULL_RISK_RULES_MAX = 8_000;
 
 /** The longest sentence a judgment may carry. */
 export const INBOX_PULL_RISK_WHY_MAX = 300;

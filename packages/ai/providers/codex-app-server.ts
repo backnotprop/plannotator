@@ -44,7 +44,7 @@ import {
   resolveWindowsCommandShim,
 } from "./command-path.ts";
 import { guardChildStreams, writeChildLine } from "./child-io.ts";
-import { askAiChildEnv, codexAskAiConfigArgs, readCodexConfigTexts } from "./ask-ai-env.ts";
+import { askAiChildEnv, codexAskAiConfigArgs, codexOneShotConfigArgs, readCodexConfigTexts } from "./ask-ai-env.ts";
 import { CODEX_FALLBACK_MODELS, cliVersionFrom, effortList, type CatalogModel } from "@plannotator/core/model-catalog";
 
 const PROVIDER_NAME = "codex-sdk";
@@ -148,6 +148,20 @@ export function classifyRpcMessage(msg: RpcMessage): RpcClassification {
     };
   }
   return { kind: "unknown" };
+}
+
+/** What a turn of plain writing is made of. Any other item is a tool of some kind, known or new. */
+const CODEX_ONE_SHOT_ITEMS: ReadonlySet<unknown> = new Set(["userMessage", "agentMessage", "reasoning"]);
+
+/**
+ * In a single judgment (`oneShot`), an item that isn't plain writing counts as a tool use, not only the shell:
+ * MCP calls, web search and the like sit outside the read-only sandbox. Null for everything else.
+ */
+export function codexOneShotToolUse(notification: { method: string; params?: RpcMessage }): AIMessage | null {
+  if (notification.method !== "item/started") return null;
+  const item = notification.params?.item as RpcMessage | undefined;
+  if (!item || CODEX_ONE_SHOT_ITEMS.has(item.type)) return null;
+  return { type: "tool_use", toolName: String(item.type), toolInput: {}, toolUseId: String(item.id ?? "") };
 }
 
 /**
@@ -344,10 +358,11 @@ export class CodexAppServerProcess {
 
   /** Spawn + JSON-RPC initialize handshake, once. `initTimeoutMs` bounds the
    *  initialize wait (model discovery passes a short value so it can't hang).
-   *  `env`: the environment Codex runs in and whose config it reads; default this process's. */
-  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>): Promise<void> {
+   *  `env`: the environment Codex runs in and whose config it reads; default this process's.
+   *  `oneShot`: a single judgment, with web search and the MCP servers off. */
+  start(codexPath: string, cwd: string, initTimeoutMs?: number, env?: Readonly<Record<string, string | undefined>>, oneShot?: boolean): Promise<void> {
     if (!this.startPromise) {
-      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env).catch((err) => {
+      this.startPromise = this.doStart(codexPath, cwd, initTimeoutMs, env, oneShot).catch((err) => {
         this.startPromise = null;
         throw err;
       });
@@ -355,9 +370,10 @@ export class CodexAppServerProcess {
     return this.startPromise;
   }
 
-  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env): Promise<void> {
+  private async doStart(codexPath: string, cwd: string, initTimeoutMs?: number, env: Readonly<Record<string, string | undefined>> = process.env, oneShot?: boolean): Promise<void> {
     const commandPath = resolveWindowsCommandShim(codexPath);
-    const appServerArgs = [...codexAskAiConfigArgs(readCodexConfigTexts(cwd, env)), "app-server"];
+    const configTexts = readCodexConfigTexts(cwd, env);
+    const appServerArgs = [...codexAskAiConfigArgs(configTexts), ...(oneShot ? codexOneShotConfigArgs(configTexts) : []), "app-server"];
     const command =
       buildWindowsCommandScriptSpawnCommand(commandPath, appServerArgs) ?? [
         commandPath,
@@ -845,12 +861,23 @@ class CodexAppServerSession extends BaseSession {
           return;
         }
       }
+      const tool = this.config.oneShot ? codexOneShotToolUse(notif) : null;
+      if (tool) push(tool);
       for (const msg of mapCodexAppServerEvent(notif, this.id)) push(msg);
       if (notif.method === "turn/completed" || notif.method === "process_exited") {
         finish();
       }
     });
     const unsubRequests = proc.onRequest((method, id, params) => {
+      // A single judgment asks nothing of anyone: whatever Codex wants, the run ends with no answer.
+      if (this.config.oneShot) {
+        const requestId = String(id);
+        push({ type: "permission_request", requestId, toolName: method, toolInput: {}, toolUseId: requestId });
+        if (method === PERMISSIONS_APPROVAL_METHOD) proc.respond(id, { permissions: {}, scope: "turn" });
+        else if (method === CMD_APPROVAL_METHOD || method === FILE_APPROVAL_METHOD) proc.respond(id, { decision: "cancel" });
+        else proc.respondError(id, `Unsupported request: ${method}`);
+        return;
+      }
       // Permission-profile escalation (network/fs). Ask AI runs read-only, so
       // deny it by granting nothing — this is exactly Codex's own cancel
       // response (empty profile + turn scope), which lets the turn continue
@@ -961,7 +988,7 @@ class CodexAppServerSession extends BaseSession {
 
     if (!this.process || !this.process.alive) {
       this.process = new CodexAppServerProcess();
-      await this.process.start(this.config.codexExecutablePath, this.config.cwd);
+      await this.process.start(this.config.codexExecutablePath, this.config.cwd, undefined, undefined, this.config.oneShot);
       this.threadStarted = false;
     }
     if (this.threadStarted) return;

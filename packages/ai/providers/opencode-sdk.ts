@@ -410,7 +410,8 @@ class OpenCodeSession extends BaseSession {
 									system: this.config.systemPrompt,
 								}),
 							...(modelParam && { model: modelParam }),
-							...(this.config.noTools && { tools: { "*": false } }),
+							// `variant`: the low effort of a model that has one; anything else ignores it.
+							...(this.config.noTools && { tools: { "*": false }, variant: "low" }),
 							parts: [{ type: "text", text: prompt }],
 						},
 					});

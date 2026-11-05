@@ -9,8 +9,6 @@ import { INBOX_PULL_RISK_LEVELS, INBOX_PULL_RISK_WHY_MAX, type InboxPullRiskJudg
 
 /** How much of a diff goes to the agent: a few cents at most on a cheap model. Past this many a rule is rarely decided by more lines. */
 export const RISK_DIFF_MAX_CHARS = 40_000;
-/** How much of that the list of changed files may take. */
-const FILE_LIST_MAX_CHARS = 8_000;
 
 export const RISK_SYSTEM_PROMPT = `You check how risky a pull request is against one person's rules. You make one quick judgment from the diff.
 
@@ -57,26 +55,32 @@ function splitPatch(patch: string): FileChunk[] {
   return chunks;
 }
 
-/** At most `max` characters of a file's diff, whole lines, saying how many lines were left out. */
+/** The room a cut file's "not shown" line takes, and the least worth showing: under that, a file's header is all it would get. */
+const CUT_NOTE_ROOM = 48;
+const CUT_MIN = 200;
+
+/** At most `max` characters of a file's diff, whole lines, saying how many lines were left out. Nothing at all when `max` is too small to help. */
 function cutChunk(text: string, max: number): string {
   if (text.length <= max) return text;
-  const at = text.lastIndexOf("\n", max);
-  const kept = text.slice(0, at > 0 ? at : max);
+  if (max < CUT_MIN) return "";
+  const end = max - CUT_NOTE_ROOM;
+  const at = text.lastIndexOf("\n", end);
+  const kept = text.slice(0, at > 0 ? at : end);
   const left = text.slice(kept.length).split("\n").length - 1;
   return `${kept}\n[${left} more lines of this file not shown]\n`;
 }
 
 /**
- * The diff as the agent reads it, at most about `max` characters. Rules are mostly
- * about what a change touches, so every changed path stays in view, even when the
- * lines cannot. Lockfiles and generated files are named but never shown. The rest
- * shares the room evenly: a small file is whole, and what it leaves goes to the
- * big ones, each cut at its end. An even share keeps one huge file from hiding
- * a small change to something a rule names.
+ * The diff as the agent reads it, at most `max` characters. Rules are mostly about
+ * what a change touches, so the changed paths come first and can take half the room,
+ * even when the lines cannot fit. Lockfiles and generated files are named but never
+ * shown. The rest shares what is left evenly: a small file is whole, and what it leaves
+ * goes to the big ones, each cut at its end. An even share keeps one huge file from
+ * hiding a small change to something a rule names.
  */
 export function trimDiffForRisk(patch: string, max = RISK_DIFF_MAX_CHARS): string {
   const files = splitPatch(patch);
-  if (files.length === 0) return patch.length <= max ? patch : cutChunk(patch, max);
+  if (files.length === 0) return cutChunk(patch, max);
   const generated = (f: FileChunk) => isDefaultGeneratedPath(f.path);
   const shown = files.filter((f) => !generated(f));
   const fits = shown.reduce((sum, f) => sum + f.text.length, 0) <= max;
@@ -85,23 +89,24 @@ export function trimDiffForRisk(patch: string, max = RISK_DIFF_MAX_CHARS): strin
   let list = "";
   let listed = 0;
   for (const line of listLines) {
-    if (list.length + line.length + 1 > FILE_LIST_MAX_CHARS) break;
+    if (list.length + line.length + 1 > max / 2) break;
     list += `${line}\n`;
     listed++;
   }
   if (listed < files.length) list += `...and ${files.length - listed} more files\n`;
+  const head = `Files changed:\n${list}\nThe diff, trimmed to fit. Some lines are not shown:\n`;
   // Fair share: the smallest files take what they need, and the rest split what is left.
-  let room = Math.max(0, max - list.length);
+  let room = Math.max(0, max - head.length);
   const quota = new Map<FileChunk, number>();
   const bySize = [...shown].sort((a, b) => a.text.length - b.text.length);
   bySize.forEach((file, i) => {
-    const share = Math.floor(room / (bySize.length - i));
+    // Too many files for a share worth showing: the smallest get a useful piece until the room is gone.
+    const share = Math.max(Math.floor(room / (bySize.length - i)), Math.min(CUT_MIN, room));
     const take = Math.min(file.text.length, share);
     quota.set(file, take);
     room -= take;
   });
-  const body = shown.map((f) => cutChunk(f.text, quota.get(f) ?? 0)).join("");
-  return `Every file changed:\n${list}\nThe diff, trimmed to fit. Some lines are not shown:\n${body}`;
+  return head + shown.map((f) => cutChunk(f.text, quota.get(f) ?? 0)).join("");
 }
 
 /** The message that carries the rules and the pull request. `fence` must not be guessable from the diff. */

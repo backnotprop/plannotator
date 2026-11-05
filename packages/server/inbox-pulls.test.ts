@@ -270,6 +270,19 @@ describe("risk ranking", () => {
     fetch(`${base}/api/inbox/pulls/risk`, { method: "POST", headers: { "Content-Type": "application/json", ...headers }, body: JSON.stringify(body) });
   const settings = { rules: "Anything in billing.", provider: "pi-sdk", model: "a/claude-sonnet-5" };
 
+  test("the Reviews page's read starts judgments too", async () => {
+    const runs: RiskRun[] = [];
+    const w = await riskWorld(async (run) => {
+      runs.push(run);
+      return { text: '{"risk":"high","why":"It changes the retry schedule."}' };
+    });
+    await w.send("Opened https://github.com/northwind/billing-svc/pull/412", "retries");
+    expect((await save(w.base, settings)).status).toBe(200);
+    expect((await fetch(`${w.base}/api/inbox/reviews?refresh=1`)).status).toBe(200);
+    await Bun.sleep(100);
+    expect(runs.length).toBeGreaterThan(0);
+  });
+
   test("the list read starts judgments only once rules exist, and the window reads them back for the current heads", async () => {
     const runs: RiskRun[] = [];
     const w = await riskWorld(async (run) => {

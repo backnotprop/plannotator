@@ -1,12 +1,12 @@
 /**
  * PR risk ranking in the window. What regresses:
- *  - the filter hiding what it should keep (a stack's high layer, a row in the folded group), or hiding a row that has
- *    no judgment without a word;
+ *  - the filter hiding what it should keep (a stack's high layer, a row in the folded group), or hiding a row with a
+ *    layer not ranked without a word;
+ *  - a save during the model read leaving the agent on the person's own, possibly expensive, default;
  *  - a merged layer's old judgment deciding a stack;
  *  - the filter closing the stack open beside the list;
  *  - a tap on a mark opening the row instead of showing the sentence;
  *  - the dialog losing the person's words when a save fails, or keeping the last agent's model after a switch;
- *  - the marks or the line showing while Code review's answer says there's nothing.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -131,19 +131,18 @@ const page = (stackId: string | null = null, opened: string[] = []) => (
 const shownRows = () => [...document.querySelectorAll('[data-pulls-row]')].map((r) => r.getAttribute('data-pulls-row'));
 const markOf = (n: number) => document.querySelector(`[data-pulls-row="${key(n)}"] [data-pull-risk]`)?.getAttribute('data-pull-risk') ?? null;
 
-test.skipIf(!hasDom)('no rules: one line and no marks, however old judgments or a remembered filter read', async () => {
+test.skipIf(!hasDom)('no rules: the chip and no marks, however a remembered filter reads', async () => {
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
   spy('pullRisk', async () => ({ ...JUDGED, rules: '', judgments: {} }));
   await mount(page());
-  expect(document.querySelector('[data-pulls-risk-hint]')).not.toBeNull();
-  expect(document.querySelector('[data-pulls-risk-chip]')).toBeNull();
+  expect(document.querySelector('[data-pulls-risk-chip]')).not.toBeNull();
+  expect(document.querySelector('[data-pulls-risk-filter]')!.getAttribute('data-pulls-risk-filter')).toBe('all');
   expect(shownRows()).toContain(key(1));
 });
 
 test.skipIf(!hasDom)('marks: a stack takes its highest open layer, never a merged one', async () => {
   spy('pullRisk', async () => JUDGED);
   await mount(page());
-  expect(document.querySelector('[data-pulls-risk-hint]')).toBeNull();
   expect(markOf(1)).toBe('low');
   expect(markOf(2)).toBe('high');
   expect(markOf(3)).toBe('medium');
@@ -158,7 +157,33 @@ test.skipIf(!hasDom)('High keeps the high rows, also from the folded group, and 
   spy('pullRisk', async () => ({ ...JUDGED, judgments }));
   await mount(page());
   expect(shownRows().sort()).toEqual([key(2), key(4), key(6)].sort());
-  expect(document.querySelector('[data-pulls-risk-not-judged]')?.textContent).toBe('1 pull request not checked yet.');
+  expect(document.querySelector('[data-pulls-risk-not-judged]')?.textContent).toBe('1 pull request not ranked yet.');
+});
+
+test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it can say, High hides it and counts it, high still shows', async () => {
+  // #5 and #6 are one stack. #5 low with #6 not ranked: maybe past the size the Inbox reads, so never.
+  const low = { ...JUDGED.judgments };
+  delete low[key(6)];
+  spy('pullRisk', async () => ({ ...JUDGED, judgments: low }));
+  await mount(page());
+  expect(markOf(6)).toBeNull();
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  await mount(page());
+  expect(shownRows()).not.toContain(key(6));
+  expect(document.querySelector('[data-pulls-risk-not-judged]')?.getAttribute('data-pulls-risk-not-judged')).toBe('1');
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  // The other way round: #6 high and #5 not ranked is on screen, so nothing is hidden to count.
+  const high = { ...JUDGED.judgments };
+  delete high[key(5)];
+  spy('pullRisk', async () => ({ ...JUDGED, judgments: high }));
+  await mount(page());
+  expect(shownRows()).toContain(key(6));
+  expect(document.querySelector('[data-pulls-risk-not-judged]')).toBeNull();
 });
 
 test.skipIf(!hasDom)('Medium and up puts high first within a group; All keeps the list as it came', async () => {
@@ -235,6 +260,23 @@ test.skipIf(!hasDom)('a save that fails keeps the words and says why; a switch o
   expect(document.querySelector('[role="alert"]')?.textContent).toContain('could not be saved');
   expect(document.querySelector<HTMLTextAreaElement>('[data-pull-risk-rules-text]')!.value).toBe('Anything in billing.');
   expect(closed).toBe(0);
+});
+
+test.skipIf(!hasDom)('Save waits for a new agent\'s cheap model, so a save during the read can\'t leave it on the person\'s default; a saved model needs no wait', async () => {
+  let arrive = (_: { models: { id: string; label: string }[]; default_model: string | null }) => {};
+  spy('pullRiskModels', () => new Promise((resolve) => (arrive = resolve)));
+  await mount(<RiskRulesDialog answer={{ ...JUDGED, provider: null, model: null, agents: [{ id: 'pi-sdk', label: 'Pi' }] }} onSaved={() => {}} onClose={() => {}} />);
+  const save = () => document.querySelector<HTMLButtonElement>('[data-pull-risk-save]')!;
+  expect(save().disabled).toBe(true);
+  await act(async () => arrive({ models: [{ id: 'a/sonnet', label: 'Sonnet' }], default_model: 'a/sonnet' }));
+  await settle();
+  expect(save().disabled).toBe(false);
+  expect(document.querySelector<HTMLSelectElement>('[data-pull-risk-model]')!.value).toBe('a/sonnet');
+  if (root) await act(async () => root!.unmount());
+  document.body.innerHTML = '';
+
+  await mount(<RiskRulesDialog answer={JUDGED} onSaved={() => {}} onClose={() => {}} />);
+  expect(save().disabled).toBe(false);
 });
 
 test.skipIf(!hasDom)('no agent installed: one line, and the rules can still be saved', async () => {

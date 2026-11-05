@@ -5035,6 +5035,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     // An answer in progress is saved. Open clients lose the connection (the force below cuts their
     // `closing` short); one that polls the next Inbox gets a 404, and stops.
     ask.stop();
+    // No judgment written after stop, and no agent left running.
+    pullRisk.stop();
     void mcp.close().catch(() => {});
     server.stop(true);
     // The tailnet mapping and the door listener, the Wi-Fi listener and its

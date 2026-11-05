@@ -7752,8 +7752,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-risk { flex: none; display: inline-flex; align-items: center; font-size: var(--ib-fs-12, 12px); font-weight: 500; line-height: 17px; white-space: nowrap; color: var(--muted-foreground); }
 .ib-risk[data-risk="low"] { font-weight: 400; color: color-mix(in oklch, var(--muted-foreground) 72%, transparent); }
 .ib-risk[data-risk="high"] { padding: 0 7px; border-radius: 999px; font-weight: 600; background: color-mix(in oklch, var(--destructive) 14%, var(--card)); color: color-mix(in oklch, var(--destructive) 85%, var(--foreground)); }
-.ib-pr-riskhint { display: block; width: 100%; margin: 2px 0 6px; padding: 4px 10px; border: 0; background: none; text-align: left; font: inherit; font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); cursor: pointer; }
-.ib-pr-riskhint:hover { color: var(--foreground); text-decoration: underline; }
 .ib-pr-risknote { margin: 8px 0 0; padding: 4px 10px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-pr-empty .ib-pr-risknote { margin: 0; padding: 0; }
 .ib-pr-riskline { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; margin: 10px 0 0; font-size: var(--ib-fs-13, 13px); line-height: 1.5; color: var(--muted-foreground); }

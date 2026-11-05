@@ -162,6 +162,7 @@ interface ClaudeSDKQueryOptions {
   allowDangerouslySkipPermissions?: boolean;
   pathToClaudeCodeExecutable?: string;
   settingSources?: string[];
+  settings?: { disableAllHooks?: boolean };
   effort?: string;
   strictMcpConfig?: boolean;
   /** The whole env of the `claude` process (the SDK does not merge it with process.env). */
@@ -501,15 +502,17 @@ class ClaudeAgentSDKSession extends BaseSession {
       opts.maxBudgetUsd = this.config.maxBudgetUsd;
     }
 
-    // A single judgment: only this prompt, no tools, no MCP servers, nothing of
-    // the person's settings or folder, and no session left behind.
+    // A single judgment: only this prompt, no tools, no MCP servers, no hooks and
+    // no session left behind. Settings load as they do for Ask AI: they can say
+    // where this person's Claude sends code (Bedrock, Vertex), and leaving them
+    // out would send a diff to whatever login it has instead.
     if (this.config.oneShot) {
       return {
         ...opts,
         systemPrompt: this.config.systemPrompt ?? "",
         tools: [],
         allowedTools: [],
-        settingSources: [],
+        settings: { disableAllHooks: true },
         strictMcpConfig: true,
         persistSession: false,
       };
