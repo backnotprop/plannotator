@@ -2,6 +2,7 @@ import {
   forwardRef,
   useCallback,
   useImperativeHandle,
+  useLayoutEffect,
   useRef,
   type CSSProperties,
   type ElementType,
@@ -29,6 +30,12 @@ export interface OverlayScrollAreaHandle {
   getViewport(): HTMLElement | null;
 }
 
+/** Owned by the host, so positions survive a panel being closed and unmounted. */
+export interface ScrollMemory {
+  positions: Map<string, number>;
+  key: string;
+}
+
 export interface OverlayScrollAreaProps
   extends Omit<React.HTMLAttributes<HTMLElement>, 'children'> {
   /** Root element tag (default 'div'). Use 'main' for the primary plan viewport. */
@@ -40,6 +47,7 @@ export interface OverlayScrollAreaProps
   overflowX?: 'hidden' | 'scroll' | 'visible' | 'auto';
   /** Vertical overflow (default 'auto'). */
   overflowY?: 'hidden' | 'scroll' | 'visible' | 'auto';
+  scrollMemory?: ScrollMemory;
 }
 
 export const OverlayScrollArea = forwardRef<
@@ -52,12 +60,14 @@ export const OverlayScrollArea = forwardRef<
     onViewportReady,
     overflowX = 'hidden',
     overflowY = 'auto',
+    scrollMemory,
     style,
     ...rest
   },
   ref,
 ) {
   const elRef = useRef<HTMLElement | null>(null);
+  const activeMemoryRef = useRef<ScrollMemory | undefined>(undefined);
   // Hold the latest callback without changing the ref-callback identity, so the
   // element isn't detached/reattached on every parent render.
   const onReadyRef = useRef(onViewportReady);
@@ -67,9 +77,27 @@ export const OverlayScrollArea = forwardRef<
   useImperativeHandle(ref, () => ({ getViewport }), [getViewport]);
 
   const setEl = useCallback((node: HTMLElement | null) => {
+    const previous = elRef.current;
+    const memory = activeMemoryRef.current;
+    if (previous && previous !== node && memory) {
+      memory.positions.set(memory.key, previous.scrollTop);
+    }
     elRef.current = node;
+    if (node && memory) node.scrollTop = memory.positions.get(memory.key) ?? 0;
     onReadyRef.current?.(node);
   }, []);
+
+  useLayoutEffect(() => {
+    const node = elRef.current;
+    activeMemoryRef.current = scrollMemory;
+    if (!node || !scrollMemory) return;
+    const { positions, key } = scrollMemory;
+    // Before paint: no flash of the list's first rows when a panel reopens.
+    node.scrollTop = positions.get(key) ?? 0;
+    const save = () => { positions.set(key, node.scrollTop); };
+    node.addEventListener('scroll', save, { passive: true });
+    return () => node.removeEventListener('scroll', save);
+  }, [scrollMemory?.positions, scrollMemory?.key]);
 
   const Comp = element as ElementType;
   const mergedStyle: CSSProperties = { overflowX, overflowY, ...style };

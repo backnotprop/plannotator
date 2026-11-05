@@ -23,6 +23,8 @@ interface SidebarContainerProps {
   /** Desktop preserves the incumbent sticky rail. Compact Plan uses the same
    * content as a safe, visible-viewport-bounded foreground surface. */
   presentation?: "desktop" | "overlay";
+  closing?: boolean;
+  scrollPositions?: Map<string, number>;
   activeTab: SidebarTab;
   onTabChange: (tab: SidebarTab) => void;
   onClose: () => void;
@@ -81,6 +83,8 @@ interface SidebarContainerProps {
 
 export const SidebarContainer: React.FC<SidebarContainerProps> = ({
   presentation = "desktop",
+  closing = false,
+  scrollPositions,
   activeTab,
   onTabChange,
   onClose,
@@ -167,6 +171,10 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
     <aside
       id={compact ? "pn-compact-plan-navigator" : undefined}
       data-pn-plan-navigator={compact ? "true" : undefined}
+      data-pn-panel-side={compact ? 'left' : undefined}
+      data-pn-panel-state={compact ? closing ? 'closed' : 'open' : undefined}
+      aria-hidden={compact && closing || undefined}
+      inert={compact && closing || undefined}
       // The compact navigator (Contents / Versions / Archive) is the same kind
       // of full-viewport transient surface as CompactPlanStage, so it must not
       // print over the document either. Desktop rail printing is unchanged.
@@ -327,7 +335,9 @@ export const SidebarContainer: React.FC<SidebarContainerProps> = ({
       </div>
 
       {/* Content area */}
-      <OverlayScrollArea className={compact
+      <OverlayScrollArea
+        scrollMemory={scrollPositions ? { positions: scrollPositions, key: activeTab } : undefined}
+        className={compact
         ? "flex-1 min-h-0 overscroll-contain [-webkit-overflow-scrolling:touch]"
         : "flex-1 min-h-0"}
       >

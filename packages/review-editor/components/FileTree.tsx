@@ -15,7 +15,7 @@ import { EvoLogPicker } from './EvoLogPicker';
 import { WorktreePicker } from './WorktreePicker';
 import { getReviewSearchSideLabel, type ReviewSearchFileGroup, type ReviewSearchMatch } from '../utils/reviewSearch';
 import type { DiffFile } from '../types';
-import { OverlayScrollArea } from '@plannotator/ui/components/OverlayScrollArea';
+import { OverlayScrollArea, type ScrollMemory } from '@plannotator/ui/components/OverlayScrollArea';
 import { PRPlatformIcon } from '@plannotator/ui/components/PRPlatformIcon';
 import { Paperclip } from 'lucide-react';
 import { RepoFileTree } from './RepoFileTree';
@@ -31,6 +31,7 @@ import { PanelControlsRow, PanelSearchField, TOOLS_ONE_ROW_WIDTH } from './Panel
 import { PanelSectionHeader, CountColumns, countColumnVars, compactRowsProps } from './FileRowBits';
 
 interface FileTreeProps {
+  scrollMemory?: ScrollMemory;
   /** The top of the panel (views, the comparison sentence, Changes | All
    *  files, Go to File), shared with the other views. Absent: no header. */
   header?: ReviewPanelHeaderModel;
@@ -136,6 +137,7 @@ interface FileTreeProps {
 }
 
 export const FileTree: React.FC<FileTreeProps> = ({
+  scrollMemory,
   header,
   treeScope = 'changes',
   repoFiles,
@@ -527,7 +529,13 @@ export const FileTree: React.FC<FileTreeProps> = ({
 
       {/* The list: the nav rows scroll with it; the tools and progress rows
           stick to its top. Then the file tree, All files or search results. */}
-      <OverlayScrollArea ref={scrollAreaRef} className="flex-1 min-h-0">
+      <OverlayScrollArea
+        ref={scrollAreaRef}
+        // All files initializes its expanded ancestors after mount. Restore
+        // only once those rows exist, rather than clamping to an empty list.
+        scrollMemory={showAllFiles && !repoExpanded ? undefined : scrollMemory}
+        className="flex-1 min-h-0"
+      >
         <div
           {...reviewPanelBodyProps(header)}
           className="px-2 pb-2"
