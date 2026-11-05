@@ -21,7 +21,7 @@
  * A referenced file (Shape's references, a review's diff headers; while Code
  * review is on) is not a record, so its route takes a project-relative path and
  * a scope, never a root: `thread` (with `message`, the message's own project
- * first), `shape`, or `repo` (a PR page: `host/owner/repo`, every clone here).
+ * first; with `from: "root"` for a diff's path), `shape`, or `repo` (a PR page: `host/owner/repo`, every clone here).
  * The server finds the roots and `checkInboxProjectFile` holds the path to them.
  * A path out of the project is refused at launch and reads as not found.
  *
@@ -33,10 +33,12 @@ import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionM
 import { INBOX_OPEN_IN_DEFAULT_APP, inboxOpenInAllows, inboxOpenInPolicy } from "@plannotator/core/inbox-types";
 import { getOpenInApp, type OpenInApp, type OpenInPlatform } from "@plannotator/core/open-in-apps";
 import { existsSync, realpathSync } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path";
 import { checkInboxAttachmentForLaunch, checkInboxProjectFile, type InboxProjectFilePlace } from "@plannotator/shared/inbox/attachments";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
+import { isLinkedWorktree } from "@plannotator/shared/shape/store";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
   currentPlatform,
@@ -92,14 +94,17 @@ export interface InboxOpenInRouteContext {
   shapeRoot: (id: string) => string | null;
   /** The folders of every project on a repository (`host/owner/repo`, lowercased). */
   repoRoots: (repo: string) => string[];
+  /** The person's home folder, by default this process's. */
+  home?: string;
 }
 
-/** The scope of a referenced file: where its path starts. */
-/** The checkout a folder lies in: the nearest folder up with a `.git` (a file in a linked worktree). */
-function checkoutOf(folder: string): string | null {
-  if (!existsSync(folder)) return null;
+/**
+ * The checkout a folder lies in: the nearest folder up with a `.git`, from a folder that may be gone (a branch switch
+ * removes a subfolder, the worktree stays). The home folder is never one, even with a `.git`: it holds more than code.
+ */
+function checkoutOf(folder: string, home: string): string | null {
   for (let dir = folder; ; dir = dirname(dir)) {
-    if (existsSync(join(dir, ".git"))) return dir;
+    if (existsSync(join(dir, ".git"))) return dir === home ? null : dir;
     if (dirname(dir) === dir) return null;
   }
 }
@@ -124,16 +129,19 @@ interface FileScope {
   message?: unknown;
   shape?: unknown;
   repo?: unknown;
+  /** `root`: a diff's path, which starts at the top of the repository wherever the agent stood. */
+  from?: unknown;
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, home = homedir() } = context;
 
   /**
-   * Where a scope's path may be, in the order to try. A shape's or a repository's path starts at its root. A message's
-   * link is as the agent wrote it, so it starts in the checkout the agent wrote from: at its folder (`base_path`), then
-   * at that checkout's top. Other projects come after, except that a linked worktree folded into its project never falls
-   * back to the main checkout: that copy is not the agent's file. An absolute path says which of these it means.
+   * Where a scope's path may be, in the order to try. A shape's or a repository's path starts at its root, and so does
+   * a diff's (`from: "root"`). A message's link is as the agent wrote it, so it starts in the checkout the agent wrote
+   * from: at its folder (`base_path`), then at that checkout's top. Other projects come after, except that an agent in a
+   * linked worktree never falls back to the main checkout: that copy is not the agent's file. An absolute path says
+   * which of these it means.
    */
   const placesOf = (scope: FileScope, named: string): InboxProjectFilePlace[] => {
     if (typeof scope.shape === "string") {
@@ -147,7 +155,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     const message = typeof scope.message === "string" ? store.message(scope.message) : null;
     const sender = message?.thread_id === scope.thread ? message : first;
     const base = sender.base_path ?? null;
-    const checkout = base ? checkoutOf(base) : null;
+    const checkout = base ? checkoutOf(base, home) : null;
     const own = sender.from_project?.root ?? store.project(sender.project_id)?.root ?? null;
     const shown = [store.project(first.project_id)?.root, store.thread(scope.thread)?.project.root];
     const known = (roots: unknown[]) => [...new Set(roots.filter((root): root is string => typeof root === "string"))];
@@ -161,11 +169,10 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       // Outside all of them: refused by the path rule, as any other path outside the project.
       return places.length || !roots.length ? places : [{ root: roots[0]!, relative: named }];
     }
-    const folded = checkout !== null && own !== null && pathInside(own, checkout) === null && pathInside(checkout, own) === null && checkout !== own;
-    const roots = known(folded ? [checkout, ...shown.filter((root) => root !== own)] : [checkout, own, ...shown]);
+    const roots = known(checkout && isLinkedWorktree(checkout) ? [checkout, ...shown.filter((root) => root !== own)] : [checkout, own, ...shown]);
     const clean = posix.normalize(named.replace(/\\/g, "/"));
     return roots.flatMap((root) => {
-      const from = base ? (base === root ? "" : pathInside(root, base)) : null;
+      const from = base && scope.from !== "root" ? (base === root ? "" : pathInside(root, base)) : null;
       const places = from ? [{ root, relative: posix.join(from, clean) }] : [];
       return [...places, { root, relative: clean }];
     });
@@ -178,7 +185,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
       const url = new URL(req.url);
       if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
       const params = url.searchParams;
-      const scope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo") };
+      const scope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo"), from: params.get("from") };
       const file = await checkInboxProjectFile(placesOf(scope, params.get("path") ?? ""));
       return json(file.ok ? { found: true, path: file.path, kind: file.kind } : { found: false });
     }

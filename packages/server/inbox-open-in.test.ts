@@ -395,6 +395,96 @@ describe("Inbox Open in: a file a reference names", () => {
     expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(r.project, "app.ts"));
   });
 
+  test("a real worktree under the project (`.claude/worktrees/n`): a file only in main is not the agent's", async () => {
+    const r = await referenced();
+    const git = (...args: string[]) => {
+      const done = spawnSync("git", ["-C", r.project, "-c", "user.name=t", "-c", "user.email=t@example.com", ...args], {
+        encoding: "utf8",
+        env: { ...process.env, GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null" },
+      });
+      if (done.status !== 0) throw new Error(done.stderr);
+    };
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    git("init", "-q");
+    git("add", "src/app.ts");
+    git("commit", "-qm", "one");
+    git("worktree", "add", "-q", "-b", "n", ".claude/worktrees/n");
+    writeFileSync(join(r.project, "src/main-new.ts"), "main\n");
+    const nested = join(r.project, ".claude/worktrees/n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: nested });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(nested, "src/app.ts"));
+    expect(await r.check({ ...scope, path: "src/main-new.ts" })).toEqual({ found: false });
+  });
+
+  test("a diff's path starts at the top of the repository, an agent's link at its folder", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "packages/server"), { recursive: true });
+    writeFileSync(join(r.project, "package.json"), "{}\n");
+    writeFileSync(join(r.project, "packages/server/package.json"), "{}\n");
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(r.project, "packages/server") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "package.json" })).path).toBe(join(r.project, "packages/server/package.json"));
+    expect((await r.check({ ...scope, from: "root", path: "package.json" })).path).toBe(join(r.project, "package.json"));
+    await r.open({ ...scope, from: "root", path: "package.json", app_id: "reveal" });
+    expect(r.launches).toEqual([{ how: "reveal", path: join(r.project, "package.json") }]);
+  });
+
+  test("a branch switch removed the agent's subfolder: still its worktree, not main", async () => {
+    const r = await referenced();
+    mkdirSync(join(r.project, "src"));
+    writeFileSync(join(r.project, "src/app.ts"), "main\n");
+    writeFileSync(join(r.project, "src/only-main.ts"), "main\n");
+    const wt = worktree(r, "wt", { "src/app.ts": "worktree\n" });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path: join(wt, "feat") });
+    const scope = { thread: sent.message.thread_id, message: sent.message.id };
+    expect((await r.check({ ...scope, path: "src/app.ts" })).path).toBe(join(wt, "src/app.ts"));
+    expect(await r.check({ ...scope, path: "src/only-main.ts" })).toEqual({ found: false });
+  });
+
+  test("a base_path is no way in: not a folder without a `.git`, not the home folder even with one", async () => {
+    const dir = realpathSync(mkdtempSync(join(tmpdir(), "open-in-home-")));
+    roots.push(dir);
+    const home = join(dir, "home");
+    mkdirSync(join(home, ".git"), { recursive: true });
+    mkdirSync(join(home, ".ssh"));
+    writeFileSync(join(home, ".ssh/id_rsa"), "secret\n");
+    mkdirSync(join(home, "notes"));
+    writeFileSync(join(home, "notes/a.md"), "# a\n");
+    const loose = join(dir, "etc");
+    mkdirSync(loose);
+    writeFileSync(join(loose, "hosts"), "secret\n");
+    const r = await referenced({ openInHome: home });
+    const prj = r.server.store.ensureProject({ name: "billing", root: r.project });
+    for (const base_path of [home, join(home, "notes"), loose]) {
+      const sent = r.server.store.sendMessage({ project_id: prj.id, author: AGENT, body: "Look.", base_path });
+      const scope = { thread: sent.message.thread_id, message: sent.message.id };
+      for (const path of [".ssh/id_rsa", "notes/a.md", "hosts", "../.ssh/id_rsa"]) expect((await r.check({ ...scope, path })).found).toBe(false);
+      expect((await r.check({ ...scope, path: join(home, ".ssh/id_rsa") })).found).toBe(false);
+    }
+  });
+
+  test("a board's worktree that is not one (no `.git` file) is not read: not by Open in, not by its file viewer", async () => {
+    const r = await referenced();
+    writeFileSync(join(r.project, "app.ts"), "main\n");
+    const loose = realpathSync(mkdtempSync(join(r.root, "etc-")));
+    writeFileSync(join(loose, "hosts"), "secret\n");
+    const made = createShapeStore({ dataDir: r.dataDir }).update({
+      board: { title: "Tree", claim: "Built.", views: { picture: { html: '<p data-mark="k">One</p>' } } },
+      project: { root: r.project, name: "billing", worktree: loose },
+      session: { id: "ses_a", host: "claude-code" },
+    });
+    if (!made.ok) throw new Error(JSON.stringify(made));
+    expect(await r.check({ shape: made.id, path: "hosts" })).toEqual({ found: false });
+    expect((await r.check({ shape: made.id, path: "app.ts" })).path).toBe(join(r.project, "app.ts"));
+    const read = await (await fetch(`${r.base}/api/shapes/${made.id}/code/file?path=hosts`)).text();
+    expect(read).not.toContain("secret");
+  });
+
   test("an agent in a subfolder: a link starts at its folder, and at the top of its checkout", async () => {
     const r = await referenced();
     mkdirSync(join(r.project, "src"));

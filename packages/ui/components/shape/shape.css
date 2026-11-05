@@ -175,7 +175,7 @@
 .shp-code-head { display: flex; justify-content: space-between; align-items: center; padding: 9px 14px; font: 500 12.5px/1 var(--font-mono); color: var(--muted-foreground); border-bottom: 1px solid color-mix(in oklab, var(--border) 60%, transparent); }
 .shp-code-file { flex: 1; min-height: 0; overflow: auto; }
 .shp-diff-pop { min-height: 0; overflow: auto; padding: 4px 0 8px; }
-.shp-diff-pop-acts { display: flex; justify-content: flex-end; align-items: center; min-height: 36px; padding: 4px 44px 4px 16px; }
+.shp-diff-pop-acts { display: flex; justify-content: flex-end; align-items: center; min-height: 44px; padding: 4px 44px 4px 16px; }
 .shp-empty-note { margin: 0; padding: 18px; font-size: 13.5px; color: var(--muted-foreground); }
 
 /* ── the one floating panel: Ask · Thread · References ── */

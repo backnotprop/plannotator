@@ -439,6 +439,8 @@ export interface InboxServerOptions {
    * Default: this host's launcher. Tests pass a recording one, so no real app starts.
    */
   openInLauncher?: InboxOpenInLauncher;
+  /** The person's home folder for Open in, by default this process's. */
+  openInHome?: string;
   /** Tests: how a project root's `origin` is read (default `readInboxProjectRepo`, inbox-repos.ts). */
   readProjectRepo?: (root: string) => Promise<InboxProjectRepo | null>;
   /** Tests: run the hover cards' `gh` / `glab` through this instead of the real ones (ref-cards.ts). */
@@ -3289,6 +3291,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     json,
     localOnly,
     launcher: options.openInLauncher ?? systemOpenInLauncher(),
+    home: options.openInHome,
     codeReviewOn,
     shapeRoot: (id) => {
       const shape = shapeOn() ? shapes.store.get(id) : null;

@@ -229,7 +229,8 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     if (c.id) {
       const record = store.get(c.id);
       if (!record) return refuse("not_found", `No shape ${c.id}. List them with \`plannotator shape list\`.`);
-      project = record.project;
+      // Written from this folder now: the store moves the board there if it is the same project.
+      project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
       if (!project) return refuse("project_unresolved", `${folder} is not a folder. Pass --project <folder>.`);

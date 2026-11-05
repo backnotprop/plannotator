@@ -182,7 +182,7 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
 
 export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
   const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = useGuideState(thread, message);
-  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id }} path={path} />, [thread.thread_id, message.id]);
+  const fileOpenIn = useCallback((path: string) => <OpenInFile scope={{ thread: thread.thread_id, message: message.id, from: 'root' }} path={path} />, [thread.thread_id, message.id]);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
   const [sheet, setSheet] = useState(false);

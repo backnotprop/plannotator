@@ -359,8 +359,8 @@ function OpenInCodeSpanMenu({ scope, path, line, children }: { scope: OpenInFile
   if (notAFile) return <>{children}</>;
   const onClick = (event: MouseEvent) => {
     if (timer.current) clearTimeout(timer.current);
-    // A second click, a drag over the words or a link around the span: not this.
-    if (event.detail > 1 || !window.getSelection()?.isCollapsed || (event.target as Element).closest('a')) return;
+    // A second click or a drag over the words: not this.
+    if (event.detail > 1 || !window.getSelection()?.isCollapsed) return;
     timer.current = setTimeout(() => void ask(), CODE_SPAN_CLICK_MS);
   };
   return (

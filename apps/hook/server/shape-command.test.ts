@@ -51,6 +51,39 @@ function world(env: Record<string, string | undefined> = {}) {
 }
 
 describe("shape update", () => {
+  test("a board's checkout follows its latest write within its project, and only there", async () => {
+    const w = world();
+    const { createShapeStore } = await import("@plannotator/shared/shape/store");
+    const dataDir = join(w.project, "..", "data");
+    let here: { root: string; name: string; worktree?: string } = { root: w.project, name: "kettle", worktree: "/wt/one" };
+    const write = async (...argv: string[]) => {
+      const out: string[] = [];
+      const code = await runShapeCommand(["update", "--file", w.board("b.json", `words ${Math.random()}`), ...argv], {
+        dataDir,
+        cwd: w.project,
+        env: {},
+        stdout: (t) => out.push(t),
+        stderr: () => {},
+        projectRootOf: async () => here,
+      });
+      expect(code).toBe(0);
+      return JSON.parse(out.join("\n")) as { id: string; v: number };
+    };
+    const projectOf = (id: string) => createShapeStore({ dataDir }).get(id)!.project;
+    const { id } = await write();
+    expect(projectOf(id).worktree).toBe("/wt/one");
+    here = { root: w.project, name: "kettle", worktree: "/wt/two" };
+    await write("--id", id, "--base", "1");
+    expect(projectOf(id).worktree).toBe("/wt/two");
+    here = { root: w.project, name: "kettle" };
+    await write("--id", id, "--base", "2");
+    expect(projectOf(id).worktree).toBeUndefined();
+    // Written from another project: the board stays where it is.
+    here = { root: "/elsewhere", name: "elsewhere", worktree: "/wt/three" };
+    await write("--id", id, "--base", "3");
+    expect(projectOf(id)).toEqual({ root: w.project, name: "kettle" });
+  });
+
   test("creates a shape, then adds versions only from the latest base", async () => {
     const w = world();
     const first = await w.run("update", "--file", w.board("b1.json", "whistles once"));

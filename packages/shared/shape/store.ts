@@ -266,9 +266,18 @@ export function shapesDirOf(dataDir: string): string {
 
 export type { ShapeProject };
 
-/** The checkout a board's code lives in: the linked worktree it was written from while that is still there, else the project's root. */
+/** A linked worktree's `.git` is a file; a main checkout's is a folder. */
+export function isLinkedWorktree(folder: string): boolean {
+  try {
+    return statSync(join(folder, ".git")).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** The checkout a board's code lives in: the linked worktree of its latest write while that is still one, else the project's root. */
 export function shapeCodeRoot(project: ShapeProject): string {
-  return project.worktree && existsSync(project.worktree) ? project.worktree : project.root;
+  return project.worktree && isLinkedWorktree(project.worktree) ? project.worktree : project.root;
 }
 
 export function createShapeStore(options: { dataDir: string; now?: () => number }): ShapeStore {
@@ -512,7 +521,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         parts: shapeParts(kept.board),
       };
       appendLine(join(folder, "versions.jsonl"), version);
-      const next: ShapeRecord = { ...record, title: kept.board.title, updated: at, latest: n, drawing: null };
+      // The board's checkout follows its latest write, within its project.
+      const project = input.project.root === record.project.root ? { ...input.project, name: record.project.name } : record.project;
+      const next: ShapeRecord = { ...record, project, title: kept.board.title, updated: at, latest: n, drawing: null };
       writeJsonAtomic(join(folder, "shape.json"), next);
       return { ok: true, id: record.id, v: n, created: false, record: next };
     });

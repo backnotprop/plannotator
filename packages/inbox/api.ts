@@ -837,7 +837,8 @@ export function pageServerSession(): string | null {
 export type TagMode = 'ask' | 'add' | 'handoff';
 
 /** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
-export type OpenInFileScope = { thread: string; message?: string } | { shape: string } | { repo: string };
+/** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string };
 
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);

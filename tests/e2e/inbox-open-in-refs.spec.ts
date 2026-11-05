@@ -48,6 +48,8 @@ interface World {
   shapeThread: string;
   reviewThread: string;
   messageThread: string;
+  subReviewThread: string;
+  subGuideThread: string;
   worktree: string;
   treeLinksThread: string;
   treeReviewThread: string;
@@ -201,6 +203,11 @@ test.beforeAll(async () => {
   const messageSent = await claude.send({ project_path: project, thread: 'links', subject: 'Retries: where to look', body: 'The wait is in [the retry loop](src/retry.ts#L3), and the rows in [the ledger](src/ledger.ts). I also meant [a file that is gone](src/gone.ts). The table is `src/ledger.ts:1`, and `react.js` is not one of ours.' });
   const treeLinks = await claude.send({ project_path: worktree, thread: 'tree links', subject: 'Retries: from my worktree', body: 'See [the new file](src/only-on-the-pr.ts), `src/only-on-the-pr.ts:1` and `src/retry.ts`.' });
   const treeReview = await claude.submitGuide({ project_path: worktree, thread: 'tree review', subject: 'Retries: worktree review', guide: REVIEW_GUIDE, patch, review: true } as never);
+  // An agent that stood in a subfolder, with a file there that has the same path: a diff's path still starts at the top.
+  mkdirSync(join(project, 'src/src'), { recursive: true });
+  writeFileSync(join(project, 'src/src/retry.ts'), 'export {};\n');
+  const subReview = await claude.submitGuide({ project_path: join(project, 'src'), thread: 'subfolder review', subject: 'Retries: subfolder review', guide: REVIEW_GUIDE, patch, review: true } as never);
+  const subGuide = await claude.submitGuide({ project_path: join(project, 'src'), thread: 'subfolder guide', subject: 'Retries: subfolder guide', guide: REVIEW_GUIDE, patch } as never);
   const reviewSent = await claude.submitGuide({ project_path: project, thread: 'review', subject: 'Retries: review', guide: REVIEW_GUIDE, patch, review: true } as never);
   mkdirSync(join(root, 'boards'), { recursive: true });
   writeFileSync(join(root, 'boards', 'board.json'), JSON.stringify(board(patch)));
@@ -219,6 +226,8 @@ test.beforeAll(async () => {
     shape: (JSON.parse(updated.stdout) as { id: string }).id,
     shapeThread: shapeSent.thread_id as string,
     reviewThread: reviewSent.thread_id as string,
+    subReviewThread: subReview.thread_id as string,
+    subGuideThread: subGuide.thread_id as string,
     messageThread: messageSent.thread_id as string,
     worktree,
     treeLinksThread: treeLinks.thread_id as string,
@@ -318,6 +327,12 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(diffPopout.locator('.shp-diff-pop')).toBeVisible();
       await diffPopout.locator('[data-open-in-caret]').click();
       await expect(menu.locator('[data-open-in-item="reveal"]')).toBeVisible();
+      // The dialog's close and the control beside it sit on one line.
+      const middle = async (at: string) => {
+        const box = (await diffPopout.locator(at).first().boundingBox())!;
+        return box.y + box.height / 2;
+      };
+      expect(Math.abs((await middle('[aria-label="Close"]')) - (await middle('[data-open-in-caret]')))).toBeLessThan(1.5);
       await shot(page, `04c-shape-diff-popout-${colorScheme}`);
       const diffCount = launched().length;
       await menu.locator('[data-open-in-item="reveal"]').click();
@@ -556,6 +571,29 @@ test('an agent in a linked worktree: its message, review and board open the work
     await page.getByRole('button', { name: 'Start review' }).first().click();
     await page.locator('section[data-review-mode] [data-open-in-span="src/retry.ts"]').click();
     expect(await pick('src/retry.ts')).toContain(inTree('src/retry.ts'));
+  } finally {
+    await context.close();
+  }
+});
+
+test('from a subfolder: a review\'s and a guide\'s file header opens the file the diff shows', async ({ browser }) => {
+  const { context, page } = await windowAt(browser, 1440, 900, 'light');
+  const pick = async () => {
+    await page.locator('[data-open-in-caret]').first().click();
+    const item = page.locator('[data-open-in-menu="src/retry.ts"] [data-open-in-item="reveal"]');
+    await expect(item).toBeVisible();
+    const count = launched().length;
+    await item.click();
+    await expect.poll(() => launched().length).toBe(count + 1);
+    expect(launched().at(-1)).toContain(realPath('src/retry.ts'));
+    expect(launched().at(-1)).not.toContain('src/src/retry.ts');
+  };
+  try {
+    await openReviewFiles(page, world.subReviewThread);
+    await pick();
+    await page.goto(`${world.url}#thread=${world.subGuideThread}`);
+    await page.locator('[data-guide-card]').first().click();
+    await pick();
   } finally {
     await context.close();
   }
