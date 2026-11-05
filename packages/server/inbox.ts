@@ -213,7 +213,7 @@ import { parseFileLevelComments, parsePRReviewAction, submitPRReview as submitFo
 import { prCommandRuntime } from "./pr";
 import { createInboxPullLinks } from "./inbox-pull-links";
 import { createPullAvatars, type PullAvatarOptions } from "./inbox-pull-avatars";
-import { INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
+import { INBOX_INITIATIVE_PEEK_THREADS, INBOX_PULL_OWNER_KEYS_MAX, inboxPullIsOpen, inboxPullItems, inboxPullStacks, inboxReviewRows, type InboxPullReason } from "@plannotator/core/inbox-types";
 import { createInboxReviewIndex } from "./inbox-reviews";
 import { isInboxBoardSeq, readInboxBoardSeen, writeInboxBoardSeen } from "@plannotator/shared/inbox/board-seen";
 import { createInboxTagsRoute } from "./inbox-tags";
@@ -280,6 +280,8 @@ const THEME_ID = /^[a-z0-9][a-z0-9-]{0,63}$/;
 /** Remote mode's fixed port: the Inbox never takes it. */
 export const INBOX_FORBIDDEN_PORT = 19432;
 const SSE_HEARTBEAT_MS = 15_000;
+/** The cards read's list rows per initiative for its tagged threads: what the preview lists, plus the thread it is opened in (left out there). */
+const INITIATIVE_THREAD_ROWS = INBOX_INITIATIVE_PEEK_THREADS + 1;
 /**
  * A window's stream (`window=`) beats every 10 s with a named frame
  * (`event: heartbeat`), not the `: ping` comment the other streams get:
@@ -1351,6 +1353,19 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (lists.length > 0) steps[id] = lists;
       }
     }
+    // `initiative_threads` (additive, approval "board-hashtags"): per live initiative, the latest-tagged threads
+    // (`#Shape`) no card of it links, at most INITIATIVE_THREAD_ROWS, with their list rows in `threads`, and
+    // `total`, how many such threads there are, for the preview's "+N more". From the store's in-memory tag
+    // index, read from its newest end: a tag used in thousands of threads costs the same as one in a few.
+    const linkedTo = new Map<string, Set<string>>();
+    for (const card of cards) {
+      if (!card.initiative || card.column === "dropped") continue;
+      const linked = linkedTo.get(card.initiative) ?? new Set<string>();
+      for (const id of card.threads) linked.add(id);
+      linkedTo.set(card.initiative, linked);
+    }
+    const initiativeThreads = store.initiativeThreads({ limit: INITIATIVE_THREAD_ROWS, linked: (id) => linkedTo.get(id) });
+    for (const read of Object.values(initiativeThreads)) for (const id of read.threads) if (!(id in threads)) threads[id] = store.listRow(id);
     // `initiatives` (additive, approval "board-initiatives"): every one, deleted ones too (an opened card's
     // history names them); the window offers only the live ones.
     return {
@@ -1362,6 +1377,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       threads,
       ...(steps ? { steps } : {}),
       initiatives: store.initiatives(),
+      initiative_threads: initiativeThreads,
     };
   };
 
