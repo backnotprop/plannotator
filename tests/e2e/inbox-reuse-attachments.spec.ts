@@ -10,8 +10,8 @@
  * tile's × undoes it; Tab reaches it and Enter adds; a draft keeps it; Send
  * writes no bytes, and the fake agent reads the same bytes at a read-only path
  * of its own; the version on screen is the one fixed; deleting the original
- * touches nothing; a phone adds from the viewer's toolbar and nothing new rests
- * on its thread; full screen's card shows the file under Reply; a linked
+ * touches nothing; a phone adds from the viewer's toolbar and only a download
+ * tile, which opens no viewer, has the button rest on it; full screen's card shows the file under Reply; a linked
  * machine's thread offers none of it.
  */
 import { expect, test, type Browser, type Page } from '@playwright/test';
@@ -387,14 +387,18 @@ test('full screen: the toolbar has the button, and the card shows the file under
   await expect(page.locator(`[data-fcomp-mode-on="reply"] [data-compose-file-name="${REF_A}"]`)).toBeVisible();
 });
 
-test('a phone: nothing new on the thread; the viewer holds a 44 px button; the file shows at once and stays in the reply', async ({ browser, browserName }) => {
+test('a phone: nothing new on a file that opens; the viewer holds a 44 px button; the file shows at once and stays in the reply', async ({ browser, browserName }) => {
   test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
   const { thread_id } = await threadWithFiles();
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
   const phone = await context.newPage();
   try {
     await open(phone, thread_id);
-    await expect(phone.locator('section.ib-pane [data-reuse-surface="tile"]:visible, section.ib-pane [data-reuse-surface="gallery"]:visible, section.ib-pane [data-reuse-surface="inline"]:visible')).toHaveCount(0);
+    await expect(phone.locator('section.ib-pane [data-reuse-surface="gallery"]:visible, section.ib-pane [data-reuse-surface="inline"]:visible')).toHaveCount(0);
+    // Only the file that opens no viewer: the same tiles, drawn in the foot and the header's band.
+    const resting = phone.locator('section.ib-pane [data-reuse-surface="tile"]:visible');
+    await expect(resting.first()).toHaveAttribute('aria-label', `Add ${SHEET} to your reply`);
+    for (const label of await resting.evaluateAll((all) => all.map((el) => el.getAttribute('aria-label')))) expect(label).toBe(`Add ${SHEET} to your reply`);
     await preview(phone, REF_A).tap();
     const bar = phone.locator('[data-reuse-surface="bar"]').first();
     await expect(bar).toBeVisible();
@@ -436,7 +440,7 @@ test("a phone's HTML page opens clear: the pill keeps its room; the button comes
   }
 });
 
-test("a phone's tiles keep their place: Open and Download sit at the tile's edge, a size is whole; the check takes room only once it rests there", async ({ browser, browserName }) => {
+test("a phone's tiles keep their place: Open sits at the tile's edge, a size is whole; the check takes room only once it rests there", async ({ browser, browserName }) => {
   test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
   const { thread_id } = await threadWithFiles();
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true });
@@ -451,8 +455,8 @@ test("a phone's tiles keep their place: Open and Download sit at the tile's edge
   try {
     await open(phone, thread_id);
     await tile(phone, REF_A).scrollIntoViewIfNeeded();
+    expect(await gap(REF_A)).toBeLessThanOrEqual(24);
     for (const name of [REF_A, SHEET]) {
-      expect(await gap(name)).toBeLessThanOrEqual(24);
       const detail = tile(phone, name).locator('.ib-kd');
       expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
     }
@@ -467,6 +471,50 @@ test("a phone's tiles keep their place: Open and Download sit at the tile's edge
     const checkBox = (await check.boundingBox())!;
     const word = (await cue(REF_A).boundingBox())!;
     expect(word.x + word.width).toBeLessThanOrEqual(checkBox.x);
+  } finally {
+    await context.close();
+  }
+});
+
+test("a phone, a thread with only a PDF: its tile holds a 44 px button clear of Download; a tap adds with no download, and the tile still downloads", async ({ browser, browserName }) => {
+  test.skip(browserName === 'firefox', 'Firefox has no mobile emulation');
+  const { thread_id } = await threadWithFiles({ body: 'Only the sheet.', attachments: [join(harbor, 'art', SHEET)] });
+  const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, acceptDownloads: true });
+  const phone = await context.newPage();
+  const downloads: string[] = [];
+  phone.on('download', (download) => downloads.push(download.suggestedFilename()));
+  try {
+    await open(phone, thread_id);
+    await tile(phone, SHEET).scrollIntoViewIfNeeded();
+    const add = phone.locator(`section.ib-pane .ib-attachments:not(.ib-hatts-tiles) [data-reuse-surface="tile"][aria-label="Add ${SHEET} to your reply"]`);
+    await expect(add).toBeVisible();
+    const box = (await add.boundingBox())!;
+    expect(Math.min(box.width, box.height)).toBeGreaterThanOrEqual(44);
+    const tileBox = (await tile(phone, SHEET).boundingBox())!;
+    expect(box.x + box.width).toBeLessThanOrEqual(tileBox.x + tileBox.width);
+    const word = (await tile(phone, SHEET).locator('.ib-open').boundingBox())!;
+    expect(word.x + word.width).toBeLessThanOrEqual(box.x);
+    const detail = tile(phone, SHEET).locator('.ib-kd');
+    expect(await detail.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+
+    await add.tap();
+    await expect(phone.locator(`[data-reply-files] [data-compose-file="done"][data-compose-file-name="${SHEET}"]`)).toBeVisible();
+    const added = phone.locator(`section.ib-pane .ib-attachments:not(.ib-hatts-tiles) [data-reuse-surface="tile"][aria-label^="${SHEET} is in your reply"]`);
+    await expect(added).toHaveAttribute('data-reuse-state', 'added');
+    const check = (await added.boundingBox())!;
+    expect(check.width).toBeGreaterThanOrEqual(44);
+    const after = (await tile(phone, SHEET).locator('.ib-open').boundingBox())!;
+    expect(after.x + after.width).toBeLessThanOrEqual(check.x);
+    expect(downloads).toEqual([]);
+
+    await added.tap();
+    await expect(replyTiles(phone)).toHaveCount(0);
+    await expect(add).toBeVisible();
+    expect(downloads).toEqual([]);
+
+    const download = phone.waitForEvent('download');
+    await tile(phone, SHEET).locator('.ib-nm').tap();
+    expect((await download).suggestedFilename()).toBe(SHEET);
   } finally {
     await context.close();
   }
@@ -493,6 +541,51 @@ test("a phone reaches a file that downloads through the viewer's steps: the butt
     await context.close();
   }
 });
+
+for (const width of [1440, 390]) {
+  test(`New message at ${width}: a tile's size is whole, a long one or a large one; a kind too long gives way first`, async ({ browser }) => {
+    const context = await browser.newContext({ viewport: { width, height: 900 } });
+    const compose = await context.newPage();
+    const kb = 1024;
+    const jpeg = (bytes: number) => Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(bytes - 4, 0x20)]);
+    const file = (name: string, buffer: Buffer, mimeType: string) => ({ name, mimeType, buffer });
+    try {
+      await compose.goto(studio.url);
+      const band = compose.getByRole('region', { name: 'Desktop notifications' }).getByRole('button', { name: 'Hide' });
+      if (await band.isVisible().catch(() => false)) await band.click();
+      await compose.locator(`${width < 768 ? '.ib-lhead' : '.ib-side'} [data-open-compose]`).first().click();
+      const dialog = compose.locator('dialog[data-compose]');
+      await dialog.locator('[data-compose-attach]').setInputFiles([
+        file('hero-direction-long-name.jpg', jpeg(329 * kb), 'image/jpeg'),
+        file('hero-direction-large.jpg', jpeg(Math.round(12.4 * kb * kb)), 'image/jpeg'),
+        file('report.averyveryverylongextensionforafile', Buffer.alloc(Math.round(12.4 * kb * kb), 0x1), 'application/octet-stream'),
+      ]);
+      const done = dialog.locator('[data-compose-file="done"]');
+      await expect(done).toHaveCount(3, { timeout: 30_000 });
+      const line = (name: string) => dialog.locator(`[data-compose-file-name="${name}"] .ib-cp-kd`);
+      await expect(line('hero-direction-long-name.jpg')).toHaveText('JPEG image, 329.0 KB');
+      await expect(line('hero-direction-large.jpg')).toHaveText('JPEG image, 12.4 MB');
+      // Neither the kind nor the size is cut, and each tile holds a line of this length with room to spare.
+      for (const name of ['hero-direction-long-name.jpg', 'hero-direction-large.jpg']) {
+        const words = line(name).locator('.ib-cp-kd-w');
+        expect(await words.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+        expect(await line(name).evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true);
+      }
+      // A kind no tile can hold: the words give way, and the number stays whole and clear of the ×.
+      const long = 'report.averyveryverylongextensionforafile';
+      const words = line(long).locator('.ib-cp-kd-w');
+      expect(await words.evaluate((el) => el.scrollWidth > el.clientWidth)).toBe(true);
+      const size = line(long).locator('.ib-cp-kd-n');
+      await expect(size).toHaveText('12.4 MB');
+      const sizeBox = (await size.boundingBox())!;
+      const x = (await dialog.locator(`[data-compose-file-name="${long}"] .ib-cp-fx`).boundingBox())!;
+      expect(sizeBox.x + sizeBox.width).toBeLessThanOrEqual(x.x);
+      expect(sizeBox.width).toBeGreaterThanOrEqual(await size.evaluate((el) => el.scrollWidth));
+    } finally {
+      await context.close();
+    }
+  });
+}
 
 test('a refused add shows no check; the button tries again in its place', async () => {
   const { thread_id } = await threadWithFiles();
