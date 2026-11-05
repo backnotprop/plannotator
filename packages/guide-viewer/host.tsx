@@ -116,6 +116,11 @@ export interface GuideHostValue<P extends object = Record<string, unknown>> {
    */
   renderOverviewFigure?: () => React.ReactNode | null;
   /**
+   * The review's own actions on the title's line, ahead of Global comment (GuideView `threadHeading`: the Inbox's
+   * Show me). No other heading draws them. Answering null (or absent) adds nothing.
+   */
+  renderHeadActions?: () => React.ReactNode | null;
+  /**
    * A control the host raises in a small tab out of a section card's top-right
    * edge (the Inbox: its Split | Unified switch on the first card). Called with
    * each card's index (the "Everything else" card's is the number of

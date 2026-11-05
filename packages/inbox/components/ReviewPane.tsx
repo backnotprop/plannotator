@@ -4,9 +4,11 @@
  * review card opens, while the person has Settings → Capabilities → Code
  * review on.
  *
- * - The agent's walkthrough is the spine: the overview and its chapters down
- *   the left rail, with a "Walkthrough | All files" switch that turns the same
- *   rail into the list of changed files.
+ * - The agent's walkthrough is the spine. There is no left rail (approval
+ *   "review-deslop", r7): the top bar holds the "Walkthrough | All files"
+ *   switch, the menu of chapters or changed files (ReviewJump), the review's
+ *   title in quiet grey and Split | Unified. A phone keeps the switch and a
+ *   native list held at the top of the scroll.
  * - The diff is Plannotator's own (`GuideReader` over review-editor's
  *   `AllFilesCodeView`): line comments as in code review, and a Viewed tick on
  *   each file's header, kept on the message.
@@ -22,7 +24,8 @@
  *   Comment · Ask · Show me. Show me asks the agent for a picture of the
  *   lines, which opens over the diff; a click on a part opens its code and the
  *   picture shrinks to a corner card. The Overview draws the agent's own
- *   picture sent with the guide, or offers one Show me for the whole review.
+ *   picture sent with the guide; a review with none has one Show me in its
+ *   heading, for the whole review.
  *   Plain Ask opens the Inbox's Ask window with the lines named.
  *
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
@@ -32,7 +35,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNod
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
-import { formatCount, plural } from '@plannotator/core/inbox-format';
+import { groupByFileKind } from '@plannotator/core/file-kind';
+import { plural } from '@plannotator/core/inbox-format';
 import { AnnotationPanel } from '@plannotator/ui/components/AnnotationPanel';
 import { DecisionControl, type DecisionHandler } from '@plannotator/ui/components/DecisionControl';
 import { buildDecisionSpec, type DecisionActionId } from '@plannotator/ui/utils/decisionSpec';
@@ -41,12 +45,13 @@ import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
-import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
+import { OverviewFigure, ShowMeButton } from '../review-drawing/OverviewFigure';
 import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
 import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
 import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
 import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
 import type { GuideSelectionActions } from '../guide/types';
+import { reviewSourceLine } from '../guide/sourceLine';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
 import { Icon } from '../icons';
@@ -70,6 +75,8 @@ import {
   type AskingSession,
   type RouteState,
 } from './ReplyRoute';
+import { DiffStyleSwitch } from './DiffStyleSwitch';
+import { chapterInView, fileInView, jumpPlace, jumpProgress, ReviewJump } from './ReviewJump';
 import { Tip } from './Tip';
 
 // `#guide-reader` is packages/inbox/guide/GuideReader.tsx (package.json `imports`).
@@ -95,6 +102,9 @@ const NO_BLOCKS: never[] = [];
 const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
+
+/** Where Split | Unified is held under the top bar (inbox.css `.ib-rv-held`). */
+const HELD_TOP = 8;
 
 export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
@@ -170,7 +180,44 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const reviewedCount = chapters.filter((_, i) => reviewed[i] ?? snapshot?.guide.reviewed[i] ?? false).length;
 
   const move = (path: string) => setReveal((was) => ({ path, token: (was?.token ?? 0) + 1 }));
+  // Where the person is: the top bar's chapter (or file) follows the scroll. A jump holds the one picked until the
+  // person moves the page themselves, so the name does not run through the chapters a smooth scroll passes, and a
+  // last chapter too short to reach the top of the scroll keeps its name.
+  const [fileSpot, setFileSpot] = useState<string | null>(null);
+  const jumped = useRef(false);
+  // The tab's control has scrolled up to where it is held: how far from the scroll's right edge to hold it (a tab
+  // above the first card only; a phone draws neither).
+  const [heldAt, setHeldAt] = useState<number | null>(null);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let frame = 0;
+    const read = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const box = body.getBoundingClientRect();
+        const tab = body.querySelector('[data-guide-section-tab] [data-diff-style-switch]')?.getBoundingClientRect();
+        setHeldAt(tab && tab.top <= box.top + HELD_TOP ? Math.round(body.clientWidth - (tab.right - box.left)) : null);
+        if (jumped.current) return;
+        if (mode === 'walkthrough') setCurrent(chapterInView(body, chapters.length));
+        else setFileSpot(fileInView(body));
+      });
+    };
+    const release = () => {
+      jumped.current = false;
+    };
+    const HAND = ['wheel', 'touchmove', 'pointerdown', 'keydown'] as const;
+    read();
+    body.addEventListener('scroll', read, { passive: true });
+    for (const kind of HAND) body.addEventListener(kind, release, { passive: true });
+    return () => {
+      cancelAnimationFrame(frame);
+      body.removeEventListener('scroll', read);
+      for (const kind of HAND) body.removeEventListener(kind, release);
+    };
+  }, [mode, snapshot, chapters.length]);
   const toChapter = (index: number | null) => {
+    jumped.current = true;
     setCurrent(index);
     if (mode !== 'walkthrough') setMode('walkthrough');
     if (index === null) {
@@ -182,8 +229,21 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     else bodyRef.current?.querySelector(`[data-guide-section="${index}"]`)?.scrollIntoView({ block: 'start', behavior: 'smooth' });
   };
   const toFile = (path: string) => {
+    jumped.current = true;
+    setFileSpot(path);
     if (mode !== 'files') setMode('files');
     move(path);
+  };
+  /** The switch keeps the person's place: the file at the top of the view stays there in the other mode. */
+  const flip = (next: RailMode) => {
+    const body = bodyRef.current;
+    const path = body ? fileInView(body) : null;
+    jumped.current = true;
+    setMode(next);
+    if (next === 'files') setFileSpot(path);
+    else setCurrent(path ? chapterOf(chapters, path) : null);
+    if (path) move(path);
+    else body?.scrollTo({ top: 0 });
   };
 
   // Show me: a picture of selected lines (or the whole review), over the diff.
@@ -225,7 +285,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const openCode = (target: ShapeCodeTarget): boolean => {
     if (!files.some((file) => file.path === target.path)) return false;
     const index = chapterOf(chapters, target.path);
+    jumped.current = true;
     if (index === null) {
+      setFileSpot(target.path);
       if (mode !== 'files') setMode('files');
     } else {
       setCurrent(index);
@@ -313,8 +375,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overviewHtml, overviewMeta, overviewChanged, files, chapters, mode],
   );
-  const renderOverviewFigure = useCallback(
-    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <OverviewShowMe onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
+  // Before there is a picture, Show me is one of the review's own actions, in its heading beside Global comment.
+  const renderHeadActions = useCallback(
+    (): ReactNode | null => (!overviewHtml && showMe.state.canAsk ? <ShowMeButton onShowMe={() => showMe.open({ file: null, lines: null })} /> : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [overviewHtml, showMe.state.canAsk],
   );
@@ -332,6 +395,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     [viewed, message.id, setSaveError],
   );
   const viewedProp = useMemo(() => (readOnly ? undefined : { files: viewedSet, onToggle: toggleViewed }), [readOnly, viewedSet, toggleViewed]);
+  // The top bar's menu lists what the review draws, in the order it draws it (code, then tests, then generated).
+  const jumpChapters = chapters.map((chapter, index) => ({ title: chapter.title, reviewed: reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false }));
+  const jumpFiles = groupByFileKind(files, (file) => file.path)
+    .flatMap((group) => group.items)
+    .map((file) => ({ path: file.path, additions: file.additions, deletions: file.deletions, viewed: viewedSet.has(file.path) }));
+  const jumpAt = mode === 'walkthrough' ? current : Math.max(0, jumpFiles.findIndex((file) => file.path === fileSpot));
+  const place = jumpPlace({ mode, chapters: jumpChapters, files: jumpFiles, current: jumpAt });
 
   // The notes the person writes on a decision: kept per review until its verdict went (a failed send, a close
   // and a reload keep them), the way the reply box keeps its draft.
@@ -449,11 +519,13 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     }
   };
 
+  const title = message.guide?.title ?? snapshot?.guide.title ?? 'Review';
+  const source = snapshot ? reviewSourceLine(snapshot) : '';
   const railModes = (
     <div className="ib-seg ib-rv-modes" role="radiogroup" aria-label="Review by">
       {(['walkthrough', 'files'] as const).map((value) => (
         <label key={value} className="ib-seg-o" data-on={mode === value ? '' : undefined} data-review-mode-choice={value}>
-          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => setMode(value)} />
+          <input type="radio" name={`ib-rv-mode-${sheetId}`} checked={mode === value} onChange={() => flip(value)} />
           {value === 'walkthrough' ? 'Walkthrough' : 'All files'}
         </label>
       ))}
@@ -463,21 +535,42 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   return (
     <section
       ref={paneRef}
-      className={`ib-viewer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
+      className={`ib-viewer ib-review ib-rv-walk${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
       aria-label="Review"
       data-review-message={message.id}
       data-review-mode={mode}
     >
       <div className="ib-vhead">
-        <button type="button" className="ib-back" onClick={onBack}>
-          <Icon name="back" size={15} />
-          Thread
-        </button>
+        <Tip content="Thread">
+          <button type="button" className="ib-back" aria-label="Thread" onClick={onBack}>
+            <Icon name="back" size={15} />
+          </button>
+        </Tip>
         <span className="ib-vsep" />
-        <span className="ib-fn">Review</span>
-        <span className="ib-from">
-          <bdi>{message.guide?.title ?? ''}</bdi> · from {author}
-        </span>
+        {!phone && (
+          <span className="ib-rv-nav" data-review-nav="">
+            {railModes}
+            {snapshot && <ReviewJump mode={mode} chapters={jumpChapters} files={jumpFiles} current={jumpAt} onChapter={toChapter} onFile={toFile} />}
+          </span>
+        )}
+        {!phone && <span className="ib-vsep ib-rv-titlesep" aria-hidden="true" />}
+        {/* The review's title, quiet; where it gives way (a short bar) the heading holds the same facts. */}
+        <Tip
+          content={
+            <span className="ib-tip-proj">
+              <bdi className="ib-tip-name">{title}</bdi>
+              {source && (
+                <span className="ib-tip-path" dir="ltr" data-review-source="">
+                  {source}
+                </span>
+              )}
+            </span>
+          }
+        >
+          <span className="ib-fn ib-rv-title" data-review-title="">
+            <bdi>{title}</bdi>
+          </span>
+        </Tip>
         <span className="ib-sp" />
         {folded && (
           <button
@@ -541,80 +634,15 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
         </Tip>
       </div>
       <div className="ib-rsplit">
-        <nav className="ib-rrail" aria-label="Review">
-          {railModes}
-          {mode === 'walkthrough' ? (
-            <ol className="ib-rv-list" data-review-chapters="">
-              <li>
-                <button type="button" className="ib-rv-row" data-on={current === null ? '' : undefined} onClick={() => toChapter(null)}>
-                  <span className="ib-rv-mark ib-rv-overview" aria-hidden="true">
-                    <Icon name="book" size={13} />
-                  </span>
-                  <span className="ib-rv-t">Overview</span>
-                </button>
-              </li>
-              {chapters.map((chapter, index) => {
-                const done = reviewed[index] ?? snapshot?.guide.reviewed[index] ?? false;
-                const count = chapter.diffs.length;
-                return (
-                  <li key={`${chapter.title}:${index}`}>
-                    <button
-                      type="button"
-                      className="ib-rv-row"
-                      data-on={current === index ? '' : undefined}
-                      onClick={() => toChapter(index)}
-                      aria-label={`Chapter ${index + 1}: ${chapter.title}${done ? ', reviewed' : ''}`}
-                    >
-                      <span className="ib-rv-mark" data-done={done ? '' : undefined} aria-hidden="true">
-                        {done ? <Icon name="check" size={12} /> : index + 1}
-                      </span>
-                      <span className="ib-rv-t">{chapter.title}</span>
-                      <span className="ib-rv-n">{count}</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ol>
-          ) : (
-            <ul className="ib-rv-list" data-review-files="">
-              {files.map((file) => {
-                const seen = viewedSet.has(file.path);
-                const slash = file.path.lastIndexOf('/');
-                return (
-                  <li key={file.path}>
-                    <button type="button" className="ib-rv-row ib-rv-file" onClick={() => toFile(file.path)} aria-label={`${file.path}${seen ? ', viewed' : ''}`}>
-                      <span className="ib-rv-mark" data-done={seen ? '' : undefined} aria-hidden="true">
-                        {seen ? <Icon name="check" size={12} /> : null}
-                      </span>
-                      <span className="ib-rv-t">
-                        <Tip content={file.path} cut>
-                          <span className="ib-rv-path">
-                            {/* Cut at the start (the box is right to left); the path itself reads left to right, a leading dot included. */}
-                            <bdi dir="ltr">
-                              {slash >= 0 && <span className="ib-rv-dir">{file.path.slice(0, slash + 1)}</span>}
-                              {file.path.slice(slash + 1)}
-                            </bdi>
-                          </span>
-                        </Tip>
-                      </span>
-                      <span className="ib-rv-n">
-                        <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
-                      </span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-          <div className="ib-rv-progress" aria-live="polite">
-            {mode === 'walkthrough'
-              ? `${reviewedCount} of ${plural(chapters.length, 'chapter')} reviewed`
-              : `${viewed.filter((path) => files.some((file) => file.path === path)).length} of ${plural(files.length, 'file')} viewed`}
-          </div>
-        </nav>
         <div className="ib-gbody" ref={bodyRef}>
+          {/* Split | Unified, once its tab has reached the top of the scroll: the same control held in the same spot. */}
+          {heldAt !== null && (
+            <div className="ib-rv-held" style={{ paddingRight: heldAt }} data-review-diff-style-held="">
+              <DiffStyleSwitch icons name="ib-diff-style-held" />
+            </div>
+          )}
           {phone && (
-            // A phone has no rail: its switch, and the chapters or files as a native list to jump to.
+            // A phone: its switch, and the chapters or files as a native list to jump to, held at the top.
             <div className="ib-rv-phonebar" data-review-phonebar="">
               {railModes}
               <select
@@ -628,7 +656,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 }}
               >
                 <option value="" disabled>
-                  {mode === 'walkthrough' ? `Chapters · ${reviewedCount} of ${chapters.length} reviewed` : `Files · ${plural(files.length, 'file')}`}
+                  {mode === 'walkthrough' && !place.lead ? `Overview · ${reviewedCount} of ${chapters.length} reviewed` : place.lead ? `${place.lead} · ${place.name}` : `Files · ${plural(files.length, 'file')}`}
                 </option>
                 {mode === 'walkthrough' ? (
                   <>
@@ -640,12 +668,16 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                     ))}
                   </>
                 ) : (
-                  files.map((file) => (
+                  jumpFiles.map((file) => (
                     <option key={file.path} value={file.path}>
-                      {`${file.path}${viewedSet.has(file.path) ? ' ✓' : ''}`}
+                      {`${file.path}${file.viewed ? ' ✓' : ''}`}
                     </option>
                   ))
                 )}
+                {/* The count, wherever the person is: a chapter's name takes the list's own line. */}
+                <option value="progress" disabled>
+                  {jumpProgress({ mode, chapters: jumpChapters, files: jumpFiles })}
+                </option>
               </select>
             </div>
           )}
@@ -713,8 +745,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
                 viewed={viewedProp}
                 {...(selectionActions ? { selectionActions } : {})}
                 renderOverviewDiagram={renderOverviewDiagram}
-                renderOverviewFigure={renderOverviewFigure}
+                renderHeadActions={renderHeadActions}
                 highlight={highlight}
+                threadHeading
               />
             </ReaderPart>
           ) : null}

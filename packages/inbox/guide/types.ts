@@ -57,6 +57,13 @@ export interface GuideReaderProps {
   highlight?: { path: string; start: number; end: number; token: number } | null;
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
+  /**
+   * Under a top bar that names the review and lists its chapters, and holds Split | Unified (the full-window review):
+   * the heading reads like a thread's (GuideView `threadHeading`) and no card carries the layout switch. Absent: as before.
+   */
+  threadHeading?: boolean;
+  /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */
+  renderHeadActions?: () => ReactNode | null;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */
