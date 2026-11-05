@@ -7709,7 +7709,7 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-cp-rvwhere { flex: none; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }
 .ib-cp[data-phone] .ib-cp-rvrow { flex-wrap: wrap; row-gap: 4px; }
 .ib-cp[data-phone] .ib-cp-choices { flex: 1; }
-.ib-cp[data-phone] .ib-cp-choice { flex: 1; justify-content: center; min-height: 44px; padding: 0 6px; }
+.ib-cp[data-phone] .ib-cp-choice { flex: 1 1 auto; justify-content: center; min-height: 44px; padding: 0 3px; }
 .ib-cp[data-phone] .ib-cp-rvsize { flex: 0 0 100%; margin-left: 0; padding-left: 74px; }
 .ib-cp[data-phone][data-review-box] .ib-cp-to .ib-cp-tol { min-width: 64px; }
 .ib-rvasked { margin: 0 0 6px; color: var(--muted-foreground); font-size: var(--ib-fs-12-5, 12.5px); }

@@ -13,6 +13,7 @@ const pull = (number: number, over: Partial<InboxPull> = {}): InboxPull =>
     title: `PR ${number}`,
     url: `https://github.com/o/web/pull/${number}`,
     state: 'open',
+    head_repo: null,
     head: `b${number}`,
     base: 'main',
     author: 'dana',
