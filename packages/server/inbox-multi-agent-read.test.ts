@@ -372,6 +372,44 @@ describe("who settled a reply no connection wakes", () => {
     expect(await lineOf(server, unknown.thread_id)).toEqual({ read_by: null, state: "delivered" });
   });
 
+  test("two ids of one agent are one agent: `claude` and `claude-code` never read as someone else", async () => {
+    const { server, client, project } = await setup();
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_code", CLAUDE, "Unrelated.");
+    const asked = await agentSends(client, project, "ses_claude_old", { host: "claude", name: "Claude Code", wakes: false }, "Which region?");
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_code");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: null, state: "delivered" });
+  });
+
+  test("a reader that only polls is known by its connection: the row names it", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    await poll(server, "ses_pi_quiet", "pi", project);
+    await personReplies(server, asked.message_id, "us-east-1", "k1");
+    await reads(client, asked.thread_id, "ses_pi_quiet");
+    expect(await lineOf(server, asked.thread_id)).toEqual({ read_by: "pi", state: "delivered" });
+  });
+
+  test("a reply addressed to a session is that session's: another agent reading it is no one's read", async () => {
+    const { server, client, project } = await setup();
+    const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
+    const elsewhere = join(project, "..", "elsewhere");
+    mkdirSync(elsewhere, { recursive: true });
+    await agentSends(client, elsewhere, "ses_claude", CLAUDE, "Unrelated.");
+    await poll(server, "ses_pi", "pi", project);
+    const response = await fetch(`${base(server)}/api/inbox/messages/${asked.message_id}/reply`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ serverSession: server.serverSession, idempotency_key: "k1", words: "us-east-1", to: { host: "pi", session: "ses_pi" } }),
+    });
+    expect(response.status).toBe(200);
+    await reads(client, asked.thread_id, "ses_claude");
+    expect((await lineOf(server, asked.thread_id)).read_by).toBeNull();
+    expect((await thread(server, asked.thread_id)).messages[0]!.agent_checked_by ?? null).toBeNull();
+  });
+
   test("the agent it was for: no name, the line stays Delivered", async () => {
     const { server, client, project } = await setup();
     const asked = await agentSends(client, project, "cursor-1", CURSOR, "Which region?");
