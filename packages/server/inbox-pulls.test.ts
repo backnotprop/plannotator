@@ -139,6 +139,8 @@ interface Forge {
   othersDelayMs?: number;
   /** The head commit `gh api … pulls/N --jq .head.sha` answers (default: the list's `headRefOid`); a list: one per read. */
   heads: string[] | null;
+  /** The commits GitHub says the PR has; null, that read fails. */
+  prCommits?: string[] | null;
 }
 
 /** gh signed in to github.com only; glab signed in nowhere. */
@@ -153,6 +155,7 @@ function forge(answer: unknown = GH_ANSWER): Forge {
     others: () => f.calls.filter((c) => othersCall(c.args)),
     run: async (cli, args) => {
       f.calls.push({ cli, args });
+      if (cli === "gh" && args.some((a) => a.includes("/commits?"))) return f.prCommits ? { stdout: `${f.prCommits.join("\n")}\n`, stderr: "", exitCode: 0 } : { stdout: "", stderr: "HTTP 502", exitCode: 1 };
       if (cli === "gh" && args.includes("--jq")) return { stdout: `${f.heads ? f.heads.shift() ?? "" : String(args[3]!.split("/").at(-1)).padStart(40, "a")}\n`, stderr: "", exitCode: 0 };
       if (cli === "gh" && args[0] === "auth") return { stdout: JSON.stringify({ hosts: { "github.com": [{ login: "dana", active: true, state: "success" }] } }), stderr: "", exitCode: 0 };
       if (cli === "glab" && args[0] === "auth") return { stdout: "", stderr: "No hosts logged in", exitCode: 1 };
@@ -483,14 +486,14 @@ describe("on", () => {
     const stack = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#413")}&scope=stack`);
     const stackAnswer = (await stack.json()) as { patch: string; base: string; head: string };
     expect(stackAnswer.patch).toBe("diff of repos/northwind/billing-svc/compare/main...retry/backoff\n");
-    expect(stackAnswer).toMatchObject({ base: "main", head: "retry/backoff" });
+    expect(stackAnswer).toMatchObject({ base: "main", head: "retry/backoff", head_sha: "413".padStart(40, "a") });
     const diffCalls = w.forge.calls.slice(before);
     expect(diffCalls.every((c) => c.args.includes("--hostname") && c.args[c.args.indexOf("--hostname") + 1] === "github.com")).toBe(true);
 
     const unknown = await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/elsewhere/thing#9")}&scope=layer`);
     expect(unknown.status).toBe(404);
-    // The layer: its head, its patch, its head again; the stack: its compare.
-    expect(w.forge.calls.length).toBe(before + 4);
+    // Each: its head, its patch, its head again.
+    expect(w.forge.calls.length).toBe(before + 6);
   });
 });
 
@@ -704,9 +707,72 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await w.pulls();
     const before = w.forge.calls.length;
     const answer = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent("github.com/northwind/billing-svc#22")}&scope=stack`)).json()) as { head: string; base: string };
-    const call = w.forge.calls[before]!;
+    const call = w.forge.calls.slice(before).find((c) => !c.args.includes("--jq"))!;
     expect(call.args[3]).toBe("repos/northwind/billing-svc/compare/charge-client...dana:feat-2");
     expect(answer).toMatchObject({ base: "charge-client", head: "dana:feat-2" });
+  });
+
+  test("names the head its compare ended at, read around it: the list can be behind, a push during the read leaves it unknown", async () => {
+    const f = forge(stackAnswer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const pushed = "b".repeat(40);
+    f.heads = [pushed, pushed];
+    expect((await pulls.diff("github.com/northwind/billing-svc#22", "stack")).head_sha).toBe(pushed);
+    f.heads = [pushed, "c".repeat(40)];
+    expect((await pulls.diff("github.com/northwind/billing-svc#21", "stack")).head_sha).toBeNull();
+    // The commit the person read, so a whole stack's review can be pinned to it.
+    expect(pulls.readHead("github.com/northwind/billing-svc#22")).toBe(pushed);
+  });
+
+  test("a head the forge did not pin down is asked again, not kept; an answer older than the last head read is not served", async () => {
+    const f = forge(stackAnswer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const key = "github.com/northwind/billing-svc#22";
+    const newer = "b".repeat(40);
+    f.heads = ["", ""];
+    expect((await pulls.diff(key, "layer")).head_sha).toBeNull();
+    f.heads = [newer, newer];
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
+    const old = "c".repeat(40);
+    f.heads = [old, old];
+    expect((await pulls.diff(key, "stack")).head_sha).toBe(old);
+    // This scope's cached answer named another head than the last one read: asked again.
+    f.heads = [newer, newer];
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
+    expect(f.heads).toEqual([]);
+  });
+
+  test("a label moving updated_at reads nothing again; a new head does", async () => {
+    const at = (updatedAt: string, headRefOid: string) => answerOf([ghPull(21, { headRefName: "feat", baseRefName: "charge-client", updatedAt, headRefOid })], [], [ghPull(20, { state: "MERGED", headRefName: "charge-client", mergedAt: "2026-11-02T10:00:00Z" })]);
+    let answer = at("2026-11-03T10:00:00Z", "a".repeat(40));
+    const f = forge();
+    const run: typeof f.run = async (cli, args, env) => {
+      if (cli === "gh" && args.includes("graphql")) {
+        f.calls.push({ cli, args });
+        return { stdout: JSON.stringify(answer), stderr: "", exitCode: 0 };
+      }
+      return f.run(cli, args, env);
+    };
+    let clock = 1_000_000;
+    const pulls = createInboxPulls({ run, now: () => clock });
+    const repos = [{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }];
+    const reread = async (next: unknown) => {
+      answer = next as typeof answer;
+      clock += INBOX_PULLS_FRESH_MS;
+      await pulls.list(repos);
+    };
+    await pulls.list(repos);
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    await reread(at("2026-11-03T11:00:00Z", "a".repeat(40)));
+    const asked = f.calls.length;
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    expect(f.calls.length).toBe(asked);
+    await reread(at("2026-11-03T12:00:00Z", "b".repeat(40)));
+    const before = f.calls.length;
+    await pulls.diff("github.com/northwind/billing-svc#21", "stack");
+    expect(f.calls.length).toBe(before + 3);
   });
 
   test("the lowest open layer's base gone (a merged branch deleted): the stack's own base", async () => {
@@ -722,7 +788,7 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
     const answer = await pulls.diff("github.com/northwind/billing-svc#21", "stack");
     expect(answer.base).toBe("main");
-    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname").map((c) => c.args[3])).toEqual([
+    expect(f.calls.filter((c) => c.args[0] === "api" && c.args[1] === "--hostname" && !c.args.includes("--jq")).map((c) => c.args[3])).toEqual([
       "repos/northwind/billing-svc/compare/charge-client...feat",
       "repos/northwind/billing-svc/compare/main...feat",
     ]);
@@ -926,7 +992,7 @@ describe("the worst case (break-ui on #2590)", () => {
     const diff = await pulls.diff("github.com/northwind/billing-svc#331", "stack");
     expect(diff.patch).toBe("diff of repos/northwind/billing-svc/compare/main...fehlermeldungen-im-dashboard\n");
     await pulls.diff("github.com/northwind/billing-svc#330", "stack");
-    expect(f.calls.at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
+    expect(f.calls.filter((c) => !c.args.includes("--jq")).at(-1)!.args[3]).toBe("repos/northwind/billing-svc/compare/main...%C3%BCbersetzung/fehlermeldungen");
     const before = f.calls.length;
     await expect(pulls.diff("github.com/northwind/billing-svc#340", "stack")).rejects.toMatchObject({ code: "pull_diff_failed" });
     expect(f.calls.length).toBe(before);
@@ -1348,7 +1414,7 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls).toHaveLength(2);
   });
 
-  test("posted at the head of the patch the person read, which the forge moved past the list; a head never read is refused", async () => {
+  test("posted at the head of the patch the person read, which the forge moved past the list; a commit not on the PR is refused for the page to fall back", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");
     await w.pulls();
@@ -1359,8 +1425,9 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     const res = await w.review({ key: PR412, head_sha: pushed, action: "comment", body: "On the pushed commit.", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "Here." }] });
     expect(res.status).toBe(200);
     expect((w.post.calls[0]!.input as { commit_id: string }).commit_id).toBe(pushed);
+    w.forge.prCommits = [SHA412, pushed];
     const never = await w.review({ key: PR412, head_sha: "c".repeat(40), action: "approve", body: "" });
-    expect(((await never.json()) as { code: string }).code).toBe("pull_moved");
+    expect(((await never.json()) as { code: string }).code).toBe("pull_commit_gone");
     expect(w.post.calls).toHaveLength(1);
   });
 
@@ -1371,10 +1438,12 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     w.forge.heads = ["b".repeat(40), "c".repeat(40)];
     const diff = (await (await fetch(`${w.base}/api/inbox/pulls/diff?key=${encodeURIComponent(PR412)}&scope=layer`)).json()) as { head_sha: string | null };
     expect(diff.head_sha).toBeNull();
-    // Neither read is kept as a head the person read: a post at either is refused, and nothing runs.
+    // Neither read is kept as a head the person read: the page sends neither (it posts nothing at a null head), and
+    // one the PR does not have is refused with nothing run.
+    w.forge.prCommits = [SHA412];
     for (const sha of ["b".repeat(40), "c".repeat(40)]) {
       const res = await w.review({ key: PR412, head_sha: sha, action: "approve", body: "" });
-      expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
+      expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
     }
     expect(w.post.calls).toEqual([]);
   });
@@ -1449,9 +1518,12 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");
     await w.pulls();
+    w.forge.prCommits = [SHA412];
     const moved = await w.review({ key: PR412, head_sha: "f".repeat(40), action: "approve", body: "" });
     expect(moved.status).toBe(409);
-    expect(((await moved.json()) as { code: string }).code).toBe("pull_moved");
+    expect(((await moved.json()) as { code: string }).code).toBe("pull_commit_gone");
+    const notACommit = await w.review({ key: PR412, head_sha: "not a sha", action: "approve", body: "" });
+    expect(((await notACommit.json()) as { code: string }).code).toBe("pull_moved");
     expect((await w.review({ key: "github.com/northwind/billing-svc#999", head_sha: SHA412, action: "approve" })).status).toBe(404);
     expect((await w.review({ key: PR412, head_sha: SHA412, action: "merge" })).status).toBe(422);
     expect((await w.review({ key: PR412, head_sha: SHA412, action: "comment", fileComments: [{ path: "a", line: 0, side: "RIGHT", body: "x" }] })).status).toBe(422);
@@ -1461,6 +1533,103 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(refused.status).toBe(409);
     expect(((await refused.json()) as { code: string }).code).toBe("code_review_off");
     expect(off.post.calls).toEqual([]);
+  });
+
+  test("GitHub: an older commit of the PR takes the review at that commit, in that commit's lines", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const older = "e".repeat(40);
+    w.forge.prCommits = [older, SHA412];
+    const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "On what I read." }] });
+    expect(res.status).toBe(200);
+    expect(w.post.calls[0]!.input).toMatchObject({ commit_id: older, comments: [{ line: 3, side: "RIGHT", body: "On what I read." }] });
+  });
+
+  test("GitHub: when it cannot say what the PR has, GitHub decides; its 422 at an older commit is the fallback, not an error", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.forge.prCommits = null;
+    w.post.answer = () => ({ stdout: "", stderr: "HTTP 422: Unprocessable Entity (commit_id is not part of the pull request)", exitCode: 1 });
+    const res = await w.review({ key: PR412, head_sha: "e".repeat(40), action: "comment", body: "", fileComments: [{ path: "src/retry.ts", line: 3, side: "RIGHT", body: "x" }] });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
+    expect(w.post.calls).toHaveLength(1);
+  });
+
+  for (const reason of ["HTTP 422: No commit found for SHA", "gh: Validation Failed (HTTP 422): commit_id is invalid", "HTTP 422: pull_request_review_thread.line must be part of the diff", "gh: Validation Failed (HTTP 422): Path could not be resolved", "HTTP 422: start_line must be part of the same hunk as the line."]) {
+    test(`GitHub at an older commit, a refusal of the commit or its lines is the fallback: ${reason}`, async () => {
+      const w = await world({ codeReview: true });
+      await w.send("Ready.", "posting");
+      await w.pulls();
+      const older = "e".repeat(40);
+      w.forge.prCommits = [older, SHA412];
+      w.post.answer = () => ({ stdout: "", stderr: reason, exitCode: 1 });
+      const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "x" });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
+    });
+  }
+
+  for (const reason of ["gh: Unprocessable Entity (HTTP 422): Can not approve your own pull request", "HTTP 422: User can only have one pending review per pull request", "HTTP 422: Unprocessable Entity (was submitted too quickly)", "HTTP 422: Reference could not be resolved"]) {
+    test(`GitHub at an older commit, a refusal that is not about the commit stays an error: ${reason}`, async () => {
+      const w = await world({ codeReview: true });
+      await w.send("Ready.", "posting");
+      await w.pulls();
+      const older = "e".repeat(40);
+      w.forge.prCommits = [older, SHA412];
+      w.post.answer = () => ({ stdout: "", stderr: reason, exitCode: 1 });
+      const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "x" });
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ code: "pull_review_failed" });
+    });
+  }
+
+  test("GitHub's 422 giving no reason, at a head the list still names: gone only if a force-push took that commit", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.post.answer = () => ({ stdout: "", stderr: "gh: Validation Failed (HTTP 422)", exitCode: 1 });
+    w.forge.prCommits = [SHA412];
+    expect((await w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "x" })).status).toBe(502);
+    w.forge.prCommits = ["f".repeat(40)];
+    const gone = await w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "y" });
+    expect(gone.status).toBe(409);
+    expect(((await gone.json()) as { code: string }).code).toBe("pull_commit_gone");
+  });
+
+  test("GitLab: a commit the Inbox does not name is refused, and nothing posts, whatever the commit list could say", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const res = await w.review({ key: "gitlab.com/northwind/data/ledger#61:pull", head_sha: "e".repeat(40), action: "comment", body: "x" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
+    expect(w.post.calls.filter((c) => c.args.includes("POST"))).toEqual([]);
+  });
+
+  test("file-level comments over the limit, or one malformed: all refused and nothing posted, never cut for the page to forget", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const one = { path: "src/retry.ts", body: "On the file." };
+    const review = (fileLevelComments: unknown[]) => w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "Words.", fileLevelComments });
+    const over = await review(Array.from({ length: 501 }, () => one));
+    expect(over.status).toBe(422);
+    expect(((await over.json()) as { error: string }).error).toContain("at most 500");
+    expect((await review([one, { path: "src/retry.ts", body: "  " }])).status).toBe(422);
+    expect(w.post.calls).toEqual([]);
+  });
+
+  test("GitHub lists 250 commits at most: a full list not naming the commit says nothing, and GitHub decides", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.forge.prCommits = Array.from({ length: 250 }, (_, i) => i.toString(16).padStart(40, "0"));
+    const res = await w.review({ key: PR412, head_sha: "e".repeat(40), action: "comment", body: "x" });
+    expect(res.status).toBe(200);
+    expect(w.post.calls[0]!.input).toMatchObject({ commit_id: "e".repeat(40) });
   });
 
   test("a forge that refuses the review: an error the window shows, nothing claimed posted", async () => {
