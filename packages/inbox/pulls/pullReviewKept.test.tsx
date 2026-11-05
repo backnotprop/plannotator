@@ -27,9 +27,10 @@
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test';
-import { act, useEffect, useState } from 'react';
+import { act, useEffect, useState, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
+import type { PlatformPostProps } from '../guide/platform-post-types';
 
 const hasDom = typeof document !== 'undefined';
 interface ReaderProps {
@@ -1744,4 +1745,135 @@ test.skipIf(!hasDom)('a file-level comment on a file gone from the diff: labelle
   const notes = [...document.querySelectorAll('[data-code-annotation-note]')].map((n) => n.textContent);
   expect(notes).toEqual(['Written on older code']);
   expect(stored(top, 'layer', A)?.comments.sort()).toEqual(['f1', 'f2']);
+});
+
+test.skipIf(!hasDom)('GitHub refuses the older commit with a push under the open dialog: a comment planned for the head still goes there, and nothing is lost', async () => {
+  forge = { commits: new Map(), landed: [], reviews: [] };
+  const { low, top } = layers(TEAMMATE);
+  const C = 'd'.repeat(40);
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave(LINE));
+  diffHead = B;
+  diffCode = 'c';
+  await act(async () => reread((p) => moved(p, top, { head_sha: B })));
+  await settle();
+  await act(async () => void reader!.comments!.onSave({ ...LINE, id: 'l2', text: 'Read at B.' }));
+  await openPost();
+  diffHead = C;
+  diffCode = 'e';
+  await act(async () => reread((p) => moved(p, top, { head_sha: C })));
+  await settle();
+  forge.commits.delete(A);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(forge.landed.map((c) => [c.commit, c.body])).toEqual([[B, 'Read at B.']]);
+  expect(forge.reviews.map((r) => r.commit)).toEqual([B]);
+  expect(forge.reviews[0]!.body).toContain('[Outdated');
+  expect(forge.reviews[0]!.body).toContain(LINE.text);
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+});
+
+test.skipIf(!hasDom)('the verdict refused after the older comment went, then Cancel: the header still offers it, and it goes at the head', async () => {
+  await pushedOver(() => (diffCode = 'c'));
+  await pickVerdict(/Request changes/);
+  await act(async () => document.querySelector<HTMLInputElement>('[role="dialog"] input[value="request_changes"]')?.click());
+  await settle();
+  postAnswer = (body) => (body.head_sha === B ? Response.json({ error: 'GitHub refused it.', code: 'pull_review_failed' }, { status: 502 }) : null);
+  await act(async () => inDialog('Request Changes').click());
+  await settle();
+  expect(forge!.landed.map((c) => c.commit)).toEqual([A]);
+  postAnswer = null;
+  await act(async () => inDialog('Cancel').click());
+  await settle();
+  expect(document.querySelector('.ib-vcomments')?.getAttribute('aria-label')).toBe('Comments, 0');
+  await pickVerdict(/Request changes/);
+  expect(inDialog('Request Changes').disabled).toBe(true);
+  await typeInDialog('Please mirror the icons.');
+  await act(async () => inDialog('Request Changes').click());
+  await settle();
+  expect(forge!.reviews.at(-1)).toMatchObject({ commit: B, action: 'request_changes', body: 'Please mirror the icons.' });
+  expect(document.querySelector('[data-pull-review-posted]')?.textContent).toContain('Changes requested on GitHub');
+});
+
+/** The dialog by itself: it forgets only what a target the forge took carried. */
+async function postDialog(kept: readonly Record<string, unknown>[], answer: (head: string) => Response, head = B) {
+  const seam: string = '../guide/PlatformPost.tsx';
+  const { default: PlatformPost } = (await import(seam)) as { default: ComponentType<PlatformPostProps> };
+  const pull = { key: 'github.com/o/r#7', url: 'https://github.com/o/r/pull/7', number: 7, title: 'PR 7', repo: 'o/r', host: 'github.com', platform: 'github' as const, head_sha: head, mine: false };
+  const sent: { head: string; inline: string[]; body: string }[] = [];
+  const went: string[][] = [];
+  const posted: string[][] = [];
+  host = document.createElement('div');
+  document.body.append(host);
+  root = createRoot(host);
+  const draw = (comments: readonly Record<string, unknown>[], at: string) =>
+    act(async () => {
+      root!.render(
+        <div className="pn-inbox">
+          <PlatformPost
+            pull={{ ...pull, head_sha: at }}
+            open={{ action: 'comment', chooseEvent: false }}
+            comments={comments as never}
+            anchor="diff"
+            post={async (request) => {
+              const body = request as { head_sha: string; fileComments?: { body: string }[]; body?: string };
+              sent.push({ head: body.head_sha, inline: (body.fileComments ?? []).map((c) => c.body), body: body.body ?? '' });
+              return answer(body.head_sha);
+            }}
+            onClose={() => {}}
+            onWent={(ids) => went.push([...ids])}
+            onPosted={(result) => posted.push([...result.posted])}
+          />
+        </div>,
+      );
+    });
+  await draw(kept, head);
+  await settle();
+  return { sent, went, posted, redraw: draw };
+}
+const TOOK = () => Response.json({ ok: true, prUrl: '', submission: { status: 'complete' } });
+const GONE = () => Response.json({ error: 'The commit you read is no longer on this pull request.', code: 'pull_commit_gone' }, { status: 409 });
+const FAILED = () => Response.json({ error: 'GitHub refused it.', code: 'pull_review_failed' }, { status: 502 });
+const OLD = { ...LINE, id: 'old', text: 'Old words.', postAt: A, postHere: false };
+const NOW = { ...LINE, id: 'now', text: 'Words at the head.' };
+
+test.skipIf(!hasDom)('the dialog: a rebuild takes the plan as it stood, not what came in under it; those comments are neither sent nor forgotten', async () => {
+  const { sent, went, posted, redraw } = await postDialog([OLD, NOW], (head) => (head === A ? GONE() : TOOK()));
+  const C = 'd'.repeat(40);
+  const another = { ...LINE, id: 'other', text: 'From the other window.', postAt: A, postHere: false };
+  await redraw([OLD, { ...NOW, postAt: B, postHere: false }, another], C);
+  await settle();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(sent.map((s) => s.head)).toEqual([A, B]);
+  expect(sent[1]!.inline).toEqual(['Words at the head.']);
+  expect(sent[1]!.body).toContain('Old words.');
+  expect(JSON.stringify(sent)).not.toContain('From the other window.');
+  expect(went).toEqual([]);
+  expect(posted).toEqual([['old', 'now']]);
+});
+
+test.skipIf(!hasDom)('the dialog: the review at the head refused: only what the older commit took is forgotten, and nothing counts as posted', async () => {
+  const { went, posted } = await postDialog([OLD, NOW], (head) => (head === A ? TOOK() : FAILED()));
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(went).toEqual([['old']]);
+  expect(posted).toEqual([]);
+});
+
+test.skipIf(!hasDom)('the dialog: a comment read on the commit it posts at is an ordinary comment of that review, in one request', async () => {
+  const { sent, posted } = await postDialog([{ ...NOW, postAt: B, postHere: true }], TOOK);
+  await typeInDialog('The words.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(sent).toEqual([{ head: B, inline: ['Words at the head.'], body: 'The words.' }]);
+  expect(posted).toEqual([['now']]);
+});
+
+test.skipIf(!hasDom)('the dialog: both reviews taken: the older comment counts as posted too, so a later review never carries it', async () => {
+  const { went, posted } = await postDialog([OLD, NOW], TOOK);
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(went).toEqual([['old']]);
+  expect(posted).toEqual([['old', 'now']]);
 });

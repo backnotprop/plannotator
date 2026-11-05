@@ -1171,7 +1171,7 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls).toHaveLength(1);
   });
 
-  for (const reason of ["HTTP 422: No commit found for SHA", "gh: Validation Failed (HTTP 422): commit_id is invalid", "HTTP 422: pull_request_review_thread.line must be part of the diff", "gh: Validation Failed (HTTP 422): Path could not be resolved"]) {
+  for (const reason of ["HTTP 422: No commit found for SHA", "gh: Validation Failed (HTTP 422): commit_id is invalid", "HTTP 422: pull_request_review_thread.line must be part of the diff", "gh: Validation Failed (HTTP 422): Path could not be resolved", "HTTP 422: start_line must be part of the same hunk as the line."]) {
     test(`GitHub at an older commit, a refusal of the commit or its lines is the fallback: ${reason}`, async () => {
       const w = await world({ codeReview: true });
       await w.send("Ready.", "posting");
@@ -1185,7 +1185,7 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     });
   }
 
-  for (const reason of ["gh: Unprocessable Entity (HTTP 422): Can not approve your own pull request", "HTTP 422: User can only have one pending review per pull request", "HTTP 422: Unprocessable Entity (was submitted too quickly)"]) {
+  for (const reason of ["gh: Unprocessable Entity (HTTP 422): Can not approve your own pull request", "HTTP 422: User can only have one pending review per pull request", "HTTP 422: Unprocessable Entity (was submitted too quickly)", "HTTP 422: Reference could not be resolved"]) {
     test(`GitHub at an older commit, a refusal that is not about the commit stays an error: ${reason}`, async () => {
       const w = await world({ codeReview: true });
       await w.send("Ready.", "posting");

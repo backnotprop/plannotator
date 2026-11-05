@@ -44,18 +44,22 @@ function permalinkOf(pull: PlatformPostPull) {
  * A comment read on another commit (`postAt`) is its own target, posted there, since a review names one commit. A commit
  * that has gone (`gone`): inline here if its lines still read the same, else in the body with its label.
  */
-function asSubmitted(comments: readonly KeptComment[], pull: PlatformPostPull, anchor: PlatformPostProps['anchor'], gone: ReadonlySet<string>): CodeAnnotation[] {
-  return comments.map((c) => ({
-    ...c,
-    prUrl: c.postAt && !gone.has(c.postAt) ? `${pull.url}${AT}${c.postAt}` : pull.url,
-    prNumber: pull.number,
-    prTitle: c.postAt && !gone.has(c.postAt) ? `read at ${c.postAt.slice(0, 7)}` : pull.title,
-    // The row cuts at its end, so nothing long stands before the commit it names.
-    prRepo: c.postAt && !gone.has(c.postAt) ? '' : pull.repo,
-    ...(c.postAt && gone.has(c.postAt) && !c.postHere ? { outdated: true } : {}),
-    ...(anchor === 'stack' && (c.scope ?? 'line') !== 'general' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
-    ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: 'guide' } : {}),
-  }));
+function asSubmitted(comments: readonly KeptComment[], pull: PlatformPostPull, anchor: PlatformPostProps['anchor'], gone: ReadonlySet<string>, head: string): CodeAnnotation[] {
+  return comments.map((c) => {
+    // Read on the commit this plan posts at: an ordinary comment of this review.
+    const older = c.postAt && c.postAt !== head && !gone.has(c.postAt) ? c.postAt : null;
+    return {
+      ...c,
+      prUrl: older ? `${pull.url}${AT}${older}` : pull.url,
+      prNumber: pull.number,
+      prTitle: older ? `read at ${older.slice(0, 7)}` : pull.title,
+      // The row cuts at its end, so nothing long stands before the commit it names.
+      prRepo: older ? '' : pull.repo,
+      ...(c.postAt && gone.has(c.postAt) && !c.postHere ? { outdated: true } : {}),
+      ...(anchor === 'stack' && (c.scope ?? 'line') !== 'general' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
+      ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: 'guide' } : {}),
+    };
+  });
 }
 
 const OPEN_PR_KEY = 'plannotator-inbox-platform-open-pr';
@@ -82,11 +86,14 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
   // (`pull_moved`, `pull_commit_gone`) is refused, with what the person wrote still in the dialog.
   const planHead = useRef(pull.head_sha);
   const refused = useRef(false);
-  // The comments this plan was built from: another window's, come in since, wait for the next post.
-  const planned = useRef(new Set<string>());
-  const planNow = () => {
-    const submitted = asSubmitted(comments, pull, anchor, gone.current);
-    planned.current = new Set(comments.map((c) => c.id));
+  // The comments this plan was built from, as they stood then: another window's, or a new head's view of these, wait for
+  // the next plan.
+  const planned = useRef<readonly KeptComment[]>([]);
+  const carried = useRef<CodeAnnotation[]>([]);
+  const planOf = (kept: readonly KeptComment[]) => {
+    const submitted = asSubmitted(kept, pull, anchor, gone.current, planHead.current);
+    planned.current = kept;
+    carried.current = submitted;
     return buildReviewSubmission(
       submitted,
       [],
@@ -113,8 +120,14 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
     const sameHead = planHead.current === pull.head_sha;
     planHead.current = pull.head_sha;
     refused.current = false;
-    setPlan((was) => (sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked') ? was : planNow()));
+    setPlan((was) => (sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked') ? was : planOf(comments)));
   }, [open, comments, pull, anchor]);
+
+  /** A comment went only if a target the forge took carried it; what the dialog could only offer to copy did not. */
+  const wentIn = (targets: readonly SubmissionTarget[], orphans: ReviewSubmission['orphans']) => {
+    const kept = new Set(orphans.flatMap((group) => group.annotations.map((a) => a.id)));
+    return carried.current.filter((c) => !kept.has(c.id) && targets.some((t) => t.status === 'success' && t.prUrl === c.prUrl)).map((c) => c.id);
+  };
 
   const send = async (pending: ReturnType<typeof openPendingTab> | null) => {
     // Refused, and the new commit is in: retrying that plan can never go, so this shows the new one to read and post.
@@ -122,7 +135,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       closePendingTab(pending);
       refused.current = false;
       planHead.current = pull.head_sha;
-      setPlan(planNow());
+      setPlan(planOf(comments));
       return;
     }
     setSubmitting(true);
@@ -147,7 +160,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       if (older.length > 0) {
         const earlier = await submitPlatformReviewTargets({ targets: older, action: 'comment', generalComment: '', bodyForTarget: (target) => buildPlatformReviewBody('comment', pull.platform, '', target), fetchReview });
         settled = earlier.targets;
-        const ids = comments.filter((c) => planned.current.has(c.id) && settled.some((t) => t.status === 'success' && t.prUrl === `${pull.url}${AT}${c.postAt}`)).map((c) => c.id);
+        const ids = wentIn(settled, plan.orphans);
         if (ids.length > 0) onWent?.(ids);
         const stuck = settled.filter((t) => t.status !== 'success' && !gone.current.has(t.prUrl.slice(t.prUrl.indexOf(AT) + AT.length)));
         if (stuck.length > 0) {
@@ -158,7 +171,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       }
       // A commit that has gone puts its comments in this review, so the review is built again with them.
       const fresh = settled.some((t) => t.status !== 'success');
-      const rebuilt = fresh ? planNow() : plan;
+      const rebuilt = fresh ? planOf(planned.current) : plan;
       let targets = rebuilt.targets.filter(review);
       // A verdict goes to this PR alone, whatever is left for it after an older commit; a comment with no line comments
       // still posts its main comment (as the review app).
@@ -193,9 +206,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       }
       if (openPR) settlePendingTab(pending, attempt.openUrls.length > 0 ? attempt.openUrls : [pull.url], window as unknown as TabOpener);
       else closePendingTab(pending);
-      // What went: every comment but the ones the dialog could only offer to copy (the whole stack's line comments).
-      const kept = new Set(rebuilt.orphans.flatMap((group) => group.annotations.map((a) => a.id)));
-      const posted = [...planned.current].filter((id) => !kept.has(id));
+      const posted = wentIn([...settled, ...attempt.targets], rebuilt.orphans);
       setPlan({ targets: [], orphans: [] });
       setGeneral('');
       onPosted({ action, url: pull.url, posted, head: planHead.current });

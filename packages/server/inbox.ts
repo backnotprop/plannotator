@@ -3753,7 +3753,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           const message = cause instanceof Error ? cause.message : "The review was not posted.";
           // A refusal of the commit or its lines, or GitHub's 422 giving no reason: nothing went, and the words have a way.
           // Any other reason (your own PR, a pending review, too quickly) is the person's to read.
-          if (/no commit found|commit_id|not part of the pull request|part of the diff|could not be resolved|\(HTTP 422\)\s*$|HTTP 422: (?:Unprocessable Entity|Validation Failed)\s*$/i.test(message)) {
+          if (/no commit found|commit_id|not part of the pull request|part of the (?:diff|same hunk)|\bpath could not be resolved|\(HTTP 422\)\s*$|HTTP 422: (?:Unprocessable Entity|Validation Failed)\s*$/i.test(message)) {
             // At a head the list still names, only if a force-push really took it.
             if (!known || (await pulls.hasCommit(key, headSha)) === false) return commitGone();
           }
