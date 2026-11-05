@@ -34,7 +34,7 @@ function CodeGuide(props: ShapeCodeGuideProps) {
   );
 }
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate, headStart }: ShapeBoardProps) {
   return (
     <OpenInCodeSpans scope={{ shape: id }} on={!!host.fileAction}>
     <ShapeSurface
@@ -49,6 +49,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       initialView={initialView}
       initialPanel={initialPanel}
       onNavigate={onNavigate}
+      headStart={headStart}
     />
     </OpenInCodeSpans>
   );

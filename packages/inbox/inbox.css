@@ -7824,6 +7824,11 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-shape-layer { position: absolute; inset: var(--ib-gutter); z-index: 19; display: flex; flex-direction: column; background: var(--background); border-radius: inherit; overflow: hidden; }
 .ib-shape-layer > * { flex: 1; min-height: 0; }
 .ib-shape-loading { flex: 1; }
+/* The board's sidebar toggle sits alone in the gutter, 22px from the pane's edge where every full page's head has it;
+   the title and the claim share one left edge after it (the board's own phone layout: 10px, its padding). */
+.ib-shape-layer .shp-root:not(.phone) .shp-head-start { margin-left: -18px; }
+.ib-shape-layer .shp-root:not(.phone) .shp-head:has(.shp-head-start) .shp-claim { margin-left: 24px; }
+.ib-shape-layer .shp-root.phone .shp-head:has(.shp-head-start) .shp-claim { margin-left: 42px; }
 .ib-shape-thread { display: flex; flex-direction: column; gap: 18px; padding: 4px 2px 24px; }
 .ib-shape-msg { border-radius: 10px; padding: 6px 8px; transition: box-shadow .4s; }
 .ib-shape-who { display: flex; align-items: baseline; gap: 8px; font-size: var(--ib-fs-13-5, 13.5px); margin-bottom: 4px; }

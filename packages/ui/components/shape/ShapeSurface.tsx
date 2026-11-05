@@ -157,7 +157,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, readFirst = false, initialView, initialPanel, onNavigate, headStart }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -851,6 +851,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           */}
           <header className="shp-head">
             <div className="shp-title-row">
+              {headStart && <div className="shp-head-start">{headStart}</div>}
               <h1 className={fresh('title').trim()}>{version.title}</h1>
               <div className="shp-head-side">
                 {agentDrawing && (
