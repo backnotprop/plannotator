@@ -1875,10 +1875,10 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   // The agent names files and lines, and sends its own patch too: it isn't looked at.
   const longFile = join(world.projects.web, 'src/walk-long.ts');
   writeFileSync(longFile, Array.from({ length: 60 }, (_, i) => `export const line${i + 1} = ${i + 1};`).join('\n') + '\n');
-  await claude.submitGuide({
+  const sent = await claude.submitGuide({
     project_path: world.projects.web,
     reply_to: threadId,
-    patch: '',
+    patch: world.patches.locale,
     body: 'A failed charge starts at the webhook.',
     guide: {
       title: 'How a failed charge gets retried',
@@ -1936,6 +1936,20 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
   await shot(page, 'w-thread');
   rmSync(longFile);
+
+  // More asked: the row is with the agent, and its plain answer, no second walkthrough, brings it back.
+  const moveOf = () => page.evaluate(async (id) => ((await (await fetch('/api/inbox/reviews')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.find((row) => row.thread_id === id)?.move, threadId);
+  await page.evaluate(async (id) => {
+    await fetch(`/api/inbox/messages/${id}/reply`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ idempotency_key: '00000000-0000-4000-8000-00000000a001', words: 'Where does the 200 come from?' }) });
+  }, sent.message_id);
+  await expect.poll(moveOf).toBe('agents');
+  await claude.send({ project_path: world.projects.web, reply_to: sent.message_id as string, body: 'From charge.ts, line 4.' });
+  await expect.poll(moveOf).toBe('on_you');
+
+  // Code review off: refused by name, nothing sent.
+  await setCodeReview(false);
+  await expect(claude.submitGuide({ project_path: world.projects.web, thread: 'walk-off', walkthrough: true, guide: { title: 'Off', intent: 'Off.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/i18n/fallback.ts' }] }] } } as never)).rejects.toThrow('send the guide without `walkthrough`');
+  await setCodeReview(true);
 });
 
 test("A link's review posts to its forge, though no list has it; the picker's links keep what's chosen, and only signed-in hosts are asked", async () => {
