@@ -654,6 +654,18 @@ describe("a launched agent's permission prompt over the tailnet: the owner's rul
     }
   });
 
+  test("a guest's answer to a launched Codex thread's own question (`perm:ask:`) answers the card, with one by_guest message", async () => {
+    const w = await world({ config: { inboxLaunch: { enabled: true } } });
+    const project = w.inbox.store.ensureProject({ name: "app", root: join(w.dataDir, "app") });
+    const author = { kind: "agent" as const, host: "codex", session: `perm:ask:${PERM_SESSION}`, name: "Codex" };
+    const body = ":::question\nRound refunds how?\n\n- [ ] Banker's rounding\n- [ ] Half up\n:::";
+    const id = w.inbox.store.sendMessage({ project_id: project.id, author, permission: true, body, idempotency_key: "perm-codex-ask-guest" }).message.id;
+    expect((await picks(w, "guest", id, "Half up")).status).toBe(200);
+    expect((await send(w, "guest", id, "00000000-0000-4000-8000-000000000211", "Half up")).status).toBe(200);
+    expect(stateOf(w, id)).toBe("sent");
+    expect(repliesOf(w, id).map((m) => m.by_guest)).toEqual([true]);
+  });
+
   const ANSWERS_AS_THE_OWNER: { who: string; caller: Caller; tagged?: boolean }[] = [
     { who: "this computer's window", caller: "local" },
     { who: "the owner over the tailnet", caller: "owner" },
