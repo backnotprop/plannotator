@@ -537,8 +537,8 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const files = [addedFile('m.sql', 5), addedFile('s.ts', 10)];
     await renderView(guide, { bare: true, state: makeState({ files }) });
     // Before a measure: 5 and 10 rows of 20px, the 33px header, the list's padding and the border, as the browser lays it out.
-    expect(boxHeight('m.sql')).toBe('159px');
-    expect(boxHeight('s.ts')).toBe('259px');
+    expect(boxHeight('m.sql')).toBe('151px');
+    expect(boxHeight('s.ts')).toBe('251px');
 
     const report = (path: string) => latestCodeViewProps.filter((p) => (p.files as DiffFile[])[0]?.path === path).at(-1)!.onContentHeightChange as (h: number) => void;
     // Inline comments, wrapped lines and opened gaps grow the content: the box follows, with no limit, and nothing scrolls inside it.
@@ -555,7 +555,7 @@ describe('GuideView bare (the Inbox PR page)', () => {
   test.skipIf(!hasDom)('a host opts in without bare: the box fits, the heading stays', async () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'm.sql' }] }] });
     await renderView(guide, { fitFileHeights: true, state: makeState({ files: [addedFile('m.sql', 5)] }) });
-    expect(boxHeight('m.sql')).toBe('159px');
+    expect(boxHeight('m.sql')).toBe('151px');
     expect(host!.querySelector('h1')).not.toBeNull();
     expect(latestCodeViewProps.at(-1)!.onContentHeightChange).toBeFunction();
   });
@@ -567,9 +567,9 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const guide = makeGuide({ sections: [{ title: 'One', overview: '', diffs: [{ file: 'a.ts' }] }] });
     // Rows: ctx, ctx2, then 3 (max of 2 removed, 3 added) and 1 → 6 in Split; ctx, ctx2, 5 and 1 → 8 in Unified.
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'split' } });
-    expect(boxHeight('a.ts')).toBe(`${59 + 6 * 20}px`);
+    expect(boxHeight('a.ts')).toBe(`${51 + 6 * 20}px`);
     await renderView(guide, { fitFileHeights: true, state: { ...makeState({ files: [file] }), diffStyle: 'unified' } });
-    expect(boxHeight('a.ts')).toBe(`${59 + 8 * 20}px`);
+    expect(boxHeight('a.ts')).toBe(`${51 + 8 * 20}px`);
   });
 
   // Guards a modified file growing on its first mount: the separators above and between hunks are 32 px each, with no gaps around them.
@@ -583,10 +583,10 @@ describe('GuideView bare (the Inbox PR page)', () => {
       return boxHeight('a.ts');
     };
     // Each hunk draws three rows in Unified.
-    expect(await box(patchOf(1))).toBe(`${59 + 3 * 20}px`);
-    expect(await box(patchOf(10))).toBe(`${59 + 3 * 20 + 32}px`);
-    expect(await box(patchOf(1, 30))).toBe(`${59 + 6 * 20 + 32}px`);
-    expect(await box(patchOf(10, 30, 50))).toBe(`${59 + 9 * 20 + 3 * 32}px`);
+    expect(await box(patchOf(1))).toBe(`${51 + 3 * 20}px`);
+    expect(await box(patchOf(10))).toBe(`${51 + 3 * 20 + 32}px`);
+    expect(await box(patchOf(1, 30))).toBe(`${51 + 6 * 20 + 32}px`);
+    expect(await box(patchOf(10, 30, 50))).toBe(`${51 + 9 * 20 + 3 * 32}px`);
   });
 
   // Guards the same growth on a file with no final newline: the viewer draws that note as a row of its own.
@@ -602,12 +602,12 @@ describe('GuideView bare (the Inbox PR page)', () => {
     const oldSide = `-a\n${NOTE}+a\n`;
     const bothSides = `-a\n${NOTE}+b\n${NOTE}`;
     const afterContext = `-a\n+b\n c\n${NOTE}`;
-    expect(await box(oldSide, 'unified')).toBe('119px');
-    expect(await box(oldSide, 'split')).toBe('99px');
-    expect(await box(bothSides, 'unified')).toBe('139px');
-    expect(await box(bothSides, 'split')).toBe('99px');
-    expect(await box(afterContext, 'unified')).toBe('139px');
-    expect(await box(afterContext, 'split')).toBe('119px');
+    expect(await box(oldSide, 'unified')).toBe('111px');
+    expect(await box(oldSide, 'split')).toBe('91px');
+    expect(await box(bothSides, 'unified')).toBe('131px');
+    expect(await box(bothSides, 'split')).toBe('91px');
+    expect(await box(afterContext, 'unified')).toBe('131px');
+    expect(await box(afterContext, 'split')).toBe('111px');
   });
 
   // A commented file back in the outer window: 20 files so the window runs, frames by hand once it is back.

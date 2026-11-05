@@ -68,7 +68,7 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return FIT_BOX_CHROME + 33 + 8 + rows * 20 + separatorHeight;
+  return FIT_BOX_CHROME + 33 + rows * 20 + separatorHeight;
 }
 
 interface GuideFileCardProps {
