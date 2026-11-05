@@ -99,27 +99,37 @@ export function PullReview(props: PullReviewProps) {
 }
 
 /**
- * A layer's other stored reviews move to this head's. One kept for another head commit: its lines may have moved, so
- * line comments and Viewed go; global comments are on no line and move. One that names no commit (written before the
- * head was known, or by an older Inbox, which named the PR's last update): nothing says whether a commit came since, so
- * all of it moves, its line comments marked outdated: they never post on whatever sits at those lines now.
+ * A review's words: this head's entry, with what the layer's other entries hold that must stay in view. One kept for
+ * another head commit: its global comments, on no line (its line comments and Viewed may have moved). One that names no
+ * commit (written before the head was known, or by an older Inbox, which named the PR's last update): all of it. Its line
+ * comments are marked outdated, so they never post on whatever sits at those lines now, once a head is named and the PR
+ * has changed since (`updatedAt`).
+ *
+ * `read` touches nothing, as an entry can be newer than what this window knows. `absorb` takes what is now in view out of
+ * the other entries (the person wrote, so this entry speaks for them). `move`, once a patch read here names this head,
+ * also removes the other heads' line comments and Viewed.
  */
-function dropStale(layerKey: string, scope: string, keptId: string): void {
+function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
+  const now = readKept(keptId);
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
+    const named = HEAD_SHA.test(keptId.slice(keptId.lastIndexOf(':') + 1));
     const carried: CodeAnnotation[] = [];
     const ticks: string[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
       const name = window.localStorage.key(i);
       if (!name || !name.startsWith(prefix) || name === STORE + keptId) continue;
-      const ofAHead = HEAD_SHA.test(name.slice(prefix.length));
+      const suffix = name.slice(prefix.length);
+      const ofAHead = HEAD_SHA.test(suffix);
       const was = readKept(name.slice(STORE.length));
-      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments.map((c) => ((c.scope ?? 'line') === 'line' ? { ...c, outdated: true } : c))));
+      const stale = named && suffix !== updatedAt;
+      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments.map((c) => (stale && (c.scope ?? 'line') === 'line' ? { ...c, outdated: true } : c))));
       if (!ofAHead) ticks.push(...was.viewed);
-      window.localStorage.removeItem(name);
+      if (mode === 'read') continue;
+      if (!ofAHead || mode === 'move') window.localStorage.removeItem(name);
+      else keep(name.slice(STORE.length), { comments: was.comments.filter((c) => c.scope !== 'general'), viewed: was.viewed });
     }
-    if (carried.length === 0 && ticks.length === 0) return;
-    const now = readKept(keptId);
+    if (carried.length === 0 && ticks.length === 0) return now;
     const ids = new Set(now.comments.map((c) => c.id));
     const comments = [...now.comments];
     for (const c of carried) {
@@ -127,9 +137,12 @@ function dropStale(layerKey: string, scope: string, keptId: string): void {
       ids.add(c.id);
       comments.push(c);
     }
-    keep(keptId, { comments, viewed: [...new Set([...now.viewed, ...ticks])] });
+    const value = { comments, viewed: [...new Set([...now.viewed, ...ticks])] };
+    if (mode !== 'read') keep(keptId, value);
+    return value;
   } catch {
     // Storage off.
+    return now;
   }
 }
 
@@ -161,14 +174,22 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const seenId = layer ? `${layer.key}\u0000${scope}\u0000${layer.head_sha ?? layer.updated_at}\u0000${diffBase}` : '';
   const [diff, setDiff] = useState<InboxPullDiffAnswer | null>(() => SEEN.get(seenId) ?? null);
   const [diffError, setDiffError] = useState<string | null>(null);
-  // The head of a patch this review read itself. One remembered in `SEEN` can be older than what another window kept.
-  const readHead = useRef<string | null>(null);
+  // A patch this review read itself named its head. One remembered in `SEEN` can be older than what another window kept.
+  const read = useRef(false);
+  // A read to try again when the list is next read (its tick, a focus): one that failed or named no head.
+  const [attempt, setAttempt] = useState(0);
+  const again = useRef(false);
+  useEffect(() => {
+    if (again.current) setAttempt((n) => n + 1);
+    again.current = false;
+  }, [model]);
   useEffect(() => {
     if (!layer) return;
-    // Back to a diff read a moment ago (This layer → Whole stack → This layer): drawn at once, not read again.
+    // Back to a diff read a moment ago (This layer → Whole stack → This layer): drawn at once, not read again. Never
+    // over a patch of another head: a list that flipped back reads the forge first.
     const seen = SEEN.get(seenId);
-    setDiffError(null);
-    if (seen) {
+    if (seen && (!diff?.head_sha || seen.head_sha === diff.head_sha)) {
+      setDiffError(null);
       setDiff(seen);
       return;
     }
@@ -178,53 +199,60 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       return;
     }
     const controller = new AbortController();
-    // A patch that names its head stays on screen, and keeps its comments, until the read names a newer one: the list
-    // can land on a head still behind it.
-    if (layer.head_sha && !diff?.head_sha) setDiff(null);
+    // Whatever is on screen stays, and keeps its comments, until a read names a newer patch.
     inboxApi
       .pullDiff(layer.key, scope, controller.signal)
       .then((answer) => {
         if (controller.signal.aborted) return;
-        SEEN.set(seenId, answer);
-        readHead.current = answer.head_sha ?? null;
-        while (SEEN.size > SEEN_MAX) SEEN.delete(SEEN.keys().next().value!);
+        setDiffError(null);
+        again.current = !answer.head_sha;
+        if (answer.head_sha) {
+          SEEN.set(seenId, answer);
+          while (SEEN.size > SEEN_MAX) SEEN.delete(SEEN.keys().next().value!);
+          read.current = true;
+        } else if (diff?.head_sha) return;
         setDiff(answer);
       })
       .catch((cause: unknown) => {
-        if (!controller.signal.aborted) setDiffError(cause instanceof Error ? cause.message : 'The diff could not be read.');
+        if (controller.signal.aborted) return;
+        again.current = !(cause instanceof InboxApiError && (cause.code === 'pull_diff_too_large' || cause.code === 'pull_diff_fork'));
+        if (!diff) setDiffError(cause instanceof Error ? cause.message : 'The diff could not be read.');
       });
     return () => controller.abort();
     // A new layer or scope reads again; the same one keeps its diff.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [seenId]);
+  }, [seenId, attempt]);
 
   // Comments and Viewed are kept per head commit: a new commit starts clean, but for the global comments. The head is
   // the patch's when it says, in either scope (the list can be minutes behind it, and the comments are on the patch;
-  // another layer's commit changes nothing here), else the list's. Neither says: the last one known stays.
-  const lastHead = useRef<string | null>(null);
-  const head = diff?.head_sha ?? layer?.head_sha ?? lastHead.current;
-  lastHead.current = head;
-  const keptId = `${layerKey}:${scope}:${head ?? ''}`;
-  // Only a patch read here says this head is the newest: until then nothing stored moves or goes (it can be newer).
-  const sure = !!head && readHead.current === head;
-  const [comments, setComments] = useState<CodeAnnotation[]>(() => readKept(keptId).comments);
-  const [viewed, setViewed] = useState<string[]>(() => readKept(keptId).viewed);
+  // another layer's commit changes nothing here), else the list's. Neither says: the name in use stays.
+  const lastName = useRef<string | null>(null);
+  const keptName = diff?.head_sha ?? layer?.head_sha ?? lastName.current ?? layer?.updated_at ?? null;
+  lastName.current = keptName;
+  const keptId = `${layerKey}:${scope}:${keptName ?? ''}`;
+  const sure = read.current;
+  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, mode);
+  const [comments, setComments] = useState<CodeAnnotation[]>(() => words('read').comments);
+  const [viewed, setViewed] = useState<string[]>(() => words('read').viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [scrollTarget, setScrollTarget] = useState<{ id: string; token: number } | null>(null);
   useEffect(() => {
-    if (sure) dropStale(layerKey, scope, keptId);
-    const kept = readKept(keptId);
+    const kept = words(sure ? 'move' : 'read');
     setComments(kept.comments);
     setViewed(kept.viewed);
     setSelectedId(null);
     // The layer and scope are in `keptId`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [keptId, sure]);
+  const store = (value: { comments: CodeAnnotation[]; viewed: string[] }) => {
+    if (!sure) words('absorb');
+    keep(keptId, value);
+  };
   const write = (next: { comments?: CodeAnnotation[]; viewed?: string[] }) => {
     const value = { comments: next.comments ?? comments, viewed: next.viewed ?? viewed };
     if (next.comments) setComments(next.comments);
     if (next.viewed) setViewed(next.viewed);
-    keep(keptId, value);
+    store(value);
   };
   // A diff that could not be read (too large, a refused compare) takes no verdict: there is nothing on screen to judge.
   const canDecide = !!link?.last && !diffError;
@@ -233,7 +261,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // A layer's comments are on its patch: posted at that patch's own head (the list's can be a minute behind the forge);
   // a patch whose head the forge did not pin down posts nothing (Open on GitHub instead), and neither does a diff
   // that could not be read (the header then offers Open on GitHub).
-  const postHead = scope === 'layer' ? (diff?.head_sha ?? null) : (layer?.head_sha ?? null);
+  const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   const [picked, pick] = useReviewDestination();
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
@@ -304,7 +332,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       try {
         await inboxApi.reply(link.last.message_id, { idempotency_key: keys.current.keyFor(input), ...input });
         keys.current.done();
-        keep(keptId, { comments: [], viewed: [] });
+        store({ comments: [], viewed: [] });
         if (!mounted.current) return;
         setComments([]);
         setNotes({});
@@ -316,7 +344,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         if (mounted.current) setSending(false);
       }
     },
-    [sending, layer, link, stack, comments, scope, keptId, onSent],
+    [sending, layer, link, stack, comments, scope, keptId, sure, onSent],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),
@@ -399,7 +427,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           {stack.repo}
         </span>
         <span className="ib-sp" />
-        {folded && readerComments && (
+        {folded && (readerComments || comments.length > 0) && (
           <button
             type="button"
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
@@ -440,7 +468,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
               const went = new Set(result.posted);
               const left = comments.filter((c) => !went.has(c.id));
-              keep(keptId, { comments: left, viewed });
+              store({ comments: left, viewed });
               setComments(left);
               setPosted({ label: result.label, url: result.url, action: result.action });
             }}
@@ -575,8 +603,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               {scope === 'stack' ? `The stack up to ${label} changes no files.` : `This ${noun} changes no files.`}
             </p>
           ) : snapshot ? (
-            // Keyed on the head: a new commit brings a new reader, so a composer left open cannot save onto a moved line.
-            <Suspense key={diff?.head_sha ?? diff?.patch} fallback={null}>
+            // Keyed on the code: new code brings a new reader, so a composer left open cannot save onto a moved line; the
+            // same code keeps it, whatever the head reads said.
+            <Suspense key={diff?.patch} fallback={null}>
               <GuideReader snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} />
             </Suspense>
           ) : (

@@ -71,6 +71,9 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
   });
   const submitted = useMemo(() => asSubmitted(comments, pull, anchor), [comments, pull, anchor]);
   const opened = useRef(false);
+  // The head this plan's lines are on: it posts there, whatever the PR has moved to. A commit the Inbox no longer takes
+  // is refused (`pull_moved`), with what the person wrote still in the dialog.
+  const planHead = useRef(pull.head_sha);
   useEffect(() => {
     if (!open) {
       opened.current = false;
@@ -81,8 +84,10 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
     opened.current = true;
     setAction(open.action);
     setChooseEvent(open.chooseEvent);
+    const sameHead = planHead.current === pull.head_sha;
+    planHead.current = pull.head_sha;
     setPlan((was) =>
-      was.targets.some((t) => t.status === 'partial' || t.status === 'blocked')
+      sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked')
         ? was
         : buildReviewSubmission(
             submitted,
@@ -123,7 +128,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         action,
         generalComment: general,
         bodyForTarget: (target) => buildPlatformReviewBody(action, pull.platform, general, target),
-        fetchReview: (_url, init) => post({ ...(JSON.parse(String(init.body)) as Record<string, unknown>), key: pull.key, head_sha: pull.head_sha }),
+        fetchReview: (_url, init) => post({ ...(JSON.parse(String(init.body)) as Record<string, unknown>), key: pull.key, head_sha: planHead.current }),
       });
       if (!attempt.allComplete) {
         closePendingTab(pending);

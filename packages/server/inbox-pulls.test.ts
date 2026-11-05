@@ -642,8 +642,27 @@ describe("the whole stack's diff (finding C and merged layers)", () => {
     expect((await pulls.diff("github.com/northwind/billing-svc#22", "stack")).head_sha).toBe(pushed);
     f.heads = [pushed, "c".repeat(40)];
     expect((await pulls.diff("github.com/northwind/billing-svc#21", "stack")).head_sha).toBeNull();
-    // A whole stack's read is no head to post a layer's review at.
-    expect(pulls.readHead("github.com/northwind/billing-svc#22")).toBeNull();
+    // The commit the person read, so a whole stack's review can be pinned to it.
+    expect(pulls.readHead("github.com/northwind/billing-svc#22")).toBe(pushed);
+  });
+
+  test("a head the forge did not pin down is asked again, not kept; an answer older than the last head read is not served", async () => {
+    const f = forge(stackAnswer);
+    const pulls = createInboxPulls({ run: f.run });
+    await pulls.list([{ host: "github.com", repo: "northwind/billing-svc", project_id: "prj_1" }]);
+    const key = "github.com/northwind/billing-svc#22";
+    const newer = "b".repeat(40);
+    f.heads = ["", ""];
+    expect((await pulls.diff(key, "layer")).head_sha).toBeNull();
+    f.heads = [newer, newer];
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
+    const old = "c".repeat(40);
+    f.heads = [old, old];
+    expect((await pulls.diff(key, "stack")).head_sha).toBe(old);
+    // This scope's cached answer named another head than the last one read: asked again.
+    f.heads = [newer, newer];
+    expect((await pulls.diff(key, "layer")).head_sha).toBe(newer);
+    expect(f.heads).toEqual([]);
   });
 
   test("a label moving updated_at reads nothing again; a new head does", async () => {

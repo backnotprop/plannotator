@@ -380,7 +380,7 @@ export interface InboxPulls {
   avatarUrls(host: string): Record<string, string>;
   /** One layer's patch, or the stack's from its base up to that layer. Throws InboxPullsError. */
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
-  /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
+  /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
 }
 
@@ -652,7 +652,9 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       // By what makes the diff: a label or a comment moves `updated_at` and costs no read.
       const cacheKey = `${key}\u0000${scope}\u0000${bases[0]}\u0000${pull.head_sha ?? pull.updated_at}`;
       const hit = diffs.get(cacheKey);
-      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS) return hit.answer;
+      // Only an answer naming the head last read here: a list gone back to an older head reads the forge, and so does a
+      // head the forge did not pin down.
+      if (hit && now() - hit.at < INBOX_PULL_DIFF_FRESH_MS && readHeads.get(key) === hit.answer.head_sha) return hit.answer;
       if (scope === "stack" && (!bases.every(compareBranch) || !compareBranch(pull.head))) throw new InboxPullsError("pull_diff_failed", "This stack's branch names can't be compared here. Open it on the forge.");
       const state = hosts.get(pull.host);
       const cli: RefCli = state?.cli ?? (pull.platform === "github" ? "gh" : "glab");
@@ -670,7 +672,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
             : `projects/${project}/repository/compare?from=${encodeURIComponent(base)}&to=${encodeURIComponent(pull.head)}&straight=false`;
         return ["api", "--hostname", pull.host, endpoint];
       };
-      // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer's posts nothing).
+      // The head commit, read around the patch: a push between the two reads leaves it unknown (a layer posts nothing).
       const headNow = async (): Promise<string | null> => {
         const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
         const read = await run(cli, ["api", "--hostname", pull.host, endpoint, ...(pull.platform === "github" ? ["--jq", ".head.sha"] : [])]).catch(() => null);
@@ -710,7 +712,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       }
       const headAfter = headBefore ? await headNow() : null;
       const head_sha = headBefore && headBefore === headAfter ? headBefore : null;
-      if (head_sha && scope === "layer") readHeads.set(key, head_sha);
+      if (head_sha) readHeads.set(key, head_sha);
       const answer: InboxPullDiffAnswer = { key, scope, base, head, patch, head_sha };
       diffs.set(cacheKey, { at: now(), answer });
       // Bounded: only the last few diffs are kept.
