@@ -380,7 +380,7 @@ export function recordTag(record: InboxAnnotationRecord): string | null {
 export function recordQuote(record: InboxAnnotationRecord): string {
   const comment = guideCommentOf(record);
   if (!comment) return annotationQuote(annotationOf(record));
-  const lines = (comment.selectedText ?? comment.originalCode ?? '').split('\n');
+  const lines = (comment.selectedText ?? comment.anchorText ?? comment.originalCode ?? '').split('\n');
   const first = lines.find((line) => line.trim() !== '')?.trim() ?? '';
   return `${cutText(first, 120)}${lines.length > 1 && first ? ' …' : ''}`;
 }
@@ -405,6 +405,9 @@ function conventionalPrefix(comment: CodeAnnotation): string {
   return `**${label}${decorations.length ? ` (${decorations.join(', ')})` : ''}:** `;
 }
 
+/** Heading suffix of a comment on lines outside the diff, as the review app's export writes it. */
+const OUTSIDE_DIFF_LABEL = '(not in the diff)';
+
 /**
  * One comment as the review app's export writes it (exportReviewFeedback in
  * packages/review-editor/utils/exportFeedback.ts, line scope): the line range
@@ -417,10 +420,14 @@ function guideCommentEntry(comment: CodeAnnotation, heading: string): string {
     ? ` — \`\`${comment.tokenText.replace(/`/g, '\\`')}\`\`${comment.charStart != null ? ` (chars ${comment.charStart}-${comment.charEnd})` : ''}`
     : '';
   const prefix = conventionalPrefix(comment);
-  let output = `${heading} ${range} (${comment.side})${token}\n`;
+  let output = `${heading} ${range} (${comment.side})${token}${comment.outsideDiff ? ` ${OUTSIDE_DIFF_LABEL}` : ''}\n`;
   if (comment.text) output += `${prefix}${comment.text}\n`;
   else if (prefix) output += `${prefix.trimEnd()}\n`;
   if (comment.selectedText) output += `\n**Highlighted text:**\n${fenced(comment.selectedText)}`;
+  const opened = comment.outsideDiff ? (comment.anchorText ?? comment.originalCode) : '';
+  if (opened) output += `\n**Code:**\n${fenced(opened)}`;
+  // The code block already quotes the lines; a suggestion still shows what it replaces.
+  if (comment.outsideDiff && !comment.suggestedCode) return `${output}\n`;
   if ((comment.suggestedCode || comment.text) && comment.originalCode) output += `\n**Replaces:**\n${fenced(comment.originalCode)}`;
   if (comment.suggestedCode) output += `\n**Suggested code:**\n${fenced(comment.suggestedCode)}`;
   return `${output}\n`;

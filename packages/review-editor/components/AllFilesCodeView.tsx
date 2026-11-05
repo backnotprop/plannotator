@@ -28,6 +28,7 @@ import { useIsWorkerPoolReadyOrDisabled, useWorkerPoolThemeSync } from '../worke
 import type { DiffFile, AnnotationScrollTarget } from '../types';
 import type { MarkdownFileView } from '../utils/markdownPreview';
 import { buildFileTree, getVisualFileOrder } from '../utils/buildFileTree';
+import { scrollWithPage, type PageScroll } from '../utils/scrollWithPage';
 import { fileKind } from '@plannotator/core/file-kind';
 import { packageFileKind } from '@plannotator/core/package-changes';
 import { getFileKindOrder } from '../utils/fileKindTree';
@@ -412,6 +413,8 @@ export interface AllFilesCodeViewProps {
    * Inbox's PR page: a file box as tall as its lines). Absent: nothing measured.
    */
   onContentHeightChange?: (height: number) => void;
+  /** No scroller of its own: as tall as its content, windowed and sticky against the page's scroller. Read once, at mount. */
+  scrollsWithPage?: boolean;
   /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
@@ -748,6 +751,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
   onContentHeightChange,
+  scrollsWithPage = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
   onAddEditorCommentForFile,
@@ -777,9 +781,26 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   // State mirror of the scroll container so the leading-content portal can
   // mount once CodeView has rendered it (a plain ref can't trigger that).
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  const scrollsWithPageRef = useRef(scrollsWithPage);
+  const pageScrollRef = useRef<PageScroll | null>(null);
   const attachScrollContainer = useCallback((el: HTMLDivElement | null) => {
     scrollRef.current = el;
     setScrollEl(el);
+    pageScrollRef.current?.undo();
+    pageScrollRef.current = el && scrollsWithPageRef.current ? scrollWithPage(el) : null;
+  }, []);
+  // Every named jump goes through the handle; with the page as the scroller it says so first.
+  const attachViewer = useCallback((viewer: CodeViewHandle<DiffAnnotationMetadata> | null) => {
+    viewerRef.current =
+      viewer && scrollsWithPageRef.current
+        ? {
+            ...viewer,
+            scrollTo: (target) => {
+              pageScrollRef.current?.expectJump();
+              return viewer.scrollTo(target);
+            },
+          }
+        : viewer;
   }, []);
   // Measured height of the leading content (commit description card) — becomes
   // CodeView's layout.paddingTop so the virtualized items start below it and
@@ -2635,7 +2656,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
         syncAllCollapsedMirror();
         reportFileCollapsed(itemId, false);
       }
-      handle.scrollTo({ type: 'item', id: itemId, align: 'start' });
+      // With the page as the scroller the host moves it to the file; this would fight that move.
+      if (!scrollsWithPageRef.current) handle.scrollTo({ type: 'item', id: itemId, align: 'start' });
     });
     return () => cancelAnimationFrame(raf);
   }, [fileScrollTarget?.filePath, fileScrollTarget?.token, fileSetKey, filePathToItemId, syncAllCollapsedMirror, reportFileCollapsed]);
@@ -3185,9 +3207,12 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
     () => ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
+      // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
+      // around each separator would be empty space the rows float in.
+      ...(scrollsWithPage && { spacing: 0 }),
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight],
+    [compactTouchLayout, customLineHeight, scrollsWithPage],
   );
   itemMetricsRef.current = itemMetrics;
 
@@ -3211,7 +3236,8 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // via the sticky header. Keep Pierre's default 8px list edge padding.
       // leadingHeight reserves space for the leading-content portal (commit
       // description card) so items start below it and it scrolls with them.
-      layout: { gap: 0, paddingTop: 8 + leadingHeight, paddingBottom: 8 },
+      // Scrolling with the page, the box around the viewer holds the padding: rows laid out edge to edge have no slack to float in.
+      layout: scrollsWithPage ? { gap: 0, paddingTop: 0, paddingBottom: 0 } : { gap: 0, paddingTop: 8 + leadingHeight, paddingBottom: 8 },
       itemMetrics,
       // Opt-in safety net for the hand-maintained itemMetrics above: Pierre
       // compares its virtualization estimates against measured DOM heights and
@@ -3271,6 +3297,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       readOnly,
       itemMetrics,
       leadingHeight,
+      scrollsWithPage,
       handleLineSelectionEnd,
       handleGutterUtilityClick,
       onCodeNavRequest,
@@ -3313,7 +3340,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // type/base/whitespace/PR with the all-files panel open would keep the
       // OLD diff on screen (the panel instance is reused, not recreated).
       key={fileSetKey}
-      ref={viewerRef}
+      ref={attachViewer}
       containerRef={attachScrollContainer}
       // Containment mirrors Pierre's own production wrapper (diffshub
       // CodeViewWrapper): without it, every forced layout during scrolling
@@ -3321,7 +3348,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       // overflow-anchor:none disables the BROWSER's scroll anchoring, which
       // otherwise fights CodeView's own anchor resolution whenever item
       // heights change (our augmentation applies).
-      className={`relative h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [overflow-anchor:none] [will-change:scroll-position] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
+      className={`relative ${scrollsWithPage ? 'overflow-x-clip [contain:layout_style]' : `h-full overflow-y-auto overflow-x-clip ${allowScrollChaining ? 'overscroll-auto' : 'overscroll-contain'} [contain:strict] [will-change:scroll-position]`} [overflow-anchor:none] [&_diffs-container]:overflow-clip [&_diffs-container]:[contain:layout_paint_style]`}
       initialItems={identity.items}
       options={options}
       selectedLines={selectedLines}

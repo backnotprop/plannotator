@@ -163,14 +163,17 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
   // Only a file changed in place has both sides to open: an added or deleted file is already whole, and a renamed one stays as it came.
-  const wholeFiles = useRef(new Map<string, InboxFileContents>());
+  const wholeFiles = useRef(new Map<string, { patch: string; contents: InboxFileContents }>());
   const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(
     () =>
       fileContents
         ? async (file, signal) => {
             if (file.status !== 'modified' || file.oldPath) return null;
-            const contents = await fileContents(file.path, signal);
-            wholeFiles.current.set(file.path, contents);
+            // A viewer coming back into the outer window asks again: what this patch already has is not read twice.
+            const kept = wholeFiles.current.get(file.path);
+            if (kept?.patch === file.patch) return kept.contents;
+            const contents = await fileContents(file.path, signal, file.patch);
+            wholeFiles.current.set(file.path, { patch: file.patch, contents });
             return contents;
           }
         : undefined,
@@ -242,9 +245,9 @@ export default function GuideReader({ snapshot, reviewed, onReviewedChange, comm
       // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
       const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
       const whole = wholeFiles.current.get(filePath);
-      const wholeText = side === 'new' ? whole?.newContent : whole?.oldContent;
+      const wholeText = side === 'new' ? whole?.contents.newContent : whole?.contents.oldContent;
       const openedCode = outsideDiff && wholeText ? wholeText.split('\n').slice(lineStart - 1, lineEnd).join('\n') : '';
-      const selectedText = outsideDiff ? openedCode : file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
+      const selectedText = !outsideDiff && file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
         type,

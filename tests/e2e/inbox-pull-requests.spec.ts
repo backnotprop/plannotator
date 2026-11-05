@@ -1176,7 +1176,6 @@ test('the expand arrows on the PR page: read from the forge, opening a gap grows
   await expect(review.locator('[data-guide-file-shell="src/settings/Layout.tsx"] [data-expand-button]')).toHaveCount(0);
   const box = shell.locator('[data-guide-code-view-mounted]');
   const height = async () => (await box.boundingBox())!.height;
-  await expect.poll(height).toBeLessThan(620);
   const before = await height();
   // The gap above the hunk: its arrow opens down from the file's first line.
   await shell.locator('[data-expand-button][data-expand-down]').first().click();

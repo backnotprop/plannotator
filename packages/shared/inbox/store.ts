@@ -4789,7 +4789,8 @@ export class InboxStore {
     if (!Number.isInteger(start) || !Number.isInteger(end) || (start as number) < 1 || (end as number) < (start as number)) {
       throw new InboxError("validation_error", "annotation.lineStart / lineEnd: line numbers, start first.", { field: "annotation.lineStart" });
     }
-    if (!isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
+    // A line an expand arrow opened is outside every hunk by its nature; the file must still be one the patch changes.
+    if (fields.outsideDiff !== true && !isLineRangeInPatch(diff.patch, start as number, end as number, side)) {
       const range = start === end ? `line ${start}` : `lines ${start}-${end}`;
       throw new InboxError("validation_error", `annotation.lineStart / lineEnd: ${range} on the ${side} side of ${file} is not in one hunk of the guided review's patch.`, { field: "annotation.lineStart" });
     }

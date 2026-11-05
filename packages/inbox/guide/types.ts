@@ -45,7 +45,7 @@ export interface GuideReaderProps {
   /** Under the host's own title (the PR review): no heading block of the reader's own, the host's page margins. */
   bare?: boolean;
   /** Reads one changed file's whole text, for the "N unmodified lines" arrows. Absent: the diffs show as they came. */
-  fileContents?: (path: string, signal: AbortSignal) => Promise<InboxFileContents>;
+  fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<InboxFileContents>;
 }
 
 /** The surface's guide reader (SurfaceGuideReader.tsx): the sections (6.1), then one section per screen (6.2). */

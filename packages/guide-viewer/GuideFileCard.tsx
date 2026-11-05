@@ -8,6 +8,8 @@ import { useGuideFileWindow } from './GuideViewportManager';
 
 /** The tallest a file's box grows: a longer diff scrolls inside it. */
 const MAX_DIFF_HEIGHT = 620;
+/** A fitted box's border and padding around the viewer's own height. */
+const FIT_BOX_CHROME = 2 + 16;
 /** A folded file's box: its header alone. */
 const COLLAPSED_HEIGHT = 49;
 
@@ -41,8 +43,8 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
     if (line.startsWith('@@')) {
       closeBlock();
       const at = /^@@ -(\d+)(?:,\d+)? \+(\d+)/.exec(line);
-      if (hunks > 0) separatorHeight += 48;
-      else if (at && (Number(at[1]) > 1 || Number(at[2]) > 1)) separatorHeight += 40;
+      if (hunks > 0) separatorHeight += 32;
+      else if (at && (Number(at[1]) > 1 || Number(at[2]) > 1)) separatorHeight += 32;
       hunks += 1;
       inHunk = true;
     } else if (line.startsWith('diff --git')) {
@@ -66,7 +68,7 @@ function estimateFitDiffHeight(patch: string, diffStyle: 'split' | 'unified' = '
   }
   closeBlock();
   if (hunks === 0) return estimateDiffHeight(patch);
-  return Math.min(2 + 16 + 33 + 8 + rows * 20 + separatorHeight, MAX_DIFF_HEIGHT);
+  return FIT_BOX_CHROME + 33 + 8 + rows * 20 + separatorHeight;
 }
 
 interface GuideFileCardProps {
@@ -78,8 +80,9 @@ interface GuideFileCardProps {
   revealTarget: { filePath: string; token: number } | null;
   onActivate: (filePath: string) => void;
   /**
-   * Size the box to the diff's content (GuideView `fitFileHeights`: the Inbox): an estimate from the hunks' rows,
-   * then the height the renderer reports, both capped at the usual maximum. Off: the fixed estimate, as before.
+   * Size the box to the diff's content (GuideView `fitFileHeights`: the Inbox), with no limit and no scroller of its
+   * own: the page scrolls. An estimate from the hunks' rows holds the space, then the height the renderer reports.
+   * Off: the fixed estimate, as before.
    */
   fitContent?: boolean;
 }
@@ -104,7 +107,10 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   const scrollPositionRef = useRef(0);
   const [collapsed, setCollapsed] = useState(kind === 'generated');
   const fileList = useMemo(() => [file], [file]);
-  const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused);
+  // A file whose gap was opened stays mounted: the viewer holds the opened lines, and leaving the outer window would
+  // close them, shrink the box under the reader and read the file again. A mounted viewer draws only rows near the viewport.
+  const [opened, setOpened] = useState(false);
+  const { mounted, register, requestMount } = useGuideFileWindow(file.path, focused || opened);
   const diffHeight = useMemo(
     () => (fitContent ? estimateFitDiffHeight(file.patch, diffStyle) : estimateDiffHeight(file.patch)),
     [fitContent, file.patch, diffStyle],
@@ -135,7 +141,7 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
     return stopWaiting;
   }, [mounted, fitContent, stopWaiting]);
   const onContentHeightChange = useCallback((height: number) => {
-    const next = height + 2;
+    const next = height + FIT_BOX_CHROME;
     if (!settledRef.current) {
       if (measuredRef.current !== null && next < measuredRef.current) {
         pendingRef.current = next;
@@ -156,10 +162,13 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
   }, [applyMeasured, stopWaiting]);
   const target = revealTarget?.filePath === file.path ? revealTarget : null;
   const renderedHeight = collapsed
-    ? COLLAPSED_HEIGHT
+    ? COLLAPSED_HEIGHT + (fitContent ? FIT_BOX_CHROME - 16 : 0)
     : fitContent && measuredHeight !== null
-      ? Math.max(COLLAPSED_HEIGHT, Math.min(measuredHeight, MAX_DIFF_HEIGHT))
+      ? Math.max(COLLAPSED_HEIGHT, measuredHeight)
       : diffHeight;
+  // Fitting, a mounted box follows its content by itself; the last height holds it until the viewer has drawn. No
+  // `overflow: hidden` there: it would make the box the sticky header's scroller.
+  const followsContent = fitContent && mounted && !collapsed;
 
   // A navigation target can live far outside the current outer window or in a
   // chapter that was just reopened. Force its CodeView first, then move the
@@ -216,9 +225,16 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
       )}
 
       <div
-        style={{ height: renderedHeight }}
-        className="overflow-hidden rounded-lg border border-border/40 bg-background"
+        style={followsContent ? { minHeight: renderedHeight } : { height: renderedHeight }}
+        className={`${fitContent ? 'overflow-clip py-2' : 'overflow-hidden'} rounded-lg border border-border/40 bg-background`}
         data-guide-code-view-mounted={mounted ? 'true' : 'false'}
+        onClickCapture={
+          fitContent && !opened
+            ? (event) => {
+                if (event.nativeEvent.composedPath().some((node) => node instanceof Element && node.hasAttribute('data-expand-button'))) setOpened(true);
+              }
+            : undefined
+        }
       >
         {mounted ? (
           <DiffRenderer
@@ -227,16 +243,17 @@ export const GuideFileCard: React.FC<GuideFileCardProps> = ({
             fileScrollTarget={target}
             fileOrder="list"
             mountCollapsed={collapsed}
-            initialScrollPosition={scrollPositionRef.current}
+            // The page owns the position of a box that scrolls with it.
+            initialScrollPosition={fitContent ? 0 : scrollPositionRef.current}
             onScrollPositionChange={(position) => {
               scrollPositionRef.current = position;
             }}
+            {...(fitContent ? { onContentHeightChange, scrollsWithPage: true } : {})}
             onFileCollapsedChange={(filePath, nextCollapsed) => {
               if (filePath === file.path) setCollapsed(nextCollapsed);
             }}
             isActive={focused}
             allowScrollChaining
-            {...(fitContent ? { onContentHeightChange } : {})}
           />
         ) : (
           <div className="flex h-full flex-col" aria-hidden="true">

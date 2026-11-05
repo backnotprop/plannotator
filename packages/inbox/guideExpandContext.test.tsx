@@ -152,8 +152,8 @@ async function draw(node: React.ReactNode) {
   await settle();
 }
 
-const boxHeight = (path: string) => Number.parseFloat(host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.height);
-const reader = (patch: string, files: string[], fileContents?: (path: string, signal: AbortSignal) => Promise<{ oldContent: string | null; newContent: string | null }>) => (
+const boxHeight = (path: string) => Number.parseFloat(host!.querySelector<HTMLElement>(`[data-guide-file-shell="${path}"] [data-guide-code-view-mounted]`)!.style.minHeight);
+const reader = (patch: string, files: string[], fileContents?: (path: string, signal: AbortSignal, patch: string) => Promise<{ oldContent: string | null; newContent: string | null }>) => (
   <GuideReader snapshot={snapshotOf(patch, files)} reviewed={[false]} onReviewedChange={() => {}} {...(fileContents ? { fileContents } : {})} />
 );
 
@@ -169,7 +169,7 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     return Response.json({});
   }) as typeof fetch;
-  await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} codeReview />);
+  await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} />);
   expect(asked).toEqual([`/api/inbox/messages/${MESSAGE}/guide/file?path=a.ts`]);
   expect(arrows().length).toBeGreaterThan(0);
   const before = rows();
@@ -183,28 +183,22 @@ test.skipIf(!hasDom)("a thread's guided review: the arrows come from the message
   expect(boxHeight('a.ts')).toBeGreaterThan(boxBefore);
 });
 
-test.skipIf(!hasDom)("a thread's guided review with Code review off asks nothing (a 409 per file otherwise), and turned on it reads", async () => {
+test.skipIf(!hasDom)("a tailnet guest's page asks nothing (each file would be a silent 403) and still reads the diff", async () => {
   const asked: string[] = [];
   globalThis.fetch = (async (input: RequestInfo | URL) => {
     const path = String(input);
     if (path.includes('/guide/file')) {
       asked.push(path);
-      return Response.json({ oldContent: whole(OLD), newContent: whole(NEW) });
+      return Response.json({ error: 'local only', code: 'local_only' }, { status: 403 });
     }
     if (path.includes('/guide')) return Response.json({ message_id: MESSAGE, guide: message.guide, snapshot: snapshotOf(MODIFIED, ['a.ts']) });
     if (path.includes('/attachments')) return Response.json({ serverSession: 's', attachments: [], annotations: [] });
     return Response.json({});
   }) as typeof fetch;
-  const pane = (codeReview: boolean) => <div className="pn-inbox"><GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} codeReview={codeReview} /></div>;
-  await draw(pane(false));
+  await draw(<GuidePane thread={thread} message={message} onBack={() => {}} onClose={() => {}} guest />);
   expect(rows()).toBeGreaterThan(0);
   expect(asked).toEqual([]);
   expect(arrows()).toEqual([]);
-  // The settings answer after the first draw (a deep link to the guide).
-  await act(async () => root!.render(pane(true)));
-  await settle();
-  expect(asked.length).toBe(1);
-  expect(arrows().length).toBeGreaterThan(0);
 });
 
 test.skipIf(!hasDom)('a read-only diff (a resolved thread, a PR with no comments) still has its arrows', async () => {

@@ -20,8 +20,9 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { Client, StreamableHTTPClientTransport } from "@modelcontextprotocol/client";
+import { buildGuideSnapshot } from "@plannotator/core/guide-format";
 import { startInboxServer, type InboxServer } from "./inbox";
-import { createInboxPulls, INBOX_PULL_FILE_MAX_BYTES, type PullFileGitReader } from "./inbox-pulls";
+import { createInboxPulls, gitBlobId, INBOX_PULL_FILE_MAX_BYTES, type PullFileGitReader } from "./inbox-pulls";
 import type { RefRunner } from "./ref-cards";
 
 const roots: string[] = [];
@@ -37,6 +38,10 @@ afterEach(async () => {
   else process.env.PLANNOTATOR_DATA_DIR = savedDataDir;
 });
 
+const blobId = (text: string) => gitBlobId(Buffer.from(text, "utf8")).slice(0, 10);
+/** What a patch's `index` line names for these two texts. */
+const idsOf = (oldText: string, newText: string) => ({ oldId: blobId(oldText), newId: blobId(newText) });
+const IDS = idsOf("old\n", "new\n");
 const KEY = "github.com/northwind/billing-svc#412";
 const HEAD = "a".repeat(40);
 const BASE = "b".repeat(40);
@@ -123,11 +128,11 @@ describe("a PR's file", () => {
     f.files.set(fileAt("src/a.ts", HEAD), "new\n");
     f.files.set(fileAt("src/a.ts", BASE), "old\n");
     const pulls = await listed(f);
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads).toEqual([fileAt("src/a.ts", HEAD), `repos/northwind/billing-svc/compare/main...${HEAD}?per_page=1`, fileAt("src/a.ts", BASE)]);
     // The same file again, and the page reopened: nothing more is asked of the forge.
     const asked = f.reads.length;
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads.length).toBe(asked);
   });
 
@@ -136,7 +141,7 @@ describe("a PR's file", () => {
     f.files.set(fileAt("src/a.ts", HEAD), "new\n");
     f.files.set(fileAt("src/a.ts", BASE), "old\n");
     const pulls = await listed(f);
-    expect(await pulls.fileContents(KEY, "stack", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents(KEY, "stack", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(f.reads).toContain(`repos/northwind/billing-svc/compare/main...${HEAD}?per_page=1`);
   });
 
@@ -147,7 +152,7 @@ describe("a PR's file", () => {
       read.push(`${root} ${sha} ${path}`);
       return root === "/clone-b" ? `${sha.slice(0, 1)} text\n` : null;
     });
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone-a", "/clone-b"])).toEqual({ oldContent: "b text\n", newContent: "a text\n" });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone-a", "/clone-b"], idsOf("b text\n", "a text\n"))).toEqual({ oldContent: "b text\n", newContent: "a text\n" });
     expect(read).toContain(`/clone-a ${HEAD} src/a.ts`);
     expect(read).toContain(`/clone-b ${BASE} src/a.ts`);
     expect(f.reads.filter((r) => r.includes("/contents/"))).toEqual([]);
@@ -161,15 +166,93 @@ describe("a PR's file", () => {
     const pulls = await listed(f);
     await pulls.diff(KEY, "layer");
     expect(pulls.readHead(KEY)).toBe(HEAD);
-    expect((await pulls.fileContents(KEY, "layer", "src/a.ts", [])).newContent).toBe("the patch's\n");
+    expect((await pulls.fileContents(KEY, "layer", "src/a.ts", [], idsOf("old\n", "the patch's\n"))).newContent).toBe("the patch's\n");
+  });
+
+  test("a text that is not the patch's own file opens nothing, even at the same length", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "NEW\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+    f.files.set(fileAt("src/b.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/b.ts", BASE), "OLD\n");
+    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("a merged PR whose merge base is its head has both sides alike: nothing opens", async () => {
+    const f = scripted();
+    f.mergeBase = HEAD;
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("a whole stack with the list behind a push: the list's head is not the patch's file", async () => {
+    const f = scripted(ghPull({ headRefOid: "c".repeat(40) }));
+    f.files.set(fileAt("src/a.ts", "c".repeat(40)), "an older head\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "stack", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+  });
+
+  test("a retarget keeps the head and asks where the diff runs from again", async () => {
+    const f = scripted();
+    f.files.set(fileAt("src/a.ts", HEAD), "new\n");
+    f.files.set(fileAt("src/a.ts", BASE), "old\n");
+    f.files.set(fileAt("src/a.ts", "d".repeat(40)), "older\n");
+    let clock = 1_000_000;
+    const pulls = await listed(f, async () => null, () => clock);
+    expect((await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).oldContent).toBe("old\n");
+    f.pull = ghPull({ baseRefName: "release" });
+    f.mergeBase = "d".repeat(40);
+    clock += 60 * 60_000;
+    await pulls.list([REPO], { refresh: true });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], idsOf("older\n", "new\n"))).toEqual({ oldContent: "older\n", newContent: "new\n" });
+    expect(f.reads).toContain(`repos/northwind/billing-svc/compare/release...${HEAD}?per_page=1`);
+  });
+
+  test("a head that moved during the diff's read has no commit to read at: nothing runs", async () => {
+    const f = scripted();
+    let heads = 0;
+    const run: RefRunner = (cli, args) => (args.includes(".head.sha") ? Promise.resolve({ stdout: `${(heads++ === 0 ? "c" : "e").repeat(40)}\n`, stderr: "", exitCode: 0 }) : f.run(cli, args));
+    const pulls = createInboxPulls({ run, gitRead: async () => null });
+    await pulls.list([REPO]);
+    expect((await pulls.diff(KEY, "layer")).head_sha).toBeNull();
+    f.reads.length = 0;
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
+    expect(f.reads).toEqual([]);
+  });
+
+  test("a patch that names no blobs (GitLab's whole stack): no arrows, and nothing runs", async () => {
+    const f = scripted();
+    const pulls = await listed(f);
+    expect(await pulls.fileContents(KEY, "stack", "src/a.ts", ["/clone"], null)).toEqual({ oldContent: null, newContent: null });
+    expect(f.reads).toEqual([]);
+  });
+
+  test("the cache of texts stays within its bound: the oldest is read again", async () => {
+    const f = scripted();
+    // Each under the 5 MB a file may be; fourteen of them pass the 64 MB kept.
+    const paths = Array.from({ length: 14 }, (_, i) => `f${i}.ts`);
+    for (const path of paths) f.files.set(fileAt(path, HEAD), `${path}${"x".repeat(4_900_000)}`);
+    const pulls = await listed(f);
+    for (const path of paths) await pulls.fileContents(KEY, "layer", path, [], IDS);
+    const asked = () => f.reads.filter((read) => read === fileAt("f0.ts", HEAD)).length;
+    expect(asked()).toBe(1);
+    await pulls.fileContents(KEY, "layer", "f0.ts", [], IDS);
+    expect(asked()).toBe(2);
+    // The newest stayed.
+    await pulls.fileContents(KEY, "layer", "f13.ts", [], IDS);
+    expect(f.reads.filter((read) => read === fileAt("f13.ts", HEAD)).length).toBe(1);
   });
 
   test("a fork's layer, an unknown PR: nothing runs", async () => {
     const f = scripted(ghPull({ headRepository: { nameWithOwner: "dana/billing-svc" } }));
     const pulls = await listed(f);
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"])).toEqual({ oldContent: null, newContent: null });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", ["/clone"], IDS)).toEqual({ oldContent: null, newContent: null });
     expect(f.reads).toEqual([]);
-    await expect(pulls.fileContents("github.com/elsewhere/thing#9", "layer", "src/a.ts", [])).rejects.toMatchObject({ code: "pull_unknown" });
+    await expect(pulls.fileContents("github.com/elsewhere/thing#9", "layer", "src/a.ts", [], IDS)).rejects.toMatchObject({ code: "pull_unknown" });
     expect(f.reads).toEqual([]);
   });
 
@@ -183,14 +266,14 @@ describe("a PR's file", () => {
     f.files.set(fileAt("huge.ts", BASE), "old\n");
     const pulls = await listed(f);
     for (const path of ["added.ts", "deleted.ts", "logo.png", "huge.ts"]) {
-      expect(await pulls.fileContents(KEY, "layer", path, [])).toEqual({ oldContent: null, newContent: null });
+      expect(await pulls.fileContents(KEY, "layer", path, [], IDS)).toEqual({ oldContent: null, newContent: null });
     }
   });
 
   test("a local clone's answer that the file is too large or binary stands: the forge is not asked", async () => {
     const f = scripted();
     const pulls = await listed(f, async () => "none");
-    expect(await pulls.fileContents(KEY, "layer", "huge.ts", ["/clone"])).toEqual({ oldContent: null, newContent: null });
+    expect(await pulls.fileContents(KEY, "layer", "huge.ts", ["/clone"], IDS)).toEqual({ oldContent: null, newContent: null });
     expect(f.reads).toEqual([]);
   });
 
@@ -201,16 +284,25 @@ describe("a PR's file", () => {
     let clock = 1_000_000;
     const pulls = await listed(f, async () => null, () => clock);
     f.failWith = { stderr: "gh: API rate limit exceeded (HTTP 403)" };
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [])).toEqual({ oldContent: null, newContent: null });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
     const asked = f.reads.length;
     expect(asked).toBeGreaterThan(0);
     // Held: asks nothing, for any file.
-    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [])).toEqual({ oldContent: null, newContent: null });
+    expect(await pulls.fileContents(KEY, "layer", "src/b.ts", [], IDS)).toEqual({ oldContent: null, newContent: null });
     expect(f.reads.length).toBe(asked);
     // Over: the same file reads.
     f.failWith = null;
     clock += 60 * 60_000;
-    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
+  });
+
+  test("the arrows' rate limit does not refuse the next layer's diff", async () => {
+    const f = scripted();
+    const pulls = await listed(f);
+    f.failWith = { stderr: "gh: API rate limit exceeded (HTTP 403)" };
+    await pulls.fileContents(KEY, "layer", "src/a.ts", [], IDS);
+    f.failWith = null;
+    expect((await pulls.diff(KEY, "layer")).patch).toBe("the patch\n");
   });
 
   test("GitLab: the merge request's own base commit, the raw file route", async () => {
@@ -233,10 +325,10 @@ describe("a PR's file", () => {
     };
     const pulls = createInboxPulls({ run, gitRead: async () => null });
     await pulls.list([{ host: "gitlab.com", repo: "northwind/data/ledger", project_id: "prj_1" }]);
-    expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "layer", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "layer", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads.every((r) => r.startsWith("glab "))).toBe(true);
     // The whole stack has no merge request's refs to read: the project's merge base. (The texts are cached by now.)
-    expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "stack", "src/a.ts", [])).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    expect(await pulls.fileContents("gitlab.com/northwind/data/ledger#61:pull", "stack", "src/a.ts", [], IDS)).toEqual({ oldContent: "old\n", newContent: "new\n" });
     expect(reads).toContain(`glab projects/northwind%2Fdata%2Fledger/repository/merge_base?refs%5B%5D=main&refs%5B%5D=${HEAD}`);
   });
 });
@@ -299,7 +391,7 @@ const contentsOf = async (response: Response) => {
 
 describe("the PR route", () => {
   const ask = (base: string, path: string, headers: Record<string, string> = {}, key = KEY) =>
-    fetch(`${base}/api/inbox/pulls/file?key=${encodeURIComponent(key)}&scope=layer&path=${encodeURIComponent(path)}`, { headers });
+    fetch(`${base}/api/inbox/pulls/file?key=${encodeURIComponent(key)}&scope=layer&path=${encodeURIComponent(path)}&old=${IDS.oldId}&new=${IDS.newId}`, { headers });
 
   test("Code review off: 409, and nothing runs", async () => {
     const w = await world({ codeReview: false });
@@ -350,12 +442,48 @@ describe("a guide's file", () => {
     return w.git("diff");
   }
 
-  test("Code review off: 409, and git is not asked", async () => {
+  test("Code review off: the arrows still read the project's own blobs, and no forge is asked", async () => {
     const w = await world({ codeReview: false });
     const id = await w.sendGuide(await changed(w), ["a.ts"]);
     const response = await w.askGuide(id, "a.ts");
-    expect(response.status).toBe(409);
-    expect(((await response.json()) as { code: string }).code).toBe("code_review_off");
+    expect(response.status).toBe(200);
+    expect(await contentsOf(response)).toEqual({ oldContent: "one\ntwo\nthree\n", newContent: "one\n2\nthree\n" });
+    expect(w.forge.reads).toEqual([]);
+  });
+
+  const PR_SOURCE = { kind: "pr", pr: { url: "https://github.com/northwind/billing-svc/pull/412", number: 412, title: "PR 412", platform: "github" } } as const;
+  const patchOf = (path: string) => `diff --git a/${path} b/${path}\nindex ${IDS.oldId}..${IDS.newId} 100644\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-old\n+new\n`;
+  /** A guide of a PR whose blobs this clone does not have. */
+  const prGuide = (w: Awaited<ReturnType<typeof world>>, path: string) =>
+    w.sendGuide("", [], {
+      patch: undefined,
+      guide: undefined,
+      snapshot: buildGuideSnapshot({
+        guide: { title: "T", intent: "I", sections: [{ title: "S", overview: "O", diffs: [{ file: path, summary: "s" }] }] },
+        review: { rawPatch: patchOf(path), gitRef: "main...head", source: PR_SOURCE },
+        reviewed: [],
+      } as unknown as Parameters<typeof buildGuideSnapshot>[0]),
+    });
+
+  test("a guide of a PR with the blobs missing here: only Code review asks the forge, and only the patch's own file opens", async () => {
+    const on = await world({ codeReview: true });
+    on.forge.files.set(fileAt("a.ts", HEAD), "new\n");
+    on.forge.files.set(fileAt("a.ts", BASE), "old\n");
+    // The Inbox learns of the project from the guide, and of the PR from the list.
+    const id = await prGuide(on, "a.ts");
+    expect((await fetch(`${on.base}/api/inbox/pulls?refresh=1`)).status).toBe(200);
+    expect(await contentsOf(await on.askGuide(id, "a.ts"))).toEqual({ oldContent: "old\n", newContent: "new\n" });
+    on.forge.files.set(fileAt("b.ts", HEAD), "NEW\n");
+    on.forge.files.set(fileAt("b.ts", BASE), "old\n");
+    expect(await contentsOf(await on.askGuide(await prGuide(on, "b.ts"), "b.ts"))).toEqual(NO_CONTENTS);
+
+    const off = await world({ codeReview: false });
+    off.forge.files.set(fileAt("a.ts", HEAD), "new\n");
+    off.forge.files.set(fileAt("a.ts", BASE), "old\n");
+    const response = await off.askGuide(await prGuide(off, "a.ts"), "a.ts");
+    expect(response.status).toBe(200);
+    expect(await contentsOf(response)).toEqual(NO_CONTENTS);
+    expect(off.forge.reads).toEqual([]);
   });
 
   test("another site, a bad path, no such message: refused", async () => {

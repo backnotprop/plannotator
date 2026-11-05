@@ -25,7 +25,7 @@
 import { createHash } from "node:crypto";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
-import { parseDiffToFiles, type DiffFile } from "@plannotator/core/diff-files";
+import { parseDiffToFiles, patchBlobIds, type DiffFile, type PatchBlobIds } from "@plannotator/core/diff-files";
 import { forgeRefKey, parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { GUIDE_REVIEW_PROMPT, GUIDE_SCHEMA_JSON } from "@plannotator/core/guide-prompt";
 import { parseGuideSnapshot, parseGuideSnapshotJson, type GuideSnapshot } from "@plannotator/core/guide-format";
@@ -39,7 +39,7 @@ import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { readDiffSideBytes, readGitObjectBytes } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
-import { INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
+import { gitBlobId, INBOX_PULL_FILE_MAX_BYTES, textOfBytes } from "./inbox-pulls";
 import { buildAuthoredGuideSnapshot } from "./guide/guide-cli";
 import { SEND_ROUTING_FIELDS, replyNextStepText, senderWakes, guarded, imagesNotShownText, noStakesText, recommendedInLabelText,
   callerWorkingFolder, namingLine, ok, sendAgentMessage, sendProject, type InboxMcpContext } from "./inbox-mcp";
@@ -173,11 +173,6 @@ function patchFilesOf(store: InboxStore, sha256: string): DiffFile[] {
   return files;
 }
 
-/** The id git gives a file's bytes, which a patch's `index` line names. */
-export function gitBlobId(bytes: Uint8Array): string {
-  return createHash("sha1").update(`blob ${bytes.byteLength}\u0000`).update(bytes).digest("hex");
-}
-
 /**
  * One changed file's whole text for a guided review's expand arrows
  * (`GET /api/inbox/messages/:id/guide/file`). The guide keeps the diff as sent
@@ -196,15 +191,14 @@ export async function inboxGuideFileContents(
   sha256: string,
   path: string,
   root: string | null,
-  forge?: () => Promise<InboxFileContents> | null,
+  forge?: (ids: PatchBlobIds) => Promise<InboxFileContents> | null,
 ): Promise<InboxFileContents> {
   const none: InboxFileContents = { oldContent: null, newContent: null };
   const file = patchFilesOf(store, sha256).find((f) => f.path === path);
   if (!file || file.oldPath) return none;
-  const ids = /^index ([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})/m.exec(file.patch);
-  if (!ids || /^0+$/.test(ids[1]!) || /^0+$/.test(ids[2]!)) return none;
-  const oldId = ids[1]!;
-  const newId = ids[2]!;
+  const ids = patchBlobIds(file.patch);
+  if (!ids) return none;
+  const { oldId, newId } = ids;
   const stored = async (id: string): Promise<Uint8Array | null> => {
     if (!root) return null;
     const read = await readGitObjectBytes(gitRuntime, id, INBOX_PULL_FILE_MAX_BYTES, root);
@@ -222,10 +216,8 @@ export async function inboxGuideFileContents(
     const newContent = textOfBytes(newBytes);
     return oldContent !== null && newContent !== null ? { oldContent, newContent } : none;
   }
-  const remote = await forge?.();
-  if (!remote || remote.oldContent === null || remote.newContent === null) return none;
-  const same = (text: string, id: string) => gitBlobId(Buffer.from(text, "utf8")).startsWith(id);
-  return same(remote.oldContent, oldId) && same(remote.newContent, newId) ? remote : none;
+  // The forge's reader checks both texts against these ids.
+  return (await forge?.(ids)) ?? none;
 }
 
 /** The key the Pull requests list would give the pull request a guide is of, or null. */

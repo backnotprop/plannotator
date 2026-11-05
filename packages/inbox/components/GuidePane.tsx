@@ -33,8 +33,8 @@ const GuideReader = lazy(() => import('#guide-reader'));
 export interface GuidePaneProps {
   thread: InboxThread;
   message: InboxMessageWire;
-  /** Settings → Capabilities → Code review: its expand arrows read files (the route refuses, and nothing is asked, while it is off). */
-  codeReview?: boolean;
+  /** A tailnet guest's page: the expand arrows' route refuses it, so nothing is asked. */
+  guest?: boolean;
   /** Back to the thread. */
   onBack: () => void;
   /** Close the guide and the thread. */
@@ -178,7 +178,7 @@ export function useGuideState(thread: InboxThread, message: InboxMessageWire) {
   return { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, scrollTarget, readOnly, changeReviewed, save, remove, edit, showComment, readerComments, localWrites, fileContents };
 }
 
-export function GuidePane({ thread, message, onBack, onClose, codeReview = false }: GuidePaneProps) {
+export function GuidePane({ thread, message, onBack, onClose, guest = false }: GuidePaneProps) {
   const { snapshot, error, reviewed, saveError, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = useGuideState(thread, message);
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(GUIDE_FOLD_PANEL_BELOW, false);
   /** The folded panel, open over the guide. */
@@ -267,13 +267,11 @@ export function GuidePane({ thread, message, onBack, onClose, codeReview = false
           ) : snapshot ? (
             <Suspense fallback={null}>
               <GuideReader
-                // The switch can arrive after the first draw: a diff that drew without whole files reads them on a fresh mount.
-                key={codeReview ? 'expands' : 'as-sent'}
                 snapshot={snapshot}
                 reviewed={reviewed}
                 onReviewedChange={changeReviewed}
                 comments={readerComments}
-                {...(codeReview ? { fileContents } : {})}
+                {...(guest ? {} : { fileContents })}
               />
             </Suspense>
           ) : null}

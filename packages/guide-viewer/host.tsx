@@ -46,6 +46,8 @@ export interface GuideDiffRendererProps {
    * height its content needs (AllFilesCodeView does). A renderer that ignores it keeps the estimated box.
    */
   onContentHeightChange?: (height: number) => void;
+  /** No scroller of its own: as tall as its content, against the page's scroller (a `fitFileHeights` host). */
+  scrollsWithPage?: boolean;
 }
 
 export interface GuideDiffRendererContext {

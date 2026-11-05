@@ -112,6 +112,19 @@ export function parseDiffToFiles(rawPatch: string): DiffFile[] {
   return files;
 }
 
+/** The two blobs a file's patch runs between (its `index` line). */
+export interface PatchBlobIds {
+  oldId: string;
+  newId: string;
+}
+
+/** A file's `index` blob ids; null when there is no such line (GitLab's rebuilt patches) or a side does not exist (all zeros). */
+export function patchBlobIds(patch: string): PatchBlobIds | null {
+  const ids = /^index ([0-9a-f]{7,64})\.\.([0-9a-f]{7,64})/m.exec(patch);
+  if (!ids || /^0+$/.test(ids[1]!) || /^0+$/.test(ids[2]!)) return null;
+  return { oldId: ids[1]!, newId: ids[2]! };
+}
+
 /** Return true only when the complete source range is represented by one diff hunk. */
 export function isLineRangeInPatch(
   patch: string,

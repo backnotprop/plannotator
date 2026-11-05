@@ -3570,7 +3570,9 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
           if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
           const filePath = changedFilePath(url.searchParams.get("path"));
           try {
-            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, await pullRoots(key))) });
+            const [oldId, newId] = [url.searchParams.get("old"), url.searchParams.get("new")];
+            const ids = oldId && newId && /^[0-9a-f]{7,64}$/.test(oldId) && /^[0-9a-f]{7,64}$/.test(newId) ? { oldId, newId } : null;
+            return json({ serverSession, ...(await pulls.fileContents(key, scope, filePath, ids ? await pullRoots(key) : [], ids)) });
           } catch (cause) {
             if (cause instanceof InboxPullsError) return json({ error: cause.message, code: cause.code }, 404);
             throw cause;
@@ -4445,8 +4447,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         return json({ ...answer, replayed: false });
       }
 
-      // A guided review's expand arrows (packages/server/inbox-guides.ts): one changed file's whole text, under the
-      // Pull requests routes' own guards (it reads the project's git and working tree).
+      // A guided review's expand arrows (packages/server/inbox-guides.ts): one changed file's whole text, for anyone
+      // reading the guide. It reads the project's own git and working tree; only Code review may ask the forge.
       const guideFile = /^\/api\/inbox\/messages\/([A-Za-z0-9_]+)\/guide\/file$/.exec(path);
       if (guideFile) {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
@@ -4454,15 +4456,15 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
           return json({ error: "Cross-origin requests are not accepted.", code: "cross_origin" }, 403);
         }
-        if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
         const filePath = changedFilePath(url.searchParams.get("path"));
         const message = store.message(guideFile[1]!);
         if (!message) return json({ error: "No such message.", code: "message_not_found" }, 404);
         if (!message.guide) return json({ error: "This message carries no guided review.", code: "guide_not_found" }, 404);
         const { sha256 } = message.guide;
-        const contents = await inboxGuideFileContents(store, sha256, filePath, store.project(message.project_id)?.root ?? null, () => {
+        const contents = await inboxGuideFileContents(store, sha256, filePath, store.project(message.project_id)?.root ?? null, (ids) => {
+          if (!codeReviewOn()) return null;
           const pullKey = guidePullKey(store, sha256);
-          return pullKey && pulls.find(pullKey) ? pullRoots(pullKey).then((roots) => pulls.fileContents(pullKey, "layer", filePath, roots)) : null;
+          return pullKey && pulls.find(pullKey) ? pullRoots(pullKey).then((roots) => pulls.fileContents(pullKey, "layer", filePath, roots, ids)) : null;
         });
         return json({ serverSession, ...contents });
       }

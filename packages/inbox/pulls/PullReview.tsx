@@ -26,7 +26,7 @@
  */
 import { lazy, Suspense, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import { parseDiffToFiles, patchBlobIds } from '@plannotator/core/diff-files';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
 import type { InboxPullDiffAnswer, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { CodeAnnotation } from '@plannotator/ui/types';
@@ -212,7 +212,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const postHead = scope === 'layer' ? (diff?.head_sha ?? null) : (layer?.head_sha ?? null);
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
   // The expand arrows' whole files, at the commits this diff runs between.
-  const fileContents = useCallback((path: string, signal: AbortSignal) => inboxApi.pullFile(layerKey, scope, path, signal), [layerKey, scope]);
+  // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
+  // without them (GitLab's whole stack), or a layer whose head moved during its read, opens nothing.
+  const headMoved = scope === 'layer' && !!diff && !diff.head_sha;
+  const fileContents = useCallback(
+    async (path: string, signal: AbortSignal, patch: string) => {
+      const ids = headMoved ? null : patchBlobIds(patch);
+      return ids ? inboxApi.pullFile(layerKey, scope, path, ids, signal) : { oldContent: null, newContent: null };
+    },
+    [layerKey, scope, headMoved],
+  );
   const [picked, pick] = useReviewDestination();
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
