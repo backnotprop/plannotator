@@ -116,11 +116,12 @@ describe.if(hasDom)('annotation: off until asked for', () => {
 
 describe.if(hasDom)('What to know', () => {
   test('its words are paragraphs, each one a part, with references live', async () => {
-    await mount({ picture: PICTURE, know: 'First **point** [^1].\n\nSecond point.' }, { initialView: 'know' });
+    await mount({ picture: PICTURE, know: 'First **point** [^1].\n\nSecond **uses `code` here**.' }, { initialView: 'know' });
     const know = document.querySelector('.shp-know')!;
     expect([...know.querySelectorAll('p')].map((p) => p.getAttribute('data-mark'))).toEqual(['know-1', 'know-2']);
     expect(know.querySelector('b')?.textContent).toBe('point');
     expect(know.querySelector('.shp-rb')?.textContent).toBe('1');
+    expect(know.querySelector('b code')?.textContent).toBe('code');
     expect(dock('What to know')?.getAttribute('aria-pressed')).toBe('true');
     expect(document.querySelector('.shp-dock')?.textContent).not.toContain('Requirements');
   });
@@ -223,13 +224,22 @@ describe.if(hasDom)('a reference\'s bubble', () => {
     document.body.appendChild(el);
     root = createRoot(el);
     const ref: ShapeRef = { n: 1, kind: 'file', title: 'T', target: 'a.ts' };
-    const place = async (obstacles: { rect: DOMRect; number: boolean }[]) => {
-      await act(async () => root!.render(<RefPeek key={Math.random()} reference={ref} anchor={rect(500, 400, 20, 20)} bounds={rect(0, 0, 1000, 800)} obstacles={obstacles} {...peekProps} />));
-      return document.querySelector('.shp-peek')!.getAttribute('data-side');
-    };
-    expect(await place([])).toBe('right');
-    // The bubble has no size in this DOM, so an obstacle right where it lands stands for "this side hides it".
-    expect(await place([{ rect: rect(540, 400, 40, 40), number: true }])).toBe('right');
+    // happy-dom gives the bubble no size, and the choice needs one.
+    const width = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetWidth')!;
+    const height = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+    Object.defineProperty(HTMLElement.prototype, 'offsetWidth', { configurable: true, get: () => 200 });
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get: () => 100 });
+    try {
+      const place = async (obstacles: { rect: DOMRect; number: boolean }[]) => {
+        await act(async () => root!.render(<RefPeek key={Math.random()} reference={ref} anchor={rect(500, 400, 20, 20)} bounds={rect(0, 0, 1000, 800)} obstacles={obstacles} onClose={() => {}} />));
+        return document.querySelector('.shp-peek')!.getAttribute('data-side');
+      };
+      expect(await place([])).toBe('right');
+      expect(await place([{ rect: rect(600, 420, 20, 20), number: true }])).toBe('left');
+    } finally {
+      Object.defineProperty(HTMLElement.prototype, 'offsetWidth', width);
+      Object.defineProperty(HTMLElement.prototype, 'offsetHeight', height);
+    }
   });
 
   test('a number on the board pops it out, Esc closes it first, and the board stays', async () => {

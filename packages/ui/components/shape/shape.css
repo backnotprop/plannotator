@@ -125,11 +125,10 @@
 
 /* ── What to know: prose, set for reading ── */
 .shp-know { max-width: 66ch; padding: 10px 0 8px; font-size: 18px; line-height: 1.65; letter-spacing: -.003em; text-wrap: pretty; }
-.shp-know p { margin: 0 0 1em; padding: 2px 8px; }
+.shp-know p { margin: 0 0 1em; padding: 2px 0; }
 .shp-know p:last-child { margin-bottom: 0; }
-.shp-root.phone .shp-know p, .shp-root.phone .shp-know h3 { padding-inline: 0; }
 /* An old board's Requirements: plain lines under their group's name. */
-.shp-know h3 { margin: 1.4em 0 .25em; padding: 0 8px; font-size: inherit; font-weight: 600; }
+.shp-know h3 { margin: 1.4em 0 .25em; font-size: inherit; font-weight: 600; }
 .shp-know section p, .shp-know section ~ p { margin-bottom: .2em; }
 .shp-know section + p { margin-top: 1.4em; }
 .shp-to-code { appearance: none; border: 0; background: transparent; margin-left: 8px; padding: 2px 4px; border-radius: 5px; font: 500 12px/1 var(--font-mono); color: var(--muted-foreground); cursor: pointer; opacity: 0; transition: opacity .15s; }
