@@ -4959,7 +4959,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       });
   };
   // The read button (approval "inbox-thread-header", 2026-11-02): one icon before the subject, its words in its
-  // tooltip ("Mark read" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
+  // tooltip ("Mark read / quiet" with E, "Mark unread", "Read" while marked read) and as its name. A phone has none in its bar:
   // the ⋯ sheet leads with the read action instead (`phoneMarkRead`, `markUnreadInMenu`).
   const markReadAria = useShortcutAria({ scope: inboxThreadShortcuts, action: 'markRead' });
   const markReadButton = phone ? null : markUnreadOffered ? (
@@ -4987,7 +4987,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             <span className="text-muted-foreground">Move it back to the top</span>
           </span>
         ) : markReadEnabled ? (
-          withShortcut('Mark read', { scope: inboxThreadShortcuts, action: 'markRead' })
+          withShortcut('Mark read / quiet', { scope: inboxThreadShortcuts, action: 'markRead' })
         ) : (
           <span className="flex flex-col gap-1">
             <span>Mark read</span>
