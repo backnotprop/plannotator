@@ -17,6 +17,7 @@ import { join } from "node:path";
 import { INBOX_CARD_ACTION_ON, INBOX_CARD_TITLE_MAX } from "@plannotator/core/inbox-types";
 import { startInboxServer, type InboxServer } from "@plannotator/server/inbox";
 import { FIXTURE_V1_PR } from "@plannotator/shared/guide-format-fixtures";
+import SHAPE_KIT from "@plannotator/core/shape-kit.mjs" with { type: "text" };
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
 import { removeStubbedHtml, stubHookDistHtml } from "../../../tests/helpers/hook-dist-stub";
 import { NO_BROWSER } from "../../../tests/helpers/no-browser";
@@ -32,10 +33,12 @@ const SLOW_READER = slowReader(4);
 // Leaves while the CLI is stuck on the full pipe: a CLI that hung on this would run into the test's timeout.
 const READER_THAT_LEAVES = "sleep 2";
 // A parent reading at once from a plain socketpair (argv: out file, then the command), the kind of stdout a parent
-// on libuv hands its child. Bun.spawn's own socket holds far more, so it would hide the cut.
+// on libuv hands its child. Bun.spawn's own socket holds far more, so it would hide the cut, and so would Linux's
+// default send buffer (about 200 KB; macOS's is 8 KB): this one is small on both.
 const SOCKET_PARENT = `
 import socket, subprocess, sys
 parent, child = socket.socketpair()
+child.setsockopt(socket.SOL_SOCKET, socket.SO_SNDBUF, 4096)
 proc = subprocess.Popen(sys.argv[2:], stdout=child.fileno())
 child.close()
 with open(sys.argv[1], "wb") as out:
@@ -47,6 +50,8 @@ with open(sys.argv[1], "wb") as out:
 sys.exit(proc.wait())
 `;
 const PYTHON = Bun.which("python3");
+/** Well past what SOCKET_PARENT's socket took on macOS (4 to 8 KB) before a CLI that does not wait lost the rest. */
+const SOCKET_HOLDS = 16_384;
 
 const agents = stubbedAgentClis();
 
@@ -88,6 +93,13 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
     expect(received.length, stderr).toBe(whole.length);
     expect(received.equals(whole)).toBe(true);
     expect(code).toBe("0");
+  };
+
+  /** Read the CLI through the plain socket; what it kept is in `out`, its own exit code in `code`. */
+  const readThroughSocket = async (argv: string[], out: string, options: { cwd?: string; env?: Record<string, string> } = {}) => {
+    const proc = Bun.spawn([PYTHON!, "-I", "-c", SOCKET_PARENT, inRoot(out), ...cli(...argv)], { cwd: options.cwd ?? root, env: { ...env, ...options.env }, stdout: "ignore", stderr: "pipe" });
+    const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
+    return { stderr, code: String(code) };
   };
 
   beforeAll(() => {
@@ -151,6 +163,24 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
     }, 30_000);
   });
 
+  describe("shape kit", () => {
+    // Shape is off by default: on in its own data dir, so nothing else here runs with it on.
+    test.skipIf(!PYTHON)("a socket reading at once gets every byte, and the exit code stays 0", async () => {
+      const dataDir = inRoot("shape-data");
+      mkdirSync(dataDir);
+      writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
+      const kit = Buffer.from(SHAPE_KIT);
+      expect(kit.length, "The kit now fits in the socket, so this test no longer sees a cut: make the socket smaller").toBeGreaterThan(SOCKET_HOLDS);
+
+      const { code, stderr } = await readThroughSocket(["shape", "kit"], "out-kit", { env: { PLANNOTATOR_DATA_DIR: dataDir } });
+
+      const received = readFileSync(inRoot("out-kit"));
+      expect(received.length, stderr).toBe(kit.length);
+      expect(received.equals(kit)).toBe(true);
+      expect(code).toBe("0");
+    }, 30_000);
+  });
+
   // A sandbox Board in this process's own Inbox (temp data dir, nothing to signal), read by the real CLI.
   describe.if(INBOX_CARD_ACTION_ON)("lists from a sandbox Inbox", () => {
     /** Past what any pipe or socket here holds (macOS and Linux), the point of these lists. */
@@ -200,19 +230,7 @@ describe.skipIf(process.platform === "win32")("CLI output through a pipe", () =>
       const ways = [
         { reader: "slow", run: () => pipeInto(argv, slowReader(2), { cwd: project, id: "-slow" }), out: "out-slow" },
         { reader: "keeping up", run: () => pipeInto(argv, `cat >"$OUT"`, { cwd: project, id: "-up" }), out: "out-up" },
-        ...(PYTHON
-          ? [
-              {
-                reader: "socket",
-                run: async () => {
-                  const proc = Bun.spawn([PYTHON, "-I", "-c", SOCKET_PARENT, inRoot("out-socket"), ...cli(...argv)], { cwd: project, env, stdout: "ignore", stderr: "pipe" });
-                  const [stderr, code] = await Promise.all([new Response(proc.stderr).text(), proc.exited]);
-                  return { stderr, code: String(code) };
-                },
-                out: "out-socket",
-              },
-            ]
-          : []),
+        ...(PYTHON ? [{ reader: "socket", run: () => readThroughSocket(argv, "out-socket", { cwd: project }), out: "out-socket" }] : []),
       ];
       return Promise.all(
         ways.map(async ({ reader, run, out }) => {

@@ -384,7 +384,7 @@ const rawArgs = process.argv.slice(2);
     process.exit(1);
   }
   if (args[0] === "shape" && args[1] === "kit") {
-    process.stdout.write(SHAPE_KIT);
+    await writeWholeToStdout(SHAPE_KIT);
     process.exit(0);
   }
   // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
