@@ -4,7 +4,7 @@
  * says why (the server's words); anything else, a network failure too, is the one line and can be tried again.
  */
 import { InboxApiError, inboxApi } from '../api';
-import type { InboxInitiative } from '@plannotator/core/inbox-initiatives';
+import type { InboxInitiative } from '@plannotator/core/inbox-types';
 
 export const INITIATIVE_SAVE_FAILED = 'That did not save. Try again.';
 
