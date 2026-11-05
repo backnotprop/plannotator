@@ -16,7 +16,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import type { InboxLaunchRecord } from "@plannotator/core/inbox-types";
 import { INBOX_RUN_START_GRACE_MS } from "@plannotator/core/inbox-run-line";
 import { InboxStore } from "@plannotator/shared/inbox/store";
@@ -620,5 +620,86 @@ describe("Trust folder (`trustOffer`)", () => {
     expect(await launch.runOf(root.id, false)).toMatchObject({ untrusted: true, home_folder: true });
     expect(await refusal(post(id, "trust"))).toMatchObject({ code: "trust_failed" });
     expect(startsOf(fake.calls)).toBe(1);
+  });
+});
+
+/**
+ * Which how-to Claude Code's real host and the engine pick for a start refused for trust (`RunLine` turns the flags into
+ * words: packages/inbox/runTrustHowto.test.tsx). The failure this catches: a folder whose trust would land on home, or
+ * `/`, told to run Claude Code there, which would trust all of home (or `/`); or anyone else losing the words that help them.
+ */
+describe("the trust how-to, from Claude Code's own trust key", () => {
+  const LAUNCH_ID = "lch_0123456789ABCDEFGHJKMNPQRS";
+  /** A launch of Claude Code in the folder `folderOf` names, refused for trust. An empty `.git` folder is enough: the key only looks for one. */
+  async function refusedIn(folderOf: (home: string, root: string) => string, options: { homeDir?: (home: string, root: string) => string; scratch?: boolean } = {}) {
+    const world = setup(options.homeDir ? { homeDir: options.homeDir } : {});
+    const folder = folderOf(world.home, dirname(world.home));
+    const at = new Date(world.clock.now).toISOString();
+    const project = world.store.ensureProject({ name: "here", root: folder });
+    const record = { id: LAUNCH_ID, agent: "claude-code", session_ref: null, folder, scratch: options.scratch === true, started_at: at } as const;
+    const root = world.store.startPersonThread({ project_id: project.id, body: "Tidy.", to: { host: "claude-code", session: `launch:${LAUNCH_ID}` }, idempotency_key: "howto", launch: record }).message;
+    world.store.settleLaunch(root.id, { error: { code: "untrusted", text: `${folder} isn't a trusted folder yet.`, at } });
+    const run = await world.launch.runOf(root.id, true);
+    // A guest reads the same sentence: the how-to is about the folder, not who is reading.
+    const guest = await world.launch.runOf(root.id, false);
+    if (!run?.trust) expect([guest?.trust_covers_home, guest?.home_folder]).toEqual([run?.trust_covers_home, run?.home_folder]);
+    return { untrusted: run?.untrusted, trust: run?.trust, covers: run?.trust_covers_home, home: run?.home_folder };
+  }
+  const homeRepo = (home: string) => mkdirSync(join(home, ".git"));
+  const inside = (home: string, ...parts: string[]) => {
+    const folder = join(home, ...parts);
+    mkdirSync(folder, { recursive: true });
+    return folder;
+  };
+  const linkTo = (home: string, root: string) => {
+    const link = join(root, "home-link");
+    symlinkSync(home, link);
+    return link;
+  };
+  const COVERS_HOME = { untrusted: true, trust: undefined, covers: true, home: undefined };
+  const HOME_SENTENCE = { untrusted: true, trust: undefined, covers: undefined, home: true };
+  const RUN_IT_THERE = { untrusted: true, trust: undefined, covers: undefined, home: undefined };
+
+  test("a folder with no repo of its own under a repo rooted at home, and home itself in that repo", async () => {
+    expect(await refusedIn((home) => (homeRepo(home), inside(home, "projects", "foo")))).toEqual(COVERS_HOME);
+    // Home in that repo carries both flags: a window from before the new one keeps its home sentence, never "run it here".
+    expect(await refusedIn((home) => (homeRepo(home), home))).toEqual({ ...COVERS_HOME, home: true });
+  });
+
+  test("the file-system root", async () => {
+    expect(await refusedIn(() => "/")).toEqual(COVERS_HOME);
+  });
+
+  test("home named through a link, or with a trailing slash, still finds a repo rooted there", async () => {
+    for (const homeDir of [linkTo, (home: string) => `${home}/`]) {
+      expect(await refusedIn((home) => (homeRepo(home), inside(home, "projects", "foo")), { homeDir })).toEqual(COVERS_HOME);
+    }
+  });
+
+  test("a scratch folder is judged by where its trust lands: the scratch root, under a repo rooted at home", async () => {
+    expect(await refusedIn((home) => (homeRepo(home), inside(home, "scratch", "one")), { scratch: true })).toEqual(COVERS_HOME);
+  });
+
+  test("home with no repo keeps its own sentence, however home or the folder is spelled (samePlace)", async () => {
+    expect(await refusedIn((home) => home)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => `${home}/`)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn(linkTo)).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => home, { homeDir: (home) => `${home}/` })).toEqual(HOME_SENTENCE);
+    expect(await refusedIn((home) => home, { homeDir: linkTo })).toEqual(HOME_SENTENCE);
+  });
+
+  test("a project with its own repo under a repo rooted at home gets the button, and no home sentence", async () => {
+    const offered = await refusedIn((home) => {
+      homeRepo(home);
+      const folder = inside(home, "code", "ledger");
+      mkdirSync(join(folder, ".git"));
+      return folder;
+    });
+    expect(offered).toEqual({ untrusted: true, trust: { warning: null }, covers: undefined, home: undefined });
+  });
+
+  test("everyone else with no button keeps the words that help: a folder above home, and a scratch root at home with no repo", async () => {
+    expect(await refusedIn((_home, root) => root)).toEqual(RUN_IT_THERE);
+    expect(await refusedIn((home) => inside(home, "one"), { scratch: true })).toEqual(RUN_IT_THERE);
   });
 });
