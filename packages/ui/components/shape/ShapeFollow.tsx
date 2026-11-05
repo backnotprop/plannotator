@@ -4,7 +4,8 @@
  * examples. Pressed, the drawing lights one example's path through its own
  * parts and arrows (followPainter.ts), and a card above the dock names the
  * example and steps through it. Folded, a step is its number and its plain
- * sentence; open, it is what goes in → what happens → what comes out.
+ * sentence; open, it is the path (r7): the steps on a rail by their tags, beside
+ * what goes in → what happens → what comes out.
  *
  * Motion (r5):
  *  - The card's size changes are FLIPs, transforms only: its skin scales from
@@ -20,14 +21,17 @@
  * and themes (pierre-light, pierre-dark).
  */
 import React, { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
-import type { ShapeExample, ShapeExampleCheck, ShapeExampleSource, ShapeExampleStep } from '@plannotator/core/shape';
+import type { ShapeExample, ShapeExampleCheck, ShapeExampleInput, ShapeExampleSource, ShapeExampleStep } from '@plannotator/core/shape';
 import { animate, FOLLOW_EASE, FollowPainter } from './followPainter';
 import {
+  followCardCut,
   followCheckCode,
   followDir,
+  followFileFit,
   followFnName,
   followReduce,
   followSignature,
+  followSignatureFit,
   followSource,
   FOLLOW_LITERAL,
   type FollowAction,
@@ -37,6 +41,10 @@ import {
 
 const NOTE = 'An example, read from the code. Nothing was run.';
 
+/** The width the dock needs with "Follow an example" in words. */
+const DOCK_ROOM = 920;
+/** A mono character, in the card's 12 px code. */
+const CH = 7.25;
 /** The card and the board: one duration. */
 const SIZE_MS = 260;
 /** The document timeline (it follows a slowed-down recording; performance.now does not). */
@@ -94,7 +102,7 @@ function tokenizeInto(h: Tokenizer, code: string) {
 function snippetsOf(ex: ShapeExample): string[] {
   const out: string[] = [];
   for (const s of ex.steps) {
-    out.push(`function ${followSignature(s.signature)}`);
+    out.push(`function ${followSignature(s.signature)}`, `function ${s.signature}`);
     for (const c of s.checks) {
       out.push(followCheckCode(c));
       if (c.saw && FOLLOW_LITERAL.test(c.saw)) out.push(`x = ${c.saw}`);
@@ -194,6 +202,18 @@ function Code({ code, pre = '', className }: { code: string; pre?: string; class
   );
 }
 
+/** A name that may wrap: after a dot, never mid-word, and it copies clean. */
+const Dotted = ({ name }: { name: string }) => (
+  <>
+    {name.split(/(?<=\.)/).map((part, i) => (
+      <React.Fragment key={i}>
+        {i > 0 && <wbr />}
+        {part}
+      </React.Fragment>
+    ))}
+  </>
+);
+
 /** A value: a literal in its type's colour, anything else as plain code. */
 function Val({ v, hand, out, type }: { v: string; hand?: boolean; out?: boolean; type?: string }) {
   return (
@@ -215,136 +235,234 @@ function RailIcon() {
     </svg>
   );
 }
-const Chevron = ({ dir = 'right' }: { dir?: 'right' | 'left' | 'down' | 'up' }) => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d={{ right: 'M9 6l6 6-6 6', left: 'M15 6l-6 6 6 6', down: 'M6 9l6 6 6-6', up: 'M6 15l6-6 6 6' }[dir]} />
+// From @hugeicons/core-free-icons 4.4.0 (https://hugeicons.com, https://github.com/hugeicons/hugeicons), MIT License,
+// Copyright (c) 2025 Hugeicons: permission is hereby granted, free of charge, to use, copy, modify, merge, publish,
+// distribute, sublicense, and/or sell copies, subject to this notice; THE SOFTWARE IS PROVIDED "AS IS", WITHOUT
+// WARRANTY OF ANY KIND. Only the free MIT set; no Hugeicons Pro icon. Stroke Rounded, drawn at the Inbox's 1.6.
+const HUGE = {
+  left: 'M15 6C15 6 9.00001 10.4189 9 12C8.99999 13.5812 15 18 15 18',
+  right: 'M9.00005 6C9.00005 6 15 10.4189 15 12C15 13.5812 9 18 9 18',
+  up: 'M17.9998 15C17.9998 15 13.5809 9.00001 11.9998 9C10.4187 8.99999 5.99985 15 5.99985 15',
+  down: 'M18 9.00005C18 9.00005 13.5811 15 12 15C10.4188 15 6 9 6 9',
+  close: 'M18.9991 19L5 5.00098M19 5L5.00092 18.999',
+  tick: 'M5 14L8.5 17.5L19 6.5',
+  minus: 'M20 12L4 12',
+  out: 'M9 6.65032C9 6.65032 15.9383 6.10759 16.9154 7.08463C17.8924 8.06167 17.3496 15 17.3496 15M16.5 7.5L6.5 17.5',
+};
+const Huge = ({ name, size = 16, weight = 1.6, className }: { name: keyof typeof HUGE; size?: number; weight?: number; className?: string }) => (
+  <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={weight} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <path d={HUGE[name]} />
   </svg>
 );
-const Close = () => (
-  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
-    <path d="M6 6l12 12M18 6L6 18" />
-  </svg>
-);
-/** "Open": a small arrow out, for anything that opens the code. */
-const OpenIcon = () => (
-  <svg className="shp-ex-oi" width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-    <path d="M3 7L7 3M3.6 3H7v3.4" />
-  </svg>
-);
-/** The hand-off between the three parts, drawn as the board draws its arrows: a line and an open head. */
-const Flow = ({ down }: { down?: boolean }) =>
-  down ? (
-    <svg className="shp-ex-flow down" width="16" height="24" viewBox="0 0 16 24" aria-hidden="true">
-      <path d="M8 2V21M2 15L8 21L14 15" />
-    </svg>
-  ) : (
-    <svg className="shp-ex-flow" width="28" height="16" viewBox="0 0 28 16" aria-hidden="true">
-      <path d="M2 8H25M18 2L25 8L18 14" />
-    </svg>
-  );
 const Mark = ({ result }: { result: ShapeExampleCheck['result'] }) => (
-  <svg className="mk" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label={result === 'pass' ? 'holds' : result === 'fail' ? 'fails' : 'not reached'}>
-    <path d={result === 'pass' ? 'M2.5 6.2L5 8.5L9.5 3.5' : result === 'fail' ? 'M3 3L9 9M9 3L3 9' : 'M3 6H9'} />
+  <svg className="mk" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" role="img" aria-label={result === 'pass' ? 'holds' : result === 'fail' ? 'fails' : 'not reached'}>
+    <path d={HUGE[result === 'pass' ? 'tick' : result === 'fail' ? 'close' : 'minus']} />
   </svg>
 );
+/** A step's number, drawn as the picture's tag draws it: filled while it is the step on now. */
+const StepN = ({ n, now }: { n: number; now?: boolean }) => <b className={`shp-ex-n${now ? ' now' : ''}`}>{n}</b>;
 
 // ───────────────────────── the card's parts ─────────────────────────
 
 type At = { path: string; line: number };
 
-function Source({ from, onCode, canOpen }: { from: ShapeExampleSource; onCode: (to: At) => void; canOpen: (path: string) => boolean }) {
+/** What the three parts need. `chars`: how many mono characters fit in the code's column. */
+interface PartProps {
+  step: ShapeExampleStep;
+  onCode: (to: At) => void;
+  canOpen: (path: string) => boolean;
+  onStep: (i: number) => void;
+  chars: number;
+  /** How many mono characters fit across the inputs' column. */
+  pane: number;
+}
+
+/** Where a value came from. A line in the step's own file is only its number; the file is named once, at the function. */
+function Source({ from, home, room, onCode, canOpen, onStep }: { from: ShapeExampleSource; home: string; room: number; onCode: (to: At) => void; canOpen: (path: string) => boolean; onStep: (i: number) => void }) {
   const src = followSource(from);
-  if (src.kind === 'step') return <span className="shp-ex-src handed">from step {src.step}</span>;
-  if (src.kind === 'text') return <span className="shp-ex-src">{src.text}</span>;
+  if (src.kind === 'step')
+    return (
+      <button type="button" className="shp-ex-src handed" onClick={() => onStep(src.step - 1)} title={`From step ${src.step}`} aria-label={`From step ${src.step}`}>
+        from <StepN n={src.step} />
+      </button>
+    );
+  if (src.kind === 'text') return <span className="shp-ex-src" title={src.text}>{src.text}</span>;
   const file = fileOf(src.path);
-  if (!canOpen(src.path)) return <span className="shp-ex-src">{file}:{src.line}</span>;
+  const label = (
+    <>
+      {src.path !== home && <span className="f">{followFileFit(file, src.line, room)}</span>}
+      <span className="l">:{src.line}</span>
+    </>
+  );
+  if (!canOpen(src.path)) return <span className="shp-ex-src" title={`${src.path}:${src.line}`}>{label}</span>;
   return (
-    <button type="button" className="shp-ex-src link" onClick={() => onCode(src)} title={`Open ${file} at line ${src.line}`}>
-      <span className="u">
-        {file}:{src.line}
-      </span>
-      <OpenIcon />
+    <button type="button" className="shp-ex-src link" onClick={() => onCode(src)} title={`Open ${file} at line ${src.line}`} aria-label={`Open ${file} at line ${src.line}`}>
+      {label}
     </button>
   );
 }
 
-/** What goes in → what happens → what comes out. */
-function StepIO({ step, k, cur, onCode, canOpen, phone }: { step: ShapeExampleStep; k: string; cur: boolean; onCode: (to: At) => void; canOpen: (path: string) => boolean; phone: boolean }) {
+/** What "What happens", its gap and the link's arrow take of the code's column, in characters. */
+const FN_CAPTION = 16;
+
+/** The function's place: a file and a line, opening the code. */
+function FnLink({ step, chars, onCode, canOpen }: Pick<PartProps, 'step' | 'chars' | 'onCode' | 'canOpen'>) {
   const file = fileOf(step.code.path);
-  const nameWidth = step.inputs.length ? Math.max(...step.inputs.map((v) => v.name.length)) : 0;
+  const label = (
+    <span className="u">
+      <span className="f">{followFileFit(file, step.code.line, chars - FN_CAPTION)}</span>
+      <span className="l">:{step.code.line}</span>
+    </span>
+  );
+  if (!canOpen(step.code.path)) return <span className="shp-ex-line" title={step.code.path}>{label}</span>;
   return (
-    <div className={`shp-ex-io${phone ? ' stacked' : ''}${cur ? ' cur' : ''}`} data-io={k} aria-hidden={cur ? undefined : true} inert={!cur}>
-      <section className="shp-ex-col in" aria-label="Goes in">
-        <p className="shp-ex-cap">Goes in</p>
-        <ul className="shp-ex-ins" style={{ '--nw': `${nameWidth}ch` } as React.CSSProperties}>
-          {step.inputs.map((v, i) => {
-            const handed = typeof v.from === 'object' && 'step' in v.from;
-            return (
-              <li key={`${v.name}-${i}`} className="shp-ex-row" data-handoff={handed ? '' : undefined}>
-                <code className="nm">{v.name}</code>
-                <span className="vl">
-                  <Val v={v.value} hand={handed} type={v.type} />
-                  {v.reading && <span className="pl">{v.reading}</span>}
-                </span>
-                <Source from={v.from} onCode={onCode} canOpen={canOpen} />
-              </li>
-            );
-          })}
-        </ul>
-      </section>
-      <Flow down={phone} />
+    <button type="button" className="shp-ex-line" onClick={() => onCode(step.code)} title={`Open ${file} at line ${step.code.line}`}>
+      {label}
+      <Huge name="out" size={12} className="shp-ex-oi" />
+    </button>
+  );
+}
+
+function InputRow({ v, tall, wide, home, room, onCode, canOpen, onStep }: { v: ShapeExampleInput; tall: boolean; wide: boolean; home: string; room: number } & Pick<PartProps, 'onCode' | 'canOpen' | 'onStep'>) {
+  const handed = typeof v.from === 'object' && 'step' in v.from;
+  return (
+    <li className={`shp-ex-row${tall ? ' tall' : ''}${tall && wide ? ' wide' : ''}`} data-handoff={handed ? '' : undefined}>
+      <code className="nm" title={v.name}><Dotted name={v.name} /></code>
+      <span className="vl">
+        <Val v={v.value} hand={handed} type={v.type} />
+        {v.reading && <span className="pl">{v.reading}</span>}
+      </span>
+      <Source from={v.from} home={home} room={room} onCode={onCode} canOpen={canOpen} onStep={onStep} />
+    </li>
+  );
+}
+
+/**
+ * Goes in: name, value, where it came from, with one name column so values read
+ * down. A row that cannot fit on one line gives its value the next line; only a
+ * file name longer than half the pane is ever cut.
+ */
+function Inputs({ step, onCode, canOpen, onStep, pane }: PartProps) {
+  if (!step.inputs.length) return <p className="shp-ex-none">Nothing</p>;
+  const names = step.inputs.map((v) => v.name.length).filter((n) => n <= pane / 2);
+  const nw = names.length ? Math.max(...names) : 0;
+  const room = Math.floor(pane / 2);
+  const labelOf = (v: ShapeExampleInput) => {
+    const src = followSource(v.from);
+    if (src.kind === 'step') return 6;
+    if (src.kind === 'text') return Math.min(room, src.text.length);
+    const line = String(src.line).length + 1;
+    return src.path === step.code.path ? line : followFileFit(fileOf(src.path), src.line, room).length + line;
+  };
+  const sw = Math.max(...step.inputs.map(labelOf));
+  const valueW = (v: ShapeExampleInput) => v.value.length + (v.reading ? v.reading.length + 2 : 0);
+  // The name column is nw + 1 characters; the two gaps are 12 px each, under 4 characters.
+  const tall = (v: ShapeExampleInput) => v.name.length > nw || nw + 1 + 4 + labelOf(v) + valueW(v) > pane;
+  const wide = (v: ShapeExampleInput) => v.name.length + labelOf(v) + 2 > pane;
+  return (
+    <ul className="shp-ex-vars" style={{ '--nw': `${nw + 1}ch`, '--sw': `${sw + 1}ch` } as React.CSSProperties}>
+      {step.inputs.map((v, i) => (
+        <InputRow key={`${v.name}-${i}`} v={v} tall={tall(v)} wide={wide(v)} home={step.code.path} room={room} onCode={onCode} canOpen={canOpen} onStep={onStep} />
+      ))}
+    </ul>
+  );
+}
+
+function CheckRow({ c }: { c: ShapeExampleCheck }) {
+  return (
+    <li className={`shp-ex-row ${c.result === 'not-reached' ? 'skip' : c.result}${c.decides ? ' decides' : ''}`}>
+      <Mark result={c.result} />
+      <Code className="cond" code={followCheckCode(c)} />
+      <span className="got">
+        {c.decides && c.result === 'fail' && c.short ? <b className="short">{c.short}</b> : c.decides ? <span className="dec">Decided it</span> : null}
+        {c.result === 'not-reached' ? <span className="say">not reached</span> : c.saw && FOLLOW_LITERAL.test(c.saw) ? <Val v={c.saw} /> : <span className="say">{c.saw}</span>}
+      </span>
+    </li>
+  );
+}
+
+const Signature = ({ step, chars }: Pick<PartProps, 'step' | 'chars'>) => <Code className="shp-ex-sig" code={followSignatureFit(step.signature, chars)} pre="function " />;
+
+function Output({ step, label }: { step: ShapeExampleStep; label?: boolean }) {
+  return (
+    <div className="shp-ex-ret shp-ex-row">
+      {label && <span className="shp-ex-cap">Comes out</span>}
+      <code className="nm" title={step.output.name}><Dotted name={step.output.name} /></code>
+      {step.output.note && <span className="pl">{step.output.note}</span>}
+      <span className="shp-ex-rr">
+        <Code className="shp-ex-type" code={step.output.type} pre="let x: " />
+        <Val v={step.output.value} hand out type={step.output.type} />
+      </span>
+    </div>
+  );
+}
+
+/**
+ * Two panes: the values, then the code, with the line that decided it lit and
+ * what comes out as the code's last line. A long step scrolls its checks; the
+ * signature above them stays.
+ */
+function StepPanes({ k, cur, withInputs, ...p }: PartProps & { k: string; cur: boolean; withInputs: boolean }) {
+  const { step } = p;
+  return (
+    <div className={`shp-ex-io panes${cur ? ' cur' : ''}`} data-io={k} aria-hidden={cur ? undefined : true} inert={!cur}>
+      {withInputs && (
+        <section className="shp-ex-col in" aria-label="Goes in">
+          <p className="shp-ex-cap">
+            Goes in{step.inputs.length > 7 && <span className="shp-ex-many"> {step.inputs.length}</span>}
+          </p>
+          <Inputs {...p} />
+        </section>
+      )}
       <section className="shp-ex-col fn" aria-label="What happens">
-        <p className="shp-ex-cap">What happens</p>
-        <div className="shp-ex-box">
-          <Code className="shp-ex-sig shp-ex-row" code={followSignature(step.signature)} pre="function " />
-          <ul className="shp-ex-checks">
-            {step.checks.map((c, i) => (
-              <li key={`${c.code}-${i}`} className={`shp-ex-row ${c.result === 'not-reached' ? 'skip' : c.result}${c.decides ? ' decides' : ''}`}>
-                <Mark result={c.result} />
-                <Code className="cond" code={followCheckCode(c)} />
-                <span className="got">
-                  {c.result === 'not-reached' ? <span className="say">not reached</span> : c.saw && FOLLOW_LITERAL.test(c.saw) ? <Val v={c.saw} /> : <span className="say">{c.saw}</span>}
-                </span>
-                {c.decides && (
-                  <span className="dec">
-                    {c.result === 'fail' ? (
-                      <>
-                        Decided it: {c.short ? <b>{c.short}</b> : 'it fails'}, so the step returns early.
-                      </>
-                    ) : (
-                      'Decided it.'
-                    )}
-                  </span>
-                )}
-              </li>
-            ))}
-          </ul>
-          {canOpen(step.code.path) ? (
-            <button type="button" className="shp-ex-line shp-ex-row" onClick={() => onCode(step.code)}>
-              <span className="u">
-                Open {file} at line {step.code.line}
-              </span>
-              <OpenIcon />
-            </button>
-          ) : (
-            <span className="shp-ex-line shp-ex-row">
-              {file}:{step.code.line}
-            </span>
-          )}
+        <div className="shp-ex-caps">
+          <p className="shp-ex-cap">What happens</p>
+          <FnLink {...p} />
         </div>
-      </section>
-      <Flow down={phone} />
-      <section className="shp-ex-col out" aria-label="Comes out">
-        <p className="shp-ex-cap">Comes out</p>
-        <div className="shp-ex-outv shp-ex-row">
-          <code className="nm">{step.output.name}</code>
-          <Val v={step.output.value} hand out type={step.output.type} />
-        </div>
-        <Code className="shp-ex-type shp-ex-row" code={step.output.type} pre="let x: " />
-        {step.output.note && <span className="shp-ex-meta shp-ex-row">{step.output.note}</span>}
+        <Signature step={step} chars={p.chars} />
+        {step.checks.length > 0 && (
+          <div className="shp-ex-scroll">
+            <ul className="shp-ex-checks">
+              {step.checks.map((c, i) => (
+                <CheckRow key={`${c.code}-${i}`} c={c} />
+              ))}
+            </ul>
+          </div>
+        )}
+        <Output step={step} label />
       </section>
     </div>
   );
+}
+
+/**
+ * The stack keeps the tallest step's height, so the board never moves as you
+ * step. A step much shorter than that shows on a card that ends where it ends:
+ * only the surface shrinks (from the bottom, so the arrows and the path stay
+ * under the pointer). A huge --ex-cut lets the step and the rail take their own
+ * heights to be read; the layout box never changes.
+ */
+function fitSurface(card: HTMLElement, phone: boolean) {
+  const stack = card.querySelector<HTMLElement>('.shp-ex-ios');
+  const cur = stack?.querySelector<HTMLElement>('.shp-ex-io.cur');
+  if (phone || !stack || !cur) {
+    card.style.removeProperty('--ex-cut');
+    return;
+  }
+  card.style.setProperty('--ex-cut', '99999px');
+  const rail = card.querySelector<HTMLElement>('.shp-ex-rail');
+  const cut = followCardCut(stack.clientHeight - cur.offsetHeight, rail ? rail.parentElement!.clientHeight - rail.offsetHeight : null);
+  card.style.setProperty('--ex-cut', `${cut}px`);
+}
+
+/** Moves `box`'s scroll by as little as shows `el`. */
+function keepInView(box: HTMLElement, el: HTMLElement) {
+  const a = box.getBoundingClientRect();
+  const b = el.getBoundingClientRect();
+  if (b.left < a.left) box.scrollLeft += b.left - a.left - 8;
+  else if (b.right > a.right) box.scrollLeft += b.right - a.right + 8;
+  if (b.top < a.top) box.scrollTop += b.top - a.top;
+  else if (b.bottom > a.bottom) box.scrollTop += b.bottom - a.bottom;
 }
 
 /** Rects of the card's moving parts, for a FLIP: where they are on screen now (mid-flight included). */
@@ -454,6 +572,8 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   reduceRef.current = reduce;
   const [phase, setPhaseRaw] = useState<FollowPhase>(options.initial ?? { open: false });
   const [expanded, setExpandedRaw] = useState(options.initialOpen ?? false);
+  const [cardW, setCardW] = useState(0);
+  const [dockTight, setDockTight] = useState(false);
   const how = active && !!board;
   const cardRef = useRef<HTMLElement | null>(null);
   const painter = useRef<FollowPainter | null>(null);
@@ -499,6 +619,25 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     },
     [prepare],
   );
+
+  // The card's width sets how long a signature's line can be, and when the panes stack.
+  const cardOn = phase.open && how;
+  const expandedNow = expanded;
+  useEffect(() => {
+    const card = cardRef.current;
+    if (!cardOn || !card || typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(() => setCardW(card.offsetWidth));
+    ro.observe(card);
+    return () => ro.disconnect();
+  }, [cardOn, expandedNow]);
+
+  // The dock's seven other buttons keep their words: where all eight would not fit, this one gives its up.
+  useEffect(() => {
+    if (!surface || typeof ResizeObserver !== 'function') return;
+    const ro = new ResizeObserver(() => setDockTight(surface.clientWidth < DOCK_ROOM));
+    ro.observe(surface);
+    return () => ro.disconnect();
+  }, [surface]);
 
   // A new version with fewer examples (or none): nothing to follow past its end.
   useEffect(() => {
@@ -546,6 +685,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const before = flip.current;
     flip.current = null;
     const red = reduceRef.current;
+    if (card) fitSurface(card, phone);
     if (card && before && !red) {
       for (const a of flipping.current) a.cancel();
       flipping.current = [];
@@ -683,6 +823,28 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     push(hold);
   }, [phase]);
 
+  // A long step scrolls in its pane: the line that decided it is always in view when you land on it.
+  const stepOn = phase.open ? phase.step : null;
+  useLayoutEffect(() => {
+    if (!expanded || stepOn === null) return;
+    const io = cardRef.current?.querySelector<HTMLElement>('.shp-ex-io.cur');
+    const line = io?.querySelector<HTMLElement>('.decides');
+    // Two panes scroll the checks; one column scrolls the whole step.
+    const sc = cardRef.current?.classList.contains('narrow') ? io : line?.closest<HTMLElement>('.shp-ex-scroll');
+    if (!sc || !line) return;
+    const a = sc.getBoundingClientRect();
+    const b = line.getBoundingClientRect();
+    if (b.top < a.top || b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
+  }, [expanded, stepOn, phase]);
+
+  // The path keeps the step on now in view; a phone's sheet starts each step at its top.
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    const on = card?.querySelector<HTMLElement>('.shp-ex-stop.on');
+    if (on?.parentElement) keepInView(on.parentElement, on);
+    if (phone) card?.querySelector('.shp-ex-in')?.scrollTo?.({ top: 0 });
+  }, [expanded, stepOn, phone, cardW]);
+
   // Closing the card: it fades where it was (React has already let it go).
   const lastCard = useRef<HTMLElement | null>(null);
   useLayoutEffect(() => {
@@ -717,17 +879,24 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const ex = phase.open ? examples[phase.ex] ?? null : null;
   const step = phase.open && phase.step !== null && ex ? ex.steps[phase.step] ?? null : null;
   const showIO = expanded && !!step;
+  const narrow = phone || (cardW > 0 && cardW < 860);
+  const withRail = showIO && !narrow;
+  const withStrip = showIO && narrow;
+  const withInputs = !!ex && ex.steps.some((s) => s.inputs.length > 0);
+  // How many mono characters fit in each pane: the rail (232), the main area's padding (28) and the panes' gap (24) go first.
+  const width = cardW || 1100;
+  const panes = width - 284;
+  const charsNow = narrow ? Math.max(28, Math.floor((width - 64) / CH)) : Math.floor((withInputs ? (panes * 8) / 14 : width - 260) / CH) - 1;
+  const paneNow = narrow ? Math.floor((width - 40) / CH) : Math.floor((panes * 6) / 14 / CH);
+  const toStep = (i: number) => dispatch({ type: 'step', step: i });
 
   const stepNav = (
     <div className={`shp-ex-nav${step ? ' cur' : ''}`} aria-hidden={step ? undefined : true}>
-      <button type="button" className="shp-ex-quiet" onClick={() => dispatch({ type: 'step', step: null })} tabIndex={step ? undefined : -1}>
-        All steps
+      <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'back' })} disabled={!step || (phase.open && phase.step === 0)} aria-label="Previous step" title="Previous step">
+        <Huge name="left" />
       </button>
-      <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'back' })} disabled={!step || (phase.open && phase.step === 0)} aria-label="Previous step">
-        <Chevron dir="left" />
-      </button>
-      <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'next' })} disabled={!step || !ex || (phase.open && phase.step === ex.steps.length - 1)} aria-label="Next step">
-        <Chevron />
+      <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'next' })} disabled={!step || !ex || (phase.open && phase.step === ex.steps.length - 1)} aria-label="Next step" title="Next step">
+        <Huge name="right" />
       </button>
     </div>
   );
@@ -735,7 +904,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     <div className={`shp-ex-nav${step ? '' : ' cur'}`} aria-hidden={step ? true : undefined}>
       <button type="button" className="shp-ex-step" onClick={() => dispatch({ type: 'step', step: 0 })} tabIndex={step ? -1 : undefined}>
         Step through
-        <Chevron />
+        <Huge name="right" size={14} />
       </button>
     </div>
   );
@@ -746,10 +915,42 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     </div>
   );
   const more = step && (
-    <button type="button" className="shp-ex-more" aria-expanded={expanded} onClick={() => setExpanded(!expanded)} data-flip="more">
-      {expanded ? 'Hide inputs and outputs' : 'Inputs and outputs'}
-      <Chevron dir={expanded ? 'up' : 'down'} />
+    <button
+      type="button"
+      className={`shp-ex-more${expanded ? ' icon' : ''}`}
+      aria-expanded={expanded}
+      aria-label={expanded ? 'Hide inputs and outputs' : 'Inputs and outputs'}
+      title={expanded ? 'Hide inputs and outputs' : undefined}
+      onClick={() => setExpanded(!expanded)}
+      data-flip="more"
+    >
+      {!expanded && 'Inputs and outputs'}
+      <Huge name={expanded ? 'up' : 'down'} size={14} />
     </button>
+  );
+  const allSteps = step && !expanded && (
+    <button type="button" className="shp-ex-quiet" onClick={() => dispatch({ type: 'step', step: null })} data-flip="all">
+      All steps
+    </button>
+  );
+  const close = (
+    <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'close' })} aria-label="Stop following" title="Stop following" data-flip="close">
+      <Huge name="close" />
+    </button>
+  );
+  const tabs = examples.length > 1 && (
+    <div className="shp-tgroup shp-ex-tabs" role="group" aria-label="Which example" data-flip="tabs">
+      {examples.map((e, i) => (
+        <button key={`${e.name}-${i}`} type="button" className={`shp-tbtn${phase.open && i === phase.ex ? ' on' : ''}`} aria-pressed={phase.open && i === phase.ex} title={e.name} style={{ flexShrink: e.name.length > 16 ? 1 : 0 }} onClick={() => dispatch({ type: 'example', ex: i })}>
+          <span className="tn">{e.name}</span>
+        </button>
+      ))}
+    </div>
+  );
+  const note = (
+    <p className="shp-ex-note" data-flip="note">
+      {NOTE}
+    </p>
   );
 
   const button = how ? (
@@ -763,13 +964,35 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       onClick={() => dispatch({ type: 'toggle' })}
     >
       <RailIcon />
-      {!phone && <span className="tl">Follow an example</span>}
+      {!phone && !dockTight && <span className="tl">Follow an example</span>}
     </button>
   ) : null;
 
+  const stops =
+    ex &&
+    (withRail || withStrip) &&
+    ex.steps.map((s, i) => {
+      const on = phase.open && phase.step === i;
+      return (
+        <button key={i} type="button" className={`shp-ex-stop${on ? ' on' : ''}`} aria-current={on ? 'step' : undefined} onClick={() => toStep(i)} title={s.text} aria-label={`Step ${i + 1}: ${s.tag}`}>
+          <StepN n={i + 1} now={on} />
+          {(withRail || on) && <span className="st">{s.tag}</span>}
+        </button>
+      );
+    });
+
+  const body =
+    ex && showIO && phase.open ? (
+      <div className="shp-ex-ios" data-flip="ios">
+        {ex.steps.map((s, i) => (
+          <StepPanes key={i} step={s} onCode={onCode} canOpen={canOpen} onStep={toStep} chars={charsNow} pane={paneNow} k={`${phase.ex}-${i}`} cur={phase.step === i} withInputs={withInputs} />
+        ))}
+      </div>
+    ) : null;
+
   const card =
     how && ex ? (
-      <section ref={cardRef} className={`shp-ex-card${phone ? ' phone' : ''}${showIO ? ' expanded' : ''}`} aria-label={`Example: ${ex.title}`} data-follow-card="">
+      <section ref={cardRef} className={`shp-ex-card${phone ? ' phone' : ''}${showIO ? ' expanded' : ''}${narrow ? ' narrow' : ''}`} aria-label={`Example: ${ex.title}`} data-follow-card="">
         <div className="shp-ex-skin" data-flip="skin" aria-hidden="true" />
         <div className="shp-ex-in">
           {phone && (
@@ -777,70 +1000,65 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
               <span />
             </button>
           )}
-          <div className="shp-ex-head">
-            <div className="shp-tgroup" role="group" aria-label="Which example" data-flip="tabs">
-              {examples.map((e, i) => (
-                <button key={`${e.name}-${i}`} type="button" className={`shp-tbtn${phase.open && i === phase.ex ? ' on' : ''}`} aria-pressed={phase.open && i === phase.ex} onClick={() => dispatch({ type: 'example', ex: i })}>
-                  {e.name}
-                </button>
-              ))}
-            </div>
-            <span className="shp-ex-sp" />
-            {!phone && more}
-            <button type="button" className="shp-ex-icon" onClick={() => dispatch({ type: 'close' })} aria-label="Stop following" title="Stop following" data-flip="close">
-              <Close />
-            </button>
-          </div>
-          <div className="shp-ex-body" aria-live="polite">
-            <div className="shp-ex-stack shp-ex-texts" data-flip="text">
-              <div className={`shp-ex-text all${step ? '' : ' cur'}`} aria-hidden={step ? true : undefined}>
-                <p className="shp-ex-does">{ex.title}</p>
-                {!showIO && ex.lead && <p className="shp-ex-sub">{ex.lead}</p>}
-              </div>
-              {ex.steps.map((s, i) => {
-                const on = phase.open && phase.step === i;
-                return (
-                  <div key={i} className={`shp-ex-text${on ? ' cur' : ''}`} aria-hidden={on ? undefined : true}>
-                    <span className="shp-ex-count">
-                      {i + 1} of {ex.steps.length}
-                    </span>
-                    <div>
-                      <p className="shp-ex-does">{s.text}</p>
-                      {!showIO && (
-                        <p className="shp-ex-sub">
-                          {canOpen(s.code.path) ? (
-                            <button type="button" className="shp-ex-fn" onClick={() => onCode(s.code)} title={`Open ${fileOf(s.code.path)} at line ${s.code.line}`} tabIndex={on ? undefined : -1}>
-                              {followFnName(s.signature)}
-                            </button>
-                          ) : (
-                            <code className="shp-ex-fn">{followFnName(s.signature)}</code>
-                          )}
-                          {s.detail && <span> · {s.detail}</span>}
-                        </p>
-                      )}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-            {!phone && navs}
-          </div>
-          {showIO && phase.open && (
-            <div className="shp-ex-ios" data-flip="ios">
-              {ex.steps.map((s, i) => (
-                <StepIO key={i} step={s} k={`${phase.ex}-${i}`} cur={phase.step === i} onCode={onCode} canOpen={canOpen} phone={phone} />
-              ))}
-            </div>
+          {withRail && (
+            <nav className="shp-ex-rail" aria-label="Steps">
+              {tabs}
+              <div className="shp-ex-stops">{stops}</div>
+              {note}
+            </nav>
           )}
+          <div className="shp-ex-main">
+            <div className="shp-ex-bar">
+              {!phone && navs}
+              <div className="shp-ex-stack shp-ex-texts" data-flip="text" aria-live="polite">
+                <div className={`shp-ex-text all${step ? '' : ' cur'}`} aria-hidden={step ? true : undefined}>
+                  <p className="shp-ex-does">{ex.title}</p>
+                  {!showIO && ex.lead && <p className="shp-ex-sub">{ex.lead}</p>}
+                </div>
+                {ex.steps.map((s, i) => {
+                  const on = phase.open && phase.step === i;
+                  return (
+                    <div key={i} className={`shp-ex-text${on ? ' cur' : ''}`} aria-hidden={on ? undefined : true}>
+                      <span className="shp-ex-count">
+                        <StepN n={i + 1} now /> of {ex.steps.length}
+                      </span>
+                      <div>
+                        <p className="shp-ex-does" title={showIO ? s.text : undefined}>{s.text}</p>
+                        {!showIO && (
+                          <p className="shp-ex-sub">
+                            {canOpen(s.code.path) ? (
+                              <button type="button" className="shp-ex-fn" onClick={() => onCode(s.code)} title={`Open ${fileOf(s.code.path)} at line ${s.code.line}`} tabIndex={on ? undefined : -1}>
+                                {followFnName(s.signature)}
+                              </button>
+                            ) : (
+                              <code className="shp-ex-fn">{followFnName(s.signature)}</code>
+                            )}
+                            {s.detail && <span> · {s.detail}</span>}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div className="shp-ex-side">
+                {!withRail && tabs}
+                {!phone && allSteps}
+                {!phone && more}
+                {close}
+              </div>
+            </div>
+            {withStrip && <div className="shp-ex-strip">{stops}</div>}
+            {body}
+          </div>
           {phone && (
             <div className="shp-ex-foot" data-flip="foot">
               {more}
+              {allSteps}
               {navs}
             </div>
           )}
-          <p className="shp-ex-note" data-flip="note">
-            {NOTE}
-          </p>
+          {!withRail && note}
         </div>
       </section>
     ) : null;

@@ -7,7 +7,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { ShapeExample } from '@plannotator/core/shape';
-import { followDir, followReduce, followSignature, type FollowPhase } from './followState';
+import { followCardCut, followDir, followFileFit, followReduce, followSignature, followSignatureFit, type FollowPhase } from './followState';
 
 const ex = (steps: number): ShapeExample => ({
   name: `${steps} steps`,
@@ -74,5 +74,43 @@ describe('followSignature', () => {
     expect(followSignature("snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>, now: Date = new Date()): boolean")).toBe(
       "snoozeIntroMayClaim(\n  gate: Omit<SnoozeIntroGate, 'toast'>,\n  now: Date = new Date(),\n): boolean",
     );
+  });
+});
+
+describe('followSignatureFit', () => {
+  const sig = "snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>, now: Date = new Date()): boolean";
+  test('one line when it fits, then two broken between parameters, then one parameter a line', () => {
+    expect(followSignatureFit(sig, sig.length)).toBe(sig);
+    expect(followSignatureFit(sig, 60)).toBe("snoozeIntroMayClaim(gate: Omit<SnoozeIntroGate, 'toast'>,\n  now: Date = new Date()): boolean");
+    expect(followSignatureFit(sig, 30)).toBe(followSignature(sig, 30));
+  });
+});
+
+describe('followFileFit', () => {
+  test('a name that fits with its line stays whole', () => {
+    expect(followFileFit('snoozeIntroRows.ts', 27, 21)).toBe('snoozeIntroRows.ts');
+  });
+  test('a longer one is cut so name and line take exactly the room', () => {
+    const name = followFileFit('snoozeIntroRows.ts', 27, 16);
+    expect(name).toBe('snoozeIntroR\u2026');
+    expect(`${name}:27`.length).toBe(16);
+    expect(`${followFileFit('snoozeIntroRows.ts', 1274, 16)}:1274`.length).toBe(16);
+  });
+  test('no room still names the file', () => {
+    expect(followFileFit('snoozeIntroRows.ts', 27, 2)).toBe('sno\u2026');
+  });
+});
+
+describe('followCardCut', () => {
+  test('a little spare height holds: the edge does not move for it', () => {
+    expect(followCardCut(82, 200)).toBe(0);
+    expect(followCardCut(82, null)).toBe(0);
+  });
+  test('a lot of it comes off', () => {
+    expect(followCardCut(130, null)).toBe(130);
+  });
+  test('never past what the rail needs', () => {
+    expect(followCardCut(200, 120)).toBe(120);
+    expect(followCardCut(200, 40)).toBe(0);
   });
 });

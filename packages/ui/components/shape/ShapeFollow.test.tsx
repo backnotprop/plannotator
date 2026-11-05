@@ -9,7 +9,10 @@
  *    picture, or the card on a different step from the picture;
  *  - a click on a lit part opening Change it instead of jumping to its step;
  *  - the function's link not reaching the host's file;
- *  - reduced motion still running the dot, the slides or the flight.
+ *  - reduced motion still running the dot, the slides or the flight;
+ *  - the path missing a step or leaving the picture behind, and a long step's
+ *    signature scrolling away with its checks. What needs real layout is in
+ *    tests/e2e/inbox-shape-follow.spec.ts.
  */
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -257,6 +260,38 @@ describe.if(hasDom)('Follow an example', () => {
     });
     await wait();
     expect(reads).toEqual(['src/kettle.ts']);
+  });
+
+  test('open, the path names every step and jumps with the picture; folded, it is gone', async () => {
+    reduceMotion = true; // Closing waits on no fade.
+    await mount(fakeHost(board([EXAMPLE])));
+    await press('Follow an example');
+    await press('Step through');
+    expect(document.querySelectorAll('.shp-ex-stop').length).toBe(0);
+    await press('Inputs and outputs');
+
+    const stops = () => [...document.querySelectorAll<HTMLButtonElement>('.shp-ex-stop')];
+    expect(stops().map((b) => b.getAttribute('aria-label'))).toEqual(['Step 1: at how-a', 'Step 2: at how-b', 'Step 3: at how-c']);
+    expect(stops().map((b) => b.getAttribute('aria-current'))).toEqual(['step', null, null]);
+
+    await act(async () => stops()[2]!.click());
+    expect(stops().map((b) => b.getAttribute('aria-current'))).toEqual([null, null, 'step']);
+    expect(new Set(nowOnPicture())).toEqual(new Set(['2']));
+
+    await press('Hide inputs and outputs');
+    expect(document.querySelectorAll('.shp-ex-stop').length).toBe(0);
+    expect(count()).toBe('3 of 3');
+  });
+
+  test('a long step scrolls its checks: the signature stays out of the scroller', async () => {
+    await mount(fakeHost(board([EXAMPLE])));
+    await press('Follow an example');
+    await press('Step through');
+    await press('Inputs and outputs');
+    const cur = document.querySelector('.shp-ex-io.cur')!;
+    expect(cur.querySelectorAll('.shp-ex-sig').length).toBe(1);
+    expect(cur.querySelectorAll('.shp-ex-scroll .shp-ex-sig').length).toBe(0);
+    expect(cur.querySelectorAll('.shp-ex-scroll .decides').length).toBe(1);
   });
 
   test('reduced motion: no dot, no slide and no flight, only short fades', async () => {

@@ -68,6 +68,27 @@ export function followSource(from: ShapeExampleSource): FollowSource {
   return { kind: 'code', path: from.path, line: from.line };
 }
 
+/**
+ * A signature in the room there is: one line when it fits, then two broken at
+ * a parameter, then one parameter a line.
+ */
+export function followSignatureFit(sig: string, chars: number): string {
+  if (sig.length <= chars) return sig;
+  const open = sig.indexOf('(');
+  let depth = 0;
+  let best = -1;
+  for (let i = open; open >= 0 && i < sig.length; i++) {
+    const c = sig[i]!;
+    if ('(<[{'.includes(c)) depth++;
+    else if (')>]}'.includes(c) && !(c === '>' && sig[i - 1] === '=')) {
+      depth--;
+      if (depth === 0) break;
+    } else if (c === ',' && depth === 1 && i + 1 <= chars) best = i;
+  }
+  if (best > 0 && sig.length - best - 2 + 2 <= chars) return `${sig.slice(0, best + 1)}\n  ${sig.slice(best + 1).trim()}`;
+  return followSignature(sig, chars);
+}
+
 /** A long signature, one parameter a line, hanging-indented. */
 export function followSignature(sig: string, max = 52): string {
   if (sig.length <= max) return sig;
@@ -94,4 +115,27 @@ export function followSignature(sig: string, max = 52): string {
   if (close < 0) return sig;
   parts.push(sig.slice(from, close).trim());
   return `${sig.slice(0, open)}(\n${parts.filter(Boolean).map((p) => `  ${p},`).join('\n')}\n)${sig.slice(close + 1)}`;
+}
+
+/**
+ * A file name cut to `room` characters with its ":line", in whole characters
+ * (CSS's ellipsis leaves a gap before the line number). The full name stays in
+ * the link's title.
+ */
+export function followFileFit(file: string, line: number, room: number): string {
+  const r = Math.max(4, room - String(line).length - 1);
+  return file.length <= r ? file : `${file.slice(0, r - 1)}…`;
+}
+
+/** Below this the card holds its height: an edge that moves on every step costs more than a little air. */
+const FOLLOW_CUT_MIN = 96;
+
+/**
+ * How much of the card's held height to leave off under a step. `spare`: what
+ * the step leaves empty in the stack. `railSpare`: what the rail can give up
+ * (null: no rail).
+ */
+export function followCardCut(spare: number, railSpare: number | null): number {
+  const cut = railSpare === null ? spare : Math.min(spare, railSpare);
+  return cut >= FOLLOW_CUT_MIN ? cut : 0;
 }
