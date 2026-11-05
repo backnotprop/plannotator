@@ -889,18 +889,22 @@ test.skipIf(!hasDom)('a launched thread, its stopped agent the only one: never "
   expect(replies().map((r) => [r.path, r.body.to ?? null])).toEqual([[`/api/inbox/messages/${M1}/reply`, null]]);
 });
 
-test.skipIf(!hasDom)('a launched thread, its agent gone or stopped, a plain reply saved for it: no move offered, since only a message addressed to it can move', async () => {
-  liveness = { ses_launched: false };
+test.skipIf(!hasDom)('a launched thread, a plain reply saved: no move when it is for its own agent, stopped or gone; a move when it is for a tagged agent that ended', async () => {
+  liveness = { ses_launched: false, ses_tagged: false };
   sessions = { sessions: [live('ses_other', 'pi')] };
   const thread = launchedThread(false);
-  const saved = { ...thread.messages[0]!, id: R1, reply_to: M1, author: { kind: 'person' as const }, to: undefined, launch: undefined, started_by_person: undefined, subject: null, body: 'Carry on.', created_at: '2026-10-11T10:50:00.000Z', idempotency_key: 'k-saved' } as InboxMessageWire;
-  const withSaved = { ...thread, messages: [thread.messages[0]!, thread.messages[1]!, saved] };
-  const stopped = await render(withSaved, { at: '2026-10-11T10:52:00.000Z', checked_at: null }, stoppedRun);
-  expect(!!stopped.querySelector('[data-readdress-open]')).toBe(false);
-  act(() => root?.unmount());
-  host?.remove();
-  const gone = await render(withSaved, { at: '2026-10-11T10:52:00.000Z', checked_at: null }, { ...stoppedRun, state: 'missing' });
-  expect(!!gone.querySelector('[data-readdress-open]')).toBe(false);
+  const [rootMessage, asked, tagged] = thread.messages as [InboxMessageWire, InboxMessageWire, InboxMessageWire];
+  const saved = (replyTo: string) =>
+    ({ ...asked, id: 'msg_01M4H6G73M9H3Z32T859E72L09', reply_to: replyTo, author: { kind: 'person' }, questions: undefined, wakes: undefined, body: 'Carry on.', created_at: '2026-10-11T10:50:00.000Z', idempotency_key: 'k-saved' }) as InboxMessageWire;
+  const sent = { at: '2026-10-11T10:52:00.000Z', checked_at: null };
+  for (const run of [stoppedRun, { ...stoppedRun, state: 'missing' } as typeof stoppedRun]) {
+    const own = await render({ ...thread, messages: [rootMessage, asked, saved(M1)] }, sent, run);
+    expect(!!own.querySelector('[data-readdress-open]')).toBe(false);
+    act(() => root?.unmount());
+    host?.remove();
+  }
+  const toTagged = await render({ ...thread, messages: [rootMessage, asked, tagged, saved(R1)] }, sent, stoppedRun);
+  expect(!!toTagged.querySelector('[data-readdress-open]')).toBe(true);
 });
 
 test.skipIf(!hasDom)('a launched thread, the words going to a tagged agent that ended: the ended note shows, so the reply does not wait on it unsaid', async () => {

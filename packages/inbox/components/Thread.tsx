@@ -5996,7 +5996,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                   </p>
                 )}
                 {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
-                {message === last && !runLine && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
                   <SendToAnotherSession
                     messageId={last.id}
                     ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
