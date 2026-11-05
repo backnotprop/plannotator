@@ -255,8 +255,8 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
     onToggleReviewed?.();
   };
 
-  // A host's control in a tab on this card (the Inbox's diff layout, on the first card); nothing otherwise.
-  const tab = host.renderSectionTab?.(index) ?? null;
+  // A host's control in a tab on this card (the Inbox's diff layout); nothing otherwise.
+  const tab = host.renderSectionTab?.(index, { folded: isCollapsed, diffs: section.diffs.length, title: section.title }) ?? null;
   // A host's content at the foot of the prose column (VS Code: ask about this chapter); nothing otherwise.
   const footer = host.renderSectionFooter?.(index) ?? null;
   const tabbed = tab !== null && tab !== undefined && tab !== false;
