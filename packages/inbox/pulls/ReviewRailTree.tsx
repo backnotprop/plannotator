@@ -8,13 +8,8 @@ import { useMemo, type CSSProperties } from 'react';
 import type { DiffFile } from '@plannotator/core/diff-files';
 import { useDiffFileTreeExpansion } from '@plannotator/ui/hooks/useDiffFileTreeExpansion';
 import type { DiffFileTreeNode } from '@plannotator/ui/utils/diffFileTree';
-import {
-  AnnotationBadge,
-  ChangeTypeLetter,
-  countColumnVars,
-  CountColumns,
-  ViewedControl,
-} from '@plannotator/review-editor/components/FileRowBits';
+import { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
+import { AnnotationBadge, CountColumns, countColumnVars, ViewedControl } from '@plannotator/ui/components/FileRowAtoms';
 import { Tip } from '../components/Tip';
 
 /** The Changes tree's indent: 12 px a level from the row's 8 px, 4 px a level past what the 256 px rail can give. */
