@@ -479,8 +479,6 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-card:not(.narrow) .shp-ex-col.fn:only-child { grid-column: 1 / -1; }
 .shp-ex-card .shp-ex-col.in, .shp-ex-card .shp-ex-col.fn { padding-top: 4px; }
 .shp-ex-strip { display: flex; align-items: center; column-gap: 4px; margin-top: 8px; overflow-x: auto; scrollbar-width: none; }
-/* A phone reads a long step by scrolling its sheet: the path stays at the top of it. */
-.shp-ex-card.phone .shp-ex-strip { position: sticky; top: 0; z-index: 2; background: var(--popover); }
 .shp-ex-strip .shp-ex-stop { width: auto; flex: none; min-height: 32px; padding: 4px 6px; }
 .shp-ex-strip .shp-ex-stop .st { max-width: 24ch; }
 
@@ -510,7 +508,7 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-card.narrow .shp-ex-io.panes .shp-ex-ret { margin-top: 6px; }
 .shp-ex-card.phone { position: absolute; left: 0; right: 0; bottom: 0; translate: none; width: 100%; animation-name: shp-ex-sheet-in; }
 .shp-ex-card.phone .shp-ex-skin { border-radius: 18px 18px 0 0; }
-.shp-ex-card.phone .shp-ex-in { max-height: 72vh; overflow-y: auto; overscroll-behavior: contain; padding: 0 16px max(12px, env(safe-area-inset-bottom)); }
+.shp-ex-card.phone .shp-ex-in { max-height: var(--ex-room, 72dvh); overflow-y: auto; overscroll-behavior: contain; border-radius: 18px 18px 0 0; padding: 0 16px max(12px, env(safe-area-inset-bottom)); }
 @keyframes shp-ex-sheet-in { from { transform: translateY(24px); opacity: 0; } }
 .shp-ex-grab { display: flex; justify-content: center; width: 100%; height: 20px; padding: 8px 0 0; border: 0; background: none; cursor: pointer; }
 .shp-ex-grab span { width: 36px; height: 4px; border-radius: 2px; background: color-mix(in oklab, var(--muted-foreground) 45%, transparent); }
@@ -524,6 +522,34 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-foot { position: sticky; bottom: calc(-1 * max(12px, env(safe-area-inset-bottom))); z-index: 2; display: flex; align-items: center; justify-content: space-between; gap: 8px; margin: 8px -8px 0; padding: 4px 0; background: var(--popover); }
 .shp-ex-foot .shp-ex-navs { margin-left: auto; }
 .shp-ex-card.phone .shp-ex-nav .shp-ex-icon { width: 44px; height: 40px; }
+
+/* A phone, open: one row of controls that stays while the sheet scrolls, then the sentence, the rule that decided it and what comes out. */
+.shp-ex-card.phone.expanded .shp-ex-main { display: flex; flex-direction: column; }
+.shp-ex-card.phone.expanded .shp-ex-bar { display: contents; }
+.shp-ex-card.phone.expanded .shp-ex-side { order: -1; position: sticky; top: 0; z-index: 2; gap: 0; justify-content: flex-start; margin-inline: -8px; padding: 2px 0 2px 5px; background: var(--popover); }
+.shp-ex-card.phone .shp-ex-strip { flex: 1 1 0; min-width: 0; margin: 0; column-gap: 0; }
+.shp-ex-card.phone .shp-ex-strip .shp-ex-stop { min-height: 36px; padding: 0 3px; background: none; }
+.shp-ex-card.phone.expanded .shp-ex-nav .shp-ex-icon { width: 36px; height: 36px; }
+.shp-ex-card.phone.expanded .shp-ex-count { display: none; }
+.shp-ex-card.phone.expanded .shp-ex-text { grid-template-columns: minmax(0, 1fr); }
+.shp-ex-card.phone.expanded .shp-ex-texts { margin-top: 2px; }
+.shp-ex-card.phone .shp-ex-io.panes { row-gap: 4px; }
+.shp-ex-card.phone .shp-ex-caps { align-items: center; min-height: 28px; }
+.shp-ex-reveal { appearance: none; border: 0; background: none; padding: 0; display: inline-flex; align-items: center; gap: 4px; min-height: 28px; cursor: pointer; }
+.shp-ex-card.phone .shp-ex-type { display: none; }
+.shp-ex-card.phone .shp-ex-col.fn > .shp-ex-sig { order: 0; margin-top: 2px; }
+.shp-ex-card.phone .shp-ex-io.panes .shp-ex-ret { padding-top: 4px; }
+.shp-ex-checks li.two { row-gap: 0; }
+.shp-ex-checks li.two .got { flex: 1 0 100%; box-sizing: border-box; justify-content: flex-start; margin-left: 0; padding-left: 22px; text-align: left; column-gap: 8px; }
+.shp-ex-checks .cm { font: var(--ex-mono); color: var(--muted-foreground); }
+/* The board above a sheet: edges that fade, or no board. */
+.shp-root.follow-sheet .shp-view.v-how { mask-image: linear-gradient(#0000, #000 16px); transition: opacity .18s ease-out; }
+.shp-root.follow-sheet .shp-view.shp-ex-covered { opacity: 0; pointer-events: none; }
+.shp-ex-card.phone .shp-ex-skin::before { content: ""; position: absolute; left: 0; right: 0; bottom: 100%; height: 20px; pointer-events: none; background: linear-gradient(#0000, var(--background)); }
+.shp-ex-card.phone.over .shp-ex-skin::before { display: none; }
+/* A long value has its own line, and its source the next. */
+.shp-ex-card.phone .shp-ex-vars > li.long .vl { order: 2; flex: 1 0 100%; }
+.shp-ex-card.phone .shp-ex-vars > li.long .shp-ex-src { order: 3; margin-left: auto; }
 
 @media (prefers-reduced-motion: reduce) {
   .shp-ex-card, .shp-ex-card.phone { animation: shp-ex-fade .15s linear both; }

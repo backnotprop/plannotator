@@ -8,7 +8,7 @@
  *  - stepping never moves the board, the arrows or the path, and a short step in a tall example ends the card under it;
  *  - the long step keeps its signature and its deciding line in view;
  *  - folded, the arrows and the picture still step;
- *  - a phone keeps the path: every stop, the one on now in view, at the top of the sheet while it scrolls;
+ *  - a phone's open sheet: one row of controls that stays, the rule that decided it and what comes out; the rest opens on request, and a full sheet leaves no slice of the board;
  *  - one column beside a board: what decided it first, nothing on top of anything, the dock's every button on screen;
  *  - a path too long for its room keeps the stop on now in view, on the rail and on a phone.
  *
@@ -55,7 +55,7 @@ const NORMAL = {
     { name: 'readAndLeft', value: '2', reading: 'rows', from: at(27, 'src/snoozeIntroRows.ts') },
   ],
   signature: 'mayClaim(gate: Gate, now: Date): boolean',
-  checks: [check('gate.pageAge >= PAGE_AGE_MS', { saw: '240_000' }), check('need(gate.rows, now)', { decides: true })],
+  checks: [check('gate.pageAge >= PAGE_AGE_MS', { saw: '240_000' }), check('need(gate.rows, now)', { constant: '2', decides: true })],
   output: out('mayClaim'),
   code: at(118),
 };
@@ -202,31 +202,74 @@ test('folded: a small card with no path, and the arrows still step', async ({ br
   await context.close();
 });
 
-test('a phone keeps the path: every stop, the one on now in view, at the top of the sheet', async ({ browser }) => {
-  const { context, page } = await openBoard(browser, phone);
-  await expect(page.locator('.shp-ex-card.phone')).toBeVisible();
-  await page.getByRole('button', { name: 'Show more' }).click();
-  await settle(page);
-  await expect(page.locator('.shp-ex-strip .shp-ex-stop')).toHaveCount(steps.length);
-  const shortSheet = (await rect(page, '.shp-ex-card'))!.height;
+for (const [size, viewport] of [['390', { width: 390, height: 844 }], ['320', { width: 320, height: 640 }]] as const) {
+  test(`a phone at ${size}, open: one row of controls, the rule that decided it and what comes out; the rest opens where it belongs`, async ({ browser }) => {
+    const { context, page } = await openBoard(browser, { ...phone, viewport, screen: viewport });
+    await expect(page.locator('.shp-ex-card.phone')).toBeVisible();
+    await page.getByRole('button', { name: 'Show more' }).click();
+    await settle(page);
+    const cur = page.locator('.shp-ex-io.cur');
+    await expect(page.locator('.shp-ex-strip .shp-ex-stop')).toHaveCount(steps.length);
 
-  await press(page, 'Next step');
-  await press(page, 'Next step');
-  // The long step: taller sheet than the short one (each step sizes it), and the path stays while it scrolls.
-  expect((await rect(page, '.shp-ex-card'))!.height).toBeGreaterThan(shortSheet);
-  await page.locator('.shp-ex-in').evaluate((el) => el.scrollTo({ top: 400 }));
-  await settle(page);
-  const sheet = (await rect(page, '.shp-ex-in'))!;
-  const strip = (await rect(page, '.shp-ex-strip'))!;
-  expect(Math.abs(strip.top - sheet.top)).toBeLessThanOrEqual(1);
-  // A new step starts at the sheet's top, and its stop is on screen.
-  await press(page, 'Next step');
-  expect(await page.locator('.shp-ex-in').evaluate((el) => el.scrollTop)).toBe(0);
-  const on = (await rect(page, '.shp-ex-stop.on'))!;
-  expect(on.left).toBeGreaterThanOrEqual(0);
-  expect(on.right).toBeLessThanOrEqual(page.viewportSize()!.width);
-  await context.close();
-});
+    // The stops, the arrows and the close are one row.
+    const mid = async (s: string) => {
+      const r = (await rect(page, s))!;
+      return r.top + r.height / 2;
+    };
+    const row = await mid('.shp-ex-strip');
+    for (const s of ['[aria-label="Next step"]', '[aria-label="Previous step"]', '[aria-label="Stop following"]']) expect(Math.abs((await mid(s)) - row)).toBeLessThanOrEqual(4);
+
+    // A rule with something to say beside it: the value and the constant read on the next line, under the rule.
+    await press(page, 'Next step');
+    const line = cur.locator('.decides');
+    await expect(line.locator('.cond')).not.toContainText('//');
+    await expect(line.locator('.got')).toContainText('// 2');
+    const [rule, got] = await line.evaluate((li) => [li.querySelector('.cond')!.getBoundingClientRect(), li.querySelector('.got .dec')!.getBoundingClientRect()].map((r) => ({ left: r.left, top: r.top, bottom: r.bottom })));
+    expect(got!.top).toBeGreaterThanOrEqual(rule!.bottom - 2);
+    expect(Math.abs(got!.left - rule!.left)).toBeLessThanOrEqual(2);
+
+    // The long step, calm: of its twelve checks only the one that decided it, what comes out, and no signature or inputs.
+    await press(page, 'Next step');
+    await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(1);
+    await expect(cur.locator('.decides')).toHaveCount(1);
+    await expect(cur.locator('.shp-ex-ret')).toBeVisible();
+    await expect(cur.locator('.shp-ex-sig')).toHaveCount(0);
+    await expect(cur.locator('.shp-ex-vars')).toHaveCount(0);
+
+    // The rest opens where it belongs.
+    await press(page, 'What happens');
+    await expect(cur.locator('.shp-ex-checks > li')).toHaveCount(12);
+    await expect(cur.locator('.shp-ex-sig')).toHaveCount(1);
+    await press(page, 'Goes in');
+    await expect(cur.locator('.shp-ex-vars > li')).toHaveCount(12);
+
+    // Full, the sheet owns the screen under the title: no slice of the board, nothing over the title, nothing off the side.
+    await expect(page.locator('.shp-view.v-how')).toHaveCSS('opacity', '0');
+    expect((await rect(page, '.shp-ex-card'))!.top).toBeGreaterThanOrEqual((await rect(page, '.shp-head'))!.bottom);
+    expect(await page.locator('.shp-ex-in').evaluate((el) => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0);
+    expect((await rect(page, '[aria-label="Stop following"]'))!.right).toBeLessThanOrEqual(viewport.width);
+
+    // The controls stay while it scrolls; a new step starts at its top, with its stop on screen.
+    await page.locator('.shp-ex-in').evaluate((el) => el.scrollTo({ top: 400 }));
+    await settle(page);
+    const sheet = (await rect(page, '.shp-ex-in'))!;
+    const strip = (await rect(page, '.shp-ex-strip'))!;
+    expect(strip.top - sheet.top).toBeLessThanOrEqual(8);
+    expect(strip.top).toBeGreaterThanOrEqual(sheet.top);
+    await press(page, 'Next step');
+    expect(await page.locator('.shp-ex-in').evaluate((el) => el.scrollTop)).toBe(0);
+    const on = (await rect(page, '.shp-ex-stop.on'))!;
+    expect(on.left).toBeGreaterThanOrEqual(0);
+    expect(on.right).toBeLessThanOrEqual(viewport.width);
+
+    // Folding comes back calm, the board back in view.
+    await press(page, 'Hide inputs and outputs');
+    await expect(page.locator('.shp-view.v-how')).toHaveCSS('opacity', '1');
+    await press(page, 'Inputs and outputs');
+    await expect(cur.locator('.shp-ex-sig')).toHaveCount(0);
+    await context.close();
+  });
+}
 
 test('one column beside a board: what decided it first, nothing on top of anything, the whole dock on screen', async ({ browser }) => {
   const { context, page } = await openBoard(browser, { viewport: { width: 1060, height: 800 } });
@@ -257,7 +300,7 @@ test('a path too long for its room keeps the stop on now in view, on the rail an
     await press(page, options === phone ? 'Show more' : 'Inputs and outputs');
     await expect(page.locator(`${room} .shp-ex-stop`)).toHaveCount(longWay.length);
     for (let i = 1; i < longWay.length; i++) await press(page, 'Next step');
-    await expect(page.locator('.shp-ex-stop.on')).toContainText('stop 12');
+    await expect(page.locator('.shp-ex-stop.on')).toHaveAttribute('aria-label', 'Step 12: stop 12');
     // The room scrolls: the last stop is only in it because the path followed.
     const on = (await rect(page, '.shp-ex-stop.on'))!;
     const box = (await rect(page, room))!;

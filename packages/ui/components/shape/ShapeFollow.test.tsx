@@ -288,6 +288,7 @@ describe.if(hasDom)('Follow an example', () => {
     await press('Follow an example');
     await press('Step through');
     await press('Inputs and outputs');
+    await press('What happens');
     const cur = document.querySelector('.shp-ex-io.cur')!;
     expect(cur.querySelectorAll('.shp-ex-sig').length).toBe(1);
     expect(cur.querySelectorAll('.shp-ex-scroll .shp-ex-sig').length).toBe(0);
@@ -322,6 +323,7 @@ describe.if(hasDom)('Follow an example', () => {
     await press('Follow an example');
     await press('Step through');
     await press('Inputs and outputs');
+    await press('Goes in');
     await press('Next step');
     const flights = recorded.filter((r) => (r.el as HTMLElement).classList?.contains('shp-ex-ghost'));
     expect(flights.length).toBe(1);

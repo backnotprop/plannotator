@@ -323,10 +323,10 @@ function FnLink({ step, chars, onCode, canOpen }: Pick<PartProps, 'step' | 'char
   );
 }
 
-function InputRow({ v, tall, wide, home, room, onCode, canOpen, onStep }: { v: ShapeExampleInput; tall: boolean; wide: boolean; home: string; room: number } & Pick<PartProps, 'onCode' | 'canOpen' | 'onStep'>) {
+function InputRow({ v, tall, wide, long, home, room, onCode, canOpen, onStep }: { v: ShapeExampleInput; tall: boolean; wide: boolean; long: boolean; home: string; room: number } & Pick<PartProps, 'onCode' | 'canOpen' | 'onStep'>) {
   const handed = typeof v.from === 'object' && 'step' in v.from;
   return (
-    <li className={`shp-ex-row${tall ? ' tall' : ''}${tall && wide ? ' wide' : ''}`} data-handoff={handed ? '' : undefined}>
+    <li className={`shp-ex-row${tall ? ' tall' : ''}${tall && wide ? ' wide' : ''}${tall && long ? ' long' : ''}`} data-handoff={handed ? '' : undefined}>
       <code className="nm" title={v.name}><Dotted name={v.name} /></code>
       <span className="vl">
         <Val v={v.value} hand={handed} type={v.type} />
@@ -362,24 +362,40 @@ function Inputs({ step, onCode, canOpen, onStep, pane }: PartProps) {
   return (
     <ul className="shp-ex-vars" style={{ '--nw': `${nw + 1}ch`, '--sw': `${sw + 1}ch` } as React.CSSProperties}>
       {step.inputs.map((v, i) => (
-        <InputRow key={`${v.name}-${i}`} v={v} tall={tall(v)} wide={wide(v)} home={step.code.path} room={room} onCode={onCode} canOpen={canOpen} onStep={onStep} />
+        <InputRow key={`${v.name}-${i}`} v={v} tall={tall(v)} wide={wide(v)} long={valueW(v) + labelOf(v) + 2 > pane} home={step.code.path} room={room} onCode={onCode} canOpen={canOpen} onStep={onStep} />
       ))}
     </ul>
   );
 }
 
-function CheckRow({ c }: { c: ShapeExampleCheck }) {
+/** `sheet`: on a phone's sheet, the characters a line holds. A rule keeps its value beside it only where both fit with nothing else to say; otherwise the value and the constant read on the next line, under the rule. */
+function CheckRow({ c, sheet }: { c: ShapeExampleCheck; sheet?: number }) {
+  const said = c.result === 'not-reached' ? 'not reached' : (c.saw ?? '');
+  const two = sheet !== undefined && (!!c.constant || !!c.decides || c.code.length + said.length + 3 > sheet);
   return (
-    <li className={`shp-ex-row ${c.result === 'not-reached' ? 'skip' : c.result}${c.decides ? ' decides' : ''}`}>
+    <li className={`shp-ex-row ${c.result === 'not-reached' ? 'skip' : c.result}${c.decides ? ' decides' : ''}${two ? ' two' : ''}`}>
       <Mark result={c.result} />
-      <Code className="cond" code={followCheckCode(c)} />
+      <Code className="cond" code={sheet === undefined ? followCheckCode(c) : c.code} />
       <span className="got">
         {c.decides && c.result === 'fail' && c.short ? <b className="short">{c.short}</b> : c.decides ? <span className="dec">Decided it</span> : null}
         {c.result === 'not-reached' ? <span className="say">not reached</span> : c.saw && FOLLOW_LITERAL.test(c.saw) ? <Val v={c.saw} /> : <span className="say">{c.saw}</span>}
+        {sheet !== undefined && c.constant && <code className="cm">// {c.constant}</code>}
       </span>
     </li>
   );
 }
+
+/** A section's own name, opening the rest of it where it belongs. */
+const Reveal = ({ label, n, open, onClick }: { label: string; n?: number; open: boolean; onClick: () => void }) => (
+  <button type="button" className="shp-ex-cap shp-ex-reveal" aria-expanded={open} aria-label={label} onClick={onClick}>
+    {label}
+    {n !== undefined && <span className="shp-ex-many"> {n}</span>}
+    <Huge name={open ? 'up' : 'down'} size={14} />
+  </button>
+);
+
+/** Which of a phone's two sections show all they have. */
+type SheetMore = { fn: boolean; in: boolean };
 
 const Signature = ({ step, chars }: Pick<PartProps, 'step' | 'chars'>) => <Code className="shp-ex-sig" code={followSignatureFit(step.signature, chars)} pre="function " />;
 
@@ -402,29 +418,42 @@ function Output({ step, label }: { step: ShapeExampleStep; label?: boolean }) {
  * what comes out as the code's last line. A long step scrolls its checks; the
  * signature above them stays.
  */
-function StepPanes({ k, cur, withInputs, ...p }: PartProps & { k: string; cur: boolean; withInputs: boolean }) {
+function StepPanes({ k, cur, withInputs, sheet, onMore, ...p }: PartProps & { k: string; cur: boolean; withInputs: boolean; sheet?: SheetMore; onMore?: (key: keyof SheetMore) => void }) {
   const { step } = p;
+  // A phone's sheet shows the rule that decided it and what comes out; the rest opens where it belongs.
+  const allFn = !sheet || sheet.fn || !step.checks.length;
+  const checks = allFn ? step.checks : step.checks.filter((c) => c.decides);
+  const many = step.inputs.length > 7 ? step.inputs.length : undefined;
   return (
     <div className={`shp-ex-io panes${cur ? ' cur' : ''}`} data-io={k} aria-hidden={cur ? undefined : true} inert={!cur}>
       {withInputs && (
         <section className="shp-ex-col in" aria-label="Goes in">
-          <p className="shp-ex-cap">
-            Goes in{step.inputs.length > 7 && <span className="shp-ex-many"> {step.inputs.length}</span>}
-          </p>
-          <Inputs {...p} />
+          {!sheet ? (
+            <p className="shp-ex-cap">
+              Goes in{many !== undefined && <span className="shp-ex-many"> {many}</span>}
+            </p>
+          ) : step.inputs.length ? (
+            <Reveal label="Goes in" n={many} open={sheet.in} onClick={() => onMore?.('in')} />
+          ) : (
+            <div className="shp-ex-caps">
+              <p className="shp-ex-cap">Goes in</p>
+              <Inputs {...p} />
+            </div>
+          )}
+          {(!sheet || (sheet.in && step.inputs.length > 0)) && <Inputs {...p} />}
         </section>
       )}
       <section className="shp-ex-col fn" aria-label="What happens">
         <div className="shp-ex-caps">
-          <p className="shp-ex-cap">What happens</p>
-          <FnLink {...p} />
+          {sheet && step.checks.length ? <Reveal label="What happens" open={sheet.fn} onClick={() => onMore?.('fn')} /> : <p className="shp-ex-cap">What happens</p>}
+          <FnLink {...p} chars={sheet ? p.chars + 2 : p.chars} />
         </div>
-        <Signature step={step} chars={p.chars} />
-        {step.checks.length > 0 && (
+        {allFn && <Signature step={step} chars={p.chars} />}
+        {checks.length > 0 && (
           <div className="shp-ex-scroll">
             <ul className="shp-ex-checks">
-              {step.checks.map((c, i) => (
-                <CheckRow key={`${c.code}-${i}`} c={c} />
+              {checks.map((c, i) => (
+                <CheckRow key={`${c.code}-${i}`} c={c} sheet={sheet ? p.chars - 3 : undefined} />
               ))}
             </ul>
           </div>
@@ -454,6 +483,12 @@ function fitSurface(card: HTMLElement, phone: boolean) {
   const cut = followCardCut(stack.clientHeight - cur.offsetHeight, rail ? rail.parentElement!.clientHeight - rail.offsetHeight : null);
   card.style.setProperty('--ex-cut', `${cut}px`);
 }
+
+const SHEET_CALM: SheetMore = { fn: false, in: false };
+/** Less of the board than this above a phone's sheet is a slice, not context: it hides. */
+const BOARD_MIN = 140;
+/** What a phone's tallest sheet leaves under the title. */
+const SHEET_GAP = 12;
 
 /** The card's width when open, read while it is folded too. */
 function openWidth(card: HTMLElement): number {
@@ -582,6 +617,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const [phase, setPhaseRaw] = useState<FollowPhase>(options.initial ?? { open: false });
   const [expanded, setExpandedRaw] = useState(options.initialOpen ?? false);
   const [openW, setOpenW] = useState(0);
+  const [sheetMore, setMore] = useState<SheetMore>(SHEET_CALM);
   const [dockTight, setDockTight] = useState(false);
   const how = active && !!board;
   const cardRef = useRef<HTMLElement | null>(null);
@@ -622,12 +658,21 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
             closing.current = null;
             prepare();
             setExpandedRaw(false);
+            setMore(SHEET_CALM);
           };
           return;
         }
       }
       prepare();
       setExpandedRaw(open);
+      setMore(SHEET_CALM);
+    },
+    [prepare],
+  );
+  const toggleMore = useCallback(
+    (key: keyof SheetMore) => {
+      prepare();
+      setMore((m) => ({ ...m, [key]: !m[key] }));
     },
     [prepare],
   );
@@ -750,7 +795,16 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     }
     // The picture makes room: never covered, it fits above the card.
     const shown = !!card && how && phase.open;
-    room(viewOf(), shown ? `${Math.round(card!.offsetHeight + (phone ? 20 : 76 + 16))}px` : '', red);
+    const view = viewOf();
+    room(view, shown ? `${Math.round(card!.offsetHeight + (phone ? 20 : 76 + 16))}px` : '', red);
+    // A phone's sheet stops under the title, and never leaves a slice of the board above it.
+    const head = surface?.querySelector<HTMLElement>('.shp-head');
+    // Read against the surface, so a scrolled ancestor cannot feed the room back into itself.
+    const under = head && surface ? head.getBoundingClientRect().bottom - surface.getBoundingClientRect().top + surface.scrollTop : 0;
+    if (card && phone && head) card.style.setProperty('--ex-room', `${Math.max(surface!.clientHeight - under - SHEET_GAP, surface!.clientHeight * 0.6)}px`);
+    const covered = shown && phone && !!head && surface!.clientHeight - under - card!.offsetHeight < BOARD_MIN;
+    view?.classList.toggle('shp-ex-covered', covered);
+    card?.classList.toggle('over', covered);
   });
 
   // Stepping: the board's light, the card's hand-off, and the way the new step comes in.
@@ -838,7 +892,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   // A long step scrolls in its pane: the line that decided it is always in view when you land on it.
   const stepOn = phase.open ? phase.step : null;
   useLayoutEffect(() => {
-    if (!expanded || stepOn === null) return;
+    if (!expanded || stepOn === null || phone) return;
     const io = cardRef.current?.querySelector<HTMLElement>('.shp-ex-io.cur');
     const line = io?.querySelector<HTMLElement>('.decides');
     // Two panes scroll the checks; one column scrolls the whole step.
@@ -847,14 +901,21 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     const a = sc.getBoundingClientRect();
     const b = line.getBoundingClientRect();
     if (b.top < a.top || b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
-  }, [expanded, stepOn, phase]);
+  }, [expanded, stepOn, phase, phone]);
 
-  // The path keeps the step on now in view; a phone's sheet starts each step at its top.
+  // The path keeps the step on now in view; a phone's sheet starts each step at its top, and lower only for the rule that decided it.
   useLayoutEffect(() => {
     const card = cardRef.current;
     const on = card?.querySelector<HTMLElement>('.shp-ex-stop.on');
     if (on?.parentElement) keepInView(on.parentElement, on);
-    if (phone) card?.querySelector('.shp-ex-in')?.scrollTo?.({ top: 0 });
+    if (!phone) return;
+    const sc = card?.querySelector<HTMLElement>('.shp-ex-in');
+    sc?.scrollTo?.({ top: 0 });
+    const line = card?.querySelector<HTMLElement>('.shp-ex-io.cur .decides');
+    if (!sc || !line) return;
+    const a = sc.getBoundingClientRect();
+    const b = line.getBoundingClientRect();
+    if (b.bottom > a.bottom) sc.scrollTop += b.top - a.top - (a.height - b.height) / 2;
   }, [expanded, stepOn, phone, openW]);
 
   // Closing the card: it fades where it was (React has already let it go).
@@ -901,6 +962,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
   const charsNow = narrow ? Math.max(28, Math.floor((width - 64) / CH)) : Math.floor((withInputs ? (panes * 8) / 14 : width - 260) / CH) - 1;
   const paneNow = narrow ? Math.floor((width - 40) / CH) : Math.floor((panes * 6) / 14 / CH);
   const toStep = (i: number) => dispatch({ type: 'step', step: i });
+  const phoneOpen = phone && showIO;
 
   const stepNav = (
     <div className={`shp-ex-nav${step ? ' cur' : ''}`} aria-hidden={step ? undefined : true}>
@@ -988,7 +1050,7 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
       return (
         <button key={i} type="button" className={`shp-ex-stop${on ? ' on' : ''}`} aria-current={on ? 'step' : undefined} onClick={() => toStep(i)} title={s.text} aria-label={`Step ${i + 1}: ${s.tag}`}>
           <StepN n={i + 1} now={on} />
-          {(withRail || on) && <span className="st">{s.tag}</span>}
+          {(withRail || (on && !phone)) && <span className="st">{s.tag}</span>}
         </button>
       );
     });
@@ -997,10 +1059,16 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
     ex && showIO && phase.open ? (
       <div className="shp-ex-ios" data-flip="ios">
         {ex.steps.map((s, i) => (
-          <StepPanes key={i} step={s} onCode={onCode} canOpen={canOpen} onStep={toStep} chars={charsNow} pane={paneNow} k={`${phase.ex}-${i}`} cur={phase.step === i} withInputs={withInputs} />
+          <StepPanes key={i} step={s} onCode={onCode} canOpen={canOpen} onStep={toStep} chars={charsNow} pane={paneNow} k={`${phase.ex}-${i}`} cur={phase.step === i} withInputs={withInputs} sheet={phone ? sheetMore : undefined} onMore={toggleMore} />
         ))}
       </div>
     ) : null;
+
+  const strip = withStrip && (
+    <div className="shp-ex-strip" data-flip="stops">
+      {stops}
+    </div>
+  );
 
   const card =
     how && ex ? (
@@ -1054,23 +1122,24 @@ export function useShapeFollow(options: ShapeFollowOptions): { button: React.Rea
                 })}
               </div>
               <div className="shp-ex-side">
-                {!withRail && tabs}
+                {phoneOpen ? strip : !withRail && tabs}
+                {phoneOpen && navs}
                 {!phone && allSteps}
-                {!phone && more}
+                {(!phone || phoneOpen) && more}
                 {close}
               </div>
             </div>
-            {withStrip && <div className="shp-ex-strip" data-flip="stops">{stops}</div>}
+            {!phone && strip}
             {body}
           </div>
-          {phone && (
+          {phone && !showIO && (
             <div className="shp-ex-foot" data-flip="foot">
               {more}
               {allSteps}
               {navs}
             </div>
           )}
-          {!withRail && note}
+          {(!phone ? !withRail : !showIO || sheetMore.fn || sheetMore.in) && note}
         </div>
       </section>
     ) : null;
