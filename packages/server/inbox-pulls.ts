@@ -55,6 +55,7 @@ import {
   type InboxPullDiffAnswer,
   type InboxPullDiffScope,
   type InboxPullHost,
+  inboxPullLabel,
   inboxPullSafeBranch,
   type InboxPullCard,
   type InboxPullLink,
@@ -62,7 +63,7 @@ import {
   type InboxPullState,
 } from "@plannotator/core/inbox-types";
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
-import { reconstructGitlabPatch, type GitLabDiffEntry } from "@plannotator/shared/pr-provider";
+import { fetchPRFileContent, reconstructGitlabPatch, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
 /** A host's answer is fresh this long. */
@@ -576,7 +577,23 @@ export interface InboxPulls {
   diff(key: string, scope: InboxPullDiffScope): Promise<InboxPullDiffAnswer>;
   /** The head commit of the last layer patch read for this PR (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
+  /**
+   * A file as this PR has it at its head commit, read from the forge with the person's own CLI, so it needs no checkout.
+   * Null when the PR is not in the last list, has no known head, or has no such text file there. Never throws.
+   */
+  file(key: string, path: string): Promise<InboxPullFile | null>;
 }
+
+/** A file at a PR's head commit: its text, and its address on the forge. */
+export interface InboxPullFile {
+  contents: string;
+  label: string;
+  platform: InboxPull["platform"];
+  url: string;
+}
+
+/** The files read at a head commit, kept while the Inbox runs: a commit never changes, so nor do they. */
+const INBOX_PULL_FILES_KEPT = 64;
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
@@ -658,6 +675,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  const headFiles = new Map<string, string | null>();
   let known = new Map<string, InboxPull>();
   let lastRepos = new Set<string>();
   let avatars = new Map<string, Record<string, string>>();
@@ -970,6 +988,32 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       return { ...(avatars.get(host.toLowerCase()) ?? {}) };
     },
     readHead: (key) => readHeads.get(key) ?? null,
+    async file(key, path) {
+      const pull = known.get(key);
+      const sha = pull ? (pull.head_sha ?? readHeads.get(key)) : null;
+      const parts = pull ? splitPath(pull.repo) : null;
+      if (!pull || !sha || !parts) return null;
+      const kept = `${pull.host}/${pull.repo}@${sha}:${path}`;
+      let contents = headFiles.get(kept);
+      if (contents === undefined) {
+        if (now() < (holdUntil.get(pull.host) ?? 0)) return null;
+        const ref: PRRef =
+          pull.platform === "github"
+            ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
+            : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
+        // The host always named, as for every read here: neither GH_HOST nor a folder's remote picks it.
+        const runtime: PRRuntime = { runCommand: (cli, args, options) => run(cli as RefCli, args.includes("--hostname") ? args : [...args, "--hostname", pull.host], options?.env) };
+        const read = await fetchPRFileContent(runtime, ref, sha, path).catch(() => null);
+        // Text only: what is not, the preview cannot show.
+        contents = read === null || read.includes("\0") ? null : read;
+        headFiles.set(kept, contents);
+        while (headFiles.size > INBOX_PULL_FILES_KEPT) headFiles.delete(headFiles.keys().next().value!);
+      }
+      if (contents === null) return null;
+      const encoded = path.split("/").map(encodeURIComponent).join("/");
+      const url = `https://${pull.host}/${pull.repo}/${pull.platform === "gitlab" ? "-/" : ""}blob/${sha}/${encoded}`;
+      return { contents, label: inboxPullLabel(pull), platform: pull.platform, url };
+    },
     async diff(key, scope) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");

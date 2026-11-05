@@ -2756,7 +2756,8 @@ Optional seams, so a host can put its own control beside a file a board or a mes
 
 - `ShapeHost.fileAction?(id, { path, line? })`: drawn in the References row and bubble, the Code view's file cards and planned files, the whole-file head, the file popout and the diff popout. `ShapeCodeGuideProps.fileAction?(path)` is the same slot on `ShapeCodeGuide`.
 - `CodeFilePopout`'s `headerAction?: ReactNode`, before the line count.
-- `LocalLinkResolution`'s `unavailable` result takes `after?: ReactNode`, drawn after the inert link.
+- `LocalLinkResolution`'s `unavailable` result takes `wrap?: (text: ReactNode) => ReactNode`: the host draws the inert link's text itself (a hover of its own), and decides when `title` shows. It replaces `after`, which no host outside this repo had taken up.
+- `CodeSnippetPreview` takes `actions` (a host's controls in its header), `container` (where it portals; the body by default), `sheet` (a sheet from the bottom edge over a scrim, whose click calls `onDismiss`) and `windowRef`. Without them it is drawn as before, with two fixes for every host: a window with too little room on its side scrolls rather than runs off the screen, and scrolling its own code no longer calls `onDismiss`.
 - `CodeSpanContext` (in `components/LocalLinkContext`): a `(text, code) => ReactNode` wrap for an inline code span that names a code file, in `InlineMarkdown` and in a board's own text (`ShapeInline`). Without a provider the span draws as before. `ShapeSurface` stops passing it on while the board is annotating.
 - `DropdownMenuContent` takes `anchor`, for a menu opened from something that is not its trigger.
 

@@ -19,7 +19,7 @@
  * Build the binary first (see inbox.spec.ts). Shots land in
  * PLANNOTATOR_E2E_PROOF_DIR/open-in-refs (default .local/proof).
  */
-import { expect, test, type Browser, type BrowserContext, type Page } from '@playwright/test';
+import { expect, test, type Browser, type BrowserContext, type Locator, type Page } from '@playwright/test';
 import { spawnSync } from 'node:child_process';
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -35,6 +35,13 @@ const proofDir = join(resolve(process.env.PLANNOTATOR_E2E_PROOF_DIR ?? join(repo
 const GIT_ENV = { GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' };
 
 const RETRY_BASE = ['export async function retryPayout(payout) {', '  for (let attempt = 0; attempt < 5; attempt++) {', '    const result = await charge(payout);', '    if (result.ok) return result;', '  }', '}', ''].join('\n');
+/** What only the PR has: no branch on this computer holds it. */
+const PR_ONLY_FILE = Array.from({ length: 60 }, (_, i) => `export const schedule${i + 1} = { attempt: ${i + 1}, waitMs: ${(i + 1) * 500} };`).join('\n') + '\n';
+/** A long file: 1,400 lines of it. */
+const LONG_FILE =
+  Array.from({ length: 200 }, (_, i) =>
+    [`/** Rows of batch ${i}. */`, `export function batch${i}(rows: Row[]): Row[] {`, `  const kept = rows.filter((row) => row.batch === ${i});`, `  const total = kept.reduce((sum, row) => sum + row.cents, 0);`, `  audit('batch', ${i}, total);`, `  return kept;`, `}`].join('\n'),
+  ).join('\n') + '\n';
 const RETRY_HEAD = ['const BACKOFF_MS = [500, 2_000, 8_000];', '', 'export async function retryPayout(payout) {', '  for (let attempt = 0; attempt <= BACKOFF_MS.length; attempt++) {', '    const result = await charge(payout);', '    if (result.ok) return result;', '    await sleep(BACKOFF_MS[attempt]);', '  }', '}', ''].join('\n');
 
 interface World {
@@ -55,6 +62,9 @@ interface World {
   treeLinksThread: string;
   treeReviewThread: string;
   treeShape: string;
+  hoverThread: string;
+  pullThread: string;
+  forgeLog: string;
   claude: SimAgent;
 }
 
@@ -121,12 +131,20 @@ function fakes(dir: string, launches: string, patch: string) {
     latestReviews: { nodes: [] },
     commits: { nodes: [{ commit: { statusCheckRollup: { state: 'SUCCESS' } } }] },
   };
+  // The forge's copy of the PR's head commit.
+  mkdirSync(join(dir, 'forge/src'), { recursive: true });
+  writeFileSync(join(dir, 'forge/src/retry.ts'), RETRY_HEAD);
+  writeFileSync(join(dir, 'forge/src/pr-only-schedule.ts'), PR_ONLY_FILE);
   writeFileSync(join(dir, 'pulls.json'), JSON.stringify({ data: { viewer: { login: 'dana' }, requested: { nodes: [pull] }, authored: { nodes: [] }, merged: { nodes: [] } } }));
   writeFileSync(
     join(dir, 'gh'),
     [
       '#!/bin/sh',
       'if [ "$1" = auth ]; then echo \'{"hosts":{"github.com":[{"login":"dana","active":true,"state":"success","tokenSource":"keyring"}]}}\'; exit 0; fi',
+      'case "$1 $2" in',
+      `  "api repos/acme/payouts/contents/"*"?ref=${'8'.repeat(40)}") echo "$2" >> '${join(dir, 'forge.log')}'; f="\${2#repos/acme/payouts/contents/}"; f="\${f%%\\?*}"; f="$(printf %s "$f" | sed 's/%2F/\\//g')"; [ -f '${join(dir, 'forge')}'/"$f" ] || exit 1; base64 < '${join(dir, 'forge')}'/"$f"; exit 0;;`,
+      '  "api repos/"*) exit 1;;',
+      'esac',
       `if [ "$1" = api ] && [ "$2" = graphql ]; then cat '${join(dir, 'pulls.json')}'; exit 0; fi`,
       'if [ "$1" = api ] && [ "$2" = --hostname ] && [ "$5" = --jq ]; then echo "' + '8'.repeat(40) + '"; exit 0; fi',
       `if [ "$1" = api ] && [ "$2" = --hostname ]; then cat '${join(dir, 'pr.patch')}'; exit 0; fi`,
@@ -209,6 +227,19 @@ test.beforeAll(async () => {
   writeFileSync(join(project, 'src/src/retry.ts'), 'export {};\n');
   const subReview = await claude.submitGuide({ project_path: join(project, 'src'), thread: 'subfolder review', subject: 'Retries: subfolder review', guide: REVIEW_GUIDE, patch, review: true } as never);
   const subGuide = await claude.submitGuide({ project_path: join(project, 'src'), thread: 'subfolder guide', subject: 'Retries: subfolder guide', guide: REVIEW_GUIDE, patch } as never);
+  writeFileSync(join(project, 'src/big-ledger.ts'), LONG_FILE);
+  const hoverSent = await claude.send({
+    project_path: project,
+    thread: 'hover',
+    subject: 'Ledger: where to look',
+    body: 'Batch five is `src/big-ledger.ts:36-42`, the last one is `src/big-ledger.ts:1395`, and the whole file is `src/big-ledger.ts`, with [the entry point](src/retry.ts#L3) beside it.',
+  });
+  const pullSent = await claude.send({
+    project_path: project,
+    thread: 'pull',
+    subject: 'Backoff: read this first',
+    body: 'The wait is `src/retry.ts:1-3`, the schedule is in [the new file](src/pr-only-schedule.ts:30-34), and `src/nowhere.ts` is not in it.',
+  });
   const reviewSent = await claude.submitGuide({ project_path: project, thread: 'review', subject: 'Retries: review', guide: REVIEW_GUIDE, patch, review: true } as never);
   mkdirSync(join(root, 'boards'), { recursive: true });
   writeFileSync(join(root, 'boards', 'board.json'), JSON.stringify(board(patch)));
@@ -218,6 +249,14 @@ test.beforeAll(async () => {
   const treeUpdated = spawnSync(binary, ['shape', 'update', '--file', join(root, 'boards', 'board.json'), '--project', worktree, '--thread', treeLinks.thread_id as string], { env, encoding: 'utf8', timeout: 60_000 });
   expect(treeUpdated.status, treeUpdated.stderr).toBe(0);
   const { platform } = (await (await fetch(new URL('/api/inbox/open-in/apps', url))).json()) as { platform: string };
+  // Hand the PR to its thread, as the PR page's Hand to an agent does.
+  const listed = (await (await fetch(new URL('/api/inbox/pulls', url))).json()) as { serverSession: string; pulls: { key: string }[] };
+  const owned = await fetch(new URL('/api/inbox/pulls/owner', url), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ serverSession: listed.serverSession, keys: [listed.pulls[0]!.key], thread_id: pullSent.thread_id }),
+  });
+  expect(owned.status, await owned.clone().text()).toBe(200);
   world = {
     platform,
     root,
@@ -236,6 +275,9 @@ test.beforeAll(async () => {
     treeLinksThread: treeLinks.thread_id as string,
     treeReviewThread: treeReview.thread_id as string,
     treeShape: (JSON.parse(treeUpdated.stdout) as { id: string }).id,
+    hoverThread: hoverSent.thread_id as string,
+    pullThread: pullSent.thread_id as string,
+    forgeLog: join(stubs, 'forge.log'),
     claude,
   };
 });
@@ -262,6 +304,27 @@ const shot = (page: Page, name: string) => page.screenshot({ path: join(proofDir
 const realPath = (file: string) => join(world.project, file);
 /** What Open in's file manager launches for a file: macOS selects the file; Linux opens the folder that holds it. */
 const revealed = (file: string) => (world.platform === 'mac' ? `open -R ${file}` : `xdg-open ${dirname(file)}`);
+
+/** Rest the pointer on words that name a file: their code window, its code drawn in colour. */
+async function codeWindowOf(page: Page, words: Locator): Promise<Locator> {
+  const window = page.locator('[data-code-snippet-preview]');
+  await page.mouse.move(1, 1);
+  await expect(window).toHaveCount(0);
+  await words.hover();
+  await expect(window).toBeVisible();
+  await page.waitForTimeout(250);
+  return window;
+}
+
+/** Rest on words that name no file: no window, and no list. */
+async function noCodeWindow(page: Page, words: Locator) {
+  await page.mouse.move(1, 1);
+  await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
+  await words.hover();
+  await page.waitForTimeout(500);
+  await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
+  await expect(words).toBeVisible();
+}
 
 /** The board's References panel, open. */
 async function openRefs(page: Page, thread = world.shapeThread, shape = world.shape) {
@@ -382,12 +445,13 @@ for (const colorScheme of ['light', 'dark'] as const) {
       expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
       await expect(popout).toBeVisible();
 
-      // What to know: a code span opens the list at its line. One that is not a file stays a plain span.
+      // What to know: resting on a code span shows its code, with Open. One that is not a file shows nothing.
       await page.reload();
       await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
       await expect(page.locator('.shp-view.v-know.drawn')).toBeVisible(); // its fade in has finished, for the picture
-      const knowSpan = page.locator('.shp-know [data-open-in-span="src/ledger.ts"]');
-      await knowSpan.click();
+      const knowWindow = await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'));
+      await expect(knowWindow).toContainText('export const ledger');
+      await knowWindow.locator('[data-open-in-caret]').click();
       const knowMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
       await expect(knowMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
       await shot(page, `13-board-know-code-span-${colorScheme}`);
@@ -395,31 +459,30 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await knowMenu.locator('[data-open-in-item="reveal"]').click();
       await expect.poll(() => launched().length).toBe(knowCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/ledger.ts')));
-      await page.locator('.shp-know [data-open-in-span="react.js"]').click();
-      await expect(page.locator('.shp-know [data-open-in-span="react.js"]')).toHaveCount(0);
-      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+      await noCodeWindow(page, page.locator('.shp-know [data-code-hover="react.js"]'));
       // The number beside it is still the number.
       await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
       // The Code view's guide is the board's words too.
       await page.locator('.shp-tbtn', { hasText: 'Code' }).first().click();
-      await page.locator('.shp-view.v-code [data-open-in-span="src/retry.ts"]').click();
+      const codeViewWindow = await codeWindowOf(page, page.locator('.shp-view.v-code [data-code-hover="src/retry.ts"]'));
+      await codeViewWindow.locator('[data-open-in-caret]').click();
       await expect(page.locator('[data-open-in-menu="src/retry.ts"] [data-open-in-item="reveal"]')).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
-      // Annotating, a click on the words picks them: no menu.
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-code-snippet-preview]')).toHaveCount(0);
+      // Annotating, the words are only words: nothing shows, and a click picks them.
       await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
       await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
-      await expect(page.locator('.shp-know [data-open-in-span]')).toHaveCount(0);
-      await page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }).click();
-      await page.waitForTimeout(350);
-      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+      await expect(page.locator('.shp-know [data-code-hover]')).toHaveCount(0);
+      await noCodeWindow(page, page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }));
 
       // The review's own words: its intent names a file.
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
       await page.getByRole('button', { name: 'Start review' }).first().click();
       const reader = page.locator('section[data-review-mode]');
-      const guideSpan = reader.locator('[data-open-in-span="src/retry.ts"]');
-      await guideSpan.click();
+      const guideWindow = await codeWindowOf(page, reader.locator('[data-code-hover="src/retry.ts"]'));
+      await guideWindow.locator('[data-open-in-caret]').click();
       const guideMenu = page.locator('[data-open-in-menu="src/retry.ts"]');
       await expect(guideMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
       await shot(page, `14-guide-code-span-${colorScheme}`);
@@ -427,9 +490,7 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await guideMenu.locator('[data-open-in-item="reveal"]').click();
       await expect.poll(() => launched().length).toBe(guideCount + 1);
       expect(launched().at(-1)).toBe(revealed(realPath('src/retry.ts')));
-      await reader.locator('[data-open-in-span="react.js"]').click();
-      await expect(reader.locator('[data-open-in-span="react.js"]')).toHaveCount(0);
-      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
+      await noCodeWindow(page, reader.locator('[data-code-hover="react.js"]'));
 
       // The review's diff header: a file on disk has it, one only the change has does not.
       await openReviewFiles(page);
@@ -459,20 +520,25 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await prFile.scrollIntoViewIfNeeded();
       await shot(page, `06-pr-diff-${colorScheme}`);
 
-      // A message's links that name no attachment: a file on disk has it, with its line; the gone one has none.
+      // A message's links and code spans that name a file: the sentence stays a sentence, and resting on one shows its code.
       await page.goto(`${world.url}#thread=${world.messageThread}`);
       const body = page.locator('.ib-body').first();
       await expect(body.locator('[data-local-link="unavailable"]')).toHaveCount(3);
-      await expect(body.locator('[data-open-in-caret]')).toHaveCount(2);
+      await expect(body.locator('[data-open-in-caret]')).toHaveCount(0);
+      await expect(body.locator('[data-open-in]')).toHaveCount(0);
+      await expect(body.locator('[data-code-hover] svg')).toHaveCount(0);
       await shot(page, `07-message-links-${colorScheme}`);
 
-      // Its code spans look like code until used: a click opens the same list at the span, and its line goes along.
-      const spanNames = page.locator('[data-open-in-span]');
-      await expect(spanNames).toHaveCount(2);
+      const linkWindow = await codeWindowOf(page, body.locator('[data-code-hover="src/retry.ts"]'));
+      await expect(linkWindow.locator('[data-target-line]')).toHaveCount(1);
+      await expect(linkWindow.locator('[data-target-line]')).toContainText('charge(payout)');
+      await shot(page, `20-hover-link-local-${colorScheme}`);
+      // The span's Open goes to its line.
+      const spanWindow = await codeWindowOf(page, body.locator('[data-code-hover="src/ledger.ts"]').last());
+      await spanWindow.locator('[data-open-in-caret]').click();
       const spanMenu = page.locator('[data-open-in-menu="src/ledger.ts"]');
-      await page.locator('[data-open-in-span="src/ledger.ts"]').click();
       await expect(spanMenu.locator('[data-open-in-item="reveal"]')).toBeVisible();
-      await shot(page, `11-message-code-span-menu-${colorScheme}`);
+      await shot(page, `21-hover-open-menu-${colorScheme}`);
       const spanEditor = spanMenu.locator('[data-open-in-item="vscode"]');
       if (await spanEditor.count()) {
         const count = launched().length;
@@ -483,12 +549,49 @@ for (const colorScheme of ['light', 'dark'] as const) {
         await page.keyboard.press('Escape');
       }
       await expect(spanMenu).toHaveCount(0);
-      // A span that is not a file: no menu, no error, and from then on a plain span.
-      await page.locator('[data-open-in-span="react.js"]').click();
-      await expect(page.locator('[data-open-in-span="react.js"]')).toHaveCount(0);
-      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
-      await expect(body.locator('code', { hasText: 'react.js' })).toBeVisible();
+      // A name that is no file here: no window, no error; the link then says why it is not a link.
+      await noCodeWindow(page, body.locator('[data-code-hover="react.js"]'));
+      await noCodeWindow(page, body.locator('[data-code-hover="src/gone.ts"]'));
       await expect(page.locator('[data-open-in-status].ib-err')).toHaveCount(0);
+
+      // A range; a line deep in a long file, with what is around it; a long file named with no line, from its top.
+      await page.goto(`${world.url}#thread=${world.hoverThread}`);
+      const words = page.locator('.ib-body').first();
+      const range = await codeWindowOf(page, words.locator('[data-code-hover="src/big-ledger.ts"]').nth(0));
+      await expect(range.locator('[data-target-line]')).toHaveCount(7);
+      await expect(range.locator('[data-target-line]').first()).toContainText('Rows of batch 5');
+      await shot(page, `22-hover-line-range-${colorScheme}`);
+      const deep = await codeWindowOf(page, words.locator('[data-code-hover="src/big-ledger.ts"]').nth(1));
+      await expect(deep.locator('[data-target-line]')).toContainText('batch199');
+      await expect(deep).toContainText('line 1395');
+      await shot(page, `23-hover-long-file-deep-line-${colorScheme}`);
+      const top = await codeWindowOf(page, words.locator('[data-code-hover="src/big-ledger.ts"]').nth(2));
+      await expect(top.locator('tbody tr')).toHaveCount(40);
+      await expect(top).toContainText('lines 1–40');
+      await shot(page, `24-hover-long-file-top-${colorScheme}`);
+      // Its own code scrolls without closing it.
+      await top.locator('.code-snippet-preview').evaluate((el) => el.scrollTo(0, 200));
+      await page.waitForTimeout(100);
+      await expect(top).toBeVisible();
+
+      // A thread that owns a PR: the PR's version, from the forge at its head commit, and this computer's Open beside it.
+      await page.goto(`${world.url}#thread=${world.pullThread}`);
+      const pullBody = page.locator('.ib-body').first();
+      const prVersion = await codeWindowOf(page, pullBody.locator('[data-code-hover="src/retry.ts"]'));
+      await expect(prVersion).toContainText('src/retry.ts · #88');
+      await expect(prVersion).toContainText('BACKOFF_MS');
+      await expect(prVersion.locator('[data-open-in-caret]')).toBeVisible();
+      await expect(prVersion.locator('[data-code-hover-forge]')).toHaveAttribute('href', `https://github.com/acme/payouts/blob/${'8'.repeat(40)}/src/retry.ts#L1-L3`);
+      await shot(page, `25-hover-pr-with-checkout-${colorScheme}`);
+      // Only in the PR, on no branch here: its code, the forge's link, and no editor to open it in.
+      const prOnly = await codeWindowOf(page, pullBody.locator('[data-code-hover="src/pr-only-schedule.ts"]'));
+      await expect(prOnly.locator('[data-target-line]')).toHaveCount(5);
+      await expect(prOnly.locator('[data-target-line]').first()).toContainText('schedule30');
+      await expect(prOnly.locator('[data-open-in-caret]')).toHaveCount(0);
+      await expect(prOnly.locator('[data-code-hover-forge]')).toHaveText('Open on GitHub');
+      await shot(page, `26-hover-pr-not-checked-out-${colorScheme}`);
+      await noCodeWindow(page, pullBody.locator('[data-code-hover="src/nowhere.ts"]'));
+      expect(readFileSync(world.forgeLog, 'utf8')).toContain(`repos/acme/payouts/contents/src%2Fpr-only-schedule.ts?ref=${'8'.repeat(40)}`);
 
       await expect(page.getByText('Tell your agents')).toHaveCount(0);
     } finally {
@@ -504,13 +607,36 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
       await shot(page, `08-phone-message-${colorScheme}`);
 
+      // No hover here: a tap shows the code as a sheet, with no app to open it in. Close, or the scrim, dismisses it.
+      const sheet = page.locator('[data-code-snippet-sheet]');
+      await page.locator('.ib-body [data-code-hover="src/retry.ts"]').tap();
+      await expect(sheet).toBeVisible();
+      await expect(sheet.locator('[data-target-line]')).toContainText('charge(payout)');
+      await expect(sheet.locator('[data-open-in-caret]')).toHaveCount(0);
+      await page.waitForTimeout(250);
+      await shot(page, `27-phone-sheet-local-${colorScheme}`);
+      await sheet.locator('[data-code-hover-close]').tap();
+      await expect(sheet).toHaveCount(0);
+      await page.goto(`${world.url}#thread=${world.hoverThread}`);
+      await page.locator('.ib-body [data-code-hover="src/big-ledger.ts"]').first().tap();
+      await expect(sheet.locator('[data-target-line]')).toHaveCount(7);
+      await page.waitForTimeout(250);
+      await shot(page, `28-phone-sheet-line-range-${colorScheme}`);
+      await page.locator('[data-code-snippet-scrim]').click({ position: { x: 10, y: 10 } });
+      await expect(sheet).toHaveCount(0);
+      await page.goto(`${world.url}#thread=${world.pullThread}`);
+      await page.locator('.ib-body [data-code-hover="src/pr-only-schedule.ts"]').tap();
+      await expect(sheet.locator('[data-target-line]').first()).toContainText('schedule30');
+      await expect(sheet.locator('[data-code-hover-forge]')).toHaveAttribute('href', `https://github.com/acme/payouts/blob/${'8'.repeat(40)}/src/pr-only-schedule.ts#L30-L34`);
+      await page.waitForTimeout(250);
+      await shot(page, `29-phone-sheet-pr-${colorScheme}`);
+
       await page.goto(`${world.url}#thread=${world.shapeThread}&shape=${world.shape}`);
       // The phone's dock has the count, not the word.
       await page.locator('.shp-tbtn', { hasText: '3' }).click();
       await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
       await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
       await page.waitForTimeout(600); // the sheet has finished rising, for the picture
-      await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
       await shot(page, `09-phone-shape-${colorScheme}`);
 
       await page.goto(`${world.url}#thread=${world.reviewThread}`);
@@ -540,10 +666,14 @@ test('an agent in a linked worktree: its message, review and board open the work
     // A link and a span to a file only the worktree has; a span to one both have.
     await page.goto(`${world.url}#thread=${world.treeLinksThread}`);
     const body = page.locator('.ib-body').first();
-    await expect(body.locator('[data-open-in-caret]')).toHaveCount(1);
-    await body.locator('[data-open-in-caret]').click();
+    const linkInTree = await codeWindowOf(page, body.locator('[data-code-hover="src/only-on-the-pr.ts"]').first());
+    await expect(linkInTree).toContainText('onlyHere');
+    await linkInTree.locator('[data-open-in-caret]').click();
     expect(await pick('src/only-on-the-pr.ts')).toBe(revealed(inTree('src/only-on-the-pr.ts')));
-    await page.locator('[data-open-in-span="src/retry.ts"]').click();
+    // It shows what it opens: the main checkout's has no BACKOFF_MS.
+    const spanInTree = await codeWindowOf(page, body.locator('[data-code-hover="src/retry.ts"]'));
+    await expect(spanInTree).toContainText('BACKOFF_MS');
+    await spanInTree.locator('[data-open-in-caret]').click();
     expect(await pick('src/retry.ts')).toBe(revealed(inTree('src/retry.ts')));
 
     // The review: the same two files.
@@ -570,11 +700,11 @@ test('an agent in a linked worktree: its message, review and board open the work
     // The board's and the review's own words start in the worktree too. (With the panel open, a click on the board only closes the panel.)
     await page.reload();
     await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
-    await page.locator('.shp-know [data-open-in-span="src/ledger.ts"]').click();
+    await (await codeWindowOf(page, page.locator('.shp-know [data-code-hover="src/ledger.ts"]'))).locator('[data-open-in-caret]').click();
     expect(await pick('src/ledger.ts')).toBe(revealed(inTree('src/ledger.ts')));
     await page.goto(`${world.url}#thread=${world.treeReviewThread}`);
     await page.getByRole('button', { name: 'Start review' }).first().click();
-    await page.locator('section[data-review-mode] [data-open-in-span="src/retry.ts"]').click();
+    await (await codeWindowOf(page, page.locator('section[data-review-mode] [data-code-hover="src/retry.ts"]'))).locator('[data-open-in-caret]').click();
     expect(await pick('src/retry.ts')).toBe(revealed(inTree('src/retry.ts')));
   } finally {
     await context.close();
@@ -617,19 +747,19 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await page.goto(`${world.url}#thread=${world.messageThread}`);
     await expect(page.locator('.ib-body [data-local-link="unavailable"]').first()).toBeVisible();
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
-    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
+    await expect(page.locator('[data-code-hover]')).toHaveCount(0);
     await page.goto(`${world.url}#thread=${world.shapeThread}&shape=${world.shape}`);
     await page.getByRole('button', { name: /References/ }).first().click();
     await expect(page.locator('.shp-ref-list li')).toHaveCount(3);
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
     await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
     await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
-    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
+    await expect(page.locator('[data-code-hover]')).toHaveCount(0);
     // A guide opens as a plain guide with Code review off, and its words stay words.
     await page.goto(`${world.url}#thread=${world.reviewThread}`);
     await page.locator('[data-guide-card]').first().click();
     await expect(page.locator('.ib-gbody code', { hasText: 'src/retry.ts:3' })).toBeVisible();
-    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
+    await expect(page.locator('[data-code-hover]')).toHaveCount(0);
     expect(asked).toEqual([]);
   } finally {
     await context.close();

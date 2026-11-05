@@ -1,6 +1,6 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { inboxUrl, machineOf } from '../inboxUrl';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -30,7 +30,7 @@ import { splitReplyFeedback } from '../replyFeedback';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
-import { OpenInCodeSpans, OpenInFile, type OpenInSurface } from './OpenIn';
+import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -724,12 +724,20 @@ export function MessageBody({
       }
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       if (!attachment) {
-        // Not attached, but a file of the project: its Open in (nothing when it is not on this computer).
+        // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
         const projectFile = openInFiles ? projectFileOfLink(href) : null;
         return {
           kind: 'unavailable',
           title: NOT_ATTACHED_TITLE,
-          ...(projectFile ? { after: <OpenInFile scope={{ thread: message.thread_id, message: message.id }} path={projectFile.path} line={projectFile.line} /> } : {}),
+          ...(projectFile
+            ? {
+                wrap: (text: ReactNode) => (
+                  <OpenInCodeHover scope={{ thread: message.thread_id, message: message.id }} path={projectFile.path} line={projectFile.line} lineEnd={projectFile.lineEnd} title={NOT_ATTACHED_TITLE}>
+                    {text}
+                  </OpenInCodeHover>
+                ),
+              }
+            : {}),
         };
       }
       return {

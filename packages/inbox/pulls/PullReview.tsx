@@ -557,7 +557,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
           ) : snapshot ? (
             // The reader is a chunk loaded on first use: one that cannot arrive says so here (GuidePane).
             <ReaderPart diff={snapshot.review.rawPatch}>
-              <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
+              <OpenInCodeSpans scope={{ repo: repoKey ?? '', pull: layerKey }} on={!!repoKey}>
                 <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
               </OpenInCodeSpans>
             </ReaderPart>

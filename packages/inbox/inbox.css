@@ -4321,12 +4321,21 @@ dialog.ib-cp:not([data-phone]) .ib-state.ib-cp-trustask { left: auto; right: 12p
 /* Shape's file popout portals out of .pn-inbox, as a menu does: the caret keeps its stroke there too. */
 [data-popout] .ib-split svg.ib-ic { width: 12px; height: 12px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
 /* A code span naming a file looks like any other code span until the pointer is on it. */
-.ib-openin-span { cursor: pointer; border-radius: 4px; }
-.ib-openin-span:hover code { color: var(--primary); }
-.ib-openin-span:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
-/* A referenced file's Open in, in a message's line of text: it stays within the line. */
-.ib-body .ib-openin { vertical-align: middle; margin-left: 4px; }
-.ib-body .ib-split { height: 20px; }
+/* Words that name a file: they stay as they are, only a keyboard's focus shows. */
+.ib-code-hover { border-radius: 4px; }
+.ib-code-hover:focus { outline: none; }
+.ib-code-hover:focus-visible { outline: 2px solid var(--ring); outline-offset: 1px; }
+/* The code window (ui's CodeSnippetPreview) sits over the window but under its own editor list, a z-50 popup in the body. */
+.pn-inbox .code-snippet-preview-window { z-index: 40; }
+.pn-inbox [data-code-snippet-scrim] { z-index: 39; }
+/* Its header's controls take a line of small text. */
+.code-snippet-preview-window .ib-split { height: 22px; font-family: var(--font-sans, inherit); }
+.pn-inbox .code-snippet-preview-window .ib-split .ib-sa { font-size: 11px; }
+.ib-code-hover-forge { font-family: var(--font-sans, inherit); font-size: 11px; color: var(--primary); white-space: nowrap; }
+.ib-code-hover-forge:hover { text-decoration: underline; }
+.pn-inbox .ib-code-hover-close { font-family: var(--font-sans, inherit); font-size: 13px; min-height: 44px; padding: 0 8px; color: var(--foreground); }
+[data-code-snippet-sheet] .ib-code-hover-forge { display: inline-flex; align-items: center; min-height: 44px; font-size: 13px; }
+.light .code-snippet-preview { color: oklch(0.25 0.02 260); }
 /* A menu portals out of .pn-inbox (Open in, full screen's ⋯): its line glyphs keep their stroke there too, never a filled shape. */
 svg.ib-ic.ib-glyph { stroke: currentColor; fill: none; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; color: var(--muted-foreground); }
 /* The menu portals to the body, outside .pn-inbox: its glyphs carry their own stroke. */

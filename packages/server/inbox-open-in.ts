@@ -8,6 +8,11 @@
  *   POST /api/inbox/open-in       { attachment_id, app_id, serverSession }
  *   GET  /api/inbox/open-in/file  ?path=&<scope>  a referenced file: is it here, and what kind
  *   POST /api/inbox/open-in/file  { path, line?, <scope>, app_id, serverSession }
+ *   GET  /api/inbox/open-in/file/code  ?path=&<scope>  a referenced file's text, for its hover
+ *
+ * The last only reads, so it also answers the owner through the tailnet (a phone's tap). A thread that owns a pull
+ * request, and a PR page (`pull`), read the file at that PR's head commit from the forge (`InboxPulls.file`), so it needs
+ * no checkout; otherwise, and when the PR has no such file, it is the file on this computer, under the rules below.
  *
  * The launch takes an attachment id, never a path: the path is the record's
  * realpath, re-checked at launch (`checkInboxAttachmentForLaunch`: still that
@@ -36,6 +41,9 @@ import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, isAbsolute, join, posix, relative, sep } from "node:path";
 import { checkInboxAttachmentForLaunch, checkInboxProjectFile, type InboxProjectFilePlace } from "@plannotator/shared/inbox/attachments";
+import { readFileCapped } from "@plannotator/shared/repo-file";
+import { inboxAttachmentNameRefusal, isInboxTextKind } from "@plannotator/core/inbox-types";
+import { isShapeProjectPath } from "@plannotator/core/shape";
 import { crossOriginRefusalBody, isSameOriginOrNoOrigin } from "@plannotator/shared/request-origin";
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import { isLinkedWorktree } from "@plannotator/shared/shape/store";
@@ -49,10 +57,12 @@ import {
   type AvailableOpenInApp,
   type OpenInLaunchResult,
 } from "./open-in";
+import type { InboxPullFile } from "./inbox-pulls";
 
 export const INBOX_OPEN_IN_PATH = "/api/inbox/open-in";
 export const INBOX_OPEN_IN_APPS_PATH = "/api/inbox/open-in/apps";
 export const INBOX_OPEN_IN_FILE_PATH = "/api/inbox/open-in/file";
+export const INBOX_OPEN_IN_CODE_PATH = "/api/inbox/open-in/file/code";
 
 /** How the Inbox launches: the host's real launcher, or a test's stub. */
 export interface InboxOpenInLauncher {
@@ -94,6 +104,12 @@ export interface InboxOpenInRouteContext {
   shapeRoot: (id: string) => string | null;
   /** The folders of every project on a repository (`host/owner/repo`, lowercased). */
   repoRoots: (repo: string) => string[];
+  /** The pull requests a thread owns, the latest hand-over first. */
+  threadPulls: (thread: string) => string[];
+  /** A file at a pull request's head commit, or null. */
+  pullFile: (pull: string, path: string) => Promise<InboxPullFile | null>;
+  /** This computer's window, or the owner's own login through the tailnet. */
+  ownerOrLocal: (req: Request, via: "local" | "tailnet") => boolean;
   /** The person's home folder, by default this process's. */
   home?: string;
 }
@@ -129,12 +145,14 @@ interface FileScope {
   message?: unknown;
   shape?: unknown;
   repo?: unknown;
+  /** A PR page: the pull request whose version of a file its hover shows. */
+  pull?: unknown;
   /** `root`: a diff's path, which starts at the top of the repository wherever the agent stood. */
   from?: unknown;
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
-  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots } = context;
+  const { store, serverSession, readBody, json, localOnly, launcher, codeReviewOn, shapeRoot, repoRoots, threadPulls, pullFile, ownerOrLocal } = context;
   const givenHome = context.home ?? homedir();
   const home = realpathOrNull(givenHome) ?? givenHome;
 
@@ -205,6 +223,37 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
     return launch(body.app_id, { name: body.path, kind: file.kind, path: file.path }, line);
   };
 
+  /**
+   * The text of a file a reference names. A PR's version comes first where the scope has a PR: what the message or the
+   * review talks about is that commit, and a checkout here may be on another branch. The path the agent wrote may start
+   * in its folder, so each place's path is tried, under the same path rule as a file here.
+   */
+  const codeRoute = async (req: Request): Promise<Response> => {
+    if (!codeReviewOn()) return json({ error: "Code review is off.", code: "code_review_off" }, 409);
+    if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+    const url = new URL(req.url);
+    if (!isSameOriginOrNoOrigin(req.headers.get("origin"), url.host, req.headers.get("sec-fetch-site"))) return json(crossOriginRefusalBody(), 403);
+    const params = url.searchParams;
+    const scope: FileScope = { thread: params.get("thread"), message: params.get("message"), shape: params.get("shape"), repo: params.get("repo"), pull: params.get("pull"), from: params.get("from") };
+    const named = params.get("path") ?? "";
+    const places = placesOf(scope, named);
+    const pulls = typeof scope.pull === "string" ? [scope.pull] : typeof scope.thread === "string" ? threadPulls(scope.thread) : [];
+    if (pulls.length > 0) {
+      const clean = posix.normalize(named.replace(/\\/g, "/"));
+      const paths = [...new Set([...places.map((place) => place.relative), clean])].filter((path) => isShapeProjectPath(path) && !inboxAttachmentNameRefusal(path));
+      for (const pull of pulls) {
+        for (const path of paths) {
+          const file = await pullFile(pull, path);
+          if (file) return json({ found: true, contents: file.contents, pull: { label: file.label, platform: file.platform, url: file.url } });
+        }
+      }
+    }
+    const file = await checkInboxProjectFile(places);
+    if (!file.ok || !isInboxTextKind(file.kind)) return json({ found: false });
+    const read = await readFileCapped(file.path);
+    return json(read.ok && !read.content.includes("\0") ? { found: true, contents: read.content } : { found: false });
+  };
+
   /** Launch what the per-kind policy allows and this computer has: the app first, nothing is opened for a refusal. */
   const launch = async (appId: string, target: { name: string; kind: unknown; path: string }, line?: number, check?: () => Promise<void>): Promise<Response> => {
     const policy = inboxOpenInPolicy(target, launcher.platform);
@@ -227,6 +276,7 @@ export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {
   };
 
   return async function handle(req: Request, path: string, via: "local" | "tailnet"): Promise<Response | null> {
+    if (path === INBOX_OPEN_IN_CODE_PATH) return ownerOrLocal(req, via) ? codeRoute(req) : localOnly();
     if (path !== INBOX_OPEN_IN_PATH && path !== INBOX_OPEN_IN_APPS_PATH && path !== INBOX_OPEN_IN_FILE_PATH) return null;
     // Launching an app changes this computer: never through the tailnet.
     if (via === "tailnet") return localOnly();

@@ -1,18 +1,21 @@
 import { inboxUrl } from '../inboxUrl';
-import { useEffect, useMemo, useRef, useState, type MouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode, type Ref } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
+import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
+import { HostTitle, tooltipContainerOf } from '@plannotator/ui/components/HostTitle';
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuGroup, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@plannotator/ui/components/ui/dropdown-menu';
-import { loadOpenInApps, useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
+import { useHoverPreview } from '@plannotator/ui/hooks/useHoverPreview';
+import { useOpenInApps, useRememberedOpenInApp } from '@plannotator/ui/hooks/useOpenInApps';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
-import { InboxApiError, inboxApi, type OpenInFileScope } from '../api';
+import { InboxApiError, inboxApi, type OpenInFileCode, type OpenInFileScope } from '../api';
 import { Icon } from '../icons';
 import { newTabUrl, openInMenu, openInMenuFor, remembersOpenInItem, type OpenInItem, type OpenInMenu } from '../openIn';
 import { attachmentDownloadUrl } from '../attachments';
 import { projectFileOfLink } from '../links';
 import { useInboxFileSource } from '../fileSource';
-import { usePhone } from '../phone';
+import { usePhone, useTouchScreen } from '../phone';
 import { Tip } from './Tip';
 
 /**
@@ -194,6 +197,7 @@ function SplitButton({
   status,
   launch,
   copyPath,
+  onOpenChange,
 }: {
   id: string;
   kind: unknown;
@@ -204,8 +208,13 @@ function SplitButton({
   status: { text: string; error: boolean } | null;
   launch: (item: OpenInItem) => Promise<void>;
   copyPath: () => Promise<void>;
+  onOpenChange?: (open: boolean) => void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [open, setOpenState] = useState(false);
+  const setOpen = (next: boolean) => {
+    setOpenState(next);
+    onOpenChange?.(next);
+  };
   const primary = menu.primary;
   const disabled = !primary || busy || (menu.missing && primary.kind !== 'browser');
   const title = !primary ? 'Open in…' : menu.missing && primary.kind !== 'browser' ? missingWord : primary.label;
@@ -261,16 +270,30 @@ const knownFiles = new Map<string, { path: string; kind: string } | null>();
  * "Open in" for a file something references, by its project-relative path (Shape's references and Code view, a review's
  * diff headers). The split button, without "Open". Nothing at all when the file is not on this computer, through the
  * tailnet (the apps route refuses it) or on a phone, as for an attachment there is no app to launch. `line` goes along
- * when the app's launcher takes one.
+ * when the app's launcher takes one. `label`: the word "Open" on the button (the code window's header).
  */
-export function OpenInFile({ scope, path, line }: { scope: OpenInFileScope; path: string; line?: number }) {
+export function OpenInFile({ scope, path, line, label = false, onListOpenChange }: { scope: OpenInFileScope; path: string; line?: number; label?: boolean; onListOpenChange?: (open: boolean) => void }) {
   const phone = usePhone();
   const { writes } = useInboxFileSource();
   if (phone || !writes) return null;
-  return <OpenInFileSplit scope={scope} path={path} line={line} />;
+  return <OpenInFileSplit scope={scope} path={path} line={line} label={label} onListOpenChange={onListOpenChange} />;
 }
 
-function OpenInFileSplit({ scope, path, line }: { scope: OpenInFileScope; path: string; line?: number }) {
+/** Whether a referenced file is here and what kind, remembered for the next control drawn for it. */
+async function checkOpenInFile(scope: OpenInFileScope, path: string): Promise<{ path: string; kind: string } | null> {
+  const key = JSON.stringify([scope, path]);
+  try {
+    const found = await inboxApi.openInFileCheck(scope, path);
+    const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
+    knownFiles.set(key, next);
+    return next;
+  } catch {
+    knownFiles.delete(key);
+    return null;
+  }
+}
+
+function OpenInFileSplit({ scope, path, line, label, onListOpenChange }: { scope: OpenInFileScope; path: string; line?: number; label: boolean; onListOpenChange?: (open: boolean) => void }) {
   const answer = useOpenInApps(INBOX_OPEN_IN_APPS_URL, true, path);
   const [remembered, remember] = useRememberedOpenInApp();
   const key = JSON.stringify([scope, path]);
@@ -280,17 +303,9 @@ function OpenInFileSplit({ scope, path, line }: { scope: OpenInFileScope; path: 
     setFile(knownFiles.get(key) ?? null);
     if (!available) return;
     let live = true;
-    inboxApi.openInFileCheck(scope, path).then(
-      (found) => {
-        const next = found.found && found.path && found.kind ? { path: found.path, kind: found.kind } : null;
-        knownFiles.set(key, next);
-        if (live) setFile(next);
-      },
-      () => {
-        knownFiles.delete(key);
-        if (live) setFile(null);
-      },
-    );
+    void checkOpenInFile(scope, path).then((next) => {
+      if (live) setFile(next);
+    });
     return () => {
       live = false;
     };
@@ -300,25 +315,22 @@ function OpenInFileSplit({ scope, path, line }: { scope: OpenInFileScope; path: 
   const { busy, status, launch, copyPath } = useOpenInActions(file?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
   if (!answer?.available || !file) return null;
   const menu = openInMenuFor(file, answer.apps, answer.platform ?? 'linux', remembered, null, false);
-  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={false} busy={busy} status={status} launch={launch} copyPath={copyPath} />;
+  return <SplitButton id={path} kind={file.kind} missingWord="" menu={menu} label={label} busy={busy} status={status} launch={launch} copyPath={copyPath} onOpenChange={onListOpenChange} />;
 }
 
 /**
- * A code span that names a file (`src/retry.ts:12`) in a message: it looks as it does without this, and a click opens
- * the same list at the span. Nothing is asked before the click; a span that is not a file on this computer then stays a
- * plain span, with no menu and no error. The short wait lets a double click select the words, as in any other text.
+ * A code span that names a file (`src/retry.ts:12`) in a message: it looks as it does without this, and resting on it
+ * shows the code (`OpenInCodeHover`).
  */
 export function OpenInCodeSpan({ scope, text, children }: { scope: OpenInFileScope; text: string; children: ReactNode }) {
-  const phone = usePhone();
-  const { writes } = useInboxFileSource();
   const named = projectFileOfLink(text);
-  if (phone || !writes || !named) return <>{children}</>;
-  return <OpenInCodeSpanMenu scope={scope} path={named.path} line={named.line}>{children}</OpenInCodeSpanMenu>;
+  if (!named) return <>{children}</>;
+  return <OpenInCodeHover scope={scope} path={named.path} line={named.line} lineEnd={named.lineEnd}>{children}</OpenInCodeHover>;
 }
 
 /**
  * Code spans in what `children` draws (a message, a board, and a guide through its reader): each that names a file
- * opens the list. `on` is Code review.
+ * shows its code. `on` is Code review.
  */
 export function OpenInCodeSpans({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
   const key = JSON.stringify(scope);
@@ -331,67 +343,219 @@ export function OpenInCodeSpans({ scope, on, children }: { scope: OpenInFileScop
   return <CodeSpanContext.Provider value={render}>{children}</CodeSpanContext.Provider>;
 }
 
-const CODE_SPAN_CLICK_MS = 200;
+/** A file named with no line shows this much of its top. */
+const FILE_TOP_LINES = 40;
+/** Lines kept around a named line or range. */
+const CONTEXT_LINES = 6;
 
-function OpenInCodeSpanMenu({ scope, path, line, children }: { scope: OpenInFileScope; path: string; line?: number; children: ReactNode }) {
-  const [remembered, remember] = useRememberedOpenInApp();
-  const [found, setFound] = useState<{ menu: OpenInMenu; kind: string; path: string } | null>(null);
-  const [notAFile, setNotAFile] = useState(false);
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<HTMLSpanElement>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  useEffect(() => () => {
-    if (timer.current) clearTimeout(timer.current);
-  }, []);
-  const { status, launch, copyPath } = useOpenInActions(found?.path ?? null, (id) => inboxApi.openInFile(scope, path, id, line), remember);
+/**
+ * Words that name a file, in a line of text: they stay as they are, and hovering them shows the code in ui's code
+ * window (the one plan review's and annotate's code links use), with Open and its editor list in the window's header.
+ * Nothing is asked until the pointer rests. A name that is no file here or in the PR shows nothing, then `title` if given.
+ *
+ * With no hover (a touch screen), a tap shows the same window as a sheet from the bottom edge. A phone has no editor
+ * to open, so its sheet has the code, and the forge's link for a PR's file. By keyboard, focus shows the window, Tab or
+ * Enter goes into it and Escape closes it.
+ */
+export function OpenInCodeHover({ scope, path, line, lineEnd, title, children }: { scope: OpenInFileScope; path: string; line?: number; lineEnd?: number; title?: string; children: ReactNode }) {
+  const { writes } = useInboxFileSource();
+  if (!writes) return <>{title ? <HostTitle title={title}>{children as ReactElement}</HostTitle> : children}</>;
+  return <CodeHoverWindow scope={scope} path={path} line={line} lineEnd={lineEnd} title={title}>{children}</CodeHoverWindow>;
+}
 
-  const ask = async () => {
-    const [apps, file] = await Promise.all([loadOpenInApps(INBOX_OPEN_IN_APPS_URL), inboxApi.openInFileCheck(scope, path).catch(() => null)]);
-    if (!apps.available || !file?.found || !file.path || !file.kind) {
-      setNotAFile(true);
-      return;
-    }
-    const target = { path: file.path, kind: file.kind };
-    setFound({ ...target, menu: openInMenuFor(target, apps.apps, apps.platform ?? 'linux', remembered, null, false) });
-    setOpen(true);
+function CodeHoverWindow({ scope, path, line, lineEnd, title, children }: { scope: OpenInFileScope; path: string; line?: number; lineEnd?: number; title?: string; children: ReactNode }) {
+  const phone = usePhone();
+  const touch = useTouchScreen();
+  const [missing, setMissing] = useState(false);
+  const hover = useHoverPreview<Extract<OpenInFileCode, { found: true }>>(async () => {
+    // Open's own answer comes with the code, so the window opens whole.
+    const [answer] = await Promise.all([inboxApi.openInFileCode(scope, path).catch(() => null), phone ? null : checkOpenInFile(scope, path)]);
+    setMissing(!answer?.found);
+    return answer?.found ? answer : null;
+  });
+  const { preview, anchorRef } = hover;
+  const windowEl = useRef<HTMLDivElement | null>(null);
+  // The editor list portals away from the window: while it is open, leaving the window closes nothing.
+  const listOpen = useRef(false);
+  const pointerIn = useRef(false);
+  const { dismiss: close } = hover;
+  const dismiss = useCallback(() => {
+    if (!listOpen.current) close();
+  }, [close]);
+  const enter = () => {
+    pointerIn.current = true;
+    hover.onEnter();
   };
-
-  if (notAFile) return <>{children}</>;
-  const onClick = (event: MouseEvent) => {
-    if (timer.current) clearTimeout(timer.current);
-    // A second click or a drag over the words: not this.
-    if (event.detail > 1 || !window.getSelection()?.isCollapsed) return;
-    timer.current = setTimeout(() => void ask(), CODE_SPAN_CLICK_MS);
+  const leave = () => {
+    pointerIn.current = false;
+    if (!listOpen.current) hover.onLeave();
   };
+  const controls = () => Array.from(windowEl.current?.querySelectorAll<HTMLElement>('a[href], button:not(:disabled)') ?? []);
+
+  // While open, Escape closes it, focus back on the words when it was inside. Used: the window's own Escape skips it.
+  const open = !!preview;
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || listOpen.current) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (windowEl.current?.contains(document.activeElement)) anchorRef.current?.focus();
+      close();
+    };
+    document.addEventListener('keydown', onKey, true);
+    return () => document.removeEventListener('keydown', onKey, true);
+  }, [open, close, anchorRef]);
+
+  const anchor = (
+    <span
+      ref={(element) => {
+        anchorRef.current = element;
+      }}
+      className="ib-code-hover"
+      role="button"
+      tabIndex={0}
+      aria-haspopup="dialog"
+      aria-expanded={open}
+      data-code-hover={path}
+      onMouseEnter={touch ? undefined : enter}
+      onMouseLeave={touch ? undefined : leave}
+      onFocus={(event) => {
+        if (!touch && event.target.matches(':focus-visible')) hover.onEnter();
+      }}
+      onBlur={(event) => {
+        if (touch || (event.relatedTarget instanceof Node && windowEl.current?.contains(event.relatedTarget))) return;
+        if (!pointerIn.current) leave();
+      }}
+      onClick={(event) => {
+        if (!touch) return;
+        event.stopPropagation();
+        if (window.getSelection()?.isCollapsed !== false) hover.onEnter();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Enter' || event.key === ' ') {
+          event.preventDefault();
+          if (open) controls()[0]?.focus();
+          else hover.onEnter();
+        } else if (event.key === 'Tab' && !event.shiftKey && open) {
+          const first = controls()[0];
+          if (first) {
+            event.preventDefault();
+            first.focus();
+          }
+        }
+      }}
+    >
+      {children}
+    </span>
+  );
+
   return (
     <>
-      <span
-        ref={anchor}
-        className="ib-openin-span"
-        role="button"
-        tabIndex={0}
-        title="Open in…"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-open-in-span={path}
-        onClick={onClick}
-        onKeyDown={(event) => {
-          if (event.key !== 'Enter' && event.key !== ' ') return;
-          event.preventDefault();
-          void ask();
-        }}
-      >
-        {children}
-      </span>
-      {found && (
-        <DropdownMenu open={open} onOpenChange={setOpen}>
-          <DropdownMenuContent anchor={anchor} align="start" sideOffset={6} className="min-w-[12rem]" finalFocus={anchor} data-open-in-menu={path}>
-            <OpenInMenuItems kind={found.kind} missingWord="" menu={found.menu} onLaunch={(item) => void launch(item)} onCopyPath={() => void copyPath()} />
-          </DropdownMenuContent>
-        </DropdownMenu>
+      {title && missing ? <HostTitle title={title}>{anchor}</HostTitle> : anchor}
+      {preview && (
+        // A portal's events still reach the page's own handlers through React: not a click in here.
+        <span
+          onClick={(event) => event.stopPropagation()}
+          onBlur={(event) => {
+            const to = event.relatedTarget;
+            if (touch || pointerIn.current || (to instanceof Node && (windowEl.current?.contains(to) || anchorRef.current?.contains(to)))) return;
+            leave();
+          }}
+          onKeyDown={(event) => {
+            if (event.key !== 'Tab') return;
+            const list = controls();
+            const atEdge = document.activeElement === (event.shiftKey ? list[0] : list.at(-1));
+            if (!atEdge) return;
+            // Back to the words: from there, Tab goes on through the page.
+            if (event.shiftKey) event.preventDefault();
+            anchorRef.current?.focus();
+          }}
+        >
+          <CodeHoverPreview
+            anchorEl={anchorRef.current}
+            contents={preview.contents}
+            path={path}
+            line={line}
+            lineEnd={lineEnd}
+            pull={preview.pull}
+            sheet={touch}
+            windowRef={windowEl}
+            onDismiss={dismiss}
+            onMouseEnter={() => {
+              pointerIn.current = true;
+              hover.previewHandlers.onMouseEnter();
+            }}
+            onMouseLeave={leave}
+            actions={
+              <>
+                {preview.pull && (
+                  <a className="ib-code-hover-forge" href={withLines(preview.pull, line, lineEnd)} target="_blank" rel="noopener noreferrer" data-code-hover-forge="">
+                    Open on {preview.pull.platform === 'gitlab' ? 'GitLab' : 'GitHub'}
+                  </a>
+                )}
+                <OpenInFile
+                  scope={scope}
+                  path={path}
+                  line={line}
+                  label
+                  onListOpenChange={(next) => {
+                    listOpen.current = next;
+                    // Closed with the pointer gone: the window goes too.
+                    if (!next && !pointerIn.current && !touch) hover.onLeave();
+                  }}
+                />
+                {touch && (
+                  <button type="button" className="ib-code-hover-close" onClick={() => hover.dismiss()} data-code-hover-close="">
+                    Close
+                  </button>
+                )}
+              </>
+            }
+          />
+        </span>
       )}
-      {status && <Status status={status} />}
     </>
+  );
+}
+
+/** A file's address on its forge, at the lines the words name. */
+function withLines(pull: { platform: 'github' | 'gitlab'; url: string }, line?: number, lineEnd?: number): string {
+  if (!line) return pull.url;
+  if (!lineEnd || lineEnd === line) return `${pull.url}#L${line}`;
+  return `${pull.url}#L${line}-${pull.platform === 'gitlab' ? '' : 'L'}${lineEnd}`;
+}
+
+/** The lines the code window shows for the words: around what they name, or the file's top when they name no line (or one past its end). */
+function CodeHoverPreview({ contents, path, line, lineEnd, pull, ...window }: {
+  contents: string;
+  path: string;
+  line?: number;
+  lineEnd?: number;
+  pull?: { label: string };
+  anchorEl: HTMLElement | null;
+  sheet: boolean;
+  windowRef: Ref<HTMLDivElement>;
+  onDismiss: () => void;
+  onMouseEnter: () => void;
+  onMouseLeave: () => void;
+  actions: ReactNode;
+}) {
+  // A file's last newline ends its last line: no empty row after it.
+  const text = useMemo(() => contents.replace(/\r?\n$/, ''), [contents]);
+  const count = useMemo(() => text.split('\n').length, [text]);
+  const named = line && line <= count ? line : null;
+  return (
+    <CodeSnippetPreview
+      {...window}
+      container={window.anchorEl ? tooltipContainerOf(window.anchorEl) : null}
+      contents={text}
+      filepath={path}
+      title={pull ? `${path} · ${pull.label}` : path}
+      line={named ?? 1}
+      lineEnd={named ? (lineEnd && lineEnd > named ? Math.min(lineEnd, count) : undefined) : Math.min(FILE_TOP_LINES, count)}
+      contextLines={named ? CONTEXT_LINES : 0}
+    />
   );
 }
 

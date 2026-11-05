@@ -11,9 +11,10 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
 import { act, type ReactNode } from 'react';
 import { GuideCodeSpanContext, renderInlineMarkdown } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { createRoot, type Root } from 'react-dom/client';
+import { HOVER_PREVIEW_HIDE_DELAY_MS, HOVER_PREVIEW_SHOW_DELAY_MS } from '@plannotator/ui/hooks/useHoverPreview';
 
 const hasDom = typeof document !== 'undefined';
-const { OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { OpenInCodeHover, OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
 const { ShapeInline } = (hasDom ? await import('@plannotator/ui/components/shape/inline') : {}) as typeof import('@plannotator/ui/components/shape/inline');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
@@ -21,25 +22,27 @@ type Asked = { method: string; url: string; body: Record<string, unknown> | null
 
 const APPS = { available: true, platform: 'mac', apps: [{ id: 'reveal', label: 'Finder', kind: 'file-manager', icon: 'finder' }, { id: 'vscode', label: 'VS Code', kind: 'editor', icon: 'vscode' }] };
 const REAL = '/work/app/src/a.ts';
+/** Fifty lines: `line 1` to `line 50`. */
+const FILE = `${Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n')}\n`;
 
 let root: Root | null = null;
 let host: HTMLElement | null = null;
 let savedFetch: typeof fetch;
 let savedMatch: typeof window.matchMedia;
 let asked: Asked[] = [];
-let answers: { apps: { status: number; body: unknown }; file: { status: number; body: unknown } };
+let answers: { apps: { status: number; body: unknown }; file: { status: number; body: unknown }; code: { status: number; body: unknown } };
 
 beforeEach(() => {
   if (!hasDom) return;
   asked = [];
-  answers = { apps: { status: 200, body: APPS }, file: { status: 200, body: { found: true, path: REAL, kind: 'code' } } };
+  answers = { apps: { status: 200, body: APPS }, file: { status: 200, body: { found: true, path: REAL, kind: 'code' } }, code: { status: 200, body: { found: true, contents: FILE } } };
   savedFetch = globalThis.fetch;
   savedMatch = window.matchMedia;
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
     const url = String(input);
     const method = init?.method ?? 'GET';
     asked.push({ method, url, body: init?.body ? JSON.parse(String(init.body)) : null });
-    const answer = url.includes('/open-in/apps') ? answers.apps : method === 'POST' ? { status: 200, body: { ok: true } } : answers.file;
+    const answer = url.includes('/open-in/apps') ? answers.apps : url.includes('/open-in/file/code') ? answers.code : method === 'POST' ? { status: 200, body: { ok: true } } : answers.file;
     return new Response(JSON.stringify(answer.body), { status: answer.status, headers: { 'Content-Type': 'application/json' } });
   }) as typeof fetch;
   host = document.createElement('div');
@@ -64,7 +67,7 @@ async function settle() {
 }
 
 const caret = () => host!.querySelector('[data-open-in-caret]');
-const fileReads = () => asked.filter((a) => a.url.includes('/open-in/file') && a.method === 'GET');
+const fileReads = () => asked.filter((a) => a.url.includes('/open-in/file') && !a.url.includes('/file/code') && a.method === 'GET');
 
 // First: a page keeps the apps route's first real answer, and a refusal is not one.
 test.skipIf(!hasDom)('through the tailnet: the apps route refuses, so nothing draws and no file is asked about', async () => {
@@ -129,68 +132,238 @@ test.skipIf(!hasDom)('a source that writes nothing (the tour): nothing', async (
   expect(fileReads()).toHaveLength(0);
 });
 
-describe('a code span that names a file', () => {
+describe('words that name a file', () => {
   const scope = { thread: 'msg_span', message: 'msg_span2' };
-  const span = () => host!.querySelector('[data-open-in-span]') as HTMLElement | null;
-  const menu = () => document.querySelector('[data-open-in-menu]');
+  const words = () => host!.querySelector('[data-code-hover]') as HTMLElement;
+  const codeWindow = () => document.querySelector('[data-code-snippet-preview]') as HTMLElement | null;
+  const rows = () => [...codeWindow()!.querySelectorAll('tbody tr')].map((row) => row.querySelector('td:last-child')!.textContent);
+  const marked = () => [...codeWindow()!.querySelectorAll('[data-target-line]')].map((row) => row.querySelector('td:last-child')!.textContent);
+  const codeReads = () => asked.filter((a) => a.url.includes('/open-in/file/code'));
+  const touchScreen = () => {
+    window.matchMedia = ((query: string) => ({ matches: query.includes('coarse') || query.includes('pointer') || query.includes('max-width'), media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  };
   const draw = (text = 'src/a.ts:12') =>
     act(async () => root!.render(<OpenInCodeSpan scope={scope} text={text}><code>{text}</code></OpenInCodeSpan>));
-  const press = async (key = 'Enter') => {
+  const rest = async () => {
     await act(async () => {
-      span()!.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
-      await new Promise((done) => setTimeout(done, 20));
+      words().dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_SHOW_DELAY_MS + 40));
+    });
+    await settle();
+  };
+  const leave = async (element: Element = words()) => {
+    await act(async () => {
+      element.dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_HIDE_DELAY_MS + 40));
     });
   };
+  const tap = async () => {
+    await act(async () => {
+      words().dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_SHOW_DELAY_MS + 40));
+    });
+    await settle();
+  };
 
-  test.skipIf(!hasDom)('asks nothing until it is used, and then opens the list', async () => {
+  afterEach(() => {
+    if (hasDom) window.getSelection()?.removeAllRanges();
+  });
+
+  test.skipIf(!hasDom)('asks nothing until the pointer rests, then shows the code around the line, with Open', async () => {
     await draw();
     await settle();
-    expect(span()!.querySelector('code')!.textContent).toBe('src/a.ts:12');
+    expect(words().querySelector('code')!.textContent).toBe('src/a.ts:12');
     expect(asked.filter((a) => a.url.includes('/open-in/'))).toHaveLength(0);
-    await press();
-    await settle();
-    expect(fileReads()[0]!.url).toContain('path=src%2Fa.ts');
-    expect(menu()).not.toBeNull();
+    await rest();
+    expect(codeReads()[0]!.url).toContain('path=src%2Fa.ts');
+    expect(codeReads()[0]!.url).toContain('thread=msg_span');
+    expect(marked()).toEqual(['line 12']);
+    expect(rows().at(0)).toBe('line 6');
+    expect(rows().at(-1)).toBe('line 18');
+    expect(codeWindow()!.querySelector('[data-open-in-caret]')).not.toBeNull();
+    expect(codeWindow()!.querySelector('[data-code-hover-close]')).toBeNull();
+    expect(host!.querySelector('[data-open-in]')).toBeNull();
   });
 
-  test.skipIf(!hasDom)('a click waits out a double click, which only selects the words', async () => {
-    await draw('src/b.ts');
-    await act(async () => {
-      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 2 }));
-      await new Promise((done) => setTimeout(done, 260));
-    });
-    expect(fileReads()).toHaveLength(0);
-    await act(async () => {
-      span()!.dispatchEvent(new MouseEvent('click', { bubbles: true, detail: 1 }));
-      await new Promise((done) => setTimeout(done, 260));
-    });
-    await settle();
-    expect(menu()).not.toBeNull();
+  test.skipIf(!hasDom)('a range marks every line of it; no line shows the top of the file; a line past the end does too', async () => {
+    await draw('src/a.ts:12-14');
+    await rest();
+    expect(marked()).toEqual(['line 12', 'line 13', 'line 14']);
+    await leave();
+    await act(async () => root!.render(<div />));
+    await draw('src/a.ts');
+    await rest();
+    expect(rows()).toHaveLength(40);
+    expect(rows()[0]).toBe('line 1');
+    expect(marked()).toEqual([]);
+    await leave();
+    await act(async () => root!.render(<div />));
+    await draw('src/a.ts:900');
+    await rest();
+    expect(rows()[0]).toBe('line 1');
+    expect(marked()).toEqual([]);
   });
 
-  test.skipIf(!hasDom)('a span that is not a file stays a plain span: no menu, no error', async () => {
-    answers.file = { status: 200, body: { found: false } };
-    await draw('react.js');
-    await press();
-    await settle();
-    expect(menu()).toBeNull();
-    expect(span()).toBeNull();
-    expect(host!.innerHTML).toBe('<code>react.js</code>');
+  test.skipIf(!hasDom)('a short file named with no line has no empty row after its last line', async () => {
+    answers.code = { status: 200, body: { found: true, contents: 'one\ntwo\n' } };
+    await draw('src/a.ts');
+    await rest();
+    expect(rows()).toEqual(['one', 'two']);
   });
 
-  test.skipIf(!hasDom)('on a phone it is only the span', async () => {
-    window.matchMedia = ((query: string) => ({ matches: true, media: query, addEventListener() {}, removeEventListener() {} })) as unknown as typeof window.matchMedia;
+  test.skipIf(!hasDom)('moving from the words into the window keeps it; leaving both closes it', async () => {
     await draw();
-    await settle();
-    expect(span()).toBeNull();
+    await rest();
+    await act(async () => {
+      words().dispatchEvent(new MouseEvent('mouseout', { bubbles: true }));
+      codeWindow()!.dispatchEvent(new MouseEvent('mouseover', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, HOVER_PREVIEW_HIDE_DELAY_MS + 40));
+    });
+    expect(codeWindow()).not.toBeNull();
+    await leave(codeWindow()!);
+    expect(codeWindow()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('its own code scrolling keeps it; the page scrolling closes it, which it would drift from', async () => {
+    await draw();
+    await rest();
+    await act(async () => {
+      codeWindow()!.querySelector('.code-snippet-preview')!.dispatchEvent(new Event('scroll'));
+    });
+    expect(codeWindow()).not.toBeNull();
+    await act(async () => {
+      document.body.dispatchEvent(new Event('scroll'));
+    });
+    expect(codeWindow()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('the window stays while its editor list is open, and a pick sends the scope, the path and the line', async () => {
+    await draw();
+    await rest();
+    await act(async () => {
+      codeWindow()!.querySelector('[data-open-in-caret]')!.dispatchEvent(new MouseEvent('click', { bubbles: true }));
+      await new Promise((done) => setTimeout(done, 20));
+    });
+    await leave();
+    expect(codeWindow()).not.toBeNull();
+    const pick = document.querySelector('[data-open-in-menu] [data-open-in-item="vscode"]') as HTMLElement;
+    await act(async () => {
+      pick.click();
+      await new Promise((done) => setTimeout(done, 20));
+    });
+    expect(asked.find((a) => a.method === 'POST')!.body).toMatchObject({ thread: 'msg_span', message: 'msg_span2', path: 'src/a.ts', line: 12, app_id: 'vscode' });
+  });
+
+  test.skipIf(!hasDom)('a click in the window never reaches the page under it', async () => {
+    let clicked = 0;
+    await act(async () => root!.render(<div onClick={() => (clicked += 1)}><OpenInCodeSpan scope={scope} text="src/a.ts"><code>src/a.ts</code></OpenInCodeSpan></div>));
+    await rest();
+    await act(async () => codeWindow()!.click());
+    expect(clicked).toBe(0);
+  });
+
+  test.skipIf(!hasDom)('a file that is only in the PR: its version, named, with the forge at those lines and no Open', async () => {
+    answers.file = { status: 200, body: { found: false } };
+    answers.code = { status: 200, body: { found: true, contents: FILE, pull: { label: '#412', platform: 'github', url: 'https://github.com/o/r/blob/abc/src/a.ts' } } };
+    await draw('src/a.ts:12-14');
+    await rest();
+    expect(codeWindow()!.textContent).toContain('src/a.ts · #412');
+    const forge = codeWindow()!.querySelector('[data-code-hover-forge]') as HTMLAnchorElement;
+    expect(forge.getAttribute('href')).toBe('https://github.com/o/r/blob/abc/src/a.ts#L12-L14');
+    expect(forge.textContent).toBe('Open on GitHub');
+    expect(codeWindow()!.querySelector('[data-open-in-caret]')).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('words that name no file show nothing and stay as they were', async () => {
+    answers.code = { status: 200, body: { found: false } };
+    await draw('react.js');
+    await rest();
+    expect(codeWindow()).toBeNull();
+    expect(words().querySelector('code')!.textContent).toBe('react.js');
+  });
+
+  test.skipIf(!hasDom)('the words of a link that names no file then show why they are not a link', async () => {
+    answers.code = { status: 200, body: { found: false } };
+    await act(async () => root!.render(<OpenInCodeHover scope={scope} path="src/gone.ts" title="Not attached"><span>the file</span></OpenInCodeHover>));
+    await rest();
+    expect(codeWindow()).toBeNull();
+    expect(words().getAttribute('title') ?? words().parentElement?.getAttribute('title')).toBe('Not attached');
+  });
+
+  test.skipIf(!hasDom)('by keyboard: Enter shows it, Enter again goes in, Escape closes it and returns, and the page keeps no Escape', async () => {
+    let pageEscape = 0;
+    const onPage = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') pageEscape += 1;
+    };
+    document.addEventListener('keydown', onPage);
+    try {
+      await draw();
+      words().focus();
+      const press = async (target: Element, key: string) => {
+        await act(async () => {
+          target.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }));
+          await new Promise((done) => setTimeout(done, HOVER_PREVIEW_SHOW_DELAY_MS + 40));
+        });
+        await settle();
+      };
+      await press(words(), 'Enter');
+      expect(codeWindow()).not.toBeNull();
+      await press(words(), 'Enter');
+      expect(codeWindow()!.contains(document.activeElement)).toBe(true);
+      await press(document.activeElement!, 'Escape');
+      expect(codeWindow()).toBeNull();
+      expect(document.activeElement).toBe(words());
+      expect(pageEscape).toBe(0);
+      await press(words(), 'Escape');
+      expect(pageEscape).toBe(1);
+    } finally {
+      document.removeEventListener('keydown', onPage);
+    }
+  });
+
+  test.skipIf(!hasDom)('on a touch screen a hover does nothing, and a tap shows a sheet with no Open that Close and the scrim dismiss', async () => {
+    touchScreen();
+    await draw();
+    await rest();
+    expect(codeWindow()).toBeNull();
+    await tap();
+    expect(codeWindow()!.hasAttribute('data-code-snippet-sheet')).toBe(true);
+    expect(marked()).toEqual(['line 12']);
+    expect(codeWindow()!.querySelector('[data-open-in-caret]')).toBeNull();
+    expect(asked.filter((a) => a.url.includes('/open-in/apps'))).toHaveLength(0);
+    await act(async () => (codeWindow()!.querySelector('[data-code-hover-close]') as HTMLElement).click());
+    expect(codeWindow()).toBeNull();
+    await tap();
+    await act(async () => (document.querySelector('[data-code-snippet-scrim]') as HTMLElement).click());
+    expect(codeWindow()).toBeNull();
+  });
+
+  test.skipIf(!hasDom)('a phone\'s sheet for a PR\'s file links to the forge', async () => {
+    touchScreen();
+    answers.code = { status: 200, body: { found: true, contents: FILE, pull: { label: '!7', platform: 'gitlab', url: 'https://gitlab.com/o/r/-/blob/abc/src/a.ts' } } };
+    await draw('src/a.ts:12-14');
+    await tap();
+    const forge = codeWindow()!.querySelector('[data-code-hover-forge]') as HTMLAnchorElement;
+    expect(forge.getAttribute('href')).toBe('https://gitlab.com/o/r/-/blob/abc/src/a.ts#L12-14');
+    expect(forge.textContent).toBe('Open on GitLab');
+  });
+
+  test.skipIf(!hasDom)('in the tour nothing is asked', async () => {
+    await act(async () =>
+      root!.render(
+        <InboxFileSourceProvider source={{ ...INBOX_FILE_SOURCE, writes: false }}>
+          <OpenInCodeSpan scope={scope} text="src/a.ts"><code>src/a.ts</code></OpenInCodeSpan>
+        </InboxFileSourceProvider>,
+      ),
+    );
+    expect(host!.querySelector('[data-code-hover]')).toBeNull();
     expect(host!.querySelector('code')).not.toBeNull();
   });
 });
 
 describe('code spans in a guide and a board', () => {
   const scope = { shape: 'shp_x' };
-  const spans = () => [...host!.querySelectorAll('[data-open-in-span]')].map((el) => el.getAttribute('data-open-in-span'));
+  const spans = () => [...host!.querySelectorAll('[data-code-hover]')].map((el) => el.getAttribute('data-code-hover'));
 
   test.skipIf(!hasDom)('a guide: a span naming a file is the control, others and a link label are not', async () => {
     const renderLink = (href: string, label: ReactNode, key: number) => <button key={key} data-link={href}>{label}</button>;
