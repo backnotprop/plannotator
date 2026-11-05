@@ -847,12 +847,13 @@ export function inboxUsedBefore(dataDir: string): boolean {
 }
 
 /**
- * HELD FOR 0.28.50: DELETE THIS FUNCTION IN 0.28.50. The owner decided (2026-11-04) to hold Code review and Shape
- * back from 0.28.49. Their Settings → Capabilities switches show only to a person who already has that feature on,
- * or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read, the save's answer and the windows' `event:
+ * HELD UNTIL THE NEXT BIG RELEASE (0.29): DELETE THIS FUNCTION THEN, NOT BEFORE. The owner decided (2026-11-04) to hold
+ * Code review and Shape back from 0.28.49, and (2026-11-05) to keep holding them through 0.28.50. No version is read
+ * here: the hold ends when this function is deleted. Their Settings → Capabilities switches show only to a person
+ * who already has that feature on, or with PLANNOTATOR_INBOX_PREVIEW=1. Otherwise the settings read, the save's answer and the windows' `event:
  * capabilities` leave the key out, and Settings draws no row for an absent key. `told`: this request or event is the
  * switch's own save, so a person who turns a shown switch off hears it. The row may go at the next load.
- * In 0.28.50, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
+ * In that release, write `[key]: { on }` at each caller again and drop the `changed` argument of `capabilityListeners`.
  */
 function heldSwitch<K extends "code_review" | "shape">(key: K, on: boolean, told = false): { [P in K]?: { on: boolean } } {
   return on || told || process.env.PLANNOTATOR_INBOX_PREVIEW === "1" ? ({ [key]: { on } } as { [P in K]: { on: boolean } }) : {};
@@ -967,7 +968,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   const snoozeListeners = new Set<() => void>();
   /** How the list's rows look was saved (config.json `inboxRows`): the windows' streams say `event: rows`. */
   const rowsListeners = new Set<(rows: readonly InboxRowsOption[], rev: number) => void>();
-  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held for 0.28.50 (heldSwitch). */
+  /** A capability switch was saved (Settings → Capabilities): the windows' streams say `event: capabilities`. `changed`: held until the next big release (heldSwitch). */
   const capabilityListeners = new Set<(changed?: "code_review" | "shape") => void>();
   // The Inbox windows open now and whether any can show a notification (inbox-windows.ts).
   const windows = createInboxWindows({ graceMs: options.windowGraceMs });
@@ -2398,7 +2399,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     board: { on: boardOn() },
     /** Thread steps (config.json `inboxSteps`): off unless the person turned it on. */
     steps: { on: stepsOn() },
-    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held for 0.28.50: absent while off. */
+    /** Code review (config.json `inboxCodeReview`) and Shape (`inboxShape`): off unless the person turned them on. Held until the next big release: absent while off. */
     ...heldSwitch("code_review", codeReviewOn()),
     ...heldSwitch("shape", shapeOn()),
     /** The onboarding tour: started, finished or skipped, and whether the first real thread offers notifications once more. */
