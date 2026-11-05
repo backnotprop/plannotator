@@ -1,6 +1,6 @@
-import type { ReactNode } from 'react';
 import type { GuideOverviewDiagram } from '@plannotator/core/guide';
 import type { GuideSnapshot } from '@plannotator/core/guide-format';
+import type { ReactNode } from 'react';
 import type { CodeAnnotation } from '@plannotator/ui/types';
 
 /**
@@ -65,6 +65,8 @@ export interface GuideReaderProps {
   threadHeading?: boolean;
   /** The review's own actions on that heading's title line (the guide host's `renderHeadActions`). */
   renderHeadActions?: () => ReactNode | null;
+  /** "Open in" on each file's header (a review while Code review is on). Absent: none, as before. */
+  fileOpenIn?: (path: string) => ReactNode;
 }
 
 /** Selected lines, as a selection action receives them (review-editor's `DiffSelection`). */
