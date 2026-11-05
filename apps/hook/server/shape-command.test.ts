@@ -193,6 +193,23 @@ describe("shape --help", () => {
 });
 
 describe("the Shape switch, through the entrypoint", () => {
+  test("update tells the agent how the board will behave, and stores it either way", async () => {
+    const { run, board } = world();
+    const r = await run("update", "--file", board("kettle.json", "whistles"));
+    expect(r.code).toBe(0);
+    const out = JSON.parse(r.out);
+    expect(out.v).toBe(1);
+    expect(out.notes.join()).toContain("no width and height");
+  });
+
+  test("a board that writes Requirements is refused, and the refusal says where the words go", async () => {
+    const { run, project } = world();
+    writeFileSync(join(project, "old.json"), JSON.stringify({ title: "T", claim: "C", views: { reqs: { groups: [] } } }));
+    const r = await run("update", "--file", "old.json");
+    expect(r.code).not.toBe(0);
+    expect(r.err).toContain("views.know");
+  });
+
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
   // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
   // says it is off and exits 1, and nothing is written. On, the same calls work.
@@ -234,6 +251,11 @@ describe("the Shape switch, through the entrypoint", () => {
           expect(r.stdout).toBe("");
           expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
         }
+        expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+        // The kit only prints a file: it runs either way, and stores nothing.
+        const kit = await run("kit");
+        expect(kit.code).toBe(0);
+        expect(kit.stdout).toContain("export const pick");
         expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
       }
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));

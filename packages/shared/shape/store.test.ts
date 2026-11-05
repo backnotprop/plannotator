@@ -1,10 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { inboxProjectKey } from "../inbox/project-key";
 import { createShapeStore } from "./store";
-import type { ShapeBoard } from "./format";
+import { diffShapeVersions, type ShapeBoard } from "./format";
 
 // Every test gets its own data dir under the OS temp folder: nothing here
 // touches the person's Plannotator data.
@@ -28,7 +28,7 @@ function board(words = "whistles once"): ShapeBoard {
     claim: "Built. Nothing waits on you.",
     views: {
       picture: { html: `<p data-step="1"><span data-mark="p-whistle">${words}</span></p>` },
-      reqs: { groups: [{ id: "when", label: "When", items: [{ id: "r-once", text: "Once per boil." }] }] },
+      know: "It whistles once per boil.",
     },
   };
 }
@@ -49,7 +49,7 @@ describe("shape versions", () => {
     expect(result.v).toBe(1);
     expect(result.created).toBe(true);
     expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), result.id, "shape.json"))).toBe(true);
-    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle", "reqs/r-once"]);
+    expect(store.read(result.id)?.parts.map((p) => `${p.view}/${p.id}`)).toEqual(["header/title", "header/claim", "picture/p-whistle", "know/know-1"]);
   });
 
   test("an update needs the base it drew from, and a stale base is refused with the latest attached", () => {
@@ -267,5 +267,120 @@ console.log(r.ok ? "OK" : r.code);`,
     rmSync(join(folder, ".lock.break"));
     rmSync(join(folder, ".lock"));
     expect(await done).toEqual(["OK"]);
+  });
+});
+
+describe("a board saved with Requirements", () => {
+  const reqs = { heading: "What I understand", groups: [{ id: "when", label: "When", items: [{ id: "r-once", text: "Once per boil.", code: { path: "src/k.ts", line: 3 } }] }], foot: [{ label: "Open", text: "Nothing." }] };
+  function saved() {
+    const dataDir = scratch();
+    const { store } = storeAt(dataDir);
+    const first = store.update({ board: board(), project, session });
+    if (!first.ok) throw new Error("setup");
+    const folder = join(dataDir, "shapes", inboxProjectKey(project.name, project.root), first.id);
+    // What an older build left on disk.
+    const version = { ...JSON.parse(readFileSync(join(folder, "versions.jsonl"), "utf8").trim()), views: { picture: board().views.picture, reqs } };
+    version.parts = [{ view: "header", id: "title", text: "t" }, { view: "reqs", id: "r-once", text: "When: Once per boil." }];
+    writeFileSync(join(folder, "versions.jsonl"), `${JSON.stringify(version)}\n`);
+    const note = { id: "shn_01M6N5J925QA038Z8M96WJXJ5H", at: "2026-11-03T10:00:00Z", kind: "change", v: 1, view: "reqs", part: "r-once", quote: null, text: "Twice", from: "you", re: null, delivered: null };
+    writeFileSync(join(folder, "chat.jsonl"), `${JSON.stringify(note)}\n`);
+    return { store, id: first.id, folder };
+  }
+
+  test("it reads back whole, its parts and notes under What to know, and the files stay as written", () => {
+    const { store, id, folder } = saved();
+    const before = [readFileSync(join(folder, "versions.jsonl"), "utf8"), readFileSync(join(folder, "chat.jsonl"), "utf8")];
+    const v = store.read(id)!;
+    expect(v.views.reqs).toEqual(reqs);
+    expect(v.parts.find((p) => p.id === "r-once")?.view).toBe("know");
+    expect(store.notes(id).map((n) => n.view)).toEqual(["know"]);
+    expect([readFileSync(join(folder, "versions.jsonl"), "utf8"), readFileSync(join(folder, "chat.jsonl"), "utf8")]).toEqual(before);
+  });
+
+  test("the next version replaces it: the old lines read as removed from What to know", () => {
+    const { store, id } = saved();
+    const next = store.update({ id, base: 1, board: board(), project, session });
+    expect(next.ok).toBe(true);
+    const diff = diffShapeVersions(store.read(id, 1)!, store.read(id, 2)!);
+    expect(diff.changes.filter((c) => c.view === "know").map((c) => `${c.kind} ${c.id}`).sort()).toEqual(["added know-1", "removed r-once"]);
+  });
+});
+
+describe("images a drawing names", () => {
+  const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==", "base64");
+  function withFile() {
+    const dataDir = scratch();
+    const dir = join(dataDir, "src");
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(join(dir, "crop.png"), PNG);
+    return { dataDir, dir, store: storeAt(dataDir).store };
+  }
+  const drawing = (html: string, extra: Record<string, unknown> = {}): ShapeBoard => ({ title: "T", claim: "C", views: { picture: { html, ...extra } } });
+
+  test("relative or absolute, in the drawing, its tall and its Show more: copied in and renamed", () => {
+    const { dataDir, dir, store } = withFile();
+    const r = store.update({
+      board: drawing(`<svg><image href="crop.png" x="0" y="0" width="9" height="9"/></svg>`, { tall: { html: `<img src="${join(dir, "crop.png")}">` }, more: { html: `<img src='crop.png'>` } }),
+      project,
+      session,
+      sourceDir: dir,
+    });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    const p = store.read(r.id)!.views.picture!;
+    const name = /files\/([\w.-]+crop\.png)/.exec(p.html)?.[1];
+    expect(name).toBeTruthy();
+    expect(p.tall?.html).toContain(`files/${name}`);
+    expect(p.more?.html).toContain(`files/${name}`);
+    expect(existsSync(join(dataDir, "shapes", inboxProjectKey(project.name, project.root), r.id, "files", name!))).toBe(true);
+  });
+
+  test("a later version copies its images too", () => {
+    const { dir, store } = withFile();
+    const first = store.update({ board: drawing("<p>one</p>"), project, session, sourceDir: dir });
+    if (!first.ok) throw new Error("setup");
+    const next = store.update({ id: first.id, base: 1, board: drawing('<img src="crop.png">'), project, session, sourceDir: dir });
+    expect(next.ok).toBe(true);
+    const name = /files\/[^"]+/.exec(store.read(first.id)!.views.picture!.html)![0];
+    expect(store.filePath(first.id, name)).toBeTruthy();
+  });
+
+  test("what cannot be copied is refused by field: a missing file, not an image, a URL, a bad files/ name", () => {
+    const { dir, store } = withFile();
+    writeFileSync(join(dir, "notes.txt"), "x");
+    const cases: [string, string][] = [
+      ['<img src="gone.png">', "was not found"],
+      ['<img src="notes.txt">', "not a PNG"],
+      ['<image href="https://example.com/a.png"/>', "nothing may load from outside"],
+      ['<img src="files/../a.png">', "is not one file under files/"],
+    ];
+    for (const [html, words] of cases) {
+      const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+      expect(r.ok).toBe(false);
+      if (!r.ok) expect(r.errors.join()).toContain(words);
+    }
+  });
+
+  test("a data image and a #fragment stay as written", () => {
+    const { dir, store } = withFile();
+    const html = '<svg><image href="data:image/png;base64,AAAA"/><use href="#x"/></svg>';
+    const r = store.update({ board: drawing(html), project, session, sourceDir: dir });
+    if (!r.ok) throw new Error(r.code);
+    expect(store.read(r.id)!.views.picture!.html).toBe(html);
+  });
+
+  test("a reference of any kind keeps its images and their crops", () => {
+    const { dir, store } = withFile();
+    const r = store.update({
+      board: { ...drawing("<p>x</p>"), refs: [{ n: 1, kind: "pr", title: "PR", target: "https://github.com/o/r/pull/1", images: [{ src: "crop.png", alt: "It", crop: [0, 0, 0.5, 0.5] }] }] },
+      project,
+      session,
+      sourceDir: dir,
+    });
+    if (!r.ok) throw new Error(JSON.stringify(r));
+    const image = store.read(r.id)!.refs![0]!.images![0]!;
+    expect(image.src).toMatch(/^files\/.*crop\.png$/);
+    expect(image.crop).toEqual([0, 0, 0.5, 0.5]);
+    expect(store.read(r.id)!.refs![0]!.target).toBe("https://github.com/o/r/pull/1");
   });
 });

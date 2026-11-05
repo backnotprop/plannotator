@@ -103,6 +103,9 @@ function textarea(): HTMLTextAreaElement | null {
 }
 
 async function pick(id: string): Promise<HTMLTextAreaElement> {
+  // Annotation is off until the person turns it on, in the dock.
+  const annotate = [...document.querySelectorAll<HTMLElement>('.shp-tbtn')].find((b) => b.title.startsWith('Annotate'));
+  if (annotate) await act(async () => { annotate.click(); });
   await act(async () => { mark(id)!.dispatchEvent(new MouseEvent('click', { bubbles: true, composed: true })); });
   const el = textarea();
   if (!el) throw new Error(`no composer for ${id}`);

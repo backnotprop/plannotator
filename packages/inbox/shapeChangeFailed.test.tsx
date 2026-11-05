@@ -84,6 +84,8 @@ const markedPart = (el: HTMLElement) =>
 async function compose(el: HTMLElement, words: string, button = 'Change it', on: 'board' | 'part' = 'board') {
   if (on === 'part') {
     await wait(() => !!markedPart(el));
+    // Annotation is off until the person turns it on, in the dock.
+    await act(async () => [...el.querySelectorAll<HTMLElement>('.shp-tbtn')].find((b) => b.title.startsWith('Annotate'))!.click());
     await act(async () => markedPart(el)!.click());
   } else act(() => globalComment(el)!.click());
   await wait(() => !!document.querySelector('[data-comment-popover] textarea'));
