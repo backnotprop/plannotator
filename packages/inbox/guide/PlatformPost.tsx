@@ -66,6 +66,7 @@ type Inline = SubmissionTarget['fileComments'][number];
 const inlineKey = (c: Inline) => JSON.stringify([c.path, c.line, c.side, c.start_line ?? null, c.start_side ?? null, c.body]);
 
 const OPEN_PR_KEY = 'plannotator-inbox-platform-open-pr';
+const TOO_MANY_FILE_COMMENTS = 'This review has too many file comments to post at once (500 at most). Nothing was sent.';
 /** Between a PR's URL and a commit, in a target of that commit. */
 const AT = '#plannotator-at-';
 
@@ -170,6 +171,10 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
     if (targets.length < worked.length) setGeneral('');
     return { ...next, targets: [...was.targets.filter((t) => t.status === 'success' && !targets.some((n) => n.prUrl === t.prUrl)), ...targets] };
   };
+  /** A partly posted review put its main comment on the forge: the plan of a new head does not send it again. */
+  const forgetMainWent = (was: ReviewSubmission) => {
+    if (was.targets.some((t) => t.partial?.reviewBodyPosted)) setGeneral('');
+  };
   useEffect(() => {
     if (!open) {
       opened.current = false;
@@ -184,6 +189,7 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
     const sameHead = planHead.current === pull.head_sha;
     planHead.current = pull.head_sha;
     refused.current = false;
+    if (!sameHead) forgetMainWent(plan);
     // Always the comments as they stand. A post of unknown result is offered again: if it went whole, the Inbox says so.
     setPlan(planOver(sameHead && plan.targets.some((t) => t.partial && t.status !== 'success') ? plan : { targets: [], orphans: [] }, live()));
   }, [open, comments, pull, anchor]);
@@ -219,6 +225,7 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
       closePendingTab(pending);
       refused.current = false;
       planHead.current = pull.head_sha;
+      forgetMainWent(shown);
       setPlan(planOf(live()));
       return;
     }
@@ -245,6 +252,10 @@ export default function PlatformPost({ pull, open, comments, readComments, ancho
         const request = JSON.parse(String(init.body)) as Record<string, unknown>;
         const at = typeof request.targetPrUrl === 'string' && request.targetPrUrl.includes(AT) ? request.targetPrUrl.slice(request.targetPrUrl.indexOf(AT) + AT.length) : null;
         const response = await post({ ...request, key: pull.key, head_sha: at ?? planHead.current });
+        if (response.status === 422) {
+          const answer = (await response.clone().json().catch(() => null)) as { field?: unknown } | null;
+          if (answer?.field === 'fileLevelComments') return Response.json({ error: TOO_MANY_FILE_COMMENTS }, { status: 422 });
+        }
         if (response.status === 409) {
           const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
           // These very words went on an earlier try whose answer never came: nothing there holds up the rest.

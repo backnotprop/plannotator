@@ -161,6 +161,13 @@ function allEntries(layerKey: string, scope: string): string[] {
 }
 
 /**
+ * One comment in other words in another entry (a window still on the old head edited it): both are the person's, so it
+ * stays as a comment of its own, for them to see both and delete one. Its id follows from its words, so every read
+ * gives the same one.
+ */
+const asSeparate = (c: KeptComment): KeptComment => ({ ...c, id: `${c.id}:${stampOf(postedSignature(c))}` });
+
+/**
  * A review's words: this head's entry, with what the layer's other entries hold, all of it in view: a push loses no
  * comment. Viewed ticks stay with their head, but for an entry that names no commit (written before the head was known,
  * or by an older Inbox, which named the PR's last update).
@@ -215,12 +222,13 @@ function gather(layerKey: string, scope: string, keptId: string, screen: OnScree
       });
     }
     changed ||= carried.length > 0 || ticks.length > 0;
-    const ids = new Set(mine.map((c) => c.id));
     const comments = [...mine];
     for (const c of carried) {
-      if (ids.has(c.id)) continue;
-      ids.add(c.id);
-      comments.push(c);
+      const apart = asSeparate(c);
+      if (comments.some((o) => o.id === apart.id)) continue;
+      const same = comments.find((o) => o.id === c.id);
+      if (!same) comments.push(c);
+      else if (postedSignature(same) !== postedSignature(c)) comments.push(apart);
     }
     const value = { comments, viewed: [...new Set([...now.viewed, ...ticks])] };
     // The other entries give up their words only once this one holds them.
@@ -371,9 +379,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // since has not gone, and stays.
   const forgetWent = (went: readonly CodeAnnotation[]) => {
     const sent = new Set(went.map(postedSignature));
+    const isGone = (c: KeptComment) => sent.has(postedSignature(c)) || sent.has(postedSignature(asSeparate(c)));
     for (const id of allEntries(layerKey, scope)) {
       const was = readKept(id);
-      const left = was.comments.filter((c) => !sent.has(postedSignature(c)));
+      const left = was.comments.filter((c) => !isGone(c));
       if (left.length < was.comments.length) keep(id, { ...was, comments: left });
     }
     setComments((now) => now.filter((c) => !sent.has(postedSignature(c))));
@@ -407,7 +416,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         : {};
     write({ comments: [...comments.filter((c) => c.id !== annotation.id), { ...annotation, ...read }] });
   };
-  const remove = (id: string) => write({ comments: comments.filter((c) => c.id !== id) });
+  const remove = (id: string) => {
+    write({ comments: comments.filter((c) => c.id !== id) });
+    // Also where another window's entry still holds it, so it does not come back.
+    forgetWent(comments.filter((c) => c.id === id));
+  };
   const here = useMemo(() => comments.filter((c) => isHere(c, { stamp, files })), [comments, stamp, files]);
   const showComment = (id: string) => {
     setSelectedId(id);

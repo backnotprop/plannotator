@@ -2169,3 +2169,132 @@ test.skipIf(!hasDom)('storage full when a push moves the words to the new head: 
     expect(drawn()).toEqual(['l1']);
   });
 });
+
+// A window still on the old head edits a comment another has moved to the new head.
+const seedSplit = (top: InboxPull) => {
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${B}`, JSON.stringify({ comments: [{ ...LINE, text: 'Old words.', readHead: A, readBase: 'main' }], viewed: [] }));
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${A}`, JSON.stringify({ comments: [{ ...LINE, text: 'Edited there.', readHead: A, readBase: 'main' }], viewed: [] }));
+};
+const allWords = () => (reader!.comments!.annotations ?? []).length;
+const listed = (top: InboxPull) => words(top, B);
+
+test.skipIf(!hasDom)('one comment in two entries in different words: a read moves both to the new head, as two comments, and reading again adds none', async () => {
+  const { low, top } = layers({ ...TEAMMATE, head_sha: B });
+  diffHead = B;
+  seedSplit(top);
+  await open([low, top], top);
+  expect(listed(top)).toEqual(['Edited there.', 'Old words.']);
+  expect(window.localStorage.getItem(`${STORE}${top.key}:layer:${A}`)).toBeNull();
+  const ids = JSON.parse(window.localStorage.getItem(`${STORE}${top.key}:layer:${B}`)!).comments.map((c: { id: string }) => c.id);
+  expect(new Set(ids).size).toBe(2);
+  close();
+  await open([low, top], top);
+  expect(JSON.parse(window.localStorage.getItem(`${STORE}${top.key}:layer:${B}`)!).comments.map((c: { id: string }) => c.id)).toEqual(ids);
+});
+
+test.skipIf(!hasDom)('one comment in two entries in the same words stays one', async () => {
+  const { low, top } = layers({ ...TEAMMATE, head_sha: B });
+  diffHead = B;
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${A}`, JSON.stringify({ comments: [{ ...LINE, readHead: A, readBase: 'main', outdated: true }], viewed: [] }));
+  window.localStorage.setItem(`${STORE}${top.key}:layer:${B}`, JSON.stringify({ comments: [{ ...LINE, readHead: A, readBase: 'main' }], viewed: [] }));
+  await open([low, top], top);
+  expect(listed(top)).toEqual([LINE.text]);
+});
+
+for (const [what, stays] of [['the older', 'Edited there.'], ['the edit', 'Old words.']] as const) {
+  test.skipIf(!hasDom)(`both versions on screen, with the other entry still there: ${what} deleted does not come back`, async () => {
+    const { low, top } = layers({ ...TEAMMATE, head_sha: B });
+    diffHead = B;
+    await open([low, top], top);
+    await act(async () => void reader!.comments!.onSave({ ...LINE, text: 'Old words.' }));
+    const key = `${STORE}${top.key}:layer:${A}`;
+    window.localStorage.setItem(key, JSON.stringify({ comments: [{ ...LINE, text: 'Edited there.', readHead: A, readBase: 'main' }], viewed: [] }));
+    await act(async () => void window.dispatchEvent(new StorageEvent('storage', { key })));
+    await settle();
+    const gone = (reader!.comments!.annotations ?? []).find((c) => c.text !== stays)!;
+    expect(allWords()).toBe(2);
+    await act(async () => void reader!.comments!.onDelete?.(gone.id));
+    expect(allWords()).toBe(1);
+    close();
+    await open([low, top], top);
+    expect((reader!.comments!.annotations ?? []).map((c) => c.text)).toEqual([stays]);
+  });
+}
+
+test.skipIf(!hasDom)('both versions posted from the window that sees both: each goes once, and neither comes back from the other entry', async () => {
+  const { low, top } = layers({ ...TEAMMATE, head_sha: B });
+  diffHead = B;
+  await open([low, top], top);
+  await act(async () => void reader!.comments!.onSave({ ...LINE, text: 'Old words.' }));
+  const key = `${STORE}${top.key}:layer:${A}`;
+  window.localStorage.setItem(key, JSON.stringify({ comments: [{ ...LINE, text: 'Edited there.', readHead: B, readBase: 'main' }], viewed: [] }));
+  await act(async () => void window.dispatchEvent(new StorageEvent('storage', { key })));
+  await settle();
+  await openPost();
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(reviews().flatMap((r) => inline(r.body)).sort()).toEqual(['Edited there.', 'Old words.']);
+  expect(words(top, A)).toEqual([]);
+  expect(words(top, B)).toEqual([]);
+});
+
+const moveTo = async (redraw: (comments: readonly Record<string, unknown>[], at: string, opened?: boolean) => Promise<void>, comments: readonly Record<string, unknown>[], at: string) => {
+  await redraw(comments, B, false);
+  await settle();
+  await redraw(comments, at, true);
+  await settle();
+};
+
+test.skipIf(!hasDom)('the dialog, partly posted with the main comment gone, then a new commit: the main comment is not sent again', async () => {
+  const answers = [() => partly([SECOND], { reviewBodyPosted: true }), TOOK];
+  const { sent, redraw } = await postDialog([FIRST, SECOND], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await typeInDialog('The main comment.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await reopen(redraw, [SECOND]);
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('The main comment.');
+  await moveTo(redraw, [SECOND], 'd'.repeat(40));
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(sent[1]!.inline).toEqual(['Second.']);
+  expect(sent[1]!.body).toBe('');
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted with the main comment gone, the retry refused over a new commit: pressing again builds the new plan without it', async () => {
+  const moved = () => Response.json({ error: 'This pull request has new commits since you read it.', code: 'pull_moved' }, { status: 409 });
+  const answers = [() => partly([SECOND], { reviewBodyPosted: true }), moved, TOOK];
+  const { sent, redraw } = await postDialog([FIRST, SECOND], () => answers.shift()!(), B, ON_GITLAB_DIALOG);
+  await typeInDialog('The main comment.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  await redraw([SECOND], 'd'.repeat(40));
+  await settle();
+  await act(async () => inDialog('Retry Unposted').click());
+  await settle();
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(sent.at(-1)!.body).toBe('');
+});
+
+test.skipIf(!hasDom)('the dialog, partly posted with the main comment not gone, then a new commit: what was typed stays, to go', async () => {
+  const { redraw } = await postDialog([FIRST, SECOND], () => partly([SECOND], { reviewBodyPosted: false, postedFileCommentCount: 1 }), B, ON_GITLAB_DIALOG);
+  await typeInDialog('The main comment.');
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  await moveTo(redraw, [SECOND], 'd'.repeat(40));
+  expect(document.querySelector<HTMLTextAreaElement>('[role="dialog"] textarea')?.value).toBe('The main comment.');
+});
+
+test.skipIf(!hasDom)('over the server limit of file comments: the dialog says so in plain words and nothing is forgotten', async () => {
+  const { went, posted } = await postDialog([NOW], () => Response.json({ error: 'fileLevelComments: at most 500 comments, each { path, body }.', field: 'fileLevelComments' }, { status: 422 }));
+  await act(async () => inDialog('Post Comments').click());
+  await settle();
+  expect(dialogText()).toContain('This review has too many file comments to post at once (500 at most). Nothing was sent.');
+  expect(dialogText()).not.toContain('fileLevelComments');
+  expect(went).toEqual([]);
+  expect(posted).toEqual([]);
+});
