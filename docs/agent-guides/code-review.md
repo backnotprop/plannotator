@@ -131,7 +131,7 @@ Request changes, while the primary `Post Comments` keeps the plain comment flow 
 else is `400`, never a silent COMMENT), and `submitGhPRReview` maps it to `REQUEST_CHANGES` on the
 single create-review call AND on the pending-review → `/events` submit path (#1600), with the
 same `See inline comments.` placeholder COMMENT gets when the body is empty (GitHub requires a
-body on both). GitLab posts the note and discussions first, then sets the reviewer state with
+body on both). GitLab posts the note and discussions first, then in one GraphQL request appends you as a reviewer (`mergeRequestSetReviewers`, `APPEND`) and sets the reviewer state with
 the `mergeRequestRequestChanges` GraphQL mutation (a failure there is a `partial` whose retry is
 `request_changes` alone). A platform without a request-changes decision sets
 `requestChangesSupported: false` on the spec's platform input. The menu subtitles then say it

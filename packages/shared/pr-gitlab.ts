@@ -658,32 +658,40 @@ async function approveGlMR(run: RunWithInput, host: string, mrEndpoint: string):
   return result.exitCode === 0 ? null : commandFailure(result);
 }
 
-const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!) {
+// GitLab records requested changes only for a reviewer, and runs a document's
+// mutations in order, so the user is appended as a reviewer first.
+const REQUEST_CHANGES_MUTATION = `mutation($projectPath: ID!, $iid: String!, $username: String!) {
+  mergeRequestSetReviewers(input: { projectPath: $projectPath, iid: $iid, reviewerUsernames: [$username], operationMode: APPEND }) { errors }
   mergeRequestRequestChanges(input: { projectPath: $projectPath, iid: $iid }) { errors }
 }`;
 
-/** GraphQL error messages from a top-level `errors` array or a mutation payload's `errors` strings. */
+/** GraphQL error messages from a top-level `errors` array and every mutation payload's `errors` strings. */
 function graphqlErrors(value: unknown): string[] {
   if (!isRecord(value)) return [];
   const top = Array.isArray(value.errors)
     ? value.errors.map((e) => (isRecord(e) ? stringValue(e.message) : stringValue(e))).filter(Boolean)
     : [];
-  const payload = isRecord(value.data) ? value.data.mergeRequestRequestChanges : undefined;
-  const nested = isRecord(payload) && Array.isArray(payload.errors)
-    ? payload.errors.map(stringValue).filter(Boolean)
-    : [];
+  const payloads = isRecord(value.data) ? Object.values(value.data) : [];
+  const nested = payloads.flatMap((payload) =>
+    isRecord(payload) && Array.isArray(payload.errors) ? payload.errors.map(stringValue).filter(Boolean) : [],
+  );
   return [...top, ...nested];
 }
 
 /**
- * Set the current user's reviewer state to "Requested changes" (GitLab's
- * `mergeRequestRequestChanges`). Returns the failure message, or null on success.
+ * Add the current user as a reviewer and set their state to "Requested
+ * changes". Returns the failure message, or null on success.
  */
-async function requestGlMRChanges(run: RunWithInput, ref: GlMRRef): Promise<string | null> {
+async function requestGlMRChanges(runtime: PRRuntime, run: RunWithInput, ref: GlMRRef): Promise<string | null> {
+  const username = await getGlUser(runtime, ref.host);
+  if (!username) return "could not read the current GitLab user";
   const result = await run(
     "glab",
     apiArgs(ref.host, "graphql", ["--method", "POST", "--input", "-", "-H", "Content-Type:application/json"]),
-    JSON.stringify({ query: REQUEST_CHANGES_MUTATION, variables: { projectPath: ref.projectPath, iid: String(ref.iid) } }),
+    JSON.stringify({
+      query: REQUEST_CHANGES_MUTATION,
+      variables: { projectPath: ref.projectPath, iid: String(ref.iid), username },
+    }),
   );
   if (result.exitCode !== 0) return commandFailure(result);
   let parsed: unknown;
@@ -876,7 +884,7 @@ export async function submitGlMRReview(
     try {
       const failure = action === "approve"
         ? await approveGlMR(runCommandWithInput, ref.host, mrEndpoint)
-        : await requestGlMRChanges(runCommandWithInput, ref);
+        : await requestGlMRChanges(runtime, runCommandWithInput, ref);
       if (failure) {
         approval = "failed";
         approvalError = `Failed to ${verb}: ${failure}`;
