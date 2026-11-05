@@ -470,6 +470,63 @@ describe("drafts", () => {
     expect(((await (await fetch(`${base(server)}/api/inbox/drafts`)).json()) as { drafts: InboxDraft[] }).drafts).toEqual([]);
   });
 
+  test("a draft saved, deleted or sent tells every window's stream (event: drafts, compose); a refused save, a delete of nothing and the phone's stream hear nothing", async () => {
+    const { server, billing } = await setup();
+    /** The `event: drafts` frames a stream has carried so far. */
+    const listen = async (query: string) => {
+      const response = await fetch(`${base(server)}/api/inbox/events${query}`);
+      const reader = response.body!.getReader();
+      let text = "";
+      let open = true;
+      void (async () => {
+        while (open) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          text += new TextDecoder().decode(value);
+        }
+      })().catch(() => {});
+      return {
+        frames: () => text.split("\n\n").filter((frame) => frame.includes("event: drafts")).map((frame) => JSON.parse(frame.split("data: ")[1]!) as unknown),
+        close: () => {
+          open = false;
+          void reader.cancel().catch(() => {});
+        },
+      };
+    };
+    const windowA = await listen("?window=window-aaaa");
+    const phone = await listen("");
+    const settle = () => new Promise((done) => setTimeout(done, 100));
+    await settle();
+    const compose = { compose: true };
+
+    const id = inboxId("drf");
+    const created = (await (await post(server, `/api/inbox/drafts/${id}`, { body: "First words", to: null, base: null })).json()) as { draft: InboxDraft };
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+    // A stale save is refused and changes nothing; neither does deleting a draft that is not there.
+    expect((await post(server, `/api/inbox/drafts/${id}`, { body: "other tab", base: null })).status).toBe(409);
+    expect(((await (await post(server, `/api/inbox/drafts/${inboxId("drf")}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(false);
+    await settle();
+    expect(windowA.frames()).toEqual([compose]);
+
+    expect(((await (await post(server, `/api/inbox/drafts/${id}/delete`, {})).json()) as { deleted: boolean }).deleted).toBe(true);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose]);
+
+    // Sent from a draft: the draft is gone, and the windows hear it (the new thread's record says nothing of the draft).
+    await poll(server, "ses-pi", "pi", billing);
+    const again = inboxId("drf");
+    await post(server, `/api/inbox/drafts/${again}`, { body: "Send me", to: { host: "pi", session: "ses-pi" }, base: null });
+    expect((await post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "Send me", idempotency_key: "c-drafts", draft_id: again })).status).toBe(200);
+    await settle();
+    expect(windowA.frames()).toEqual([compose, compose, compose, compose]);
+    expect(created.draft.id).toBe(id);
+    // The phone's door (no window id) never carries drafts.
+    expect(phone.frames()).toEqual([]);
+    windowA.close();
+    phone.close();
+  });
+
   test("a draft naming an upload that is gone is refused", async () => {
     const { server } = await setup();
     const response = await post(server, `/api/inbox/drafts/${inboxId("drf")}`, { body: "x", files: [inboxId("upl")], base: null });
