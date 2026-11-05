@@ -29,7 +29,7 @@ const gh: Gh = (args) => {
   }
   if (args[0] === 'issue') return JSON.stringify([{ number: 7, title: 'Lamp flickers', labels: [] }, { number: 8, title: 'Private leak', labels: [{ name: 'security' }] }, { number: 9, title: 'Write to me at someone@example.com', labels: [] }]);
   if (args.includes('open')) return JSON.stringify([{ number: 21, title: 'fix(lamp): dim at dusk' }]);
-  return JSON.stringify([{ number: 20, title: 'feat: add a pelican' }, { number: 19, title: 'chore(deps): bump things' }]);
+  return JSON.stringify([{ number: 20, title: 'feat: add a pelican' }, { number: 19, title: 'chore(deps): bump things' }, { number: 18, title: 'feat: mark unread' }]);
 };
 
 test('open issues, open and merged PRs and published notes are all that goes in', () => {

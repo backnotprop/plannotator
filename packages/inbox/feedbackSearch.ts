@@ -37,16 +37,20 @@ function wordsOf(text: string, shortest = 4): string[] {
   return [...new Set(folded.match(/[\p{L}\p{N}]+/gu) ?? [])].filter((word) => word.length >= shortest);
 }
 
-/** The same word, give or take an ending or one slipped letter: "links" and "link", "archve" and "archive". */
+/** The same word, give or take an ending of up to 3 letters or one slipped letter: "links" and "link", "archve" and "archive". */
 function sameWord(a: string, b: string): boolean {
   if (a === b) return true;
   if (a.length < 4 || b.length < 4) return false;
-  if (a.startsWith(b) || b.startsWith(a)) return true;
+  if ((a.startsWith(b) || b.startsWith(a)) && Math.abs(a.length - b.length) <= 3) return true;
   if (a.length < 5 || b.length < 5 || Math.abs(a.length - b.length) > 1) return false;
   let at = 0;
   while (a[at] === b[at]) at += 1;
   return a.slice(at + 1) === b.slice(at + 1) || a.slice(at + 1) === b.slice(at) || a.slice(at) === b.slice(at + 1);
 }
+
+/** Each title is split once. */
+const split = new Map<string, string[]>();
+const wordsOfEntry = (entry: string) => split.get(entry) ?? split.set(entry, wordsOf(entry)).get(entry)!;
 
 export function searchFeedback(data: SearchData, text: string): SearchHit[] {
   const searched = text.slice(0, FEEDBACK_MESSAGE_MAX);
@@ -55,7 +59,7 @@ export function searchFeedback(data: SearchData, text: string): SearchHit[] {
   const typedAll = wordsOf(searched, 1);
   /** Common words over the entry's length, so of two titles sharing as much, the shorter is closer. */
   const closeness = (entry: string) => {
-    const words = wordsOf(entry);
+    const words = wordsOfEntry(entry);
     const common = typed.filter((word) => words.some((other) => sameWord(other, word))).length;
     return common / Math.min(typed.length, words.length || 1) >= SIMILAR ? common + common / words.length : 0;
   };

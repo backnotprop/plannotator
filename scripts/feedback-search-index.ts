@@ -25,13 +25,13 @@ export const FEATURES: SearchFeature[] = [
   { title: 'Archive', names: ['done button', 'mark done', 'mark as done', 'done state', 'finish thread', 'close thread', 'delete thread', 'remove thread', 'dismiss thread', 'trash thread', 'trash folder', 'trash button', 'trash can', 'move to trash'], definition: "In a thread's ⋯ menu. Unarchive reopens it.", url: `${DOCS}#what-you-see` },
   { title: 'Mark unread', names: ['mark unread', 'mark as unread', 'mark thread unread', 'thread as unread', 'keep unread'], definition: "On a thread's row and in its header.", url: `${REPO_URL}/releases/tag/v0.28.43` },
   { title: 'Pin a thread', names: ['pin thread', 'pin message', 'star thread', 'favorite thread', 'favourite thread', 'bookmark thread'], definition: "In a thread's ⋯ menu.", url: `${DOCS}#what-you-see` },
-  { title: 'Snooze a thread', names: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind me later', 'remind me tomorrow', 'postpone thread'], definition: 'Top bar, or ⋯ menu on a phone.', url: `${REPO_URL}/releases/tag/v0.28.46` },
+  { title: 'Snooze a thread', names: ['snooze thread', 'snooze message', 'snooze this', 'snooze button', 'remind later', 'remind tomorrow', 'postpone thread'], definition: 'Top bar, or ⋯ menu on a phone.', url: `${REPO_URL}/releases/tag/v0.28.46` },
   { title: 'Voice', names: ['by voice', 'voice input', 'voice reply', 'use voice', 'use microphone', 'microphone input', 'microphone button', 'dictate reply', 'dictate message', 'speech to text'], definition: 'Turn on Voice in Settings, then press the mic.', url: `${REPO_URL}/releases/tag/v0.28.43` },
-  { title: 'New message', names: ['compose message', 'compose new message', 'compose button', 'write first', 'write to agent first', 'start new message', 'write new message', 'send new message', 'new message button'], definition: 'The pencil beside Search.', url: `${DOCS}#what-you-see` },
+  { title: 'New message', names: ['compose message', 'compose new message', 'compose button', 'message first', 'message agent first', 'start new message', 'write new message', 'send new message', 'new message button'], definition: 'The pencil beside Search.', url: `${DOCS}#what-you-see` },
   { title: 'Search', names: ['search message', 'search thread', 'find thread', 'find message', 'search across thread', 'search across message', 'search all message'], definition: 'At the top of the sidebar.', url: `${DOCS}#what-you-see` },
   { title: 'Settings, Appearance', names: ['dark mode', 'light mode', 'font size', 'text size', 'change theme', 'own theme', 'own color'], definition: 'Theme, text size and colors.', url: `${DOCS}#what-you-see` },
-  { title: 'Settings, Rows', names: ['compact row', 'compact list', 'rows compact', 'row density', 'list density', 'density option', 'rows feel cramped', 'list too cramped', 'row too cramped'], definition: 'Density, first line and more.', url: `${REPO_URL}/releases/tag/v0.28.47` },
-  { title: 'Over your tailnet', names: ['use on my phone', 'use on phone', 'open on my phone', 'inbox on my phone', 'use from my phone', 'reply from my phone', 'open from my phone', 'check from my phone', 'use on mobile', 'mobile app', 'iphone app', 'android app', 'ipad app'], definition: 'Open it from your other devices.', url: `${DOCS}#over-your-tailnet` },
+  { title: 'Settings, Rows', names: ['compact row', 'compact list', 'rows compact', 'row density', 'list density', 'density option', 'tighter rows', 'denser list', 'smaller rows'], definition: 'Density, first line and more.', url: `${REPO_URL}/releases/tag/v0.28.47` },
+  { title: 'Over your tailnet', names: ['use on phone', 'open on phone', 'inbox on phone', 'use from phone', 'reply from phone', 'open from phone', 'check from phone', 'use on mobile', 'mobile app', 'iphone app', 'android app', 'ipad app'], definition: 'Open it from your other devices.', url: `${DOCS}#over-your-tailnet` },
 ];
 
 export interface Release {
@@ -77,7 +77,7 @@ export function buildSearchData(input: { issues: Titled[]; pulls: Titled[]; rele
       .sort((a, b) => version(b.tag).reduce((order, part, at) => order || part - version(a.tag)[at]!, 0))
       .flatMap((release) => releaseTitles(release.body ?? '').map((title) => ({ title, path: `releases/tag/${release.tag}` }))),
   ];
-  const seen = new Set<string>();
+  const seen = new Set(FEATURES.map((feature) => feature.title.toLowerCase()));
   return {
     features: FEATURES,
     links: links.filter(({ title }) => {

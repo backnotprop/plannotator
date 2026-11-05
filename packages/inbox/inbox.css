@@ -6662,8 +6662,8 @@ kbd[data-keycap]::after { content: attr(data-keycap); }
 /* Sidebar → Feedback (components/FeedbackDialog.tsx): the message, an optional category and email, the line
    saying what is sent, then Prompt your agent to send feedback, Cancel and Send; a short "sent" state. On a phone the
    dialog is a bottom sheet (the sheet corner on top, the safe area below), 44 px targets. */
-dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); margin: max(24px, calc(50vh - 208px)) auto auto; max-height: calc(100vh - max(24px, calc(50vh - 208px)) - 24px); }
-/* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show. */
+dialog.ib-dlg.ib-fbk { --ib-fbk-top: max(24px, min(calc(50vh - 208px), calc(100vh - 580px))); width: min(540px, calc(100vw - 32px)); margin: var(--ib-fbk-top) auto auto; max-height: calc(100vh - var(--ib-fbk-top) - 24px); }
+/* "These might help". Empty it takes no room. On a computer the dialog is placed from its top (above), so the box stays put when lines show; in a short window it starts higher, so five lines leave Send in view. */
 .ib-fbk-rel-h { margin: 10px 0 3px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-fbk-rel ul { list-style: none; margin: 0; padding: 0; }
 .ib-fbk-rel li { position: relative; padding: 2px 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--ib-fs-13, 13px); line-height: 1.4; color: var(--muted-foreground); }

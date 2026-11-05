@@ -34,7 +34,7 @@ describe('searchFeedback', () => {
   });
 
   test('unrelated or short words find nothing', () => {
-    for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden', 'beacon zebras']) expect(titles(text)).toEqual([]);
+    for (const text of ['', 'the', 'the a of it', 'zebras dancing on saturn', 'lamp ideas for my garden', 'beacon zebras', 'light']) expect(titles(text)).toEqual([]);
   });
 
   test('only the first 4,000 characters are searched', () => {

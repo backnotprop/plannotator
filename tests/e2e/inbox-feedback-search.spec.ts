@@ -68,6 +68,24 @@ test('the list loads at the first search, not with the page', async ({ page }) =
   expect(loads()).toHaveLength(1);
 });
 
+test('erasing the box while the list still loads leaves no lines', async ({ page }) => {
+  let release = () => {};
+  const held = new Promise<void>((done) => (release = done));
+  await page.route('**/*feedbackSearch*', async (route) => {
+    await held;
+    await route.continue();
+  });
+  await openForm(page);
+  const box = page.locator('[data-feedback-message]');
+  await page.keyboard.type('jira links', { delay: 5 });
+  await page.waitForTimeout(500);
+  await box.fill('');
+  await page.waitForTimeout(500);
+  release();
+  await page.waitForTimeout(500);
+  await expect(lines(page)).toHaveCount(0);
+});
+
 test('no match changes nothing on screen', async ({ page }) => {
   await openForm(page);
   const form = () => page.locator('.ib-fbk-form').boundingBox();
@@ -98,8 +116,22 @@ test('a link opens in a new tab with no way back, and the words stay', async ({ 
   await expect(page.locator('[data-feedback-message]')).toHaveValue('need a done button');
 });
 
-test('in a short window, Tab brings Send into view with five lines showing', async ({ page }) => {
-  await page.setViewportSize({ width: 1366, height: 625 });
+for (const height of [600, 625, 700, 768, 900]) {
+  test(`at ${height} px high, Send and Cancel show with five lines, with no scrolling`, async ({ page }) => {
+    await page.setViewportSize({ width: 1366, height });
+    await openForm(page);
+    await page.keyboard.type('the diff view is slow', { delay: 15 });
+    await expect(lines(page)).toHaveCount(5);
+    const dialog = (await page.locator('dialog[open]').boundingBox())!;
+    for (const button of ['[data-feedback-send]', '.ib-fbk-acts .ib-btn:not(.ib-left):not(.ib-pri)']) {
+      const at = (await page.locator(button).boundingBox())!;
+      expect(at.y + at.height, button).toBeLessThanOrEqual(Math.min(height, dialog.y + dialog.height));
+    }
+  });
+}
+
+test('in a very short window, Tab brings Send into view with five lines showing', async ({ page }) => {
+  await page.setViewportSize({ width: 1366, height: 480 });
   await openForm(page);
   await page.keyboard.type('the diff view is slow', { delay: 15 });
   await expect(lines(page)).toHaveCount(5);
@@ -110,7 +142,7 @@ test('in a short window, Tab brings Send into view with five lines showing', asy
   await expect(page.locator('[data-feedback-send]')).toBeFocused();
   const at = (await page.locator('[data-feedback-send]').boundingBox())!;
   const dialog = (await page.locator('dialog[open]').boundingBox())!;
-  expect(at.y + at.height).toBeLessThanOrEqual(Math.min(625, dialog.y + dialog.height));
+  expect(at.y + at.height).toBeLessThanOrEqual(Math.min(480, dialog.y + dialog.height));
 });
 
 test('words survive a press on the backdrop, and a sent message clears them', async ({ page }) => {

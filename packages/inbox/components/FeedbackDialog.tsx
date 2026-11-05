@@ -61,8 +61,12 @@ export function FeedbackDialog({ version, phone, onSend, onCopyPrompt, onClose }
   const doneRef = useRef<HTMLButtonElement>(null);
   const closed = useRef(false);
   useEffect(() => {
-    const pause = setTimeout(() => void searchShipped(message).then(setHits), SEARCH_PAUSE_MS);
-    return () => clearTimeout(pause);
+    let latest = true;
+    const pause = setTimeout(() => void searchShipped(message).then((found) => latest && setHits(found)), SEARCH_PAUSE_MS);
+    return () => {
+      latest = false;
+      clearTimeout(pause);
+    };
   }, [message]);
   useEffect(() => {
     unsent = { message, category, contact };
