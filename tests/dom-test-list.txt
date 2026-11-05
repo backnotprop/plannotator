@@ -77,6 +77,7 @@ packages/inbox/links.test.tsx
 packages/inbox/replyFileLinks.test.tsx
 packages/inbox/replyFeedback.test.tsx
 packages/inbox/replyFocusOnOpen.test.tsx
+packages/inbox/permissionFocus.test.tsx
 packages/inbox/replyBoxTyping.test.tsx
 packages/inbox/replyFootPhone.test.tsx
 packages/inbox/issueRefs.test.tsx
@@ -95,6 +96,8 @@ packages/inbox/decisionCardContract.test.tsx
 packages/inbox/threadFolding.test.tsx
 packages/inbox/threadNameMeta.test.tsx
 packages/inbox/threadHeader.test.tsx
+packages/inbox/launchMenuGuest.test.tsx
+packages/inbox/composeLaunchPulls.test.tsx
 packages/inbox/choiceLabels.test.tsx
 packages/inbox/pasteTarget.test.ts
 packages/inbox/seenOnSight.test.tsx
@@ -133,6 +136,9 @@ packages/inbox/endedSession.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
+packages/inbox/composeTrust.test.tsx
+packages/inbox/openInTerminal.test.tsx
+packages/inbox/runTrustHowto.test.tsx
 packages/inbox/sessionLabelPicker.test.tsx
 packages/inbox/sessionLabels.test.tsx
 packages/inbox/listHeaderCompose.test.tsx
