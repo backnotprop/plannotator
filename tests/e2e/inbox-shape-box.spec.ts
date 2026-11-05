@@ -15,6 +15,7 @@ import { join, resolve } from 'node:path';
 import { type Browser, devices, expect, firefox, type Page, test, webkit } from '@playwright/test';
 import { removeInboxScratch } from './inbox-scratch';
 import { seedShapeWorld, type ShapeWorld } from './inbox-shape-seed';
+import { SimAgent } from '../../scripts/inbox-sim';
 
 const repo = resolve(__dirname, '../..');
 const binary = resolve(process.env.PLANNOTATOR_E2E_BINARY ?? join(repo, '.local/plannotator'));
@@ -424,7 +425,7 @@ for (const [look, options, thread] of [
     const undo = page.locator('[data-toast-undo]').last();
     await expect(undo).toBeVisible();
     await undo.click();
-    await expect(page.locator('.ib-toast', { hasText: 'Added to your reply' })).toHaveCount(0);
+    await expect(page.locator('.ib-toast', { hasText: 'Added to your reply' })).toHaveCount(0, { timeout: 1000 });
 
     await page.getByRole('button', { name: 'Close Shape' }).click();
     await expect(page.locator('[data-shape-layer]')).toHaveCount(0);
@@ -439,11 +440,13 @@ for (const [look, options, thread] of [
   });
 }
 
-/** A thread of its own (its reply draft starts empty): one agent's first message in a project it has not written in. */
-async function freshThread(key: string, agent: number, project: string) {
-  const sent = await w.agents[agent]!.send({ project_path: w.projects[project]!, subject: `Board ${key}`, body: 'The board is drawn.' });
+/** A thread of its own (its reply draft starts empty): a new session's first message, from its own agent. */
+async function freshThread(key: string): Promise<{ thread: string; agent: SimAgent }> {
+  const agent = await SimAgent.connect({ binary, env: w.env, name: 'Claude Code', host: 'claude-code' });
+  w.agents.push(agent);
+  const sent = await agent.send({ project_path: w.projects.plannotator!, subject: `Board ${key}`, body: 'The board is drawn.' });
   w.threads[key] = sent.thread_id as string;
-  return key;
+  return { thread: key, agent };
 }
 const addToReply = async (page: Page, text = '') => {
   if (text) await composer(page).locator('textarea').fill(text);
@@ -451,32 +454,48 @@ const addToReply = async (page: Page, text = '') => {
   await expect(composer(page)).toHaveCount(0);
 };
 const replyFileNames = (page: Page) => page.locator('[data-compose-file-name]').evaluateAll((fs) => fs.map((f) => f.getAttribute('data-compose-file-name')));
+const omniboxBox = async (page: Page) => drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
+/** The board again over its thread, as its chip opens it (the address the Inbox keeps). */
+async function reopenBoard(page: Page, thread: string, id: string) {
+  await page.evaluate((hash) => {
+    window.location.hash = hash;
+  }, `thread=${w.threads[thread]}&shape=${id}`);
+  await expect(page.locator('.shp-dock')).toBeVisible();
+  await page.waitForTimeout(3600); // drawn in
+  if ((await crosshair(page).getAttribute('aria-pressed')) !== 'true') await crosshair(page).click();
+  await page.mouse.move(5, 5);
+}
+/** Taken down by its own Undo, a Send or a Cancel: well inside its own 7 s, so it never just ran out. */
+const gone = (toast: ReturnType<Page['locator']>) => expect(toast).toHaveCount(0, { timeout: 1000 });
 
 test('Add to reply’s Undo: once, its own press only (even of the same words), its toast gone; edited words stay', async ({ browser }) => {
-  const thread = await freshThread('undo', 0, 'pando');
+  const { thread } = await freshThread('undo');
   const id = store('reply-undo', thread);
   const { context, page, problems } = await openBoard(browser, id, {}, thread);
   const reply = page.getByRole('textbox', { name: /^Reply to / });
   const added = page.locator('.ib-toast', { hasText: 'Added to your reply' });
-  const omnibox = async () => drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
   await crosshair(page).click();
   await page.mouse.move(5, 5);
 
-  // The same box twice, nothing typed: the same words twice, and a second picture named beside the first.
-  await omnibox();
-  await addToReply(page);
+  // The same box twice, words typed only the first time: its quote twice, those words between, and a second picture
+  // named beside the first.
+  await omniboxBox(page);
+  await addToReply(page, 'Between.');
   const one = await reply.inputValue();
-  expect(one.startsWith('> Picture · ')).toBe(true);
-  await omnibox();
+  const quote = one.split('\n\n')[0]!;
+  expect(quote.startsWith('> Picture · ')).toBe(true);
+  expect(one).toBe(`${quote}\n\nBetween.`);
+  await omniboxBox(page);
   await addToReply(page);
-  await expect(reply).toHaveValue(`${one}\n\n${one}`);
+  await expect(reply).toHaveValue(`${one}\n\n${quote}`);
   await expect.poll(() => replyFileNames(page)).toEqual(['omnibox.png', 'omnibox-2.png']);
   await clearOfDock(page, added);
   await page.screenshot({ path: join(replyShots, '04-undo-toast-light.png') });
 
-  // Its Undo: the second press's words and file, and the toast goes. Z then has nothing to undo.
+  // Its Undo: the second press's quote (not the first's, the same words) and file, and the toast goes. Z then has
+  // nothing to undo.
   await page.locator('[data-toast-undo]').click();
-  await expect(added).toHaveCount(0);
+  await gone(added);
   await expect(reply).toHaveValue(one);
   await expect.poll(() => replyFileNames(page)).toEqual(['omnibox.png']);
   await page.keyboard.press('z');
@@ -494,7 +513,7 @@ test('Add to reply’s Undo: once, its own press only (even of the same words), 
   const edited = (await reply.inputValue()).replace('Grey it out.', 'Grey it out, and say why.');
   await reply.fill(edited);
   await page.locator('[data-toast-undo]').click();
-  await expect(added).toHaveCount(0);
+  await gone(added);
   await expect(reply).toHaveValue(edited);
   await expect.poll(() => replyFileNames(page)).toEqual(['omnibox.png']);
   await page.screenshot({ path: join(replyShots, '06-undo-after-edit-light.png') });
@@ -502,21 +521,74 @@ test('Add to reply’s Undo: once, its own press only (even of the same words), 
   await context.close();
 });
 
-test('Add to reply, then Send: the reply goes with its picture, and its Undo ends with it', async ({ browser }) => {
-  const thread = await freshThread('send', 1, 'relay');
-  const id = store('reply-send', thread);
+test('Add to reply with the box closed: Undo works on the saved draft, and a second picture is named beside the draft’s', async ({ browser }) => {
+  const { thread } = await freshThread('closed');
+  const id = store('reply-closed', thread);
   const { context, page, problems } = await openBoard(browser, id, {}, thread);
+  const reply = page.getByRole('textbox', { name: /^Reply to / });
+  const added = page.locator('.ib-toast', { hasText: 'Added to your reply' });
+  const files = page.locator('[data-compose-file-name]');
+  const close = async () => {
+    await page.getByRole('button', { name: 'Close Shape' }).click();
+    await expect(page.locator('[data-shape-layer]')).toHaveCount(0);
+  };
   await crosshair(page).click();
   await page.mouse.move(5, 5);
-  await drag(page, await at(page, 'omnibox', 0.05, 0.2), await at(page, 'omnibox', 0.4, 0.8));
+
+  // Added, then Esc in the reply box (it closes into a draft), then Z: the draft loses them both.
+  await omniboxBox(page);
+  await addToReply(page, 'Cancel me.');
+  await close();
+  await expect(files).toHaveAttribute('data-compose-file', 'done');
+  await reply.press('Escape');
+  await expect(reply).toHaveCount(0);
+  await expect(added).toHaveCount(1);
+  await page.keyboard.press('z');
+  await gone(added);
+  await page.waitForTimeout(600); // the draft saved
+  await page.keyboard.press('r');
+  await expect(reply).toBeVisible();
+  await expect(reply).toHaveValue('');
+  await expect(files).toHaveCount(0);
+  await page.screenshot({ path: join(replyShots, '07-undo-after-esc-light.png') });
+  await reply.press('Escape');
+
+  // Added, Cancel (the draft keeps the picture), the same box again: the second picture is omnibox-2.png.
+  await reopenBoard(page, thread, id);
+  await omniboxBox(page);
+  await addToReply(page);
+  await close();
+  await expect(files).toHaveAttribute('data-compose-file', 'done');
+  await page.locator('.ib-pfoot').getByRole('button', { name: 'Cancel' }).click();
+  await expect(reply).toHaveCount(0);
+  await reopenBoard(page, thread, id);
+  await omniboxBox(page);
+  await addToReply(page);
+  await close();
+  await expect.poll(() => replyFileNames(page)).toEqual(['omnibox.png', 'omnibox-2.png']);
+  await page.screenshot({ path: join(replyShots, '08-second-picture-after-cancel-light.png') });
+  expect(problems).toEqual([]);
+  await context.close();
+});
+
+test('Add to reply, then Send (⌘Enter): the reply goes with its picture, and its Undo ends with it', async ({ browser }) => {
+  const { thread, agent } = await freshThread('send');
+  const id = store('reply-send', thread);
+  const { context, page, problems } = await openBoard(browser, id, {}, thread);
+  const reply = page.getByRole('textbox', { name: /^Reply to / });
+  await crosshair(page).click();
+  await page.mouse.move(5, 5);
+  await omniboxBox(page);
   await addToReply(page, 'Put the engine’s mark here.');
   await page.getByRole('button', { name: 'Close Shape' }).click();
   await expect(page.locator('[data-shape-layer]')).toHaveCount(0);
   await expect(page.locator('[data-compose-file-name]')).toHaveAttribute('data-compose-file', 'done');
-  await page.locator('.ib-pfoot').getByRole('button', { name: 'Send' }).click();
-  // Well inside the toast's 7 s: the Send took it down, so no Undo can open an empty reply box.
-  await expect(page.locator('.ib-toast', { hasText: 'Added to your reply' })).toHaveCount(0, { timeout: 2500 });
-  const sent = await w.agents[1]!.nextReply(w.threads[thread]!, 20);
+  const toast = page.locator('.ib-toast', { hasText: 'Added to your reply' });
+  await expect(toast).toHaveCount(1);
+  await reply.press('ControlOrMeta+Enter');
+  // The Send took it down at once, so no Undo can open an empty reply box.
+  await gone(toast);
+  const sent = await agent.nextReply(w.threads[thread]!, 20);
   expect(String(sent.body)).toContain('Put the engine’s mark here.');
   expect(JSON.stringify(sent)).toContain('omnibox.png');
   expect(problems).toEqual([]);
@@ -525,7 +597,7 @@ test('Add to reply, then Send: the reply goes with its picture, and its Undo end
 
 test('a picture too big for the limit comes smaller, never missing', async ({ browser }) => {
   // A part that is pure noise: no size of it compresses, so its picture at full size is over SHAPE_LIMITS.notePicture.
-  const thread = await freshThread('big', 1, 'pando');
+  const { thread } = await freshThread('big');
   const dir = join(w.root, 'boards', 'reply-big');
   mkdirSync(dir, { recursive: true });
   const maker = await browser.newPage();

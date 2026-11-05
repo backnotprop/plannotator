@@ -1113,6 +1113,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 }] : []),
                 ...(boxSelect?.onAddToReply ? [{
                   label: 'Add to reply',
+                  spends: true,
                   onSelect: (text: string) => {
                     boxSelect.onAddToReply!({ ...target.box!, label: quoteLabel(target) }, text);
                     setTarget(null);
@@ -1130,8 +1131,9 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               onSubmit={(text) => {
                 const sent = target;
                 if (sent.box) sentBox(sent.el);
-                const input: Promise<Omit<ShapeNoteInput, 'kind' | 'v'>> = sent.box ? boxNoteInput(sent.box, text) : Promise.resolve({ view: sent.view, part: sent.id, quote: sent.text, text });
-                void input.then(sendChange).then((ok) => {
+                // A part's change goes at once, as before; a box's once its picture is drawn.
+                const sending = sent.box ? boxNoteInput(sent.box, text).then(sendChange) : sendChange({ view: sent.view, part: sent.id, quote: sent.text, text });
+                void sending.then((ok) => {
                   if (sent.box && ok) boxSettled(sent.el);
                   // Not taken: the same box again, with the words and why (unless another one opened meanwhile).
                   if (!ok) setTarget((open) => open ?? { ...sent, retry: { text, error: SHAPE_CHANGE_NOT_SENT } });

@@ -2,6 +2,9 @@
  * A board's Add to reply: the reply's words for a box, and its Undo taking out only what that press added.
  */
 import { expect, test } from 'bun:test';
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
+import { InlineMarkdown } from '@plannotator/ui/components/InlineMarkdown';
 import { freeName, replyWordsCount,shapeReplyFileName, shapeReplyWords, withFreeName, withoutReplyWords } from './addToReply';
 
 test('several parts quote their words after the label; one part’s label already quotes its own', () => {
@@ -40,11 +43,28 @@ test('two presses with the same words: each Undo takes out its own press, not th
   expect(withoutReplyWords(first, added, 1)).toBe(first);
 });
 
-test('a board’s backticks and links reach the reply as plain words', () => {
-  expect(
-    shapeReplyWords({ label: 'Picture · 2 parts', parts: ['a', 'b'], words: 'Run `rm` [here](https://x.test)' }, ''),
-  ).toBe('> Picture · 2 parts · “Run \\`rm\\` \\[here\\](https://x.test)”');
-  expect(shapeReplyWords({ label: 'Picture · “`x`”', parts: ['a'], words: '`x`' }, 'a `b`')).toBe('> Picture · “\\`x\\`”\n\na `b`');
+test('a board’s words reach the reply as plain words: the Inbox’s markdown makes nothing of them', () => {
+  // Every inline thing InlineMarkdown draws (a thread's message renders through it), each beside plain words.
+  // In groups under the line's 80-character cut.
+  for (const board of [
+    'Run `rm` [here](https://x.test) ![a](b.png) [[wiki]]',
+    '**bold** *it* _it_ ~~gone~~ $x^2$ \\(y\\) a\\b',
+    '#fff #12 @bob https://bare.test/a',
+    '<https://auto.test> <me@mail.test> <x:y> <!-- hid -->',
+  ]) {
+    const line = shapeReplyWords({ label: 'Picture · 2 parts', parts: ['a', 'b'], words: board }, '');
+    expect(line.startsWith('> Picture · 2 parts · “')).toBe(true);
+    const html = renderToStaticMarkup(createElement(InlineMarkdown, { text: line.slice(2) }));
+    // No element at all: no link, code, emphasis, math, swatch or mention; the words themselves, all of them.
+    expect(html).not.toContain('<');
+    const shown = html.replace(/﻿/g, '').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&').replace(/&quot;/g, '"').replace(/&#x27;/g, "'");
+    expect(shown).toBe(`Picture · 2 parts · “${board}”`);
+  }
+  // One part's label (its quoted words) the same.
+  const one = shapeReplyWords({ label: 'Picture · “*Save* @bob”', parts: ['a'], words: '*Save* @bob' }, 'a `b`');
+  expect(renderToStaticMarkup(createElement(InlineMarkdown, { text: one.split('\n')[0]!.slice(2) }))).not.toContain('<');
+  // What was typed is the person's own markdown, kept as typed.
+  expect(one.endsWith('\n\na `b`')).toBe(true);
 });
 
 test('a second picture of the same name is renamed, never replacing the first', () => {

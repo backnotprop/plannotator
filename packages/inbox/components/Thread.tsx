@@ -58,7 +58,7 @@ import { inboxMessageImageBase, inlineImageRefFromSrc, markTallImage } from '../
 import { reportUnsentReply } from '../unsent';
 import { registerReloadFlush } from '../stalePage';
 import { clearLateVoiceMiss, LATE_VOICE_MISSED, noteLateVoiceMiss, useLateVoiceMiss } from '../lateVoice';
-import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook } from '../replyDraft';
+import { landInReplyDraft, landWordsInReplyDraft, replySendStarts, useReplyDraft, type ReplyBoxTook, type ReplyDraftFiles } from '../replyDraft';
 import { useReplyHasWords, useReplyText, useReplyTextStore, useReplyTextWhile, type ReplyText } from '../replyText';
 import { GUIDE_REQUEST_WORDS, guideRequestTarget, guideTargetCanEnd } from '../guideRequest';
 import { conflictText, DraftHead, DraftFootNote, DraftStamp } from './DraftLabel';
@@ -1705,8 +1705,13 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     setTaggedIds(ids);
     if (ids.length === 0) setTagMode('ask');
   }, []);
+  /** A board's Add to reply whose Undo is live (one at a time): `closing` as the box closes into a draft, `end` when it can no longer. */
+  const partUndo = useRef<{ end: () => void; closing: () => void } | null>(null);
   /** `discarded`: Discard closed it, so a file still uploading stops instead of joining the draft. */
   const closeBox = (discarded = false) => {
+    // A board's Add to reply still undoable: it reads the box as it goes into the draft (its Undo works on that).
+    if (!discarded) partUndo.current?.closing();
+    else partUndo.current?.end();
     // A Send waiting to be confirmed: read back now, so a reply that went leaves no stale "Draft" foot.
     const earlier = unconfirmed.get(thread.thread_id);
     if (earlier) forgetUnconfirmed(earlier, 'closed');
@@ -5091,10 +5096,10 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   }, [replyWords, sending]);
 
   // A board's Add to reply: its words after the draft's, its picture beside them. Its toast's Undo works once and takes
-  // out exactly that press's words and file; a Send or another thread ends it (an Undo then would open an empty box).
+  // out exactly that press's words and file, in the box or, once Cancel or Esc closed it, in the saved draft; a Send,
+  // Discard or another thread ends it.
   const changeReplyLive = useRef(changeReply);
   changeReplyLive.current = changeReply;
-  const partUndo = useRef<{ end: () => void } | null>(null);
   useEffect(() => {
     if (!replyPart || sending) return;
     onReplyPartTaken?.();
@@ -5105,7 +5110,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     // Which of the words' places is this press's: the same box added twice reads the same.
     const nth = words ? replyWordsCount(kept, words) : 0;
     if (words) changeReply(kept.trim() ? `${kept.trimEnd()}\n\n${words}` : words);
-    const file = replyPart.file ? withFreeName(replyPart.file, replyFiles.files.map((f) => f.name)) : null;
+    // Its name beside every file the reply holds: a closed box's draft files come back through state, after this.
+    const taken = [...replyFiles.files.map((f) => f.name), ...draftFilesWithMine(replyDraft.draft?.files ?? []).map((f) => f.name)];
+    const file = replyPart.file ? withFreeName(replyPart.file, taken) : null;
     const keys = file ? replyFiles.add([file]) : [];
     setError(null);
     partUndo.current?.end();
@@ -5116,22 +5123,41 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       if (partUndo.current?.end === end) partUndo.current = null;
       onToastGone?.(undo);
     };
-    partUndo.current = { end };
+    // Its file's upload, once in (a box opened again shows the draft's files under their upload ids), and the box as it
+    // last closed into the draft.
+    const uploads = new Set<string>();
+    let closed: { text: string; files: ReplyDraftFiles } | null = null;
+    const closing = () => {
+      for (const f of replyFiles.current()) if (keys.includes(f.key) && f.upload) uploads.add(f.upload.upload_id);
+      const text = boxRef.current.text;
+      closed = { text, files: replyFiles.draftFiles(text) };
+    };
+    partUndo.current = { end, closing };
     const undo = () => {
       if (!live) return;
       end();
-      for (const key of keys) replyFiles.remove(key);
-      if (!words) return;
-      const now = boxRef.current.open ? boxRef.current.text : replyDraft.draft?.body ?? '';
       // Words the person changed since are theirs now: the file goes, the words stay.
-      const next = withoutReplyWords(now, words, nth);
-      if (next !== now) changeReplyLive.current(next);
+      if (boxRef.current.open) {
+        for (const key of [...keys, ...uploads]) replyFiles.remove(key);
+        if (!words) return;
+        const now = boxRef.current.text;
+        const next = withoutReplyWords(now, words, nth);
+        if (next !== now) changeReplyLive.current(next);
+        return;
+      }
+      // Closed (Cancel, Esc): the draft it was saved as, without them.
+      if (!closed) return;
+      const text = words ? withoutReplyWords(closed.text, words, nth) : closed.text;
+      const files = closed.files.filter((f) => !uploads.has(f.upload_id));
+      if (text === closed.text && files.length === closed.files.length) return;
+      replyDraft.save(text, files);
+      replyDraft.flush();
     };
     onToast?.({ icon: 'check', lead: 'Added to your reply', phoneLead: 'Added to your reply', speech: 'Added to your reply.', onUndo: undo });
     // openBox and changeReply read this render's draft and Send state.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [replyPart, sending]);
-  // A Send, or another thread, ends the Undo.
+  // A Send, or another thread, ends the Undo (Discard ends it in closeBox).
   useEffect(() => {
     if (sending) partUndo.current?.end();
   }, [sending]);

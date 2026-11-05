@@ -102,7 +102,7 @@ interface CommentPopoverProps {
   askAILabel?: string;
   /** Opt-in: more actions, drawn after the main one in this order (the right end; Tab reaches them last), each taking
    *  whatever is typed (Shape's box: "Show me", "Add to reply"). Absent or empty → nothing drawn. */
-  extraActions?: readonly { label: string; onSelect: (text: string) => void }[];
+  extraActions?: readonly { label: string; onSelect: (text: string) => void; /** It takes the words for good: the `draftKey` draft is cleared, as a submit clears it. */ spends?: boolean }[];
   /** Opt-in: `/` and `$` skill-reference autocomplete (document UI surfaces). Off by default. */
   skillReferences?: boolean;
   /**
@@ -553,6 +553,11 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
     [mentionSource, mentionChipPeople, mentionTokenClassName],
   );
 
+  const runExtraAction = (action: NonNullable<CommentPopoverProps['extraActions']>[number]) => {
+    if (action.spends && draftKey) draftStore.delete(draftKey);
+    action.onSelect(text.trim());
+  };
+
   const handleSubmit = useCallback(() => {
     const canSubmitEmpty = allowEmptySubmit && initialText.trim().length > 0;
     if (hasUnsavedContent || canSubmitEmpty) {
@@ -824,7 +829,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
               {extraActions?.map((action, i) => (
                 <button
                   key={action.label}
-                  onClick={() => action.onSelect(text.trim())}
+                  onClick={() => runExtraAction(action)}
                   style={{ order: -1 - i }}
                   className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
                 >
@@ -991,7 +996,7 @@ export const CommentPopover: React.FC<CommentPopoverProps> = ({
           {extraActions?.map((action, i) => (
             <button
               key={action.label}
-              onClick={() => action.onSelect(text.trim())}
+              onClick={() => runExtraAction(action)}
               style={{ order: -1 - i }}
               className="px-2 py-1.5 text-xs font-medium rounded-md text-muted-foreground hover:text-primary hover:bg-muted transition-colors"
             >

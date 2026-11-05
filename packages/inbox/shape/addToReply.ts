@@ -17,8 +17,19 @@ const clip = (text: string, max: number) => {
   return one.length > max ? `${one.slice(0, max - 1).trimEnd()}…` : one;
 };
 
-// The board's words read as words in the reply: a backtick or a [..](..) of theirs makes no code or link.
-const plain = (text: string) => text.replace(/[\\`[\]]/g, (c) => `\\${c}`);
+// A zero-width no-break space: the Inbox's markdown (InlineMarkdown) reads it as space, and nobody sees it.
+const BREAK = '﻿';
+/**
+ * The board's words read as words in the reply, never as markup of the Inbox's markdown (InlineMarkdown): what it
+ * lets a backslash escape gets one (code, links, emphasis, strikethrough, math, swatches and issue refs); what it
+ * does not (an @mention, a bare or <auto> link, an HTML comment) gets the invisible break where its pattern starts.
+ */
+export const plainQuote = (text: string) =>
+  text
+    .replace(/[\\`*_~$[\]#]/g, (c) => `\\${c}`)
+    .replace(/([@<])/g, `$1${BREAK}`)
+    .replace(/:\/\//g, `:${BREAK}//`);
+const plain = plainQuote;
 
 /** The reply's words for a box: "> Picture · 3 parts · “Google DuckDuckGo Bing”", a blank line, what was typed. */
 export function shapeReplyWords(selection: Pick<ShapeBoxSelection, 'label' | 'parts' | 'words'>, text: string): string {
