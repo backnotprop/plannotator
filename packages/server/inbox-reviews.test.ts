@@ -432,7 +432,8 @@ describe("the record", () => {
     expect(createInboxPullLinks(dir).landings()).toEqual([landing]);
     const file = join(inboxDir(dir), INBOX_PULL_LINKS_FILE);
     const whole = JSON.parse(readFileSync(file, "utf8"));
-    whole.landed.bad = { thread_id: "t", url: "https://x", number: 1, state: "gone" };
+    whole.landed.bad = { thread_id: "t", key: "github.com/o/r#2", url: "https://x", number: 2, state: "gone" };
+    whole.landed.keyless = { thread_id: "t", url: "https://x", number: 3, state: "closed" };
     writeFileSync(file, JSON.stringify(whole));
     expect(createInboxPullLinks(dir).landings()).toEqual([landing]);
     chmodSync(inboxDir(dir), 0o500);
