@@ -468,6 +468,7 @@ test('an HTML page\'s pin leaves with its comment: after Send, after Remove in t
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   // What was sent stays as an earlier comment, read only; its pin does not.
   await expect(panel.locator('[data-earlier-row]')).toBeVisible();
+  await expect(panel.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(pin).toHaveCount(0);
 
   const listed = await seededThread(world);
@@ -493,7 +494,9 @@ test('a highlight leaves the open file with its comment after Send', async ({ br
   await expect(fileHighlight(page)).toBeVisible();
   await pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' }).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
-  await expect(page.locator('[data-attachment-pane]').locator('[data-earlier-row]')).toBeVisible();
+  const filePane = page.locator('[data-attachment-pane]');
+  await expect(filePane.locator('[data-earlier-row]')).toBeVisible();
+  await expect(filePane.locator('.ib-apanel [data-annotation-id]')).toHaveCount(0);
   await expect(fileHighlight(page)).toHaveCount(0);
   await page.context().close();
 });

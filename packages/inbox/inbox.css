@@ -6846,9 +6846,10 @@ dialog.ib-dlg.ib-fbk { width: min(540px, calc(100vw - 32px)); }
 
 /* Earlier comments (EarlierSection.tsx): at the foot of the comments column's timeline, in its one scroll area. The row
    stays in view while its list scrolls. A comment reads as a resolved one: a card's quote and words, dimmed, no actions. */
-/* The panel takes the column's height, so its own scroll area scrolls. It grew past the column before, and a list too
-   long for the column was cut off beside the thread with no way to reach the rest. */
-.pn-inbox .ib-apanel > [data-annotation-panel] { flex: 1 1 0; min-height: 0; }
+/* The panel may shrink to the column's height, so its own scroll area scrolls. It grew past the column before, and a list
+   too long for the column was cut off with no way to reach the rest. A short list keeps its own height, and what the
+   column has under it (a guided review's foot) stays right under the list. */
+.pn-inbox .ib-apanel > [data-annotation-panel] { flex-shrink: 1; min-height: 0; }
 .ib-earlier { margin: 2px -8px -8px; padding: 0 8px 8px; }
 .ib-earlier[data-after] { padding-top: 4px; border-top: 1px solid color-mix(in oklch, var(--border) 50%, transparent); }
 .pn-inbox .ib-earlier-row { position: sticky; top: 0; z-index: 2; display: flex; align-items: center; gap: 6px; box-sizing: border-box; width: calc(100% + 16px); margin: 0 -8px; padding: 7px 14px; border: 0; background: var(--card); font-size: var(--ib-fs-11, 11px); font-weight: 500; color: var(--muted-foreground); text-align: left; cursor: pointer; }

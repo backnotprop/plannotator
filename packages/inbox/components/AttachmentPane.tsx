@@ -2500,7 +2500,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                   <Icon name="chevD" size={13} />
                 </button>
               )}
-              {!(onlyEarlier && elsewhere === 0 && props.strip.picks === 0 && props.strip.annotations === 0) && (
+              {!(onlyEarlier && props.strip.picks === 0 && props.strip.annotations === 0) && (
               <p className="ib-fvsend" data-strip-chip="">
                 <b>{chipText}</b> {props.strip.picks === 0 && props.strip.annotations === 1 ? 'rides' : 'ride'} your next Send to {props.agent}.
                 {elsewhere > 0 && ` ${elsewhere} ${elsewhere === 1 ? 'is' : 'are'} on other files.`}

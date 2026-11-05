@@ -349,6 +349,10 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   await expect(panel).toContainText('package.json · line 3');
   await expect(viewer.locator('[data-strip-chip]')).toHaveText('2 comments');
   await shot('4.3-guide-comments-in-the-panel');
+  // A short list keeps its own height: the foot stays right under it, not at the bottom of the column.
+  const foot = (await viewer.locator('.ib-gstrip').boundingBox())!;
+  const lastCard = (await panel.locator('[data-annotation-id]').last().boundingBox())!;
+  expect(foot.y - (lastCard.y + lastCard.height)).toBeLessThan(80);
 
   // Kept in the store with the thread's annotations, keyed to the message and the file.
   const model = (await (await page.request.get(`${world.url}api/inbox/threads/${sent.thread_id}/attachments`)).json()) as { annotations: { message_id: string; path: string; guide: { side: string; line_start: number; line_end: number } }[] };
