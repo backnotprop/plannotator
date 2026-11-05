@@ -45,6 +45,8 @@ const VERDICTS: Record<string, string> = {
 /** About 9 MB: past the review page's 8 MB, and more than an argument can carry. The fake model refuses anything past 1 MB, with a model's words. */
 const BIG_LINES = 400_000;
 const REFUSAL = 'prompt is too long: 900000 tokens > 200000 maximum';
+/** #508: its run never answers, so it stays "being ranked" for the whole file. */
+const STILL_RANKING = 'Rename the ledger tables';
 const RULES = 'Anything in billing or charges.\nAnything that changes permissions.';
 
 function ghPull(number: number, title: string, fields: Record<string, unknown> = {}) {
@@ -105,6 +107,7 @@ const fs = require('fs');
 const log = ${JSON.stringify(join(dir, 'pi.log'))};
 const verdicts = ${JSON.stringify(VERDICTS)};
 const refusal = ${JSON.stringify(REFUSAL)};
+const stillRanking = ${JSON.stringify(STILL_RANKING)};
 if (process.argv.includes('--version')) { console.log('0.90.0'); process.exit(0); }
 fs.appendFileSync(log, JSON.stringify({ argv: process.argv.slice(2) }) + '\\n');
 const send = (m) => process.stdout.write(JSON.stringify(m) + '\\n');
@@ -128,6 +131,7 @@ require('readline').createInterface({ input: process.stdin }).on('line', (line) 
       return;
     }
     const title = /^Title: (.*)$/m.exec(m.message)?.[1] ?? '';
+    if (title === stillRanking) return;
     send({ type: 'message_end', message: { role: 'assistant', content: [{ type: 'text', text: verdicts[title] ?? 'no idea' }] } });
     send({ type: 'agent_end' });
   }
@@ -228,6 +232,7 @@ test.beforeAll(async ({ browser }) => {
             ghPull(505, 'Split the settings page'),
             ghPull(506, 'Change who can open settings', { baseRefName: 'b505' }),
             ghPull(507, 'Regenerate the API client'),
+            ghPull(508, STILL_RANKING),
           ],
         },
         authored: { nodes: [] },
@@ -392,7 +397,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await expect(row(503).locator('[data-pull-risk="low"]')).toBeVisible({ timeout: 30_000 });
   // A stack is one row, at its highest layer.
   await expect(row(506).locator('[data-pull-risk="high"]')).toBeVisible({ timeout: 30_000 });
-  await expect.poll(() => prompts().length).toBe(7);
+  await expect.poll(() => prompts().length).toBe(8);
   await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible({ timeout: 30_000 });
   await expect(row(504).locator('[data-pull-risk="failed"]')).toContainText('I would say this looks fine to me.');
 
@@ -413,7 +418,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   await shots('rows-refused');
 
   const judged = piLog().filter((l) => l.argv?.includes('--no-tools'));
-  expect(judged).toHaveLength(7);
+  expect(judged).toHaveLength(8);
   // Nothing of a diff is ever in an agent's argv.
   expect(judged.every((l) => l.argv!.join(' ').length < 2_000)).toBe(true);
   expect(judged[0]!.argv!.join(' ')).toContain('--no-tools --no-session --no-extensions --no-skills --no-context-files --provider anthropic --model claude-sonnet-5 --thinking low');
@@ -429,7 +434,7 @@ test('the rows: all three levels; an answer that makes no sense and a refused di
   expect(readFileSync(join(dataDir, 'inbox', 'pull-risk.json'), 'utf8')).not.toContain('Anything in billing');
 });
 
-test('the filter: High, Medium and up, remembered; what failed to rank stays on screen', async () => {
+test('the filter: High, Medium and up, remembered; under High what it could not place is one quiet count that shows it', async () => {
   const pick = async (option: string) => {
     await page.locator('[data-pulls-risk-chip]').click();
     await page.locator(`[data-pulls-risk-option="${option}"]`).click();
@@ -448,16 +453,30 @@ test('the filter: High, Medium and up, remembered; what failed to rank stays on 
   await expect(row(506)).toBeVisible();
   await expect(row(502)).toHaveCount(0);
   await expect(row(503)).toHaveCount(0);
-  await expect(row(504)).toBeVisible();
-  await expect(row(507)).toBeVisible();
+  // Two failed (#504, #507) and one still being ranked (#508): one line, no rows.
+  for (const n of [504, 507, 508]) await expect(row(n)).toHaveCount(0);
+  const notRanked = page.locator('[data-pulls-risk-not-ranked-toggle]');
+  await expect(notRanked).toHaveText('3 not ranked');
   await expect(page.locator('[data-pulls-risk-not-judged]')).toHaveCount(0);
+  await page.mouse.move(0, 0);
   await shots('filter-high');
+  await notRanked.click();
+  for (const n of [504, 507, 508]) await expect(page.locator(`[data-pulls-risk-not-ranked] [data-pulls-row="${keyOf(n)}"]`)).toBeVisible();
+  await expect(row(504).locator('[data-pull-risk="failed"]')).toBeVisible();
+  await expect(row(508).locator('[data-pull-risk]')).toHaveCount(0);
+  await page.mouse.move(0, 0);
+  await shots('filter-high-open');
+  await notRanked.click();
+  await expect(row(504)).toHaveCount(0);
   await page.reload();
   await expect(row(501)).toBeVisible();
   await expect(row(503)).toHaveCount(0);
   await pick('medium');
   await expect(row(502)).toBeVisible();
   await expect(row(503)).toHaveCount(0);
+  // Medium and up as before: a failed row stays in the list, and no count of High's.
+  await expect(row(504)).toBeVisible();
+  await expect(page.locator('[data-pulls-risk-not-ranked]')).toHaveCount(0);
   await pick('all');
   await expect(row(503)).toBeVisible();
   await expect(row(504)).toBeVisible();
@@ -485,7 +504,7 @@ test("the PR's page and its review carry the mark and the sentence; a stack show
 test('a restart redoes nothing', async () => {
   await context.close();
   await stopScratchInbox(dataDir);
-  const failed = (l: { prompt?: string }) => l.prompt!.includes('Title: Upgrade the linter') || l.prompt!.includes('Title: Regenerate the API client');
+  const failed = (l: { prompt?: string }) => ['Upgrade the linter', 'Regenerate the API client', STILL_RANKING].some((title) => l.prompt!.includes(`Title: ${title}`));
   const before = prompts().filter((l) => !failed(l)).length;
   await start();
   context = await page.context().browser()!.newContext({ viewport: { width: 1440, height: 900 }, colorScheme: 'light' });

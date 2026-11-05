@@ -184,7 +184,7 @@ export function PullsPage(given: PullsPageProps) {
           </div>
         )}
         {!model && !state.error && <p className="ib-pr-empty">Reading your pull requests…</p>}
-        {model && ranked && <PullList model={model} groups={ranked.groups} filter={props.filter} risk={activeRisk} notJudged={ranked.notJudged} judgments={judgments} riskFailed={riskFailed} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
+        {model && ranked && <PullList model={model} groups={ranked.groups} filter={props.filter} risk={activeRisk} notJudged={ranked.notJudged} notRanked={ranked.notRanked} judgments={judgments} riskFailed={riskFailed} selected={open?.stack.id ?? null} phone={phone} onOpen={(id) => props.onOpenStack(id)} />}
       </div>
       <PullsFoot model={model} loading={state.loading} error={model ? state.error : null} onRefresh={state.refresh} />
       {!phone && <ListColumnEdge />}
@@ -254,6 +254,7 @@ function PullList({
   filter,
   risk,
   notJudged,
+  notRanked,
   judgments,
   riskFailed,
   selected,
@@ -265,6 +266,7 @@ function PullList({
   filter: PullFilter;
   risk: RiskFilterValue;
   notJudged: number;
+  notRanked: readonly InboxPullItem[];
   judgments: RiskJudgments;
   riskFailed: RiskFailures;
   selected: string | null;
@@ -275,11 +277,13 @@ function PullList({
   // With the risk filter on, nothing it kept stays folded away.
   const waitingOpen = waitingFolded || risk !== 'all';
   const now = useRelativeClock(true);
+  const [notRankedOpen, setNotRankedOpen] = useState(false);
   const total = groups.on_you.length + groups.ready.length + groups.waiting.length;
-  // A stack opened from the folded group keeps it open.
+  // A stack opened from the folded group keeps it open, and one opened from those not ranked keeps them shown.
   useEffect(() => {
     if (selected && groups.waiting.some((i) => i.stack.id === selected)) setWaitingOpen(true);
-  }, [selected, groups.waiting]);
+    if (selected && notRanked.some((i) => i.stack.id === selected)) setNotRankedOpen(true);
+  }, [selected, groups.waiting, notRanked]);
   // The notices this view needs: Mine and To review are the person's own lists, whole whatever Others did.
   const notices = pullsNotices(model, filter);
   const notJudgedLine =
@@ -288,12 +292,48 @@ function PullList({
         {plural(notJudged, 'pull request')} not ranked yet.
       </p>
     ) : null;
+  const labels = repoLabels([...pullRows(groups), ...notRanked].map((item) => item.stack));
+  const row = (item: InboxPullItem) => (
+    <PullRow
+      key={item.stack.id}
+      item={item}
+      link={stackLink(item.stack, model.links)}
+      links={model.links}
+      repoLabel={labels.get(inboxPullRepoKey(item.stack.host, item.stack.repo)) ?? repoName(item.stack.repo)}
+      selected={item.stack.id === selected}
+      phone={phone}
+      now={now}
+      judgments={judgments}
+      riskFailed={riskFailed}
+      onOpen={() => onOpen(item.stack.id)}
+    />
+  );
+  // High: what it can't place, behind one quiet line in the fold's own shape.
+  const notRankedLine =
+    notRanked.length > 0 ? (
+      <div className="ib-group ib-pr-fold" role="group" aria-label="Not ranked" data-pulls-risk-not-ranked={notRanked.length}>
+        <button type="button" className="ib-pr-foldbtn" onClick={() => setNotRankedOpen((v) => !v)} aria-expanded={notRankedOpen} data-pulls-risk-not-ranked-toggle="">
+          <Icon name={notRankedOpen ? 'chevD' : 'chevR'} size={14} />
+          {notRankedOpen ? (
+            <>
+              Not ranked <span className="ib-n">{formatCount(notRanked.length)}</span>
+            </>
+          ) : (
+            `${formatCount(notRanked.length)} not ranked`
+          )}
+        </button>
+        {notRankedOpen && notRanked.map(row)}
+      </div>
+    ) : null;
   if (total === 0 && risk !== 'all') {
     return (
-      <div className="ib-pr-empty" data-pulls-empty="risk">
-        <p className="ib-pr-empty-h">{risk === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
-        {notJudgedLine}
-      </div>
+      <>
+        <div className="ib-pr-empty" data-pulls-empty="risk">
+          <p className="ib-pr-empty-h">{risk === 'high' ? 'Nothing high risk.' : 'Nothing at medium risk or above.'}</p>
+          {notJudgedLine}
+        </div>
+        {notRankedLine}
+      </>
     );
   }
   // Others is on its way (read in the background) and nothing shows yet: never "Nothing open" before it answers.
@@ -328,22 +368,6 @@ function PullList({
       </div>
     );
   }
-  const labels = repoLabels(pullRows(groups).map((item) => item.stack));
-  const row = (item: InboxPullItem) => (
-    <PullRow
-      key={item.stack.id}
-      item={item}
-      link={stackLink(item.stack, model.links)}
-      links={model.links}
-      repoLabel={labels.get(inboxPullRepoKey(item.stack.host, item.stack.repo)) ?? repoName(item.stack.repo)}
-      selected={item.stack.id === selected}
-      phone={phone}
-      now={now}
-      judgments={judgments}
-      riskFailed={riskFailed}
-      onOpen={() => onOpen(item.stack.id)}
-    />
-  );
   return (
     <>
       {notices.length > 0 && (
@@ -398,6 +422,7 @@ function PullList({
         </div>
       )}
       {notJudgedLine}
+      {notRankedLine}
     </>
   );
 }

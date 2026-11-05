@@ -1,7 +1,7 @@
 /**
  * PR risk ranking in the window. What regresses:
  *  - the filter hiding what it should keep (a stack's high layer, a row in the folded group), or hiding a row with a
- *    layer not ranked without a word;
+ *    layer not ranked without a word, or High losing a row it can't place (failed, or not ranked yet) for good;
  *  - a save during the model read leaving the agent on the person's own, possibly expensive, default;
  *  - a merged layer's old judgment deciding a stack;
  *  - the filter closing the stack open beside the list;
@@ -159,7 +159,7 @@ test.skipIf(!hasDom)('High keeps the high rows, also from the folded group, and 
   spy('pullRisk', async () => ({ ...JUDGED, judgments }));
   await mount(page());
   expect(shownRows().sort()).toEqual([key(2), key(4), key(6)].sort());
-  expect(document.querySelector('[data-pulls-risk-not-judged]')?.textContent).toBe('1 pull request not ranked yet.');
+  expect(document.querySelector('[data-pulls-risk-not-ranked-toggle]')?.textContent).toBe('1 not ranked');
 });
 
 test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it can say, High hides it and counts it, high still shows', async () => {
@@ -175,7 +175,7 @@ test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it c
   window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
   await mount(page());
   expect(shownRows()).not.toContain(key(6));
-  expect(document.querySelector('[data-pulls-risk-not-judged]')?.getAttribute('data-pulls-risk-not-judged')).toBe('1');
+  expect(document.querySelector('[data-pulls-risk-not-ranked]')?.getAttribute('data-pulls-risk-not-ranked')).toBe('1');
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
 
@@ -185,10 +185,10 @@ test.skipIf(!hasDom)('a stack with a layer not ranked: Low is not something it c
   spy('pullRisk', async () => ({ ...JUDGED, judgments: high }));
   await mount(page());
   expect(shownRows()).toContain(key(6));
-  expect(document.querySelector('[data-pulls-risk-not-judged]')).toBeNull();
+  expect(document.querySelector('[data-pulls-risk-not-ranked]')).toBeNull();
 });
 
-test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Low; no filter hides it; the review says it too', async () => {
+test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Low; Medium and up keeps it in the list; the review says it too', async () => {
   const reason = 'prompt is too long: 2500000 tokens > 200000 maximum';
   const judgments = { ...JUDGED.judgments };
   delete judgments[key(3)];
@@ -205,7 +205,7 @@ test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Lo
   if (root) await act(async () => root!.unmount());
   document.body.innerHTML = '';
 
-  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'medium');
   await mount(page());
   const shown = shownRows();
   expect(shown).toContain(key(3));
@@ -213,8 +213,46 @@ test.skipIf(!hasDom)('a PR that failed to rank says so with the reason, never Lo
   expect(shown).not.toContain(key(1));
   // Ranked first: a failed row can't push a high one down.
   expect(shown.indexOf(key(2))).toBeLessThan(shown.indexOf(key(3)));
-  // On screen, so not counted as hidden.
-  expect(document.querySelector('[data-pulls-risk-not-judged]')).toBeNull();
+  // On screen, so not counted as hidden; and that is High's line only.
+  expect(document.querySelectorAll('[data-pulls-risk-not-judged], [data-pulls-risk-not-ranked]').length).toBe(0);
+});
+
+test.skipIf(!hasDom)('High hides what failed and what is not ranked yet behind one quiet count, and a click shows them as rows', async () => {
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  const judgments = { ...JUDGED.judgments };
+  delete judgments[key(1)]; // not ranked yet (a run still going counts)
+  delete judgments[key(3)]; // failed
+  delete judgments[key(6)]; // #5 low, #6 failed: the stack can't be said to be Low
+  const reason = 'prompt is too long: 2500000 tokens > 200000 maximum';
+  spy('pullRisk', async () => ({ ...JUDGED, judgments, failed: { [key(3)]: reason, [key(6)]: reason }, pending: 1 }));
+  await mount(page());
+  expect(shownRows().sort()).toEqual([key(2), key(4)].sort());
+  const toggle = document.querySelector<HTMLButtonElement>('[data-pulls-risk-not-ranked-toggle]')!;
+  expect(toggle.textContent).toBe('3 not ranked');
+  // One line, not two.
+  expect(document.querySelectorAll('[data-pulls-risk-not-judged]').length).toBe(0);
+  expect(toggle.getAttribute('aria-expanded')).toBe('false');
+  // Last in the list, after every group.
+  expect(document.querySelector('[data-pulls-risk-not-ranked]')!.nextElementSibling).toBeNull();
+  await act(async () => toggle.click());
+  expect(shownRows().sort()).toEqual([key(1), key(2), key(3), key(4), key(6)].sort());
+  expect(markOf(3)).toBe('failed');
+  expect(markOf(6)).toBe('failed');
+  expect(markOf(1)).toBeNull();
+  const opened = [...document.querySelectorAll('[data-pulls-risk-not-ranked] [data-pulls-row]')].map((r) => r.getAttribute('data-pulls-row'));
+  expect(opened.sort()).toEqual([key(1), key(3), key(6)].sort());
+  await act(async () => toggle.click());
+  expect(shownRows().sort()).toEqual([key(2), key(4)].sort());
+});
+
+test.skipIf(!hasDom)('High with nothing high: the empty words, and the count still shows what it could not place', async () => {
+  window.localStorage.setItem('plannotator-inbox-pr-risk-filter', 'high');
+  spy('pullRisk', async () => ({ ...JUDGED, judgments: { [key(1)]: { level: 'low', why: 'Docs.' } }, failed: { [key(2)]: 'Too big.' } }));
+  await mount(page());
+  expect(document.querySelector('[data-pulls-empty]')?.getAttribute('data-pulls-empty')).toBe('risk');
+  await act(async () => document.querySelector<HTMLButtonElement>('[data-pulls-risk-not-ranked-toggle]')!.click());
+  expect(shownRows()).toContain(key(2));
+  expect(shownRows()).not.toContain(key(1));
 });
 
 test.skipIf(!hasDom)('a failure on a layer of a stack with a higher one found: the stack shows that level', async () => {
@@ -241,7 +279,7 @@ test.skipIf(!hasDom)("nothing passes: says so, instead of saying there are no pu
   await mount(page());
   expect(shownRows()).toEqual([]);
   expect(document.querySelector('[data-pulls-empty]')?.getAttribute('data-pulls-empty')).toBe('risk');
-  expect(Number(document.querySelector('[data-pulls-risk-not-judged]')?.getAttribute('data-pulls-risk-not-judged'))).toBeGreaterThan(0);
+  expect(Number(document.querySelector('[data-pulls-risk-not-ranked]')?.getAttribute('data-pulls-risk-not-ranked'))).toBeGreaterThan(0);
 });
 
 test.skipIf(!hasDom)('the filter never closes the stack open beside the list, and the page says the sentence', async () => {
