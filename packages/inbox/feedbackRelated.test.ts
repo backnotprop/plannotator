@@ -177,6 +177,7 @@ describe('the opening decides', () => {
       release('Skip questions from the open-questions list'),
       release('Re-ask from the open-questions list'),
       release('Question cards'),
+      release('Jira links on Board cards'),
       release('Click Inbox to refresh'),
       release('Right-click a thread'),
       release('Start a Grok Build session from the Inbox'),
@@ -252,6 +253,42 @@ describe('the opening decides', () => {
 
   test('past its first words a run-on is a later part: it can still name a long title', () => {
     expect(said('my agents write all day and by the evening I have lost track of who asked what and it would help with replying when the agent session has ended')).toEqual(['Replying when the agent session has ended']);
+  });
+
+  test('a title named whole holds however long its line gets', () => {
+    const message = 'Support Jira links on Board cards as references so the planning stays in one place and I can follow my tickets from there';
+    const typed = message.split(' ');
+    const shown = typed.map((_, n) => said(typed.slice(0, n + 1).join(' ')).includes('Jira links on Board cards'));
+    expect(shown.indexOf(true)).toBeGreaterThan(-1);
+    expect(shown.slice(shown.indexOf(true)).every(Boolean)).toBe(true);
+  });
+
+  test('nothing draws on the product name and a word that says nothing yet', () => {
+    // As in the shipped file, where titles say "show" and "start" often.
+    const common = Array.from({ length: 11 }, (_, n) => [release(`The thread list shows number ${n}`), release(`Start an agent number ${n} from the Inbox`)]).flat();
+    const index = relatedIndex({ ...LOOSE, releases: [...LOOSE.releases, ...common] });
+    for (const text of ['Inbox: show', 'Inbox show', 'Inbox: start', 'Inbox start', 'Inbox: show me which threads']) expect(relatedLinks(index, text).map((link) => link.title)).toEqual([]);
+  });
+
+  test('the product name does not make up the words a title needs', () => {
+    expect(said('The Inbox page does not refresh on its own')).toEqual([]);
+    expect(said('Inbox: start a new claude session')).toEqual([]);
+    expect(said('Inbox: start a new claude session when I start a new thread')).toEqual([]);
+  });
+
+  test('a rare word is enough beside the product name, and the asks still come early', () => {
+    expect(said('the inbox uses too much memory')).toHaveLength(1);
+    expect(said('Inbox: mark a thread')).toEqual([]);
+    expect(said('Inbox: mark a thread unread')).toEqual(['Mark unread']);
+    expect(said('Inbox: a Done button')).toEqual(['Archive']);
+  });
+
+  test('a later part names a title without saying the product', () => {
+    expect(said('The sidebar is fine and works well. Is there a way to start a Grok Build session')).toEqual(['Start a Grok Build session from the Inbox']);
+  });
+
+  test('past its first words, a run-on can still ask for a feature in a few words', () => {
+    expect(said('my agents write all day and by the evening I have lost track of what they wanted and mark unread')).toEqual(['Mark unread']);
   });
 
   test('a later part never replaces, and never adds a second line', () => {

@@ -62,6 +62,10 @@ const STOP = new Set(
     /\s+/,
   ),
 );
+/** The product itself: said in most messages and most titles, so it never makes a match. "Inbox: show" asks nothing yet. */
+const notProduct = (term: string) => term !== 'inbox';
+/** One word alone must be this rare to count: "memory" says what is wrong, "show" says nothing yet. */
+const ONE_WORD_MAX_SEEN = 10;
 /** Words every other title has: they lift a match and never make one alone. */
 const WEAK = new Set(
   `plannotator inbox app window page file files thread threads message messages agent agents session sessions fix fixes fixed error issue bug work works working update updates updated button review reviews reply replies`.split(
@@ -155,7 +159,8 @@ function saysPhrase(said: string[], phrase: string[]): boolean {
 const OPENING_WORDS = 16;
 /** An opening needs this many words that count: "Hi team," says nothing yet. */
 const OPENING_MIN_TERMS = 3;
-const LATER_MIN_TERMS = 4;
+/** A title of at least this many words, named whole and in order, holds however long the sentence around it gets. */
+const NAMED_MIN_TERMS = 4;
 /** What a later part must score to add a line, on top of naming a title outright. */
 const LATER_MIN_SCORE = MIN_SCORE * 2;
 /** Later parts add at most this many lines, and never replace one. */
@@ -169,9 +174,9 @@ function partsOf(typed: string): string[] {
   return [...cut, ...rest].filter(Boolean);
 }
 
-/** Every word of a title of at least LATER_MIN_TERMS words, in order: the bar for words after the opening. "Question cards" in passing does not count. */
+/** Every word of a title of at least NAMED_MIN_TERMS words, in order: "Question cards" in passing does not count. */
 function namesTitle(said: string[], terms: string[]): boolean {
-  if (new Set(terms).size < LATER_MIN_TERMS) return false;
+  if (new Set(terms).size < NAMED_MIN_TERMS) return false;
   let at = -1;
   for (const term of terms) {
     at = said.indexOf(term, at + 1);
@@ -201,6 +206,7 @@ function matches(index: RelatedIndex, text: string, later: boolean): { entry: En
       if (asked || (real.length <= FEATURE_MAX_WORDS && entry.phrases.some((phrase) => saysPhrase(spoken, phrase)))) found.push({ entry, score: Infinity });
       continue;
     }
+    const titleTerms = entry.terms.filter(notProduct);
     const length = entry.terms.length * 2.5;
     let score = 0;
     for (const term of query) {
@@ -219,20 +225,20 @@ function matches(index: RelatedIndex, text: string, later: boolean): { entry: En
     }
     score *= 1 + 0.4 * inARow;
     if (later) {
-      if (score >= LATER_MIN_SCORE && namesTitle(said, entry.terms)) found.push({ entry, score });
+      if (score >= LATER_MIN_SCORE && namesTitle(said, titleTerms)) found.push({ entry, score });
       continue;
     }
     // The gate: a word in common is not enough.
     const realInTitle = real.filter((term) => entry.terms.includes(term)).length;
-    const titleAsked = entry.terms.length ? entry.terms.filter((term) => query.includes(term)).length / entry.terms.length : 0;
+    const titleAsked = titleTerms.length ? titleTerms.filter((term) => query.includes(term)).length / titleTerms.length : 0;
     // "Mark unread": the title is what they asked for, in its own words and in about half of theirs.
-    const snug = new Set(entry.terms).size >= 2 && titleAsked >= 0.6 && realInTitle >= 1 && query.filter((term) => entry.terms.includes(term)).length >= query.length / 2;
+    const snug = new Set(titleTerms).size >= 2 && titleAsked >= 0.6 && realInTitle >= 1 && query.filter((term) => titleTerms.includes(term)).length >= query.length / 2;
     // Two of three words through a long title, in the other order, are a coincidence.
     const firsts = real.map((term) => entry.terms.indexOf(term)).filter((at) => at >= 0);
     const sameOrder = firsts.every((at, n) => n === 0 || at > firsts[n - 1]!);
     const covered = real.length >= 2 && realInTitle >= Math.max(2, Math.ceil(real.length * 0.67)) && sameOrder;
-    const oneWord = real.length === 1 && inARow >= 1; // One real word needs its neighbour beside it: "blank page", not "blank lines".
-    if ((snug || covered || oneWord) && score >= MIN_SCORE) found.push({ entry, score });
+    const oneWord = real.length === 1 && inARow >= 1 && (index.documents.get(real[0]!) ?? 0) <= ONE_WORD_MAX_SEEN; // One real word needs its neighbour beside it: "blank page", not "blank lines".
+    if ((snug || covered || oneWord || namesTitle(said, titleTerms)) && score >= MIN_SCORE) found.push({ entry, score });
   }
   // Stable: at the same score the file's order, newest first, decides.
   return found.sort((a, b) => (a.score === b.score ? 0 : b.score - a.score));
