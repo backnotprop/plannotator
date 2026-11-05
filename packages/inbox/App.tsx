@@ -134,6 +134,7 @@ import { errorToast } from './toastError';
 import { canToggleRead, MARK_READ_LOOK_WAIT_MS, MARK_READ_UNDO_MS, MARK_UNREAD_RETRY_WAIT_MS, markReadToast, markUnreadToast, seenHeldInNew } from './markRead';
 import { threadLink, type RowMenuAction } from './rowMenu';
 import { movePin, unpinnedWhere } from './pins';
+import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, shownProjects, type ProjectAction } from './projectMenu';
@@ -3357,6 +3358,7 @@ function Inbox() {
     const pinnedAt = index >= 0 ? (pinsNow[index]!.pinned_at ?? null) : null;
     // Where it still is, from the pinned row (an archived thread has none in the list) or the list.
     const listed = (latestRef.current?.pins ?? []).find((pin) => pin.thread_id === row.thread_id) ?? rowOf(row.thread_id) ?? (threadRow?.thread_id === row.thread_id ? threadRow : null);
+    if (pinned) noteStarred(row.thread_id);
     try {
       await inboxApi.pin(row.thread_id, pinned);
     } catch (cause) {
@@ -3368,15 +3370,15 @@ function Inbox() {
     await refreshList(false);
     const subject = row.subject ?? '(no subject)';
     if (pinned) {
-      say(`Pinned “${subject}”`);
+      say(`Starred “${subject}”`);
       return;
     }
     const canUndo = index >= 0 && pinnedAt !== null;
     showToast({
       icon: 'unpin',
-      lead: 'Unpinned',
+      lead: 'Unstarred',
       detail: unpinnedWhere(listed),
-      speech: `Unpinned “${subject}”. ${unpinnedWhere(listed)}.`,
+      speech: `Unstarred “${subject}”. ${unpinnedWhere(listed)}.`,
       onUndo: canUndo ? () => void restorePin({ thread_id: row.thread_id, index, pinned_at: pinnedAt! }, subject) : undefined,
     });
   };
@@ -3386,6 +3388,7 @@ function Inbox() {
    * back a pin another tab removed meanwhile.
    */
   const restorePin = async (restore: { thread_id: string; index: number; pinned_at: string }, subject: string) => {
+    noteStarred(restore.thread_id);
     try {
       await inboxApi.pinRestore(restore);
     } catch (cause) {
@@ -3395,7 +3398,7 @@ function Inbox() {
     setSidebarSectionOpen('pinned', true);
     await refreshList(false);
     dismissToast();
-    say(`Pinned “${subject}” again.`);
+    say(`Starred “${subject}” again.`);
   };
   /** A pinned row's menu: Unpin, Move up, Move down, Copy link. */
   const pinAction = async (row: InboxListRow, action: PinnedAction) => {

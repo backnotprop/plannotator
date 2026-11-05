@@ -13,6 +13,7 @@ import { RowAgents, RowAgentTiles } from './RowAgents';
 import { isTextCut, ProjectTipText, Tip } from './Tip';
 import { LazyRowTips, opensTips, RowTip } from './RowTip';
 import { AuthorMark, Icon } from '../icons';
+import { starPopping } from '../starPop';
 import { ListColumnEdge } from '../shell/ListColumnEdge';
 import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 import { canMarkUnread, offersRowMarkRead } from '../markRead';
@@ -558,17 +559,17 @@ function TitleCell({ row, pill = false, noPreview = false }: { row: InboxListRow
  * preview. A three-line or phone row has it on line 3 before the badge and the counts; a wide row in a column of its
  * own just left of the open counts' column. For the eye only: the row's name ends with ", pinned" (`PinnedWords`).
  */
-function PinMark() {
+function PinMark({ threadId }: { threadId: string }) {
   return (
-    <span className="ib-pinmark" data-pin-mark="" aria-hidden="true">
-      <Icon name="pin" size={13} />
+    <span className="ib-pinmark" data-pin-mark="" data-pop={starPopping(threadId) ? '' : undefined} aria-hidden="true">
+      <Icon name="star" size={13} />
     </span>
   );
 }
 
 /** The end of a pinned row's accessible name. */
 function PinnedWords() {
-  return <span className="ib-sr">, pinned</span>;
+  return <span className="ib-sr">, starred</span>;
 }
 
 /**
@@ -704,7 +705,7 @@ function WideRow({ row, project, away, selected, filtered, lit, pinned, pinColum
       <span className="ib-cw">{row.snoozed ? <SnoozedUntil row={row} /> : <CountWords row={row} wide={full} tip={!full} />}</span>
       <span className="ib-bcol">{badgeEl}</span>
       {/* The pin's column, in a list with a pinned row only (`pinColumn`), so a list without pins keeps its columns. */}
-      {pinColumn && <span className="ib-cpin">{pinned && <PinMark />}</span>}
+      {pinColumn && <span className="ib-cpin">{pinned && <PinMark threadId={row.thread_id} />}</span>}
       <span className="ib-cq">
         <OpenCounts row={row} tip />
       </span>
@@ -898,7 +899,7 @@ function NarrowRow({ row, project, away, selected, filtered, lit, pinned, keys, 
       <div className="ib-l3">
         {!noPreview && <Preview row={row} />}
         <GuideMark row={row} />
-        {pinned && <PinMark />}
+        {pinned && <PinMark threadId={row.thread_id} />}
         {badge}
         <SnoozedUntil row={row} />
         <LineCount row={row} tip />
@@ -948,7 +949,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           <span className="ib-m1">
             <RowTitle row={row} className="ib-m2" pill={pill} />
             {compact && <LeadLine row={row} project={project} filtered={filtered} tip={false} />}
-            {pinOnLine1 && <PinMark />}
+            {pinOnLine1 && <PinMark threadId={row.thread_id} />}
             <span className="ib-t">
               <RowTime row={row} relative={relative} />
             </span>
@@ -964,7 +965,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
           <span className="ib-m1">
             <LeadLine row={row} project={project} filtered={filtered} tip={false} />
             {compact && <RowTitle row={row} className="ib-m2" pill={pill} />}
-            {pinOnLine1 && <PinMark />}
+            {pinOnLine1 && <PinMark threadId={row.thread_id} />}
             <span className="ib-t">
               <RowTime row={row} relative={relative} />
             </span>
@@ -985,7 +986,7 @@ function PhoneRow({ row, project, away, filtered, lit, menu, pinned, keys, pill,
             <Icon name="book" size={13} />
           </span>
         )}
-        {pinned && !pinOnLine1 && <PinMark />}
+        {pinned && !pinOnLine1 && <PinMark threadId={row.thread_id} />}
         {badge}
         <SnoozedUntil row={row} />
         <LineCount row={row} />

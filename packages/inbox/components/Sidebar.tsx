@@ -9,6 +9,7 @@ import { connectPrompt } from '../connectPrompt';
 import { formatCount } from '../format';
 import { Icon, type IconName } from '../icons';
 import { pinnedState } from '../pins';
+import { starPopping } from '../starPop';
 import { awayLine, isAway, type MachinesModel } from '../machines';
 import { useSidebarSections, type SidebarSection } from '../sidebarSections';
 import { useSidebar } from '../shell/sidebar';
@@ -452,8 +453,10 @@ export function Sidebar(props: SidebarProps) {
               section="pinned"
               id={pinnedLabelId}
               controls={pinnedBodyId}
-              label="Pinned"
-              icon="pin"
+              label="Starred"
+              icon="star"
+              iconClass="ib-star-on"
+              pop={starPopping()}
               open={!pinnedClosed}
               count={pinsWaiting}
               onToggle={() => sections.toggle('pinned')}
@@ -665,6 +668,9 @@ function SectionHeader(props: {
   controls: string;
   label: string;
   icon: IconName;
+  iconClass?: string;
+  /** The section's star takes the little pop: a thread was starred just now. */
+  pop?: boolean;
   open: boolean;
   count: number;
   onToggle: () => void;
@@ -679,7 +685,7 @@ function SectionHeader(props: {
       data-sidebar-section={props.section}
       onClick={props.onToggle}
     >
-      <Icon name={props.icon} />
+      <Icon name={props.icon} className={[props.iconClass, props.pop ? 'ib-star-pop' : ''].filter(Boolean).join(' ') || undefined} />
       <span className="ib-side-sec-l">{props.label}</span>
       <span className="ib-side-sec-tail">
         {props.count > 0 && (
