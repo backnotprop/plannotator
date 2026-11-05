@@ -8,7 +8,7 @@ import { handoffStack, inboxPullLabel, openLayers, stackProjects, stackTitle } f
  */
 
 /** What the box's Review row says it reviews. */
-export type ReviewKind = 'local' | 'pr';
+export type ReviewKind = 'local' | 'pr' | 'walkthrough';
 
 /** How the read behind the box's pull requests went. */
 export type ReviewPullsRead = 'reading' | 'read' | 'failed';
@@ -130,6 +130,11 @@ export function localReviewMessage(input: { changes: InboxReviewChanges; project
   return [`Please send me a guided review of ${CHANGES_WORDS[input.changes]}${where}${on}, using /review-curate.`, words, 'If I ask for changes, make them and send me the updated review in this thread.']
     .filter(Boolean)
     .join('\n\n');
+}
+
+/** The hand-off for a walkthrough: the person's words say what. */
+export function walkthroughMessage(words: string): string {
+  return ['Please walk me through this, using /review-walkthrough. Don\'t change any code.', words.trim()].join('\n\n');
 }
 
 /** The thread's suggested name: "Review web-app: uncommitted on main". */

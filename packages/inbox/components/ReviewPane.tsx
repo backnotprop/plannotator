@@ -104,7 +104,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
   // conversation in the thread, and no Approve or Request changes is offered.
-  const verdict = !thread.pull_theirs;
+  const verdict = !thread.pull_theirs && !message.guide?.walkthrough;
   // Post to GitHub/GitLab (the owner's answer C on #2590): a review of the one PR this thread was handed can go on
   // that PR instead. A teammate's posts with its full verdict; its agent path stays verdict-free (no control here).
   // A stack's review spans several PRs and posts from each layer's own review (Pull requests) instead.
@@ -469,7 +469,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
     <section
       ref={paneRef}
       className={`ib-viewer ib-review${folded ? ' ib-fold' : ''}${folded && sheet ? ' ib-panel-open' : ''}`}
-      aria-label="Review"
+      aria-label={message.guide?.walkthrough ? 'Walkthrough' : 'Review'}
       data-review-message={message.id}
       data-review-mode={mode}
     >
@@ -479,7 +479,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
           Thread
         </button>
         <span className="ib-vsep" />
-        <span className="ib-fn">Review</span>
+        <span className="ib-fn">{message.guide?.walkthrough ? 'Walkthrough' : 'Review'}</span>
         <span className="ib-from">
           <bdi>{message.guide?.title ?? ''}</bdi> · from {author}
         </span>
@@ -603,9 +603,11 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onPosted,
                           </span>
                         </Tip>
                       </span>
-                      <span className="ib-rv-n">
-                        <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
-                      </span>
+                      {!message.guide?.walkthrough && (
+                        <span className="ib-rv-n">
+                          <span className="ib-add">+{formatCount(file.additions)}</span> <span className="ib-del">-{formatCount(file.deletions)}</span>
+                        </span>
+                      )}
                     </button>
                   </li>
                 );

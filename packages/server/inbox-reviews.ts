@@ -96,6 +96,7 @@ export function inboxReviewThreadOf(
     deletions: guide.deletions,
     agent: author.kind === "agent" ? { host: author.host, session: author.session, name: author.name } : null,
     source: guide.source ?? sourceOf(latestReview),
+    ...(guide.walkthrough ? { walkthrough: true as const } : {}),
     verdict,
     answered,
     reviewed_at: latestReview.created_at,

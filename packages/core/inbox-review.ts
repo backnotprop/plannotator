@@ -37,6 +37,10 @@ export interface InboxReviewSkill {
 }
 
 /** Shared tail of every skill: what to do when there is nothing to review, and the fallback for a session that started before the switch. */
+/** A walkthrough's agent text (approval item 6): submit_guide's field while Code review is on, and its skill below. */
+export const INBOX_WALKTHROUGH_FIELD_DESCRIPTION =
+  'true sends a walkthrough of the code as it is now, not a change: no `patch`, each `diffs` entry names `file` and `lines` ("10-40, 80-95", or none for the whole file), and the Inbox reads them from the project. It takes no verdict.';
+
 const NO_CODE = 'If you changed no code for this thread, say so in one sentence instead.';
 const OLD_SESSION = 'If submit_guide takes no `review` field in this session, send it without one.';
 
@@ -63,6 +67,17 @@ export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>
       `Call get_guide_brief, then submit_guide with \`review: true\` and \`reply_to\` set to this reply. Do not change code while you write it. ${OLD_SESSION} ${NO_CODE}`,
       '',
       INBOX_REVIEW_CURATE_DRAWING_LINE,
+    ].join('\n'),
+  },
+  'review-walkthrough': {
+    name: 'review-walkthrough',
+    description: 'A walkthrough of how something works, from the code as it is',
+    body: [
+      'The person wants to understand how something works, not to judge a change. Send them a walkthrough of the code as it is now, in the order that explains it best, following their words.',
+      '',
+      'Call get_guide_brief for the guide\'s shape, then submit_guide with `walkthrough: true` and `reply_to` set to this reply, and no `patch`. In each chapter, `diffs` names a `file` and the `lines` to show (`"lines": "10-40, 80-95"`, or leave it out for the whole file); a file goes in one chapter. Do not change code.',
+      '',
+      'If they reply with more to look at, answer in this thread, with another walkthrough when showing code helps. If submit_guide takes no `walkthrough` field in this session, explain in a plain message instead.',
     ].join('\n'),
   },
   'review-recheck': {
@@ -92,7 +107,7 @@ export const INBOX_REVIEW_SKILL_TEXTS: Readonly<Record<string, InboxReviewSkill>
 };
 
 /** The review skills the "/" list offers, in the list's order. One entry adds or removes a skill. */
-export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-recheck'];
+export const INBOX_REVIEW_SKILL_NAMES: readonly string[] = ['review-curate', 'review-walkthrough', 'review-recheck'];
 
 /** The offered skills, in order. */
 export const INBOX_REVIEW_SKILLS: readonly InboxReviewSkill[] = INBOX_REVIEW_SKILL_NAMES.map((name) => INBOX_REVIEW_SKILL_TEXTS[name]!);

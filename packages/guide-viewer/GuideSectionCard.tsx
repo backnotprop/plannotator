@@ -382,7 +382,7 @@ export const GuideSectionCard: React.FC<GuideSectionCardProps> = ({
                 fitContent={fitFileHeights}
               />
             ))
-          ) : host.renderSectionEmpty?.(index) ?? (
+          ) : section.diffs.length === 0 ? null : host.renderSectionEmpty?.(index) ?? (
             <div className="flex min-h-[150px] items-center justify-center px-6 text-center">
               <div>
                 <p className="text-xs font-medium text-foreground">No chapter files in the current diff</p>

@@ -23,6 +23,7 @@
  */
 
 import { createHash } from "node:crypto";
+import { isAbsolute } from "node:path";
 import type { McpServer } from "@modelcontextprotocol/server";
 import * as z from "zod";
 import { parseDiffToFiles } from "@plannotator/core/diff-files";
@@ -40,7 +41,8 @@ import type { GuideOverviewDiagram } from "@plannotator/core/guide";
 import { displayInboxSubject, inboxReviewSourceOf, type InboxGuideRef } from "@plannotator/core/inbox-types";
 import { checkServerSession, INBOX_SERVER_SESSION_MISMATCH_ERROR, serverSessionMismatchBody } from "@plannotator/core/server-session";
 import { readFileSync } from "node:fs";
-import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
+import { checkInboxDrawing, INBOX_REVIEW_FIELD_DESCRIPTION, INBOX_REVIEW_OVERVIEW_DIAGRAM_DOC, INBOX_WALKTHROUGH_FIELD_DESCRIPTION, inboxReviewTitleLine } from "@plannotator/core/inbox-review";
+import { readInboxWalkthrough } from "./inbox-walkthrough";
 import { inboxBlobPath, writeBlob } from "@plannotator/shared/inbox/attachments";
 import { questionOpenersWithTextText } from "@plannotator/shared/inbox/question-openers";
 import { InboxError } from "@plannotator/shared/inbox/schema";
@@ -212,7 +214,7 @@ export function inboxGuideInputHash(input: { snapshot?: unknown; guide?: unknown
  * asked for a verdict (submit_guide `review: true` while Code review is on); the record then carries `review` and the
  * chapter titles the review card lists.
  */
-export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false): { text: string; ref: InboxGuideRef } {
+export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string, review = false, walkthrough = false): { text: string; ref: InboxGuideRef } {
   const text = JSON.stringify(snapshot);
   const files = parseDiffToFiles(snapshot.review.rawPatch);
   const ref: InboxGuideRef = {
@@ -225,6 +227,7 @@ export function describeInboxGuide(snapshot: GuideSnapshot, inputSha256: string,
     additions: files.reduce((n, f) => n + f.additions, 0),
     deletions: files.reduce((n, f) => n + f.deletions, 0),
     ...(review ? { review: true as const, chapters: snapshot.guide.sections.map((section) => inboxReviewTitleLine(section.title)) } : {}),
+    ...(walkthrough ? { walkthrough: true as const } : {}),
   };
   // Reviews (approval "inbox-reviews-page") lists a review by where its changes came from.
   const source = review ? inboxReviewSourceOf(snapshot) : null;
@@ -408,7 +411,7 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
             .describe("Instead of guide and patch: a complete Plannotator guide snapshot, as an object or its JSON."),
           body: z.string().optional().describe("Your note above the card, markdown. Default: the guide's intent."),
           // Code review (approval "inbox-code-review-direction"): listed only while the person has it on.
-          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION) } : {}),
+          ...(context.codeReviewOn?.() ? { review: z.boolean().optional().describe(INBOX_REVIEW_FIELD_DESCRIPTION), walkthrough: z.boolean().optional().describe(INBOX_WALKTHROUGH_FIELD_DESCRIPTION) } : {}),
           ...SEND_ROUTING_FIELDS,
         })
         .strict(),
@@ -417,13 +420,25 @@ export function registerInboxGuideTools(server: McpServer, context: InboxMcpCont
     async (input, ctx) =>
       guarded(async () => {
         const project = await sendProject(context, input);
-        const checked = checkInboxGuide(input, project.root, { codeReview: context.codeReviewOn?.() ?? false });
+        // A walkthrough: asked for here, or any guide in a thread the New review box started as one, so a real agent's
+        // own patch (or an empty one) can't turn it back into a diff, and the verdict stays away.
+        const asked = (input as { walkthrough?: boolean }).walkthrough === true;
+        if (asked && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `walkthrough`.");
+        const replyThread = input.reply_to ? context.store.message(input.reply_to)?.thread_id : null;
+        const walkthrough = asked || (!!context.codeReviewOn?.() && !!replyThread && !!context.walkthroughThread?.(replyThread));
+        let submitted: { snapshot?: unknown; guide?: unknown; patch?: string } = input;
+        if (walkthrough && input.snapshot === undefined && input.guide !== undefined) {
+          const read = readInboxWalkthrough(input.guide, [callerWorkingFolder(ctx), input.project_path, project.root].filter((folder): folder is string => !!folder && isAbsolute(folder)));
+          if (!read.ok) throw new InboxError("invalid_guide", read.error);
+          submitted = { guide: read.guide, patch: read.patch };
+        }
+        const checked = checkInboxGuide(submitted, project.root, { codeReview: context.codeReviewOn?.() ?? false });
         if (!checked.ok) throw new InboxError("invalid_guide", checked.error);
         // `review` exists only while Code review is on (the schema above); a session that listed it before the
         // switch went off is refused here rather than sending a review the window would not draw.
-        const review = (input as { review?: boolean }).review === true;
+        const review = (input as { review?: boolean }).review === true || walkthrough;
         if (review && !context.codeReviewOn?.()) throw new InboxError("code_review_off", "Code review is off in this Inbox (Settings → Capabilities): send the guide without `review`.");
-        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review);
+        const described = describeInboxGuide(checked.snapshot, inboxGuideInputHash(input), review, walkthrough);
         const body = input.body?.trim() ? input.body : checked.snapshot.guide.intent;
         // A reply never gets the default: its only subject is one the agent gives (it may name a thread the person started).
         // The default is made one line here (displayInboxSubject), so the guide's own title can never fail the subject check.

@@ -153,11 +153,12 @@ function newCommentId(): string {
  * A review's "All files" (code review in the Inbox): every changed file in the patch's order, under one heading, so
  * the same chain draws the same diffs and comments without the agent's chapters.
  */
-function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }[]): CodeGuideData {
+function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string; additions: number; deletions: number }[]): CodeGuideData {
+  const asItIs = files.every((file) => file.additions === 0 && file.deletions === 0);
   return {
     title: snapshot.guide.title,
     intent: '',
-    sections: [{ title: 'Every changed file', overview: 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
+    sections: [{ title: asItIs ? 'Every file' : 'Every changed file', overview: asItIs ? 'In the order they were sent.' : 'In the order of the diff.', diffs: files.map((file) => ({ file: file.path })) }],
     unplacedFiles: [],
     reviewed: [false],
   };
@@ -319,6 +320,8 @@ export default function GuideReader({
   // AllFilesCodeView compares Viewed sets by identity: a new Set only when the ticks change.
   const viewedFilesKey = viewed ? [...viewed.files].sort().join('\n') : null;
   const viewedSet = useMemo(() => (viewed ? new Set(viewed.files) : undefined), [viewedFilesKey]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Nothing marked as changed (a walkthrough): Split would draw the same code twice.
+  const asItIs = files.length > 0 && files.every((file) => file.additions === 0 && file.deletions === 0);
   const renderSectionTab = useCallback((index: number) => (index === 0 ? <DiffStyleSwitch /> : null), []);
 
   const getDiffRendererProps = useCallback(
@@ -329,7 +332,7 @@ export default function GuideReader({
       onToggleViewed?: (filePath: string) => void;
       fileOpenIn?: (filePath: string) => ReactNode;
     } => ({
-      ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...((phone || asItIs) && { diffStyleOverride: 'unified' as const }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -385,14 +388,14 @@ export default function GuideReader({
       DiffRenderer: GuideDiff,
       getDiffRendererProps,
       ...(revealFile ? { revealFile } : {}),
-      ...(phone ? {} : { renderSectionTab }),
+      ...(phone || asItIs ? {} : { renderSectionTab }),
       ...(renderOverviewDiagram ? { renderOverviewDiagram } : {}),
       ...(renderOverviewFigure ? { renderOverviewFigure } : {}),
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
-      diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      diffStyle: phone || asItIs ? ('unified' as const) : savedDiffStyle,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
+    [files, asItIs, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, globalComments, savedDiffStyle],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.

@@ -119,12 +119,15 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
   }
 }
 
+const reviewIsWalkthrough = (row: InboxReviewRow) => !!row.review?.walkthrough || row.started?.kind === 'walkthrough';
+
 export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
   const host = row.review?.agent?.host ?? row.link?.agent?.host ?? row.started?.host ?? null;
   const agent = row.reviewed && name ? { host, name } : null;
   const { status, tone } = statusOf(row);
+  if (reviewIsWalkthrough(row)) return { kind: 'local', lead: 'Walkthrough', agent, status: row.reason === 'review_ready' ? 'Ready' : status, tone };
   if (stack) {
     const many = stack.layers.length > 1;
     if (many) {
@@ -149,7 +152,7 @@ export function reviewContextLine(row: InboxReviewRow, projectName: string | nul
   const line = reviewRowLine(row);
   const started = row.started;
   const what =
-    line.kind !== 'local'
+    line.kind !== 'local' || reviewIsWalkthrough(row)
       ? line.lead
       : source?.branch
         ? `Local changes on ${source.branch}${source.base ? `, against ${source.base.replace(/^origin\//, '')}` : ''}`
@@ -262,7 +265,7 @@ export function reviewViewOf(
     firstReviewId: folds ? first : null,
     latestReviewId: row.review?.latest_review_id ?? null,
     curating: row.reason === 'curating',
-    asked: ask ? `New review · ${ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
+    asked: ask ? `New review · ${reviewIsWalkthrough(row) ? 'Walkthrough' : ask === 'custom' ? 'Custom curation' : 'Guided review'}` : null,
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,

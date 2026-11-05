@@ -77,7 +77,7 @@ import {
 } from './model';
 import { newUuid } from '../uuid';
 import { handoffKeys, pullHandoffAskLine, pullHandoffMessage, pullHandoffThreadName, pullLaunchAsk } from '../pulls/model';
-import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, reviewDefaultTo, reviewLinkListed, reviewLinkStack, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
+import { forgetUnsentReview, keepUnsentReview, localReviewMessage, localReviewName, walkthroughMessage, reviewDefaultTo, reviewLinkListed, reviewLinkStack, unsentReview, type ReviewBoxPull, type ReviewKind, type ReviewPullsRead, type ReviewBoxRequest, type ReviewSummary } from './reviewBox';
 import { ReviewRows } from './ReviewRows';
 
 /** How long after the last keystroke a pasted link is read. */
@@ -510,6 +510,10 @@ export function ComposeDialog(props: ComposeDialogProps) {
       setError('Nothing sent: choose a pull request first.');
       return;
     }
+    if (box && reviewKind === 'walkthrough' && !body.trim()) {
+      setError('Nothing sent: say what to walk you through first.');
+      return;
+    }
     if (boxPull && pulls && pulls.keys.length > INBOX_PULL_OWNER_KEYS_MAX) {
       setError(`A stack of more than ${INBOX_PULL_OWNER_KEYS_MAX} open pull requests can't go to one review thread.`);
       return;
@@ -535,7 +539,9 @@ export function ComposeDialog(props: ComposeDialogProps) {
       // The skills the words reference go with the message as one block at its end, as New message's do (skills.ts).
       const words = !box
         ? body
-        : boxPull || linkOnly
+        : reviewKind === 'walkthrough'
+          ? walkthroughMessage(body)
+          : boxPull || linkOnly
           ? pullHandoffMessage(boxPull?.stack ?? reviewLinkStack(linkOnly!.pull), body.trim() ? { kind: 'custom', words: body } : { kind: 'guide' })
           : localReviewMessage({ changes: reviewChanges, project: reviewProject?.name ?? null, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, words: body });
       // Checked first: a PR the Inbox can't keep for that agent is never sent to it.
@@ -554,7 +560,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         body: skills ? withSkillsBlock(words, skills) : words,
         idempotency_key: sendKey.current,
         ...(linkOnly ? { review: { kind: 'link' as const, url: linkOnly.pull.url, title: linkOnly.pull.title, mine: linkOnly.pull.mine, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
-        ...(box && !boxPull && !linkOnly ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
+        ...(box && reviewKind === 'walkthrough' ? { review: { kind: 'walkthrough' as const } } : {}),
+        ...(box && reviewKind === 'local' ? { review: { kind: 'local' as const, changes: reviewChanges, branch: reviewSummary?.branch ?? null, base: reviewSummary?.base ?? null, ask: body.trim() ? ('custom' as const) : ('guide' as const) } } : {}),
         uploads: uploadIds,
         ...named,
         ...(draft ? { draft_id: draft.id } : {}),
@@ -717,7 +724,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
     if (event.repeat && (event.key === 'Enter' || event.key === ' ') && (event.target as Element).closest('[data-compose-send]')) event.preventDefault();
   };
 
-  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull && !linkOnly));
+  const sendable = !!linkThread || ((!!target || (!!start && start.project.exists)) && !(box && reviewKind === 'pr' && !boxPull && !linkOnly) && !(box && reviewKind === 'walkthrough' && !body.trim()));
   const attached = files.files.filter((file) => file.state !== 'refused').length;
   const sendKeys = useShortcutAria({ scope: inboxThreadShortcuts, action: 'send' });
   // While the sessions are read, neither Save draft nor a dead To: a neutral "Looking…" state.
@@ -832,6 +839,8 @@ export function ComposeDialog(props: ComposeDialogProps) {
         setReviewKind(kind);
         setReviewMenu(false);
         toFollowsReview();
+        // The words are the walkthrough.
+        if (kind === 'walkthrough') textRef.current?.focus();
       }}
       changes={reviewChanges}
       onChanges={setReviewChanges}
@@ -1106,7 +1115,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             ariaLabel="Message"
             ariaDescribedBy={status ? statusId : undefined}
             destination="your message"
-            placeholder={box ? 'A guided review, by default. Add words to curate it your way, or ask for a full review.' : 'Write an idea or a request. It starts a new thread.'}
+            placeholder={box ? (reviewKind === 'walkthrough' ? 'What should it walk you through?' : 'A guided review, by default. Add words to curate it your way, or ask for a full review.') : 'Write an idea or a request. It starts a new thread.'}
             // The field is tall and sits in a scrolling body above the footer: the picker opens at the
             // caret, inside the dialog and above its footer, and Escape closes it before the dialog.
             caretMenu={caretMenu}

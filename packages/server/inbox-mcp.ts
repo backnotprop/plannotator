@@ -287,6 +287,8 @@ export interface InboxMcpContext extends InboxSnoozeMcpContext {
    * Absent: off.
    */
   codeReviewOn?: () => boolean;
+  /** The New review box started this thread as a walkthrough: every guide sent in it is one. */
+  walkthroughThread?: (threadId: string) => boolean;
 }
 
 

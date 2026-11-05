@@ -132,6 +132,8 @@ export interface InboxReviewThread {
   updated_at: string;
   /** The thread was resolved (archived), and when; null while open. */
   resolved_at: string | null;
+  /** The latest review is a walkthrough: the code as it is, with no verdict to give. */
+  walkthrough?: true;
 }
 
 /**
@@ -234,7 +236,7 @@ export interface InboxReviewLinkPull {
 
 /** New review on local changes or a link: what the box asked for, so its row shows "Curating…" before any review arrives. */
 export interface InboxReviewStart {
-  kind: "local" | "link";
+  kind: "local" | "link" | "walkthrough";
   /** Local changes only. */
   changes: InboxReviewChanges | null;
   /** A link only. */
@@ -261,6 +263,7 @@ export function inboxReviewStartOf(value: unknown, where: Pick<InboxReviewStart,
     const pull = { key: ref.key, url: review.url as string, number: ref.number, title: typeof review.title === "string" ? review.title.slice(0, 300) : "", platform: ref.platform, mine: review.mine === true };
     return { kind: "link", changes: null, pull, branch: null, base: null, ask: review.ask === "custom" ? "custom" : "guide", ...where };
   }
+  if (review.kind === "walkthrough") return { kind: "walkthrough", changes: null, branch: null, base: null, ask: "custom", ...where };
   if (review.kind !== "local" || (review.changes !== "uncommitted" && review.changes !== "last" && review.changes !== "branch")) return null;
   const ref = (ref: unknown) => (typeof ref === "string" && ref.length > 0 && ref.length <= 200 ? ref : null);
   return { kind: "local", changes: review.changes, branch: ref(review.branch), base: ref(review.base), ask: review.ask === "custom" ? "custom" : "guide", ...where };
