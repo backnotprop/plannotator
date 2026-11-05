@@ -208,14 +208,8 @@ export async function openPull(world: PhoneWorld, page: Page): Promise<void> {
   await expect(page.locator(`[data-guide-file-shell="${SHORT_FILE}"]`)).toBeVisible({ timeout: 30_000 });
 }
 
-/** The guided review's comments, as the window saves them; the ones of an earlier call are removed first. */
+/** The guided review's comments, as the window saves them. */
 export async function seedReview(world: PhoneWorld, page: Page, comments: readonly Comment[]): Promise<void> {
-  const read = await page.request.get(`${world.url}api/inbox/threads/${world.thread}/attachments`);
-  expect(read.status(), await read.text()).toBe(200);
-  for (const old of ((await read.json()) as { annotations: { id: string }[] }).annotations) {
-    const removed = await page.request.post(`${world.url}api/inbox/annotations/${old.id}/remove`, { data: {} });
-    expect(removed.status(), await removed.text()).toBe(200);
-  }
   for (const [i, c] of comments.entries()) {
     const saved = await page.request.post(`${world.url}api/inbox/messages/${world.message}/guide/annotations`, { data: { annotation: annotation(c, i) } });
     expect(saved.status(), await saved.text()).toBe(200);
