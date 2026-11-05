@@ -1225,13 +1225,15 @@ test("the details as real gh answers them: a running check, a template for a bod
     await expect(panel).not.toContainText('your-change-here');
     await expect(panel).not.toContainText('hidden-bot-marker');
 
+    // What a diagram in a comment draws can copy the marks of the window's overlays. It draws late, above the note
+    // below, so it is waited for first; Escape still closes the panel.
+    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+
     await expect(panel.locator('[data-pull-details-threads-missing]')).toBeVisible();
     write(`ctxg-${number}.json`, { data: { repository: { pullRequest: { comments: { nodes: [] }, reviews: { nodes: [] }, reviewThreads: { nodes: [] } } } } });
     await panel.locator('[data-pull-details-threads-missing] button').click();
     await expect(panel.locator('[data-pull-details-threads-missing]')).toHaveCount(0);
-
-    // What a diagram in a comment draws can copy the marks of the window's overlays; Escape still closes the panel.
-    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached({ timeout: 15_000 });
+    await expect(panel.locator('.pn-visible-viewport-overlay [data-pn-image-annotator-stage]').first()).toBeAttached();
     await page.mouse.move(700, 5);
     await page.keyboard.press('Escape');
     await expect(panel).toBeHidden();
