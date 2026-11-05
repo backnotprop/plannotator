@@ -21,10 +21,12 @@
  */
 
 import { useEffect, useId, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from 'react';
-import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
+import { INBOX_DRAFT_BODY_MAX, inboxId, type InboxAttachmentState, type InboxDraft, type InboxDraftTo } from '@plannotator/core/inbox-types';
 import { InboxApiError, inboxApi, type ComposeSessionsModel, type DraftView, type StartThreadInput } from '../api';
 import { whenTime } from '../format';
 import { HostMark, Icon } from '../icons';
+import type { ReuseSource } from '../reuse';
+import { ThreadFilesStrip } from './ThreadFilesStrip';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, useComposeFiles, useFileDrop } from './ComposeFiles';
 import { SessionDetail, ToPicker } from './ToPicker';
 import { THREAD_NAME_ATTACHED_NOTE, ThreadNameChip } from './ThreadNameChip';
@@ -87,6 +89,8 @@ export interface ComposeRequest {
   pulls?: InboxDraft['pulls'] | null;
   /** The thread's name as compose opens (Launch an agent: `pullHandoffThreadName`), as if the person had typed it. */
   threadName?: string;
+  /** Files already in the Inbox this message starts with (an archived thread's reuse button). */
+  reuse?: readonly ReuseSource[];
 }
 
 export interface ComposeSent {
@@ -121,6 +125,8 @@ export interface ComposeTransport {
 export interface ComposeDialogProps {
   request: ComposeRequest;
   phone: boolean;
+  /** The files of the thread behind the dialog, offered one click each. Absent or null: no row. */
+  threadFiles?: readonly InboxAttachmentState[] | null;
   /** The project the person is looking at: the list's filter, or the open thread's. */
   current: { id: string | null; root: string | null; name: string | null } | null;
   /** The session the person last sent to: listed first in the picker while it is live; never put in To by itself. */
@@ -195,11 +201,19 @@ export function ComposeDialog(props: ComposeDialogProps) {
   // A paste of 32 KB or more becomes a pasted text tile (approval "inbox-paste-attachment"), put back by its tile.
   const files = useComposeFiles(request.draft?.files ?? [], {
     onPasted: (names) => say(attachedAnnouncement(names)),
+    onAlready: (name) => say(`${name} is already in this message`),
     onPutBack: () => say('The pasted text is back in your message.'),
     text: { value: body, set: setBody },
   });
   // A drop anywhere on the dialog attaches the files ("Drop files to attach").
   const drop = useFileDrop(files.add, takesFiles);
+  const reuseStarted = useRef(false);
+  useEffect(() => {
+    if (reuseStarted.current) return;
+    reuseStarted.current = true;
+    for (const source of request.reuse ?? []) files.addExisting(source);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const { model, load } = useComposeSessions(true, transport?.sessions);
   const voice = useVoiceSession();
   const projects = useMemo(() => (model?.projects ?? []).filter((g) => !pulls || (g.project.id !== null && pulls.projects.includes(g.project.id))), [model, pulls]);
@@ -731,6 +745,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
             }}
           />
         </div>
+        {takesFiles && <ThreadFilesStrip threadFiles={props.threadFiles} files={files} />}
         <ComposeFileTiles
           files={files.files}
           onRemove={(key) => {

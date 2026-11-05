@@ -2,6 +2,7 @@ import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Clipboa
 import { inboxAttachmentKindLabel, readInboxAttachmentKind, type InboxDraftFile, type InboxDraftPasted, type InboxUpload } from '@plannotator/core/inbox-types';
 import type { DraftFileUploader, ReplyDraftFileRef } from '@plannotator/core/inbox-reply-draft';
 import { InboxApiError } from '../api';
+import { ownAttachmentInPaste, type OwnAttachmentPaste } from './reusePaste';
 import type { ReuseSource } from '../reuse';
 import { httpDraftFileUploader } from '../replyDraftHttp';
 import { formatBytes } from '../format';
@@ -223,6 +224,11 @@ export function useComposeFiles(
   /** The tile holding these bytes, whichever way they came. */
   const holding = useCallback((sha256: string): ComposeFile | undefined => filesRef.current.find((file) => file.reuse?.sha256 === sha256 || file.upload?.sha256 === sha256), []);
 
+  const flash = (key: string) => {
+    patch(key, { flash: true });
+    setTimeout(() => patch(key, { flash: false }), 900);
+  };
+
   /**
    * A file the Inbox already holds, as a tile (the attachment's reuse button). No bytes travel: the answer is a
    * pending upload naming the same blob. Bytes already in this message are not added twice: their tile says so.
@@ -230,8 +236,7 @@ export function useComposeFiles(
   const addExisting = useCallback((source: ReuseSource) => {
     const here = holding(source.sha256);
     if (here) {
-      patch(here.key, { flash: true });
-      setTimeout(() => patch(here.key, { flash: false }), 900);
+      flash(here.key);
       onAlready.current?.(source.name);
       return;
     }
@@ -261,6 +266,54 @@ export function useComposeFiles(
     inFlight.current.set(key, settled);
     onPasted.current?.([source.name]);
   }, [holding]);
+
+  /**
+   * A picture of this Inbox, pasted (reusePaste.ts): the file itself, with its own name and no new bytes. The name and
+   * hash come with the answer. Refused (its thread went, its current version is not readable), the paste goes on as a
+   * paste: `pictures` are what the clipboard held.
+   */
+  const addPasted = (own: OwnAttachmentPaste, pictures: readonly File[]) => {
+    const key = `local-${newUuid()}`;
+    const fresh: ComposeFile = { key, name: 'Adding…', size: 0, state: 'uploading', progress: 0, upload: null, error: null, preview: own.src, reuse: { sha256: '' } };
+    filesRef.current = [...filesRef.current, fresh];
+    setFiles((current) => [...current, fresh]);
+    const drop = () => {
+      filesRef.current = filesRef.current.filter((file) => file.key !== key);
+      setFiles((current) => current.filter((file) => file.key !== key));
+    };
+    const controller = new AbortController();
+    aborts.current.set(key, controller);
+    const settled = uploader.current.reuse!(own.id, own.version, { signal: controller.signal })
+      .then((upload) => {
+        const here = holding(upload.sha256);
+        if (here && here.key !== key) {
+          drop();
+          flash(here.key);
+          onAlready.current?.(upload.name);
+          return null;
+        }
+        patch(key, { state: 'done', progress: 1, upload, name: upload.name, size: upload.size, reuse: { sha256: upload.sha256 } });
+        onPasted.current?.([upload.name]);
+        return upload;
+      })
+      .catch((cause) => {
+        if (cause instanceof DOMException && cause.name === 'AbortError') return null;
+        if (pictures.length > 0) {
+          drop();
+          namesRef.current = [...namesRef.current, ...pictures.map((file) => file.name)];
+          add(pictures);
+          onPasted.current?.(pictures.map((file) => file.name));
+        } else {
+          patch(key, { state: 'refused', name: 'Picture', error: cause instanceof InboxApiError ? cause.message : 'Not attached: that file could not be added.' });
+        }
+        return null;
+      })
+      .finally(() => {
+        aborts.current.delete(key);
+        inFlight.current.delete(key);
+      });
+    inFlight.current.set(key, settled);
+  };
 
   /** Take these bytes out of the message (the reuse button's second click). */
   const removeHolding = useCallback((sha256: string) => {
@@ -341,6 +394,13 @@ export function useComposeFiles(
       const data = event.clipboardData;
       const phone = isPhone();
       const list = pastedFiles(data, namesRef.current, new Date(), { phone });
+      // A picture copied from this Inbox is that file, not a new one. Another machine's thread: its files are not ours to name.
+      const own = !machine.current && uploader.current.reuse ? ownAttachmentInPaste(data, location.origin) : null;
+      if (own) {
+        event.preventDefault();
+        addPasted(own, list);
+        return true;
+      }
       if (list.length === 0) return pasteLongText(event);
       // Text the person meant still pastes natively, unless it is 32 KB or more: a tile beside the files then.
       // On a phone an image's own link (paste.ts) is not inserted.
