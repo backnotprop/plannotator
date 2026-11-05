@@ -119,6 +119,12 @@ function statusOf(row: InboxReviewRow): { status: string; tone: ReviewRowLine['t
   }
 }
 
+/** The landing a row speaks for: a link's own PR only, since an agent's guide may name another that merged. */
+export function reviewRowLanding(row: InboxReviewRow): InboxReviewRow['landed'][number] | null {
+  const handed = row.started?.pull;
+  return (handed ? row.landed.find((landing) => landing.key === handed.key) : row.landed[0]) ?? null;
+}
+
 export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
   const stack = row.stacks[0];
   const name = row.review?.agent?.name ?? linkAgentName(row.link) ?? (row.started ? hostLabel(row.started.host) : null);
@@ -134,7 +140,7 @@ export function reviewRowLine(row: InboxReviewRow): ReviewRowLine {
     }
     return { kind: 'pr', lead: inboxPullLabel(focusOf(stack)), agent, status, tone };
   }
-  const landing = row.landed[0];
+  const landing = reviewRowLanding(row);
   if (landing) return { kind: 'pr', lead: `${landing.platform === 'gitlab' ? '!' : '#'}${landing.number} ${landing.state}`, agent, status, tone };
   // The PR the person handed it: an agent's words about another PR don't change where a Post goes.
   const linked = row.started?.pull;
@@ -267,7 +273,7 @@ export function reviewViewOf(
     fromThread: folds ? (thread.thread_name ?? thread.subject ?? null) : null,
     onWholeThread: options.onWholeThread,
     onOpenPull: stack ? () => options.onOpenStack(stack.id) : null,
-    pullUrl: row.landed[0]?.url ?? null,
+    pullUrl: reviewRowLanding(row)?.url ?? null,
   };
 }
 

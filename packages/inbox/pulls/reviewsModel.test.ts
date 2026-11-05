@@ -233,3 +233,23 @@ test("a review's lead is the PR the person handed it, whatever the agent's guide
   expect(line.lead).toBe('#231');
 });
 
+test("a link's row and header speak only for its own PR's landing, not for a merged PR the guide named", () => {
+  const handed = { key: 'github.com/o/app#231', url: 'https://github.com/o/app/pull/231', number: 231, title: 'T', platform: 'github' as const, mine: false };
+  const started = { kind: 'link', changes: null, pull: handed, branch: null, base: null, ask: 'guide', host: 'claude-code', project_id: 'p', at: '' };
+  const landing = (key: string, number: number) => ({ key, thread_id: 't', number, url: `https://github.com/o/app/pull/${number}`, platform: 'github', state: 'merged', title: 'T', head: 'b', at: '', through_review: null });
+  const view = (fields: Partial<InboxReviewRow>) => reviewViewOf(row(fields), { messages: [], subject: null }, { projectName: null, onWholeThread: () => {}, onOpenStack: () => {} });
+
+  const other = { started, landed: [landing('github.com/o/app#999', 999)] } as unknown as Partial<InboxReviewRow>;
+  expect(reviewRowLine(row(other)).lead).toBe('#231');
+  expect(view(other).pullUrl).toBeNull();
+
+  const own = { started, landed: [landing('github.com/o/app#999', 999), landing('github.com/o/app#231', 231)] } as unknown as Partial<InboxReviewRow>;
+  expect(reviewRowLine(row(own)).lead).toBe('#231 merged');
+  expect(view(own).pullUrl).toBe('https://github.com/o/app/pull/231');
+
+  // A thread no link started still shows what landed.
+  const plain = { landed: [landing('github.com/o/app#999', 999)] } as unknown as Partial<InboxReviewRow>;
+  expect(reviewRowLine(row(plain)).lead).toBe('#999 merged');
+  expect(view(plain).pullUrl).toBe('https://github.com/o/app/pull/999');
+});
+

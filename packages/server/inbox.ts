@@ -1120,8 +1120,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Others PR lands only when the background Others read does, so while one is still missing, wait for that read (its
    * own deadline) and list once more. A caller answers `pull_unknown` for any key still missing after.
    */
-  /** The PR New review's link last read: what Start review takes for whose it is. */
-  let lastLinkRead: InboxPull | null = null;
+  /** The PRs New review's links read, by key: what Start review takes for whose it is. */
+  const linkReads = new Map<string, InboxPull>();
   /** One PR no list holds, from a host this computer's CLI is signed in to; nothing is asked of any other host. */
   const readUnlistedPull = async (ref: NonNullable<ReturnType<typeof inboxPullRefOfKey>>): Promise<InboxPull | null> => {
     if (!(await pulls.signedInTo(ref.platform === "gitlab" ? "glab" : "gh", ref.host))) return null;
@@ -3279,7 +3279,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       const start = codeReviewOn() ? inboxReviewStartOf(review, where) : null;
       if (!start) return;
       // Whose PR it is comes from what the Inbox read itself (the list, or the link's read just before Start), never the window's word.
-      const read = start.pull && (pulls.find(start.pull.key) ?? (lastLinkRead?.key === start.pull.key ? lastLinkRead : null));
+      const read = start.pull && (pulls.find(start.pull.key) ?? linkReads.get(start.pull.key));
       const started = start.pull ? { ...start, pull: { ...start.pull, mine: read?.mine === true } } : start;
       pullOwners.start(threadId, started);
       // A link's PR belongs to this thread from now on, on the list or not: only its own state is read, while its row is listed.
@@ -3870,7 +3870,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const { ref } = link;
         const cli = ref.platform === "gitlab" ? ("glab" as const) : ("gh" as const);
         const pull = pulls.find(ref.key) ?? (await readUnlistedPull(ref));
-        lastLinkRead = pull;
+        if (pull) linkReads.set(ref.key, pull);
         if (!pull) return json({ serverSession, ok: false, reason: "unreadable", cli, host: ref.host });
         const { projectsByRepo } = await pullProjects();
         const owner = pullOwners.get(ref.key);

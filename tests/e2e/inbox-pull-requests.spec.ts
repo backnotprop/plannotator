@@ -449,6 +449,7 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   forge.gh('repos/northwind/payments/pulls/231', JSON.stringify({ state: 'open', title: 'Idempotent refunds', html_url: 'https://github.com/northwind/payments/pull/231', head: { ref: 'refunds', sha: 'a'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
   forge.gh('user', JSON.stringify({ login: 'dana' }));
   forge.gh('repos/northwind/never-opened/pulls/77', JSON.stringify({ state: 'open', title: 'Never opened', html_url: 'https://github.com/northwind/never-opened/pull/77', head: { ref: 'x', sha: 'b'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
+  forge.gh('repos/northwind/payments/pulls/234', JSON.stringify({ state: 'open', title: 'Yours', html_url: 'https://github.com/northwind/payments/pull/234', head: { ref: 'y', sha: 'd'.repeat(40) }, base: { ref: 'main' }, user: { login: 'dana' } }));
   forge.gh('repos/northwind/payments/pulls/233', JSON.stringify({ state: 'open', title: 'Not yours', html_url: 'https://github.com/northwind/payments/pull/233', head: { ref: 'x', sha: 'c'.repeat(40) }, base: { ref: 'main' }, user: { login: 'tomas' } }));
   forge.glab(`projects/${encodeURIComponent('northwind/mobile')}/merge_requests/44`, JSON.stringify({ state: 'merged', merged_at: ago(90), title: 'Offline queue', web_url: 'https://gitlab.com/northwind/mobile/-/merge_requests/44', source_branch: 'offline', target_branch: 'main', author: { username: 'priya' } }));
 
@@ -1770,7 +1771,7 @@ test('New review, a pull request link: what was found and how it was read, a rep
       title: 'Idempotent refunds, reviewed',
       intent: 'Make refunds safe to retry.',
       sections: [{ title: 'The change', overview: 'Read the new lines.', diffs: [{ file: 'src/i18n/fallback.ts', summary: 'The change.' }] }],
-      source: { kind: 'pr', pr: { url: 'https://github.com/northwind/payments/pull/231', number: 231, platform: 'github' } },
+      source: { kind: 'pr', pr: { url: 'https://github.com/northwind/payments/pull/999', number: 999, platform: 'github' } },
       generator: { engine: 'claude-code', model: 'claude-opus-5' },
     },
     review: true,
@@ -1854,6 +1855,9 @@ test("A link's review posts to its forge, though no list has it; the picker's li
   // A review of #231, reached by its link, is on no list: its ending offers GitHub all the same, and it posts.
   await page.goto(`${world.url}#reviews`);
   await page.locator('[data-reviews-kind="reviewed"]', { hasText: 'Idempotent refunds' }).first().click();
+  // The thread's header and the dialog below both say #231, though the agent's guide named #999.
+  await expect(page.locator('[data-review-context]')).toContainText('#231');
+  await expect(page.locator('[data-review-context]')).not.toContainText('#999');
   await page.locator('[data-review-start]').last().click();
   const choice = page.locator('[data-review-destination-choice="forge"]');
   await expect(page.locator('[data-review-destination], [data-review-posts="github"]').first()).toBeVisible({ timeout: 15_000 });
@@ -1861,7 +1865,7 @@ test("A link's review posts to its forge, though no list has it; the picker's li
   await expect(page.locator('[data-review-posts="github"]')).toBeVisible();
   await shot(page, 'l-link-post');
   await page.locator('[data-review-posts] [data-decision-primary]').click();
-  // The dialog says which PR, and the page's header agrees, whatever PR the agent's guide named.
+  // The dialog says which PR, whatever PR the agent's guide named.
   await expect(page.locator('[data-review-posting-to]')).toHaveText('Posting to northwind/payments#231');
   await shot(page, 'l-link-approve-dialog');
   await page.getByRole('dialog').getByRole('button', { name: 'Approve', exact: true }).click();
@@ -1963,6 +1967,17 @@ test("A link's review posts to its forge, though no list has it; the picker's li
     return rows.find((row) => row.thread_id === thread_id)?.started?.pull?.mine;
   });
   expect(claimed).toBe(false);
+  // Another link read between reading a PR and starting it doesn't change whose the first one is.
+  const mine = await page.evaluate(async () => {
+    const url = 'https://github.com/northwind/payments/pull/234';
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent(url)}`);
+    await fetch(`/api/inbox/reviews/link?ref=${encodeURIComponent('https://github.com/northwind/payments/pull/233')}`);
+    const res = await fetch('/api/inbox/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ to: { host: 'claude-code', session: 'ses-ledger-claude' }, body: 'Please review.', idempotency_key: '00000000-0000-4000-8000-000000000234', review: { kind: 'link', url, title: 'Yours', ask: 'guide' } }) });
+    const { thread_id } = (await res.json()) as { thread_id: string };
+    const rows = ((await (await fetch('/api/inbox/reviews?cached=1')).json()) as { rows: { thread_id: string | null; started?: { pull?: { mine: boolean } } }[] }).rows;
+    return rows.find((row) => row.thread_id === thread_id)?.started?.pull?.mine;
+  });
+  expect(mine).toBe(true);
   world.polls.splice(world.polls.indexOf(ledgerAgent), 1);
   await ledgerAgent.stop();
 });
