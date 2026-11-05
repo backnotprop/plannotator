@@ -286,6 +286,69 @@ describe.if(hasDom)('Follow an example', () => {
     expect(stops()).toEqual([[0, null], [0, null], [-1, 'true']]);
   });
 
+  test('every number that steps the example carries a bug, hidden from screen readers, and keeps its name', async () => {
+    await mount(fakeHost(board([EXAMPLE])));
+    await press('Follow an example');
+    const tags = [...drawing()!.querySelectorAll<HTMLButtonElement>('.shp-ex-tag')];
+    expect(tags.map((t) => t.querySelectorAll('.n + .bug[aria-hidden="true"] svg').length)).toEqual([1, 1, 1]);
+    expect(tags.map((t) => t.getAttribute('aria-label'))).toEqual(EXAMPLE.steps.map((s, i) => `Step ${i + 1}: ${s.text}. ${s.tag}`));
+  });
+
+  test('the board made only shorter lays out again, in a host that never re-renders it: a phone hides the slice left above the card', async () => {
+    // Watched boxes, resized by hand: nothing else here re-renders the board.
+    const watching: { cb: ResizeObserverCallback; els: Element[] }[] = [];
+    const realRO = globalThis.ResizeObserver;
+    globalThis.ResizeObserver = class {
+      private w: { cb: ResizeObserverCallback; els: Element[] };
+      constructor(cb: ResizeObserverCallback) {
+        this.w = { cb, els: [] };
+        watching.push(this.w);
+      }
+      observe(el: Element) {
+        this.w.els.push(el);
+      }
+      unobserve() {}
+      disconnect() {
+        this.w.els = [];
+      }
+    } as unknown as typeof ResizeObserver;
+    try {
+      let tall = 844;
+      const el = document.createElement('div');
+      document.body.appendChild(el);
+      const surfaceOf = () => document.querySelector<HTMLElement>('.shp-root')!;
+      root = createRoot(el);
+      act(() => root!.render(<ShapeSurface host={fakeHost(board([EXAMPLE]))} id={ID} initialView="how" />));
+      for (let i = 0; i < 50 && !drawing(); i++) await wait();
+      const surface = surfaceOf();
+      Object.defineProperty(surface, 'clientWidth', { configurable: true, get: () => 390 });
+      Object.defineProperty(surface, 'clientHeight', { configurable: true, get: () => tall });
+      surface.getBoundingClientRect = () => new DOMRect(0, 0, 390, tall);
+      surface.querySelector<HTMLElement>('.shp-head')!.getBoundingClientRect = () => new DOMRect(0, 0, 390, 60);
+      await press('Follow an example');
+      const card = document.querySelector<HTMLElement>('.shp-ex-card')!;
+      Object.defineProperty(card, 'offsetHeight', { configurable: true, get: () => 200 });
+      const view = () => document.querySelector('.shp-view.v-how')!;
+      const resize = (box: Element) =>
+        act(() => {
+          for (const w of watching) if (w.els.includes(box)) w.cb([], {} as ResizeObserver);
+        });
+      resize(surface);
+      await wait();
+      expect(document.querySelector('.shp-root.follow-sheet')).not.toBeNull();
+      expect(view().classList.contains('shp-ex-covered')).toBe(false);
+
+      // Shorter only: the card keeps its height, and 300 - 60 - 200 leaves less than a board's room.
+      tall = 300;
+      resize(surface);
+      await wait();
+      expect(view().classList.contains('shp-ex-covered')).toBe(true);
+    } finally {
+      if (realRO) globalThis.ResizeObserver = realRO;
+      else delete (globalThis as { ResizeObserver?: unknown }).ResizeObserver;
+    }
+  });
+
   test('Esc stops following and is marked used; a panel goes first', async () => {
     reduceMotion = true;
     await mount(fakeHost(board([EXAMPLE])));

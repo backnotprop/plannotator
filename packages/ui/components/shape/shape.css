@@ -328,7 +328,8 @@
 .shp-root.panel-open:not(.phone) .shp-ex-card { left: calc((100% - var(--pw) - 12px) / 2); max-width: calc(100% - var(--pw) - 44px); }
 .shp-ex-card.leaving { pointer-events: none; }
 /* The board's status stays in view while an example is followed: it rides above the card, on the card's curve. */
-.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: translate .26s cubic-bezier(.22, 1, .36, 1); }
+/* It keeps sliding with the dock when a panel opens. */
+.shp-pill { translate: 0 calc(-1 * var(--ex-lift, 0px)); transition: left .32s cubic-bezier(.2,.8,.2,1), translate .26s cubic-bezier(.22, 1, .36, 1); }
 .shp-root.follow-sheet .shp-pill { z-index: 26; }
 .shp-ex-skin { position: absolute; inset: 0 0 var(--ex-cut, 0px); z-index: -1; border-radius: 14px; transform-origin: 0 0; background: var(--popover); pointer-events: none;
   box-shadow: 0 0 0 1px var(--ex-edge), 0 12px 32px -14px rgb(0 0 0 / .3), 0 2px 6px -2px rgb(0 0 0 / .06); }
@@ -478,7 +479,6 @@ span.shp-ex-src { display: block; overflow: hidden; text-overflow: ellipsis; tex
 .shp-ex-stop { appearance: none; position: relative; border: 0; background: none; display: flex; align-items: center; gap: 8px; width: 100%; min-height: 28px; padding: 4px 8px; border-radius: 6px; text-align: left; color: var(--muted-foreground); font: 400 13px/20px var(--font-sans); cursor: pointer; transition: background-color .15s ease, color .15s ease; }
 .shp-ex-stop .st { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .shp-ex-stop.on { background: var(--ex-band); color: var(--foreground); font-weight: 500; }
-.shp-ex-rail .shp-ex-stop.on::before { content: ""; position: absolute; left: 0; top: 6px; bottom: 6px; width: 2px; border-radius: 2px; background: var(--primary); }
 .shp-ex-rail .shp-ex-note { margin-top: auto !important; padding: 8px 8px 4px; }
 .shp-ex-card:not(.narrow) .shp-ex-io.panes { display: grid; grid-template-columns: minmax(0, 6fr) minmax(0, 8fr); column-gap: 24px; }
 .shp-ex-card:not(.narrow) .shp-ex-col.fn:only-child { grid-column: 1 / -1; }

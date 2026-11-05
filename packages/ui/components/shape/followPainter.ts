@@ -55,6 +55,8 @@ export const FOLLOW_DRAWN_CSS = `
 .shp-ex-tag .n { position: relative; display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 6px; background: var(--mark-soft); color: var(--mark); font-size: 11.5px; font-weight: 600; }
 .shp-ex-tag .n::before { content: attr(data-n); position: absolute; inset: 0; display: grid; place-items: center; border-radius: inherit; background: var(--mark); color: var(--primary-foreground, #fff); opacity: 0; transition: opacity .22s ease var(--ex-d, 0ms); }
 .shp-ex-tag[data-s="now"] .n::before { opacity: 1; }
+.shp-ex-tag .bug { display: inline-flex; flex: none; margin-left: -3px; color: var(--mark); opacity: .7; }
+.shp-ex-tag[data-s="now"] .bug { opacity: 1; }
 .shp-ex-tag:focus-visible { outline: 2px solid var(--mark); outline-offset: 2px; }
 .shp-ex-tag.bottom { transform: translate(-100%, -50%) scale(var(--ex-inv)); }
 .shp-ex-tag.top { transform: translate(-100%, calc(-100% - 4px)) scale(var(--ex-inv)); transform-origin: 100% 100%; }
@@ -71,6 +73,27 @@ export const FOLLOW_DRAWN_CSS = `
 `;
 
 const GEOMETRY = 'path, line, polyline';
+/** What a tag keeps from the edge of what shows of the drawing. */
+const EDGE = 8;
+/** How far the drawing's frame shows past itself (ShapeDrawn's `clip-path: inset(-24px)`). */
+const FRAME_BLEED = 24;
+
+/**
+ * A bug beside the number: this number steps the example (the debugger). Bug02 from @hugeicons/core-free-icons 4.4.0
+ * (https://hugeicons.com), MIT License, Copyright (c) 2025 Hugeicons; free set only. Stroke Rounded, at the Inbox's 1.6.
+ */
+const BUG = [
+  'M3.01206 6.59744C2.89214 7.65674 3.6584 10.1951 5.87693 10.255',
+  'M18.2891 10.195C19.3684 10.255 20.9873 8.99582 20.9873 6.59741',
+  'M20.0876 20.9879C20.1476 19.6088 19.2482 17.4742 17.5093 17.4142',
+  'M3.90138 20.9881C3.84009 19.5998 4.7594 17.4509 6.53675 17.3905',
+  'M3.01227 13.7926H5.21757',
+  'M21 13.7926L18.8282 13.7926',
+  'M11.9932 13.7926V10.8546M16.4902 2.99982L14.6914 4.79862M7.49615 2.99982L9.29496 4.79862',
+  'M6.95612 8.61209C8.57504 9.77532 12.5924 11.4542 16.9695 8.68404',
+  'M16.826 7.6767C13.2523 2.7 8.69536 5.09841 7.07644 7.8206C6.02093 9.59542 4.37823 13.8886 7.49616 18.5655C10.8539 22.6667 14.8113 20.808 16.4302 18.6494C17.9892 16.7906 19.5242 11.9938 16.826 7.6767Z',
+];
+const BUG_SVG = `<svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" focusable="false">${BUG.map((d) => `<path d="${d}"/>`).join('')}</svg>`;
 
 /** The drawing's scale on screen (its canvas is scaled to fit, and may be mid-resize). */
 function scaleOf(board: HTMLElement) {
@@ -150,7 +173,11 @@ export class FollowPainter {
         n.className = 'n';
         n.textContent = String(i + 1);
         n.setAttribute('data-n', String(i + 1));
-        tag.append(n, doc.createTextNode(s.tag));
+        const bug = doc.createElement('span');
+        bug.className = 'bug';
+        bug.setAttribute('aria-hidden', 'true');
+        bug.innerHTML = BUG_SVG;
+        tag.append(n, bug, doc.createTextNode(s.tag));
         this.layer.appendChild(tag);
         this.tags.push({ tag, i, ...anchor });
       }
@@ -187,6 +214,13 @@ export class FollowPainter {
   place() {
     const { b, k } = scaleOf(this.board);
     if (!k) return;
+    // What shows of the drawing: its frame, which clips 24 px outside itself, within the view it scrolls in.
+    const host = (this.board.getRootNode() as ShadowRoot).host as HTMLElement | undefined;
+    const box = host?.closest?.('.shp-view');
+    const frame = host?.closest?.('.shp-drawn');
+    const v = box && box.clientWidth ? box.getBoundingClientRect() : null;
+    const f = frame ? frame.getBoundingClientRect() : null;
+    const view = v ? { left: Math.max(v.left, f ? f.left - FRAME_BLEED : -Infinity), right: Math.min(v.right, f ? f.right + FRAME_BLEED : Infinity) } : null;
     this.layer.style.setProperty('--ex-inv', String(Math.min(1.6, 1 / k)));
     const x = (v: number) => (v - b.left) / k;
     const y = (v: number) => (v - b.top) / k;
@@ -212,6 +246,12 @@ export class FollowPainter {
         tag.classList.add('beside');
         tag.style.left = `${x(r.right) + 10}px`;
         tag.style.top = `${y(r.top + r.height / 2)}px`;
+      }
+      // A tag that would run past the view it is read in comes back inside it.
+      if (view) {
+        const t = tag.getBoundingClientRect();
+        const shift = t.left < view.left + EDGE ? view.left + EDGE - t.left : t.right > view.right - EDGE ? Math.max(view.left + EDGE - t.left, view.right - EDGE - t.right) : 0;
+        if (shift) tag.style.left = `${parseFloat(tag.style.left) + shift / k}px`;
       }
     }
   }

@@ -41,7 +41,7 @@ const check = (code: string, more = {}) => ({ code, saw: 'true', result: 'pass',
 
 const SHORT = {
   part: 'a',
-  tag: 'left after 9 s',
+  tag: 'left the thread after 9 s, past the 5 s it needs',
   text: 'You leave the thread',
   inputs: [{ name: 'visit.at', value: '12:00:00', from: at(163) }],
   signature: 'leaveCounts(visit: Visit): boolean',
@@ -154,6 +154,8 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
   await press(page, 'Inputs and outputs');
   await expect(page.locator('.shp-ex-rail .shp-ex-stop')).toHaveCount(steps.length);
   expect(await page.evaluate(() => (window as unknown as { stripSeen?: boolean }).stripSeen ?? false)).toBe(false);
+  // The selected stop is marked by its row's band alone: no accent bar on its edge.
+  expect(await page.locator('.shp-ex-rail .shp-ex-stop.on').evaluate((el) => getComputedStyle(el, '::before').content)).toBe('none');
 
   const held = () => Promise.all([rect(page, '.shp-view.v-how .shp-drawn-fit'), rect(page, '.shp-ex-rail .shp-ex-stop'), rect(page, '[aria-label="Next step"]'), rect(page, '.shp-ex-card')]);
   const first = await held();
@@ -200,6 +202,20 @@ test('the path: rows read on one line, stepping moves nothing, a short step ends
 
 test('folded: a small card with no path, and the arrows still step', async ({ browser }) => {
   const { context, page } = await openBoard(browser);
+  // Every number that steps the example is whole in the view: a long tag on the first part does not run past its edge.
+  const inside = await page.evaluate(() => {
+    const view = document.querySelector('.shp-view.v-how')!.getBoundingClientRect();
+    // The drawing's frame clips 24 px outside itself.
+    const frame = document.querySelector('.shp-view.v-how .shp-drawn')!.getBoundingClientRect();
+    const left = Math.max(view.left, frame.left - 24);
+    const right = Math.min(view.right, frame.right + 24);
+    const tags = [...document.querySelectorAll('*')].flatMap((h) => [...(h.shadowRoot?.querySelectorAll('.shp-ex-tag') ?? [])]);
+    return tags.length > 0 && tags.every((t) => {
+      const r = t.getBoundingClientRect();
+      return r.left >= left && r.right <= right;
+    });
+  });
+  expect(inside).toBe(true);
   await press(page, 'Inputs and outputs');
   const opened = (await rect(page, '.shp-ex-card'))!;
   await press(page, 'Hide inputs and outputs');
@@ -481,4 +497,43 @@ test("the board's status stays in view and clickable above the card, on a desk a
     expect(top).toBe(true);
     await context.close();
   }
+});
+
+test('the status slides with the dock when a panel opens, never ahead of it', async ({ browser }) => {
+  const dir = join(w.root, 'boards', 'follow-pill-slide');
+  mkdirSync(dir, { recursive: true });
+  const file = join(dir, 'board.json');
+  writeFileSync(file, JSON.stringify(board));
+  const made = w.shape(['update', '--file', file, '--project', w.projects.plannotator!, '--thread', w.threads.snooze!]);
+  expect(made.status, made.stderr).toBe(0);
+  const pillId = (JSON.parse(made.stdout) as { id: string }).id;
+  const { context, page } = await openBoard(browser, {}, pillId);
+  writeFileSync(file, JSON.stringify({ ...board, claim: 'Built, version two.' }));
+  const again = w.shape(['update', '--file', file, '--project', w.projects.plannotator!, '--thread', w.threads.snooze!, '--id', pillId, '--base', '1']);
+  expect(again.status, again.stderr).toBe(0);
+  await expect(page.locator('.shp-pill')).toBeVisible();
+  await settle(page);
+  // Every frame of the slide: where the dock's middle is, and how far the status is from it.
+  const frames = await page.evaluate(async () => {
+    const mid = (s: string) => {
+      const r = document.querySelector(s)!.getBoundingClientRect();
+      return r.left + r.width / 2;
+    };
+    const seen: [number, number][] = [[mid('.shp-dock'), 0]];
+    document.querySelector<HTMLElement>('.shp-dock button[title="References"]')!.click();
+    const until = performance.now() + 600;
+    while (performance.now() < until) {
+      await new Promise((r) => requestAnimationFrame(r));
+      seen.push([mid('.shp-dock'), Math.abs(mid('.shp-pill') - mid('.shp-dock'))]);
+    }
+    return seen;
+  });
+  const docks = frames.map(([d]) => d);
+  // The dock did slide, through frames in between ...
+  const [from, to] = [docks[0]!, docks.at(-1)!];
+  expect(Math.abs(to - from)).toBeGreaterThan(40);
+  expect(docks.some((d) => Math.min(Math.abs(d - from), Math.abs(d - to)) > 8 && (d - from) * (to - d) > 0)).toBe(true);
+  // ... and the status never left its side.
+  expect(Math.max(...frames.map(([, gap]) => gap))).toBeLessThan(4);
+  await context.close();
 });
