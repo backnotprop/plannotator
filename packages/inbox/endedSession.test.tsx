@@ -945,6 +945,17 @@ test.skipIf(!hasDom)('a launched root moved before it started, a reply on the se
   expect(!!el.querySelector('[data-readdress-open]')).toBe(false);
 });
 
+test.skipIf(!hasDom)('a launched root moved to another session that then ended: that session reads as ended, though the launched agent would start again', async () => {
+  liveness = { ses_launched: false, ses_c: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const [rootMessage, asked] = thread.messages as [InboxMessageWire, InboxMessageWire];
+  const moved = { ...rootMessage, to: { host: 'pi', session: 'ses_c' }, launch: { ...rootMessage.launch!, session: 'ses_launched' } } as InboxMessageWire;
+  const answered = { ...asked, reply_to: LAUNCHED_ROOT, author: { kind: 'agent', host: 'pi', session: 'ses_c', name: null }, questions: undefined, wakes: true } as InboxMessageWire;
+  const el = await render({ ...thread, messages: [moved, answered] }, null, stoppedRun);
+  expect(el.querySelector(`[data-message-article="${M1}"] [data-session-ended]`)).not.toBeNull();
+});
+
 test.skipIf(!hasDom)('a launched thread, the words going to a tagged agent that ended: the ended note shows, so the reply does not wait on it unsaid', async () => {
   liveness = { ses_launched: true, ses_tagged: false };
   sessions = { sessions: [live('ses_launched', 'claude-code', { wrote_thread: true })] };
