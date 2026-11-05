@@ -92,7 +92,11 @@ export function createInboxPullLinks(dataDir: string): InboxPullLinks {
         if ((start?.kind === "local" || start?.kind === "link" || start?.kind === "walkthrough") && typeof start.at === "string") started.set(threadId, start);
       }
       for (const [key, landing] of Object.entries(parsed.landed ?? {})) {
-        if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") landed.set(key, landing);
+        if (typeof landing?.thread_id === "string" && typeof landing.key === "string" && (landing.state === "merged" || landing.state === "closed") && typeof landing.url === "string" && typeof landing.number === "number") {
+          // Written before a key was the list's own: GitLab's had no `:pull`, and capitals were kept.
+          const own = `${landing.key}${landing.platform === "gitlab" && !landing.key.endsWith(":pull") ? ":pull" : ""}`.toLowerCase();
+          landed.set(own === landing.key ? key : inboxReviewLandingId({ key: own, thread_id: landing.thread_id }), { ...landing, key: own });
+        }
       }
       for (const [key, value] of Object.entries(parsed.posted ?? {})) {
         const review = value as Partial<InboxReviewPosted> | string | null;

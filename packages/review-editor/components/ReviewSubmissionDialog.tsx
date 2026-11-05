@@ -96,6 +96,8 @@ interface ReviewSubmissionDialogProps {
   recoveryPersistsRefresh: boolean;
   mrLabel: string;
   platformLabel: string;
+  /** The PR this goes on, when no comment target names it (the Inbox's Post). */
+  postingTo?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -477,6 +479,7 @@ export function ReviewSubmissionDialog({
   recoveryPersistsRefresh,
   mrLabel,
   platformLabel,
+  postingTo,
 }: ReviewSubmissionDialogProps) {
   const isCompactTouchLayout = useCompactTouchLayout();
   const generalCommentRef = useRef<HTMLTextAreaElement>(null);
@@ -592,6 +595,12 @@ export function ReviewSubmissionDialog({
           </div>
         )}
         {!bodyLocked && <div className="mb-3" />}
+
+        {postingTo && !hasTargets && (
+          <p className="mb-3 text-sm text-muted-foreground" data-review-posting-to="">
+            Posting to <span className="font-medium text-foreground">{postingTo}</span>
+          </p>
+        )}
 
         {/* Targets */}
         {submission.targets.length > 0 && (
