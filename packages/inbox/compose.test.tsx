@@ -243,6 +243,10 @@ test.skipIf(!hasDom)('Keep draft: the sidebar\'s Drafts row and the Drafts page 
 
   act(() => (el.querySelector('[data-drafts-nav]') as HTMLButtonElement).click());
   await until(() => el.querySelectorAll('[data-draft-id]').length === 1, 'the draft row');
+  // The header is the name alone: no count and no description beside or under it.
+  const page = el.querySelector('[data-drafts-page]')!;
+  expect(page.querySelector('.ib-dh')?.textContent).toBe('Drafts');
+  expect(page.querySelector('.ib-dh')?.nextElementSibling?.tagName).not.toBe('P');
   const row = el.querySelector('[data-draft-id]')!;
   expect(row.querySelector('[data-draft-chip]')?.textContent).toBe('No agent chosen');
   expect(row.textContent).toContain('Idea: group the list by session');
