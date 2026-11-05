@@ -25,6 +25,7 @@
  * window's storage per layer and scope until the verdict goes.
  */
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
@@ -442,9 +443,31 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const filesPicker = phone || railFolded;
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
+  const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // A phone's sheet hides the page under it, the button that opened it too: focus goes to the sheet's close, and back.
+  useEffect(() => {
+    if (phone && sheet) sheetCloseRef.current?.focus({ preventScroll: true });
+  }, [phone, sheet]);
+  const closeSheet = () => {
+    // At once: the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
+    if (phone) sheetButtonRef.current?.focus({ preventScroll: true });
+  };
+  const onSheetKey = (event: React.KeyboardEvent) => {
+    if (event.key === 'Escape' && phone && sheet && !event.defaultPrevented) {
+      event.preventDefault();
+      closeSheet();
+    }
+  };
+  // The sheet covers a phone's diff: a comment chosen in it closes it, to show the comment's lines (as ReviewPane).
+  const showFromPanel = (id: string) => {
+    showComment(id);
+    if (phone) setSheet(false);
+  };
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -595,6 +618,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         <span className="ib-sp" />
         {folded && (readerComments || comments.length > 0) && (
           <button
+            ref={sheetButtonRef}
             type="button"
             className={`ib-btn ib-sm ib-vcomments${sheet ? ' ib-on' : ''}`}
             onClick={() => setSheet((v) => !v)}
@@ -783,13 +807,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             </p>
           )}
         </div>
-        <div className="ib-apanel ib-gpanel" id={sheetId} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
+        <div className="ib-apanel ib-gpanel" id={sheetId} onKeyDown={onSheetKey} role={folded ? 'region' : undefined} aria-label={folded ? 'Comments' : undefined}>
           {folded && (
             <div className="ib-sheet-h">
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={() => setSheet(false)} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
@@ -802,10 +826,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
             codeAnnotationNote={(c) => (here.includes(c) ? null : 'Written on older code')}
-            onSelect={showComment}
+            onSelect={showFromPanel}
             onDelete={remove}
             selectedId={selectedId}
-            onSelectCodeAnnotation={showComment}
+            onSelectCodeAnnotation={showFromPanel}
             onDeleteCodeAnnotation={remove}
             onEditCodeAnnotation={readerComments ? (id, updates) => {
               const before = comments.find((c) => c.id === id);

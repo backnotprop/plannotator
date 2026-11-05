@@ -29,6 +29,7 @@
  */
 
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type ReactNode } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import type { InboxMessageWire, InboxPull, InboxThread } from '@plannotator/core/inbox-types';
 import { parseDiffToFiles } from '@plannotator/core/diff-files';
@@ -151,10 +152,15 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   const [paneRef, folded] = useNarrowerThan<HTMLElement>(REVIEW_FOLD_PANEL_BELOW, true);
   const [sheet, setSheet] = useState(false);
   const sheetButtonRef = useRef<HTMLButtonElement>(null);
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   const sheetId = useId();
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
+  // A phone's sheet hides the page under it, the button that opened it too: focus goes to the sheet's close.
+  useEffect(() => {
+    if (phone && sheet) sheetCloseRef.current?.focus({ preventScroll: true });
+  }, [phone, sheet]);
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it.
   const readerComments = useMemo(
     () =>
@@ -443,7 +449,8 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
   );
 
   const closeSheet = () => {
-    setSheet(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
     sheetButtonRef.current?.focus({ preventScroll: true });
   };
   const onSheetKey = (event: React.KeyboardEvent) => {
@@ -739,7 +746,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeSheet} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
