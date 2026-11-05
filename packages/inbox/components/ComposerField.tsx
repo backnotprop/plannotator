@@ -125,7 +125,8 @@ export function InboxComposerField({
     },
     [textareaRef],
   );
-  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip.
+  // The field going away (the box closed, Reply to Comment in full screen) ends the session's run and drops its clip;
+  // a host with a `late` keeps a take being transcribed (voiceSession.ts `attach`).
   const voiceSession = voice?.session;
   useEffect(() => {
     if (!voiceSession || !innerRef.current) return;

@@ -32,14 +32,20 @@ export function iconOf(attachment: InboxAttachmentState): IconName {
 }
 
 /** "1280 × 800, 79 KB" for an image; "MP4 video · 7:41 · 1920 × 1080 · 461 MB" for a video; "PDF, 2.3 MB" otherwise. */
-export function sizeLine(attachment: InboxAttachmentState): string {
+/** The line under a file's name as two parts: words, then its separator and size. A narrow tile cuts only the words. */
+function sizeParts(attachment: InboxAttachmentState): { words: string; size: string } {
   const size = formatBytes(attachment.current?.size ?? attachment.size);
   const kind = readInboxAttachmentKind(attachment.kind);
   if (kind === 'video') {
-    return [inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), inboxVideoMeta(attachment), size].filter(Boolean).join(' · ');
+    return { words: [inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), inboxVideoMeta(attachment)].filter(Boolean).join(' · '), size: ` · ${size}` };
   }
-  if (kind === 'image' && attachment.width && attachment.height) return `${attachment.width} × ${attachment.height}, ${size}`;
-  return `${inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type)}, ${size}`;
+  if (kind === 'image' && attachment.width && attachment.height) return { words: `${attachment.width} × ${attachment.height}`, size: `, ${size}` };
+  return { words: inboxAttachmentKindLabel(attachment.kind, attachment.name, attachment.media_type), size: `, ${size}` };
+}
+
+export function sizeLine(attachment: InboxAttachmentState): string {
+  const { words, size } = sizeParts(attachment);
+  return `${words}${size}`;
 }
 
 /** The changed line a tile or caption shows, or null when the file on disk is what was sent. */
@@ -243,8 +249,10 @@ export function AttachmentTiles({
                   </span>
                 </Tip>
               ) : (
-                <span className="ib-kd" id={detailId}>
-                  {detail}
+                <span className="ib-kd ib-kd-split" id={detailId}>
+                  <span className="ib-kd-w">{sizeParts(attachment).words}</span>
+                  <span className="ib-kd-n">{sizeParts(attachment).size}</span>
+                  {counted ? <span className="ib-kd-c">{counted}</span> : null}
                 </span>
               )}
             </span>

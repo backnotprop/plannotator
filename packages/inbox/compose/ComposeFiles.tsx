@@ -809,12 +809,12 @@ function iconFor(upload: Pick<InboxUpload, 'kind'> | null): IconName {
   }
 }
 
-/** The line under a tile's name: words, then the size. The size is its own part, so only the words ever give way. */
+/** The line under a tile's name: words, then its separator and size. A narrow tile cuts only the words. */
 function detailOf(file: ComposeFile): { words: string; size: string } {
   const size = formatBytes(file.state === 'uploading' ? file.size : file.upload!.size);
-  if (file.state === 'uploading') return { words: file.reuse ? 'Adding… ' : `Uploading… ${Math.round(file.progress * 100)}% of `, size };
+  if (file.state === 'uploading') return file.reuse ? { words: 'Adding…', size: ` ${size}` } : { words: `Uploading… ${Math.round(file.progress * 100)}%`, size: ` of ${size}` };
   const upload = file.upload!;
-  return { words: `${inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type)}, `, size };
+  return { words: inboxAttachmentKindLabel(upload.kind, upload.name, upload.media_type), size: `, ${size}` };
 }
 
 /** True for the first PASTED_UNDO_MS after `at`, then false (re-rendered when it turns). */
@@ -939,9 +939,9 @@ export function ComposeFileTiles({ files, onRemove, onPutBack }: { files: readon
                 {file.error ?? 'Not attached.'}
               </span>
             ) : (
-              <span className="ib-kd ib-cp-kd">
-                <span className="ib-cp-kd-w">{detailOf(file).words}</span>
-                <span className="ib-cp-kd-n">{detailOf(file).size}</span>
+              <span className="ib-kd ib-kd-split">
+                <span className="ib-kd-w">{detailOf(file).words}</span>
+                <span className="ib-kd-n">{detailOf(file).size}</span>
               </span>
             )}
             {file.state === 'uploading' && !file.reuse && (
