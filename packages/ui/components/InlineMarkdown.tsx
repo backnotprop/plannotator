@@ -1137,6 +1137,7 @@ export const InlineMarkdown: React.FC<{
             ? <React.Fragment key={key++}>{localLink.wrap(inert)}</React.Fragment>
             : <HostTitle key={key++} title={localLink.title}>{inert}</HostTitle>,
         );
+        if (localLink.after) parts.push(<React.Fragment key={key++}>{localLink.after}</React.Fragment>);
       } else if (isInPageAnchor) {
         parts.push(
           <a

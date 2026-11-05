@@ -13,12 +13,19 @@ import { isCodeFilePath } from "@plannotator/core/code-file";
  * - `unavailable`: draw the link text as inert text with `title` as its
  *   tooltip: no href, so nothing is fetched or navigated. `wrap`, when given,
  *   draws that text instead, without the tooltip (a host's own hover for that
- *   path, which then decides when `title` shows).
+ *   path, which then decides when `title` shows). `after`, when given, is drawn
+ *   right after it (a host's own control for that path); deprecated, prefer `wrap`.
  * - `null` from the resolver: the renderer's default for that link.
  */
 export type LocalLinkResolution =
   | { kind: "open"; open: () => void; title?: string; href?: string }
-  | { kind: "unavailable"; title: string; wrap?: (text: ReactNode) => ReactNode };
+  | {
+      kind: "unavailable";
+      title: string;
+      wrap?: (text: ReactNode) => ReactNode;
+      /** @deprecated Use `wrap`. Still drawn right after the inert link, as before. */
+      after?: ReactNode;
+    };
 
 /** Called with the link target as written (fragment and query included). */
 export type LocalLinkResolver = (href: string) => LocalLinkResolution | null;

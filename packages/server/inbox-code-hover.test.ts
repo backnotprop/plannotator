@@ -192,7 +192,7 @@ describe("a path that holds credentials answers as a missing file", () => {
   });
 
   test("other hidden folders and ordinary names keep working", async () => {
-    const plain = [".github/ci.yml", ".claude/rules.md", ".agents/skills/x/SKILL.md", "src/a.ts", "src/keys.ts", "docs/docker.md", "src/git.ts", "src/gh/client.ts", "api/auth.json", ".config/app.json", "my.config/ghost.md"];
+    const plain = [".github/ci.yml", ".claude/rules.md", ".agents/skills/x/SKILL.md", "src/a.ts", "src/keys.ts", "docs/docker.md", "src/git.ts", "src/gh/client.ts", "api/auth.json", ".config/app.json", "my.config/ghost.md", ".config/ghost.md", ".config/gh-notes.md"];
     for (const path of plain) if (path !== "src/a.ts") file(path);
     const ask = route({});
     for (const path of plain) expect((await ask({ thread: "msg_1", path })).body).toMatchObject({ found: true });
