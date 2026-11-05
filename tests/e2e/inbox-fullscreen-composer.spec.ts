@@ -618,7 +618,7 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
   });
   expect(res.status).toBe(200);
   const long = Array.from({ length: 12 }, (_, i) => `Line ${i + 1} of a long reply.`).join('\n');
-  for (const width of [1440, 1280, 1100, 900, 390]) {
+  for (const width of [1440, 1280, 1100, 900, 768, 390]) {
     const phone = width === 390;
     const context = await browser.newContext({ viewport: { width, height: phone ? 844 : 800 }, hasTouch: phone, isMobile: phone, reducedMotion: 'reduce' });
     try {
@@ -642,8 +642,54 @@ test('an HTML page: the reply box never runs over the drawer’s foot, at any wi
         const footBox = (await foot.boundingBox())!;
         expect(box.x + box.width, `${width}: the reply box ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
       }
+      if (width <= 1100 && !phone) {
+        // The comment list over the box: beside the drawer, centred over the box. Zero height by design; x and width are what it is placed by.
+        await card(page).locator('[data-fcomp-comments]').click();
+        const list = (await page.locator('.ib-anncard').boundingBox())!;
+        const box = (await card(page).boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(list.x + list.width, `${width}: the list ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+        expect(Math.abs(list.x + list.width / 2 - (box.x + box.width / 2)), `${width}: the list is centred over the box`).toBeLessThanOrEqual(1);
+      }
     } finally {
       await context.close();
+    }
+  }
+});
+
+test('the unsaved comment question stays beside the drawer: its foot and Write the reply can still be pressed', async ({ browser }: { browser: Browser }) => {
+  for (const name of ['checkout.html', 'checkout.png']) {
+    for (const width of [900, 1100, 768]) {
+      const context = await browser.newContext({ viewport: { width, height: 800 }, reducedMotion: 'reduce' });
+      try {
+        const page = await context.newPage();
+        await page.goto(fileUrl(name));
+        await expect(pane(page)).toHaveAttribute('data-full-view', '');
+        await page.locator('[data-full-view-comments]').first().click();
+        const foot = page.locator('[data-full-view-foot]');
+        await expect(foot).toBeVisible();
+        const field =
+          name === 'checkout.html'
+            ? page.locator('[data-comment-popover] textarea[data-pn-mobile-editable="true"]').last()
+            : pane(page).getByRole('textbox', { name: 'Comment on checkout.png' });
+        if (name === 'checkout.html') await page.frameLocator('[data-attachment-pane] iframe').first().locator('h1').click();
+        else await card(page).getByRole('radio', { name: /Comment/ }).click();
+        await expect(field).toBeVisible();
+        await page.waitForTimeout(200);
+        await field.fill('Not saved yet');
+        // HTML asks on Escape; an image asks when the file would close.
+        if (name === 'checkout.html') await field.press('Escape');
+        else await foot.getByRole('button', { name: 'Write the reply' }).click();
+        const guard = page.locator('[data-step-guard]');
+        await expect(guard).toBeVisible();
+        if (width === 900) await page.screenshot({ path: join(process.env.PLANNOTATOR_E2E_GUARD_SHOTS ?? shotsDir, `question-${name}-${width}.png`) });
+        const box = (await guard.boundingBox())!;
+        const footBox = (await foot.boundingBox())!;
+        expect(box.x + box.width, `${name} ${width}: the question ends before the foot starts`).toBeLessThanOrEqual(footBox.x);
+        await foot.getByRole('button', { name: 'Write the reply' }).click({ trial: true, timeout: 3_000 });
+      } finally {
+        await context.close();
+      }
     }
   }
 });
