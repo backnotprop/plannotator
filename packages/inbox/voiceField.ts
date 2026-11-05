@@ -34,7 +34,8 @@ export function textareaField(textarea: HTMLTextAreaElement, touch: () => boolea
         // One undo step. Focus goes back to wherever the person went meanwhile.
         const elsewhere = document.activeElement;
         textarea.focus({ preventScroll: true });
-        done = document.execCommand('insertText', false, out);
+        // A field that cannot take focus (hidden under a sheet): the browser would type into whatever has it.
+        if (document.activeElement === textarea) done = document.execCommand('insertText', false, out);
         if (elsewhere instanceof HTMLElement && elsewhere !== textarea && elsewhere !== document.body) elsewhere.focus({ preventScroll: true });
       }
       if (!done) {
