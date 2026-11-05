@@ -151,7 +151,7 @@ function board(patch: string) {
       know: 'The loop waits 0.5 s, 2 s, then 8 s [^1]. The rows go through `src/ledger.ts:1`, and `react.js` is not one of ours.',
       code: {
         stage: 'after',
-        guide: { title: 'Back off between retries', intent: 'Wait before retrying.', sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }] }] },
+        guide: { title: 'Back off between retries', intent: 'Wait before retrying, in `src/retry.ts:3`.', sections: [{ title: 'The retry loop', overview: 'Waits between attempts.', diffs: [{ file: 'src/retry.ts', summary: 'The backoff.' }] }] },
         patch,
         files: [{ path: 'src/retry.ts', line: 3 }],
       },
@@ -380,7 +380,14 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
       // The number beside it is still the number.
       await expect(page.locator('.shp-know [data-ref="1"]').first()).toBeVisible();
+      // The Code view's guide is the board's words too.
+      await page.locator('.shp-tbtn', { hasText: 'Code' }).first().click();
+      await page.locator('.shp-view.v-code [data-open-in-span="src/retry.ts"]').click();
+      await expect(page.locator('[data-open-in-menu="src/retry.ts"] [data-open-in-item="reveal"]')).toBeVisible();
+      await page.keyboard.press('Escape');
+      await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
       // Annotating, a click on the words picks them: no menu.
+      await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
       await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
       await expect(page.locator('.shp-know [data-open-in-span]')).toHaveCount(0);
       await page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }).click();
@@ -575,6 +582,11 @@ test('Code review off: no place offers one', async ({ browser }) => {
     await expect(page.locator('[data-open-in-caret]')).toHaveCount(0);
     await page.locator('.shp-tbtn', { hasText: 'What to know' }).first().click();
     await expect(page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' })).toBeVisible();
+    await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
+    // A guide opens as a plain guide with Code review off, and its words stay words.
+    await page.goto(`${world.url}#thread=${world.reviewThread}`);
+    await page.locator('[data-guide-card]').first().click();
+    await expect(page.locator('.ib-gbody code', { hasText: 'src/retry.ts:3' })).toBeVisible();
     await expect(page.locator('[data-open-in-span]')).toHaveCount(0);
     expect(asked).toEqual([]);
   } finally {
