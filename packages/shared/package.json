@@ -142,7 +142,6 @@
     "./live-proxy-node": "./live-proxy-node.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/ask": "./inbox/ask.ts",
-    "./inbox/review-drawings": "./inbox/review-drawings.ts",
     "./inbox/debug-log": "./inbox/debug-log.ts",
     "./inbox/store": "./inbox/store.ts",
     "./inbox/project-key": "./inbox/project-key.ts",

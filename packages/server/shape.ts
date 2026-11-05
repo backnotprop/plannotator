@@ -30,7 +30,7 @@ import { acceptsGzip } from "@plannotator/shared/app-html";
 import { gunzipSync } from "node:zlib";
 import { shapesDirOf } from "@plannotator/shared/shape/store";
 import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
-import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
+import { shapeBoardsOn } from "@plannotator/shared/shape/switch";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createBunShapeRoutes } from "./shape-routes";
@@ -220,7 +220,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
   const { dataDir } = options;
   const version = options.version ?? "";
   const serverSession = createServerSessionNonce();
-  const shapeOn = () => options.shape ?? shapeSwitchOn();
+  const shapeOn = () => options.shape ?? shapeBoardsOn();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const shapes = createBunShapeRoutes({ dataDir, heartbeatMs: options.heartbeatMs, watchMs: options.watchMs });
   const idleMs = options.idleMs ?? SHAPE_SERVER_IDLE_MS;

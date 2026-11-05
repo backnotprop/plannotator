@@ -8,7 +8,9 @@
  *   Inbox's Ask is off), the question is stored and waits: the agent answers it
  *   with `plannotator shape answer` when it next reads its notes.
  * - Change it: stored; it waits until the agent's `shape read --notes` picks
- *   it up, and the event feed clears "waits for the agent" then.
+ *   it up, and the event feed clears "waits for the agent" then. With
+ *   `wakeOnChange` (Code review on), it also asks the live session to pick it
+ *   up now, through the same Ask, so the redraw comes while the person looks.
  * - Files and hover: the shape's project folder, through code-nav.
  * - Copy prompt: the command any session runs to pick up what waits.
  */
@@ -28,6 +30,8 @@ export interface InboxShapeHostOptions {
   subscribe: (listener: (ids: string[]) => void) => () => void;
   /** The `plannotator` command this Inbox's agents run (Copy prompt), else `plannotator`. */
   command?: string | null;
+  /** A Change it wakes the thread's live session (Code review on). Absent: it waits for the agent's next turn. */
+  wakeOnChange?: () => boolean;
   /** The fetch the Ask stream uses (tests). */
   fetch?: typeof fetch;
 }
@@ -36,6 +40,11 @@ export interface InboxShapeHostOptions {
 export function shapeAskPrompt(loaded: { shape: { id: string; title: string }; version: { n: number } }, input: ShapeNoteInput): string {
   const where = [input.view ? `the ${input.view} view` : null, input.quote ? `"${input.quote.replace(/\s+/g, ' ').slice(0, 300)}"` : null].filter(Boolean).join(', ');
   return `About the Shape board "${loaded.shape.title}" (${loaded.shape.id}, v${input.v}${where ? `, ${where}` : ''}): ${input.text}\n\nAnswer in one or two sentences. If it needs a change to the board, draw it as a new version.`;
+}
+
+/** The words that wake the session for a Change it: only the command, as the notes themselves say the rest. */
+export function shapeChangePrompt(loaded: { shape: { id: string; title: string } }): string {
+  return `The person left changes on the Shape board "${loaded.shape.title}" (${loaded.shape.id}). Run \`plannotator shape read ${loaded.shape.id} --notes\` and draw them as a new version. Then say what changed in one sentence.`;
 }
 
 /** Read an Ask stream (`/api/ai/query`): the answer's text so far, to `onText`; the whole answer at the end. */
@@ -80,13 +89,13 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
   };
 
   /** Through the thread's Ask to the live session; null when none can answer now. */
-  const askSession = async (loaded: ShapeLoadedWire, input: ShapeNoteInput, onText: (text: string) => void): Promise<{ text: string; provider: string } | null> => {
+  const askSession = async (loaded: ShapeLoadedWire, prompt: string, onText: (text: string) => void, busyPolicy?: 'wait'): Promise<{ text: string; provider: string } | null> => {
     const thread = loaded.shape.thread;
     if (!thread || loaded.session.state === 'gone') return null;
     try {
       const model = await inboxApi.askRead(thread);
       if (!model.can_ask) return null;
-      const posted = await inboxApi.askSend(thread, generateId('ask'), shapeAskPrompt(loaded, input));
+      const posted = await inboxApi.askSend(thread, generateId('ask'), prompt);
       if (!posted.provider_id) return null;
       const session = await doFetch('/api/ai/session', {
         method: 'POST',
@@ -96,13 +105,33 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
       if (!session.ok) return null;
       const { sessionId } = (await session.json()) as { sessionId: string };
       const answer = await readAnswer(
-        await doFetch('/api/ai/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, prompt: shapeAskPrompt(loaded, input) }) }),
+        await doFetch('/api/ai/query', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sessionId, prompt, ...(busyPolicy ? { busyPolicy } : {}) }) }),
         onText,
       );
       return answer ? { text: answer, provider: posted.provider_id } : null;
     } catch {
       // The Ask is off in this Inbox (404), or the session went away mid-answer: the question waits instead.
       return null;
+    }
+  };
+
+  /** A Change it wakes the session once; one that comes while it is being woken wakes it once more, after. */
+  const waking = new Map<string, boolean>();
+  const wake = async (id: string): Promise<void> => {
+    if (waking.has(id)) {
+      waking.set(id, true);
+      return;
+    }
+    waking.set(id, false);
+    try {
+      const loaded = last.get(id) ?? (await load(id));
+      await askSession(loaded, shapeChangePrompt(loaded), () => {}, 'wait');
+    } catch {
+      // Not woken: the note waits for the agent's next turn, as it always may.
+    } finally {
+      const again = waking.get(id);
+      waking.delete(id);
+      if (again) void wake(id);
     }
   };
 
@@ -119,12 +148,14 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
       }
     },
     async note(id, input): Promise<ShapeNote> {
-      return (await inboxApi.shapeNote(id, { ...input })).note;
+      const note = (await inboxApi.shapeNote(id, { ...input })).note;
+      if (input.kind === 'change' && options.wakeOnChange?.()) void wake(id);
+      return note;
     },
     async ask(id, input, onText) {
       const question = (await inboxApi.shapeNote(id, { ...input, kind: 'ask' })).note;
       const loaded = last.get(id) ?? (await load(id));
-      const answered = await askSession(loaded, input, onText);
+      const answered = await askSession(loaded, shapeAskPrompt(loaded, input), onText);
       if (!answered) return { question, answer: null };
       const answer = (await inboxApi.shapeAnswer(id, { re: question.id, text: answered.text, from: { host: 'inbox-ask', id: answered.provider } })).note;
       return { question, answer };

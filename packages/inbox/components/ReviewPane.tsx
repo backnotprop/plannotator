@@ -18,12 +18,12 @@
  *   app's export format. It wakes the agent like any reply, and the card in
  *   the thread then shows the outcome.
  *
- * - Show me (approval "shape-in-code-review", mock ac2): selecting lines offers
- *   Comment · Ask · Show me. Show me asks the agent for a picture of the
- *   lines, which opens over the diff; a click on a part opens its code and the
- *   picture shrinks to a corner card. The Overview draws the agent's own
- *   picture sent with the guide, or offers one Show me for the whole review.
- *   Plain Ask opens the Inbox's Ask window with the lines named.
+ * - Show me (approval "code-review-launch-build", item 1): selecting lines
+ *   offers Comment · Ask · Show me. Show me asks the agent for a Shape of the
+ *   lines, a real board that opens over the review; a click on a part lands on
+ *   its line and the board shrinks to a corner card. The Overview draws the
+ *   agent's own picture sent with the guide, or offers one Show me for the whole
+ *   review. Plain Ask opens the Inbox's Ask window with the lines named.
  *
  * No new keyboard shortcuts: Escape and "Thread" go back as the guide pane's do.
  */
@@ -41,11 +41,13 @@ import { parseGuideSnapshot } from '@plannotator/core/guide-format';
 import { inboxDrawnViewOf, inboxReviewLines, inboxReviewRound } from '@plannotator/core/inbox-review';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
+import type { ShapeHost } from '@plannotator/ui/components/shape';
 import { OverviewFigure, OverviewShowMe } from '../review-drawing/OverviewFigure';
-import { ShowMeBox, ShowMeCorner, ShowMeSheet } from '../review-drawing/ShowMeLayer';
-import { anchorDrawing, anchorLines, overviewPicture, baseName, changedMarks, chapterOf, codeKey, markOf, newSideLines, partName, targetLines } from '../review-drawing/showMeModel';
-import { useShowMe, type ShowMePlace } from '../review-drawing/useShowMe';
-import { SHEET_HOME, type SheetOffset } from '../review-drawing/useSheetDrag';
+import { ShowMeBox, ShowMeCorner } from '../review-drawing/ShowMeLayer';
+import { overviewPicture, baseName, changedMarks, chapterOf, markOf, partName, targetLines } from '../review-drawing/showMeModel';
+import { useShowMe } from '../review-drawing/useShowMe';
+import { ShapeLayer, ShapePebbleButton } from '../shape/ShapeParts';
+import type { InboxShapes } from '../shape/useInboxShapes';
 import type { GuideSelectionActions } from '../guide/types';
 import { InboxApiError, inboxApi } from '../api';
 import { agentName } from '../format';
@@ -86,6 +88,12 @@ export interface ReviewPaneProps {
   onSent: () => void | Promise<void>;
   /** Plain Ask on selected lines: the Inbox's Ask window opens with these words in its box. Absent: no Ask. */
   onAsk?: (words: string) => void;
+  /** The window's Shape host and boards. */
+  shapeHost: ShapeHost;
+  shapes: InboxShapes;
+  /** The board open over the review (`&shape=` in the address), or null. */
+  board: string | null;
+  onBoard: (id: string | null) => void;
 }
 
 /** Below this width the comments panel folds into the header's Comments button: the rail and the diff keep the room. */
@@ -96,7 +104,7 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
-export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
+export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, shapeHost, shapes, board, onBoard }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments } = state;
   // A teammate's pull request takes no verdict (the owner's direction): its review reads, comments stay for the
@@ -186,40 +194,47 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     move(path);
   };
 
-  // Show me: a picture of selected lines (or the whole review), over the diff.
+  // Show me: a Shape of selected lines (or the whole review), over the review.
   const author = agentName(message.author);
-  const host = message.author.kind === 'agent' ? (message.author.host ?? null) : null;
   const round = inboxReviewRound(thread.messages, message.id);
   const earlierReviews = useMemo(() => {
     const at = thread.messages.findIndex((m) => m.id === message.id);
     return thread.messages.slice(0, Math.max(0, at)).filter((m) => m.guide?.review).map((m) => m.id);
   }, [thread.messages, message.id]);
-  const showMe = useShowMe({ threadId: thread.thread_id, reviewId: message.id, earlier: earlierReviews, title: message.guide?.title ?? snapshot?.guide.title ?? '', round, agent: author, files, enabled: !readOnly });
-  // Round 2 for Show me: an earlier round's picture stays as asked, its parts anchored again on this round's diff.
-  const askedReview = showMe.state.shown && showMe.state.shown.review !== message.id ? showMe.state.shown.review : null;
-  const [askedPatch, setAskedPatch] = useState<{ review: string; patch: string } | null>(null);
-  useEffect(() => {
-    if (!askedReview || askedPatch?.review === askedReview) return;
-    let live = true;
-    inboxApi.guide(askedReview).then(
-      (answer) => {
-        const parsed = parseGuideSnapshot(answer.snapshot);
-        if (live && parsed.ok) setAskedPatch({ review: askedReview, patch: parsed.value.review.rawPatch });
-      },
-      () => {},
-    );
-    return () => {
-      live = false;
-    };
-  }, [askedReview]); // eslint-disable-line react-hooks/exhaustive-deps
-  const anchors = useMemo(() => {
-    const shown = showMe.state.shown;
-    if (!shown || !askedReview || askedPatch?.review !== askedReview) return null;
-    const lines = (patch: string) => new Map(parseDiffToFiles(patch).map((file) => [file.path, newSideLines(file.patch)] as const));
-    return anchorDrawing([shown.drawing.view.html, shown.drawing.view.tall?.html ?? ''], lines(askedPatch.patch), new Map(files.map((file) => [file.path, newSideLines(file.patch)] as const)));
-  }, [showMe.state.shown?.drawing.id, askedReview, askedPatch, files]); // eslint-disable-line react-hooks/exhaustive-deps
-  // Where the person dragged the picture: kept while the review is open, through the corner card and back.
-  const [sheetOffset, setSheetOffset] = useState<SheetOffset>(SHEET_HOME);
+  const showMe = useShowMe({
+    threadId: thread.thread_id,
+    reviewId: message.id,
+    title: message.guide?.title ?? snapshot?.guide.title ?? '',
+    round,
+    agent: author,
+    enabled: !readOnly,
+    subscribeBoards: shapes.subscribe,
+    onBoard,
+  });
+  /** The part a click landed on: the board shrinks to the corner card, kept as it is underneath. */
+  const [landed, setLanded] = useState<{ name: string; mark: string | null; file: string; lines: [number, number] } | null>(null);
+  useEffect(() => setLanded(null), [board]);
+  const threadBoard = shapes.byThread.get(thread.thread_id);
+  const boardSummary = board ? (shapes.shapes ?? []).find((shape) => shape.id === board) : undefined;
+  const showMeAgain = useRef(showMe.again);
+  showMeAgain.current = showMe.again;
+  const onBoardRef = useRef(onBoard);
+  onBoardRef.current = onBoard;
+  // The board's Show me again: the box, over the review, for what it was made of; the new version opens the board again.
+  const boardHost = useMemo<ShapeHost>(
+    () =>
+      showMe.state.canAsk
+        ? {
+            ...shapeHost,
+            refreshLabel: 'Show me again',
+            refresh: async (id) => {
+              onBoardRef.current(null);
+              showMeAgain.current(id);
+            },
+          }
+        : shapeHost,
+    [shapeHost, showMe.state.canAsk],
+  );
   const [highlight, setHighlight] = useState<{ path: string; start: number; end: number; token: number } | null>(null);
   /** A part of a picture opens its code: the chapter that holds the file (else All files), the lines painted. */
   const openCode = (target: ShapeCodeTarget): boolean => {
@@ -234,6 +249,12 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
     move(target.path);
     const [start, end] = targetLines(target);
     setHighlight((was) => ({ path: target.path, start, end, token: (was?.token ?? 0) + 1 }));
+    return true;
+  };
+  /** A click on a part of the board: it lands on the line and the board shrinks. A file not in this review: the board's own viewer. */
+  const landOnCode = (target: ShapeCodeTarget, el: HTMLElement): boolean => {
+    if (!openCode(target)) return false;
+    setLanded({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });
     return true;
   };
   // The actions are made once per switch (a new object each render would re-render every diff); Show me reads
@@ -256,23 +277,6 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
         : undefined,
     [showMe.state.canAsk, onAsk],
   );
-  /**
-   * Show me again on an earlier round's picture: its lines where they are in this round (the same text, moved
-   * or not), else the lines the person pressed Show me on, else the lines it was asked on.
-   */
-  const againPlace = (): ShowMePlace | undefined => {
-    const shown = showMe.state.shown;
-    if (!shown) return undefined;
-    const { file, lines } = shown.drawing;
-    if (file && lines && askedPatch?.review === askedReview) {
-      const before = parseDiffToFiles(askedPatch.patch).find((f) => f.path === file);
-      const after = files.find((f) => f.path === file);
-      const now = before && after ? anchorLines(lines, newSideLines(before.patch), newSideLines(after.patch)) : null;
-      if (now) return { file, lines: now };
-    }
-    return shown.from ?? undefined;
-  };
-
   // The Overview's picture, and in a later round which of its parts the agent redrew.
   // The Overview's picture, drawn as a Shape picture (overviewPicture: version 3 only); any other diagram keeps the guide viewer's own.
   const overviewHtml = useMemo(() => overviewPicture(snapshot?.guide.overview?.diagram), [snapshot]);
@@ -479,6 +483,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
           <bdi>{message.guide?.title ?? ''}</bdi> · from {author}
         </span>
         <span className="ib-sp" />
+        {threadBoard && <ShapePebbleButton shape={threadBoard} open={board === threadBoard.id} onToggle={() => onBoard(board === threadBoard.id ? null : threadBoard.id)} />}
         {folded && (
           <button
             type="button"
@@ -770,26 +775,9 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
         onStop={() => void showMe.stop()}
         onClose={showMe.closeBox}
       />
-      {showMe.state.shown?.as === 'sheet' && (
-        <ShowMeSheet
-          drawing={showMe.state.shown.drawing}
-          answer={showMe.state.shown.answer}
-          agent={author}
-          host={host}
-          offset={sheetOffset}
-          {...(phone ? {} : { onOffset: setSheetOffset })}
-          asked={askedReview ? { stale: anchors?.stale ?? new Set<string>(), onAgain: () => showMe.again(showMe.state.shown!.drawing, againPlace()) } : null}
-          onAgain={() => showMe.again(showMe.state.shown!.drawing)}
-          onCode={(drawn, el) => {
-            const target = anchors?.moved.get(codeKey(drawn)) ?? drawn;
-            if (openCode(target)) showMe.toCorner({ name: partName(el), mark: markOf(el), file: target.path, lines: targetLines(target) });
-          }}
-          onShrink={() => showMe.toCorner(null)}
-          onClose={showMe.closePicture}
-        />
-      )}
-      {showMe.state.shown?.as === 'corner' && (
-        <ShowMeCorner drawing={showMe.state.shown.drawing} part={showMe.state.shown.part} onGrow={showMe.grow} onClose={showMe.closePicture} />
+      {board && <ShapeLayer host={boardHost} id={board} thread={thread} hidden={!!landed} onClose={() => onBoard(null)} onCode={landOnCode} />}
+      {board && landed && (
+        <ShowMeCorner shape={board} title={boardSummary?.title ?? 'Shape'} picture={boardSummary?.preview?.picture ?? null} part={landed} onGrow={() => setLanded(null)} onClose={() => onBoard(null)} />
       )}
     </section>
   );

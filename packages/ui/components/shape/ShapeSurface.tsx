@@ -148,7 +148,7 @@ export function shapeEndedLabel(host: Pick<ShapeHost, 'askWaitsWhenEnded'>): str
   return host.askWaitsWhenEnded ? 'Session ended · your question waits for the agent' : 'Session ended · Ask AI answers; changes wait for the agent';
 }
 
-export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
+export function ShapeSurface({ host, id, onClose, onCode, CodeGuide, CodeHoverCard, renderThread, initialView, initialPanel, onNavigate }: ShapeSurfaceProps) {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const [rootEl, setRootEl] = useState<HTMLDivElement | null>(null);
   const attachRoot = useCallback((el: HTMLDivElement | null) => {
@@ -370,8 +370,10 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     [host, id],
   );
 
-  // A drawn part with `data-code`: the Code view's whole file when it has one, else the file viewer.
-  const openCodeTarget = useCallback(async (at: ShapeCodeTarget) => {
+  // A drawn part with `data-code`: the host's own view of the code when it has one, else the Code view's whole file
+  // when the board has one, else the file viewer.
+  const openCodeTarget = useCallback(async (at: ShapeCodeTarget, el: HTMLElement) => {
+    if (onCode?.(at, el)) return;
     const v = versionRef.current;
     if (v?.views.code && host.readFile && (v.views.code.files ?? []).some((f) => f.path === at.path)) {
       openCode(at.path, at.line);
@@ -379,7 +381,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     }
     const contents = await readProjectFile(at.path);
     if (contents != null) setViewer({ kind: 'file', path: at.path, contents, line: at.line, token: Date.now() });
-  }, [readProjectFile, host, openCode]);
+  }, [readProjectFile, host, openCode, onCode]);
 
   // Esc: close the panel; otherwise skip the drawing while it plays.
   useEffect(() => {
@@ -739,7 +741,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 {finished && <span className="shp-finished">Finished</span>}
                 {!phone && generalButton(null)}
                 {host.refresh && !finished && (
-                  <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>Bring it up to date</button>
+                  <button type="button" className="shp-quiet-btn" onClick={() => void bringUpToDate()} disabled={busy}>{host.refreshLabel ?? 'Bring it up to date'}</button>
                 )}
                 {onClose && (
                   <button type="button" className="shp-icon-btn shp-close" onClick={onClose} aria-label="Close Shape" title="Close Shape">×</button>

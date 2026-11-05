@@ -1582,9 +1582,15 @@ function Inbox() {
   // Shape (approval "shape-inbox-placement"): only while the person turned it on. Off, nothing is read and nothing shows.
   // A tailnet guest never: the server refuses it the routes. The owner over the tailnet has it, as at the desk.
   const shapeOn = settings?.shape?.on === true && settings.guest !== true;
-  const shapes = useInboxShapes(shapeOn, subscribeShapeFrames);
+  // The boards work with Code review on too: its Show me makes one (approval "code-review-launch-build", item 1). Shape's
+  // own places (the row, the grid, ⌘K's group, `/shape`) stay on Shape's switch.
+  const codeReviewOn = settings?.code_review?.on === true;
+  const boardsOn = (shapeOn || codeReviewOn) && settings?.guest !== true;
+  const shapes = useInboxShapes(boardsOn, subscribeShapeFrames);
+  const wakeOnChange = useRef(codeReviewOn);
+  wakeOnChange.current = codeReviewOn;
   const shapeHost = useMemo(
-    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null) }),
+    () => createInboxShapeHost({ subscribe: shapes.subscribe, command: connectCommand(settings?.mcp_command ?? null), wakeOnChange: () => wakeOnChange.current }),
     [shapes.subscribe, settings?.mcp_command],
   );
   // A `#shapes` link while Shape is off (or never on): the list, in its place.
@@ -4853,7 +4859,7 @@ function Inbox() {
   const searchShapes = useCallback(
     (q: string): SearchShape[] =>
       filterShapeItems(
-        (shapes.shapes ?? []).filter((s) => s.state === 'active').map((s) => ({ s, title: s.title, project: s.project.name })),
+        (shapeOn ? (shapes.shapes ?? []) : []).filter((s) => s.state === 'active').map((s) => ({ s, title: s.title, project: s.project.name })),
         q,
       )
         .slice(0, 5)
@@ -4866,10 +4872,10 @@ function Inbox() {
           picture: s.preview?.picture ?? null,
           refs: s.preview?.refs ?? [],
         })),
-    [shapes.shapes],
+    [shapes.shapes, shapeOn],
   );
-  // The board open over its thread or over the grid (Shape on only).
-  const shapeLayerId = shapeOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
+  // The board open over its thread or over the grid. A review draws its own, over the review (ReviewPane).
+  const shapeLayerId = boardsOn && route.shape && (route.page === 'shapes' || (route.page === 'inbox' && !!route.thread)) ? route.shape : null;
   const guideMessage =
     route.guide && thread && thread.thread_id === route.thread ? (thread.messages.find((m) => m.id === route.guide && m.guide) ?? null) : null;
   // Linked machines: the open thread's machine is away, so its read failed: "MacBook asleep since …", and the answers
@@ -5585,7 +5591,7 @@ function Inbox() {
             onReplyOpened={() => setReplyFor(null)}
             askButton={ask.button}
             shapeButton={(() => {
-              const board = shapeOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
+              const board = boardsOn && thread ? shapes.byThread.get(thread.thread_id) : undefined;
               if (!board) return null;
               const open = route.shape === board.id;
               return <ShapePebbleButton shape={board} open={open} onToggle={() => (open ? close({ ...route, shape: null }) : go({ ...route, shape: board.id }))} />;
@@ -5792,7 +5798,7 @@ function Inbox() {
             // Pull requests: a row only while Code review is on; its count is the last read's "On you" (read at start and on focus).
             onPulls={pullsShown ? () => leave({ page: 'pulls', project: null, thread: null }) : undefined}
             pullsCount={pullsShown && pulls.model ? pullsOnYou(pulls.model) : 0}
-            onShape={shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
+            onShape={shapeOn && shapes.rowShown ? () => leave({ page: 'shapes', project: null, thread: null }) : undefined}
             shapeChanged={shapes.changed}
             // On the list it shows, Inbox (or a project) refreshes; with a thread open it closes it as before, and refreshes.
             onInbox={() => (route.page === 'inbox' && route.project === null && !route.machine ? void refreshInbox(null, route.thread !== null) : leave({ page: 'inbox', project: null, thread: null }))}
@@ -5825,7 +5831,7 @@ function Inbox() {
       >
         <main className="ib-main" data-shape-open={shapeLayerId ? '' : undefined}>
           {main}
-          {shapeLayerId && (
+          {shapeLayerId && !reviewPaneOpen && (
             <ShapeLayer
               host={shapeHost}
               id={shapeLayerId}
@@ -6158,7 +6164,7 @@ function Inbox() {
       {guideMessage &&
         thread &&
         // A review, while Code review is on: the full-window review (its own header's verdict). Otherwise the guide pane, as always.
-        (settings?.code_review?.on === true && guideMessage.guide?.review ? (
+        (reviewPaneOpen ? (
           <ReviewPane
             key={guideMessage.id}
             thread={thread}
@@ -6171,6 +6177,15 @@ function Inbox() {
             onClose={() => close({ ...route, thread: null, guide: null })}
             onSent={afterWrite}
             onAsk={ask.askWith}
+            shapeHost={shapeHost}
+            shapes={shapes}
+            board={shapeLayerId}
+            onBoard={(id) => {
+              const now = routeRef.current;
+              if (now.guide !== guideMessage.id) return;
+              if (id) go({ ...now, shape: id });
+              else close({ ...now, shape: null });
+            }}
           />
         ) : (
           <GuidePane

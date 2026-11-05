@@ -21,13 +21,14 @@ function HoverCard(props: ShapeCodeHoverCardProps) {
   );
 }
 
-export default function ShapeBoard({ host, id, onClose, renderThread, initialView, initialPanel, onNavigate }: ShapeBoardProps) {
+export default function ShapeBoard({ host, id, onClose, onCode, renderThread, initialView, initialPanel, onNavigate }: ShapeBoardProps) {
   return (
     <ShapeSurface
       key={id}
       host={host}
       id={id}
       onClose={onClose}
+      onCode={onCode}
       CodeGuide={ShapeCodeGuide}
       CodeHoverCard={HoverCard}
       renderThread={renderThread}

@@ -7,6 +7,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
+import type { ShapeCodeTarget } from '@plannotator/core/shape';
 import type { QuestionAnswer } from '@plannotator/core/question-block';
 // The parts by file, never the index: the index holds ShapeSurface, which only the lazy #shape-board may load.
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
@@ -62,13 +63,30 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
   );
 }
 
-/** The board, over the thread (or over the grid): its ×, Esc or Back closes it. */
-export function ShapeLayer({ host, id, onClose, thread }: { host: ShapeHost; id: string; onClose: () => void; thread: InboxThread | null }) {
+/**
+ * The board, over the thread, the grid or a review: its ×, Esc or Back closes it. `hidden`: kept as it is (its view,
+ * its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
+ */
+export function ShapeLayer({
+  host,
+  id,
+  onClose,
+  thread,
+  hidden,
+  onCode,
+}: {
+  host: ShapeHost;
+  id: string;
+  onClose: () => void;
+  thread: InboxThread | null;
+  hidden?: boolean;
+  onCode?: (target: ShapeCodeTarget, el: HTMLElement) => boolean;
+}) {
   return (
-    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape">
+    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape" hidden={hidden}>
       {/* The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload. */}
       <PanePart loading={<div className="ib-shape-loading" aria-busy="true" />}>
-          <ShapeBoard host={host} id={id} onClose={onClose} renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined} />
+          <ShapeBoard host={host} id={id} onClose={onClose} onCode={onCode} renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined} />
       </PanePart>
     </section>
   );
