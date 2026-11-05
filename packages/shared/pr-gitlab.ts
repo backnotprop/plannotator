@@ -350,6 +350,7 @@ export async function fetchGlMRContext(
 
   // --- Discussions (inline review threads) ---
   const reviewThreads: PRContext["reviewThreads"] = [];
+  const threadsIncomplete = discussionsResult.exitCode !== 0;
   const discussionNoteIds = new Set<string>();
   if (discussionsResult.exitCode === 0) {
     try {
@@ -533,6 +534,7 @@ export async function fetchGlMRContext(
     comments: notes,
     reviews,
     reviewThreads,
+    ...(threadsIncomplete ? { threadsIncomplete } : {}),
     checks,
     linkedIssues,
     requestedReviewers,

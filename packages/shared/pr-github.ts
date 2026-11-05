@@ -381,8 +381,9 @@ export async function fetchGhPRContext(
   // gives the login only). Non-blocking failure: degrade to no threads / no bot
   // tags rather than failing the whole context.
   try {
-    const { threads, botLogins, avatarByLogin } = await fetchGhThreadsAndBots(runtime, ref);
+    const { threads, botLogins, avatarByLogin, complete } = await fetchGhThreadsAndBots(runtime, ref);
     context.reviewThreads = threads;
+    if (!complete) context.threadsIncomplete = true;
     for (const c of context.comments) {
       if (botLogins.has(c.author)) c.isBot = true;
       const a = avatarByLogin.get(c.author);
@@ -395,6 +396,7 @@ export async function fetchGhPRContext(
     }
   } catch {
     context.reviewThreads = [];
+    context.threadsIncomplete = true;
   }
 
   return context;
@@ -402,13 +404,21 @@ export async function fetchGhPRContext(
 
 // --- Review Threads + bot detection (GraphQL) ---
 
+const PR_THREAD_COMMENT_FIELDS = `id
+              body
+              author { __typename login avatarUrl(size: 48) }
+              createdAt
+              url
+              diffHunk`;
+
 const PR_CONTEXT_GRAPHQL_QUERY = `
-query($owner: String!, $repo: String!, $number: Int!) {
+query($owner: String!, $repo: String!, $number: Int!, $withComments: Boolean = true, $withReviews: Boolean = true, $withThreads: Boolean = true, $commentsAfter: String, $reviewsAfter: String, $threadsAfter: String) {
   repository(owner: $owner, name: $repo) {
     pullRequest(number: $number) {
-      comments(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
-      reviews(first: 100) { nodes { author { __typename login avatarUrl(size: 48) } } }
-      reviewThreads(first: 100) {
+      comments(first: 100, after: $commentsAfter) @include(if: $withComments) { pageInfo { hasNextPage endCursor } nodes { author { __typename login avatarUrl(size: 48) } } }
+      reviews(first: 100, after: $reviewsAfter) @include(if: $withReviews) { pageInfo { hasNextPage endCursor } nodes { author { __typename login avatarUrl(size: 48) } } }
+      reviewThreads(first: 100, after: $threadsAfter) @include(if: $withThreads) {
+        pageInfo { hasNextPage endCursor }
         nodes {
           id
           isResolved
@@ -418,13 +428,9 @@ query($owner: String!, $repo: String!, $number: Int!) {
           path
           diffSide
           comments(first: 50) {
+            pageInfo { hasNextPage endCursor }
             nodes {
-              id
-              body
-              author { __typename login avatarUrl(size: 48) }
-              createdAt
-              url
-              diffHunk
+              ${PR_THREAD_COMMENT_FIELDS}
             }
           }
         }
@@ -433,72 +439,128 @@ query($owner: String!, $repo: String!, $number: Int!) {
   }
 }`;
 
+const PR_THREAD_COMMENTS_GRAPHQL_QUERY = `
+query($id: ID!, $after: String) {
+  node(id: $id) {
+    ... on PullRequestReviewThread {
+      comments(first: 100, after: $after) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          ${PR_THREAD_COMMENT_FIELDS}
+        }
+      }
+    }
+  }
+}`;
+
+interface GhConnection {
+  pageInfo?: { hasNextPage?: boolean; endCursor?: string | null } | null;
+  nodes?: any[] | null;
+}
+
+/** The cursor of a connection's next page, or null when it has none. */
+const nextCursor = (connection: GhConnection | null | undefined): string | null =>
+  connection?.pageInfo?.hasNextPage && connection.pageInfo.endCursor ? connection.pageInfo.endCursor : null;
+
 /**
- * One GraphQL round-trip returning the PR's inline review threads AND the set of
- * author logins that are bots (`__typename === "Bot"`) across comments, reviews,
- * and thread comments. GraphQL is the only place GitHub exposes author type —
- * `gh pr view --json` gives the login only. The caller uses the bot set to tag
- * the top-level comments/reviews; thread comments are tagged inline here.
+ * The PR's inline review threads AND the set of author logins that are bots (`__typename === "Bot"`) across comments,
+ * reviews, and thread comments, every page of them. GraphQL is the only place GitHub exposes author type — `gh pr view
+ * --json` gives the login only. The caller uses the bot set to tag the top-level comments/reviews; thread comments are
+ * tagged inline here. A read that fails partway says so (`complete: false`) and keeps what it read.
  */
 async function fetchGhThreadsAndBots(
   runtime: PRRuntime,
   ref: GhPRRef,
-): Promise<{ threads: PRReviewThread[]; botLogins: Set<string>; avatarByLogin: Map<string, string> }> {
-  const result = await runtime.runCommand("gh", hostnameArgs(ref.host, [
-    "api", "graphql",
-    "-f", `query=${PR_CONTEXT_GRAPHQL_QUERY}`,
-    "-f", `owner=${ref.owner}`,
-    "-f", `repo=${ref.repo}`,
-    "-F", `number=${ref.number}`,
-  ]));
-
-  const empty = { threads: [] as PRReviewThread[], botLogins: new Set<string>(), avatarByLogin: new Map<string, string>() };
-  if (result.exitCode !== 0) return empty;
-
-  const data = JSON.parse(result.stdout);
-  const pr = data?.data?.repository?.pullRequest;
-  if (!pr) return empty;
+): Promise<{ threads: PRReviewThread[]; botLogins: Set<string>; avatarByLogin: Map<string, string>; complete: boolean }> {
+  const read = async (fields: string[]): Promise<any | null> => {
+    const result = await runtime.runCommand("gh", hostnameArgs(ref.host, ["api", "graphql", ...fields]));
+    if (result.exitCode !== 0) return null;
+    try {
+      const parsed = JSON.parse(result.stdout);
+      return parsed?.errors?.length ? null : parsed?.data ?? null;
+    } catch {
+      return null;
+    }
+  };
 
   const botLogins = new Set<string>();
   const avatarByLogin = new Map<string, string>();
+  const threads: PRReviewThread[] = [];
   const collect = (author: any) => {
     if (!author?.login) return;
     const login = String(author.login);
     if (author.__typename === 'Bot') botLogins.add(login);
     if (author.avatarUrl && !avatarByLogin.has(login)) avatarByLogin.set(login, String(author.avatarUrl));
   };
-  for (const n of (pr.comments?.nodes ?? [])) collect(n?.author);
-  for (const n of (pr.reviews?.nodes ?? [])) collect(n?.author);
+  const commentOf = (c: any): PRThreadComment => {
+    collect(c?.author);
+    return {
+      id: String(c.id ?? ''),
+      author: c.author?.login ? String(c.author.login) : '',
+      ...(c.author?.__typename === 'Bot' ? { isBot: true } : {}),
+      ...(c.author?.avatarUrl ? { avatarUrl: String(c.author.avatarUrl) } : {}),
+      body: String(c.body ?? ''),
+      createdAt: String(c.createdAt ?? ''),
+      url: String(c.url ?? ''),
+      ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
+    };
+  };
 
-  const threadNodes = pr.reviewThreads?.nodes;
-  const threads: PRReviewThread[] = Array.isArray(threadNodes)
-    ? threadNodes.map((t: any): PRReviewThread => ({
-        id: String(t.id ?? ''),
-        isResolved: t.isResolved === true,
-        isOutdated: t.isOutdated === true,
-        path: String(t.path ?? ''),
-        line: typeof t.line === 'number' ? t.line : null,
-        startLine: typeof t.startLine === 'number' ? t.startLine : null,
-        diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
-        comments: Array.isArray(t.comments?.nodes)
-          ? t.comments.nodes.map((c: any): PRThreadComment => {
-              collect(c?.author);
-              return {
-                id: String(c.id ?? ''),
-                author: c.author?.login ? String(c.author.login) : '',
-                ...(c.author?.__typename === 'Bot' ? { isBot: true } : {}),
-                ...(c.author?.avatarUrl ? { avatarUrl: String(c.author.avatarUrl) } : {}),
-                body: String(c.body ?? ''),
-                createdAt: String(c.createdAt ?? ''),
-                url: String(c.url ?? ''),
-                ...(c.diffHunk ? { diffHunk: String(c.diffHunk) } : {}),
-              };
-            })
-          : [],
-      }))
-    : [];
+  // Each round asks only for the lists with more to give.
+  let page: string[] = [];
+  for (;;) {
+    const data = await read([
+      "-f", `query=${PR_CONTEXT_GRAPHQL_QUERY}`,
+      "-f", `owner=${ref.owner}`,
+      "-f", `repo=${ref.repo}`,
+      "-F", `number=${ref.number}`,
+      ...page,
+    ]);
+    const pr = data?.repository?.pullRequest;
+    if (!pr) return { threads, botLogins, avatarByLogin, complete: false };
+    for (const n of (pr.comments?.nodes ?? [])) collect(n?.author);
+    for (const n of (pr.reviews?.nodes ?? [])) collect(n?.author);
+    for (const t of (pr.reviewThreads?.nodes ?? [])) {
+      const comments: PRThreadComment[] = (t.comments?.nodes ?? []).map(commentOf);
+      let after = nextCursor(t.comments);
+      while (after) {
+        const more = await read(["-f", `query=${PR_THREAD_COMMENTS_GRAPHQL_QUERY}`, "-f", `id=${String(t.id ?? '')}`, "-f", `after=${after}`]);
+        const connection: GhConnection | undefined = more?.node?.comments;
+        if (!connection) {
+          threads.push(threadOf(t, comments));
+          return { threads, botLogins, avatarByLogin, complete: false };
+        }
+        comments.push(...(connection.nodes ?? []).map(commentOf));
+        after = nextCursor(connection);
+      }
+      threads.push(threadOf(t, comments));
+    }
+    const nextComments = nextCursor(pr.comments);
+    const nextReviews = nextCursor(pr.reviews);
+    const nextThreads = nextCursor(pr.reviewThreads);
+    if (!nextComments && !nextReviews && !nextThreads) return { threads, botLogins, avatarByLogin, complete: true };
+    page = [
+      "-F", `withComments=${!!nextComments}`,
+      "-F", `withReviews=${!!nextReviews}`,
+      "-F", `withThreads=${!!nextThreads}`,
+      ...(nextComments ? ["-f", `commentsAfter=${nextComments}`] : []),
+      ...(nextReviews ? ["-f", `reviewsAfter=${nextReviews}`] : []),
+      ...(nextThreads ? ["-f", `threadsAfter=${nextThreads}`] : []),
+    ];
+  }
+}
 
-  return { threads, botLogins, avatarByLogin };
+function threadOf(t: any, comments: PRThreadComment[]): PRReviewThread {
+  return {
+    id: String(t.id ?? ''),
+    isResolved: t.isResolved === true,
+    isOutdated: t.isOutdated === true,
+    path: String(t.path ?? ''),
+    line: typeof t.line === 'number' ? t.line : null,
+    startLine: typeof t.startLine === 'number' ? t.startLine : null,
+    diffSide: t.diffSide === 'LEFT' || t.diffSide === 'RIGHT' ? t.diffSide : null,
+    comments,
+  };
 }
 
 // --- Requested reviewers ---

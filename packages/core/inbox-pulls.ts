@@ -196,6 +196,8 @@ export interface InboxPullDetailsAnswer {
   reviewers: InboxPullReviewer[];
   checks: InboxPullCheck[];
   comments: InboxPullDetailComment[];
+  /** The comments on lines could not all be read: the forge failed partway. Not kept; the next opening asks again. */
+  threads_incomplete?: boolean;
 }
 
 export interface InboxPullDiffAnswer {

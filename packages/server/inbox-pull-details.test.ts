@@ -193,6 +193,124 @@ describe("reading them through the list", () => {
     expect(refused.code).toBe("pull_unknown");
   });
 
+  /** The forge, with some of its answers changed: `change` returns the answer to give instead, or nothing. */
+  const changed = (f: ReturnType<typeof forge>, change: (args: string[], stdout: string) => unknown) => (async (cli: string, args: string[]) => {
+    const answer = await (f.run as unknown as (cli: string, args: string[]) => Promise<{ stdout: string; stderr: string; exitCode: number }>)(cli, args);
+    const instead = change(args, answer.stdout);
+    return instead === undefined ? answer : typeof instead === "number" ? { stdout: "", stderr: "HTTP 502", exitCode: instead } : { stdout: JSON.stringify(instead), stderr: "", exitCode: 0 };
+  }) as never;
+  const isView = (args: string[]) => args[0] === "pr" && args[1] === "view";
+  const threadsField = (args: string[], name: string) => args.find((a) => a.startsWith(`${name}=`))?.slice(name.length + 1);
+  const thread = (id: string, comments: { pageInfo?: unknown; nodes: unknown[] }) => ({ id, isResolved: false, isOutdated: false, path: "src/a.ts", line: 3, startLine: null, diffSide: "RIGHT", comments });
+  const noted = (id: string) => ({ id, author: { __typename: "User", login: "kim", avatarUrl: "https://a/kim" }, body: id, createdAt: "2026-11-01T00:00:00Z", url: "u" });
+  const threadPage = (threads: unknown[], next?: string) => ({ data: { repository: { pullRequest: { reviewThreads: { pageInfo: { hasNextPage: !!next, endCursor: next ?? null }, nodes: threads } } } } });
+
+  test("a queued check and a skipped one, as gh answered them on a real PR: running, and skipped, not passed", async () => {
+    const f = forge();
+    // Two rows of #2671's statusCheckRollup, as captured.
+    const rollup = [
+      { __typename: "CheckRun", completedAt: "0001-01-01T00:00:00Z", conclusion: "", detailsUrl: "https://github.com/backnotprop/plannotator/actions/runs/42096823925/job/127488930196", name: "Gitleaks", startedAt: "2026-11-05T19:44:54Z", status: "QUEUED", workflowName: "Security Scanning" },
+      { __typename: "CheckRun", completedAt: "2026-11-05T19:44:53Z", conclusion: "SKIPPED", detailsUrl: "https://github.com/backnotprop/plannotator/actions/runs/42096823940/job/127488933395", name: "Inbox Claude Code connection (the mod against the compiled binary)", startedAt: "2026-11-05T19:44:54Z", status: "COMPLETED", workflowName: "Inbox Claude Code connection" },
+      { __typename: "CheckRun", completedAt: "2026-11-05T19:44:53Z", conclusion: "STALE", detailsUrl: "", name: "Old", startedAt: "", status: "COMPLETED", workflowName: "" },
+    ];
+    const pulls = createInboxPulls({ run: changed(f, (args, stdout) => (isView(args) ? { ...JSON.parse(stdout), statusCheckRollup: rollup } : undefined)) });
+    await pulls.list(repos);
+    const answer = await pulls.details(KEY);
+    expect(answer.checks.map((c) => [c.state, c.note])).toEqual([["pending", undefined], ["pass", "Skipped"], ["pending", undefined]]);
+  });
+
+  test("a description of only a PR template's comments is no description", async () => {
+    const f = forge();
+    const pulls = createInboxPulls({ run: changed(f, (args, stdout) => (isView(args) ? { ...JSON.parse(stdout), body: "<!-- Please describe the change -->\n\n<!-- and how you tested it -->\n" } : undefined)) });
+    await pulls.list(repos);
+    expect((await pulls.details(KEY)).description).toBeNull();
+  });
+
+  test("every comment on a line is read, past a page of threads and a thread's page of comments", async () => {
+    const f = forge();
+    const asked: (string | undefined)[] = [];
+    const pulls = createInboxPulls({
+      run: changed(f, (args) => {
+        if (threadsField(args, "query")?.includes("PullRequestReviewThread")) {
+          expect(threadsField(args, "id")).toBe("t1");
+          expect(threadsField(args, "after")).toBe("c50");
+          return { data: { node: { comments: { pageInfo: { hasNextPage: false, endCursor: null }, nodes: [noted("t1-2")] } } } };
+        }
+        if (!threadsField(args, "query")?.includes("reviewThreads(first")) return undefined;
+        asked.push(threadsField(args, "threadsAfter"));
+        return threadsField(args, "threadsAfter")
+          ? threadPage([thread("t2", { nodes: [noted("t2-1")] })])
+          : threadPage([thread("t1", { pageInfo: { hasNextPage: true, endCursor: "c50" }, nodes: [noted("t1-1")] })], "t100");
+      }),
+    });
+    await pulls.list(repos);
+    const answer = await pulls.details(KEY);
+    expect(asked).toEqual([undefined, "t100"]);
+    expect(answer.comments.map((c) => c.body).filter((body) => body.startsWith("t"))).toEqual(["t1-1", "t1-2", "t2-1"]);
+    expect(answer.threads_incomplete).toBeUndefined();
+  });
+
+  test("a page of threads that fails: what was read shows, says it is not all, and is not kept", async () => {
+    const f = forge();
+    let failing = true;
+    const pulls = createInboxPulls({
+      run: changed(f, (args) => {
+        if (!threadsField(args, "query")?.includes("reviewThreads(first")) return undefined;
+        if (threadsField(args, "threadsAfter")) return failing ? 1 : threadPage([thread("t2", { nodes: [noted("t2-1")] })]);
+        return threadPage([thread("t1", { nodes: [noted("t1-1")] })], "t100");
+      }),
+    });
+    await pulls.list(repos);
+    const partial = await pulls.details(KEY);
+    expect(partial.threads_incomplete).toBe(true);
+    expect(partial.comments.some((c) => c.body === "t1-1")).toBe(true);
+    failing = false;
+    const whole = await pulls.details(KEY);
+    expect(whole.threads_incomplete).toBeUndefined();
+    expect(whole.comments.some((c) => c.body === "t2-1")).toBe(true);
+    expect(f.state.views).toBe(2);
+  });
+
+  test("a rate limit on the details holds the host, and no read goes out until it lifts; the list's spent budget holds them too", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    const limited = (async (cli: string, args: string[]) => {
+      if (isView(args)) {
+        f.state.views++;
+        return { stdout: "", stderr: "API rate limit exceeded for user", exitCode: 1 };
+      }
+      return (f.run as unknown as (cli: string, args: string[]) => unknown)(cli, args);
+    }) as never;
+    const pulls = createInboxPulls({ run: limited, now: () => now });
+    await pulls.list(repos);
+    await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed" });
+    const views = f.state.views;
+    await expect(pulls.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed", message: expect.stringContaining("slow down") });
+    expect(f.state.views).toBe(views);
+
+    const g = forge();
+    const reset = new Date(Date.now() + 3_600_000).toISOString();
+    const spent = createInboxPulls({
+      run: changed(g, (args, stdout) => (args.includes("graphql") && stdout.includes('"authored"') ? { data: { ...JSON.parse(stdout).data, rateLimit: { cost: 1, remaining: 3, resetAt: reset } } } : undefined)),
+    });
+    await spent.list(repos);
+    await expect(spent.details(KEY)).rejects.toMatchObject({ code: "pull_details_failed", message: expect.stringContaining("slow down") });
+    expect(g.state.views).toBe(0);
+  });
+
+  test("a read goes once it is an hour old, and the people it named with it, so the walk stays short", async () => {
+    let now = 1_000_000;
+    const f = forge();
+    const pulls = createInboxPulls({ run: f.run, now: () => now });
+    await pulls.list(repos);
+    await pulls.details(KEY);
+    expect(pulls.avatarUrls("github.com").kim).toBe("https://a/kim");
+    now += 59 * 60_000;
+    expect(pulls.avatarUrls("github.com").kim).toBe("https://a/kim");
+    now += 2 * 60_000;
+    expect(pulls.avatarUrls("github.com").kim).toBeUndefined();
+  });
+
   test("two asking at once when the forge fails: both are told it did not answer, neither an internal error", async () => {
     const f = forge();
     f.state.view.exitCode = 1;

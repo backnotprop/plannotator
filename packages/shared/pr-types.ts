@@ -237,6 +237,8 @@ export interface PRContext {
   comments: PRComment[];
   reviews: PRReview[];
   reviewThreads: PRReviewThread[];
+  /** The forge failed while `reviewThreads` was read: there may be more than this holds. */
+  threadsIncomplete?: boolean;
   checks: PRCheck[];
   linkedIssues: PRLinkedIssue[];
   /** Who has been asked to review and has not yet, as far as the forge says. Absent when this read did not ask. */

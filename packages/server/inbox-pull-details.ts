@@ -62,9 +62,9 @@ const QUIET_NOTE: Readonly<Record<string, string>> = { SKIPPED: "Skipped", NEUTR
 
 function checkOf(check: PRCheck): InboxPullCheck | null {
   if (!check.name) return null;
-  // A queued or running check answers an empty conclusion, not null.
-  const done = check.status === "COMPLETED" || !!check.conclusion;
+  // gh answers a queued or running check with an empty conclusion, not null.
   const conclusion = check.conclusion?.toUpperCase() ?? "";
+  const done = check.status === "COMPLETED" && !!conclusion && conclusion !== "STALE";
   const state: InboxPullCheckState = !done ? "pending" : FAILED.has(conclusion) ? "fail" : "pass";
   const note = QUIET_NOTE[conclusion];
   let url: string | undefined;
@@ -115,7 +115,7 @@ export function pullDetailsOf(key: string, context: PRContext, author: string | 
   const avatars: Record<string, string> = {};
   const reviewers = reviewersOf(context, author, avatars);
   const comments = commentsOf(context, avatars);
-  const body = context.body.trim();
+  const body = context.body.replace(/<!--[\s\S]*?(?:-->|$)/g, "").trim();
   return {
     answer: {
       key,
@@ -124,6 +124,7 @@ export function pullDetailsOf(key: string, context: PRContext, author: string | 
       reviewers,
       checks: context.checks.flatMap((check) => checkOf(check) ?? []),
       comments,
+      ...(context.threadsIncomplete ? { threads_incomplete: true } : {}),
     },
     avatars,
   };

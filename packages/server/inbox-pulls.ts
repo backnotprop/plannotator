@@ -78,6 +78,8 @@ export const INBOX_PULLS_RATE_FLOOR = 100;
 export const INBOX_PULL_DIFF_MAX_BYTES = 8 * 1024 * 1024;
 /** A PR's details are kept this long (keyed by the PR's last update too): opening the page again does not ask again. */
 const INBOX_PULL_DETAILS_FRESH_MS = 60_000;
+/** How long the people a read named stay allowed for their pictures: as long as a page is likely to stay open. */
+const INBOX_PULL_DETAILS_KEEP_MS = 60 * 60_000;
 /** A layer's diff is kept this long (keyed by the PR's last update too). */
 export const INBOX_PULL_DIFF_FRESH_MS = 5 * 60_000;
 
@@ -1060,7 +1062,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       const named: Record<string, string> = {};
       const asked = host.toLowerCase();
       for (const [key, entry] of detailReads) {
-        if (known.get(key)?.host.toLowerCase() === asked && entry.avatars) Object.assign(named, entry.avatars);
+        const pull = known.get(key);
+        if (!pull || now() - entry.at > INBOX_PULL_DETAILS_KEEP_MS) {
+          detailReads.delete(key);
+          continue;
+        }
+        if (pull.host.toLowerCase() === asked && entry.avatars) Object.assign(named, entry.avatars);
       }
       return { ...named, ...(avatars.get(asked) ?? {}) };
     },
@@ -1078,13 +1085,19 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           throw failed();
         }
       }
-      if (now() < (holdUntil.get(pull.host) ?? 0)) throw failed();
+      if (listHeld(pull.host)) throw new InboxPullsError("pull_details_failed", `${pull.host} asked to slow down. Try again in a minute.`);
       const parts = splitPath(pull.repo);
       if (!parts) throw failed();
       const ref: PRRef = pull.platform === "github"
         ? { platform: "github", host: pull.host, owner: parts.owner, repo: parts.repo, number: pull.number }
         : { platform: "gitlab", host: pull.host, projectPath: pull.repo, iid: pull.number };
-      const runtime: PRRuntime = { runCommand: (cmd, args, options) => run(cmd as RefCli, args, options?.env) };
+      const runtime: PRRuntime = {
+        runCommand: async (cmd, args, options) => {
+          const result = await run(cmd as RefCli, args, options?.env);
+          if (result.exitCode !== 0 && refErrorOf(cmd as RefCli, result) === "rate_limited") holdUntil.set(pull.host, now() + REF_RATE_LIMIT_MS);
+          return result;
+        },
+      };
       const entry: { at: number; updated: string; read: Promise<PullDetailsRead>; avatars?: Record<string, string> } = {
         at: now(),
         updated: pull.updated_at,
@@ -1094,6 +1107,8 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       try {
         const read = await entry.read;
         entry.avatars = read.avatars;
+        // Part of an answer is shown, not kept: the next opening asks again.
+        if (read.answer.threads_incomplete && detailReads.get(key) === entry) detailReads.delete(key);
         return read.answer;
       } catch {
         // A failure is not kept: the next opening asks again.
