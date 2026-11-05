@@ -3187,13 +3187,19 @@ function Inbox() {
     const threadId = row.thread_id;
     const earlier = (rowOf(threadId) ?? (threadRow?.thread_id === threadId ? threadRow : null))?.snoozed ?? null;
     snoozedThisLoad.current = true;
+    let answer: Awaited<ReturnType<typeof inboxApi.snooze>>;
     try {
-      await inboxApi.snooze(threadId, until);
+      answer = await inboxApi.snooze(threadId, until);
     } catch (cause) {
       showError(cause);
       return;
     }
     await afterWrite();
+    // A home machine whose clock is ahead of this one: the time has passed there, so the thread is not snoozed.
+    if (answer.snoozed === null) {
+      showError(new InboxApiError(409, 'snooze_past', 'That time has passed.'));
+      return;
+    }
     const drawnBefore = moveSnoozedRow(threadId);
     if (drawnBefore) snoozeMoved.current.set(threadId, drawnBefore);
     const when = inboxSnoozeWhen(until);

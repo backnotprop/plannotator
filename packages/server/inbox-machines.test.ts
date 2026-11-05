@@ -1466,7 +1466,7 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       const onA = await mcp(a.port);
       closing.push(onA);
       let key = 0;
-      const person = (thread: string, until: string, at?: string) => fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key: `person-${key++}`, until, at }) });
+      const person = (thread: string, until: string, at?: string, idempotency_key = `person-${key++}`) => fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key, until, at }) });
       const inMonth = (days = 30) => new Date(Date.now() + days * 86_400_000).toISOString();
       const firstAt: Record<string, string> = {};
       for (const thread of [moved, undone, agents]) {
@@ -1480,13 +1480,19 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
 
       b.stop();
       await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
-      const soon = new Date(Date.now() + 1_000).toISOString();
-      expect((await person(moved, soon)).status).toBe(202);
+      // Room for every write below to land before this time, on a slow machine too; the test waits for the time itself.
+      const soon = new Date(Date.now() + 10_000).toISOString();
+      expect((await person(moved, soon, undefined, "person-moved")).status).toBe(202);
       expect((await person(undone, inMonth(40))).status).toBe(202);
       expect((await person(undone, soon, firstAt[undone])).status).toBe(202);
       expect((await call(onA, agents, soon)).structuredContent!.held).toBe(true);
       expect((await person(quiet, soon)).status).toBe(202);
-      await Bun.sleep(1_200);
+      await Bun.sleep(Date.parse(soon) - Date.now() + 100);
+
+      // The window retries a write it holds, past that time too: still the held one, never refused here.
+      const retry = await person(moved, soon, undefined, "person-moved");
+      expect(retry.status).toBe(202);
+      expect(retry.headers.get("Idempotent-Replayed")).toBe("true");
 
       b = await start(dataB);
       await waitFor("the held writes settled", async () => (await outboxOf(a.port)).waiting.length === 0, 45_000);
@@ -1539,13 +1545,14 @@ describe("an agent's snooze_thread of a linked machine's thread", () => {
       // Away, a time that runs out before it is back: the person's own snooze and the agent's both end quietly.
       b.stop();
       await waitFor("B offline on A", async () => ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.some((m: Json) => !m.self && m.state === "offline"), 30_000);
-      const soon = () => new Date(Date.now() + 1_000).toISOString();
+      const soon = () => new Date(Date.now() + 5_000).toISOString();
+      const last = Date.now() + 5_000;
       const peer = ((await (await fetch(`http://127.0.0.1:${a.port}/api/inbox/machines`)).json()) as Json).machines.find((m: Json) => !m.self).id as string;
       expect((await call(onA, thread, soon())).structuredContent!.held).toBe(true);
       const own = await fetch(`http://127.0.0.1:${a.port}/api/inbox/m/${peer}/threads/${thread}/snooze`, { method: "POST", headers: { "Content-Type": "application/json", "X-Plannotator-Thread": thread }, body: JSON.stringify({ idempotency_key: "own-held", until: soon() }) });
       expect(own.status).toBe(202);
       expect((await outboxOf(a.port)).waiting).toHaveLength(2);
-      await Bun.sleep(1_200);
+      await Bun.sleep(Math.max(0, last - Date.now()) + 5_000);
 
       // This Inbox restarts with B still away: B's rows are not known. Not "no such thread".
       await onA.close();

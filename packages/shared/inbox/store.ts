@@ -1254,17 +1254,15 @@ export class InboxStore {
   /**
    * A snooze write a linked machine held for this one. Its time can pass on the way, and then it is not refused: the
    * person wanted the thread back by then. A snooze still running here returns now, as if the write had landed in
-   * time (its mark included), and with none there is nothing to do. Null: the thread has no snooze.
+   * time (its mark included). A return not read yet keeps its own mark. Null: the thread is not snoozed now.
    */
   setHeldSnooze(threadId: string, until: unknown, at?: unknown): InboxSnooze | null {
     if (inboxSnoozeRefusal(until, this.now()) !== "past") return this.setSnooze(threadId, until, at);
     const root = this.messages.get(threadId);
     if (!root || root.thread_id !== threadId) throw new InboxError("thread_not_found", `No thread ${threadId}.`);
     const running = this.snoozeList.find((entry) => entry.thread_id === threadId && inboxSnoozeRunning(entry.until, this.now()));
-    if (!running) return this.snoozeList.find((entry) => entry.thread_id === threadId) ?? null;
-    const returned: InboxSnooze = { ...running, until: new Date(until as string).toISOString() };
-    this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), returned]);
-    return returned;
+    if (running) this.commitSnoozes([...this.snoozeList.filter((entry) => entry.thread_id !== threadId), { ...running, until: new Date(until as string).toISOString() }]);
+    return null;
   }
 
   /** Unsnooze: the snooze ends, and with it a return's mark. A thread with none changes nothing. */

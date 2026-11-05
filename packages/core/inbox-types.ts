@@ -2263,11 +2263,13 @@ export type InboxToolCostHost = "pi" | "opencode" | "dsh";
  * The `snooze_thread` action (its name in `action`, its tag on `thread_id` and
  * its `until` field; no line in the description): 10,095 → 10,248 bytes with
  * Pi's wrapper, measured from the entry, not on real Pi (+153; tokens estimated
- * at +40, so 2,790). The Board-on figure takes the same +153 and +40, estimated.
+ * at +40, so 2,790). Board on, measured the same way from a real tools/list:
+ * 11,779 bytes (tokens estimated at the old ratio, 3,224). Most of that gap from
+ * 11,456 is older than this action.
  */
 const INBOX_TOOL_COST_NOW = { bytes: 10248, tokens: 2790 };
 /** The entry with the Board on (the `card` action listed): for the switch's words, measured on Pi. */
-export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11609, tokens: 3176 } as const;
+export const INBOX_TOOL_COST_WITH_BOARD = { bytes: 11779, tokens: 3224 } as const;
 /**
  * What thread steps add to the entry when the person turns them on (the
  * `steps` action and send_message's `steps` field; approval
