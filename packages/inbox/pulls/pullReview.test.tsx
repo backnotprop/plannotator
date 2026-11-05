@@ -865,6 +865,17 @@ test.skipIf(!hasDom)('Review hands it to the picked agent and never opens the di
   expect(pressed()).toEqual(['ses_b']);
 });
 
+test.skipIf(!hasDom)('a repository with no project: a new agent is not offered, since compose would have nowhere to start it', async () => {
+  sessionsAnswer = { ...sessionsAnswer, projects: [], launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
+  const launched: string[] = [];
+  mount(<Page answer={{ ...model, links: {}, projects: {} }} stackId={STACK_ID} onLaunch={(_k, _p, body) => launched.push(body)} />);
+  await settle();
+  expect(document.querySelector('[data-pulls-launch]')).toBeNull();
+  expect(el('[data-pulls-review]').getAttribute('data-pulls-review')).toBe('');
+  await act(async () => el('[data-pulls-review]').click());
+  expect(launched).toEqual([]);
+});
+
 test.skipIf(!hasDom)('an ended agent: Review reads the live agents again, drops the pick, and launches a new one when none is left', async () => {
   sessionsAnswer = { ...sessionsAnswer, launch: { agents: [{ agent: 'claude-code', name: 'Claude Code' }], projects: [] } };
   refuse = { ses_billing: { status: 409, body: { code: 'session_not_live', error: 'That session is not live any more: nothing was sent.' } } };
