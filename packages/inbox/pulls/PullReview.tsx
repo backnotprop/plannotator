@@ -84,6 +84,13 @@ const seenDiff = (seenId: string, layerKey: string): InboxPullDiffAnswer | undef
 /** A stored review's last part when it names a head commit (as `shaOf` in the server's inbox-pulls.ts takes one). */
 const HEAD_SHA = /^[0-9a-f]{40}(?:[0-9a-f]{24})?$/i;
 
+/** What a line comment's lines are on, kept on it as `anchorSnapshot`: the same head can show other lines (a retarget). */
+function stampOf(patch: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < patch.length; i++) hash = Math.imul(hash ^ patch.charCodeAt(i), 0x01000193);
+  return `${patch.length}:${(hash >>> 0).toString(36)}`;
+}
+
 function readKept(id: string): { comments: CodeAnnotation[]; viewed: string[] } {
   try {
     const raw = JSON.parse(window.localStorage.getItem(STORE + id) ?? 'null') as { comments?: unknown; viewed?: unknown } | null;
@@ -115,21 +122,32 @@ export function PullReview(props: PullReviewProps) {
 
 /**
  * A review's words: this head's entry, with what the layer's other entries hold that must stay in view. One kept for
- * another head commit: its global comments, on no line (its line comments and Viewed may have moved). One that names no
- * commit (written before the head was known, or by an older Inbox, which named the PR's last update): all of it. Its line
- * comments are marked outdated, so they never post on whatever sits at those lines now, once a head is named and either
- * the PR has updated since (`updatedAt`) or the list's head (`listHead`) is not the one named.
+ * another head commit: its global comments, on no line (its line comments and Viewed may have moved), and until a patch
+ * read here names a head, its line comments written on the patch on screen. One that names no commit (written before the
+ * head was known, or by an older Inbox, which named the PR's last update): all of it.
+ *
+ * A line comment says which patch it was written on (`stamp`). One written on another is marked outdated, so it never
+ * posts on whatever sits at those lines now. One with no stamp is an older Inbox's: outdated once the PR has updated
+ * since, or a head is named that the list (`listHead`) does not name; otherwise it takes the stamp of the patch named.
  *
  * `read` touches nothing, as an entry can be newer than what this window knows. `absorb` takes what is now in view out of
  * the other entries (the person wrote, so this entry speaks for them). `move`, once a patch read here names this head,
  * also removes the other heads' line comments and Viewed.
  */
-function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, listHead: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
+function gather(layerKey: string, scope: string, keptId: string, updatedAt: string | null, listHead: string | null, stamp: string | null, mode: 'read' | 'absorb' | 'move'): { comments: CodeAnnotation[]; viewed: string[] } {
   const now = readKept(keptId);
   try {
     const prefix = `${STORE}${layerKey}:${scope}:`;
     const head = keptId.slice(keptId.lastIndexOf(':') + 1);
     const named = HEAD_SHA.test(head);
+    const onLine = (c: CodeAnnotation) => (c.scope ?? 'line') === 'line';
+    const placed = (c: CodeAnnotation, stale: boolean): CodeAnnotation => {
+      if (!onLine(c) || c.outdated || c.anchorSnapshot === stamp) return c;
+      if (c.anchorSnapshot !== undefined ? stamp !== null || stale : stale) return { ...c, outdated: true };
+      return named && stamp && c.anchorSnapshot === undefined ? { ...c, anchorSnapshot: stamp } : c;
+    };
+    const mine = now.comments.map((c) => placed(c, false));
+    let changed = mine.some((c, i) => c !== now.comments[i]);
     const carried: CodeAnnotation[] = [];
     const ticks: string[] = [];
     for (let i = window.localStorage.length - 1; i >= 0; i--) {
@@ -138,23 +156,24 @@ function gather(layerKey: string, scope: string, keptId: string, updatedAt: stri
       const suffix = name.slice(prefix.length);
       const ofAHead = HEAD_SHA.test(suffix);
       const was = readKept(name.slice(STORE.length));
-      const stale = named && (suffix !== updatedAt || (!!listHead && listHead !== head));
-      carried.push(...(ofAHead ? was.comments.filter((c) => c.scope === 'general') : was.comments.map((c) => (stale && (c.scope ?? 'line') === 'line' ? { ...c, outdated: true } : c))));
+      const stale = suffix !== updatedAt || (named && listHead !== head);
+      const inView = (c: CodeAnnotation) => c.scope === 'general' || (mode !== 'move' && !!stamp && onLine(c) && c.anchorSnapshot === stamp);
+      carried.push(...(ofAHead ? was.comments.filter(inView) : was.comments.map((c) => placed(c, stale))));
       if (!ofAHead) ticks.push(...was.viewed);
       if (mode === 'read') continue;
       if (!ofAHead || mode === 'move') window.localStorage.removeItem(name);
-      else keep(name.slice(STORE.length), { comments: was.comments.filter((c) => c.scope !== 'general'), viewed: was.viewed });
+      else keep(name.slice(STORE.length), { comments: was.comments.filter((c) => !inView(c)), viewed: was.viewed });
     }
-    if (carried.length === 0 && ticks.length === 0) return now;
-    const ids = new Set(now.comments.map((c) => c.id));
-    const comments = [...now.comments];
+    changed ||= carried.length > 0 || ticks.length > 0;
+    const ids = new Set(mine.map((c) => c.id));
+    const comments = [...mine];
     for (const c of carried) {
       if (ids.has(c.id)) continue;
       ids.add(c.id);
       comments.push(c);
     }
     const value = { comments, viewed: [...new Set([...now.viewed, ...ticks])] };
-    if (mode !== 'read') keep(keptId, value);
+    if (mode !== 'read' && changed) keep(keptId, value);
     return value;
   } catch {
     // Storage off.
@@ -247,7 +266,9 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   lastPatch.current = diff?.patch ?? null;
   const keptId = `${layerKey}:${scope}:${keptName ?? ''}`;
   const sure = read.current;
-  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, layer?.head_sha ?? null, mode);
+  const patch = diff?.patch;
+  const stamp = useMemo(() => (patch === undefined ? null : stampOf(patch)), [patch]);
+  const words = (mode: 'read' | 'absorb' | 'move') => gather(layerKey, scope, keptId, layer?.updated_at ?? null, layer?.head_sha ?? null, stamp, mode);
   const [comments, setComments] = useState<CodeAnnotation[]>(() => words('read').comments);
   const [viewed, setViewed] = useState<string[]>(() => words('read').viewed);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -259,7 +280,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     setSelectedId(null);
     // The layer and scope are in `keptId`.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [keptId, sure]);
+  }, [keptId, sure, stamp]);
   const store = (value: { comments: CodeAnnotation[]; viewed: string[] }) => {
     if (!sure) words('absorb');
     keep(keptId, value);
@@ -283,7 +304,12 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
   useEffect(() => setPosted(null), [keptId]);
-  const save = (annotation: CodeAnnotation) => write({ comments: [...comments.filter((c) => c.id !== annotation.id), annotation] });
+  // A new line comment is on the patch on screen; an edited one stays on the patch it was written on.
+  const save = (annotation: CodeAnnotation) => {
+    const was = comments.find((c) => c.id === annotation.id);
+    const onPatch = (annotation.scope ?? 'line') !== 'line' ? annotation : { ...annotation, anchorSnapshot: was ? was.anchorSnapshot : (stamp ?? undefined) };
+    write({ comments: [...comments.filter((c) => c.id !== annotation.id), onPatch] });
+  };
   const remove = (id: string) => write({ comments: comments.filter((c) => c.id !== id) });
   const showComment = (id: string) => {
     setSelectedId(id);
@@ -366,7 +392,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
         if (mounted.current) setSending(false);
       }
     },
-    [sending, layer, link, stack, comments, scope, keptId, sure, onSent],
+    [sending, layer, link, stack, comments, scope, keptId, sure, stamp, onSent],
   );
   const spec = useMemo(
     () => buildDecisionSpec({ app: 'review', gate: true, count: comments.length, hasFeedback: comments.length > 0, approvalNotesSupported: true }),

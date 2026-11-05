@@ -74,6 +74,18 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
   // The head this plan's lines are on: it posts there, whatever the PR has moved to. A commit the Inbox no longer takes
   // is refused (`pull_moved`), with what the person wrote still in the dialog.
   const planHead = useRef(pull.head_sha);
+  const refused = useRef(false);
+  const planNow = () =>
+    buildReviewSubmission(
+      submitted,
+      [],
+      pull.url,
+      new Set(submitted.map((c) => c.filePath)),
+      { number: pull.number, title: pull.title, repo: pull.repo },
+      anchor === 'guide' ? new Map([[pull.url, 'diff']]) : undefined,
+      pull.platform,
+      permalinkOf(pull),
+    );
   useEffect(() => {
     if (!open) {
       opened.current = false;
@@ -82,27 +94,24 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
     // A plan kept from a partial or blocked attempt stays (its narrowed retry); otherwise built fresh.
     if (opened.current) return;
     opened.current = true;
-    setAction(open.action);
+    // Words typed for a review are no approval because its comments have gone (a new commit): they stay that review.
+    setAction(open.action === 'approve' && general.trim() ? action : open.action);
     setChooseEvent(open.chooseEvent);
     const sameHead = planHead.current === pull.head_sha;
     planHead.current = pull.head_sha;
-    setPlan((was) =>
-      sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked')
-        ? was
-        : buildReviewSubmission(
-            submitted,
-            [],
-            pull.url,
-            new Set(submitted.map((c) => c.filePath)),
-            { number: pull.number, title: pull.title, repo: pull.repo },
-            anchor === 'guide' ? new Map([[pull.url, 'diff']]) : undefined,
-            pull.platform,
-            permalinkOf(pull),
-          ),
-    );
+    refused.current = false;
+    setPlan((was) => (sameHead && was.targets.some((t) => t.status === 'partial' || t.status === 'blocked') ? was : planNow()));
   }, [open, submitted, pull, anchor]);
 
   const send = async (pending: ReturnType<typeof openPendingTab> | null) => {
+    // Refused, and the new commit is in: retrying that plan can never go, so this shows the new one to read and post.
+    if (refused.current && planHead.current !== pull.head_sha) {
+      closePendingTab(pending);
+      refused.current = false;
+      planHead.current = pull.head_sha;
+      setPlan(planNow());
+      return;
+    }
     setSubmitting(true);
     try {
       let targets = plan.targets;
@@ -128,7 +137,14 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         action,
         generalComment: general,
         bodyForTarget: (target) => buildPlatformReviewBody(action, pull.platform, general, target),
-        fetchReview: (_url, init) => post({ ...(JSON.parse(String(init.body)) as Record<string, unknown>), key: pull.key, head_sha: planHead.current }),
+        fetchReview: async (_url, init) => {
+          const response = await post({ ...(JSON.parse(String(init.body)) as Record<string, unknown>), key: pull.key, head_sha: planHead.current });
+          if (response.status === 409) {
+            const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+            if (answer?.code === 'pull_moved') refused.current = true;
+          }
+          return response;
+        },
       });
       if (!attempt.allComplete) {
         closePendingTab(pending);
