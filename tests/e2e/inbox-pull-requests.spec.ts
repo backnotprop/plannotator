@@ -1174,6 +1174,8 @@ test('Escape closes an open sheet wherever focus is; what used the key keeps it,
       await expect(global).toBeFocused();
       await esc();
       await expect(global).toBeHidden();
+      // Focus is back on what opened the composer, a frame later.
+      await expect(addGlobal).toBeFocused();
       await expect(sheet).toBeVisible();
       await closesToButton(sheet, button);
     }
