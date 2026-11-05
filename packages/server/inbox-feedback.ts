@@ -6,8 +6,10 @@
  *
  * The window cannot reach the feedback Worker itself (its CSP allows
  * `connect-src 'self'` only), so this server forwards the person's words,
- * adding the Plannotator version and this computer's OS name and nothing
- * else, through the one client (`sendProductFeedback`, packages/core/
+ * adding the Plannotator version, this computer's OS name and the names of
+ * the agents that wrote to this Inbox (`inboxFeedbackAgents`: "Claude Code",
+ * "Codex"; never a session, a path, a subject or a count) and nothing else,
+ * through the one client (`sendProductFeedback`, packages/core/
  * product-feedback.ts) the CLI's `plannotator feedback` also uses. A window
  * write like any other (same origin; the owner's page over the tailnet too).
  * Nothing is stored here and nothing is sent unless the person pressed Send.
@@ -15,6 +17,7 @@
 
 import {
   FEEDBACK_UNAVAILABLE,
+  feedbackAgentNames,
   feedbackInputError,
   feedbackOsName,
   productFeedbackPayload,
@@ -24,11 +27,45 @@ import {
   type ProductFeedbackPayload,
   type ProductFeedbackResult,
 } from "@plannotator/core/product-feedback";
+import { INBOX_AGENT_IDS, INBOX_AGENT_LABELS, INBOX_HOST_NAMES, type InboxAuthor } from "@plannotator/core/inbox-types";
+import { AGENT_CONFIG } from "@plannotator/core/agents";
 
 export const INBOX_FEEDBACK_PATH = "/api/inbox/feedback";
 
 // `serverSession`: every window POST carries it (packages/inbox/api.ts); it is not forwarded.
 const BODY_KEYS = new Set(["message", "category", "contact", "serverSession"]);
+
+/**
+ * The name the feedback carries for an agent host, from Plannotator's own
+ * lists only ("claude-code" → "Claude Code"). A host it does not know (an agent
+ * can call itself anything) is null and is never sent.
+ */
+export function feedbackAgentNameOfHost(host: string | null | undefined): string | null {
+  if (!host) return null;
+  if (Object.hasOwn(INBOX_HOST_NAMES, host)) return INBOX_HOST_NAMES[host]!;
+  if ((INBOX_AGENT_IDS as readonly string[]).includes(host)) return INBOX_AGENT_LABELS[host as keyof typeof INBOX_AGENT_LABELS];
+  if (Object.hasOwn(AGENT_CONFIG, host)) return AGENT_CONFIG[host as keyof typeof AGENT_CONFIG].name;
+  return null;
+}
+
+/**
+ * The agents the person has used, from the messages in this Inbox: each
+ * agent message's host, as its name, the most recently used first,
+ * deduplicated and capped (`feedbackAgentNames`). Names only: an agent's own
+ * display name, its session, the thread and the message are never read into it.
+ */
+export function inboxFeedbackAgents(messages: Iterable<{ author: InboxAuthor; created_at: string }>): string[] {
+  const lastUsed = new Map<string, string>();
+  for (const message of messages) {
+    if (message.author.kind !== "agent") continue;
+    const name = feedbackAgentNameOfHost(message.author.host);
+    if (!name) continue;
+    const at = lastUsed.get(name);
+    if (at === undefined || message.created_at > at) lastUsed.set(name, message.created_at);
+  }
+  const newestFirst = [...lastUsed].sort((a, b) => b[1].localeCompare(a[1]) || a[0].localeCompare(b[0])).map(([name]) => name);
+  return feedbackAgentNames(newestFirst);
+}
 
 export function createInboxFeedback(options: {
   version: string;
@@ -37,6 +74,8 @@ export function createInboxFeedback(options: {
   url?: () => string;
   send?: (payload: ProductFeedbackPayload, url: string) => Promise<ProductFeedbackResult>;
   platform?: string;
+  /** The agent names to send (`inboxFeedbackAgents` over the store), read at each Send. Default: none. */
+  agents?: () => Iterable<string>;
 }) {
   const { json } = options;
   const url = options.url ?? (() => productFeedbackUrl(process.env));
@@ -64,8 +103,15 @@ export function createInboxFeedback(options: {
     const input = { message: fields.message, category: (fields.category ?? null) as FeedbackCategory | null, contact: (fields.contact ?? null) as string | null };
     const invalid = feedbackInputError(input);
     if (invalid) return json({ error: invalid, code: "validation_error" }, 400);
+    // The agent names never stop a Send: a failing read sends the feedback without them.
+    let agents: Iterable<string> = [];
+    try {
+      agents = options.agents?.() ?? [];
+    } catch {
+      agents = [];
+    }
     // sendProductFeedback answers within FEEDBACK_TIMEOUT_MS (8 s) and never throws; the catch keeps a thrown seam plain too.
-    const result = await send(productFeedbackPayload(input, { version: options.version, os, surface: "inbox" }), url()).catch(
+    const result = await send(productFeedbackPayload(input, { version: options.version, os, surface: "inbox", agents }), url()).catch(
       (): ProductFeedbackResult => ({ ok: false, reason: FEEDBACK_UNAVAILABLE, unavailable: true }),
     );
     if (result.ok) return json({ ok: true });

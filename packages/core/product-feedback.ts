@@ -9,8 +9,10 @@
  *
  * Nothing is sent without a person's click or an explicit CLI command. A
  * submission carries the message, the optional category and contact the
- * person typed, the Plannotator version, the OS name and where it was sent
- * from; nothing else (no thread content, no paths, no machine id).
+ * person typed, the Plannotator version, the OS name, where it was sent
+ * from and, from the Inbox, the names of the agents the person has used
+ * ("Claude Code", "Codex"; `feedbackAgentNames`); nothing else (no thread
+ * content, no session ids, no paths, no machine id).
  *
  * Browser-safe: no Node or Bun imports. The limits mirror the Worker's
  * (apps/feedback-service/core/validation.ts; its test/limits.test.ts keeps
@@ -26,6 +28,10 @@ export const FEEDBACK_MESSAGE_MAX = 4000;
 export const FEEDBACK_CONTACT_MAX = 200;
 export const FEEDBACK_CATEGORIES = ["bug", "idea", "other"] as const;
 export const FEEDBACK_SURFACES = ["inbox", "plan-review", "code-review", "annotate", "cli"] as const;
+/** At most this many agent names ride one submission. */
+export const FEEDBACK_AGENTS_MAX = 8;
+/** Each agent name is a short label of at most this many characters. */
+export const FEEDBACK_AGENT_NAME_MAX = 40;
 
 export type FeedbackCategory = (typeof FEEDBACK_CATEGORIES)[number];
 export type FeedbackSurface = (typeof FEEDBACK_SURFACES)[number];
@@ -37,7 +43,7 @@ export interface ProductFeedbackInput {
   contact?: string | null;
 }
 
-/** The wire body: the input plus the version, the OS and the surface. Exactly these keys. */
+/** The wire body: the input plus the version, the OS, the surface and the agent names. Exactly these keys. */
 export interface ProductFeedbackPayload {
   message: string;
   category?: FeedbackCategory;
@@ -45,6 +51,8 @@ export interface ProductFeedbackPayload {
   version: string;
   os: string;
   surface: FeedbackSurface;
+  /** Agent names only ("Claude Code", "Codex"), deduplicated and capped (`feedbackAgentNames`). Absent when there are none. */
+  agents?: string[];
 }
 
 /**
@@ -112,9 +120,38 @@ export function feedbackInputError(input: ProductFeedbackInput): string | null {
   return null;
 }
 
-/** The exact body sent: the input's words, the version, the OS and the surface. */
-export function productFeedbackPayload(input: ProductFeedbackInput, meta: { version: string; os: string; surface: FeedbackSurface }): ProductFeedbackPayload {
+// An agent name is a short label: letters, digits, spaces and a few separators (the Worker's rule too).
+const AGENT_NAME_RE = /^[0-9A-Za-z][0-9A-Za-z .+_()\/-]*$/;
+
+/**
+ * The agent names a submission may carry: each one trimmed, a short label (at
+ * most FEEDBACK_AGENT_NAME_MAX characters, nothing else dropped in), the first
+ * of any repeat kept (case aside), at most FEEDBACK_AGENTS_MAX in the order
+ * given. Anything that is not such a name is left out, never sent.
+ */
+export function feedbackAgentNames(names: Iterable<unknown>): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of names) {
+    if (out.length >= FEEDBACK_AGENTS_MAX) break;
+    if (typeof raw !== "string") continue;
+    const name = raw.trim().replace(/\s+/g, " ");
+    if (!name || lengthOf(name) > FEEDBACK_AGENT_NAME_MAX || !AGENT_NAME_RE.test(name)) continue;
+    const key = name.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(name);
+  }
+  return out;
+}
+
+/** The exact body sent: the input's words, the version, the OS, the surface and the agent names, if any. */
+export function productFeedbackPayload(
+  input: ProductFeedbackInput,
+  meta: { version: string; os: string; surface: FeedbackSurface; agents?: Iterable<unknown> },
+): ProductFeedbackPayload {
   const contact = typeof input.contact === "string" ? input.contact.trim() : "";
+  const agents = feedbackAgentNames(meta.agents ?? []);
   return {
     message: input.message.trim(),
     ...(input.category ? { category: input.category } : {}),
@@ -123,7 +160,13 @@ export function productFeedbackPayload(input: ProductFeedbackInput, meta: { vers
     version: meta.version.slice(0, 40),
     os: meta.os.slice(0, 40),
     surface: meta.surface,
+    ...(agents.length > 0 ? { agents } : {}),
   };
+}
+
+/** A Worker deployed before `agents` existed refuses the field by name (its strict validation). */
+function refusedAgentsField(status: number, error: unknown): boolean {
+  return status === 400 && typeof error === "string" && error.startsWith("Unknown field: agents");
 }
 
 export interface SendProductFeedbackOptions {
@@ -134,6 +177,16 @@ export interface SendProductFeedbackOptions {
 
 /** POSTs one submission. No cookies, no credentials, no redirects; the answer's body is never read beyond its error. */
 export async function sendProductFeedback(payload: ProductFeedbackPayload, options: SendProductFeedbackOptions): Promise<ProductFeedbackResult> {
+  const result = await sendOnce(payload, options);
+  // Fails open: a Worker older than the agent names refuses them, and the feedback goes again without them.
+  if ("reason" in result && payload.agents && refusedAgentsField(result.status ?? 0, result.reason)) {
+    const { agents: _agents, ...without } = payload;
+    return sendOnce(without, options);
+  }
+  return result;
+}
+
+async function sendOnce(payload: ProductFeedbackPayload, options: SendProductFeedbackOptions): Promise<ProductFeedbackResult> {
   const doFetch = options.fetch ?? fetch;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), options.timeoutMs ?? FEEDBACK_TIMEOUT_MS);

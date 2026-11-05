@@ -11,8 +11,8 @@ export class D1FeedbackStore implements FeedbackStore {
   async insert(entry: FeedbackEntry): Promise<void> {
     await this.db
       .prepare(
-        `INSERT INTO feedback (message, category, contact, version, os, surface, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?)`
+        `INSERT INTO feedback (message, category, contact, version, os, surface, agents, created_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .bind(
         entry.message,
@@ -21,6 +21,7 @@ export class D1FeedbackStore implements FeedbackStore {
         entry.version,
         entry.os,
         entry.surface,
+        entry.agents,
         entry.created_at
       )
       .run();

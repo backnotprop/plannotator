@@ -73,12 +73,33 @@ describe("the Worker only ever inserts", () => {
     expect([...seen].sort()).toContain("stores/d1.ts");
   });
 
-  test("the only SQL file is the migration, and it keeps the append-only triggers", () => {
-    expect(sqlFiles.map((s) => s.file)).toEqual(["schema.sql"]);
-    const schema = sqlFiles[0]!.text.replace(/--[^\n]*/g, "");
+  test("the only SQL files are the schema and its additive migrations, and the schema keeps the append-only triggers", () => {
+    expect(sqlFiles.map((s) => s.file).sort()).toEqual(["migrations/0001_agents.sql", "schema.sql"]);
+    const schema = sqlFiles.find((s) => s.file === "schema.sql")!.text.replace(/--[^\n]*/g, "");
     expect(schema).toMatch(/BEFORE UPDATE ON feedback\s+BEGIN\s+SELECT RAISE\(ABORT/);
     expect(schema).toMatch(/BEFORE DELETE ON feedback\s+BEGIN\s+SELECT RAISE\(ABORT/);
     expect(/\b(drop|alter|insert|update\s+feedback|delete\s+from)\b/i.exec(schema)?.[0] ?? null).toBeNull();
+  });
+
+  test("a migration only adds a column: no other statement, so it can never change, remove or read a row or a trigger", () => {
+    for (const { file, text } of sqlFiles.filter((s) => s.file.startsWith("migrations/"))) {
+      const statements = text.replace(/--[^\n]*/g, "").split(";").map((s) => s.replace(/\s+/g, " ").trim()).filter(Boolean);
+      expect(statements.length, file).toBe(1);
+      expect(statements[0], file).toMatch(/^ALTER TABLE feedback ADD COLUMN [a-z_]+ TEXT$/);
+    }
+  });
+
+  test("the INSERT writes only columns the schema has, and a migration adds every column a fresh schema has beyond the first", () => {
+    const sql = sources.flatMap(({ text }) => [...text.matchAll(/\.prepare\(\s*`([^`]*)`/g)].map((m) => m[1]!))[0]!;
+    const written = /INSERT INTO feedback \(([^)]*)\)/.exec(sql.replace(/\s+/g, " "))![1]!.split(",").map((c) => c.trim());
+    const schema = sqlFiles.find((s) => s.file === "schema.sql")!.text.replace(/--[^\n]*/g, "");
+    const table = /CREATE TABLE IF NOT EXISTS feedback \(([\s\S]*?)\n\);/.exec(schema)![1]!;
+    const columns = table.split("\n").map((line) => /^\s*([a-z_]+)\s/.exec(line)?.[1]).filter((c): c is string => !!c);
+    for (const column of written) expect(columns, `the INSERT writes ${column}`).toContain(column);
+    // A database made before a column existed gets it from its migration, so the deployed one has it too.
+    const added = sqlFiles.filter((s) => s.file.startsWith("migrations/")).map((s) => /ADD COLUMN ([a-z_]+)/.exec(s.text)![1]!);
+    expect(added).toContain("agents");
+    for (const column of added) expect(columns, `the schema has ${column}`).toContain(column);
   });
 
   test("no SQL verb but INSERT appears anywhere in the source, comments included", () => {
