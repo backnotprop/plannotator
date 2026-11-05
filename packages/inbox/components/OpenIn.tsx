@@ -1,5 +1,5 @@
 import { inboxUrl } from '../inboxUrl';
-import { useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type HTMLAttributes, type MouseEvent as ReactMouseEvent, type ReactElement, type ReactNode, type Ref } from 'react';
 import { readInboxAttachmentKind, type InboxAttachmentState } from '@plannotator/core/inbox-types';
 import { AppIcon } from '@plannotator/ui/components/icons/AppIcon';
 import { CodeSnippetPreview } from '@plannotator/ui/components/CodeSnippetPreview';
@@ -375,7 +375,7 @@ interface CodeHoverWords {
 }
 
 /** What words that name a file do, wherever they are drawn: the file's read, the window, and how it stays and closes. */
-function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
+function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords, raised = false) {
   const phone = usePhone();
   const touch = useTouchScreen();
   const [missing, setMissing] = useState(false);
@@ -453,7 +453,10 @@ function useCodeHover({ scope, path, line, lineEnd }: CodeHoverWords) {
           lineEnd={lineEnd}
           pull={preview.pull}
           sheet={touch}
-          windowRef={windowEl}
+          windowRef={(el) => {
+          windowEl.current = el;
+          if (el && raised) el.dataset.codeHoverRaised = '';
+        }}
           onDismiss={dismiss}
           onMouseEnter={() => {
             pointerIn.current = true;
@@ -562,14 +565,16 @@ function CodeHoverWindow({ title, children, ...words }: CodeHoverWords & { title
 }
 
 /**
- * The same window for code spans a host draws as HTML, which has no spans to wrap (Ask AI's answers, `ChatMarkdown`): it
- * listens over the region, one window at a time. `on` is Code review.
+ * The same window for code spans a host draws as HTML, which has no spans to wrap (Ask AI's answers, `ChatMarkdown`):
+ * handlers for the host's own element, so nothing is added around what it draws, and the window to draw beside it. One
+ * window at a time. `on` is Code review: off, there are no handlers and no window.
  */
-export function OpenInCodeRegion({ scope, on, children }: { scope: OpenInFileScope; on: boolean; children: ReactNode }) {
+export function useOpenInCodeRegion(scope: OpenInFileScope, on: boolean): { handlers?: Pick<HTMLAttributes<HTMLElement>, 'onMouseOver' | 'onClick'>; window: ReactNode } {
   const touch = useTouchScreen();
   const { writes } = useInboxFileSource();
   const [at, setAt] = useState<{ el: HTMLElement; turn: number; path: string; line?: number; lineEnd?: number } | null>(null);
   const turns = useRef(0);
+  if (!on || !writes) return { window: null };
   /** The file a code span or a link with no scheme names. */
   const namedBy = (target: EventTarget) => {
     const el = target instanceof Element ? target.closest<HTMLElement>('code, a') : null;
@@ -581,7 +586,7 @@ export function OpenInCodeRegion({ scope, on, children }: { scope: OpenInFileSco
   };
   const show = (event: ReactMouseEvent<HTMLElement>) => {
     // Not during a drag: the person is selecting words.
-    if (!on || !writes || event.buttons) return;
+    if (event.buttons) return;
     const named = namedBy(event.target);
     if (!named) return;
     // A tap on a link stays here: its address means nothing to a browser.
@@ -590,24 +595,21 @@ export function OpenInCodeRegion({ scope, on, children }: { scope: OpenInFileSco
     if (touch && window.getSelection()?.isCollapsed === false) return;
     setAt({ ...named, turn: (turns.current += 1) });
   };
-  return (
-    <div
-      style={{ display: 'contents' }}
-      data-code-hover-region=""
-      onMouseOver={touch ? undefined : show}
-      onClick={(event) => {
+  return {
+    handlers: {
+      onMouseOver: touch ? undefined : show,
+      onClick: (event) => {
         if (touch) show(event);
-        else if (on && writes && namedBy(event.target)?.el.tagName === 'A') event.preventDefault();
-      }}
-    >
-      {children}
-      {at && <CodeRegionWindow key={at.turn} scope={scope} anchor={at.el} path={at.path} line={at.line} lineEnd={at.lineEnd} />}
-    </div>
-  );
+        else if (namedBy(event.target)?.el.tagName === 'A') event.preventDefault();
+      },
+    },
+    window: at && <CodeRegionWindow key={at.turn} scope={scope} anchor={at.el} path={at.path} line={at.line} lineEnd={at.lineEnd} />,
+  };
 }
 
 function CodeRegionWindow({ anchor, ...words }: CodeHoverWords & { anchor: HTMLElement }) {
-  const { hover, touch, enter, leave, element } = useCodeHover(words);
+  // Over a floating window (Ask AI's), so drawn above it.
+  const { hover, touch, enter, leave, element } = useCodeHover(words, true);
   useEffect(() => {
     hover.anchorRef.current = anchor;
     const open = touch ? () => hover.onEnter() : enter;

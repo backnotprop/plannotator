@@ -167,7 +167,7 @@ describe("a path that holds credentials answers as a missing file", () => {
   };
 
   test("in a project at the home folder, by a segment or a name; the forge is never asked", async () => {
-    const secrets = [".ssh/id_ed25519", ".ssh/config", ".gnupg/pubring.kbx", ".aws/credentials", ".docker/config.json", ".kube/config", ".git/config", ".netrc", ".npmrc", ".pypirc", "id_rsa", "backup/id_ed25519", "certs/site.pem", "tls/server.key", "CERTS/SITE.PEM"];
+    const secrets = [".ssh/id_ed25519", ".ssh/config", ".gnupg/pubring.kbx", ".aws/credentials", ".docker/config.json", ".kube/config", ".git/config", ".netrc", ".npmrc", ".pypirc", "id_rsa", "backup/id_ed25519", "certs/site.pem", "tls/server.key", "CERTS/SITE.PEM", ".config/gh/hosts.yml", ".config/glab-cli/config.yml", ".config/gcloud/application_default_credentials.json", ".codex/auth.json", ".claude/.credentials.json", ".pgpass", ".zsh_history", ".bash_history"];
     for (const path of secrets) file(path);
     const asked: string[] = [];
     const ask = route({ threadPulls: ["key"], pullFile: async (_pull, path) => (asked.push(path), inPull(path)) });
@@ -192,7 +192,7 @@ describe("a path that holds credentials answers as a missing file", () => {
   });
 
   test("other hidden folders and ordinary names keep working", async () => {
-    const plain = [".github/ci.yml", ".claude/rules.md", ".agents/skills/x/SKILL.md", "src/a.ts", "src/keys.ts", "docs/docker.md", "src/git.ts"];
+    const plain = [".github/ci.yml", ".claude/rules.md", ".agents/skills/x/SKILL.md", "src/a.ts", "src/keys.ts", "docs/docker.md", "src/git.ts", "src/gh/client.ts", "api/auth.json", ".config/app.json", "my.config/ghost.md"];
     for (const path of plain) if (path !== "src/a.ts") file(path);
     const ask = route({});
     for (const path of plain) expect((await ask({ thread: "msg_1", path })).body).toMatchObject({ found: true });

@@ -152,7 +152,21 @@ interface FileScope {
 }
 
 const CREDENTIAL_FOLDERS = new Set([".ssh", ".gnupg", ".aws", ".docker", ".kube", ".git"]);
-const CREDENTIAL_FILES = new Set([".netrc", ".npmrc", ".pypirc", ".git-credentials", "id_rsa", "id_dsa", "id_ecdsa", "id_ed25519"]);
+const CREDENTIAL_FILES = new Set([
+  ".netrc",
+  ".npmrc",
+  ".pypirc",
+  ".pgpass",
+  ".git-credentials",
+  ".bash_history",
+  ".zsh_history",
+  "id_rsa",
+  "id_dsa",
+  "id_ecdsa",
+  "id_ed25519",
+]);
+/** A run of folders and names that holds a CLI's sign-in, anywhere in the path. */
+const CREDENTIAL_RUNS = [".config/gh", ".config/glab-cli", ".config/gcloud", ".codex/auth.json", ".claude/.credentials.json"];
 
 /**
  * A path a hover never shows, as if the file were missing: a thread sent from the home folder makes all of it a project.
@@ -161,7 +175,13 @@ const CREDENTIAL_FILES = new Set([".netrc", ".npmrc", ".pypirc", ".git-credentia
 function holdsCredentials(path: string): boolean {
   const parts = path.replace(/\\/g, "/").toLowerCase().split("/").map((part) => part.replace(/:.*$/s, "").replace(/[. ]+$/, ""));
   const name = parts.at(-1) ?? "";
-  return parts.some((part) => CREDENTIAL_FOLDERS.has(part)) || CREDENTIAL_FILES.has(name) || /\.(pem|key)$/.test(name);
+  const joined = `/${parts.join("/")}/`;
+  return (
+    parts.some((part) => CREDENTIAL_FOLDERS.has(part)) ||
+    CREDENTIAL_FILES.has(name) ||
+    /\.(pem|key)$/.test(name) ||
+    CREDENTIAL_RUNS.some((run) => joined.includes(`/${run}/`))
+  );
 }
 
 export function createInboxOpenInRoute(context: InboxOpenInRouteContext) {

@@ -14,7 +14,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { HOVER_PREVIEW_HIDE_DELAY_MS, HOVER_PREVIEW_SHOW_DELAY_MS } from '@plannotator/ui/hooks/useHoverPreview';
 
 const hasDom = typeof document !== 'undefined';
-const { OpenInCodeHover, OpenInCodeRegion, OpenInCodeSpan, OpenInCodeSpans, OpenInFile } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
+const { OpenInCodeHover, OpenInCodeSpan, OpenInCodeSpans, OpenInFile, useOpenInCodeRegion } = (hasDom ? await import('./components/OpenIn') : {}) as typeof import('./components/OpenIn');
 const { ShapeInline } = (hasDom ? await import('@plannotator/ui/components/shape/inline') : {}) as typeof import('@plannotator/ui/components/shape/inline');
 const { InboxFileSourceProvider, INBOX_FILE_SOURCE } = (hasDom ? await import('./fileSource') : {}) as typeof import('./fileSource');
 
@@ -396,6 +396,8 @@ describe('words with a comment\'s marks around them', () => {
     markTheWordsAfter();
     await rest();
     expect(codeWindow()).not.toBeNull();
+    // A message's window stays under the toast and decision mode's pill.
+    expect(codeWindow()!.hasAttribute('data-code-hover-raised')).toBe(false);
     expect([...host!.querySelector('p')!.childNodes]).toEqual(before);
   });
 
@@ -423,15 +425,26 @@ describe('words with a comment\'s marks around them', () => {
   });
 });
 
+/** A host's element with the region's handlers on it, as Ask AI's layer has them. */
+function Region({ scope, on, children }: { scope: { thread: string }; on: boolean; children: ReactNode }) {
+  const region = useOpenInCodeRegion(scope, on);
+  return (
+    <div data-host="" {...region.handlers}>
+      {children}
+      {region.window}
+    </div>
+  );
+}
+
 describe('code spans drawn as HTML: Ask AI\'s answers', () => {
   const scope = { thread: 'msg_ask' };
   const codeWindow = () => document.querySelector('[data-code-snippet-preview]') as HTMLElement | null;
   const draw = (on = true) =>
     act(async () =>
       root!.render(
-        <OpenInCodeRegion scope={scope} on={on}>
+        <Region scope={scope} on={on}>
           <div dangerouslySetInnerHTML={{ __html: '<p>See <code id="a">src/a.ts:12</code>, <code id="b">src/b.ts:2-3</code>, <a id="l" href="src/l.ts:4">the file</a> and <a id="x" href="https://example.com/x.ts">the site</a>.</p><pre><code id="p">src/c.ts</code></pre>' }} />
-        </OpenInCodeRegion>,
+        </Region>,
       ),
     );
   const fire = async (id: string, type: string, wait = HOVER_PREVIEW_SHOW_DELAY_MS) => {
@@ -464,6 +477,10 @@ describe('code spans drawn as HTML: Ask AI\'s answers', () => {
     expect(reads()[0]).toContain('thread=msg_ask');
     expect(reads()[0]).toContain(encodeURIComponent('src/a.ts'));
     expect(codeWindow()).not.toBeNull();
+    // Raised: it opens over a floating window.
+    expect(codeWindow()!.hasAttribute('data-code-hover-raised')).toBe(true);
+    // The host's own element holds the words: nothing is drawn between.
+    expect(document.getElementById('a')!.closest('[data-host]')!.parentElement).toBe(host);
     await over('b');
     expect(document.querySelectorAll('[data-code-snippet-preview]')).toHaveLength(1);
     expect(codeWindow()!.querySelectorAll('[data-target-line]')).toHaveLength(2);
@@ -485,8 +502,12 @@ describe('code spans drawn as HTML: Ask AI\'s answers', () => {
     expect(codeWindow()).not.toBeNull();
   });
 
-  test.skipIf(!hasDom)('off with Code review: nothing is asked, and a link is left alone', async () => {
+  test.skipIf(!hasDom)('off with Code review: nothing is asked, a link is left alone, and the host\'s element is as it was', async () => {
     await draw(false);
+    // Only the host's own element and what it holds: nothing drawn around or beside it.
+    expect(host!.firstElementChild!.hasAttribute('data-host')).toBe(true);
+    expect(host!.children).toHaveLength(1);
+    expect(host!.firstElementChild!.children).toHaveLength(1);
     await over('a');
     expect(reads()).toEqual([]);
     expect(codeWindow()).toBeNull();

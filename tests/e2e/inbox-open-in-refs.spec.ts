@@ -774,6 +774,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(sheet).toHaveCount(0);
       await page.locator('[data-ask-open]').first().tap();
       const ask = page.locator('[data-chat-window]');
+      // Ask AI's window on a phone is the whole screen, as it is with Code review off.
+      await expect(ask).toBeVisible();
+      await expect.poll(async () => JSON.stringify(await ask.boundingBox())).toBe(JSON.stringify({ x: 0, y: 0, width: 390, height: 844 }));
       await ask.locator('code', { hasText: 'src/retry.ts:1-3' }).tap();
       await expect(sheet).toContainText('BACKOFF_MS');
       await page.waitForTimeout(250);
@@ -892,6 +895,33 @@ test('a saved comment across a link to a missing file: learning it is missing le
     await link.hover();
     await expect(page.locator('[data-pn-tooltip]')).toBeVisible();
     await expect(link.locator('mark').first()).toBeVisible();
+  } finally {
+    await context.close();
+  }
+});
+
+test('Ask AI\'s window in a small window keeps its place, and a code span in it shows its code over it', async ({ browser }) => {
+  await world.handPull(world.prReviewThread);
+  const { context, page } = await windowAt(browser, 700, 500, 'dark');
+  try {
+    await page.goto(`${world.url}#thread=${world.prReviewThread}`);
+    await page.locator('section.ib-pane [data-ask-open]').click();
+    const ask = page.locator('[data-chat-window]');
+    await expect(ask).toContainText('from the table in');
+    const box = (await ask.boundingBox())!;
+    expect(box.y).toBeGreaterThanOrEqual(0);
+    expect(box.x).toBeGreaterThanOrEqual(0);
+    expect(box.y + box.height).toBeLessThanOrEqual(500);
+    expect(box.x + box.width).toBeLessThanOrEqual(700);
+    await expect(ask.getByRole('button').first()).toBeInViewport();
+    const inAsk = await codeWindowOf(page, ask.locator('code', { hasText: 'src/retry.ts:1-3' }));
+    // Over Ask AI's window: the window's own header is under it, not over it.
+    const head = await inAsk.evaluate((el) => {
+      const r = el.getBoundingClientRect();
+      const top = document.elementFromPoint(r.left + r.width / 2, r.top + 8);
+      return !!top && el.contains(top);
+    });
+    expect(head).toBe(true);
   } finally {
     await context.close();
   }

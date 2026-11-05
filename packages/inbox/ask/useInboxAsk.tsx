@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type PointerEvent as ReactPointerEvent, type ReactNode } from 'react';
 import { ChatWindowStore, useChatFrameFocusReturn } from '@plannotator/ui/components/chat';
 import { inboxApi, type InboxAskChat, type InboxAskConversationWire, type InboxAskModel } from '../api';
-import { OpenInCodeRegion } from '../components/OpenIn';
+import { useOpenInCodeRegion } from '../components/OpenIn';
 import { Tip } from '../components/Tip';
 import { AskChat } from './AskChat';
 import { onAskChange } from './askEvents';
@@ -168,36 +168,38 @@ export function useInboxAsk({ on, codeReview, threadId, phone, openThread, reply
     [store],
   );
 
+  const region = useOpenInCodeRegion({ thread: askFor ?? '' }, codeReview && !!askFor);
+
   return {
     askWith,
     button: icon('ib-iconbtn ib-artbtn'),
     fileButton: icon(pressed ? 'ib-fvb ib-on' : 'ib-fvb'),
     layer: askFor ? (
-      <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn}>
-        <OpenInCodeRegion scope={{ thread: askFor }} on={codeReview}>
-          <AskChat
-            key={askFor}
-            threadId={askFor}
-            store={store}
-            model={model}
-            picked={picked?.thread_id === askFor ? picked : null}
-            phone={phone}
-            focusRequest={focusRequest}
-            seed={seed?.threadId === askFor ? seed : null}
-            takeFocus={() => {
-              if (wantsFocus.current !== askFor) return false;
-              wantsFocus.current = null;
-              return true;
-            }}
-            onPick={pick}
-            onLeave={() => {
-              openChats.current.delete(askFor);
-            }}
-            onConversation={adopt}
-            onReload={reload}
-            onReply={(words) => replyInThread(askFor, words)}
-          />
-        </OpenInCodeRegion>
+      // The code window's handlers sit on the layer itself: ChatFrame sizes itself from this element.
+      <div className="ib-ask-layer" data-ask-layer="" onPointerDownCapture={keepFocusIn} {...region.handlers}>
+        <AskChat
+          key={askFor}
+          threadId={askFor}
+          store={store}
+          model={model}
+          picked={picked?.thread_id === askFor ? picked : null}
+          phone={phone}
+          focusRequest={focusRequest}
+          seed={seed?.threadId === askFor ? seed : null}
+          takeFocus={() => {
+            if (wantsFocus.current !== askFor) return false;
+            wantsFocus.current = null;
+            return true;
+          }}
+          onPick={pick}
+          onLeave={() => {
+            openChats.current.delete(askFor);
+          }}
+          onConversation={adopt}
+          onReload={reload}
+          onReply={(words) => replyInThread(askFor, words)}
+        />
+        {region.window}
       </div>
     ) : null,
   };
