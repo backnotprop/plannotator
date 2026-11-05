@@ -606,7 +606,13 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
                 : null
             }
             comments={forPost(comments, screen, postHead, layer.platform, scope)}
-            readComments={() => forPost(unstored.current ? comments : words('read').comments, screen, postHead, layer.platform, scope)}
+            readComments={() => {
+              if (unstored.current) return forPost(comments, screen, postHead, layer.platform, scope);
+              // What another window wrote that has not reached this one: the panel says the same as the post.
+              const stands = words('read').comments;
+              setComments(stands);
+              return forPost(stands, screen, postHead, layer.platform, scope);
+            }}
             anchor={scope === 'stack' ? 'stack' : 'diff'}
             headSha={postHead}
             busy={sending || !snapshot}

@@ -1974,6 +1974,7 @@ test.skipIf(!hasDom)('another window edits a comment under the open dialog: its 
   await settle();
   expect(reviews().map((r) => inline(r.body))).toEqual([['From the other window.']]);
   expect(stored(top, 'layer', A)).toBeNull();
+  expect(drawn()).toEqual([]);
 });
 
 test.skipIf(!hasDom)('another window deletes a comment under the open dialog: it does not go; with none left nothing goes and nothing says posted', async () => {
@@ -1986,6 +1987,7 @@ test.skipIf(!hasDom)('another window deletes a comment under the open dialog: it
   await act(async () => inDialog('Post Comments').click());
   await settle();
   expect(reviews().map((r) => inline(r.body))).toEqual([[LINE.text]]);
+  expect(drawn()).toEqual([]);
   close();
   posted = [];
   await open([low, top], top);
