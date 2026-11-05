@@ -619,6 +619,13 @@ describe('All N layers', () => {
     expect(row.textContent).toBe('All 3 layers+1 -1');
   });
 
+  test.skipIf(!hasDom)('one open layer over a merged one: no row, as there is nothing more to read than the layer', async () => {
+    mount(<PullReview model={{ ...model, pulls: [merged, bottom] }} modelError={null} stackId={inboxPullStacks([merged, bottom])[0]!.id} layerKey={bottom.key} scope="layer" onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    expect(document.querySelector('[data-pull-layer-row]')).not.toBeNull();
+    expect(document.querySelector('[data-pull-layer-all]')?.textContent ?? null).toBeNull();
+  });
+
   test.skipIf(!hasDom)('two PRs on one branch: it counts the chain its diff reads, not the sibling', async () => {
     const sibling = { ...top, number: 415, key: top.key.replace('#414', '#415'), head: 'retry/other', base: bottom.head };
     const row = await draw([bottom, middle, sibling], middle.key, 'layer');
