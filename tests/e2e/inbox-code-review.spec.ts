@@ -333,6 +333,11 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
+  // The PR page's quiet scrollbar and 33 px file head are its own: this window keeps its shorter head and its bar.
+  const scrollbar = retry.locator('[data-diff-hscrollbar]');
+  await expect(scrollbar).toBeAttached();
+  await expect(scrollbar.locator('> div')).toHaveCSS('opacity', '1');
+  expect(await scrollbar.evaluate((bar) => bar.parentElement!.getBoundingClientRect().height)).toBeLessThan(33);
 
   await retry.hover();
   await added(12).click();

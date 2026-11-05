@@ -2299,12 +2299,15 @@ pre code.pn-code[data-keep-layout] {
 /* Pierre's diff colours from the theme, as the review stylesheet passes them into its shadow DOM. */
 .ib-gbody diffs-container { --diffs-dark-bg: var(--background); --diffs-light-bg: var(--background); --diffs-dark: var(--foreground); --diffs-light: var(--foreground); }
 /* FileHeader's height is this variable, which only the review stylesheet defined: here the row shrank onto its file name. */
-.ib-gbody { --panel-header-h: 33px; }
+.ib-prreview .ib-gbody { --panel-header-h: 33px; }
 /* A file's own horizontal scrollbar rides its header's bottom edge: it shows only under the pointer, or while dragged. */
-.ib-gbody [data-diff-hscrollbar] > div { opacity: 0; transition: opacity 120ms ease-out, background-color 150ms ease; }
-.ib-gbody [data-guide-file-shell]:hover [data-diff-hscrollbar] > div, .ib-gbody [data-diff-hscrollbar]:active > div { opacity: 1; }
+.ib-prreview [data-diff-hscrollbar] > div { opacity: 0; transition: opacity 120ms ease-out, background-color 150ms ease; }
+.ib-prreview [data-diff-hscrollbar]:active > div { opacity: 1; }
+@media (hover: hover) {
+  .ib-prreview [data-guide-file-shell]:hover [data-diff-hscrollbar] > div { opacity: 1; }
+}
 @media (prefers-reduced-motion: reduce) {
-  .ib-gbody [data-diff-hscrollbar] > div { transition: none; }
+  .ib-prreview [data-diff-hscrollbar] > div { transition: none; }
 }
 /* The guide beside its comments: the attachment pane's panel column, with what rides the next Send at its foot. */
 .ib-gsplit { display: grid; grid-template-columns: minmax(0, 1fr) 300px; min-height: 0; }
