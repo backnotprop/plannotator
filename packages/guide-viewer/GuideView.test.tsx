@@ -333,7 +333,7 @@ describe('GuideView per-file windowing', () => {
     expect(targetProps?.isActive).toBe(true);
   });
 
-  test.skipIf(!hasDom)('updates the bounded fallback window while scrolling without IntersectionObserver', async () => {
+  test.skipIf(!hasDom)('updates the fallback window while scrolling without IntersectionObserver', async () => {
     const originalObserver = globalThis.IntersectionObserver;
     Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: undefined });
 
@@ -371,7 +371,8 @@ describe('GuideView per-file windowing', () => {
       });
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[19].path}"]`)).not.toBeNull();
-      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+      // Far from the view: no CodeView, count or no count.
+      expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[10].path}"]`)).toBeNull();
     } finally {
       Object.defineProperty(globalThis, 'IntersectionObserver', {
         configurable: true,
@@ -434,7 +435,8 @@ describe('GuideView per-file windowing', () => {
 
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[0].path}"]`)).toBe(focusedBefore);
       expect(host!.querySelector(`[data-testid="file-code-view"][data-file="${files[1].path}"]`)).toBeNull();
-      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBeLessThanOrEqual(8);
+      // The eight in the window, and the focused file beside them.
+      expect(host!.querySelectorAll('[data-testid="file-code-view"]').length).toBe(9);
 
       await act(async () => {
         observer!.trigger(shells.map((target, index) => ({

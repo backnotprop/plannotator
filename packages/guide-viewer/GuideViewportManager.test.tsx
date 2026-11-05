@@ -6,7 +6,6 @@ import type { DiffFile } from './types';
 import { GuideHostProvider, type GuideHostValue } from './host';
 import {
   GUIDE_EAGER_MOUNT_MAX_FILES,
-  GUIDE_MAX_MOUNTED_CODE_VIEWS,
   GuideViewportProvider,
   useGuideFileWindow,
 } from './GuideViewportManager';
@@ -89,11 +88,8 @@ afterEach(async () => {
   if (hasDom) document.body.innerHTML = '';
 });
 
-async function render(node: React.ReactNode) {
-  Object.defineProperty(globalThis, 'IntersectionObserver', {
-    configurable: true,
-    value: SilentIntersectionObserver,
-  });
+async function render(node: React.ReactNode, observer: unknown = SilentIntersectionObserver) {
+  Object.defineProperty(globalThis, 'IntersectionObserver', { configurable: true, value: observer });
   host = document.createElement('div');
   document.body.appendChild(host);
   await act(async () => {
@@ -158,8 +154,101 @@ describe('GuideViewportProvider eager mode', () => {
     const mounted = mountedIds();
     expect(mounted.length).toBeGreaterThan(0);
     expect(mounted.length).toBeLessThan(ids.length);
-    expect(mounted.length).toBeLessThanOrEqual(GUIDE_MAX_MOUNTED_CODE_VIEWS);
     expect(SilentIntersectionObserver.instances).toBe(1);
+  });
+});
+
+/** An IntersectionObserver the test drives: `deliver` says which shells are now in the window. */
+class DrivenIntersectionObserver {
+  static current: DrivenIntersectionObserver | null = null;
+  private targets = new Set<Element>();
+  constructor(private callback: IntersectionObserverCallback) {
+    DrivenIntersectionObserver.current = this;
+  }
+  observe = (target: Element) => void this.targets.add(target);
+  unobserve = (target: Element) => void this.targets.delete(target);
+  disconnect = () => this.targets.clear();
+  deliver(near: (id: string) => boolean) {
+    this.callback(
+      [...this.targets].map((target) => ({ target, isIntersecting: near((target as HTMLElement).dataset.shell!) })) as IntersectionObserverEntry[],
+      this as unknown as IntersectionObserver,
+    );
+  }
+}
+
+describe('GuideViewportProvider window', () => {
+  const ids = Array.from({ length: 40 }, (_, index) => `src/file-${index}.ts`);
+
+  async function deliver(near: (id: string) => boolean) {
+    await act(async () => {
+      DrivenIntersectionObserver.current!.deliver(near);
+      await new Promise((done) => requestAnimationFrame(done));
+    });
+  }
+
+  test.skipIf(!hasDom)('every file in the window draws, however many fit, and only those', async () => {
+    await render(
+      <GuideViewportProvider>
+        {ids.map((id) => <Shell key={id} id={id} />)}
+      </GuideViewportProvider>,
+      DrivenIntersectionObserver,
+    );
+
+    const inWindow = ids.slice(5, 35);
+    await deliver((id) => inWindow.includes(id));
+    expect(mountedIds()).toEqual(inWindow);
+
+    // Further down: what left the window goes, with nothing kept over what arrived.
+    const further = ids.slice(10, 40);
+    await deliver((id) => further.includes(id));
+    expect(mountedIds()).toEqual(further);
+  });
+
+  test.skipIf(!hasDom)('a flick draws the files it lands on at once, not when the scroll stops', async () => {
+    await render(
+      <div data-scroller="" style={{ overflowY: 'auto' }}>
+        <GuideViewportProvider>
+          {ids.map((id) => <Shell key={id} id={id} />)}
+        </GuideViewportProvider>
+      </div>,
+      DrivenIntersectionObserver,
+    );
+    const scroller = host!.querySelector<HTMLElement>('[data-scroller]')!;
+    await deliver((id) => ids.slice(0, 5).includes(id));
+
+    const landed = ids.slice(30, 35);
+    await act(async () => {
+      scroller.scrollTop = 100_000;
+      scroller.dispatchEvent(new Event('scroll'));
+    });
+    await deliver((id) => landed.includes(id));
+    expect(mountedIds()).toEqual(landed);
+  });
+
+  test.skipIf(!hasDom)('a focused file and a jump target far off draw beside the window, taking nothing from it', async () => {
+    let jump: () => void = () => {};
+    function Far({ id, pinned, target }: { id: string; pinned?: boolean; target?: boolean }) {
+      const { mounted, register, requestMount } = useGuideFileWindow(id, pinned);
+      if (target) jump = requestMount;
+      return (
+        <div ref={register} data-shell={id}>
+          {mounted && <span data-shell-mounted={id} />}
+        </div>
+      );
+    }
+    await render(
+      <GuideViewportProvider>
+        {ids.map((id, index) => <Far key={id} id={id} pinned={index === 0} target={index === 39} />)}
+      </GuideViewportProvider>,
+      DrivenIntersectionObserver,
+    );
+
+    const inWindow = ids.slice(10, 30);
+    await deliver((id) => inWindow.includes(id));
+    expect(mountedIds()).toEqual([ids[0], ...inWindow]);
+
+    await act(async () => jump());
+    expect(mountedIds()).toEqual([ids[0], ...inWindow, ids[39]]);
   });
 });
 
@@ -188,14 +277,13 @@ describe('GuideView eager threshold', () => {
     expect(host!.querySelectorAll('[data-testid="file-code-view"]')).toHaveLength(files.length);
   });
 
-  test.skipIf(!hasDom)('one file over the limit keeps the bounded window', async () => {
+  test.skipIf(!hasDom)('one file over the limit runs the window: only the seed before the observer delivers', async () => {
     const files = Array.from({ length: GUIDE_EAGER_MOUNT_MAX_FILES + 1 }, (_, index) => makeFile(`src/file-${index}.ts`));
     await renderGuide(files);
 
     expect(host!.querySelectorAll('[data-guide-file-shell]')).toHaveLength(files.length);
     const mounted = host!.querySelectorAll('[data-testid="file-code-view"]').length;
     expect(mounted).toBeGreaterThan(0);
-    expect(mounted).toBeLessThanOrEqual(GUIDE_MAX_MOUNTED_CODE_VIEWS);
     expect(mounted).toBeLessThan(files.length);
   });
 });

@@ -34,6 +34,7 @@ import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, writeFileSync }
 import { join, resolve } from 'node:path';
 import { SimAgent, scratchProject } from '../../scripts/inbox-sim';
 import { NO_BROWSER } from '../helpers/no-browser';
+import { expectNoBlankFiles } from './on-screen-files';
 import { markTourDecided } from '../helpers/tour-decided';
 import { inboxScratch, rememberInboxOf, removeInboxScratch } from './inbox-scratch';
 
@@ -400,6 +401,35 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   await page.keyboard.press('Escape');
   await box.fill('');
   expect(world.errors).toEqual([]);
+});
+
+test('a review of 21 small files on a tall window: every file on screen draws, all the way down', async ({ browser }) => {
+  const paths = Array.from({ length: 21 }, (_, i) => `src/small/f${String(i).padStart(2, '0')}.ts`);
+  const review = await world.claude.submitGuide({
+    project_path: world.project,
+    guide: {
+      title: 'Twenty-one small files',
+      intent: 'A rename across small files.',
+      sections: [{ title: 'The rename', overview: 'Each file changes one line.', diffs: paths.map((file) => ({ file, summary: 'One line.' })) }],
+      review: { gitRef: 'main...HEAD', base: 'main' },
+      generator: { engine: 'claude-code', model: 'claude-opus-5' },
+    },
+    patch: paths.map((path, i) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1,2 +1,2 @@\n export const a = 1;\n-export const b = ${i};\n+export const b = ${i + 1};\n`).join(''),
+    body: 'A rename across 21 small files.',
+    review: true,
+  } as never);
+  const context = await browser.newContext({ viewport: { width: 1920, height: 1200 }, colorScheme: 'light' });
+  const page = await context.newPage();
+  try {
+    await page.goto(`${world.url}#thread=${review.thread_id}`);
+    await page.locator('[data-review-card]').getByRole('button', { name: 'Start review' }).click();
+    const pane = page.locator('[data-review-message]');
+    await expect(pane.locator('[data-guide-file-shell]').first()).toBeVisible({ timeout: 30_000 });
+    await expect(pane.locator('[data-guide-file-shell]')).toHaveCount(21);
+    await expectNoBlankFiles(pane.locator('.ib-gbody'));
+  } finally {
+    await context.close();
+  }
 });
 
 test('a phone at 390 px: the switch, the "/" list, the card, the review with a comment, the verdict and the outcome', async ({ browser }) => {

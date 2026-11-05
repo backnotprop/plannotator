@@ -8,7 +8,6 @@ import React, {
   type ReactNode,
 } from 'react';
 
-const MAX_MOUNTED_CODE_VIEWS = 8;
 const INITIAL_MOUNTED_CODE_VIEWS = 2;
 /**
  * Guides with at most this many files mount every CodeView up front instead of
@@ -18,8 +17,6 @@ const INITIAL_MOUNTED_CODE_VIEWS = 2;
  */
 export const GUIDE_EAGER_MOUNT_MAX_FILES = 15;
 const OUTER_OVERSCAN_PX = 1_200;
-const FAST_SCROLL_VELOCITY_PX_PER_MS = 1.2;
-const SCROLL_IDLE_MS = 120;
 const FORCE_MOUNT_MS = 1_500;
 
 interface RegisteredShell {
@@ -60,9 +57,11 @@ function setEquals(left: ReadonlySet<string>, right: ReadonlySet<string>): boole
 /**
  * One outer-window coordinator for every file shell in a Guided Review.
  *
- * Pierre virtualizes lines INSIDE each mounted CodeView. This manager bounds
- * how many one-file CodeViews exist at all, without making 250 shell components
- * rerender on every scroll-window update: subscribers are keyed per file id.
+ * Pierre virtualizes lines INSIDE each mounted CodeView. This manager keeps a
+ * CodeView for every file on screen or within the overscan of it, however many
+ * that is and however fast the scroll (anything on screen draws, at any window
+ * size), and none for the rest, without making 250 shell components rerender on
+ * every scroll-window update: subscribers are keyed per file id.
  */
 class GuideViewportManager {
   private entries = new Map<string, RegisteredShell>();
@@ -74,12 +73,8 @@ class GuideViewportManager {
   private scrollRoot: HTMLElement | null = null;
   private host: HTMLElement | null = null;
   private reconcileRaf: number | null = null;
-  private idleTimer: ReturnType<typeof setTimeout> | null = null;
   private forceTimer: ReturnType<typeof setTimeout> | null = null;
   private forcedId: string | null = null;
-  private fastScrolling = false;
-  private lastScrollTop = 0;
-  private lastScrollAt = 0;
   private eager: boolean;
 
   constructor(eager = false) {
@@ -116,9 +111,6 @@ class GuideViewportManager {
     }
 
     this.scrollRoot = findScrollRoot(host);
-    this.lastScrollTop = this.readScrollTop();
-    this.lastScrollAt = performance.now();
-
     // Distance-based reconciliation still works without IntersectionObserver,
     // but only if scrolling continues to schedule it. Register this listener for
     // both paths so older embedded browsers do not freeze the initial window.
@@ -207,13 +199,7 @@ class GuideViewportManager {
     }
 
     this.pinned.add(id);
-    const next = new Set(this.mounted);
-    next.add(id);
-    if (next.size > MAX_MOUNTED_CODE_VIEWS) {
-      const eviction = this.farthestMountedFrom(id, next);
-      if (eviction) next.delete(eviction);
-    }
-    this.setMounted(next);
+    this.setMounted(new Set([...this.mounted, id]));
   };
 
   requestMount = (id: string): void => {
@@ -222,13 +208,7 @@ class GuideViewportManager {
       return;
     }
     this.forcedId = id;
-    const next = new Set(this.mounted);
-    next.add(id);
-    if (next.size > MAX_MOUNTED_CODE_VIEWS) {
-      const eviction = this.farthestMountedFrom(id, next);
-      if (eviction) next.delete(eviction);
-    }
-    this.setMounted(next);
+    this.setMounted(new Set([...this.mounted, id]));
 
     if (this.forceTimer) clearTimeout(this.forceTimer);
     this.forceTimer = setTimeout(() => {
@@ -245,40 +225,18 @@ class GuideViewportManager {
       const entry = id ? this.entries.get(id) : undefined;
       if (entry) entry.near = change.isIntersecting;
     }
-    if (this.fastScrolling) {
-      this.scheduleIdleReconcile();
-    } else {
-      this.scheduleReconcile();
-    }
+    this.scheduleReconcile();
   };
 
   private handleOuterScroll = (): void => {
-    const now = performance.now();
-    const scrollTop = this.readScrollTop();
-    const elapsed = Math.max(1, now - this.lastScrollAt);
-    const velocity = Math.abs(scrollTop - this.lastScrollTop) / elapsed;
-    this.lastScrollTop = scrollTop;
-    this.lastScrollAt = now;
-    this.fastScrolling = velocity >= FAST_SCROLL_VELOCITY_PX_PER_MS;
-
-    if (this.fastScrolling) this.scheduleIdleReconcile();
-    else this.scheduleReconcile();
+    this.scheduleReconcile();
   };
-
-  private scheduleIdleReconcile(): void {
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = setTimeout(() => {
-      this.idleTimer = null;
-      this.fastScrolling = false;
-      this.reconcile();
-    }, SCROLL_IDLE_MS);
-  }
 
   private scheduleReconcile(): void {
     if (this.reconcileRaf != null) return;
     this.reconcileRaf = requestAnimationFrame(() => {
       this.reconcileRaf = null;
-      if (!this.fastScrolling) this.reconcile();
+      this.reconcile();
     });
   }
 
@@ -287,46 +245,19 @@ class GuideViewportManager {
       this.setMounted(new Set(this.entries.keys()));
       return;
     }
-    const rootRect = this.getRootRect();
-    const candidates = [...this.entries.entries()]
-      .filter(([id, entry]) => entry.near || id === this.forcedId || this.pinned.has(id))
-      .map(([id, entry]) => ({
-        id,
-        distance: this.distanceFromViewport(entry.element.getBoundingClientRect(), rootRect)
-          - (this.mounted.has(id) ? 80 : 0),
-      }))
-      .sort((left, right) => left.distance - right.distance);
+    // With no IntersectionObserver (older embedded browsers) this reads the window itself on each scroll.
+    const measuredRoot = typeof IntersectionObserver === 'undefined' ? this.getRootRect() : null;
+    const next = new Set<string>();
+    for (const [id, entry] of this.entries) {
+      const near = measuredRoot ? this.isWithinOverscan(entry.element.getBoundingClientRect(), measuredRoot) : entry.near;
+      if (near || id === this.forcedId || this.pinned.has(id)) next.add(id);
+    }
 
     // Before the first observer delivery, retain the tiny eager seed rather
     // than flashing every CodeView off and back on.
-    if (candidates.length === 0 && this.mounted.size > 0) return;
+    if (next.size === 0 && this.mounted.size > 0) return;
 
-    const next = new Set<string>();
-    for (const id of this.pinned) {
-      if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
-      if (this.entries.has(id)) next.add(id);
-    }
-    if (this.forcedId && this.entries.has(this.forcedId) && next.size < MAX_MOUNTED_CODE_VIEWS) {
-      next.add(this.forcedId);
-    }
-    for (const candidate of candidates) {
-      if (next.size >= MAX_MOUNTED_CODE_VIEWS) break;
-      next.add(candidate.id);
-    }
     this.setMounted(next);
-  }
-
-  private farthestMountedFrom(protectedId: string, ids: ReadonlySet<string>): string | null {
-    const rootRect = this.getRootRect();
-    let farthest: { id: string; distance: number } | null = null;
-    for (const id of ids) {
-      if (id === protectedId || this.pinned.has(id)) continue;
-      const entry = this.entries.get(id);
-      if (!entry) return id;
-      const distance = this.distanceFromViewport(entry.element.getBoundingClientRect(), rootRect);
-      if (!farthest || distance > farthest.distance) farthest = { id, distance };
-    }
-    return farthest?.id ?? null;
   }
 
   private setMounted(next: Set<string>): void {
@@ -351,16 +282,8 @@ class GuideViewportManager {
     return new DOMRectReadOnly(0, 0, window.innerWidth, window.innerHeight);
   }
 
-  private distanceFromViewport(rect: DOMRectReadOnly, root: DOMRectReadOnly): number {
-    if (rect.bottom < root.top) return root.top - rect.bottom;
-    if (rect.top > root.bottom) return rect.top - root.bottom;
-    const rectCenter = rect.top + rect.height / 2;
-    const rootCenter = root.top + root.height / 2;
-    return Math.abs(rectCenter - rootCenter) * 0.1;
-  }
-
-  private readScrollTop(): number {
-    return this.scrollRoot?.scrollTop ?? window.scrollY;
+  private isWithinOverscan(rect: DOMRectReadOnly, root: DOMRectReadOnly): boolean {
+    return rect.bottom > root.top - OUTER_OVERSCAN_PX && rect.top < root.bottom + OUTER_OVERSCAN_PX;
   }
 
   private cleanObservers(): void {
@@ -371,12 +294,9 @@ class GuideViewportManager {
     this.scrollRoot = null;
     if (this.reconcileRaf != null) cancelAnimationFrame(this.reconcileRaf);
     this.reconcileRaf = null;
-    if (this.idleTimer) clearTimeout(this.idleTimer);
-    this.idleTimer = null;
     if (this.forceTimer) clearTimeout(this.forceTimer);
     this.forceTimer = null;
     this.forcedId = null;
-    this.fastScrolling = false;
   }
 }
 
@@ -428,5 +348,3 @@ export function useGuideFileWindow(id: string, pinned = false): {
 
   return { mounted, register, requestMount };
 }
-
-export const GUIDE_MAX_MOUNTED_CODE_VIEWS = MAX_MOUNTED_CODE_VIEWS;
