@@ -5,10 +5,11 @@
  * the person's data, environment or Inbox.
  */
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { parseShapeCommand, runShapeCommand } from "./shape-command";
+import { checkShapeBoard } from "@plannotator/core/shape";
+import { parseShapeCommand, runShapeCommand, SHAPE_COMMAND_USAGE } from "./shape-command";
 
 const roots: string[] = [];
 afterEach(() => {
@@ -180,6 +181,17 @@ describe("parseShapeCommand", () => {
   });
 });
 
+describe("shape --help", () => {
+  // What regresses: the format or the validator changes and the help's example (the one an agent copies with no
+  // thread and no /shape skill) stops being a board the store takes.
+  test("its JSON example is a board the store accepts", () => {
+    const json = SHAPE_COMMAND_USAGE.match(/```json\n([\s\S]*?)\n```/)?.[1];
+    expect(json).toBeDefined();
+    const checked = checkShapeBoard(JSON.parse(json!));
+    expect(checked.ok ? [] : checked.errors).toEqual([]);
+  });
+});
+
 describe("the Shape switch, through the entrypoint", () => {
   // Guards the gate in apps/hook/server/index.ts: while the person has not turned Shape on (config.json
   // `inboxShape` unset or false), every `plannotator shape …` (its --help too) prints only the one line that
@@ -227,12 +239,130 @@ describe("the Shape switch, through the entrypoint", () => {
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");
       expect(help.code, help.stderr).toBe(0);
-      expect(`${help.stdout}${help.stderr}`).toContain("shape update");
+      // On, --help is the whole guide (welcome, commands, drawing); off (above) it is only SHAPE_OFF_TEXT.
+      expect(`${help.stdout}${help.stderr}`).toContain(SHAPE_COMMAND_USAGE);
       const made = await run("update", "--file", join(root, "board.json"), "--project", project);
       expect(made.code, made.stderr).toBe(0);
       expect(JSON.parse(made.stdout).v).toBe(1);
     } finally {
       removeStubbedHtml(stubbed);
+    }
+  }, 60_000);
+
+  /** The CLI from source in a fresh data dir under the OS temp folder (never the person's), with hook pages stubbed. */
+  async function cli() {
+    const { removeStubbedHtml, stubHookDistHtml } = await import("../../../tests/helpers/hook-dist-stub");
+    const { NO_BROWSER } = await import("../../../tests/helpers/no-browser");
+    const root = realpathSync(mkdtempSync(join(tmpdir(), "shape-cli-switch-")));
+    roots.push(root);
+    const dataDir = join(root, "data");
+    const project = join(root, "kettle");
+    mkdirSync(dataDir, { recursive: true });
+    mkdirSync(project, { recursive: true });
+    const stubbed = stubHookDistHtml();
+    const entry = join(import.meta.dir, "index.ts");
+    const env: Record<string, string> = {
+      PATH: process.env.PATH ?? "",
+      PLANNOTATOR_DATA_DIR: dataDir,
+      PLANNOTATOR_BROWSER: NO_BROWSER,
+      NO_BROWSER: "1",
+      NO_ANON_PING: "1",
+      PLANNOTATOR_UPDATE_CHECK: "0",
+      PLANNOTATOR_INBOX_CONNECT: "0",
+      PLANNOTATOR_INBOX_NOTES: "0",
+      PLANNOTATOR_TEST_SANDBOX: "1",
+    };
+    const run = async (...argv: string[]) => {
+      const proc = Bun.spawn(["bun", "run", entry, "shape", ...argv], { cwd: project, env, stdout: "pipe", stderr: "pipe" });
+      const [stdout, stderr, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
+      return { stdout, stderr, code };
+    };
+    const config = () => JSON.parse(readFileSync(join(dataDir, "config.json"), "utf8"));
+    return { dataDir, run, config, done: () => removeStubbedHtml(stubbed) };
+  }
+
+  // `plannotator shape on|off` is the person's switch from a terminal: it must work while Shape is off (the only
+  // shape commands that do), flip what --help shows, be harmless twice, and keep the rest of config.json.
+  test("on and off work from the off state and decide what --help shows; on twice is harmless", async () => {
+    const { SHAPE_OFF_TEXT } = await import("./shape-command");
+    const c = await cli();
+    try {
+      writeFileSync(join(c.dataDir, "config.json"), JSON.stringify({ inboxBoard: true }));
+      // Off (unset): off works and says so; `on --help` is still gated.
+      expect(await c.run("off")).toEqual({ stdout: "Shape is off.\n", stderr: "", code: 0 });
+      expect(c.config()).toEqual({ inboxBoard: true, inboxShape: false });
+      expect(await c.run("on", "--help")).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+      // on, from off, twice.
+      for (let i = 0; i < 2; i++) {
+        expect(await c.run("on")).toEqual({ stdout: "Shape is on.\n", stderr: "", code: 0 });
+        expect(c.config()).toEqual({ inboxBoard: true, inboxShape: true });
+      }
+      const help = await c.run("--help");
+      expect(help.code, help.stderr).toBe(0);
+      expect(`${help.stdout}${help.stderr}`).toContain(SHAPE_COMMAND_USAGE);
+      // off again: --help is only the off line, and the off line names the way back.
+      expect(await c.run("off")).toEqual({ stdout: "Shape is off.\n", stderr: "", code: 0 });
+      expect(await c.run("--help")).toEqual({ stdout: "", stderr: `${SHAPE_OFF_TEXT}\n`, code: 1 });
+      expect(SHAPE_OFF_TEXT).toContain("`plannotator shape on`");
+      // Extra words are refused without a word of the guide, and change nothing.
+      const extra = await c.run("on", "now");
+      expect(extra.code).toBe(2);
+      expect(extra.stdout).toBe("");
+      expect(extra.stderr).not.toContain("Usage:");
+      expect(c.config().inboxShape).toBe(false);
+    } finally {
+      c.done();
+    }
+  }, 60_000);
+
+  // A config.json that is not valid JSON is never written over, so the switch did not move: say so and exit 1,
+  // never "Shape is off." (which off would otherwise read back from the unreadable file).
+  test("on and off with a config.json that cannot be saved: an error, exit 1, the file untouched", async () => {
+    const c = await cli();
+    try {
+      const path = join(c.dataDir, "config.json");
+      writeFileSync(path, "{ not json");
+      for (const which of ["on", "off"]) {
+        const r = await c.run(which);
+        expect({ which, code: r.code, stdout: r.stdout }).toEqual({ which, code: 1, stdout: "" });
+        expect(r.stderr).toContain("config_not_saved: ");
+        expect(readFileSync(path, "utf8")).toBe("{ not json");
+      }
+    } finally {
+      c.done();
+    }
+  }, 60_000);
+
+  test("on and off set the very switch the Inbox's Settings reads (and the other way round)", async () => {
+    const { SHAPE_OFF_TEXT } = await import("./shape-command");
+    const { startInboxServer } = await import("@plannotator/server/inbox");
+    const c = await cli();
+    const saved = process.env.PLANNOTATOR_DATA_DIR;
+    // The Inbox reads config.json through the env, like the CLI child.
+    process.env.PLANNOTATOR_DATA_DIR = c.dataDir;
+    const inbox = await startInboxServer({ dataDir: c.dataDir, phones: false });
+    try {
+      const base = `http://127.0.0.1:${inbox.port}`;
+      // Off, the settings read leaves Shape out (held for 0.28.50, inbox.ts heldSwitch): absent reads as off.
+      const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape?: { on: boolean } }).shape?.on === true;
+      expect(await settingsShape()).toBe(false);
+      expect((await c.run("on")).code).toBe(0);
+      expect(await settingsShape()).toBe(true);
+      expect((await fetch(`${base}/api/shapes`)).status).toBe(200);
+      expect((await c.run("off")).code).toBe(0);
+      expect(await settingsShape()).toBe(false);
+      expect((await fetch(`${base}/api/shapes`)).status).toBe(404);
+      // The Settings switch, and the CLI's gate follows it.
+      const set = (on: boolean) =>
+        fetch(`${base}/api/inbox/settings`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ shape: { on } }) });
+      expect((await set(true)).status).toBe(200);
+      expect((await c.run("--help")).stdout).toContain(SHAPE_COMMAND_USAGE);
+      expect((await set(false)).status).toBe(200);
+      expect((await c.run("--help")).stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
+    } finally {
+      inbox.stop();
+      process.env.PLANNOTATOR_DATA_DIR = saved;
+      c.done();
     }
   }, 60_000);
 });

@@ -30,7 +30,7 @@ import { acceptsGzip } from "@plannotator/shared/app-html";
 import { gunzipSync } from "node:zlib";
 import { shapesDirOf } from "@plannotator/shared/shape/store";
 import { SHAPE_EVENTS_PATH } from "@plannotator/shared/shape/routes";
-import { loadConfig } from "@plannotator/shared/config";
+import { shapeSwitchOn } from "@plannotator/shared/shape/switch";
 import { createRequestHostGuard } from "./request-host-guard";
 import { withPlannotatorServerHeader } from "./plannotator-server-marker";
 import { createBunShapeRoutes } from "./shape-routes";
@@ -63,6 +63,8 @@ export interface ShapeServerInfo {
   serverSession: string;
   /** Shape is on (config.json `inboxShape`). */
   on: boolean;
+  /** Pages open on this server now (each holds the event stream). Bare `plannotator shape` opens no second tab while one is. */
+  pages: number;
 }
 
 const NO_STORE = { "Cache-Control": "no-store", "X-Content-Type-Options": "nosniff" } as const;
@@ -130,18 +132,28 @@ export function isProcessAlive(pid: number): boolean {
 }
 
 /**
+ * A running Shapes server and, from the same answer, how many pages are open on it: null when that cannot be read
+ * (an older server without the field), and the caller then opens a page as if none were.
+ */
+export interface RunningShapeServer extends ShapeServerEntry {
+  pages: number | null;
+}
+
+/**
  * The running Shapes server of this data dir, or null: its process is alive and
  * its port answers as a Shapes server. A stale `server.json` (its pid gone, or
  * another program on the port) reads as none.
  */
-export async function runningShapeServer(dataDir: string, timeoutMs = 1500): Promise<ShapeServerEntry | null> {
+export async function runningShapeServer(dataDir: string, timeoutMs = 1500): Promise<RunningShapeServer | null> {
   const entry = readShapeServerEntry(dataDir);
   if (!entry || !isProcessAlive(entry.pid)) return null;
   try {
     const response = await fetch(`http://${LOOPBACK}:${entry.port}${SHAPE_SERVER_INFO_PATH}`, { signal: AbortSignal.timeout(timeoutMs) });
     if (!response.ok) return null;
     const info = (await response.json()) as Partial<ShapeServerInfo>;
-    return info.shape_server === 1 ? entry : null;
+    if (info.shape_server !== 1) return null;
+    const pages = typeof info.pages === "number" && Number.isInteger(info.pages) && info.pages >= 0 ? info.pages : null;
+    return { ...entry, pages };
   } catch {
     return null;
   }
@@ -208,7 +220,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
   const { dataDir } = options;
   const version = options.version ?? "";
   const serverSession = createServerSessionNonce();
-  const shapeOn = () => options.shape ?? loadConfig().inboxShape === true;
+  const shapeOn = () => options.shape ?? shapeSwitchOn();
   const hostGuard = createRequestHostGuard({ localOnly: true });
   const shapes = createBunShapeRoutes({ dataDir, heartbeatMs: options.heartbeatMs, watchMs: options.watchMs });
   const idleMs = options.idleMs ?? SHAPE_SERVER_IDLE_MS;
@@ -263,7 +275,7 @@ export async function startShapeServer(options: ShapeServerOptions): Promise<Sha
       if (req.method !== "GET") return json({ error: "method not allowed" }, 405);
       const blocked = crossSite(req);
       if (blocked) return blocked;
-      return json({ shape_server: 1, version, serverSession, on: shapeOn() } satisfies ShapeServerInfo);
+      return json({ shape_server: 1, version, serverSession, on: shapeOn(), pages: open } satisfies ShapeServerInfo);
     }
 
     if (path === "/api/shapes" || path.startsWith("/api/shapes/")) {
