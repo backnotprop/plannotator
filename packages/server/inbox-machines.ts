@@ -199,7 +199,8 @@ export function parseFarDetails(raw: unknown) {
           exit_code: typeof failure.exit_code === "number" ? failure.exit_code : 1,
           ...(failure.tls === "untrusted" || failure.tls === "revoked" ? { tls: failure.tls } : {}),
           ...(failure.release_first === true ? { release_first: true } : {}),
-          ...(typeof failure.prepare === "string" ? { prepare: failure.prepare.slice(0, 300) } : {}),
+          // The one kind of reason there is (stagingReason): anything else is not said here.
+          ...(typeof failure.prepare === "string" && /^(?:could not write to )?the temp folder\b/.test(failure.prepare) ? { prepare: failure.prepare.slice(0, 300) } : {}),
           ...(failure.unchanged === true ? { unchanged: true } : {}),
         }
       : null,
