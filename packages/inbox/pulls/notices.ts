@@ -4,6 +4,7 @@
  */
 import type { InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import { hostName } from './labels';
+import type { PullFilter } from './model';
 
 type Cli = 'gh' | 'glab';
 
@@ -38,9 +39,12 @@ function clisFor(host: string): Cli[] {
  * (its last read shown when there is one, else its PRs are not), a host whose searches found more than one read takes
  * ("Showing 100 of 133" when the searches were limited to the projects' repositories, else that not every one was
  * read), and a project's host no CLI here is signed in to (the CLIs that could read it not installed, or not signed
- * in there).
+ * in there). Others (every open PR of the projects' repositories) is a read of its own: when it alone failed, the
+ * notice says its last read is shown, or that pull requests by others are not.
  */
-export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'unsigned'>): PullsNotice[] {
+export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'unsigned'>, filter: PullFilter = 'all'): PullsNotice[] {
+  // Mine and To review come from the person's own lists: what Others left out is not theirs to say.
+  const othersShown = filter === 'all' || filter === 'others';
   const out: PullsNotice[] = [];
   for (const error of ['unavailable', 'rate_limited'] as const) {
     for (const shown of [false, true]) {
@@ -53,17 +57,33 @@ export function pullsNotices(model: Pick<InboxPullsAnswer, 'hosts' | 'clis' | 'u
       out.push({ key: `${error}:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
     }
   }
+  // Others (every open PR of the projects' repositories) is a read of its own: it failed while the person's own lists
+  // answered. Said of Others only; a host whose own read failed already says so above.
+  for (const error of othersShown ? (['unavailable', 'rate_limited'] as const) : []) {
+    for (const shown of [false, true]) {
+      const hosts = model.hosts.filter((h) => !h.error && h.others_error === error && !!h.others_last_read === shown);
+      if (hosts.length === 0) continue;
+      const names = joinAnd([...new Set(hosts.map((h) => hostName(h.host)))]);
+      const head = error === 'unavailable' ? `${names} didn't answer` : `${names} asked to slow down`;
+      const tail = shown ? `showing ${hosts.length > 1 ? 'their' : 'its'} last read.` : "pull requests by others aren't shown.";
+      out.push({ key: `${error}:others:${shown}`, head, line: `${head}; ${tail}${error === 'rate_limited' && !shown ? ' Try again in a minute.' : ''}` });
+    }
+  }
   for (const h of model.hosts) {
     if (!h.capped) continue;
+    const ofOthers = h.capped.of === 'others';
+    if (ofOthers && !othersShown) continue;
     const forge = h.cli === 'glab' ? 'GitLab' : 'GitHub';
     const link = { href: forgeListUrl(h.host, h.cli), label: `Open on ${forge}` };
     if (typeof h.capped.total === 'number') {
       if (h.capped.total <= h.capped.shown) continue;
       out.push({ key: `capped:${h.host}`, head: `Showing ${h.capped.shown} of ${h.capped.total}`, line: `Showing ${h.capped.shown} of ${h.capped.total} from ${h.host}`, link });
     } else {
-      // The searches were not limited to the projects' repositories: how many of the rest are theirs is not known.
+      // How many are left out is not known: Others searched only the most active repositories, or the person's own
+      // searches were not limited to the projects' repositories (and found more than one read takes).
       const noun = h.cli === 'glab' ? 'merge request' : 'pull request';
-      out.push({ key: `capped:${h.host}`, head: `Not every ${noun} was read`, line: `Not every ${noun} on ${h.host} was read: it has more than one read takes.`, link });
+      const line = ofOthers ? `Not every ${noun} on ${h.host} was read.` : `Not every ${noun} on ${h.host} was read: it has more than one read takes.`;
+      out.push({ key: `capped:${h.host}`, head: `Not every ${noun} was read`, line, link });
     }
   }
   // Each host no CLI is signed in to, by the CLIs that could read it and whether they are installed.
@@ -126,7 +146,7 @@ export function pullsEmptyWords(
     }
     return { kind: 'signed-out', head: 'No signed-in GitHub or GitLab here', lines: [SIGN_IN_LINE] };
   }
-  return { kind: 'nothing', head: 'Nothing open in your projects', lines: ['Pull requests you opened, and the ones you are asked to review, show here.', ...unsigned.map((n) => n.line)] };
+  return { kind: 'nothing', head: 'Nothing open in your projects', lines: ['Open pull requests in your projects show here.', ...unsigned.map((n) => n.line)] };
 }
 
 /** The CLIs whose hosts answered this read, for the foot ("From gh on this computer"). */

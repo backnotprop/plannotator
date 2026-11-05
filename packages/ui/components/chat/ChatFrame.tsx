@@ -95,15 +95,18 @@ export interface ChatFrameProps {
   labels?: Partial<ChatFrameLabels>;
 }
 
+/* The window's pointer helpers are exported for a host that drags its own
+ * floating part the same way (the Inbox's Show me picture). */
+
 /** A press that can start a gesture: the primary button of the first pointer.
  * Ctrl+press is the context menu on a Mac, and that menu can eat the release. */
-function startsGesture(event: React.PointerEvent): boolean {
+export function startsGesture(event: React.PointerEvent): boolean {
   return event.button === 0 && event.isPrimary && !event.ctrlKey;
 }
 
 /** Follow one pointer on an element until it lifts. A second finger is ignored.
  * A gesture the system cancels runs `onCancel`: it never finished, so it undoes. */
-function followPointer(
+export function followPointer(
   element: HTMLElement,
   pointerId: number,
   onMove: (move: PointerEvent) => void,
@@ -135,7 +138,7 @@ function followPointer(
  * is a React portal: its rows sit under <body> in the DOM but inside this row in
  * the React tree, so their events still bubble here, and acting on one would
  * swallow its click. Buttons and links in the row keep their own presses. */
-function isOnTitleRow(event: React.SyntheticEvent<HTMLElement>): boolean {
+export function isOnTitleRow(event: React.SyntheticEvent<HTMLElement>): boolean {
   const target = event.target as HTMLElement | null;
   if (target === null || !event.currentTarget.contains(target)) return false;
   return target.closest('button, a') === null;
