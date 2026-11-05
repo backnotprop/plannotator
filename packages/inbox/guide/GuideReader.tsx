@@ -41,7 +41,7 @@ import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
 import { WorkerPoolContext } from '@pierre/diffs/react';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
-import { getSharedWorkerPool } from '@plannotator/review-editor/worker-pool';
+import { getSharedWorkerPool, useSharedWorkerPool } from '@plannotator/review-editor/worker-pool';
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
 import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
@@ -123,7 +123,7 @@ export const GuideDiff: FC<
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const fontFamily = useConfigValue('diffFontFamily');
   const fontSize = useConfigValue('diffFontSize');
-  const pool = largeDiffsInWorker && props.files.some(isLargeDiff) ? getSharedWorkerPool() : undefined;
+  const pool = useSharedWorkerPool(!!largeDiffsInWorker && props.files.some(isLargeDiff));
   return (
     <WorkerPoolContext.Provider value={pool}>
       <AllFilesCodeView
