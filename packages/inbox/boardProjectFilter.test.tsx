@@ -477,6 +477,61 @@ test.if(hasDom)("the Initiatives dialog never shows a browser's raw error: a fai
   expect(await tryAdd('shape')).toBe('There is already an initiative named Shape.');
 });
 
+// The review's picture: the line said the name was taken while the toast still offered the Undo that had just failed.
+test.if(hasDom)('a refused Undo stops offering Undo, for that one only; a failed save keeps it, to try again', async () => {
+  scriptFetch();
+  const scripted = globalThis.fetch;
+  let refuse: 'taken' | 'offline' | null = null;
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = new URL(String(input), 'http://127.0.0.1:1');
+    if (url.pathname === `/api/inbox/initiatives/${MEMORY}` && init?.method === 'POST' && JSON.parse(String(init.body)).op === 'restore') {
+      if (refuse === 'offline') throw new TypeError('Failed to fetch');
+      if (refuse === 'taken') {
+        return new Response(JSON.stringify({ code: 'initiative_exists', error: 'There is already an initiative named Memory.' }), { status: 409, headers: { 'Content-Type': 'application/json' } });
+      }
+    }
+    return scripted(input, init);
+  }) as typeof fetch;
+  draw();
+  await settle();
+  await press($('[data-board-filter-button]')!);
+  await act(async () => $('[data-board-initiative-edit]')!.click());
+  await settle();
+  const dialog = $('[data-dialog="initiatives"]')!;
+  const del = (id: string) => dialog.querySelector<HTMLElement>(`[data-initiative-row="${id}"] [data-initiative-delete]`)!;
+  const undo = async () => {
+    await act(async () => dialog.querySelector<HTMLElement>('.ib-toast [data-toast-undo]')!.click());
+    await settle();
+  };
+  const error = () => dialog.querySelector('[data-initiative-error]')?.textContent ?? null;
+
+  await act(async () => del(MEMORY).click());
+  await settle();
+  refuse = 'offline';
+  await undo();
+  expect(error()).toBe('That did not save. Try again.');
+  expect(dialog.querySelector('.ib-toast [data-toast-undo]')).not.toBeNull();
+
+  refuse = 'taken';
+  await undo();
+  expect(error()).toBe('There is already an initiative named Memory.');
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+
+  // Memory refused with Shape still waiting behind it: only Memory's Undo goes.
+  await act(async () => del(MEMORY).click());
+  await settle();
+  await act(async () => del(SHAPE).click());
+  await settle();
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('2 initiatives');
+  await undo();
+  expect(dialog.querySelector('.ib-toast')!.textContent).toContain('“Shape”');
+  refuse = null;
+  posts.length = 0;
+  await undo();
+  expect(posts.map((p) => [p.path, p.body.op])).toEqual([[`/api/inbox/initiatives/${SHAPE}`, 'restore']]);
+  expect(dialog.querySelector('.ib-toast')).toBeNull();
+});
+
 test.if(hasDom)('Done and Cancelled list only the filtered project', async () => {
   scriptFetch();
   const drawn = draw({ view: 'done', project: API });

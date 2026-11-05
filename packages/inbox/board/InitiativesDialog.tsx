@@ -99,18 +99,25 @@ export function InitiativesDialog({
   const undo = async () => {
     const back = deleted;
     let done = 0;
+    let refused = false;
     const ok = await run(async () => {
       let last = back[0]!;
       for (const i of back) {
-        last = (await inboxApi.changeInitiative(i.id, { op: 'restore' })).initiative;
+        try {
+          last = (await inboxApi.changeInitiative(i.id, { op: 'restore' })).initiative;
+        } catch (cause) {
+          refused = cause instanceof InboxApiError && INITIATIVE_REFUSALS.has(cause.code);
+          throw cause;
+        }
         done++;
       }
       return last;
     });
-    // A name taken since refuses its restore: the line says so, and what came back stays back.
-    if (done > 0) onChanged();
+    // A name taken since refuses its restore: the line says so, what came back stays back, and the toast stops
+    // offering that Undo. A failed save keeps it, to try again.
+    if (done > 0 || refused) onChanged();
     if (!ok) {
-      setDeleted((now) => now.slice(done));
+      setDeleted((now) => now.slice(done + (refused ? 1 : 0)));
       return;
     }
     clearToast();
