@@ -393,6 +393,16 @@ describe("uploads", () => {
     expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
   });
 
+  test("the same Send twice at once with one upload, while it copies: one thread and one set of files, both answered", async () => {
+    const { server, billing } = await setup();
+    await poll(server, "ses-pi", "pi", billing);
+    const file = ((await (await upload(server, "ref02.png", PNG)).json()) as { upload: InboxUpload }).upload;
+    const send = () => post(server, "/api/inbox/messages", { to: { session: "ses-pi" }, body: "See this.", idempotency_key: "twice", uploads: [file.upload_id] });
+    const answers = await Promise.all([send(), send()]);
+    expect(answers.map((answer) => answer.status)).toEqual([200, 200]);
+    expect(readdirSync(join(server.store.dir, "uploads")).filter((name) => name !== "pending")).toHaveLength(1);
+  });
+
   test("a full disk is answered 507 in words, when adding a file and when saving a draft", async () => {
     const { server, billing } = await setup();
     await poll(server, "ses-pi", "pi", billing);
