@@ -6,7 +6,7 @@
  *
  *   bun tests/e2e/voice-inbox.ts <root> <JSON options>
  *
- * Prints one line `{ url, threads, filed, upstream }` and runs until told to stop. A JSON line on stdin is a command:
+ * Prints one line `{ url, threads, filed, filedToo, upstream }` and runs until told to stop. A JSON line on stdin is a command:
  *  - `{ "upstream": [{ status?, text?, html?, hold? }] }`: the next answers, the last repeating. `hold` waits for
  *    `{ "release": true }`.
  *  - `{ "codex": { ... } }`: the fake Codex's new state.
@@ -85,7 +85,9 @@ writeFileSync(join(root, "shot.png"), Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAA
 const attachments = await recordInboxAttachments(store.dir, ["shot.png"], { base: root, at: new Date().toISOString() });
 const filed = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_vf", name: "Claude Code" }, subject: "The screenshot", body: "The checkout, attached.", attachments }).message;
 
-console.log(JSON.stringify({ url: server.url, threads, filed: { thread: filed.thread_id, attachment: filed.attachments?.[0]?.id ?? null } }));
+const filedToo = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses_vg", name: "Claude Code" }, subject: "Another screenshot", body: "The cart, attached.", attachments }).message;
+
+console.log(JSON.stringify({ url: server.url, threads, filed: { thread: filed.thread_id, attachment: filed.attachments?.[0]?.id ?? null }, filedToo: { thread: filedToo.thread_id, attachment: filedToo.attachments?.[0]?.id ?? null } }));
 
 let buffer = "";
 process.stdin.setEncoding("utf8");
