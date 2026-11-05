@@ -864,6 +864,10 @@ export function pageServerSession(): string | null {
  */
 export type TagMode = 'ask' | 'add' | 'handoff';
 
+/** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
+/** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string };
+
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
@@ -1420,6 +1424,11 @@ export const inboxApi = {
   /** "Open in": the file as it is now, in a catalog app or the default app, by the attachment's id (on this computer only). */
   openIn: (attachmentId: string, appId: string) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in'), { attachment_id: attachmentId, app_id: appId }),
+  /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
+  openInFileCheck: (scope: OpenInFileScope, path: string) =>
+    get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
+    post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
   // `machine`: the drawing is of another machine's file, so it is kept there (it is sent while that machine is online).
   uploadMarkup: async (image: Blob, machine?: string | null) =>

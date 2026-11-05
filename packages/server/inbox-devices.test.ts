@@ -304,6 +304,8 @@ describe("the device door, on the binary", () => {
       // "Open in" launches an app on the computer: never from a phone (and no new-tab page there either).
       ["POST", "open-in"],
       ["GET", "open-in/apps"],
+      ["GET", "open-in/file"],
+      ["POST", "open-in/file"],
       ["GET", "attachments/att_x/page"],
       ["POST", "restart"],
       ["POST", "mcp"],

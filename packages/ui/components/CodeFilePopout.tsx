@@ -42,6 +42,8 @@ interface CodeFilePopoutProps {
   onDeleteAnnotation?: (id: string) => void;
   onSelectAnnotation?: (id: string | null) => void;
   container?: HTMLElement | null;
+  /** A host's control in the header, before the line count (Shape's "open in"). */
+  headerAction?: React.ReactNode;
 }
 
 interface PendingComment {
@@ -728,6 +730,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
   onDeleteAnnotation,
   onSelectAnnotation,
   container,
+  headerAction,
 }) => {
   const [copied, setCopied] = useState(false);
 
@@ -793,6 +796,7 @@ export const CodeFilePopout: React.FC<CodeFilePopoutProps> = ({
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">
+          {headerAction}
           <span className="text-xs text-muted-foreground tabular-nums">
             {lineCount} lines
           </span>
