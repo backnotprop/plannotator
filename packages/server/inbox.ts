@@ -433,8 +433,6 @@ export interface InboxServerOptions {
   board?: boolean;
   /** Thread steps, decided here instead of config.json `inboxSteps` (tests). Absent: config.json decides on every request. */
   steps?: boolean;
-  /** Bro mode's switch, as `steps` (absent: config.json `inboxBro`). */
-  bro?: boolean;
   /** The Bro mode offer may open though this is no release CI build (absent: only such a build; a test's way in). */
   broOffer?: boolean;
   /** Code review, decided here instead of config.json `inboxCodeReview` (tests). Absent: config.json decides on every request. */
@@ -2229,7 +2227,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    * Bro mode (approval "bro-mode", 2026-11-05): on only when the person turned it on (config.json `inboxBro`). Off or
    * unset: agent text is byte-equal to what it was before. Not held by `heldSwitch`: the owner offers it to everyone.
    */
-  const broOn = () => options.bro ?? loadConfig().inboxBro === true;
+  const broOn = () => loadConfig().inboxBro === true;
   const saveBro = (input: unknown, validateOnly = false) => {
     if (!input || typeof input !== "object" || Array.isArray(input) || typeof (input as { on?: unknown }).on !== "boolean" || Object.keys(input).some((key) => key !== "on")) {
       throw new InboxError("validation_error", "bro: { on: boolean }.", { field: "bro" });
@@ -2301,7 +2299,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   /** The Checklist can be revealed only while config.json `inboxSteps` is unset, as the Board. */
   const stepsUndecided = () => options.steps === undefined && loadConfig().inboxSteps === undefined;
   /** Bro mode's offer, while `inboxBro` is unset. Only in a build release CI marked: a spec's or sandbox's build never meets it. */
-  const broUndecided = () => options.bro === undefined && loadConfig().inboxBro === undefined;
+  const broUndecided = () => loadConfig().inboxBro === undefined;
   const broOffered = options.broOffer ?? isMarkedReleaseBuild();
   const revealState = (now: Date): RevealState => {
     const snooze = snoozeIntroSaved();
