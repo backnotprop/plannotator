@@ -1,8 +1,9 @@
 /**
  * Which repo an annotate session links `#123` and `@name` to (#2290), run
  * against both servers: the source's own repo when it has one, else the repo
- * the session started from. Sessions read it from /api/plan's `repoInfo`; with
- * no `host` the document's refs are plain text.
+ * the session started from. Sessions read it from /api/plan's `repoInfo`; a
+ * `display` with no `/` (a repo or folder name, not owner/repo) leaves the
+ * document's refs as plain text (`forgeRefLinks`).
  */
 import "../setup/sandbox-data-dir";
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
@@ -144,8 +145,8 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 				expect(await repoInfoOf(folderSession(join(otherRepo, "docs")))).toMatchObject(OTHER);
 			});
 
-			// Repos have no host without a remote, like a plain folder, but the
-			// launch repo's issues are not this repo's: refs stay plain text.
+			// With no remote the display is just the repo's name, with no `/`, so refs
+			// stay plain text: the launch repo's issues are not this repo's.
 			test("a repo with no remote keeps its own name, not the launch repo's links", async () => {
 				const localRepo = makeRepo(join(world, "local-only"));
 				const info = await repoInfoOf(fileSession(writeDoc(join(localRepo, "a.md"))));
@@ -156,6 +157,8 @@ export function describeAnnotateRepoIdentity(name: string, startAnnotateServer: 
 
 		describe("a rootless session uses the launch repo", () => {
 			test("a URL", async () => {
+				// The repo the URL would name if it were read as a relative path.
+				makeRepo(join(launchRepo, "https:", "example.com", "docs"), "git@gitlab.com:group/other.git");
 				expect(await repoInfoOf(fileSession("https://example.com/docs/a.md"))).toMatchObject(LAUNCH);
 			});
 
