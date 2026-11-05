@@ -989,17 +989,17 @@ test('Review layer by layer: the layer\'s own diff, Next layer, Whole stack from
   // No chapter card repeating the rail: the diffs take the width.
   await expect(review.locator('[data-guide-section-narrative]')).toBeHidden();
   // The rail is one column of names: a folder holding one thing merges into it, rows of 28 px touching, in the app's
-  // sans; A, D and R stay, the +/- leave the row for its tip. The diffs follow its order.
+  // sans; A, D and R stay, and each row has its +/- in the review app's columns. The diffs follow its order.
   await expect(review.locator('[data-review-file="migrations/0042_retry_schedule.sql"]')).toContainText('migrations/0042_retry_schedule.sql');
   await expect(review.locator('[data-review-folder="migrations"]')).toHaveCount(0);
   const railRow = await review.locator('[data-review-file]').first().evaluate((row) => {
-    const name = row.querySelector('.truncate')!;
+    const name = row.querySelector('.ib-prp-base')!;
     return { height: row.getBoundingClientRect().height, font: getComputedStyle(name).fontFamily, text: row.textContent ?? '' };
   });
   expect(railRow.height).toBe(28);
   expect(railRow.font).not.toMatch(/mono/i);
   expect(railRow.text).toContain('A');
-  expect(railRow.text).not.toMatch(/[+-]\d/);
+  expect(railRow.text).toMatch(/\+\d/);
   const railOrder = await review.locator('[data-review-file]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-review-file')));
   const diffOrder = await review.locator('[data-guide-file-shell]').evaluateAll((shells) => shells.map((shell) => shell.getAttribute('data-guide-file-shell')));
   // (Within a section the viewer draws tests after code, whatever the patch's order, so tests sit out of this check.)
@@ -1163,21 +1163,49 @@ test("the rail: a stack's layers stay in view over a tree of many files; on a ph
   }
 });
 
-test('the rail: a folder that does not fit gives way before the file name loses a letter', async ({ browser }) => {
+test('the rail: a long path gives way in its middle, on one line, its name whole while it fits, and no row fades', async ({ browser }) => {
   const file = (path: string) => `diff --git a/${path} b/${path}\n--- a/${path}\n+++ b/${path}\n@@ -1 +1 @@\n-a\n+b\n`;
-  const fits = 'guides-and-shared-ui.md';
-  const patch = [file(`docs/agent-guides/with-a-long-folder-name/${fits}`), file('src/one.ts')].join('');
+  const short = 'ui.md';
+  const long = 'guides-and-shared-ui.md';
+  const patch = [file(`docs/agent-guides/and-more/long-folder/${short}`), file(`notes/agent-guides/with-a-long-folder-name/${long}`), file('crates/next/src/a.rs'), file('src/one.ts')].join('');
   const { context, page } = await stubbedReview(browser, 1440, patch);
   try {
-    const row = page.locator('[data-pull-review] .ib-prp-file').filter({ hasText: fits });
-    await expect(row.locator('.ib-prp-dir')).toBeVisible({ timeout: 30_000 });
-    const sizes = await row.locator('.ib-prp-base').evaluate((box) => {
+    const rail = page.locator('[data-pull-review] [data-review-files]');
+    const row = (name: string) => rail.locator(`.ib-prp-file[data-review-file$="/${name}"]`);
+    await expect(row(short)).toBeVisible({ timeout: 30_000 });
+    // Each part's words against its box: cut is narrower than its words.
+    const cut = (part: Locator) => part.evaluate((box) => {
       const range = document.createRange();
       range.selectNodeContents(box);
-      return { box: box.getBoundingClientRect().width, text: range.getBoundingClientRect().width };
+      return box.getBoundingClientRect().width + 0.5 < range.getBoundingClientRect().width;
     });
-    expect(sizes.box).toBeGreaterThanOrEqual(sizes.text);
-    await expect(row.locator('.ib-prp-dir')).toHaveCSS('text-overflow', 'clip');
+    const shown = (part: Locator) => part.evaluate((el) => {
+      const line = el.closest('.ib-prp-fname')!.getBoundingClientRect();
+      const box = el.getBoundingClientRect();
+      return box.width > 0 && box.top >= line.top - 0.5 && box.bottom <= line.bottom + 0.5;
+    });
+    // A short name: whole, with its folder before it, cut in the folder's middle so its last folder stays.
+    for (const part of await row(short).locator('.ib-prp-base > *').all()) expect(await cut(part)).toBe(false);
+    expect(await shown(row(short).locator('.ib-prp-dir'))).toBe(true);
+    expect(await cut(row(short).locator('.ib-prp-dir .ib-prp-cut'))).toBe(true);
+    expect(await cut(row(short).locator('.ib-prp-dir .ib-prp-keep'))).toBe(false);
+    await expect(row(short).locator('.ib-prp-dir .ib-prp-cut')).toHaveCSS('text-overflow', 'ellipsis');
+    // A long name keeps the line: its folder leaves it whole, never a sliver.
+    for (const part of await row(long).locator('.ib-prp-base > *').all()) expect(await cut(part)).toBe(false);
+    expect(await shown(row(long).locator('.ib-prp-dir'))).toBe(false);
+    // Every row and folder is one line, and nothing is masked into a fade.
+    const looks = await rail.evaluate((list) =>
+      [...list.querySelectorAll('.ib-prp-file, .ib-prp-folder')].map((el) => ({
+        lines: Math.round(el.getBoundingClientRect().height / 20),
+        masked: [...el.querySelectorAll('*')].some((part) => getComputedStyle(part).maskImage !== 'none' || getComputedStyle(part).direction === 'rtl'),
+      })),
+    );
+    expect(looks.length).toBeGreaterThanOrEqual(4);
+    for (const look of looks) expect(look).toEqual({ lines: 1, masked: false });
+    // Each row shows its numbers; the tip has the whole path.
+    await expect(row(short).locator('.review-count-columns')).toHaveText('+1-1');
+    await row(long).hover();
+    await expect(page.locator('[data-pn-tooltip]')).toContainText(`notes/agent-guides/with-a-long-folder-name/${long}`);
   } finally {
     await context.close();
   }
@@ -1206,7 +1234,7 @@ test("a tooltip on screen does not take a sheet's Escape: ui's on the rail's Vie
     const panel = review.locator('.ib-gpanel');
     const comments = review.locator('.ib-vcomments');
     const tip = page.locator('[data-pn-tooltip]');
-    const row = review.locator('[data-review-files] button').filter({ has: page.locator('.ib-prp-fname') }).first();
+    const row = review.locator('[data-review-files] .ib-prp-file').first();
     const closesOverTip = async (hoverIt: () => Promise<void>) => {
       await comments.click();
       await expect(panel).toBeVisible();
@@ -1367,19 +1395,21 @@ test('every changed file stays in the review: rows for what the tree cannot hold
     // Of a symlink turned into a file the viewer draws one half: the new file's.
     await expect(review.locator('[data-guide-file-shell="a-link"]')).toContainText('+1');
 
-    // A long name keeps its end in view, and the whole of it is in its tip.
-    const cutName = await review.locator('[data-review-file^="src/extraordinarily"] .ib-rv-name').evaluate((name) => {
+    // A long name gives way in its middle and keeps its end in view, and the whole of it is in its tip.
+    const cutName = await review.locator('[data-review-file^="src/extraordinarily"] .ib-prp-base').evaluate((name) => {
+      const head = name.querySelector('.ib-prp-cut')!;
       const range = document.createRange();
-      range.selectNodeContents(name);
+      range.selectNodeContents(name.querySelector('.ib-prp-keep')!);
       const box = name.getBoundingClientRect();
-      return { cut: name.scrollWidth > name.clientWidth, endInView: range.getBoundingClientRect().right <= box.right + 1 };
+      return { cut: head.scrollWidth > head.clientWidth, endInView: range.getBoundingClientRect().right <= box.right + 1, end: name.querySelector('.ib-prp-keep')?.textContent };
     });
-    expect(cutName).toEqual({ cut: true, endInView: true });
-    await review.locator('[data-review-file^="src/extraordinarily"] .ib-rv-name').hover();
+    expect(cutName).toEqual({ cut: true, endInView: true, end: '-12.ts' });
+    await review.locator('[data-review-file^="src/extraordinarily"] .ib-prp-base').hover();
     await expect(page.locator('[data-pn-tooltip]')).toContainText('src/extraordinarily-long-module-file-name-for-the-rail-12.ts');
-    // Any row's tip has what left the row: its path and its +/-.
-    await review.locator('[data-review-file="aaa.ts"] .ib-rv-name').hover();
-    await expect(page.locator('[data-pn-tooltip]')).toContainText(/aaa\.ts.*\+\d+.*-\d+/);
+    // Any row's tip has its path; its +/- are on the row.
+    await review.locator('[data-review-file="aaa.ts"] .ib-prp-base').hover();
+    await expect(page.locator('[data-pn-tooltip]')).toContainText('aaa.ts');
+    await expect(review.locator('[data-review-file="aaa.ts"] .review-count-columns')).toHaveText(/\+\d+/);
 
     // A path's two rows differ for a screen reader.
     expect(await review.locator('[data-review-file="a-link"]').evaluateAll((rows) => rows.map((row) => row.getAttribute('aria-label')))).toEqual(['a-link, added', 'a-link, deleted']);
@@ -1592,7 +1622,7 @@ test('the rail follows Text size', async ({ browser }) => {
     const review = page.locator('[data-pull-review]');
     // The rail reads the window's type ramp.
     await review.evaluate((section) => section.style.setProperty('--ib-fs-12-5', '19px'));
-    await expect(review.locator('[data-review-file="aaa.ts"] .ib-rv-name')).toHaveCSS('font-size', '19px');
+    await expect(review.locator('[data-review-file="aaa.ts"] .ib-prp-base')).toHaveCSS('font-size', '19px');
     await review.evaluate((section) => section.style.removeProperty('--ib-fs-12-5'));
   } finally {
     await context.close();

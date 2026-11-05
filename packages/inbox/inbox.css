@@ -8077,9 +8077,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item { width: 100%; min-height: 28px; padding-block: 0; padding-right: 8px; gap: 6px; border-radius: 6px; font-size: var(--ib-fs-13, 13px); font-weight: 500; text-align: left; color: var(--muted-foreground); }
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item:hover { background: var(--ib-rail-fill); color: var(--foreground); }
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-/* A long name is cut at its start, as the rail's paths were: 200 files in one folder still differ by their ends. */
-.ib-rv-name { direction: rtl; text-align: left; }
-.ib-rv-name > bdi { direction: ltr; }
 .ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
 .ib-prr-wide:not(.ib-railfold):not(.ib-fold) .ib-gpanel { grid-column: 3; grid-row: 1 / -1; }
 
@@ -8423,9 +8420,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-prreview .ib-gbody { background: var(--background); }
 .ib-prr-wide .ib-gbody { border-top-left-radius: 12px; }
 .ib-prr-wide:not(.ib-fold) .ib-gbody { border-top-right-radius: 12px; }
-.ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 232px) minmax(0, 1fr) 300px; }
-.ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 232px) minmax(0, 1fr); }
-.ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 232px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
+.ib-review.ib-prreview.ib-prr-wide:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr) 300px; }
+.ib-review.ib-prreview.ib-prr-wide.ib-fold:not(.ib-railfold) .ib-rsplit { grid-template-columns: var(--ib-rail-w, 280px) minmax(0, 1fr); }
+.ib-prp-handle { position: absolute; top: 0; bottom: 0; left: calc(var(--ib-rail-w, 280px) - 4px); width: 8px; z-index: 4; cursor: col-resize; touch-action: none; }
 .ib-prp-handle::after { content: ""; position: absolute; top: 12px; bottom: 12px; left: 3px; width: 2px; border-radius: 1px; background: transparent; transition: background-color 120ms ease; }
 .ib-prp-handle:hover::after, .ib-prp-handle:active::after, .ib-prp-handle:focus-visible::after { background: var(--ring); }
 .ib-prp-handle:focus { outline: none; }
@@ -8461,11 +8458,24 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prp-folder { color: var(--muted-foreground); }
 .ib-prp-folder svg { flex: none; transition: transform 100ms ease; }
 .ib-prp-folder svg.ib-prp-open { transform: rotate(90deg); }
-.ib-prp-fname { flex: 1 1 auto; display: flex; min-width: 0; }
-/* The folder gives way entirely before the file's name loses a pixel: at 1000:1 the name lost a fraction, and its
-   ellipsis took two letters from a name that fit. Cut, the folder fades, so a sliver of it never reads as a stray mark. */
-.ib-prp-dir { flex: 0 1000000 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: clip; direction: rtl; color: var(--muted-foreground); -webkit-mask-image: linear-gradient(to right, transparent, #000 14px); mask-image: linear-gradient(to right, transparent, #000 14px); }
-.ib-prp-base { flex: 0 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+/* A name stays on one line and whole while it fits, and nothing on the row fades. Short of room a folder gives way in
+   its middle (its head ends in "…", its last folder stays), and where not even that fits beside the name it leaves the
+   line whole, wrapped onto a second line that is cut off, so no sliver of it reads as a stray mark. A name alone too
+   long gives way the same way, keeping its end. The row's tip has the path. */
+.ib-prp-fname { flex: 1 1 auto; display: flex; min-width: 0; height: 1.45em; line-height: 1.45em; overflow: hidden; }
+.ib-prp-fname[data-has-dir] { flex-flow: row-reverse wrap; justify-content: flex-end; }
+/* The name is laid out first, so the folder is what wraps out of sight; row-reverse draws it before the name. */
+.ib-prp-fname[data-has-dir] > .ib-prp-base { order: -1; }
+.ib-prp-cutbox { display: flex; min-width: 0; white-space: nowrap; }
+.ib-prp-base, .ib-prp-dirname { flex: 0 1 auto; }
+.ib-prp-dir { flex: 1 1 4.5em; max-width: max-content; color: var(--muted-foreground); }
+.ib-prp-cut { flex: 0 1000000 auto; min-width: 1.1em; overflow: hidden; text-overflow: ellipsis; }
+.ib-prp-keep { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+/* The review app's +/- columns (review-editor/index.css `.review-count-columns`), sized by the rail's widest row. */
+.ib-prp-files .review-count-columns { display: grid; grid-template-columns: minmax(var(--count-add-w, 3ch), max-content) minmax(var(--count-del-w, 3ch), max-content); column-gap: 4px; justify-items: end; align-items: center; flex-shrink: 0; margin-left: auto; font-size: 11px; font-weight: 400; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ib-prp-files .review-count-columns .additions { color: var(--success, #0a7f33); }
+.ib-prp-files .review-count-columns .deletions { color: var(--destructive); }
+.ib-prp-files .review-count-columns[data-count-columns="quiet"] :is(.additions, .deletions) { color: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
 .ib-prp-file[data-seen] .ib-prp-base { color: var(--muted-foreground); }
 .ib-prp-c { flex: none; font-size: 11px; color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
 .ib-prp-slot { flex: none; width: 16px; display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }

@@ -13,7 +13,7 @@ import { Tooltip } from '@plannotator/ui/components/Tooltip';
  * ui's `DiffCounts`.
  */
 export { ChangeTypeLetter } from '@plannotator/ui/components/DiffFileTree';
-export { ViewedControl } from '@plannotator/ui/components/FileRowAtoms';
+export { ViewedControl, CountColumns, countColumnVars } from '@plannotator/ui/components/FileRowAtoms';
 
 /** Staging affordance — plus button on unstaged working files (always
  * visible, brightens on hover), primary dot when staged, spinner mid-flight.
@@ -99,42 +99,6 @@ export const AnnotationBadge: React.FC<{ count: number }> = ({ count }) => {
     </span>
   );
 };
-
-/**
- * The +/- counts as two right-aligned columns: each + ends on one edge and
- * each - on the next, on every row of the panel (All changes, group headings,
- * folders, files), so the size of each change reads down one column. The
- * column widths come from `--count-add-w` / `--count-del-w`, which the panel
- * sets from its widest numbers (`countColumnVars`); a number wider than that
- * grows its own row instead of overlapping. `tone="quiet"` draws both numbers
- * in the panel's tertiary grey (headings, folders); file rows keep the green
- * and red of `.file-tree-item .additions / .deletions`.
- */
-export const CountColumns: React.FC<{
-  additions: number;
-  deletions: number;
-  tone?: 'color' | 'quiet';
-  addStyle?: React.CSSProperties;
-  delStyle?: React.CSSProperties;
-}> = ({ additions, deletions, tone = 'color', addStyle, delStyle }) => (
-  <span data-count-columns={tone} className="review-count-columns">
-    <span className={additions > 0 ? 'additions' : undefined} style={addStyle}>
-      {additions > 0 ? `+${additions}` : ''}
-    </span>
-    <span className={deletions > 0 ? 'deletions' : undefined} style={delStyle}>
-      {deletions > 0 ? `-${deletions}` : ''}
-    </span>
-  </span>
-);
-
-/** The column widths for a panel whose largest numbers are `additions` and
- *  `deletions` (the whole change's totals: every row's count is part of
- *  them). At least 3 characters, so a panel of small changes keeps its edge;
- *  2 px over, because a sign is a little wider than a tabular digit. */
-export function countColumnVars(additions: number, deletions: number): React.CSSProperties {
-  const width = (n: number) => `calc(${Math.max(3, String(n).length + 1)}ch + 2px)`;
-  return { '--count-add-w': width(additions), '--count-del-w': width(deletions) } as React.CSSProperties;
-}
 
 /** Below this panel width, group headings, folders and files drop their
  *  number columns (and a heading its viewed count), so names keep the room;
