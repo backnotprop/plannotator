@@ -151,11 +151,11 @@ describe('Show me model', () => {
 
 describe('which review a version counts its lines in', () => {
   const messages = [
-    { id: 'ask' },
-    { id: 'r1', guide: { review: {} } },
-    { id: 'reply1' },
-    { id: 'r2', guide: { review: {} } },
-    { id: 'reply2' },
+    { id: 'ask', created_at: '2026-01-01T10:00:00.000Z' },
+    { id: 'r1', created_at: '2026-01-01T11:00:00.000Z', guide: { review: {} } },
+    { id: 'reply1', created_at: '2026-01-01T12:00:00.000Z' },
+    { id: 'r2', created_at: '2026-01-01T13:00:00.000Z', guide: { review: {} } },
+    { id: 'reply2', created_at: '2026-01-01T14:00:00.000Z' },
   ];
   test('the newest review at or before the message it was stored through', () => {
     expect(reviewDrawnOn('r1', messages, undefined)).toBe('r1');
@@ -163,22 +163,32 @@ describe('which review a version counts its lines in', () => {
     expect(reviewDrawnOn('r2', messages, 'r1')).toBe('r2');
     expect(reviewDrawnOn('reply2', messages, undefined)).toBe('r2');
   });
-  test('through a message before any review, or one not here: nothing says', () => {
-    expect(reviewDrawnOn('ask', messages, 'r1')).toBeNull();
-    expect(reviewDrawnOn('elsewhere', messages, 'r1')).toBeNull();
+  test('stored through nothing, or through something before any review: the review its Show me names', () => {
+    expect(reviewDrawnOn(null, messages, 'r1', '2026-01-01T15:00:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn('ask', messages, 'r1')).toBe('r1');
+    expect(reviewDrawnOn('elsewhere', messages, 'r1')).toBe('r1');
   });
-  test('stored through nothing: the review its Show me names, else nothing says', () => {
-    expect(reviewDrawnOn(null, messages, 'r1')).toBe('r1');
-    expect(reviewDrawnOn(undefined, messages, undefined)).toBeNull();
+  test('no Show me made it: the newest review when the version was stored, wherever it was stored through', () => {
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    expect(reviewDrawnOn('ask', messages, undefined, '2026-01-01T12:30:00.000Z')).toBe('r1');
+    expect(reviewDrawnOn('elsewhere', messages, undefined, '2026-01-01T13:30:00.000Z')).toBe('r2');
+    // At the very moment of the review counts as after it.
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T11:00:00.000Z')).toBe('r1');
+  });
+  test('stored before any review, or with no time: none', () => {
+    expect(reviewDrawnOn(null, messages, undefined, '2026-01-01T10:30:00.000Z')).toBeNull();
+    expect(reviewDrawnOn('ask', messages, undefined, '2026-01-01T10:30:00.000Z')).toBeNull();
     expect(reviewDrawnOn(null, messages, undefined)).toBeNull();
   });
 });
 
 describe('a part whose lines mean nothing here', () => {
   const now = new Map([['w.ts', new Map([[16, 'a'], [17, 'b']])], ['gone.ts', new Map<number, string>()]]);
-  test('nothing says which review it was drawn on: the note, never its numbers, even when this diff has those lines', () => {
-    expect(partLanding({ path: 'w.ts', line: 16 }, now, null)).toBe('changed');
+  test('drawn on none of these reviews: the board\'s own viewer, never its numbers, even when this diff has those lines', () => {
+    expect(partLanding({ path: 'w.ts', line: 16 }, now, null)).toBeNull();
     expect(partLanding({ path: 'other.ts', line: 16 }, now, null)).toBeNull();
+    expect(partLanding({ path: 'gone.ts', line: 2 }, now, null)).toBe('changed');
   });
   test('a file the review deletes: the note, in any review', () => {
     expect(partLanding({ path: 'gone.ts', line: 2 }, now)).toBe('changed');

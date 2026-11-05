@@ -274,7 +274,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk, sh
       setLanded({ name: partName(el), mark: markOf(el), file: renamed.path, lines: null });
       return true;
     }
-    const drawnOn = reviewDrawnOn(version?.through, thread.messages, board ? showMe.askedOn(board) : undefined);
+    const drawnOn = reviewDrawnOn(version?.through, thread.messages, board ? showMe.askedOn(board) : undefined, version?.at);
     const landing = partLanding(target, showMe.nowLines, drawnOn === message.id ? undefined : drawnOn ? { lines: showMe.linesOf(drawnOn) } : null);
     if (landing === null) return false;
     if (landing === 'changed') {

@@ -1,7 +1,7 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import { useVisibleViewportBounds, hasPrimaryCoarsePointer } from '@plannotator/ui/hooks/useViewportEnvironment';
-import { placeChooser, readSelectedLines, type SelectedLinesBox, type SelectionRange } from './selectionChooserPlace';
+import { linesOffScreen, placeChooser, readSelectedLines, type ReadLines, type SelectionRange } from './selectionChooserPlace';
 
 /** Selected lines, as a host's selection action receives them. */
 export interface DiffSelection {
@@ -23,6 +23,9 @@ export interface DiffSelectionActions {
   onShowMe?: (selection: DiffSelection) => void;
 }
 
+const sameLines = (a: ReadLines, b: ReadLines) =>
+  a.top === b.top && a.bottom === b.bottom && a.left === b.left && a.shownTop === b.shownTop && a.shownBottom === b.shownBottom && a.roof === b.roof;
+
 /** How long a new selection gets to be painted before the bar makes do with what it can read. */
 const LOOK_FRAMES = 6;
 
@@ -30,8 +33,9 @@ const LOOK_FRAMES = 6;
  * The small row a selection opens first when a host passes selection actions.
  * It takes the toolbar's ref, so a press outside it or Escape dismisses it
  * exactly as the comment box is dismissed (no new keys). It sits by the lines
- * it is about (`placeChooser`) and stays with them; while it is open the diff's
- * + mark steps aside (comments.css, usePierreTheme).
+ * it is about (`placeChooser`) and stays with them, in the diff it first found
+ * them in. With them off screen or dropped by the diff it hides until they are
+ * back; while it shows, the diff's + mark steps aside (comments.css, usePierreTheme).
  */
 export function SelectionChooser({
   toolbarRef,
@@ -51,22 +55,28 @@ export function SelectionChooser({
   onShowMe: () => void;
 }) {
   const bounds = useVisibleViewportBounds(hasPrimaryCoarsePointer() ? 16 : 0);
-  const [lines, setLines] = React.useState<SelectedLinesBox | null>(null);
+  const [lines, setLines] = React.useState<ReadLines | null>(null);
+  const [dropped, setDropped] = React.useState(false);
   const [bar, setBar] = React.useState({ width: 0, height: 0 });
   const [looked, setLooked] = React.useState(false);
   const { start, end, side, endSide } = range;
   // Every frame while it is open, as nothing announces what moves the lines: the diff paints a new selection a
-  // frame or two late and redraws its rows after a scroll has ended. A diff that dropped them leaves it where it was.
+  // frame or two late and redraws its rows after a scroll has ended.
   React.useLayoutEffect(() => {
     const now = { start, end, side, endSide };
     let frames = 0;
     let id = 0;
+    let diff: Element | null = null;
+    let seen = false;
     const look = () => {
       const waiting = frames < LOOK_FRAMES;
-      const found = readSelectedLines(now, position, waiting);
+      const found = readSelectedLines(now, position, waiting, diff);
+      if (found?.own) diff = found.host;
+      if (found) seen = true;
+      setDropped(seen && !found);
       const el = toolbarRef.current;
       if (el) setBar((was) => (was.width === el.offsetWidth && was.height === el.offsetHeight ? was : { width: el.offsetWidth, height: el.offsetHeight }));
-      if (found) setLines((was) => (was && was.top === found.top && was.bottom === found.bottom && was.left === found.left ? was : found));
+      if (found) setLines((was) => (was && sameLines(was, found) ? was : found));
       if (found || !waiting) setLooked(true);
       frames += 1;
       id = requestAnimationFrame(look);
@@ -74,9 +84,10 @@ export function SelectionChooser({
     look();
     return () => cancelAnimationFrame(id);
   }, [start, end, side, endSide, position, toolbarRef]);
+  const gone = dropped || (!!lines && linesOffScreen(lines, bounds));
   // No lines to read: above the pointer where they were picked, never off the screen.
   const placed: React.CSSProperties = lines
-    ? placeChooser(lines, bar, bounds)
+    ? placeChooser(lines, bar, { ...bounds, top: Math.max(bounds.top, lines.roof) })
     : {
         top: Math.max(bounds.top + 8, Math.min(position.top - 66, bounds.bottom - 52)),
         left: Math.max(bounds.left + 8, Math.min(position.left, bounds.right - 8)),
@@ -88,8 +99,8 @@ export function SelectionChooser({
       className="review-selpop"
       role="toolbar"
       aria-label="Selected lines"
-      data-selection-chooser=""
-      style={{ position: 'fixed', ...placed, zIndex: 1000, ...(looked ? {} : { visibility: 'hidden' as const }) }}
+      {...(gone ? {} : { 'data-selection-chooser': '' })}
+      style={{ position: 'fixed', ...placed, zIndex: 1000, ...(looked && !gone ? {} : { visibility: 'hidden' as const }) }}
     >
       <button type="button" className="review-selpop-btn" onClick={onComment} data-selection-action="comment">
         Comment

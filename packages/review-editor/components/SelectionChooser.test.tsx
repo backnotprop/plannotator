@@ -8,7 +8,9 @@
  * - Comment no longer opens the comment box for the same lines;
  * - the bar stops reading the lines the diff painted (the side the selection
  *   ends on, this selection's diff when another has lines painted too), or stops
- *   falling back on the pointer when it can read none.
+ *   falling back on the pointer when it can read none;
+ * - the bar goes to another file with the same line numbers, or stays on screen
+ *   (over the header, over other lines) when its lines are gone.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -62,9 +64,9 @@ const frames = async (n = 8) => {
 };
 
 /** A diff with these lines painted, each at the place given, the way Pierre draws them. */
-function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; top: number; left: number }[]) {
+function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; top: number; left: number }[], parent: HTMLElement = document.body) {
   const host = document.createElement('diffs-container');
-  document.body.appendChild(host);
+  parent.appendChild(host);
   const shadow = host.attachShadow({ mode: 'open' });
   for (const row of rows) {
     const code = document.createElement('div');
@@ -84,7 +86,10 @@ function paintedDiff(rows: { column?: 'additions' | 'deletions'; line: number; t
     at(text, row.left - 200, row.left + 400);
     shadow.appendChild(code);
   }
+  return host;
 }
+const unpaint = (diff: HTMLElement) => diff.shadowRoot!.querySelectorAll('[data-selected-line]').forEach((el) => el.removeAttribute('data-selected-line'));
+const barEl = () => document.querySelector<HTMLElement>('.review-selpop');
 const commentBox = () => document.querySelector('.review-toolbar');
 
 describe.skipIf(!hasDom)('the selection chooser', () => {
@@ -218,6 +223,91 @@ describe.skipIf(!hasDom)('the selection chooser', () => {
       }
       await frames(3);
       expect(placed().top).toBe('266px');
+    });
+
+    test('two files sharing line numbers: it stays on the diff it found, and hides rather than go to the other', async () => {
+      const a = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(placed().top).toBe('366px');
+      // The other file now has a line of that number painted, nearer the pointer, and this one has none.
+      unpaint(a);
+      paintedDiff([{ line: 18, top: 500, left: 40 }]);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      expect(barEl()!.style.top).toBe('366px');
+    });
+
+    test('painted in both files: it stays on the one it found', async () => {
+      paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      paintedDiff([{ line: 18, top: 500, left: 40 }]);
+      await frames(3);
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('its lines dropped by the diff: hidden, the + back, and shown again when they return', async () => {
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(chooser()).not.toBeNull();
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      unpaint(diff);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      expect(chooser(), 'the + mark comes back while the bar is hidden').toBeNull();
+      for (const row of rows) row.setAttribute('data-selected-line', '');
+      await frames(3);
+      expect(placed()).toEqual({ top: '366px', left: '803px', transform: '', hidden: '' });
+    });
+
+    test('its lines off the top or the bottom of the viewport: hidden', async () => {
+      const diff = paintedDiff([{ line: 18, top: 340, left: 803 }]);
+      mount({ onShowMe: () => {} });
+      await frames();
+      const rows = [...diff.shadowRoot!.querySelectorAll<HTMLElement>('[data-selected-line]')];
+      const moveTo = (top: number) => {
+        for (const row of rows) {
+          const was = row.getBoundingClientRect();
+          row.getBoundingClientRect = () => ({ ...was, top, bottom: top + 20, y: top });
+        }
+      };
+      moveTo(-30);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      moveTo(window.innerHeight + 5);
+      await frames(3);
+      expect(barEl()!.style.visibility).toBe('hidden');
+      moveTo(100);
+      await frames(3);
+      expect(placed().hidden).toBe('');
+      expect(placed().top).toBe('126px');
+    });
+
+    test('its lines past the edge of a scroller around them, though on the screen: hidden', async () => {
+      const scroller = document.createElement('div');
+      scroller.style.overflowY = 'auto';
+      scroller.getBoundingClientRect = () => ({ top: 400, bottom: 700, left: 0, right: 900, width: 900, height: 300, x: 0, y: 400, toJSON: () => ({}) }) as DOMRect;
+      document.body.appendChild(scroller);
+      paintedDiff([{ line: 18, top: 340, left: 803 }], scroller);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(barEl()!.style.visibility).toBe('hidden');
+    });
+
+    test('its first line near the top of the page\'s scroller, no room below: not up over what sits above that scroller', async () => {
+      const scroller = document.createElement('div');
+      scroller.style.overflowY = 'auto';
+      scroller.getBoundingClientRect = () => ({ top: 46, bottom: 768, left: 0, right: 900, width: 900, height: 722, x: 0, y: 46, toJSON: () => ({}) }) as DOMRect;
+      Object.defineProperty(scroller, 'scrollHeight', { value: 3000 });
+      Object.defineProperty(scroller, 'clientHeight', { value: 722 });
+      document.body.appendChild(scroller);
+      // The lines fill the screen from just under the header to its bottom.
+      paintedDiff([{ line: 16, top: 50, left: 803 }, { line: 18, top: window.innerHeight - 10, left: 803 }], scroller);
+      mount({ onShowMe: () => {} });
+      await frames();
+      expect(Number.parseFloat(placed().top)).toBeGreaterThanOrEqual(46 + 8);
     });
   });
 });

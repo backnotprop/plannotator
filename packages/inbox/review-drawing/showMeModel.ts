@@ -288,20 +288,24 @@ export function reviewLines(files: readonly { path: string; patch: string }[]): 
 /**
  * The review a board's version counts its lines in: the newest review at or
  * before the message it was stored through (agents pass the latest id they read,
- * often a reply). Stored through nothing: the review the Show me that made the
- * board names (`askedOn`). Null when neither says, and then its numbers mean nothing here.
+ * often a reply). Stored through nothing, or through something before any review:
+ * the review the Show me that made the board names (`askedOn`), else the newest
+ * review the thread had when the version was stored (`at`). Null with none of
+ * those: its numbers mean nothing in any review here.
  */
 export function reviewDrawnOn(
   through: string | null | undefined,
-  messages: readonly { id: string; guide?: { review?: unknown } | null }[],
+  messages: readonly { id: string; created_at?: string; guide?: { review?: unknown } | null }[],
   askedOn: string | undefined,
+  at?: string,
 ): string | null {
-  if (!through) return askedOn ?? null;
-  const at = messages.findIndex((message) => message.id === through);
-  for (let i = at; i >= 0; i -= 1) {
+  for (let i = through ? messages.findIndex((message) => message.id === through) : -1; i >= 0; i -= 1) {
     if (messages[i]!.guide?.review) return messages[i]!.id;
   }
-  return null;
+  if (askedOn) return askedOn;
+  const stored = at ? Date.parse(at) : NaN;
+  const before = messages.filter((message) => message.guide?.review && message.created_at && Date.parse(message.created_at) <= stored);
+  return before.at(-1)?.id ?? null;
 }
 
 /**
@@ -310,12 +314,14 @@ export function reviewDrawnOn(
  * 'changed' when these lines can't be found here (never old numbers: they hold
  * other code now), or the file is gone from the new side. `earlier`: the review
  * it was drawn on, when not this one, with `lines` undefined until it is read;
- * null when nothing says which review it was drawn on.
+ * null when it was drawn on none of this thread's reviews (the board's own viewer
+ * reads the file as it is on disk).
  */
 export function partLanding(target: ShapeCodeTarget, now: ReviewLines, earlier?: { lines: ReviewLines | undefined } | null): [number, number] | 'changed' | null {
   const after = now.get(target.path);
   if (!after) return null;
-  if (after.size === 0 || earlier === null) return 'changed';
+  if (after.size === 0) return 'changed';
+  if (earlier === null) return null;
   const asked = targetLines(target);
   const numbers = Array.from({ length: asked[1] - asked[0] + 1 }, (_, i) => asked[0] + i);
   if (!earlier) return numbers.some((n) => after.has(n)) ? asked : null;

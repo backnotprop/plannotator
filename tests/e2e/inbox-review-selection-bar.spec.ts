@@ -156,6 +156,15 @@ test.afterAll(async () => {
 });
 
 const bar = (page: Page) => page.locator('[data-selection-chooser]');
+/** The bar whether it shows or not: hidden, it isn't `bar` (the + mark comes back). */
+const selpop = (page: Page) => page.locator('.review-selpop');
+/** What a press at the middle of this element really reaches. */
+const free = (page: Page, name: string, el: ReturnType<Page['locator']>) =>
+  el.evaluate((node, label) => {
+    const r = node.getBoundingClientRect();
+    const at = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+    return at === node || node.contains(at) ? 'free' : `${label} covered by ${at?.className}`;
+  }, name);
 
 interface Box { top: number; bottom: number; left: number; right: number }
 
@@ -394,15 +403,12 @@ test('more selected lines than the screen holds: it stays on screen', async () =
       const box = (await geometry(page)).bar!;
       return box.top >= 0 && box.bottom <= 420;
     }).toBe(true);
-    // All of them scrolled off the top: the bar waits on screen instead of going with them.
+    // All of them scrolled off the top: nothing to sit by, so it is gone, and the page's header stays free.
     await line(page, LONG, 25).evaluate((el) => el.scrollIntoView({ block: 'start' }));
     await page.mouse.move(1000, 300);
     await page.mouse.wheel(0, 200);
     await expect.poll(async () => (await line(page, LONG, 25).boundingBox())?.y ?? 0).toBeLessThan(-30);
-    await page.waitForTimeout(100);
-    const scrolledOff = (await geometry(page)).bar!;
-    expect(scrolledOff.top).toBeGreaterThanOrEqual(0);
-    expect(scrolledOff.bottom).toBeLessThanOrEqual(420);
+    await expect(selpop(page)).toBeHidden();
     await closeBar(page);
   } finally {
     await page.setViewportSize({ width: 1440, height: 900 });
@@ -496,7 +502,107 @@ test('a phone at 390 px: touch-sized, on screen, not on the lines, at the bottom
     const lowBox = clearOfLines(low);
     expect(lowBox.bottom, 'above the first line').toBeLessThanOrEqual(low.top);
     await pictures(page, 'phone-viewport-bottom', lowBox);
+    // Scrolled off: Thread and Comments are free.
+    // A touch scroll of the page, past the lines.
+    await page.locator('.ib-gbody').first().evaluate((body) => { body.scrollTop += 700; });
+    await page.waitForTimeout(300);
+    // And the diff's own scroller under it, which takes over at the page's end.
+    await line(page, LONG, 25).evaluate((row) => {
+      for (let el: Element | null = row; el; el = el.parentElement ?? (el.getRootNode() as ShadowRoot).host ?? null) {
+        if (el.scrollHeight > el.clientHeight + 200 && /auto|scroll/.test(getComputedStyle(el).overflowY)) {
+          el.scrollTop += 700;
+          return;
+        }
+      }
+    });
+    await page.waitForTimeout(300);
+    await expect(selpop(page)).toBeHidden();
+    expect(await free(page, 'Thread', page.locator('[data-review-message]').getByRole('button', { name: 'Thread' }).first())).toBe('free');
+    expect(await free(page, 'Comments', page.locator('[data-review-message]').getByRole('button', { name: /^Comments/ }).first())).toBe('free');
   } finally {
     await context.close();
   }
+});
+
+test('two files with the same line numbers: scrolled to the next file, the lines and the bar stay with the first', async () => {
+  const { page } = world;
+  await openReview(page);
+  await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
+  await setStyle(page, 'split');
+  await line(page, LONG, 1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(300);
+  await select(page, LONG, 1, 3);
+  const inFile = (file: string) => page.locator(`[data-guide-file-shell="${file}"]`).first().locator('[data-line][data-selected-line]');
+  await expect(inFile(LONG).first()).toBeAttached();
+
+  // Scroll with the bar open until the next file takes focus.
+  await line(page, TAIL, 3).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(600);
+  await page.mouse.move(1000, 500);
+  await page.mouse.wheel(0, 40);
+  await page.waitForTimeout(600);
+  await expect(inFile(TAIL), 'its numbers painted on the next file').toHaveCount(0);
+  await expect(selpop(page)).toBeHidden();
+
+  // Back: the same lines, the bar under them, and Comment goes to this file.
+  await line(page, LONG, 1).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await settled(page);
+  const g = await geometry(page);
+  const box = clearOfLines(g);
+  const three = await line(page, LONG, 3).boundingBox();
+  expect(Math.abs(box.top - (three!.y + three!.height + 6))).toBeLessThan(3);
+  await bar(page).getByRole('button', { name: 'Comment' }).click();
+  await expect(page.locator('.review-toolbar')).toBeVisible();
+  await page.keyboard.type('On the first file.');
+  await page.keyboard.press('Meta+Enter');
+  await expect(page.locator('.review-toolbar')).toHaveCount(0);
+  await expect(page.locator(`[data-guide-file-shell="${LONG}"]`).first().getByText('On the first file.')).toBeVisible();
+  await expect(page.locator(`[data-guide-file-shell="${TAIL}"]`).first().getByText('On the first file.')).toHaveCount(0);
+});
+
+test('its lines gone: the bar hides, the header is free, the + rule lifts, and it comes back with them', async () => {
+  const { page } = world;
+  await openReview(page);
+  await expect(line(page, LONG, 1)).toBeVisible({ timeout: 30_000 });
+  await setStyle(page, 'unified');
+  await line(page, LONG, 7).evaluate((el) => el.scrollIntoView({ block: 'center' }));
+  await page.waitForTimeout(300);
+  await select(page, LONG, 7, 9);
+  // A line the diff may not have drawn yet: scrolled to as a person does, then placed.
+  const bring = async (n: number, by: number, block: ScrollLogicalPosition = 'center') => {
+    await page.mouse.move(1000, 500);
+    for (let i = 0; i < 40 && !(await line(page, LONG, n).count()); i += 1) {
+      await page.mouse.wheel(0, by);
+      await page.waitForTimeout(100);
+    }
+    await line(page, LONG, n).evaluate((el, at) => el.scrollIntoView({ block: at }), block);
+  };
+  const headerFree = async () => {
+    await expect(selpop(page)).toBeHidden();
+    await expect(bar(page)).toHaveCount(0);
+    const pane = page.locator('[data-review-message]');
+    expect(await free(page, 'Approve', pane.getByRole('button', { name: /Approve|Send Feedback/ }).first())).toBe('free');
+    expect(await free(page, 'Thread', pane.getByRole('button', { name: 'Thread' }).first())).toBe('free');
+  };
+  // Just off the top of what the page shows, then far away, past where the diff draws rows.
+  await bring(17, 400, 'start');
+  await page.mouse.wheel(0, 10);
+  await headerFree();
+  await bring(61, 400);
+  await headerFree();
+  // The + is free to come back while the bar is hidden (comments.css keys it on the bar showing).
+  const plusRule = () => page.evaluate(() => getComputedStyle(document.documentElement).getPropertyValue('--review-selection-plus').trim());
+  expect(await plusRule()).toBe('');
+  await bring(7, -400);
+  await settled(page);
+  expect(await plusRule()).toBe('none');
+  clearOfLines(await geometry(page));
+  // Dismissed while hidden: a press on nothing closes it for good.
+  await bring(61, 400);
+  await expect(selpop(page)).toBeHidden();
+  await page.mouse.click(4, 4);
+  await expect(selpop(page)).toHaveCount(0);
+  await bring(7, -400);
+  await page.waitForTimeout(300);
+  await expect(selpop(page)).toHaveCount(0);
 });

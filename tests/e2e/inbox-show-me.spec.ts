@@ -882,12 +882,12 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await expect(painted(WORKER).first()).toContainText('} else {');
   await closeBoard();
 
-  // Stored through nothing, and no Show me made it: nothing says which review, so the note, and nothing painted.
+  // Stored through nothing, and no Show me made it: the newest review when it was stored, this one, so these lines.
   await openBoard(storeBoard('through-nothing', `${WORKER}#L16-L18`, []), 'The board through-nothing.');
   await part(board(page), 'it').click();
-  await expect(corner(page).locator('[data-show-me-changed]')).toContainText('This code changed after the picture was drawn.');
-  await expect(corner(page).locator('.ib-sm-pip-f')).not.toContainText('lines');
-  await expect(painted(WORKER)).toHaveCount(0);
+  await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 16–18/);
+  await expect(corner(page).locator('[data-show-me-changed]')).toHaveCount(0);
+  await expect(painted(WORKER)).toHaveCount(3);
   await closeBoard();
 
   // Back on the first board.
@@ -922,6 +922,53 @@ test('a board drawn on an earlier review lands where its code is now, or says it
   await page.getByRole('button', { name: 'Close Show me' }).click();
   expect(world.agent.asked.length).toBe(asked);
   expect(world.errors).toEqual([]);
+});
+
+test("a plain board on its only review: stored after it, through nothing or an earlier message, its lines; stored before it, the board's own viewer", async () => {
+  test.setTimeout(120_000);
+  const { page } = world;
+  const painted = page.locator(`[data-guide-file-shell="${WORKER}"]`).first().locator('[data-line][data-selected-line]');
+  const asked = await call('send_message', { project_path: world.project, body: 'Which way does the retry go?', thread: 'plain-boards', subject: 'Plain boards' });
+  const storeBoard = (name: string, flags: string[]) => {
+    const path = join(world.boardDir, `${name}.json`);
+    writeFileSync(path, JSON.stringify({ title: name, claim: `The board ${name}.`, views: { picture: { width: 800, height: 300, html: `<div data-mark="it" data-code="${WORKER}#L16-L18" style="padding:16px">it</div>` } } }));
+    const run = world.shape(['update', '--file', path, '--thread', asked.thread_id, ...flags]);
+    expect(run.status, run.stderr).toBe(0);
+    return (JSON.parse(run.stdout) as { id: string }).id;
+  };
+  const before = storeBoard('plain-before', []);
+  await new Promise((done) => setTimeout(done, 20));
+  const review = await call('submit_guide', { project_path: world.project, guide: guide(1, false), patch: world.round1, review: true, reply_to: asked.message_id, body: 'The review.' });
+  expect(review.thread_id).toBe(asked.thread_id);
+  await new Promise((done) => setTimeout(done, 20));
+  const after = storeBoard('plain-after', []);
+  const earlier = storeBoard('plain-through-earlier', ['--through', asked.message_id]);
+  await page.goto(`${world.url}#thread=${asked.thread_id}&guide=${review.message_id}`);
+  await page.reload();
+  const pane = page.locator('[data-review-message]');
+  await expect(pane).toBeVisible();
+  await pane.locator('[data-review-chapters] li').nth(3).click();
+  const openBoard = async (id: string, name: string) => {
+    await page.evaluate((shape) => { location.hash = `${location.hash.replace(/&shape=[^&]*/, '')}&shape=${encodeURIComponent(shape)}`; }, id);
+    await expect(board(page)).toContainText(`The board ${name}.`);
+  };
+  for (const [id, name] of [[after, 'plain-after'], [earlier, 'plain-through-earlier']] as const) {
+    await openBoard(id, name);
+    await part(board(page), 'it').click();
+    await expect(corner(page).locator('.ib-sm-pip-f')).toHaveText(/retry-worker\.ts lines 16–18/);
+    await expect(corner(page).locator('[data-show-me-changed]')).toHaveCount(0);
+    await expect(painted).toHaveCount(3);
+    await corner(page).getByRole('button', { name: 'Grow the board' }).click();
+    await board(page).getByRole('button', { name: 'Close Shape' }).click();
+    await expect(board(page)).toHaveCount(0);
+  }
+  await openBoard(before, 'plain-before');
+  await part(board(page), 'it').click();
+  await expect(page.getByRole('dialog').filter({ hasText: 'retry-worker.ts' })).toBeVisible();
+  await expect(corner(page)).toHaveCount(0);
+  await page.keyboard.press('Escape');
+  await expect(page.getByRole('dialog')).toHaveCount(0);
+  await board(page).getByRole('button', { name: 'Close Shape' }).click();
 });
 
 test("a part on a deleted file or a rename's old name: the file and the note, never a dead click", async () => {
