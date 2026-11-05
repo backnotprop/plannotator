@@ -97,7 +97,7 @@ export interface PostEndingProps {
    * instead of the list's; null: not known, nothing can be posted. Absent: the list's head.
    */
   headSha?: string | null;
-  /** The server said the PR moved past the commit posted to (`pull_moved`): the host reads it again. */
+  /** The server refused the commit posted to (`pull_moved`; on GitHub `pull_commit_gone`, a force-push): the host reads the PR again. */
   onMoved?: () => void;
 }
 
@@ -237,7 +237,7 @@ export function PostEnding({ pull, agent, comments: all, anchor, busy, picked, o
                 const response = await inboxApi.pullReviewPost(request);
                 if (response.status === 409 && onMoved) {
                   const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
-                  if (answer?.code === 'pull_moved') {
+                  if (answer?.code === 'pull_moved' || answer?.code === 'pull_commit_gone') {
                     setOpen(null);
                     onMoved();
                   }

@@ -137,9 +137,25 @@ const onLine = (c: CodeAnnotation) => (c.scope ?? 'line') === 'line';
 
 /** A line comment is drawn on this diff only if these are truly its lines: this patch, or the same code at the same place. */
 function isHere(c: KeptComment, screen: Pick<OnScreen, 'stamp' | 'files'>): boolean {
-  if (!onLine(c)) return true;
+  // A file-level comment is here while its file is.
+  if (!onLine(c)) return c.scope !== 'file' || !screen.stamp || screen.files.some((f) => f.path === c.filePath);
   if (c.outdated) return false;
   return !screen.stamp || c.anchorSnapshot === undefined || c.anchorSnapshot === screen.stamp || anchorStillMatches(c, screen.files);
+}
+
+/** The stored entries of one layer and scope, by the name `readKept` takes. */
+function allEntries(layerKey: string, scope: string): string[] {
+  const names: string[] = [];
+  try {
+    const prefix = `${STORE}${layerKey}:${scope}:`;
+    for (let i = 0; i < window.localStorage.length; i++) {
+      const name = window.localStorage.key(i);
+      if (name?.startsWith(prefix)) names.push(name.slice(STORE.length));
+    }
+  } catch {
+    // Storage off.
+  }
+  return names;
 }
 
 /**
@@ -219,7 +235,7 @@ function forPost(comments: readonly KeptComment[], screen: Pick<OnScreen, 'stamp
   return comments.map((c) => {
     if (!onLine(c) || c.outdated) return c;
     const here = isHere(c, screen);
-    if (scope === 'layer' && platform === 'github' && c.readHead && head && c.readHead !== head && c.readBase === screen.base) return { ...c, postAt: c.readHead, postHere: here };
+    if (scope === 'layer' && platform === 'github' && !c.outsideDiff && c.readHead && head && c.readHead !== head && c.readBase === screen.base) return { ...c, postAt: c.readHead, postHere: here };
     return here ? c : { ...c, outdated: true };
   });
 }
@@ -329,6 +345,16 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   const store = (value: { comments: KeptComment[]; viewed: string[] }) => {
     if (!sure) words('absorb');
     keep(keptId, value);
+  };
+  // What went leaves every entry of this review, so it cannot come back on a reload and go twice: a post started before a
+  // push answers after the page has moved its comments to the new head's entry.
+  const forgetWent = (ids: readonly string[]) => {
+    const went = new Set(ids);
+    for (const id of allEntries(layerKey, scope)) {
+      const was = readKept(id);
+      if (was.comments.some((c) => went.has(c.id))) keep(id, { ...was, comments: was.comments.filter((c) => !went.has(c.id)) });
+    }
+    setComments((now) => now.filter((c) => !went.has(c.id)));
   };
   const write = (next: { comments?: KeptComment[]; viewed?: string[] }) => {
     const value = { comments: next.comments ?? comments, viewed: next.viewed ?? viewed };
@@ -563,17 +589,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             busy={sending || !snapshot}
             picked={picked}
             onPick={pick}
-            onWent={(ids) => {
-              const left = comments.filter((c) => !ids.includes(c.id));
-              store({ comments: left, viewed });
-              setComments(left);
-            }}
+            onWent={forgetWent}
             onPosted={(result) => {
               // Only what went is cleared: a whole stack's line comments map to no PR's lines and stay.
-              const went = new Set(result.posted);
-              const left = comments.filter((c) => !went.has(c.id));
-              store({ comments: left, viewed });
-              setComments(left);
+              forgetWent(result.posted);
               setPosted({ label: result.label, url: result.url, action: result.action });
             }}
           />

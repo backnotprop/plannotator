@@ -50,7 +50,8 @@ function asSubmitted(comments: readonly KeptComment[], pull: PlatformPostPull, a
     prUrl: c.postAt && !gone.has(c.postAt) ? `${pull.url}${AT}${c.postAt}` : pull.url,
     prNumber: pull.number,
     prTitle: c.postAt && !gone.has(c.postAt) ? `read at ${c.postAt.slice(0, 7)}` : pull.title,
-    prRepo: pull.repo,
+    // The row cuts at its end, so nothing long stands before the commit it names.
+    prRepo: c.postAt && !gone.has(c.postAt) ? '' : pull.repo,
     ...(c.postAt && gone.has(c.postAt) && !c.postHere ? { outdated: true } : {}),
     ...(anchor === 'stack' && (c.scope ?? 'line') !== 'general' ? { diffScope: 'full-stack' as const } : { diffScope: 'layer' as const }),
     ...(anchor === 'guide' && (c.scope ?? 'line') === 'line' ? { anchorSnapshot: 'guide' } : {}),
@@ -81,8 +82,11 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
   // (`pull_moved`, `pull_commit_gone`) is refused, with what the person wrote still in the dialog.
   const planHead = useRef(pull.head_sha);
   const refused = useRef(false);
+  // The comments this plan was built from: another window's, come in since, wait for the next post.
+  const planned = useRef(new Set<string>());
   const planNow = () => {
     const submitted = asSubmitted(comments, pull, anchor, gone.current);
+    planned.current = new Set(comments.map((c) => c.id));
     return buildReviewSubmission(
       submitted,
       [],
@@ -130,6 +134,8 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         const response = await post({ ...request, key: pull.key, head_sha: at ?? planHead.current });
         if (response.status === 409) {
           const answer = (await response.clone().json().catch(() => null)) as { code?: unknown } | null;
+          // It went on an earlier try whose answer never came: nothing there holds up the rest.
+          if (answer?.code === 'already_posted' && at) return Response.json({ ok: true, prUrl: pull.url, submission: { status: 'complete' } });
           if (answer?.code === 'pull_commit_gone' && at) gone.current.add(at);
           else if (answer?.code === 'pull_moved' || answer?.code === 'pull_commit_gone') refused.current = true;
         }
@@ -139,9 +145,9 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       const older = plan.targets.filter((target) => !review(target));
       let settled: SubmissionTarget[] = [];
       if (older.length > 0) {
-        const earlier = await submitPlatformReviewTargets({ targets: older, action: 'comment', generalComment: '', bodyForTarget: () => '', fetchReview });
+        const earlier = await submitPlatformReviewTargets({ targets: older, action: 'comment', generalComment: '', bodyForTarget: (target) => buildPlatformReviewBody('comment', pull.platform, '', target), fetchReview });
         settled = earlier.targets;
-        const ids = comments.filter((c) => settled.some((t) => t.status === 'success' && t.prUrl === `${pull.url}${AT}${c.postAt}`)).map((c) => c.id);
+        const ids = comments.filter((c) => planned.current.has(c.id) && settled.some((t) => t.status === 'success' && t.prUrl === `${pull.url}${AT}${c.postAt}`)).map((c) => c.id);
         if (ids.length > 0) onWent?.(ids);
         const stuck = settled.filter((t) => t.status !== 'success' && !gone.current.has(t.prUrl.slice(t.prUrl.indexOf(AT) + AT.length)));
         if (stuck.length > 0) {
@@ -154,8 +160,9 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       const fresh = settled.some((t) => t.status !== 'success');
       const rebuilt = fresh ? planNow() : plan;
       let targets = rebuilt.targets.filter(review);
-      // Approve goes to this PR alone; a comment with no line comments still posts its main comment (as the review app).
-      if (action === 'approve' || (targets.length === 0 && general.trim())) {
+      // A verdict goes to this PR alone, whatever is left for it after an older commit; a comment with no line comments
+      // still posts its main comment (as the review app).
+      if (action !== 'comment' || (targets.length === 0 && general.trim())) {
         const current = targets.find((t) => t.prUrl === pull.url);
         const empty: SubmissionTarget = {
           prUrl: pull.url,
@@ -175,7 +182,8 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
         targets,
         action,
         generalComment: general,
-        bodyForTarget: (target) => buildPlatformReviewBody(action, pull.platform, general, target),
+        // A verdict whose line comments all went at an older commit has no thread of its own and still needs a body.
+        bodyForTarget: (target) => buildPlatformReviewBody(action, pull.platform, general, target.fileComments.length > 0 ? target : { ...target, fileComments: older.flatMap((t) => t.fileComments) }),
         fetchReview,
       });
       if (!attempt.allComplete) {
@@ -187,7 +195,7 @@ export default function PlatformPost({ pull, open, comments, anchor, post, onClo
       else closePendingTab(pending);
       // What went: every comment but the ones the dialog could only offer to copy (the whole stack's line comments).
       const kept = new Set(rebuilt.orphans.flatMap((group) => group.annotations.map((a) => a.id)));
-      const posted = comments.filter((c) => !kept.has(c.id)).map((c) => c.id);
+      const posted = [...planned.current].filter((id) => !kept.has(id));
       setPlan({ targets: [], orphans: [] });
       setGeneral('');
       onPosted({ action, url: pull.url, posted, head: planHead.current });

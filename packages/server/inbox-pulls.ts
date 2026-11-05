@@ -387,6 +387,8 @@ export interface InboxPulls {
 }
 
 /** A GitHub owner as `owner:branch` takes it in a compare (a fork's head). */
+/** The most commits GitHub lists for a pull request. */
+const PULL_COMMITS_LISTED_MAX = 250;
 const FORK_OWNER = /^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$/;
 /** Core's branch check for words (`inboxPullSafeBranch`): the hand-off names a branch only when it passes. */
 export const safeBranch = inboxPullSafeBranch;
@@ -634,7 +636,10 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       if (!pull || !parts || pull.platform !== "github") return null;
       const read = await run("gh", ["api", "--hostname", pull.host, `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}/commits?per_page=100`, "--paginate", "--jq", ".[].sha"]).catch(() => null);
       if (!read || read.exitCode !== 0) return null;
-      return read.stdout.split("\n").some((line) => line.trim().toLowerCase() === sha.toLowerCase());
+      const commits = read.stdout.split("\n").map((line) => line.trim().toLowerCase()).filter(Boolean);
+      if (commits.includes(sha.toLowerCase())) return true;
+      // GitHub lists at most 250: past that, not listed says nothing.
+      return commits.length >= PULL_COMMITS_LISTED_MAX ? null : false;
     },
     async diff(key, scope) {
       const pull = known.get(key);

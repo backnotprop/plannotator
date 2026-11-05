@@ -1171,6 +1171,67 @@ describe("Post to GitHub/GitLab (the owner's answer C: the person chooses at the
     expect(w.post.calls).toHaveLength(1);
   });
 
+  for (const reason of ["HTTP 422: No commit found for SHA", "gh: Validation Failed (HTTP 422): commit_id is invalid", "HTTP 422: pull_request_review_thread.line must be part of the diff", "gh: Validation Failed (HTTP 422): Path could not be resolved"]) {
+    test(`GitHub at an older commit, a refusal of the commit or its lines is the fallback: ${reason}`, async () => {
+      const w = await world({ codeReview: true });
+      await w.send("Ready.", "posting");
+      await w.pulls();
+      const older = "e".repeat(40);
+      w.forge.prCommits = [older, SHA412];
+      w.post.answer = () => ({ stdout: "", stderr: reason, exitCode: 1 });
+      const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "x" });
+      expect(res.status).toBe(409);
+      expect(((await res.json()) as { code: string }).code).toBe("pull_commit_gone");
+    });
+  }
+
+  for (const reason of ["gh: Unprocessable Entity (HTTP 422): Can not approve your own pull request", "HTTP 422: User can only have one pending review per pull request", "HTTP 422: Unprocessable Entity (was submitted too quickly)"]) {
+    test(`GitHub at an older commit, a refusal that is not about the commit stays an error: ${reason}`, async () => {
+      const w = await world({ codeReview: true });
+      await w.send("Ready.", "posting");
+      await w.pulls();
+      const older = "e".repeat(40);
+      w.forge.prCommits = [older, SHA412];
+      w.post.answer = () => ({ stdout: "", stderr: reason, exitCode: 1 });
+      const res = await w.review({ key: PR412, head_sha: older, action: "comment", body: "x" });
+      expect(res.status).toBe(502);
+      expect(await res.json()).toMatchObject({ code: "pull_review_failed" });
+    });
+  }
+
+  test("GitHub's 422 giving no reason, at a head the list still names: gone only if a force-push took that commit", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.post.answer = () => ({ stdout: "", stderr: "gh: Validation Failed (HTTP 422)", exitCode: 1 });
+    w.forge.prCommits = [SHA412];
+    expect((await w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "x" })).status).toBe(502);
+    w.forge.prCommits = ["f".repeat(40)];
+    const gone = await w.review({ key: PR412, head_sha: SHA412, action: "comment", body: "y" });
+    expect(gone.status).toBe(409);
+    expect(((await gone.json()) as { code: string }).code).toBe("pull_commit_gone");
+  });
+
+  test("GitLab: a commit the Inbox does not name is refused, and nothing posts, whatever the commit list could say", async () => {
+    const w = await world({ codeReview: true, gitlab: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    const res = await w.review({ key: "gitlab.com/northwind/data/ledger#61:pull", head_sha: "e".repeat(40), action: "comment", body: "x" });
+    expect(res.status).toBe(409);
+    expect(((await res.json()) as { code: string }).code).toBe("pull_moved");
+    expect(w.post.calls.filter((c) => c.args.includes("POST"))).toEqual([]);
+  });
+
+  test("GitHub lists 250 commits at most: a full list not naming the commit says nothing, and GitHub decides", async () => {
+    const w = await world({ codeReview: true });
+    await w.send("Ready.", "posting");
+    await w.pulls();
+    w.forge.prCommits = Array.from({ length: 250 }, (_, i) => i.toString(16).padStart(40, "0"));
+    const res = await w.review({ key: PR412, head_sha: "e".repeat(40), action: "comment", body: "x" });
+    expect(res.status).toBe(200);
+    expect(w.post.calls[0]!.input).toMatchObject({ commit_id: "e".repeat(40) });
+  });
+
   test("a forge that refuses the review: an error the window shows, nothing claimed posted", async () => {
     const w = await world({ codeReview: true });
     await w.send("Ready.", "posting");
