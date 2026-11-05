@@ -508,10 +508,11 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
     // the one quote, while the quote stays a single annotatable block with a
     // single `data-block-id`.
     //
-    // GitHub alerts (`> [!KIND]` as the run's first line) are unchanged: the
-    // marker line tags the block, and the body is every later line fully
-    // `>`-stripped and trimmed, empty leading lines skipped, exactly as the
-    // line-by-line merge produced it. AlertBlock renders it.
+    // GitHub alerts (`> [!KIND]` as the run's first line): the marker line tags
+    // the block, and the body is every later line with its `>` marker and one
+    // following space or tab removed and trailing whitespace trimmed, as a
+    // quote's content is (so a fence nested under a list item keeps its
+    // indentation), empty leading lines skipped. AlertBlock renders it.
     if (trimmed.startsWith('>')) {
       flush();
       let runEnd = i;
@@ -524,7 +525,7 @@ export const parseMarkdownToBlocks = (markdown: string, options?: ParseMarkdownO
         .match(/^\[!(NOTE|TIP|WARNING|CAUTION|IMPORTANT)\]\s*$/i);
       if (alertMatch) {
         const body = run.slice(1).reduce((acc, raw) => {
-          const stripped = raw.trim().replace(/^>\s*/, '');
+          const stripped = raw.replace(/^\s*>[ \t]?/, '').trimEnd();
           return acc ? acc + '\n' + stripped : stripped;
         }, '');
         blocks.push({

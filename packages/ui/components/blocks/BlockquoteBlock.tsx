@@ -157,3 +157,24 @@ const QuoteBody: React.FC<Omit<BlockquoteBlockProps, 'block'> & { inner: Block[]
     })}
   </>
 );
+
+/** Whether a callout body needs block layout: anything beyond paragraphs and list items. */
+export const calloutNeedsBlocks = (inner: readonly Block[]): boolean =>
+  inner.some((block) => block.type !== 'paragraph' && block.type !== 'list-item');
+
+/**
+ * A callout body that holds more than prose (a fence, a table, a heading, a
+ * nested quote): its blocks laid out as a quote's are, one quote level
+ * deeper and without ids of their own, so the callout stays one block.
+ */
+export const CalloutBlocks: React.FC<Omit<BlockquoteBlockProps, 'block'> & { inner: Block[]; className?: string }> = ({ inner, className, ...inlineProps }) => {
+  const depth = useContext(QuoteDepthContext);
+  return (
+    <div className={className ? `pn-quote-body ${className}` : 'pn-quote-body'}>
+      <style href="plannotator-quote-body" precedence="default">{QUOTE_BODY_CSS}</style>
+      <QuoteDepthContext.Provider value={depth + 1}>
+        <QuoteBody inner={inner} {...inlineProps} />
+      </QuoteDepthContext.Provider>
+    </div>
+  );
+};
