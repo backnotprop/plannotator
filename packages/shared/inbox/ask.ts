@@ -317,7 +317,7 @@ export function checkInboxShowMeInput(input: { kind?: unknown; show_me?: unknown
   if (rawPart !== undefined) {
     const text = (value: unknown, max: number) => typeof value === "string" && value.trim() !== "" && value.length <= max;
     if (!rawPart || typeof rawPart !== "object" || !isShapeId(rawPart.board) || !text(rawPart.name, 600) || (rawPart.code !== undefined && !text(rawPart.code, 1100)) || file !== null) {
-      throw bad("show_me.part: { board, name, mark?, code? }, with file and lines null.", "show_me");
+      throw bad("show_me.part: { board, name, code? }, with file and lines null.", "show_me");
     }
   }
   const again = input.again_shape;
