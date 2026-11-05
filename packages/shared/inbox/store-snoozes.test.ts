@@ -49,6 +49,37 @@ function code(fn: () => unknown): string {
 }
 
 describe("snoozes in the store", () => {
+  test("a held write whose time passed brings back a running snooze; a return not read yet keeps its mark; no thread is still refused", () => {
+    const t = clock();
+    const { store, project } = open(t.now);
+    const thread = (session: string) => store.sendMessage({ project_id: project.id, author: agent(session), body: "News" }).message.thread_id;
+    const at = (ms: number) => new Date(t.now().getTime() + ms).toISOString();
+    const untilOf = (id: string) => store.snoozes().find((s) => s.thread_id === id)?.until ?? null;
+
+    const running = thread("ses_running");
+    store.setSnooze(running, at(30 * 24 * HOUR));
+    const wanted = at(-HOUR);
+    expect(store.setHeldSnooze(running, wanted)).toBeNull();
+    expect(untilOf(running)).toBe(wanted);
+    expect(store.snoozedThreads().has(running)).toBe(false);
+
+    const returned = thread("ses_returned");
+    const back = at(HOUR);
+    store.setSnooze(returned, back);
+    t.go(2 * HOUR);
+    expect(store.setHeldSnooze(returned, at(-30 * 60_000))).toBeNull();
+    expect(untilOf(returned)).toBe(back);
+
+    const none = thread("ses_none");
+    expect(store.setHeldSnooze(none, at(-HOUR))).toBeNull();
+    expect(untilOf(none)).toBeNull();
+
+    expect(code(() => store.setHeldSnooze("msg_nope", at(-HOUR)))).toBe("thread_not_found");
+    // Only a time gone by is forgiven.
+    expect(code(() => store.setHeldSnooze(none, at(400 * 24 * HOUR)))).toBe("validation_error");
+    expect(store.setHeldSnooze(none, at(HOUR))!.until).toBe(at(HOUR));
+  });
+
   test("a snooze writes no store line, keeps the file owner-only, and survives a restart", () => {
     const t = clock();
     const { dir, store, project } = open(t.now);

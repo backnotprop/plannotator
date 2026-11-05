@@ -375,13 +375,15 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     const inHtml = (html: unknown, field: string): unknown =>
       typeof html !== "string"
         ? html
-        : html.replace(/(<(?:img|image)\b[^>]*?\s)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi, (all, head: string, attr: string, q2?: string, q1?: string, bare?: string) => {
+        // Attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone.
+        : html.replace(/(<(?:img|image)\b(?:\s+(?!(?:xlink:href|src|href)\s*=)[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s+)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi, (all, head: string, attr: string, q2?: string, q1?: string, bare?: string) => {
             const src = (q2 ?? q1 ?? bare)!;
             if (/^(?:#|[a-z][a-z0-9+.-]+:|\/\/|\\\\)/i.test(src)) return all;
+            const name = attr.toLowerCase() === "xlink:href" ? "href" : attr;
             const file = imageFile(src, field, sourceDir, errors);
-            if (!file) return all;
+            if (!file) return src.startsWith("files/") ? `${head}${name}="${src}"` : all;
             files.push(file);
-            return `${head}${attr.toLowerCase() === "xlink:href" ? "href" : attr}="files/${file.name}"`;
+            return `${head}${name}="files/${file.name}"`;
           });
     const next: Record<string, unknown> = {};
     for (const [name, view] of Object.entries(views)) {

@@ -36,7 +36,8 @@ const shapes =
   '<rect id="own-dash" class="dash" fill="var(--mark-soft)" stroke="var(--mark)" x="300" y="300" width="120" height="60"></rect>' +
   '<svg id="nested" x="300" y="160" width="40" height="40" viewBox="0 0 40 40"><rect id="past-edge" x="0" y="0" width="400" height="400" class="line"></rect></svg>' +
   '<image id="kept" href="shot.png" x="460" y="80" width="200" height="120"></image>' +
-  '<g data-ref="1"><circle cx="700" cy="60" r="14" style="fill:var(--mark)"></circle></g>';
+  '<g data-ref="1"><circle cx="700" cy="60" r="14" style="fill:var(--mark)"></circle></g>' +
+  '<foreignObject x="700" y="100" width="40" height="40"><span data-ref="2"></span></foreignObject>';
 const board = {
   title: 'Follow a path',
   claim: 'Built. Nothing waits on you.',
@@ -45,7 +46,7 @@ const board = {
     how: { ...svg(900, 400, follow), css: followCss(['a', 'b']) },
     know: 'The first thing to **know** [^1].\n\nThe second thing to know.',
   },
-  refs: [{ n: 1, kind: 'image', title: 'The screen', sub: 'One line about it.', target: 'shot.png', images: [{ src: 'shot.png', alt: 'The screen', crop: [0, 0, 0.5, 0.5] }] }],
+  refs: [{ n: 1, kind: 'image', title: 'The screen', sub: 'One line about it.', target: 'shot.png', images: [{ src: 'shot.png', alt: 'The screen', crop: [0, 0, 0.5, 0.5] }] }, { n: 2, kind: 'link', title: 'The page', target: 'https://example.com/page' }],
 };
 
 function store(key: string, value: unknown): string {
@@ -201,6 +202,8 @@ test('a phone pans a canvas with no tall drawing', async ({ browser }) => {
   const { context, page, problems } = await openBoard(browser, store('phone', board), { ...phone });
   const frame = page.locator('.shp-view:not(.leaving) .shp-drawn.pan');
   await expect(frame).toHaveCount(1);
+  // A finger's number: the bubble's tap target on this board.
+  expect(await drawing(page, (r) => getComputedStyle(r.querySelector('.shp-rb:not(.own)') ?? r.querySelector('.shp-rb')!).minWidth)).toBe('22px');
   const wider = await page.locator('.shp-view:not(.leaving)').evaluate((v) => {
     const scroller = [v, ...v.querySelectorAll('*')].find((el) => el.scrollWidth > el.clientWidth + 40 && /(auto|scroll)/.test(getComputedStyle(el).overflowX));
     return !!scroller;

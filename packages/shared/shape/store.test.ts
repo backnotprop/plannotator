@@ -347,6 +347,20 @@ describe("images a drawing names", () => {
     }
   });
 
+  test("a kept picture written with xlink:href is read as href, and an alt's words are left alone", () => {
+    const { dir, store } = withFile();
+    const kept = store.update({ board: drawing('<svg><image xlink:href="files/x.png"/></svg>'), project, session, sourceDir: dir });
+    expect(kept.ok).toBe(true);
+    if (kept.ok) expect(store.read(kept.id)!.views.picture!.html).toContain('<image href="files/x.png"/>');
+    const alt = store.update({ board: drawing('<img alt="x src=crop.png y" src="crop.png">'), project, session, sourceDir: dir });
+    expect(alt.ok).toBe(true);
+    if (alt.ok) {
+      const html = store.read(alt.id)!.views.picture!.html;
+      expect(html).toContain('alt="x src=crop.png y"');
+      expect(html).toMatch(/ src="files\/[0-9a-f]{10}-crop\.png"/);
+    }
+  });
+
   test("a real files/ folder beside the board is copied, not taken for pictures the board keeps", () => {
     const { dataDir, dir, store } = withFile();
     mkdirSync(join(dir, "files"));

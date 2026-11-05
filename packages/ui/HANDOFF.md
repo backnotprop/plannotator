@@ -2769,6 +2769,7 @@ Plannotator's board reads first now, and What to know replaces Requirements. A h
 - Annotation starts off behind an Annotate button in the dock, on phones too. Off: a click on a part does nothing, and the strip has only Select and Pinpoint (`AnnotationToolstrip`'s new `hideActionModes`).
 - A number pops out a bubble on hover or focus; on touch the first tap pins it and the second opens it. **A file reference calls `host.readFile` on hover**, with no cache on the UI's side, so cache it in your host if a read costs anything. Esc closes the bubble first.
 - A PR or link reference with `images` opens the picture; its page is one more click, in the bubble.
+- On a touch screen, a drawing's numbers grow from 16 to 22 px with a larger hit area. `ShapeDrawn` does this whenever it has `onRefPeek`.
 - A fixed canvas under 700 px stops at scale 0.55 and scrolls sideways. `ShapeDrawn` takes this as its own `pan` prop. `ShapeDiagram` never pans, so a diagram in a side panel still fits.
 
 **What changes with no seam:**
@@ -2780,6 +2781,14 @@ Plannotator's board reads first now, and What to know replaces Requirements. A h
 - **`ShapeThumb`:** a board with a fixed canvas drops the 1.11 zoom, so all of it shows. It takes an optional `resolveSrc`, and `ShapeGrid` an optional `assetUrl`, so kept pictures load.
 - **`views.picture.more`:** a board with one gets a Show more button; Esc comes back from it before anything closes. Only boards that carry it.
 - **`ShapeInline`:** bold renders inline markup inside it, so `` **a `b`** `` shows code.
+- **`SHAPE_LIMITS`:** `groups` and `items` are removed, with Requirements; `know` and `knowParagraphs` are new. TypeScript breaks if your code names the old ones.
+- **`ShapeRef.images[].crop`:** a new optional field, `[x, y, width, height]` from 0 to 1, for the part of a picture a bubble shows.
+- **Hover ring:** it no longer clears on every other pointer move, and it clears when the board scrolls.
+- **`.shp-tstrip`:** now `inline-flex` with a 6 px gap.
+
+**Fixes that reach every host:**
+- `<image href="files/…">` in a drawing now loads through `resolveSrc`. Before, the bare name stayed and the picture was broken.
+- Clicking a part inside an SVG now opens the comment box. Before, it threw and opened nothing.
 
 ## Shape: the board header (ui 0.62.0; not additive)
 
