@@ -132,7 +132,8 @@ test('a sheet opened by mouse, focus still on the page: Escape closes it, back o
   const rail = review.locator('.ib-rrail');
   await files.click();
   await expect(rail).toBeVisible();
-  await review.locator('.ib-prp-fileshead').click();
+  // The head's right end, clear of its Changes | All files switch.
+  await review.locator('.ib-prp-fileshead').click({ position: { x: (await review.locator('.ib-prp-fileshead').boundingBox())!.width - 2, y: 6 } });
   await page.keyboard.press('Escape');
   await expect(rail).toBeHidden();
   await expect(files).toBeFocused();

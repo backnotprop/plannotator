@@ -8079,6 +8079,19 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-prreview .ib-rrail .file-tree-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
 .ib-prr-wide:not(.ib-railfold) .ib-gbody { grid-column: 2; grid-row: 2; }
 .ib-prr-wide:not(.ib-railfold):not(.ib-fold) .ib-gpanel { grid-column: 3; grid-row: 1 / -1; }
+/* The rail's Changes | All files (pulls/RailScope.tsx): the review app's pills over its fills. */
+.ib-prreview .ib-rrail { --sidebar-fill: color-mix(in oklab, var(--foreground) 6%, transparent); --sidebar-fill-strong: color-mix(in oklab, var(--foreground) 9%, transparent); --sidebar-text-tertiary: color-mix(in oklab, var(--muted-foreground) 85%, var(--background)); }
+.ib-prp-fileshead:has(> .ib-prp-scope) { padding-left: 0; }
+/* All files (guide/PullRepoParts.tsx): the review app's tree, its row rules from review-editor's index.css (which
+   this window does not load). */
+.ib-prp-all .review-file-row-main { display: flex; align-items: center; gap: 6px; flex: 1 1 auto; min-width: 0; }
+.ib-prp-all .review-change-letter { display: flex; flex-shrink: 0; margin: 0 -2px; }
+.ib-prp-all .review-file-row-main > .truncate ~ * { margin-left: -2px; }
+.pn-inbox .ib-prreview .ib-prp-all .file-tree-item.active { background: var(--sidebar-fill-strong); color: var(--foreground); }
+/* A file the PR does not change, over the diff, which keeps its place under it for the way back. */
+.ib-gbody[data-repo-open] { overflow: hidden; }
+.ib-gbody > .ib-prp-repofile { position: sticky; top: 0; z-index: 3; height: 100%; background: var(--background); }
+.ib-gbody[data-repo-open] > :not(.ib-prp-repofile) { visibility: hidden; }
 
 /* The PR's own description at the head of its diff (PullDescription): the review app's compact Markdown, 13 px. Long,
    it starts folded and opens into a box of its own height, so the diff stays near. */

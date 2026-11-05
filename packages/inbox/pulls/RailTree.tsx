@@ -86,7 +86,7 @@ function widest(rows: Row[], into = { additions: 0, deletions: 0 }) {
   return into;
 }
 
-export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, onToggleViewed }: {
+export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, onToggleViewed, head }: {
   tree: DiffFileTreeNode<DiffFile>[];
   loose: readonly DiffFile[];
   files: readonly DiffFile[];
@@ -94,6 +94,8 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
   commentCount: (path: string) => number;
   onSelect: (path: string) => void;
   onToggleViewed: (path: string) => void;
+  /** In place of the head's file count: the page's Changes | All files switch. */
+  head?: ReactNode;
 }) {
   const rows = useMemo(() => compact(tree, 0), [tree]);
   const columns = useMemo(() => {
@@ -154,7 +156,7 @@ export function RailTree({ tree, loose, files, viewed, commentCount, onSelect, o
   return (
     <div className="ib-prp-files" style={columns}>
       <div className="ib-prp-fileshead" aria-live="polite">
-        <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>
+        {head ?? <span>{files.length} {files.length === 1 ? 'file' : 'files'}</span>}
         <span className="ib-sp" />
         {seenCount > 0 && <span>{seenCount} viewed</span>}
       </div>
