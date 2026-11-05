@@ -152,7 +152,7 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   // The rail's head is the review app's switch: Changes with the PR's count, on.
   expect(el('[data-tree-scope="changes"]').textContent).toBe('Changes1');
   expect(el('[data-tree-scope="changes"]').getAttribute('aria-pressed')).toBe('true');
-  expect(document.querySelector('[data-review-files]')).not.toBeNull();
+  expect(!!document.querySelector('[data-review-files]')).toBe(true);
   expect(listed()).toEqual([]);
 
   await act(async () => el('[data-tree-scope="all"]').click());
@@ -160,7 +160,7 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   // At the head the patch on screen was read at, for this PR, through the Inbox's route.
   expect(listed()).toEqual([`/api/inbox/pulls/repo-files?key=${encodeURIComponent(pr.key)}&snapshot=${HEAD}`]);
   expect(el('[data-tree-scope="all"]').getAttribute('aria-pressed')).toBe('true');
-  expect(document.querySelector('[data-review-files]')).toBeNull();
+  expect(!!document.querySelector('[data-review-files]')).toBe(false);
   // Remembered as the review app remembers it.
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBe('all');
 
@@ -176,7 +176,7 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   await settle();
   await act(async () => el('[data-repo-file="src/app.ts"] button').click());
   await settle();
-  expect(document.querySelector('[data-pull-repo-file]')).toBeNull();
+  expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(el('.ib-gbody').hasAttribute('data-repo-open')).toBe(false);
   expect(reveals.at(-1)).toBe('src/app.ts');
 
@@ -185,8 +185,8 @@ test.skipIf(!hasDom)('Changes | All files: the repository at the head read, a fi
   await settle();
   await act(async () => el('[data-tree-scope="changes"]').click());
   await settle();
-  expect(document.querySelector('[data-review-files]')).not.toBeNull();
-  expect(document.querySelector('[data-pull-repo-file]')).toBeNull();
+  expect(!!document.querySelector('[data-review-files]')).toBe(true);
+  expect(!!document.querySelector('[data-pull-repo-file]')).toBe(false);
   expect(storage.getItem(TREE_SCOPE_COOKIE)).toBeNull();
 });
 
@@ -195,7 +195,7 @@ test.skipIf(!hasDom)('no head commit known: no switch, the file count as before'
   const { head_sha: _gone, ...noHead } = pr;
   mount(noHead as InboxPull);
   await settle();
-  expect(document.querySelector('[data-tree-scope-switch]')).toBeNull();
+  expect(!!document.querySelector('[data-tree-scope-switch]')).toBe(false);
   expect(el('.ib-prp-fileshead').textContent).toBe('1 file');
 });
 
