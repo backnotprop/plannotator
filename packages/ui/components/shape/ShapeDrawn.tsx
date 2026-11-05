@@ -29,7 +29,8 @@ import { useReducedMotion } from './Pebble';
 /** A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first. */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined): string {
   if (!resolve) return html;
-  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${resolve(src)}"`);
+  const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
+  return html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, head: string, src: string) => `${head}${attr(resolve(src))}"`);
 }
 
 export interface MarkState {
@@ -79,7 +80,7 @@ svg { overflow: visible; } svg svg { overflow: hidden; }
 svg text { fill: var(--ink); font-family: inherit; }
 svg .ink { stroke: var(--ink); fill: var(--paper); } svg .line { stroke: var(--ink); fill: none; }
 svg .grey { stroke: var(--grey); fill: none; } svg .acc { stroke: var(--mark); fill: none; }
-svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; fill: none; stroke: var(--grey); } svg .line.dash { stroke: var(--ink); } svg .acc.dash { stroke: var(--mark); } svg .alert.dash { stroke: var(--alert); } svg .grey.dash { stroke: var(--grey); } svg .acc-fill.dash { fill: var(--mark-soft); stroke: var(--mark); }
+svg .acc-fill { fill: var(--mark-soft); stroke: var(--mark); } svg .dash { stroke-dasharray: 6 6; } svg .dash:not([fill]) { fill: none; } svg .dash:not([stroke]) { stroke: var(--grey); } svg .line.dash { stroke: var(--ink); } svg .acc.dash { stroke: var(--mark); } svg .alert.dash { stroke: var(--alert); } svg .grey.dash { stroke: var(--grey); } svg .acc-fill.dash { fill: var(--mark-soft); stroke: var(--mark); }
 svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2 { fill: var(--ink2); } svg .alert { stroke: var(--alert); fill: none; } svg .t-alert { fill: var(--alert); } svg .t-mono { font-family: var(--font-mono, ui-monospace, monospace); }
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
@@ -212,6 +213,8 @@ export interface ShapeDrawnProps {
   onRefHover?: (n: number | null) => void;
   /** A bubble was opened (PR and link bubbles open their URL themselves, unless they carry a picture). */
   onRefOpen?: (n: number) => void;
+  /** A fixed canvas in a narrow space keeps a readable size and scrolls sideways. Absent: it shrinks to fit. */
+  pan?: boolean;
   /**
    * The bubble's preview: hover or keyboard focus shows it (null hides it), a tap on a touch
    * screen pins it. Absent: a bubble only lights and opens, as before.
@@ -281,7 +284,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
   const css = useTall ? drawn.tall!.css ?? drawn.css ?? '' : drawn.css ?? '';
   const scaled = canvas && !useTall;
   // No height to fill (a diagram in a flowing page): fit the width alone.
-  const pan = scaled && narrow;
+  const pan = !!props.pan && scaled && narrow;
   const k = scaled && fit ? Math.max(pan ? 0.55 : 0.2, Math.min(fit.w / drawn.width!, fit.h > 40 ? fit.h / drawn.height! : Infinity, 1.08)) : 1;
   const [contentKey, setContentKey] = useState(0);
 
@@ -307,7 +310,7 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
         continue;
       }
       // Empty: the board draws the number. Not empty: what the agent drew is the number.
-      if (!el.childNodes.length) el.textContent = String(n);
+      if (!el.children.length && !el.textContent?.trim()) el.textContent = String(n);
       else el.classList.add('own');
       el.classList.add('shp-rb');
       el.setAttribute('role', ref.kind === 'pr' || ref.kind === 'link' ? 'link' : 'button');

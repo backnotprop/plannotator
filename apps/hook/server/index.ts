@@ -374,18 +374,17 @@ const rawArgs = process.argv.slice(2);
   const args = rawArgs;
   // Off unless the person turned Shape on (Settings → Capabilities): no command and no help, so an agent
   // learns nothing of it (the same switch hides the Pebble, the row and the routes).
-  // Two run while Shape is off: `shape kit` only prints a helper file and stores nothing, and `shape on|off` is
-  // the switch itself (`on --help` still gets the off line).
-  if (args[0] === "shape" && args[1] === "kit") {
-    process.stdout.write(SHAPE_KIT);
-    process.exit(0);
-  }
+  // `shape on|off` is the switch itself, so it runs either way (`on --help` still gets the off line).
   if (args[0] === "shape" && (args[1] === "on" || args[1] === "off") && !hasHelpFlag(args.slice(2))) {
     process.exit(runShapeSwitch(args.slice(1)));
   }
   if (args[0] === "shape" && !shapeSwitchOn()) {
     process.stderr.write(`${SHAPE_OFF_TEXT}\n`);
     process.exit(1);
+  }
+  if (args[0] === "shape" && args[1] === "kit") {
+    process.stdout.write(SHAPE_KIT);
+    process.exit(0);
   }
   // `shape open`: the Shape page without the Inbox (shape-open.ts); `shape serve` is its detached server.
   // Bare `plannotator shape` is `shape open` with no id (every board), as bare `plannotator inbox` opens the Inbox.

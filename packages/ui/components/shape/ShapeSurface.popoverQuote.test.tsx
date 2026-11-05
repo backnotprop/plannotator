@@ -60,8 +60,6 @@ afterEach(() => {
   document.body.innerHTML = '';
 });
 
-/** Annotation is off until the person turns it on, in the dock. */
-const annotate = () => act(async () => { [...document.querySelectorAll<HTMLElement>('.shp-tbtn')].find((b) => b.title.startsWith('Annotate'))!.click(); });
 const wait = () => act(() => new Promise((r) => setTimeout(r, 20)));
 
 /** A part of the drawing (inside the drawing's shadow root). */
@@ -81,7 +79,6 @@ describe.if(hasDom)('Shape comment popover quote', () => {
     root = createRoot(el);
     act(() => root!.render(<ShapeSurface host={fakeHost(sent)} id={ID} />));
     for (let i = 0; i < 50 && !mark('whistle')?.querySelector('.shp-rb'); i++) await wait();
-    await annotate();
     const part = mark('whistle');
     expect(part?.querySelector('.shp-rb')?.textContent).toBe('7');
 

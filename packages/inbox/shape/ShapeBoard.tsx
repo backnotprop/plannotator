@@ -31,6 +31,7 @@ export default function ShapeBoard({ host, id, onClose, renderThread, initialVie
       CodeGuide={ShapeCodeGuide}
       CodeHoverCard={HoverCard}
       renderThread={renderThread}
+      readFirst
       initialView={initialView}
       initialPanel={initialPanel}
       onNavigate={onNavigate}

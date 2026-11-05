@@ -56,6 +56,11 @@ describe('the kit', () => {
     expect(pick('all', 0, 0, 1, 1, 'All', { checked: true })).toContain('checked=""');
   });
 
+  test('a mark the kit does not have says so', () => {
+    expect(() => tile('gemini', 0, 0)).toThrow('gemini is not in the kit');
+    expect(tile('claude', 0, 0)).toContain('<svg data-brand');
+  });
+
   test('words are escaped in every helper that takes them', () => {
     expect(pick('a', 0, 0, 1, 1, '<b>')).toContain('&lt;b>');
     expect(text(0, 0, '<b>')).toContain('&lt;b>');

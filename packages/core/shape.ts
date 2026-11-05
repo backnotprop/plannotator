@@ -793,7 +793,6 @@ function checkKnow(c: Checker, value: unknown, field: string): string | undefine
   if (text.length > SHAPE_LIMITS.know) c.fail(field, `is ${text.length} characters; at most ${SHAPE_LIMITS.know}. ${cut}`);
   const paragraphs = shapeKnowParagraphs(text).length;
   if (paragraphs > SHAPE_LIMITS.knowParagraphs) c.fail(field, `is ${paragraphs} paragraphs; at most ${SHAPE_LIMITS.knowParagraphs}. ${cut}`);
-  if (/^\s*(?:[-*+]\s|\d+[.)]\s|#{1,6}\s|>\s|\|)/m.test(text)) c.fail(field, 'is prose: write sentences, with no lists or headings');
   return text;
 }
 
@@ -1139,6 +1138,11 @@ export interface ShapeDiff {
 }
 
 /** What a view holds on this version. What to know is the words, or an old board's Requirements. */
+/** A view, part or note saved when What to know was Requirements says "reqs": it is `know` now. */
+export function shapeViewNow<T>(view: T): T | 'know' {
+  return (view as unknown) === 'reqs' ? 'know' : view;
+}
+
 export function shapeViewContent(views: ShapeBoard['views'], view: ShapeViewId): unknown {
   return view === 'know' ? views.know ?? views.reqs : views[view];
 }
@@ -1148,8 +1152,9 @@ type Diffable = Pick<ShapeVersion, 'n' | 'views' | 'parts' | 'refs'> & Partial<P
 /** What changed from `a` to `b`, by part ids. Snapshots, so any two versions compare. */
 export function diffShapeVersions(a: Diffable, b: Diffable): ShapeDiff {
   const key = (p: ShapePart) => `${p.view}\u0000${p.id}`;
-  const before = new Map(a.parts.map((p) => [key(p), p]));
-  const after = new Map(b.parts.map((p) => [key(p), p]));
+  const now = (p: ShapePart): ShapePart => ({ ...p, view: shapeViewNow(p.view) });
+  const before = new Map(a.parts.map(now).map((p) => [key(p), p]));
+  const after = new Map(b.parts.map(now).map((p) => [key(p), p]));
   const changes: ShapeChange[] = [];
   for (const p of b.parts) {
     const old = before.get(key(p));
@@ -1215,8 +1220,9 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   const v = c.int(input.v, 'v', 1, 1_000_000);
   let view: ShapeViewId | null = null;
   if (input.view !== undefined && input.view !== null) {
-    if (!SHAPE_VIEWS.some((x) => x.id === input.view)) c.fail('view', 'must be picture, how, know or code');
-    else view = input.view as ShapeViewId;
+    const now = shapeViewNow(input.view);
+    if (!SHAPE_VIEWS.some((x) => x.id === now)) c.fail('view', 'must be picture, how, know or code');
+    else view = now as ShapeViewId;
   }
   let part: string | null = null;
   if (input.part !== undefined && input.part !== null) {
@@ -1269,7 +1275,8 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const onPicture = (board.refs ?? []).filter((r) => cited.includes(r.n));
   if (!onPicture.length) notes.push('The Picture has no numbers. Put data-ref="n" on the things that have more behind them: the person hovers a number to see its picture and line.');
   const bare = onPicture.filter((r) => !r.sub && !r.images?.length && r.kind !== 'image').map((r) => r.n);
-  if (bare.length) notes.push(`Bubbles ${bare.join(', ')} show only a title. Give those refs a sub (one line) or images (a small real picture).`);
+  if (bare.length === 1) notes.push(`Bubble ${bare[0]} shows only a title. Give that ref a sub (one line) or images (a small real picture).`);
+  else if (bare.length) notes.push(`Bubbles ${bare.join(', ')} show only a title. Give those refs a sub (one line) or images (a small real picture).`);
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
