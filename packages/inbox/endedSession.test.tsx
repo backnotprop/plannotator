@@ -15,7 +15,7 @@ import { afterEach, beforeEach, expect, test } from 'bun:test';
 import { act } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { parseInboxQuestionBlocks } from '@plannotator/core/inbox-questions';
-import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxQuestion, InboxThread } from '@plannotator/core/inbox-types';
+import type { InboxAnnotationRecord, InboxMessageWire, InboxProject, InboxQuestion, InboxRun, InboxThread } from '@plannotator/core/inbox-types';
 import { whenTime } from './format';
 
 const hasDom = typeof document !== 'undefined';
@@ -165,7 +165,7 @@ async function settle() {
   });
 }
 
-async function render(thread: InboxThread, sent: { at: string; checked_at: string | null } | null = null) {
+async function render(thread: InboxThread, sent: { at: string; checked_at: string | null } | null = null, run?: InboxRun | null) {
   host = document.createElement('div');
   document.body.appendChild(host);
   act(() => {
@@ -175,6 +175,7 @@ async function render(thread: InboxThread, sent: { at: string; checked_at: strin
         <ThreadPane
           thread={thread}
           sent={sent}
+          {...(run === undefined ? {} : { run })}
           onQuestions={() => {}}
           onChanged={async () => {}}
           onClose={() => {}}
@@ -702,4 +703,88 @@ test.skipIf(!hasDom)('a comment only, Send from the foot with the list of commen
   expect(el.querySelector('[data-route-choice]')).toBeNull();
   expect(pillList(el)).not.toBeNull();
   expect(list()).toBeNull();
+});
+
+// A launched agent that stopped is not "ended": a reply starts it again. Only that session: another agent in the same
+// thread that ended is gone as it is anywhere, and a stopped launched session never reads as ended because of whom the
+// words go to.
+const LAUNCHED_ROOT = 'msg_01M4H6G73M9H3Z32T859E72L00';
+const LAUNCHED_ASKER = { kind: 'agent' as const, host: 'claude-code', session: 'ses_launched', name: null };
+const TAGGED_AGENT = { kind: 'agent' as const, host: 'claude-code', session: 'ses_tagged', name: null };
+const stoppedRun = { state: 'stopped', launch_id: 'lch_a', agent: 'claude-code', project: 'ledger', folder: '/work/ledger', since: '2026-10-11T10:50:00.000Z', again: false, stopped_by_person: true, cause: null, untrusted: false, attach_command: null } as InboxRun;
+
+/** A thread the person launched (its root names the session), its agent's question, then a tagged agent's message. */
+function launchedThread(picked: boolean): InboxThread {
+  const inThread = { project_id: PROJECT.id, thread_id: LAUNCHED_ROOT, subject: null, resolved_at: null, idempotency_key: null };
+  return {
+    thread_id: LAUNCHED_ROOT,
+    project: PROJECT,
+    subject: 'Fix the sync',
+    thread_name: null,
+    resolved_at: null,
+    messages: [
+      {
+        ...inThread,
+        id: LAUNCHED_ROOT,
+        reply_to: null,
+        author: { kind: 'person' },
+        started_by_person: true,
+        to: { host: 'claude-code', session: 'ses_launched' },
+        subject: 'Fix the sync',
+        body: 'Fix the sync.',
+        created_at: '2026-10-11T10:40:00.000Z',
+        idempotency_key: 'k-root',
+        launch: { id: 'lch_a', agent: 'claude-code', session_ref: 'sa', folder: '/work/ledger', scratch: false, started_at: '2026-10-11T10:40:00.000Z' },
+      } as InboxMessageWire,
+      { ...inThread, id: M1, reply_to: LAUNCHED_ROOT, author: LAUNCHED_ASKER, body: BODY, created_at: '2026-10-11T10:41:00.000Z', questions: questions(picked).map((q) => ({ ...q, asked_by_agent_id: 'ses_launched' })), wakes: true },
+      { ...inThread, id: R1, reply_to: M1, author: TAGGED_AGENT, body: 'Tagged in: the bucket is yours to choose.', created_at: '2026-10-11T10:45:00.000Z', wakes: true },
+    ],
+  };
+}
+
+test.skipIf(!hasDom)('a launched thread, its stopped agent the only one: never "ended", and the reply goes to it, which starts it again', async () => {
+  liveness = { ses_launched: false };
+  sessions = { sessions: [live('ses_other', 'pi')] };
+  const thread = launchedThread(false);
+  const el = await render({ ...thread, messages: thread.messages.slice(0, 2) }, null, stoppedRun);
+  expect(el.querySelector('[data-session-ended]')).toBeNull();
+  expect(el.querySelector('[data-asker-ended]')).toBeNull();
+  await writeReply(el);
+  act(() => button(el, 'Send').click());
+  await settle();
+  await settle();
+  expect(replies().map((r) => [r.path, r.body.to ?? null])).toEqual([[`/api/inbox/messages/${M1}/reply`, null]]);
+});
+
+test.skipIf(!hasDom)('a launched thread, the words going to a tagged agent that ended: the ended note shows, so the reply does not wait on it unsaid', async () => {
+  liveness = { ses_launched: true, ses_tagged: false };
+  sessions = { sessions: [live('ses_launched', 'claude-code', { wrote_thread: true })] };
+  const el = await render(launchedThread(false), null, null);
+  expect(el.querySelector(`[data-message-article="${R1}"] [data-session-ended]`)).not.toBeNull();
+  expect(el.querySelector('[data-asker-ended]')).not.toBeNull();
+});
+
+test.skipIf(!hasDom)("a launched thread: a pick on the stopped launched session's question, the words for a live agent: no ended choice, the answer goes to the launched session, which it starts again", async () => {
+  liveness = { ses_launched: false, ses_tagged: true };
+  sessions = { sessions: [live('ses_tagged', 'claude-code', { wrote_thread: true })] };
+  const el = await render(launchedThread(true), null, stoppedRun);
+  act(() => button(el, 'Edit draft').click());
+  await settle();
+  const text = el.querySelector('textarea') as HTMLTextAreaElement;
+  act(() => {
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(text, 'And keep the logs bucket.');
+    text.dispatchEvent(new Event('input', { bubbles: true }));
+  });
+  await settle();
+  await settle();
+  expect(el.querySelector(`[data-message-article="${M1}"] [data-session-ended]`)).toBeNull();
+  act(() => button(el, 'Send').click());
+  await settle();
+  await settle();
+  expect(el.querySelector('[data-route-choice]')).toBeNull();
+  expect(pillList(el)).toBeNull();
+  expect(replies().map((r) => [r.path.includes(M1) ? 'launched' : 'tagged', r.body.words, r.body.to ?? null])).toEqual([
+    ['launched', '', null],
+    ['tagged', 'And keep the logs bucket.', null],
+  ]);
 });
