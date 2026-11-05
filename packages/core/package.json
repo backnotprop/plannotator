@@ -1,6 +1,6 @@
 {
   "name": "@plannotator/core",
-  "version": "0.25.19",
+  "version": "0.25.20",
   "license": "Apache-2.0",
   "type": "module",
   "exports": {
@@ -8,6 +8,7 @@
     "./product-feedback": "./product-feedback.ts",
     "./diff-paths": "./diff-paths.ts",
     "./diff-files": "./diff-files.ts",
+    "./stack-layers": "./stack-layers.ts",
     "./file-kind": "./file-kind.ts",
     "./package-changes": "./package-changes.ts",
     "./package-changes-npm": "./package-changes-npm.ts",
