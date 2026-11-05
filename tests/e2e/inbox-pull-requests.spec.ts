@@ -1936,6 +1936,9 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await expect(page.getByRole('button', { name: 'Reply', exact: true }).first()).toBeVisible();
   await shot(page, 'w-thread');
   rmSync(longFile);
+  // The list's mark says the word; a plain guided review's mark keeps its own.
+  await expect(page.locator(`[data-row="${threadId}"] [data-guide-mark]`).first()).toHaveAttribute('aria-label', 'Walkthrough');
+  await expect(page.locator('[data-guide-mark][aria-label="Guided review"]').first()).toBeAttached();
 
   // More asked: the row is with the agent, and its plain answer, no second walkthrough, brings it back.
   const moveOf = () => page.evaluate(async (id) => ((await (await fetch('/api/inbox/reviews')).json()) as { rows: { thread_id: string | null; move: string }[] }).rows.find((row) => row.thread_id === id)?.move, threadId);
@@ -1946,9 +1949,9 @@ test('New review, a walkthrough: the words are the ask, its thread is named from
   await claude.send({ project_path: world.projects.web, reply_to: sent.message_id as string, body: 'From charge.ts, line 4.' });
   await expect.poll(moveOf).toBe('on_you');
 
-  // Code review off: refused by name, nothing sent.
+  // Code review off: the field isn't there, and nothing is sent.
   await setCodeReview(false);
-  await expect(claude.submitGuide({ project_path: world.projects.web, thread: 'walk-off', walkthrough: true, guide: { title: 'Off', intent: 'Off.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/i18n/fallback.ts' }] }] } } as never)).rejects.toThrow('send the guide without `walkthrough`');
+  await expect(claude.submitGuide({ project_path: world.projects.web, thread: 'walk-off', walkthrough: true, guide: { title: 'Off', intent: 'Off.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/i18n/fallback.ts' }] }] } } as never)).rejects.toThrow('walkthrough');
   await setCodeReview(true);
 });
 

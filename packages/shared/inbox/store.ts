@@ -1979,6 +1979,7 @@ export class InboxStore {
       unseen,
       sent,
       guide: messages.some((m) => m.guide != null),
+      ...(messages.filter((m) => m.guide != null).at(-1)?.guide?.walkthrough ? { guide_walkthrough: true } : {}),
       last_agent_at: lastAgentAt,
       ...(root.started_by_person && root.to ? { addressee: { host: root.to.host, session: root.to.session } } : {}),
       ...(participants.length > 1 ? { participants } : {}),

@@ -1544,6 +1544,8 @@ export interface InboxListRow extends InboxThreadSummary {
   last_agent_at?: string | null;
   /** A message in the thread carries a guided review: the row's "Guided review" mark. */
   guide: boolean;
+  /** The thread's latest guide is a walkthrough: the same mark says Walkthrough. */
+  guide_walkthrough?: boolean;
   /**
    * On a thread the person started (`started_by_person`): the agent session
    * it is addressed to now (the root's `to`, which "Send to another session"
