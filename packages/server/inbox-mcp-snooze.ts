@@ -14,7 +14,7 @@ import type { InboxStore } from "@plannotator/shared/inbox/store";
 import type { MachineSnoozeAnswer } from "./inbox-machines";
 import { guarded, okComplete } from "./inbox-mcp-result";
 
-export const INBOX_SNOOZE_DESCRIPTION = "Only when the person asks you to: snooze a thread until a time, or end its snooze. It leaves their list until then; nothing is sent to them.";
+export const INBOX_SNOOZE_DESCRIPTION = "Only when the person asks: snooze a thread until a time, or end its snooze.";
 
 export interface InboxSnoozeMcpContext {
   store: InboxStore;
@@ -34,8 +34,8 @@ export function registerInboxSnoozeTool(server: McpServer, context: InboxSnoozeM
       description: INBOX_SNOOZE_DESCRIPTION,
       inputSchema: z
         .object({
-          thread_id: z.string().describe("The thread (or a message id in it)."),
-          until: z.union([z.string(), z.null()]).describe("Only when the person asks you to snooze a thread: when it comes back, an ISO 8601 time with its zone. null ends the snooze."),
+          thread_id: z.string().describe("Thread or message id."),
+          until: z.union([z.string(), z.null()]).describe("Only if the person asks: ISO 8601 return time with zone; null ends it."),
         })
         .strict(),
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: true, openWorldHint: false },

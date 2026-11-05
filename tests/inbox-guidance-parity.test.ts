@@ -226,7 +226,7 @@ describe("Inbox guidance parity across harnesses", () => {
     expect(tool.description).not.toMatch(/snooz/i);
     const properties = tool.inputSchema.properties as Record<string, { enum?: string[]; description?: string }>;
     expect(properties.action!.enum).toContain("snooze_thread");
-    expect(properties.until!.description).toStartWith("(snooze_thread) Only when the person asks you to");
+    expect(properties.until!.description).toStartWith("(snooze_thread) Only if the person asks");
     expect(properties.thread_id!.description).toContain("snooze_thread");
   });
 

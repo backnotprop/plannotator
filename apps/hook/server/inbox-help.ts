@@ -143,8 +143,8 @@ export const TOOL_GUIDE: Record<InboxMcpToolName, InboxToolGuide> = {
   snooze_thread: {
     args: ["thread_id", "until"],
     lines: [
-      `Only when the person asks you to. Their Snooze, from you: the thread leaves their list and comes back by itself at \`until\`, an ISO 8601 time with its zone, within ${INBOX_SNOOZE_MAX_DAYS} days. \`until: null\` ends the snooze. Nothing is sent to the person, and a thread reads the same while snoozed.`,
-      "- A thread on a machine linked to this Inbox works too, by the thread id the person gives you. While that machine is away, the answer says it applies when the machine is back. A machine too old for it answers `machine_needs_update`, and nothing changes.",
+      `Only when the person asks. Snoozes a thread until \`until\` (ISO 8601 with zone, within ${INBOX_SNOOZE_MAX_DAYS} days); it then returns by itself. \`null\` ends it. Sends nothing.`,
+      "- A linked machine's thread works by the id the person gives you. If that machine is away, it applies when it is back. One too old answers `machine_needs_update`.",
     ],
   },
   get_guide_brief: {

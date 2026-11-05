@@ -217,17 +217,17 @@ export const INBOX_DEFAULT_TOOLS: readonly InboxToolInfo[] = [
   },
   {
     "name": "snooze_thread",
-    "description": "Only when the person asks you to: snooze a thread until a time, or end its snooze. It leaves their list until then; nothing is sent to them.",
+    "description": "Only when the person asks: snooze a thread until a time, or end its snooze.",
     "inputSchema": {
       "type": "object",
       "$schema": "https://json-schema.org/draft/2020-12/schema",
       "properties": {
         "thread_id": {
           "type": "string",
-          "description": "The thread (or a message id in it)."
+          "description": "Thread or message id."
         },
         "until": {
-          "description": "Only when the person asks you to snooze a thread: when it comes back, an ISO 8601 time with its zone. null ends the snooze.",
+          "description": "Only if the person asks: ISO 8601 return time with zone; null ends it.",
           "type": [
             "string",
             "null"
