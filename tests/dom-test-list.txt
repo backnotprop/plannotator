@@ -512,6 +512,7 @@ packages/review-editor/App.guideGlobalComment.test.tsx
 packages/ui/hooks/skillCatalogReload.test.tsx
 packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
+packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
@@ -524,6 +525,7 @@ packages/inbox/lazyChunkFailure.test.tsx
 packages/inbox/lazyParts.test.tsx
 packages/inbox/shapeBoardHead.test.tsx
 packages/inbox/shapeChangeFailed.test.tsx
+packages/inbox/shapeSidebarToggle.test.tsx
 packages/inbox/shape/standalone/ShapePage.test.tsx
 packages/ui/components/shape/ShapeSurface.commentDraft.test.tsx
 packages/ui/components/shape/ShapeSurface.popoverQuote.test.tsx

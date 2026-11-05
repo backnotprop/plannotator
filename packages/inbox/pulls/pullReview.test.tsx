@@ -497,7 +497,8 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
       projectNames={new Map()}
       phone={false}
       onOpenStack={(id) => id && opened.push(id)}
-      onProject={() => {}}
+      filter="all"
+      onScope={() => {}}
       onReview={() => {}}
       onOpenThread={() => {}}
       onLaunch={() => {}}
@@ -509,7 +510,7 @@ test.skipIf(!hasDom)('the list: On you, Ready to land, then the waiting ones fol
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-pulls-row]')].filter((r) => r.closest('[hidden]') === null);
   const moves = rows().map((r) => r.getAttribute('data-pulls-move'));
   expect(moves).toEqual(['on_you', 'on_you', 'ready']);
-  expect(el('[data-pulls-on-you]').getAttribute('data-pulls-on-you')).toBe('2');
+  expect(el('[data-pulls-group="on_you"] .ib-n').textContent).toBe('2');
   const stackRow = rows().find((r) => r.getAttribute('data-pulls-layers') === '3')!;
   expect(stackRow).toBeDefined();
   expect(stackRow.querySelectorAll('.ib-pr-chain svg').length).toBe(3);
@@ -678,7 +679,8 @@ function Page({
         projectNames={new Map()}
         phone={false}
         onOpenStack={() => {}}
-        onProject={() => {}}
+        filter="all"
+        onScope={() => {}}
         onReview={(id, key, scope) => onReview?.(id, key, scope)}
         onOpenThread={(thread) => onOpenThread?.(thread)}
         {...(onOpenCard ? { onOpenCard } : {})}

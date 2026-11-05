@@ -68,7 +68,7 @@ async function mount(props: Partial<React.ComponentProps<typeof ShapeSurface>>, 
   const el = document.createElement('div');
   document.body.appendChild(el);
   root = createRoot(el);
-  act(() => root!.render(<ShapeSurface host={shapeHost} id={ID} {...props} />));
+  act(() => root!.render(<ShapeSurface host={shapeHost} id={ID} readFirst {...props} />));
   for (let i = 0; i < 50 && !inDrawing('[data-code]'); i++) await wait();
   await wait();
 }

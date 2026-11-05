@@ -4,7 +4,7 @@
  * over the thread, and the board's Thread tab. No keys of its own: ⌘K and Esc
  * are the window's.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { PanePart, ShapeBoardPart } from '../lazyParts';
 import type { InboxThread } from '@plannotator/core/inbox-types';
 import type { ShapeCodeTarget } from '@plannotator/core/shape';
@@ -13,12 +13,12 @@ import type { QuestionAnswer } from '@plannotator/core/question-block';
 import { Pebble } from '@plannotator/ui/components/shape/Pebble';
 import { ShapeGrid, shapeAgo, type ShapeGridItem } from '@plannotator/ui/components/shape/ShapeGrid';
 import type { ShapeHost } from '@plannotator/ui/components/shape';
-import type { InboxShapeSummary } from '../api';
+import { inboxApi, type InboxShapeSummary } from '../api';
 import { agentName, whenTime } from '../format';
 import { Icon } from '../icons';
 import { MessageBody } from '../components/Thread';
 import { Tip } from '../components/Tip';
-import { SidebarTrigger } from '../shell/sidebar';
+import { SidebarTrigger, useSidebar } from '../shell/sidebar';
 
 const ShapeBoard = ShapeBoardPart.Part;
 const NO_ANSWERS: ReadonlyMap<string, QuestionAnswer> = new Map();
@@ -64,8 +64,11 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
 }
 
 /**
- * The board, over the thread, the grid or a review: its ×, Esc or Back closes it. `hidden`: kept as it is (its view,
- * its panel) while the review shows a part's code. `onCode`: a review lands a part on its line.
+/**
+ * The board, over the thread, the grid or a review: its ×, Esc or Back closes it. It covers the page's head, so the
+ * sidebar toggle every full page's head has sits at its title's left: the board can take the window's width. `hidden`:
+ * kept as it is (its view, its panel) while the review shows a part's code. `onCode`: a review lands a part on its
+ * line; a review is its own full page, so it has no toggle.
  */
 export function ShapeLayer({
   host,
@@ -82,11 +85,31 @@ export function ShapeLayer({
   hidden?: boolean;
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => boolean;
 }) {
+  // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
+  const { isMobile } = useSidebar();
+  // The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload, and the next open
+  // (this layer mounted again, or another board in it) asks for the chunk again.
+  const [failedOn, setFailedOn] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
+  if (failedOn !== null && failedOn !== id) {
+    setFailedOn(null);
+    setAttempt(attempt + 1);
+  }
+  const failed = useCallback(() => {
+    ShapeBoardPart.retry();
+    setFailedOn(id);
+  }, [id]);
   return (
     <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape" hidden={hidden}>
-      {/* The board is a chunk the Inbox serves: one that cannot arrive says so here, with Reload. */}
-      <PanePart loading={<div className="ib-shape-loading" aria-busy="true" />}>
-          <ShapeBoard host={host} id={id} onClose={onClose} onCode={onCode} renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined} />
+      <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
+        <ShapeBoard
+          host={host}
+          id={id}
+          onClose={onClose}
+          onCode={onCode}
+          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
+          headStart={isMobile || onCode ? undefined : <SidebarTrigger />}
+        />
       </PanePart>
     </section>
   );
@@ -134,6 +157,7 @@ export function ShapeGridPage({ shapes, onOpen }: { shapes: InboxShapeSummary[] 
         <ShapeGrid
           items={items}
           query={query}
+          assetUrl={inboxApi.shapeFileUrl}
           onOpen={(id) => {
             const s = byId.get(id);
             if (s) onOpen(s);

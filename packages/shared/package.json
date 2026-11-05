@@ -140,6 +140,7 @@
     "./plannotator-server-marker": "./plannotator-server-marker.ts",
     "./plannotator-ports": "./plannotator-ports.ts",
     "./live-proxy-node": "./live-proxy-node.ts",
+    "./inbox/snoozes": "./inbox/snoozes.ts",
     "./inbox/schema": "./inbox/schema.ts",
     "./inbox/ask": "./inbox/ask.ts",
     "./inbox/debug-log": "./inbox/debug-log.ts",

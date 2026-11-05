@@ -10,6 +10,7 @@ import type { ShapeDrawnView, ShapeNote, ShapeRecord, ShapeRef, ShapeVersion } f
 import { isActionRecord, questionsOnly, splitThreadActions } from './actions';
 import { createListReader, type ListReadAnswer } from './listRead';
 import { inboxUrl, isContested, localRoute, machineOf, rememberLocal, rememberMachine, selfMachineId, setSelfMachine } from './inboxUrl';
+import type { ReplyViewing } from './replyViewing';
 import type {
   InboxCardMark,
   InboxInitiative,
@@ -742,7 +743,6 @@ export class InboxHeldError extends InboxApiError {
 /** What a held write says, by its machine's state. */
 export function heldWords(machine: Pick<MachineView, 'name' | 'state'> | null): string {
   const name = machine?.name ?? 'the other machine';
-  if (machine?.state === 'revoked') return `Not sent: ${name} removed the link. Link it again to send.`;
   return machine && machine.state !== 'online' && machine.state !== 'connecting'
     ? `Waiting for ${name}: this applies when ${name} is back.`
     : `Sending to ${name}: this applies once ${name} confirms.`;
@@ -1140,6 +1140,8 @@ export const inboxApi = {
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
   shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
+  /** Where a board's kept picture loads from. */
+  shapeFileUrl: (id: string, src: string) => `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(src.replace(/^files\//, ''))}`,
   shape: (id: string, n?: number) => get<ShapeLoadedWire>(`/api/shapes/${encodeURIComponent(id)}${n ? `?n=${n}` : ''}`),
   shapeNote: (id: string, input: Record<string, unknown>) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/notes`, input),
   shapeAnswer: (id: string, input: { re: string; text: string; from: { host: string; id: string } }) => post<{ note: ShapeNote }>(`/api/shapes/${encodeURIComponent(id)}/answer`, input),
@@ -1238,6 +1240,8 @@ export const inboxApi = {
       questions: { message_id?: string; key: string; revision: number }[];
       feedback?: string;
       annotation_ids?: string[];
+      /** The file on screen, on the reply a Send from full screen's floating box writes its words on. */
+      viewing?: ReplyViewing;
       /** Another live session takes the reply: the session that asked has ended. */
       to?: { host?: string; session: string };
       /**
@@ -1424,7 +1428,7 @@ export const inboxApi = {
   /** A new initiative, named. */
   createInitiative: (name: string) => post<{ initiative: InboxInitiative }>(inboxUrl('/initiatives'), { name }),
   /** An initiative renamed, or deleted (its cards read as in none). */
-  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' }) =>
+  changeInitiative: (id: string, change: { op: 'rename'; name: string } | { op: 'delete' } | { op: 'restore' }) =>
     post<{ initiative: InboxInitiative }>(inboxUrl(`/initiatives/${encodeURIComponent(id)}`), change),
   /** The person's move: `move` to a column, `drop` (Cancel, reason optional), `restore`. */
   moveCard: (id: string, change: { op: 'move'; column: InboxCardColumn } | { op: 'drop'; reason?: string | null } | { op: 'restore' }) =>
@@ -1440,7 +1444,11 @@ export const inboxApi = {
   /** The lane cards' marks (their one linked PR or issue's state), for the cards on screen; `refresh` when the window got its focus back. */
   cardMarks: (ids: readonly string[], refresh = false) => post<{ marks: Record<string, InboxCardMark> }>(inboxUrl('/cards/marks'), { cards: [...ids], refresh }),
   /** Pull requests (Code review on only): the PRs of the projects' repositories and their agents' threads; `refresh` reads the forges again. */
-  pulls: (refresh = false, signal?: AbortSignal) => get<InboxPullsAnswer>(inboxUrl(`/pulls${refresh ? '?refresh=1' : ''}`), signal),
+  /** `others`: the Others view is open, so the server reads Others as often as the list (else every 5 min at most). */
+  pulls: (refresh = false, signal?: AbortSignal, others = false) => {
+    const query = [refresh ? 'refresh=1' : '', others ? 'others=1' : ''].filter(Boolean).join('&');
+    return get<InboxPullsAnswer>(inboxUrl(`/pulls${query ? `?${query}` : ''}`), signal);
+  },
   /** A PR author's profile picture, served by the Inbox from its own origin (only an author the last list returned). */
   pullAvatarUrl: (host: string, login: string) => inboxUrl('/pulls/avatar', `host=${encodeURIComponent(host)}&login=${encodeURIComponent(login)}`),
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */

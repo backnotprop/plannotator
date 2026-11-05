@@ -125,10 +125,10 @@ describe('What to know', () => {
   const errors = (r: ReturnType<typeof checkShapeBoard>) => (r.ok ? '' : r.errors.join('\n'));
 
   test('up to the limit it stores; past it the agent is told to cut, and how far', () => {
-    expect(knowing('x'.repeat(SHAPE_LIMITS.know)).ok).toBe(true);
-    const long = knowing('x'.repeat(SHAPE_LIMITS.know + 1));
+    expect(knowing('x'.repeat(1200)).ok).toBe(true);
+    const long = knowing('x'.repeat(1201));
     expect(long.ok).toBe(false);
-    expect(errors(long)).toContain(`views.know: is ${SHAPE_LIMITS.know + 1} characters; at most ${SHAPE_LIMITS.know}`);
+    expect(errors(long)).toContain('views.know: is 1201 characters; at most 1200');
     expect(errors(long)).toContain('Cut it');
   });
 
@@ -139,11 +139,23 @@ describe('What to know', () => {
     expect(errors(knowing('One.\n  \nTwo.\r\n\r\nThree.'))).toContain('is 3 paragraphs');
   });
 
-  test('prose only: a list or a heading is refused, wherever it starts', () => {
-    for (const text of ['- one\n- two', '* one', '1. one', 'Words.\n\n- one', '# Heading', '> quote', '| a | b |']) {
-      expect(errors(knowing(text))).toContain('views.know: is prose');
+  test('only its length and its paragraphs are limited: a line may start any way', () => {
+    for (const text of ['> 5 MB files are skipped.', '# of retries drops to 3.', '2026. That is when it ends.', '- and that is the point.', 'Wrapped, so the next line\n5. That one starts with a number.']) {
+      expect(knowing(text).ok).toBe(true);
     }
-    expect(knowing('Costs 3 - 4 seconds. 1.5 times more, **bold**, `code` and [a link](https://example.com).').ok).toBe(true);
+  });
+
+  test('two old versions with raw reqs parts compare as What to know: same parts, no changes', () => {
+    const version = (text: string) => ({ n: 1, views: {}, refs: [], parts: [{ view: 'reqs', id: 'r-1', text }] }) as unknown as Parameters<typeof diffShapeVersions>[0];
+    expect(diffShapeVersions(version('Line'), version('Line')).changes).toEqual([]);
+    expect(diffShapeVersions(version('Line'), version('Other')).changes).toEqual([{ view: 'know', id: 'r-1', kind: 'changed', before: 'Line', after: 'Other' }]);
+  });
+
+  test('a note from a tab older than What to know is taken, as What to know', () => {
+    const r = checkShapeNoteInput({ kind: 'change', v: 1, view: 'reqs', part: 'r-1', text: 'Change this' });
+    expect(r.ok).toBe(true);
+    if (r.ok) expect(r.value.view).toBe('know');
+    expect(checkShapeNoteInput({ kind: 'change', v: 1, view: 'nope', text: 'x' }).ok).toBe(false);
   });
 
   test('it must be words, and its references must exist', () => {
@@ -216,7 +228,7 @@ describe('shapeBoardNotes: what shape update says about a board', () => {
   });
 
   test('a number with nothing behind it is named; one with a line or a picture is not', () => {
-    expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', target: 'a.ts' }]).join()).toContain('Bubbles 1 show only a title');
+    expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', target: 'a.ts' }]).join()).toContain('Bubble 1 shows only a title');
     expect(notesFor({}, [{ n: 1, kind: 'file', title: 'File', sub: 'One line', target: 'a.ts' }])).toEqual([]);
   });
 

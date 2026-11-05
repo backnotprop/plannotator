@@ -127,10 +127,15 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
   const [openKey, setOpenKey] = useState<string | null>(() => openItems[0]?.key ?? null);
   const toggles = useRef(new Map<string, HTMLButtonElement>());
   const [focusKey, setFocusKey] = useState<string | null>(null);
+  // What held focus when the mark was pressed. The mark's row (and its note) draws before the save has finished
+  // (the window still reads the list), so the person can already be in the note, or back in the reply, by now.
+  const focusAtMark = useRef<Element | null>(null);
   useEffect(() => {
     if (!focusKey) return;
-    toggles.current.get(focusKey)?.focus();
     setFocusKey(null);
+    const now = document.activeElement;
+    const wentOn = now && now !== document.body && now !== focusAtMark.current && now.isConnected && !now.closest('[hidden]');
+    if (!wentOn) toggles.current.get(focusKey)?.focus();
   }, [focusKey]);
 
   const headId = useId();
@@ -185,8 +190,12 @@ export function ActionChecklist({ actions, agent, refRepo = null, readOnly = fal
               else toggles.current.delete(action.key);
             }}
             onMark={async (mark, from) => {
+              const atMark = document.activeElement;
               const ok = await onMark(action, mark);
-              if (ok) marked(action, mark, from);
+              if (ok) {
+                focusAtMark.current = atMark;
+                marked(action, mark, from);
+              }
               return ok;
             }}
           />

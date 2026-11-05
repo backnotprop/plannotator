@@ -252,11 +252,11 @@ describe("the Shape switch, through the entrypoint", () => {
           expect(r.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
         }
         expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
-        // The kit only prints a file: it runs either way, and stores nothing.
+        // Off, the kit is one more command that does not exist: nothing teaches the feature.
         const kit = await run("kit");
-        expect(kit.code).toBe(0);
-        expect(kit.stdout).toContain("export const pick");
-        expect(existsSync(join(dataDir, "shapes")) ? readdirSync(join(dataDir, "shapes")) : []).toEqual([]);
+        expect(kit.code).toBe(1);
+        expect(kit.stdout).toBe("");
+        expect(kit.stderr).toBe(`${SHAPE_OFF_TEXT}\n`);
       }
       writeFileSync(join(dataDir, "config.json"), JSON.stringify({ inboxShape: true }));
       const help = await run("--help");
@@ -365,7 +365,7 @@ describe("the Shape switch, through the entrypoint", () => {
     const inbox = await startInboxServer({ dataDir: c.dataDir, phones: false });
     try {
       const base = `http://127.0.0.1:${inbox.port}`;
-      // Off, the settings read leaves Shape out (held for 0.28.50, inbox.ts heldSwitch): absent reads as off.
+      // Off, the settings read leaves Shape out (held until the next big release, inbox.ts heldSwitch): absent reads as off.
       const settingsShape = async () => ((await (await fetch(`${base}/api/inbox/settings`)).json()) as { shape?: { on: boolean } }).shape?.on === true;
       expect(await settingsShape()).toBe(false);
       expect((await c.run("on")).code).toBe(0);

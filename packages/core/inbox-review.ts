@@ -246,7 +246,7 @@ export function inboxShowMeRequest(input: { target: InboxShowMeTarget; title: st
     `The reviewer pressed Show me ${where} your review "${title}" (${target.review})${words}.`,
     input.again
       ? `Bring your Shape ${input.again} up to date with the code as it is now, as a new version. \`plannotator shape --help\` has how.`
-      : 'Make a Shape of it, so they can see how this code works. `plannotator shape --help` has how.',
+      : 'Make a Shape of it, so they can see it the way you see it. `plannotator shape --help` has how.',
     `Store it with \`--thread ${threadId} --through ${target.review}\`: it opens over the review by itself, so don't open a page.`,
     'Then answer here in one or two sentences.',
   ].join('\n');

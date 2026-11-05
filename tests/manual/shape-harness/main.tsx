@@ -63,6 +63,7 @@ function Harness() {
   if (q.get('diagram') === '1') return <Diagram />;
   return (
     <ShapeSurface
+      readFirst
       host={{ ...host, codeHover: async (_id, req) => hoverFor(req.symbol) }}
       id={host.id}
       CodeGuide={ShapeCodeGuide}

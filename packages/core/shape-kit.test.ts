@@ -56,6 +56,16 @@ describe('the kit', () => {
     expect(pick('all', 0, 0, 1, 1, 'All', { checked: true })).toContain('checked=""');
   });
 
+  test('a mark the kit does not have says so', () => {
+    let said = '';
+    try { tile('gemini', 0, 0); } catch (e) { said = (e as Error).message; }
+    expect(said).toContain('gemini is not in the kit');
+    // Every name it offers is one the kit draws.
+    const names = /\((.+)\)/.exec(said)![1]!.split(', ');
+    expect(names).toContain('codex');
+    for (const name of names) expect(tile(name, 0, 0)).toContain('<g class="obj">');
+  });
+
   test('words are escaped in every helper that takes them', () => {
     expect(pick('a', 0, 0, 1, 1, '<b>')).toContain('&lt;b>');
     expect(text(0, 0, '<b>')).toContain('&lt;b>');

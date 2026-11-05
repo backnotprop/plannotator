@@ -26,6 +26,7 @@ import type { HtmlEmbedHost } from '@plannotator/ui/components/html-embed/HtmlEm
 import { annotationOf, attachmentFeedback, isFileComment } from '../attachments';
 import { linkReplyFeedback, resolveReplyLink } from '../replyFileLinks';
 import { splitReplyFeedback } from '../replyFeedback';
+import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
 import type { OpenInSurface } from './OpenIn';
@@ -998,7 +999,7 @@ export interface ThreadPaneProps {
    * store's seq, so a reply the agent was not given still reads as unread),
    * or null.
    */
-  sent: { at: string; checked_at: string | null; recipients?: InboxSentRecipient[] } | null;
+  sent: { at: string; checked_at: string | null; read_by?: string; recipients?: InboxSentRecipient[] } | null;
   /** The thread's questions changed through a pick (the response's questions for that message). */
   onQuestions: (messageId: string, questions: InboxQuestion[]) => void;
   /** The questions (`<message id>/<key>`) with an answer saving, each time they change; none: the last one landed, or the pane closed. */
@@ -3552,7 +3553,9 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   /** The next Send was pressed by ⌘Enter (`send` in the thread's key scope), not clicked. */
   const sentByChord = useRef(false);
   const writeReplyFromFile = () => {
-    setFull(false);
+    // On the device's own route (fileToThread): a phone or a stacked window has no room beside the thread, so the file closes.
+    if (phone || fileStacked) onOpenFile(null);
+    else setFull(false);
     // The box open already (the full-screen composer opens it): its words stay as they are, and focus goes
     // back to it where the caret was (as R did with the box open before the composer).
     // openBox's other resets still apply (a New message, the route choice and an error go).
@@ -4068,6 +4071,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
           ...(target.actions.length > 0 ? { actions: target.actions } : {}),
           ...(feedback ? { feedback } : {}),
           ...(own.length > 0 ? { annotation_ids: own.map((r) => r.id) } : {}),
+          // From the floating box, the file on screen rides the reply that carries the words (the server drops it when a comment on that file already names it).
+          ...(last && options.stayFull && file && fileAttachment ? { viewing: replyViewingOf(fileAttachment, file, current.messages) } : {}),
           // The pasted files ride the reply that carries the words, as attachments.
           ...(last && uploads.length > 0 ? { uploads } : {}),
           ...(tags.length > 0 ? { tags } : {}),
@@ -4321,6 +4326,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             name: recipientName(repliedTo),
             // A reply that tags agents: the owner's own delivery, never another recipient's.
             deliveredAt: lastTags.length > 0 ? (last.delivery?.at ?? sent?.recipients?.find((r) => r.owner)?.delivered_at ?? null) : (sent?.checked_at ?? null),
+            readBy: sent?.read_by ? hostName(sent.read_by) : null,
             time: whenTime,
             wakes: (wakingSession !== null || (askedSession !== null && recipientConnection != null)) && !uncertainItem(recipientConnection, last.id),
             sendingNow: !!last.deliver_now_at,

@@ -234,6 +234,49 @@ describe.skipIf(!hasDom)('a drawing with controls, own numbers and kept pictures
   ];
   const hit = (el: Element, type: string, init: Record<string, unknown> = {}) => act(async () => { el.dispatchEvent(Object.assign(new MouseEvent(type, { bubbles: true, composed: true }), init)); });
 
+  test('a number with only blank space inside still shows its number', async () => {
+    const { shadow } = await draw({ html: '<span data-ref="1"> </span><span data-ref="2">\n</span><span data-ref="3"><b>mine</b></span>', refs: [1, 2, 3].map((n) => ({ n, kind: 'file' as const, title: 'T', target: 'a.ts' })) });
+    expect(shadow.querySelector('[data-ref="1"]')!.textContent).toBe('1');
+    expect(shadow.querySelector('[data-ref="2"]')!.textContent).toBe('2');
+    expect(shadow.querySelector('[data-ref="3"]')!.classList.contains('own')).toBe(true);
+  });
+
+  test('finger-sized numbers come with the bubble: a drawing with no peek keeps its size', async () => {
+    const refs = [{ n: 1, kind: 'file' as const, title: 'T', target: 'a.ts' }];
+    const plain = await draw({ html: '<span data-ref="1"></span>', refs });
+    expect(plain.board.classList.contains('peek')).toBe(false);
+    act(() => root!.unmount());
+    root = null;
+    container!.remove();
+    const peeking = await draw({ html: '<span data-ref="1"></span>', refs, onRefPeek: () => {} });
+    expect(peeking.board.classList.contains('peek')).toBe(true);
+  });
+
+  test('a host URL cannot break out of the picture attribute', async () => {
+    const { shadow } = await draw({ html: '<img src="files/a.png">', resolveSrc: () => '/x"><b id="out">y&z' });
+    expect(shadow.querySelector('#out')).toBeNull();
+    expect(shadow.querySelector('img')!.getAttribute('src')).toBe('/x"><b id="out">y&z');
+  });
+
+  test('only a caller that asks for it pans a narrow canvas; anything else shrinks to fit', async () => {
+    // This DOM measures 0 wide, which is narrow; its padding has to read as a number.
+    const real = window.getComputedStyle;
+    window.getComputedStyle = ((el: Element) => { const cs = real.call(window, el); return new Proxy(cs, { get: (t, k) => (String(k).startsWith('padding') ? '0px' : Reflect.get(t, k)) }); }) as typeof window.getComputedStyle;
+    try {
+      const canvas = { html: '<p>x</p>', width: 1000, height: 500 };
+      await draw({ html: '<p>x</p>', drawn: canvas, pan: true });
+      expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(true);
+      act(() => root!.unmount());
+      root = null;
+      container!.remove();
+      const { board } = await draw({ html: '<p>x</p>', drawn: canvas });
+      expect(container!.querySelector('.shp-drawn')!.classList.contains('pan')).toBe(false);
+      expect(board.style.transform).toBe('scale(0.2)');
+    } finally {
+      window.getComputedStyle = real;
+    }
+  });
+
   test('a radio the kit draws survives the sanitizer, with the name, class and checked its css reads', async () => {
     const { shadow } = await draw({ html: '<label class="pick on-a"><input type="radio" name="follow" class="f-a" checked=""><span>Path A</span></label><label class="pick"><input type="radio" name="follow" class="f-b"></label>' });
     const radios = [...shadow.querySelectorAll<HTMLInputElement>('input[type="radio"]')];

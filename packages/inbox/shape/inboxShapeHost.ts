@@ -188,10 +188,7 @@ export function createInboxShapeHost(options: InboxShapeHostOptions): ShapeHost 
         return null;
       }
     },
-    assetUrl(id, src) {
-      const name = src.replace(/^files\//, '');
-      return `/api/shapes/${encodeURIComponent(id)}/files/${encodeURIComponent(name)}`;
-    },
+    assetUrl: inboxApi.shapeFileUrl,
     resumePrompt(id) {
       return `${options.command || 'plannotator'} shape read ${id} --notes`;
     },

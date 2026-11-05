@@ -114,6 +114,7 @@ const CODEX = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAEgAAABICAYAAABV7bN
 export function mark(name, x, y, size = 40) {
   if (name === 'codex') return `<image x="${x}" y="${y}" width="${size}" height="${size}" href="${CODEX}"/>`;
   const m = MARKS[name];
+  if (!m) throw new Error(`${name} is not in the kit (${['codex', ...Object.keys(MARKS)].join(', ')}). Write its name as plain text.`);
   return `<svg data-brand x="${x}" y="${y}" width="${size}" height="${size}" viewBox="${m.box}" style="fill:var(--ink);color:var(--ink)">${m.body}</svg>`;
 }
 

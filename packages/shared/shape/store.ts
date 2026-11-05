@@ -45,6 +45,7 @@ import {
   shapeNoteId,
   shapeNoteWaits,
   shapeParts,
+  shapeViewNow,
   type ShapeBoard,
   type ShapeNote,
   type ShapeRecord,
@@ -287,7 +288,7 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
 
   const recordOf = (folder: string) => readJson<ShapeRecord>(join(folder, "shape.json"));
   // A version or note saved when What to know was Requirements says "reqs": read it as the view it is now. The file stays as written.
-  const nowKnow = <T extends { view: unknown }>(x: T): T => ((x.view as string) === "reqs" ? { ...x, view: "know" } : x);
+  const nowKnow = <T extends { view: unknown }>(x: T): T => (shapeViewNow(x.view) === x.view ? x : { ...x, view: "know" });
   const versionsOf = (folder: string) => readLines<ShapeVersion>(join(folder, "versions.jsonl")).map((v) => (v.parts ? { ...v, parts: v.parts.map(nowKnow) } : v));
 
   function notesOf(folder: string): ShapeNote[] {
@@ -302,7 +303,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
 
   /** Where an image comes from and its name in files/. Null: it stays as written (a files/ name, a data:image) or an error was recorded. */
   function imageFile(src: string, field: string, sourceDir: string | null | undefined, errors: string[]): { path: string; name: string } | null {
-    if (src.startsWith("files/")) {
+    // files/… is a picture the board keeps, unless the board's own folder really has one by that name: that one is copied.
+    const local = src.startsWith("files/") && sourceDir ? resolve(sourceDir, src) : null;
+    if (src.startsWith("files/") && !(local && existsSync(local))) {
       if (!/^files\/[^/\\%?#.][^/\\%?#]*$/.test(src)) errors.push(`${field}: "${src.slice(0, 80)}" is not one file under files/`);
       return null;
     }
@@ -322,12 +325,19 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       return null;
     }
     let size: number;
+    let real: string;
     try {
       const stat = statSync(path);
       if (!stat.isFile()) throw new Error("not a file");
       size = stat.size;
+      real = realpathSync(path);
     } catch {
       errors.push(`${field}: "${src}" was not found`);
+      return null;
+    }
+    // A link named .png is what it points at.
+    if (!IMAGE_EXT.has(extname(real).toLowerCase())) {
+      errors.push(`${field}: "${src}" is not a PNG, JPEG, GIF or WebP image`);
       return null;
     }
     if (size > SHAPE_IMAGE_MAX_BYTES) {
@@ -357,12 +367,15 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
     const inHtml = (html: unknown, field: string): unknown =>
       typeof html !== "string"
         ? html
-        : html.replace(/(<(?:img|image)\b[^>]*?\s(?:src|href)=)(["'])([^"']+)\2/gi, (all, head: string, quote: string, src: string) => {
+        // Attribute by attribute, so words inside another attribute's value (alt="x src=y") are left alone.
+        : html.replace(/(<(?:img|image)\b(?:\s+(?!(?:xlink:href|src|href)\s*=)[\w:.-]+(?:\s*=\s*(?:"[^"]*"|'[^']*'|[^\s"'>]+))?)*\s+)(xlink:href|src|href)\s*=\s*(?:"([^"]+)"|'([^']+)'|([^\s"'>]+))/gi, (all, head: string, attr: string, q2?: string, q1?: string, bare?: string) => {
+            const src = (q2 ?? q1 ?? bare)!;
             if (/^(?:#|[a-z][a-z0-9+.-]+:|\/\/|\\\\)/i.test(src)) return all;
+            const name = attr.toLowerCase() === "xlink:href" ? "href" : attr;
             const file = imageFile(src, field, sourceDir, errors);
-            if (!file) return all;
+            if (!file) return src.startsWith("files/") ? `${head}${name}="${src}"` : all;
             files.push(file);
-            return `${head}${quote}files/${file.name}${quote}`;
+            return `${head}${name}="files/${file.name}"`;
           });
     const next: Record<string, unknown> = {};
     for (const [name, view] of Object.entries(views)) {
