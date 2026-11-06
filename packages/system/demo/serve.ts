@@ -4,6 +4,9 @@
 //
 //   ?shot=thumb                       the card picture in a message card
 //   ?shot=view&sheet=C-001&reading=simple&layout=window|pane
+//   ?shot=card&pr=2543|2563           the review card with the change picture (&gate=1: the gate only; &open=1: PR 2563 open)
+//   ?shot=change&pr=2543&view=before|after|steps   the full System view of a PR (&gate=1, &open=1 as above)
+//   ?shot=plan                        a plan drawn dashed, as Shape's System (plan) tab
 //   &mode=light|dark                  the theme mode (dark by default)
 //
 // The drawing is read from disk here and handed to the page as files; the page
@@ -11,6 +14,7 @@
 // are, not bundled: the Inbox's sheet uses CSS that Bun's CSS parser rejects.
 import { dirname, join, normalize } from 'node:path';
 import { readFiles } from '../src/node/index.ts';
+import { before2563, OPEN_2563, PLAN, prFiles } from '../test/fixtures/change.ts';
 import page from './index.html';
 
 const pkg = join(import.meta.dir, '..');
@@ -35,6 +39,11 @@ const server = Bun.serve({
   routes: {
     '/': page,
     '/files.json': async () => Response.json((await readFiles(dir)).files),
+    // the change fixtures: each PR's real files and counts, PR 2563 as it was while open, a plan
+    '/change.json': async () => {
+      const files = (await readFiles(dir)).files;
+      return Response.json({ prs: { 2543: prFiles(2543), 2563: prFiles(2563) }, before2563: before2563(files), open2563: OPEN_2563, plan: PLAN });
+    },
   },
   fetch(req) {
     const path = decodeURIComponent(new URL(req.url).pathname);

@@ -145,7 +145,7 @@
 .sys-pr-state { display: inline-flex; align-items: center; gap: 5px; font-size: var(--ib-fs-13, 13px); font-weight: 400; }
 .sys-pr-dot { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
 .sys-pr-open { color: var(--success); }
-.sys-pr-merged { color: color-mix(in oklab, var(--secondary) 80%, var(--foreground)); }
+.sys-pr-merged { color: color-mix(in oklab, var(--primary) 85%, var(--foreground)); }
 .sys-pr-closed { color: var(--destructive, var(--sys-gone-ink)); }
 .sys-legend { flex: none; list-style: none; margin: 0; padding: 9px 16px 11px; display: flex; flex-wrap: wrap; gap: 5px 20px; border-top: 1px solid var(--ib-hair, var(--border)); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.35; }
 .sys-lg-i { display: inline-flex; align-items: baseline; gap: 6px; white-space: nowrap; }

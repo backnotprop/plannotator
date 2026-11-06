@@ -13,7 +13,7 @@ import type { GateResult } from '../gate/gate.ts';
 import { applyChange } from '../change/apply.ts';
 import { changeSummary, changeWords, type ChangeFile, type ChangeSummary } from '../change/summary.ts';
 import { Sheet } from '../draw/Sheet.tsx';
-import { restLayout } from '../layout/compose.ts';
+import { hasSimple, restLayout } from '../layout/compose.ts';
 import type { Rect, SheetLayout } from '../layout/types.ts';
 import { lodAt } from './rest.ts';
 import { useSize, useText } from './text.ts';
@@ -44,6 +44,19 @@ export function changeCrop(L: SheetLayout): Rect {
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0 };
 }
 
+/** Past this many lines in the crop, a card-sized picture is a tangle: it is drawn in the Simple reading, parts only. */
+const BUSY = 16;
+const inside = (r: Rect, x: number, y: number) => x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h;
+
+/** The sheet as the card draws it: Full, or Simple when the change's part of it is crossed by many lines. */
+export function pictureLayout(model: SystemModel, code: string): SheetLayout {
+  const full = restLayout(model, code);
+  if (!hasSimple(model, code)) return full;
+  const crop = changeCrop(full);
+  const lines = full.edges.filter((e) => e.style !== 'aud' && e.pts?.some(([x, y]) => inside(crop, x, y))).length;
+  return lines > BUSY ? restLayout(model, code, { simple: true }) : full;
+}
+
 /** The change's line, each kind in its own ink. */
 export function ChangeLine({ summary }: { summary: ChangeSummary }) {
   const words = changeWords(summary);
@@ -65,7 +78,7 @@ export function SystemChangePicture({ model, change, files, onOpen }: SystemChan
   const size = useSize(ref);
   const summary = useMemo(() => changeSummary(model, change, files), [model, change, files]);
   const shown = useMemo(() => applyChange(model, change, 'after', files), [model, change, files]);
-  const L = useMemo(() => (summary.sheet ? restLayout(shown, summary.sheet) : null), [shown, summary.sheet, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
+  const L = useMemo(() => (summary.sheet ? pictureLayout(shown, summary.sheet) : null), [shown, summary.sheet, epoch]); // eslint-disable-line react-hooks/exhaustive-deps
   const crop = L ? changeCrop(L) : null;
   const w = size.w;
   const k = crop && w ? w / crop.w : 0;
