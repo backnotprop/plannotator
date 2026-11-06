@@ -76,7 +76,7 @@ export interface SearchPaletteProps {
   open: boolean;
   /** The window's phone layout: a full-screen sheet with Cancel. */
   phone: boolean;
-  /** The project open in the list: a tie boost, and the Project chip's starting value (the person can clear it). */
+  /** The project open in the list: its results come first on ties. Search still starts everywhere (owner, 2026-11-06). */
   currentProject: string | null;
   /** The projects for the Project chip, with their names as the person reads them. */
   projects: readonly { id: string; name: string; root: string; display_name?: unknown }[];
@@ -493,12 +493,12 @@ export default function SearchPalette(props: SearchPaletteProps) {
     }
   }, [open]);
 
-  // Every open starts from an empty query, All types, and the Project chip on the project open in the list.
-  const startFilters = useMemo<SearchFilters>(() => ({ ...NO_FILTERS, project: currentProject }), [currentProject]);
+  // Every open starts from an empty query, All types and no filter: everywhere, even with a project open in the list
+  // (the owner, 2026-11-06; that project's results come first on ties, `current`). The person picks a project to narrow.
   useLayoutEffect(() => {
     if (!open) return;
     setQ('');
-    setFilters(startFilters);
+    setFilters(NO_FILTERS);
     setType(null);
     setExpanded({});
     setMenu(null);
@@ -506,8 +506,6 @@ export default function SearchPalette(props: SearchPaletteProps) {
     setHl(null);
     setAnswered(null);
     setLive('');
-    // startFilters is read at the open only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   // ── requests ──
@@ -569,7 +567,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   // The first answer of an open: at once.
   useEffect(() => {
     if (!open) return;
-    run('', startFilters);
+    run('', NO_FILTERS);
     return () => {
       clearTimers();
       inflight.current?.abort();
@@ -1088,7 +1086,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
   })();
 
   const anyFilter = filtered;
-  // Results found inside a filter (a search opened from a project starts in it): say what was left out, under the list.
+  // Results found inside a filter (a project the person picked, say): say what was left out, under the list.
   // The filters the shown answer was asked with: a chip changed since keeps the line true until its own answer lands.
   const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtersSet(answered.filters) && options.length > 0);
   const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type) : [];

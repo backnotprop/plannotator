@@ -140,7 +140,7 @@ export const FROM_OPTIONS: readonly { value: InboxSearchFrom | null; label: stri
   { value: 'me', label: 'Me' },
 ];
 
-/** What a set chip reads: "Only in plannotator" (a search that starts in a project says so), "Archived", "From me". */
+/** What a set chip reads: "Only in plannotator" (a picked project says so), "Archived", "From me". */
 export function chipText(kind: keyof SearchFilters, filters: SearchFilters, projectName: (id: string) => string): string {
   if (kind === 'project') return filters.project ? `Only in ${projectName(filters.project)}` : 'All projects';
   if (kind === 'status') return STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? 'Any status';

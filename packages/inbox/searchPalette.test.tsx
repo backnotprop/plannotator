@@ -313,21 +313,41 @@ test.skipIf(!hasDom)('while an IME composes, the arrows and Escape are its own; 
   expect(closed).toEqual(['dismissed']);
 });
 
-test.skipIf(!hasDom)('chips: the Project chip starts on the current project; a menu by keys; Escape closes the menu before the palette; No matches names the scope', async () => {
+test.skipIf(!hasDom)('opened inside a project, search starts everywhere: no Only in chip, the open project only the tie boost, and other projects\' results show', async () => {
+  const api = { id: 'prj_01M4V7JERHR0Y3XQERK1MR604B', name: 'api' };
+  // A server that keeps only the asked project's rows, as the real one does.
+  respond = async (call) => {
+    const q = call.url.searchParams.get('q');
+    if (!q) return answer({});
+    const rows = [threadRow('msg_t1', 'Relay: rate limit', { title_marks: [[7, 4]] }), threadRow('msg_a1', 'API rate limit headers', { project: api, title_marks: [[4, 4]] })];
+    const only = call.url.searchParams.get('project');
+    const threads = rows.filter((row) => !only || row.project.id === only);
+    return answer({ q, terms: [q], totals: totals({ threads: threads.length }), groups: { threads }, recent: null });
+  };
+  await render({ currentProject: project.id });
+  await waitFor(() => searches().length === 1);
+  expect(searches()[0]!.url.searchParams.get('project')).toBeNull();
+  expect(searches()[0]!.url.searchParams.get('current')).toBe(project.id);
+  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('All projects');
+  expect(host!.querySelector('[data-unset="project"]')).toBeNull();
+  await type('rate');
+  await waitFor(() => options().length === 2);
+  const last = searches().at(-1)!.url.searchParams;
+  expect(last.get('project')).toBeNull();
+  expect(last.get('current')).toBe(project.id);
+  expect(options().map((o) => o.querySelector('.ib-sp-pj bdi')?.textContent)).toEqual(['plannotator', 'api']);
+  expect(host!.querySelector('[data-search-scope]')).toBeNull();
+  expect(host!.textContent).not.toContain('Only in');
+});
+
+test.skipIf(!hasDom)('chips: a menu by keys; Escape closes the menu before the palette; No matches names the scope', async () => {
   respond = async (call) => {
     if (call.url.searchParams.get('status') === 'archived') return answer({ q: 'jitter', terms: ['jitter'], totals: totals({}), groups: {}, recent: null });
     return call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({});
   };
   await render({ currentProject: project.id });
   await waitFor(() => searches().length === 1);
-  expect(searches()[0]!.url.searchParams.get('project')).toBe(project.id);
-  expect(searches()[0]!.url.searchParams.get('current')).toBe(project.id);
-  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('Only in plannotator');
-  expect(host!.querySelector('[data-unset="project"]')).not.toBeNull();
-  // Clear the project, then pick Status → Archived by keys.
-  await act(async () => {
-    host!.querySelector<HTMLElement>('[data-unset="project"]')!.click();
-  });
+  // Pick Status → Archived by keys.
   await type('jitter');
   const status = host!.querySelector<HTMLElement>('[data-chip="status"]')!;
   await act(async () => {
@@ -612,10 +632,17 @@ test.skipIf(!hasDom)('a renamed project: a thread row marks the indexed name onl
   expect(pj('msg_t3').querySelectorAll('.ib-sp-m').length).toBe(0);
 });
 
-test.skipIf(!hasDom)('started inside a project: the chip says Only in, the results say what was left out, and Search everywhere asks again everywhere', async () => {
+test.skipIf(!hasDom)('a picked project: the chip says Only in, the results say what was left out, and Search everywhere asks again everywhere', async () => {
   respond = async (call) => (call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({}));
   await render({ currentProject: project.id });
   await waitFor(() => searches().length === 1);
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-chip="project"]')!.click();
+  });
+  await act(async () => {
+    [...host!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent === 'plannotator')!.click();
+  });
+  await waitFor(() => searches().at(-1)!.url.searchParams.get('project') === project.id);
   expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('Only in plannotator');
   // No words yet: nothing to say about results.
   expect(host!.querySelector('[data-search-scope]')).toBeNull();
@@ -899,6 +926,14 @@ test.skipIf(!hasDom)('the Type chip goes back to All types on ×, on Clear filte
 
   await pickType('Files');
   await waitFor(() => groupHeadings()[0] === 'Files60');
+  // A project too (search opened in one starts everywhere), so Clear filters shows; it clears both.
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-chip="project"]')!.click();
+  });
+  await act(async () => {
+    [...host!.querySelectorAll<HTMLElement>('[role="menuitemradio"]')].find((item) => item.textContent === 'plannotator')!.click();
+  });
+  await waitFor(() => searches().at(-1)!.url.searchParams.get('project') === project.id);
   await act(async () => {
     host!.querySelector<HTMLElement>('.ib-sp-filters [data-clear-filters]')!.click();
   });
