@@ -4480,6 +4480,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // stopped before it took it (after the asker grace). Read every few seconds while the reply waits.
   const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000);
   const undelivered = !!lastTo && !last.delivery && pendingLive?.asker?.session === lastTo.session && pendingLive.asker.live === false;
+  // Taken by that session's connection, which stopped while delivering it: that session never gets it, so it may move.
+  const stuck = !!replySession && !last.delivery && pendingLive?.asker?.session === replySession && pendingLive.asker.stuck?.includes(last.id) === true;
   const recipientConnection = pendingLive?.asker?.session === recipientSession ? pendingLive?.asker?.connection : undefined;
   const ackConnection = ackWaiting && !replySession && pendingLive?.asker?.session === ackSession ? pendingLive.asker.connection : undefined;
   // A reply that tags agents (approval "inbox-tag-agents", Lines): one line per tagged session, each with
@@ -4514,6 +4516,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
+            stuck,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
@@ -4526,6 +4529,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            stuck,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
@@ -6197,10 +6201,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {sendNowError}
                   </p>
                 )}
-                {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
-                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                {/* A plain reply saved for a session that ended, or that its session took and will never deliver, moves the same way (the server checks). */}
+                {message === last && (delivered?.ended || delivered?.stuck) && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
                   <SendToAnotherSession
                     messageId={last.id}
+                    stuck={delivered.stuck === true}
                     ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
                     taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
@@ -6213,6 +6218,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
+                    stuck={delivered?.stuck === true}
                     ended={lastTo}
                     taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
