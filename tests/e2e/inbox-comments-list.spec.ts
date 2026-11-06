@@ -24,7 +24,7 @@
  */
 
 import { expect, test, type Browser, type Locator, type Page } from '@playwright/test';
-import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
+import { cardChip, countLink, fileHighlight, fileUrl, highlight, layout, onScreen, openThread, pane, pointerOffTheEdge, quietThread, rowOf, rowShown, seededThread, startWorld, stopWorld, theList, threadUrl, type ListThread, type ListWorld } from './inbox-comments-list-world';
 
 let world: ListWorld;
 
@@ -455,6 +455,7 @@ async function pinOnPage(page: Page, t: ListThread): Promise<Locator> {
   await composer.getByRole('button', { name: 'Save' }).click();
   const pin = frame.locator('[data-plannotator-marker]');
   await expect(pin).toHaveCount(1);
+  await pointerOffTheEdge(page);
   return pin;
 }
 
@@ -492,6 +493,7 @@ test('a highlight leaves the open file with its comment after Send', async ({ br
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await pane(page).locator('.ib-footrow').getByRole('button', { name: 'Send' }).click();
   await expect(pane(page).locator('[data-foot-status]')).toHaveCount(0);
   const filePane = page.locator('[data-attachment-pane]');
@@ -506,6 +508,7 @@ test('a highlight leaves the open file when the list removes its comment', async
   const t = await seededThread(world);
   await page.goto(fileUrl(world, t, t.plan, 'side'));
   await expect(fileHighlight(page)).toBeVisible();
+  await pointerOffTheEdge(page);
   await countLink(page, t.count).click();
   await rowOf(page, t.onPlan).getByRole('button', { name: 'Remove' }).click();
   await expect(rowOf(page, t.onPlan)).toHaveCount(0);
