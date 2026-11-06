@@ -54,6 +54,7 @@ import {
   rejectsLiveMessage,
   useHtmlAnnotation,
   type HtmlLiveSession,
+  type HtmlScrollClear,
 } from "./useHtmlAnnotation";
 import {
   THEME_TOKENS,
@@ -329,6 +330,11 @@ export interface HtmlViewerProps {
    *  view inside the page. Default 'smooth'; pass 'auto' to carry the
    *  parent's reduced-motion preference across the iframe boundary. */
   scrollBehavior?: 'smooth' | 'auto';
+  /** Opt-in: where the host's own panel floats over the frame's right side
+   *  (frame pixels: its left edge, top and bottom), read as an annotation is
+   *  selected. A mark under the panel scrolls clear of it, below it, where
+   *  the page can scroll. Absent or null → centred, as before. */
+  scrollClear?: () => HtmlScrollClear | null;
   /** Accessible iframe title. */
   title?: string;
   /**
@@ -484,6 +490,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       selectionActionsIcon,
       mentionSource,
       scrollBehavior,
+      scrollClear,
       title = "HTML Plan Viewer",
       bridgeScriptUrl,
       bridgeReadyTimeoutMs = DEFAULT_BRIDGE_READY_TIMEOUT_MS,
@@ -781,6 +788,7 @@ export const HtmlViewer = forwardRef<ViewerHandle, HtmlViewerProps>(
       onUnanchoredChange: handleBridgeUnanchored,
       maxAdditionalTargets,
       scrollBehavior,
+      scrollClear,
       onHostDraft: readOnly ? undefined : onHostDraft,
     });
     createdIdsRef.current = hook.createdAnnotationIds;
