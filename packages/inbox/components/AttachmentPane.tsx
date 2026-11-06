@@ -2079,6 +2079,8 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
               onHostDraft={phoneHtml && hasComposer ? htmlComment.onHostDraft : undefined}
               touchSelection={phoneHtml && hasComposer}
               rawHtml={view.html}
+              // Its own document, served under its own policy: web pictures load in the page, never in the window.
+              frameUrl={source.pageFrameUrl}
               title={attachment.name}
               annotations={annotations}
               onAddAnnotation={(annotation) => void save(annotation)}
@@ -2134,6 +2136,7 @@ export const AttachmentPane = forwardRef<AttachmentPaneHandle, AttachmentPanePro
                 ) : <HtmlViewer
                   key={`${linkedStack.length}:${linkedTop.path}`}
                   rawHtml={linkedTop.html}
+                  frameUrl={source.pageFrameUrl}
                   title={linkedTop.name}
                   annotations={NO_ANNOTATIONS}
                   onAddAnnotation={noop}

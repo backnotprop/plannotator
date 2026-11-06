@@ -1121,6 +1121,8 @@ export function resetListReads(): void {
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
+  /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
+  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
   skills: () => get<{ skills?: unknown }>(inboxUrl('/skills')),
   /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
