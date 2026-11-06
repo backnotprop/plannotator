@@ -60,7 +60,7 @@ function compileReleaseBinary(): string {
 }
 
 /**
- * An Inbox four days into use: the seeded log, Snooze's announcement shown two and a half days ago (so the 48 h spacing
+ * An Inbox four days into use: the seeded log, Snooze's announcement shown two and a half days ago (so the spacing
  * holds), every other one-time dialog and the tour behind the person, the Board never decided, and every agent's home
  * a temp folder. HOME is the world's temp folder.
  */

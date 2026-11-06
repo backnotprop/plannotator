@@ -143,10 +143,17 @@ export function replyIsStale(messages: readonly InboxMessage[], seenThroughSeq: 
  *   still running there (`setHeldSnooze`), so a copy after a newer snooze would
  *   end that one. The owner's door answers a key it has seen without running it.
  * - `file` is an upload or a drawing: never held, sent only while online.
+ * - `local` is never forwarded: `doorWriteKind` has no kind for it, so the
+ *   forward answers 404. A phone reaches it at this Inbox's own door. Reuse
+ *   (`uploads/reuse`) is useful only as its answer, the new upload's id: a held
+ *   one answers 202 with no id, so the file never reaches the reply, and is
+ *   later run for nobody, perhaps on bytes the person never saw. A second copy
+ *   at the door mints a second id; nothing names that upload, and the 24-hour
+ *   sweep takes it (the blob stays while anything else uses it).
  *
  * inbox-outbox.test.ts fails when a door write has no entry here.
  */
-export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = {
+export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file" | "local">> = {
   "POST threads/:id/seen": "set",
   "POST threads/:id/read": "set",
   "POST threads/:id/unread": "set",
@@ -172,6 +179,7 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = 
   "POST projects/:id/read": "set",
   "POST projects/:id/unread": "set",
   "POST projects/:id/resolve": "set",
+  "POST uploads/reuse": "local",
   "POST uploads": "file",
   "POST markups": "file",
   "POST link-back": "set",
@@ -180,16 +188,16 @@ export const DOOR_WRITES: Readonly<Record<string, "append" | "set" | "file">> = 
   "POST update": "set",
 };
 
-const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).map(([name, kind]) => ({
-  kind,
-  route: new RegExp(`^${name.slice("POST ".length).replaceAll(":id", "[^/]+")}$`),
-}));
+const DOOR_WRITE_ROUTES = Object.entries(DOOR_WRITES).flatMap(([name, kind]) =>
+  kind === "local" ? [] : [{ kind, route: new RegExp(`^${name.slice("POST ".length).replaceAll(":id", "[^/]+")}$`) }],
+);
 
 /**
  * The forward's one decision, by route and never by Content-Type: a `file`
  * goes straight through while the machine is online; every other write is
- * held in the outbox. Null: no door write has that route, so it is never
- * forwarded (a write rule 8 has not classified cannot reach another machine).
+ * held in the outbox. Null: no forwarded door write has that route, so it is
+ * never forwarded (a write rule 8 has not classified, or calls `local`, cannot
+ * reach another machine).
  */
 export function doorWriteKind(route: string): "append" | "set" | "file" | null {
   return DOOR_WRITE_ROUTES.find((entry) => entry.route.test(route))?.kind ?? null;

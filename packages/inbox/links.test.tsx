@@ -258,7 +258,9 @@ test('the project file a link that names no attachment may mean: relative to the
   expect(projectFileOfLink('src/a.ts')).toEqual({ path: 'src/a.ts' });
   expect(projectFileOfLink('src/a.ts#L12')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(projectFileOfLink('src/a.ts:12')).toEqual({ path: 'src/a.ts', line: 12 });
-  expect(projectFileOfLink('src/a.ts:12-20')).toEqual({ path: 'src/a.ts', line: 12 });
+  expect(projectFileOfLink('src/a.ts:12-20')).toEqual({ path: 'src/a.ts', line: 12, lineEnd: 20 });
+  expect(projectFileOfLink('src/a.ts#L12-L20')).toEqual({ path: 'src/a.ts', line: 12, lineEnd: 20 });
+  expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(projectFileOfLink('src/a.ts:12:4')).toEqual({ path: 'src/a.ts', line: 12 });
   expect(projectFileOfLink('my%20file.ts')).toEqual({ path: 'my file.ts' });
   // The path stays as written: the server knows the folder the agent wrote from.
