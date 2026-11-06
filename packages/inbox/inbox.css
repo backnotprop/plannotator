@@ -3952,7 +3952,8 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-clear { height: 32px; }
   dialog.ib-sp[data-phone] .ib-sp-frame { flex: 1; display: flex; flex-direction: column; min-height: 0; }
   dialog.ib-sp[data-phone] .ib-sp-list { max-height: none; flex: 1; padding: 6px 8px calc(6px + env(safe-area-inset-bottom)); }
-  dialog.ib-sp[data-phone] .ib-sp-row { min-height: 48px; padding: 7px 8px; gap: 10px; }
+  /* A phone keeps its 56 px rows, a comfortable tap like the Inbox's other phone lists; only the desktop rows got denser (approval "inbox-search-sort": 64 -> 54 px, shown at 1440). */
+  dialog.ib-sp[data-phone] .ib-sp-row { min-height: 56px; padding: 7px 8px; gap: 10px; }
   dialog.ib-sp[data-phone] .ib-sp-p { font-size: var(--ib-fs-14-5, 14.5px); }
   /* Under the sideways chips: the order, at a thumb's height, the two halves sharing the row. */
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort { flex: 1; flex-wrap: nowrap; margin-left: 0; padding: 2px; gap: 2px; }
