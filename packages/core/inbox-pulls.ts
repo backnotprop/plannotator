@@ -167,6 +167,17 @@ export interface InboxPullDiffAnswer {
 
 export type InboxPullDiffScope = "layer" | "stack";
 
+/**
+ * One changed file's whole text at both ends of its diff, so the viewer's gaps can open. Both null when there is
+ * nothing to open into (see `GET /api/inbox/pulls/file`): the diff then shows as it came, with no arrows.
+ */
+export interface InboxFileContents {
+  /** The forge did not answer (rate limited, offline): both texts are null for now, and asking again may work. */
+  failed?: true;
+  oldContent: string | null;
+  newContent: string | null;
+}
+
 /** The CLI's answers are this many PRs per search at most. */
 export const INBOX_PULLS_SEARCH_MAX = 50;
 /** Merged PRs are asked back this many days (to put a stack's merged layers under it). */

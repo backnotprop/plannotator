@@ -245,6 +245,22 @@ export interface ShapeNote {
   re: string | null;
   /** When an agent picked it up (`shape read`); null while it waits. */
   delivered: string | null;
+  /** A box dragged over the board: where it sits. `part` then names every part inside it, comma-separated. */
+  box?: ShapeNoteBox;
+  /** The `data-code` places inside the box ("src/a.ts#L42"). */
+  code?: string[];
+  /** A picture of the box, grown to the whole of the parts it picked, the box drawn on it: `files/…` in the store, its full path in `shape read --notes`. */
+  picture?: string;
+}
+
+/** Where a box sits, as fractions of its drawing (or of What to know). `tall` and `more`: on that layout of the view. */
+export interface ShapeNoteBox {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  tall?: true;
+  more?: true;
 }
 
 /** A Change it that no agent has picked up: "1 change waits for the agent". */
@@ -296,6 +312,8 @@ export const SHAPE_LIMITS = {
   images: 12,
   noteText: 4000,
   quote: 600,
+  /** A box's picture, as a data: URL. */
+  notePicture: 6_000_000,
 } as const;
 
 const PART_ID_RE = /^[A-Za-z][\w.-]{0,63}$/;
@@ -1218,6 +1236,24 @@ export interface ShapeNoteInput {
   part?: string | null;
   quote?: string | null;
   text: string;
+  box?: ShapeNoteBox;
+  code?: string[];
+  /** A PNG as a data: URL; the store keeps it as a file. */
+  picture?: string;
+}
+
+const NOTE_PICTURE_RE = /^data:image\/png;base64,[A-Za-z0-9+/]+={0,2}$/;
+
+function checkNoteBox(c: Checker, input: unknown): ShapeNoteBox | undefined {
+  if (input === undefined) return undefined;
+  const b = isRecord(input) ? input : {};
+  const at = [b.x, b.y, b.w, b.h];
+  if (!at.every((n) => typeof n === 'number' && n >= 0 && n <= 1)) {
+    c.fail('box', 'must be x, y, w and h, each from 0 to 1');
+    return undefined;
+  }
+  const [x, y, w, h] = at as number[];
+  return { x: x!, y: y!, w: w!, h: h!, ...(b.tall === true ? { tall: true as const } : {}), ...(b.more === true ? { more: true as const } : {}) };
 }
 
 /** Validate a person's Change it or Ask. No part: a general comment (on a view, or the whole board). */
@@ -1241,8 +1277,14 @@ export function checkShapeNoteInput(input: unknown): ShapeCheck<ShapeNoteInput> 
   if (part && !view) c.fail('view', 'is required with a part');
   const quote = c.text(input.quote, 'quote', SHAPE_LIMITS.quote, false) ?? null;
   const text = c.text(input.text, 'text', SHAPE_LIMITS.noteText);
+  const box = checkNoteBox(c, input.box);
+  if (box && !view) c.fail('view', 'is required with a box');
+  const code = input.code === undefined ? undefined : Array.isArray(input.code) && input.code.length <= 40 && input.code.every((t) => typeof t === 'string' && parseShapeCodeTarget(t)) ? (input.code as string[]) : undefined;
+  if (input.code !== undefined && !code) c.fail('code', 'must be up to 40 data-code places');
+  const picture = input.picture === undefined ? undefined : typeof input.picture === 'string' && input.picture.length <= SHAPE_LIMITS.notePicture && NOTE_PICTURE_RE.test(input.picture) ? input.picture : undefined;
+  if (input.picture !== undefined && !picture) c.fail('picture', 'must be a PNG data: URL within the limit');
   if (c.errors.length || !kind || !v || !text) return { ok: false, errors: c.errors };
-  return { ok: true, value: { kind, v, view, part, quote, text } };
+  return { ok: true, value: { kind, v, view, part, quote, text, ...(box ? { box } : {}), ...(code ? { code } : {}), ...(picture ? { picture } : {}) } };
 }
 
 /** The words a person reads on a drawing. */
@@ -1277,7 +1319,7 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   const picture = board.views.picture;
   if (!picture) return notes;
   const words = shapeDrawnWords(picture.html);
-  if (words > 80) notes.push(`The Picture has ${words} words. Nobody writes that on a whiteboard: about 60 is the aim. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
+  if (words > 240) notes.push(`The Picture has ${words} words. Read at a glance, about 200 is the most. Move the rest behind numbers (a ref's sub and images) or to views.know.`);
   if (picture.width === undefined) notes.push('The Picture has no width and height, so it scrolls like a page. Give it a fixed canvas: it then always fits one screen.');
   else if (!picture.tall) notes.push('The Picture has no tall drawing, so a phone pans it sideways. That works. For a board you expect on a phone, add views.picture.tall.');
   const cited = [...picture.html.matchAll(/\sdata-ref\s*=\s*["']?(\d{1,3})/g)].map((m) => Number(m[1]));
@@ -1289,6 +1331,14 @@ export function shapeBoardNotes(board: Pick<ShapeBoard, 'views' | 'refs'>): stri
   if (!/\sdata-mark\s*=/.test(picture.html)) notes.push('The Picture has no data-mark, so the person cannot point at a part. Put data-mark="id" on each part.');
   const seen = shapeDrawingSpan(picture.html);
   if (seen && (seen.w < 0.6 || seen.h < 0.6)) notes.push(`The drawing fills ${Math.round(seen.w * 100)}% of the canvas's width and ${Math.round(seen.h * 100)}% of its height. Spread it out, or make the viewBox fit it.`);
+  // A name `shape update` has no icon, logo or drawn thing for (shared/shape/stamps.ts leaves it empty with data-missing),
+  // in any drawing, the phone's and the more's too; each once.
+  const how = board.views.how;
+  for (const view of [picture, picture.tall, picture.more, how, how?.tall, how?.more])
+    for (const m of (view?.html ?? '').matchAll(/\sdata-missing="([^"]*)"/g)) {
+      const note = m[1]!.replace(/&quot;/g, '"').replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
+      if (!notes.includes(note)) notes.push(note);
+    }
   // A real logo keeps its own colours: the kit's marks say so with data-brand.
   const colours = [picture.html.replace(/<svg data-brand\b.*?<\/svg>/gs, ''), picture.css ?? ''].join(' ').match(/#[0-9a-f]{3,8}\b(?=[^<>]*[;"'}])|\brgba?\(/gi);
   if (colours?.length) notes.push(`The Picture has ${colours.length} fixed colours (such as ${colours[0]}), which break in light or dark. Use var(--ink), var(--grey), var(--mark) and the rest.`);

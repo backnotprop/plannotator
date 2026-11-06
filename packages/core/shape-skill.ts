@@ -33,13 +33,17 @@ export interface ShapeSkillText {
  */
 export const SHAPE_GUIDE = `## The stance
 
-- Draw a whiteboard: what you would draw in two minutes, with one marker, while you talk. No paragraphs, status lists or legends. About 60 words on the Picture.
-- The Picture says what the thing is; How it works says how it goes. So draw the thing itself: the page and what is on it, the object and what is inside it, where things live, before and after. Draw a flowchart only when the work really is a path.
-- Sharp: straight lines, one stroke weight, the board's own fonts, the one accent on the point.
-- Paste real images, not boxes that name them. If a screenshot in the folder shows the thing, open it, cut the file down to the part that matters (\`sips -c <h> <w> --cropOffset <y> <x> in.png --out crop.png\`, or any tool), and put it on the Picture beside what it shows, never over it: \`<image href="crop.png" x="…" y="…" width="…" height="…"/>\` (relative to the board file, or absolute; it is copied in). A named product the kit knows (claude, codex, opencode, pi, github, gitlab) gets its real mark: \`plannotator shape kit > kit.mjs\`, then \`tile('claude', x, y)\`. No screenshot shows this work, as in a backend change? No picture. Not in the kit? Plain text, no made-up logo.
+- Draw the thing itself, as you would on a whiteboard for someone new to it: the pieces, where each one lives, and what passes between them. Big pictures, little words, nothing key withheld.
+- Each piece: an icon, its name, and a short line or two under it (what it holds or does). Group the pieces by where they run or who owns them, and name each group. Label each arrow with what crosses it.
+- Draw things as what they are: a database as a database, a phone as a phone, a product by its real logo. Draw nothing too complex to read at a glance.
+- Sharp: straight lines, across or down, through the gaps between pieces, never through words or a piece. An arrow's label sits just above its line, clear of it. One stroke weight, the board's own fonts.
+- A few colours, each with one meaning: a soft zone per group, a small chip for a status (new, open, unproven), a red box for what must never happen. About 200 words at most; no paragraphs.
+- The Picture says what it is; How it works says how it goes. Steps in order go in How it works, not on the Picture. A flow of pictures and logos is fine when the flow is the idea.
+- Paste real images, not boxes that name them. If a screenshot in the folder shows the thing, open it, cut the file down to the part that matters (\`sips -c <h> <w> --cropOffset <y> <x> in.png --out crop.png\`, or any tool), and put it on the Picture beside what it shows, never over it: \`<image href="crop.png" x="…" y="…" width="…" height="…"/>\` (relative to the board file, or absolute; it is copied in). Icons, real logos and drawn things come by name (below). Never make up a logo.
 - What you would say aloud goes behind a number: a reference's \`sub\` (one line), and \`images\` only if the picture shows what the line says. \`crop\` picks the part to show: a whole screen is unreadable in a bubble.
 - Use the source's own words, names and numbers (the thread, the conversation, the code). Never invent data. If the source contradicts itself and nothing settles it, draw the latest statement and say it is open.
 - Commit to a clear reading. A clear picture can be corrected; a vague one cannot.
+- Handing the board to a helper or subagent? Give it the strongest model you can choose: the board is only as good as the model that draws it.
 
 ## Keeping it current
 
@@ -86,7 +90,12 @@ Draw it however you like, by hand or from a one-off script. The board makes it b
 - \`data-mark="id"\` on each part the person may point at. Keep the id across versions.
 - \`data-step="N"\` on parts that should appear together; steps arrive in number order, the order you would explain them aloud.
 - \`data-ref="n"\` is the number for reference n: empty (\`<span data-ref="n"></span>\`), the board draws it; around your own (\`<g data-ref="n">…</g>\`), yours is used.
-- Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, the one accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill), and \`var(--alert)\` for what is wrong. Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"alert"\`, \`"dash"\`, and \`"t-acc"\`, \`"t-grey"\`, \`"t-alert"\`, \`"t-mono"\` for text.
+- Colours only through the board's variables: \`var(--ink)\`, \`var(--ink2)\`, \`var(--grey)\`, \`var(--rule)\`, \`var(--paper)\`, \`var(--surface)\`, \`var(--sunk)\`, the accent \`var(--mark)\` (\`var(--mark-soft)\` for a fill), \`var(--alert)\` for what is wrong (\`var(--alert-soft)\`), and for zones \`var(--blue)\`, \`var(--amber)\`, \`var(--green)\` and \`var(--plum)\`, each with a \`-soft\` fill. Then light and dark both work. In SVG: \`class="line"\`, \`"grey"\`, \`"acc"\`, \`"acc-fill"\`, \`"alert"\`, \`"dash"\`, and \`"t-acc"\`, \`"t-grey"\`, \`"t-alert"\`, \`"t-mono"\` for text.
+- Icons, logos and drawn things by name; the store draws them:
+  - \`<svg data-icon="server" x="…" y="…" width="28" height="28"/>\`: any Lucide icon (lucide.dev), in the ink, or \`style="color:var(--blue)"\`.
+  - \`<svg data-logo="stripe" x="…" y="…" width="40" height="40"/>\`: a product's real logo, in its own colours. Simple Icons names: stripe, postgresql, redis, supabase, cloudflare, vercel, google, apple, github, claude… \`shape update\` says when there is none: then its name in words, with an icon.
+  - \`<svg data-draw="database" x="…" y="…" width="160" height="120" data-label="Postgres"/>\`: a drawn database, server, phone, laptop, browser, envelope or queue. Its \`data-label\` is written on it, or just under a server, queue or envelope: leave the 30 px under those free.
+  - \`data-to="x y"\` on one of them sends it there again and again, as an envelope crossing a wire. It holds still for anyone who turns motion off. Once on a board, where the movement is the point.
 - Nothing from outside: no scripts, no event handlers, no \`<style>\` in the HTML (use \`css\`), no external images, fonts or \`url()\`, no iframes, forms or popovers. The store refuses them and says which.
 - Links: \`#id\` scrolls inside the drawing; an https link opens in a new tab.
 - A phone shows the board narrow. For a wide How it works, add \`"tall": { "html": … }\` with the same parts stacked about 400 px wide.
