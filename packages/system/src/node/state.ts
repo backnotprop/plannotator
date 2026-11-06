@@ -1,11 +1,17 @@
-// The files System keeps per project in the Inbox's data folder:
+// The files System keeps per project in the Inbox's data folder. The drawing
+// lives here, never in the person's repo (owner ruling 2026-11-06, q-122e6577):
 //
 //   <dataDir>/system/<project key>/setup.json   the person's choices (written by the Inbox)
 //   <dataDir>/system/<project key>/state.json   what the scheduled check last did (written by tick)
 //   <dataDir>/system/<project key>/tick.lock    the pid of a running tick
-//   <dataDir>/system/<project key>/worktree/    the drawing's own git worktree
+//   <dataDir>/system/<project key>/drawing/     the drawing: system.yaml, sheets/, revisions/
+//   <dataDir>/system/<project key>/source/      a clone of the project, at the default branch, for the agent to read
+//   <dataDir>/system/<project key>/redraw/      a redraw in progress: a copy of drawing/ the agent edits
+//   <dataDir>/system/<project key>/previous/    the drawing before the last redraw
+//   <dataDir>/system/<project key>/redraw-summary.txt  the redraw agent's sentences, read and deleted by the tick
 //   <dataDir>/system/<project key>/reviews/     revisions of open pull requests
-//   <dataDir>/system/<project key>/failed/      what a refused redraw left, by commit
+//   <dataDir>/system/<project key>/changed/     files a redraw agent changed in source/, by commit
+//   <dataDir>/system/<project key>/failed/      what a refused or cut-off redraw left
 //
 // Every function takes `dataDir`; nothing here reads ~/.plannotator itself.
 import { mkdir, readFile, rename, unlink, writeFile } from 'node:fs/promises';
@@ -25,8 +31,13 @@ export function systemPaths(dataDir: string, key: string) {
     setup: join(dir, 'setup.json'),
     state: join(dir, 'state.json'),
     lock: join(dir, 'tick.lock'),
-    worktree: join(dir, 'worktree'),
+    drawing: join(dir, 'drawing'),
+    source: join(dir, 'source'),
+    redraw: join(dir, 'redraw'),
+    previous: join(dir, 'previous'),
+    summary: join(dir, 'redraw-summary.txt'),
     reviews: join(dir, 'reviews'),
+    changed: join(dir, 'changed'),
     failed: join(dir, 'failed'),
   };
 }
@@ -37,21 +48,20 @@ export type TickState = {
   gated: string | null;
   gated_at: string | null;
   redrew_at: string | null;
-  /** The open redraw pull request's link, once one was opened. */
-  redraw_pr: string | null;
   /** Why the last tick failed, or null. */
   last_error: string | null;
   /** The commit a refused or failed redraw was for: the agent is not run again until main moves past it. */
   failed: string | null;
   /**
-   * The last time the tick found its own redraw worktree left dirty (a redraw
-   * cut off by a reboot, a logout or a kill) and set it aside to go on: when,
-   * and where the files it left are kept.
+   * The last time the tick found a redraw cut off before it ended (by a
+   * reboot, a logout or a kill: its copy of the drawing left in redraw/, or
+   * changes left in source/) and set it aside to go on: when, and where the
+   * files it left are kept.
    */
   set_aside: string | null;
 };
 
-export const EMPTY_STATE: TickState = { v: 1, gated: null, gated_at: null, redrew_at: null, redraw_pr: null, last_error: null, failed: null, set_aside: null };
+export const EMPTY_STATE: TickState = { v: 1, gated: null, gated_at: null, redrew_at: null, last_error: null, failed: null, set_aside: null };
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
 
@@ -70,7 +80,7 @@ export async function readState(dataDir: string, key: string): Promise<TickState
     const v = JSON.parse(await readFile(systemPaths(dataDir, key).state, 'utf8')) as Record<string, unknown>;
     if (v?.v !== 1) return { ...EMPTY_STATE };
     return {
-      v: 1, gated: str(v.gated), gated_at: str(v.gated_at), redrew_at: str(v.redrew_at), redraw_pr: str(v.redraw_pr),
+      v: 1, gated: str(v.gated), gated_at: str(v.gated_at), redrew_at: str(v.redrew_at),
       last_error: str(v.last_error), failed: str(v.failed), set_aside: str(v.set_aside),
     };
   } catch {

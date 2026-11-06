@@ -1,30 +1,28 @@
 # Draw a pull request's change on the system
 
-A pull request is open and you are reviewing it. The project has a drawing of its system in `.plannotator/system/`
-on its default branch. You draw how this pull request changes that drawing, so the person sees the change in place:
-added parts green, changed parts amber, removed parts grey. You write one revision file and hand it to Plannotator.
-You never commit it and never push it to the pull request's branch. The format is at the end of these instructions,
-under "System format 1"; a revision is under "revisions/<id>.yaml".
+A pull request is open and you are reviewing it. The project has a drawing of its system in the drawing folder, in
+Plannotator's own folder on this Mac. You draw how this pull request changes that drawing, so the person sees the change
+in place: added parts green, changed parts amber, removed parts grey. You write one revision file and hand it to
+Plannotator. You never commit it and never push it to the pull request's branch. The format is at the end of these
+instructions, under "System format 1"; a revision is under "revisions/<id>.yaml".
 
-You need four facts: the project's folder, the pull request (`host/owner/repo#n`), its head commit and its base
-branch. When Plannotator hands you this job they are listed above these instructions; otherwise take them from the
-review you are doing.
+You need five facts: the project's folder, the drawing folder, the pull request (`host/owner/repo#n`), its head commit
+and its base branch. When Plannotator hands you this job they are listed above these instructions; otherwise take them
+from the review you are doing.
 
 ## Steps
 
 1. **Ask the check first.** Find the merge base: `git -C <project folder> merge-base origin/<base> <head>`. Run
-   `plannotator system gate --project <project folder> --from <merge base> --to <head>`, with the merge base as the
-   sha `merge-base` printed: the gate diffs exactly the two commits it is given and finds no merge base itself. It
-   reads the drawing on disk in the project folder, whichever branch is checked out there, so run it where the base
-   branch is checked out: `touched` then names the parts and lines of the drawing the change lands on. It prints JSON: `touched`
+   `plannotator system gate --project <project folder> --dir <drawing folder> --from <merge base> --to <head>`, with
+   the merge base as the sha `merge-base` printed: the gate diffs exactly the two commits it is given and finds no
+   merge base itself. It reads the drawing in the drawing folder: `touched` then names the parts and lines of the
+   drawing the change lands on. It prints JSON: `touched`
    (the parts and lines that cite a changed file), `wake` and `why`. If `wake` is false, stop here: the change is
    drawn from `touched` alone, with no revision from you.
 
-2. **Read the drawing as committed** on the base branch:
-   `git -C <project folder> show origin/<base>:.plannotator/system/system.yaml`, and each sheet the touched parts are
-   on (`git -C <project folder> grep -l <part id> origin/<base> -- .plannotator/system/sheets` lists them;
-   `git -C <project folder> show origin/<base>:.plannotator/system/sheets/<CODE>.yaml` reads one). Note the ids of
-   the parts, lines and bands you will name.
+2. **Read the drawing** in the drawing folder: `<drawing folder>/system.yaml`, and each sheet the touched parts are
+   on (`grep -l <part id> <drawing folder>/sheets/*.yaml` lists them; `<drawing folder>/sheets/<CODE>.yaml` is one).
+   Note the ids of the parts, lines and bands you will name.
 
 3. **Read the change.** `git -C <project folder> diff --name-status -M <merge base> <head>` and
    `git -C <project folder> diff --numstat <merge base> <head>`, then the diff of every changed file the gate did not

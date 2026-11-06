@@ -1,16 +1,19 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Forge, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
+import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
 import { git, isolateGitConfig, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 // A real project: a bare origin in a temp folder (a local path, no network),
 // a teammate's clone that lands commits on main, and the person's clone that
-// the tick runs in. The agent is a scripted stand-in: a shell script that
-// edits the drawing as a redraw would, because no model is called in tests.
-// It proves the plumbing (gate, worktree, check, commit, push, state.json,
-// the lock), not drawing quality, which a live run proves (step A8).
+// the tick reads. The drawing lives in the data folder, never in a repo. The
+// agent is a scripted stand-in: a shell script that edits the drawing as a
+// redraw would, because no model is called in tests. It proves the plumbing
+// (source clone, gate, the drawing's copy, check, state.json, the lock, and
+// nothing written in the person's repo), not drawing quality, which a live
+// run proves (step A8).
 
 isolateGitConfig();
 const IDENTITY = { GIT_AUTHOR_NAME: 'Alex Rivera', GIT_AUTHOR_EMAIL: 'alex@example.com', GIT_COMMITTER_NAME: 'Alex Rivera', GIT_COMMITTER_EMAIL: 'alex@example.com' };
@@ -49,11 +52,11 @@ const killPidFile = (pidFile: string) => {
 
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
 
-/** The drawing in the teammate's clone, drawn at `at`. */
+/** The drawing, drawn at `at`, as it sits in the drawing folder. */
 const drawing = (at: string) => {
   const files = smallDrawing();
   files['system.yaml'] = files['system.yaml']!.replace('at: 1a2b3c4', `at: "${at}"`);
-  return Object.fromEntries(Object.entries(files).map(([k, v]) => [`.plannotator/system/${k}`, v]));
+  return files;
 };
 
 function project(o: { drawn?: boolean } = {}) {
@@ -70,15 +73,11 @@ function project(o: { drawn?: boolean } = {}) {
   git(team, 'add', '-A');
   git(team, 'commit', '-q', '-m', 'the code');
   const drawnAt = git(team, 'rev-parse', 'HEAD').trim();
-  if (o.drawn !== false) {
-    writeTree(team, drawing(drawnAt));
-    git(team, 'add', '-A');
-    git(team, 'commit', '-q', '-m', 'System: first drawing of small (#3)');
-  }
   git(team, 'push', '-q', 'origin', 'main');
   git(t.dir, 'clone', '-q', origin, root);
   const p = systemPaths(dataDir, KEY);
   mkdirSync(p.dir, { recursive: true });
+  if (o.drawn !== false) writeTree(p.drawing, drawing(drawnAt));
   writeFileSync(p.setup, JSON.stringify({ v: 1, repos: [], docs: ['https://docs.example.com/', 'https://127.0.0.1/'], agent: 'claude', model: 'claude-opus-5-5', thread_message: 'msg_7' }));
   /** Land a commit on main from the teammate's clone. */
   const land = (files: Record<string, string>, message: string) => {
@@ -91,15 +90,15 @@ function project(o: { drawn?: boolean } = {}) {
   return { dir: t.dir, origin, team, root, dataDir, paths: p, land, drawnAt };
 }
 
-/** A stand-in agent: runs `script` with sh in the worktree; records each prompt. */
+/** A stand-in agent: runs `script` with sh in the source clone, with $DRAWING and $SUMMARY set; records each prompt. */
 function scriptAgent(script: string): { runAgent: RunAgent; prompts: string[] } {
   const prompts: string[] = [];
   return {
     prompts,
-    runAgent: async ({ cwd, prompt }) => {
+    runAgent: async ({ cwd, drawing, summaryFile, prompt }) => {
       prompts.push(prompt);
       try {
-        return { ok: true, output: execFileSync('sh', ['-c', script], { cwd, encoding: 'utf8' }) };
+        return { ok: true, output: execFileSync('sh', ['-c', script], { cwd, env: { ...process.env, DRAWING: drawing, SUMMARY: summaryFile }, encoding: 'utf8' }) };
       } catch (e) {
         return { ok: false, output: String((e as Error).message) };
       }
@@ -109,62 +108,83 @@ function scriptAgent(script: string): { runAgent: RunAgent; prompts: string[] } 
 
 /** The redraw a person would accept: a new part `jobs` for the new file, placed on L-101, and one sentence. */
 const ADD_JOBS = `
-cat >> .plannotator/system/system.yaml <<'YAML'
+cat >> "$DRAWING/system.yaml" <<'YAML'
   jobs: { from: app, to: api, says: runs jobs }
 YAML
-perl -0pi -e 's/(  api: \\{ in: app, name: API, code: \\{ src\\/api: every route \\} \\}\\n)/$1  jobsp: { in: app, name: Jobs, code: { src\\/jobs.ts: the job runner } }\\n/' .plannotator/system/system.yaml
-perl -pi -e 's/row: \\[api\\]/row: [api, jobsp]/' .plannotator/system/sheets/L-101.yaml
-printf 'On the app sheet, the app now runs jobs.\\n' > .plannotator/redraw-summary.txt
+perl -0pi -e 's/(  api: \\{ in: app, name: API, code: \\{ src\\/api: every route \\} \\}\\n)/$1  jobsp: { in: app, name: Jobs, code: { src\\/jobs.ts: the job runner } }\\n/' "$DRAWING/system.yaml"
+perl -pi -e 's/row: \\[api\\]/row: [api, jobsp]/' "$DRAWING/sheets/L-101.yaml"
+printf 'On the app sheet, the app now runs jobs.\\n' > "$SUMMARY"
 `;
 
 function fakes() {
-  const opened: Parameters<Forge['openPr']>[0][] = [];
   const notes: Parameters<Notify>[0][] = [];
-  let open: string | null = null;
-  const forge: Forge = {
-    findOpenPr: async () => open,
-    openPr: async (o) => {
-      opened.push(o);
-      open = 'https://example.com/acme/small/pull/7';
-      return open;
-    },
-  };
   const notify: Notify = async (o) => {
     notes.push(o);
   };
-  return { forge, notify, opened, notes };
+  return { notify, notes };
 }
 
 const noAgent: RunAgent = async () => {
   throw new Error('the agent must not run');
 };
-/** For ticks that must not reach the forge or the Inbox: never the real gh or plannotator. */
-const noForge: Forge = {
-  findOpenPr: async () => {
-    throw new Error('the forge must not be asked');
-  },
-  openPr: async () => {
-    throw new Error('the forge must not be asked');
-  },
-};
+/** For ticks that must not reach the Inbox: never the real plannotator. */
 const noNotify: Notify = async () => {
   throw new Error('no note must be sent');
 };
-const NONE: TickDeps = { runAgent: noAgent, forge: noForge, notify: noNotify };
+const NONE: TickDeps = { runAgent: noAgent, notify: noNotify };
+
+/** The drawing folder's files, by path. */
+const drawingFiles = (dir: string) => {
+  const out: Record<string, string> = {};
+  const walk = (rel: string) => {
+    for (const e of readdirSync(join(dir, rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(r);
+      else out[r] = readFileSync(join(dir, r), 'utf8');
+    }
+  };
+  walk('');
+  return out;
+};
+
+/** Everything a tick could change in the person's repo: git status, the refs, the config, worktrees, and every file under .git but the index. */
+function repoSnapshot(root: string) {
+  const files: string[] = [];
+  const walk = (rel: string) => {
+    for (const e of readdirSync(join(root, '.git', rel), { withFileTypes: true })) {
+      const r = rel ? `${rel}/${e.name}` : e.name;
+      if (e.isDirectory()) walk(r);
+      else if (r !== 'index') files.push(`${r} ${createHash('sha256').update(readFileSync(join(root, '.git', r))).digest('hex')}`);
+    }
+  };
+  const status = git(root, 'status', '--porcelain=v2', '--branch', '--untracked-files=all', '--ignored');
+  walk('');
+  return {
+    status,
+    refs: git(root, 'for-each-ref', '--format=%(refname) %(objectname)'),
+    head: git(root, 'rev-parse', 'HEAD'),
+    config: readFileSync(join(root, '.git', 'config'), 'utf8'),
+    worktrees: existsSync(join(root, '.git', 'worktrees')) ? readdirSync(join(root, '.git', 'worktrees')) : null,
+    files: files.sort(),
+  };
+}
 
 describe('tick', () => {
-  test('not set up, or no drawing on main yet: nothing runs', async () => {
+  test('not set up, or no drawing yet: nothing runs', async () => {
     const p = project({ drawn: false });
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: 'other-000000', deps: NONE })).toMatchObject({ ran: 'nothing', why: 'not set up: no setup.json for this project' });
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'no drawing on main yet' });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'no drawing yet' });
+    expect(existsSync(p.paths.source)).toBe(false);
   });
 
-  test('the commit that added the drawing is gated with no agent; then main has not moved and nothing runs', async () => {
+  test("a drawing drawn at main's tip: the source clone is made at the tip, and nothing runs", async () => {
     const p = project();
-    const tip = git(p.root, 'rev-parse', 'origin/main').trim();
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toEqual({ ran: 'gated', gated: tip });
     const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE });
-    expect(r).toMatchObject({ ran: 'nothing', why: 'main has not moved' });
+    expect(r).toMatchObject({ ran: 'nothing', why: 'main has not moved', gated: p.drawnAt });
+    expect(git(p.paths.source, 'rev-parse', 'HEAD').trim()).toBe(p.drawnAt);
+    expect(git(p.paths.source, 'status', '--porcelain')).toBe('');
+    // its objects are borrowed from the person's repo, read only
+    expect(readFileSync(join(p.paths.source, '.git', 'objects', 'info', 'alternates'), 'utf8')).toContain(join(p.root, '.git', 'objects'));
     expect(existsSync(p.paths.lock)).toBe(false);
   });
 
@@ -175,6 +195,7 @@ describe('tick', () => {
     const first = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent('true').runAgent, ...fakes() } });
     expect(first.ran).toBe('gated'); // the stand-in changed nothing: the drawing stands
     expect(first.gated).toBe(tip);
+    expect(existsSync(p.paths.redraw)).toBe(false);
     const tip2 = p.land({ 'src/util.ts': 'y\n', 'docs/guide.md': 'more\n' }, 'edit util');
     const now = new Date('2026-11-06T12:00:00Z');
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: NONE })).toEqual({ ran: 'gated', gated: tip2 });
@@ -183,19 +204,23 @@ describe('tick', () => {
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing' });
   });
 
-  test('an added file wakes the agent: the redraw is committed on its own branch, pushed, offered as one PR, and noted once', async () => {
+  test('an added file wakes the agent: the drawing is redrawn in its own folder, drawn at the tip, and noted once', async () => {
     const p = project();
     const reviews = join(p.paths.reviews, 'example.com', 'acme', 'small');
     mkdirSync(reviews, { recursive: true });
     writeFileSync(join(reviews, '12@abc1234.yaml'), 'revision: PR-12\n');
+    const before = drawingFiles(p.paths.drawing);
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const agent = scriptAgent(ADD_JOBS);
     const f = fakes();
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, forge: f.forge, notify: f.notify } });
-    expect(r).toMatchObject({ ran: 'redrew', gated: tip, pr: 'https://example.com/acme/small/pull/7' });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, notify: f.notify } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
 
-    // the agent was told what landed, why it woke, and where to write
+    // the agent was told what landed, why it woke, and where to read and write
     const prompt = agent.prompts[0]!;
+    expect(prompt).toContain(`already at the new commit: ${p.paths.source}`);
+    expect(prompt).toContain(`to edit the drawing in: ${p.paths.redraw}`);
+    expect(prompt).toContain(`The summary file: ${p.paths.summary}`);
     expect(prompt).toContain(`set sources.repos.self.at to it): ${tip}`);
     expect(prompt).toContain('  - src/jobs.ts (added)');
     expect(prompt).toContain('  - PR 12');
@@ -203,97 +228,118 @@ describe('tick', () => {
     expect(prompt).toContain('  - https://docs.example.com/');
     expect(prompt).not.toContain('127.0.0.1');
 
-    // the redraw branch on origin: one commit on top of main's tip, touching only the drawing, drawn at the tip
-    const head = git(p.origin, 'rev-parse', 'refs/heads/plannotator/system-redraw').trim();
-    expect(git(p.origin, 'rev-parse', `${head}^`).trim()).toBe(tip);
-    expect(git(p.origin, 'diff', '--name-only', tip, head).trim().split('\n').sort()).toEqual(['.plannotator/system/sheets/L-101.yaml', '.plannotator/system/system.yaml']);
-    expect(git(p.origin, 'show', `${head}:.plannotator/system/system.yaml`)).toContain(`self: { repo: example.com/acme/small, at: "${tip}" }`);
-    expect(git(p.origin, 'log', '-1', '--format=%s', head).trim()).toBe('System: redraw for PR 12');
-    // main is untouched
+    // the drawing folder holds the redraw, drawn at the tip; the one before is kept; no copy or summary is left
+    const after = drawingFiles(p.paths.drawing);
+    expect(after['system.yaml']).toContain(`self: { repo: example.com/acme/small, at: "${tip}" }`);
+    expect(after['system.yaml']).toContain('jobsp: { in: app, name: Jobs');
+    expect(after['sheets/L-101.yaml']).toContain('row: [api, jobsp]');
+    expect(drawingFiles(p.paths.previous)).toEqual(before);
+    expect(existsSync(p.paths.redraw)).toBe(false);
+    expect(existsSync(p.paths.summary)).toBe(false);
+
+    // nothing was pushed: origin has main only, untouched
+    expect(git(p.origin, 'for-each-ref', '--format=%(refname)').trim()).toBe('refs/heads/main');
     expect(git(p.origin, 'rev-parse', 'refs/heads/main').trim()).toBe(tip);
 
-    expect(f.opened).toEqual([{ cwd: p.paths.worktree, base: 'main', head: 'plannotator/system-redraw', title: 'System: redraw for PR 12', body: expect.stringContaining('src/jobs.ts (added)') }]);
     expect(f.notes).toHaveLength(1);
     expect(f.notes[0]).toMatchObject({ project: p.root, replyTo: 'msg_7' });
-    expect(f.notes[0]!.body).toBe(`Main moved to ${tip.slice(0, 7)}. PR 12 landed: On the app sheet, the app now runs jobs. 1 part and 1 line changed. Redraw: https://example.com/acme/small/pull/7`);
+    expect(f.notes[0]!.body).toBe(`Main moved to ${tip.slice(0, 7)}. PR 12 landed: On the app sheet, the app now runs jobs. 1 part and 1 line changed.`);
 
-    expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: tip, redraw_pr: 'https://example.com/acme/small/pull/7', last_error: null, failed: null });
-    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: tip, last_error: null, failed: null });
+    expect(git(p.paths.source, 'rev-parse', 'HEAD').trim()).toBe(tip);
+    expect(git(p.paths.source, 'status', '--porcelain')).toBe('');
     expect(existsSync(p.paths.lock)).toBe(false);
   });
 
-  test('while the redraw PR is open, the next redraw adds to the same branch with main merged in, never forced', async () => {
+  test('a full tick leaves the person\'s repo byte for byte as it was: status, refs, config, worktrees and every file under .git', async () => {
+    const p = project();
+    const before = repoSnapshot(p.root);
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const agent = `${ADD_JOBS}
+echo changed > src/main.ts
+echo extra > src/extra.ts && git add src/extra.ts && git commit -q -m "the agent's own commit"`;
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(agent).runAgent, ...fakes() } })).toMatchObject({ ran: 'redrew', gated: tip });
+    expect(repoSnapshot(p.root)).toEqual(before);
+    // the person never fetched, and the tick still saw what merged
+    expect(git(p.root, 'rev-parse', 'origin/main').trim()).toBe(p.drawnAt);
+    // and a gated tick, and a tick with nothing to do, leave it as it was too
+    p.land({ 'src/util.ts': 'x\n' }, 'add util');
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent('true').runAgent, ...fakes() } })).ran).toBe('gated');
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('nothing');
+    expect(repoSnapshot(p.root)).toEqual(before);
+  });
+
+  test('the next redraw starts from the redrawn drawing', async () => {
     const p = project();
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const f = fakes();
-    const first = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, forge: f.forge, notify: f.notify } });
-    expect(first.ran).toBe('redrew');
-    const firstHead = git(p.origin, 'rev-parse', 'refs/heads/plannotator/system-redraw').trim();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, notify: f.notify } })).ran).toBe('redrew');
 
     const tip = p.land({ 'src/mail.ts': 'mail\n' }, 'Merge pull request #13 from acme/mail');
     const second = scriptAgent(`
-perl -0pi -e 's/(  jobsp: [^\\n]*\\n)/$1  mail: { in: app, name: Mail, code: { src\\/mail.ts: sends mail } }\\n/' .plannotator/system/system.yaml
-perl -pi -e 's/row: \\[api, jobsp\\]/row: [api, jobsp, mail]/' .plannotator/system/sheets/L-101.yaml
-echo 'On the app sheet, the app sends mail' > .plannotator/redraw-summary.txt
+perl -0pi -e 's/(  jobsp: [^\\n]*\\n)/$1  mail: { in: app, name: Mail, code: { src\\/mail.ts: sends mail } }\\n/' "$DRAWING/system.yaml"
+perl -pi -e 's/row: \\[api, jobsp\\]/row: [api, jobsp, mail]/' "$DRAWING/sheets/L-101.yaml"
+echo 'On the app sheet, the app sends mail' > "$SUMMARY"
 `);
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: second.runAgent, forge: f.forge, notify: f.notify } });
-    expect(r).toMatchObject({ ran: 'redrew', gated: tip, pr: 'https://example.com/acme/small/pull/7' });
-    expect(f.opened).toHaveLength(1);
-    const head = git(p.origin, 'rev-parse', 'refs/heads/plannotator/system-redraw').trim();
-    for (const ancestor of [firstHead, tip]) expect(() => git(p.origin, 'merge-base', '--is-ancestor', ancestor, head)).not.toThrow();
-    expect(f.notes[1]!.body).toBe(`Main moved to ${tip.slice(0, 7)}. PR 13 landed: On the app sheet, the app sends mail. 1 part changed. Redraw: https://example.com/acme/small/pull/7`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: second.runAgent, notify: f.notify } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
+    expect(drawingFiles(p.paths.drawing)['sheets/L-101.yaml']).toContain('row: [api, jobsp, mail]');
+    expect(f.notes[1]!.body).toBe(`Main moved to ${tip.slice(0, 7)}. PR 13 landed: On the app sheet, the app sends mail. 1 part changed.`);
   });
 
-  test('files the agent changed outside the drawing, its own commits included, stay in the redraw and are named in the PR and the note', async () => {
+  test('files the agent changed in the source clone, its own commits included, are named in the note, kept, and the clone put back', async () => {
     const p = project();
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
     const f = fakes();
     const agent = scriptAgent(`${ADD_JOBS}
 echo extra > src/extra.ts && git add src/extra.ts && git commit -q -m "the agent's own commit"
 echo changed > src/main.ts`);
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, forge: f.forge, notify: f.notify } });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, notify: f.notify } });
     expect(r.ran).toBe('redrew');
-    const head = git(p.origin, 'rev-parse', 'refs/heads/plannotator/system-redraw').trim();
-    expect(git(p.origin, 'diff', '--name-only', tip, head).trim().split('\n').sort()).toEqual([
-      '.plannotator/system/sheets/L-101.yaml', '.plannotator/system/system.yaml', 'src/extra.ts', 'src/main.ts',
-    ]);
-    // the summary file is never committed
-    expect(git(p.origin, 'ls-tree', '-r', '--name-only', head)).not.toContain('redraw-summary.txt');
-    expect(f.opened[0]!.body).toContain('This redraw also changed files outside the drawing:\n- src/extra.ts\n- src/main.ts');
     expect(f.notes[0]!.body).toContain('This redraw also changed: src/extra.ts, src/main.ts.');
-    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
+    expect(readFileSync(join(p.paths.changed, tip, 'src', 'main.ts'), 'utf8')).toBe('changed\n');
+    expect(git(p.paths.source, 'rev-parse', 'HEAD').trim()).toBe(tip);
+    expect(git(p.paths.source, 'status', '--porcelain')).toBe('');
+    expect(git(p.origin, 'for-each-ref', '--format=%(refname)').trim()).toBe('refs/heads/main');
   });
 
-  test('an agent that throws midway is set aside: the worktree is clean and its files are kept', async () => {
+  test('an agent that throws midway is set aside: the last good drawing stays, its partial copy is kept, the clone is clean', async () => {
     const p = project();
+    const before = drawingFiles(p.paths.drawing);
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
     const f = fakes();
-    const runAgent: RunAgent = async ({ cwd }) => {
-      writeFileSync(join(cwd, '.plannotator', 'system', 'half.yaml'), 'half\n');
+    const runAgent: RunAgent = async ({ drawing }) => {
+      writeFileSync(join(drawing, 'sheets', 'half.yaml'), 'half\n');
       throw new Error('the agent process went away');
     };
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent, forge: f.forge, notify: f.notify } });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent, notify: f.notify } });
     expect(r).toMatchObject({ ran: 'failed', error: 'the agent process went away' });
-    expect(readFileSync(join(p.paths.failed, tip, '.plannotator', 'system', 'half.yaml'), 'utf8')).toBe('half\n');
-    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
+    expect(readFileSync(join(p.paths.failed, tip, 'drawing', 'sheets', 'half.yaml'), 'utf8')).toBe('half\n');
+    expect(drawingFiles(p.paths.drawing)).toEqual(before);
+    expect(existsSync(p.paths.redraw)).toBe(false);
+    expect(git(p.paths.source, 'status', '--porcelain')).toBe('');
     expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip });
+    expect(f.notes).toEqual([]);
   });
 
-  test('a redraw cut off before it ended (a dirty worktree) does not stop later ticks: it is set aside, recorded, and the redraw goes on', async () => {
+  test('a redraw cut off before it ended does not stop later ticks: its copy and its clone changes are set aside, recorded, and the redraw goes on', async () => {
     const p = project();
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const f = fakes();
-    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, forge: f.forge, notify: f.notify } })).ran).toBe('redrew');
-    // a later redraw was killed with its edits in the worktree
-    writeFileSync(join(p.paths.worktree, '.plannotator', 'system', 'system.yaml'), 'cut off\n');
-    writeFileSync(join(p.paths.worktree, 'stray.txt'), 'stray\n');
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, notify: f.notify } })).ran).toBe('redrew');
+    const good = drawingFiles(p.paths.drawing);
+    // a later redraw was killed with its copy of the drawing half written and a file in the clone
+    mkdirSync(p.paths.redraw, { recursive: true });
+    writeFileSync(join(p.paths.redraw, 'system.yaml'), 'cut off\n');
+    writeFileSync(join(p.paths.source, 'stray.txt'), 'stray\n');
     const tip = p.land({ 'src/mail.ts': 'mail\n' }, 'Add mail (#13)');
     const now = new Date('2026-11-07T08:00:00Z');
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: scriptAgent("echo 'On the app sheet, nothing moved.' > .plannotator/redraw-summary.txt").runAgent, forge: f.forge, notify: f.notify } });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: scriptAgent('echo "On the app sheet, nothing moved." > "$SUMMARY"').runAgent, notify: f.notify } });
     expect(r).toMatchObject({ ran: 'gated', gated: tip });
     const kept = join(p.paths.failed, 'interrupted-2026-11-07T08-00-00-000Z');
-    expect(readFileSync(join(kept, '.plannotator', 'system', 'system.yaml'), 'utf8')).toBe('cut off\n');
-    expect(readFileSync(join(kept, 'stray.txt'), 'utf8')).toBe('stray\n');
+    expect(readFileSync(join(kept, 'drawing', 'system.yaml'), 'utf8')).toBe('cut off\n');
+    expect(readFileSync(join(kept, 'source', 'stray.txt'), 'utf8')).toBe('stray\n');
+    expect(drawingFiles(p.paths.drawing)).toEqual(good);
     const state = await readState(p.dataDir, KEY);
     expect(state.set_aside).toContain(kept);
     expect(state).toMatchObject({ gated: tip, last_error: null, failed: null });
@@ -310,7 +356,6 @@ echo changed > src/main.ts`);
         'const [root, dataDir, key, pidFile] = process.argv.slice(2);',
         'await tick({ root, dataDir, key, deps: {',
         "  agentCommand: () => ({ command: ['sh', '-c', `sleep 30 & echo $! > '${pidFile}'; wait`], stdin: null }),",
-        "  forge: { findOpenPr: async () => null, openPr: async () => 'https://example.com/pull/1' },",
         '  notify: async () => {},',
         '} });',
         '',
@@ -344,7 +389,7 @@ echo changed > src/main.ts`);
     try {
       const r = await tick({
         root: p.root, dataDir: p.dataDir, key: KEY,
-        deps: { agentCommand: () => ({ command: ['sh', '-c', `${escapee(pidFile)}; sleep 30`], stdin: null }), agentTimeoutMs: 300, forge: f.forge, notify: f.notify },
+        deps: { agentCommand: () => ({ command: ['sh', '-c', `${escapee(pidFile)}; sleep 30`], stdin: null }), agentTimeoutMs: 300, notify: f.notify },
       });
       expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('stopped after') });
       expect(Date.now() - started).toBeLessThan(300 + 5000 + 4000);
@@ -361,7 +406,7 @@ echo changed > src/main.ts`);
     const started = Date.now();
     const r = await tick({
       root: p.root, dataDir: p.dataDir, key: KEY,
-      deps: { agentCommand: () => ({ command: ['sh', '-c', 'sleep 30'], stdin: null }), agentTimeoutMs: 300, forge: f.forge, notify: f.notify },
+      deps: { agentCommand: () => ({ command: ['sh', '-c', 'sleep 30'], stdin: null }), agentTimeoutMs: 300, notify: f.notify },
     });
     expect(Date.now() - started).toBeLessThan(15_000);
     expect(r).toMatchObject({ ran: 'failed', error: 'the agent did not finish: the agent was stopped after 0 seconds with no end' });
@@ -369,15 +414,18 @@ echo changed > src/main.ts`);
     expect(existsSync(p.paths.lock)).toBe(false);
   });
 
-  test('a redraw that does not check clean is refused, naming the problem', async () => {
+  test('a redraw that does not check clean is refused, naming the problem; the drawing stays and no note goes', async () => {
     const p = project();
-    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+    const before = drawingFiles(p.paths.drawing);
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
     const f = fakes();
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent("perl -pi -e 's/row: \\[api\\]/row: [api, ghost]/' .plannotator/system/sheets/L-101.yaml").runAgent, ...f } });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(`perl -pi -e 's/row: \\[api\\]/row: [api, ghost]/' "$DRAWING/sheets/L-101.yaml"`).runAgent, ...f } });
     expect(r.ran).toBe('failed');
     expect(r.error).toContain('the redraw does not check clean: sheets/L-101.yaml');
     expect(r.error).toContain('unknown part "ghost"');
-    expect(f.opened).toEqual([]);
+    expect(drawingFiles(p.paths.drawing)).toEqual(before);
+    expect(readFileSync(join(p.paths.failed, tip, 'drawing', 'sheets', 'L-101.yaml'), 'utf8')).toContain('ghost');
+    expect(f.notes).toEqual([]);
   });
 
   test('an agent that fails is a failed tick with its last words', async () => {
@@ -387,34 +435,18 @@ echo changed > src/main.ts`);
     expect(r).toMatchObject({ ran: 'failed', error: 'the agent did not finish: model not found' });
   });
 
-  test('when the forge cannot be asked, no model runs', async () => {
+  test('when the remote cannot be fetched, no model runs, and the next tick tries again', async () => {
     const p = project();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('nothing'); // the source clone is made
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
-    const deps: TickDeps = {
-      runAgent: noAgent,
-      forge: { findOpenPr: async () => { throw new Error('gh pr list: not signed in'); }, openPr: async () => '' },
-      notify: noNotify,
-    };
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps })).toMatchObject({ ran: 'failed', error: 'gh pr list: not signed in' });
+    renameSync(p.origin, `${p.origin}.away`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('git fetch') });
     // nothing was spent, so the next tick tries again
-    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: 'gh pr list: not signed in' });
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } });
-    expect(r.ran).toBe('redrew');
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: expect.stringContaining('git fetch') });
+    renameSync(`${p.origin}.away`, p.origin);
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
     expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: null, last_error: null });
-  });
-
-  test('a push origin refuses after the agent ran is a failed redraw: no PR, no note, the worktree clean', async () => {
-    const p = project();
-    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
-    writeFileSync(join(p.origin, 'hooks', 'pre-receive'), '#!/bin/sh\necho "refused by the test" >&2\nexit 1\n', { mode: 0o755 });
-    const f = fakes();
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, forge: f.forge, notify: f.notify } });
-    expect(r.ran).toBe('failed');
-    expect(r.error).toContain('refused by the test');
-    expect(f.opened).toEqual([]);
-    expect(f.notes).toEqual([]);
-    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip });
-    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
   });
 
   test('a live tick holds the lock; a dead one is taken over', async () => {
@@ -468,11 +500,11 @@ test('a redraw prompt lists the pull request that renamed a drawn file', async (
 });
 
 test('redrawNote: the words of the note', () => {
-  const base = { to: '9c41e07aaaa', pr: 'https://example.com/pull/9' };
+  const base = { to: '9c41e07aaaa' };
   expect(redrawNote({ ...base, prs: [1335], summary: 'On the Desktop app sheet, stable now shows a corner, not a header.', count: { parts: 1, flows: 0 } }))
-    .toBe('Main moved to 9c41e07. PR 1335 landed: On the Desktop app sheet, stable now shows a corner, not a header. 1 part changed. Redraw: https://example.com/pull/9');
-  expect(redrawNote({ ...base, prs: [], summary: '', count: { parts: 0, flows: 2 } })).toBe('Main moved to 9c41e07. 2 lines changed. Redraw: https://example.com/pull/9');
-  expect(redrawNote({ ...base, prs: [4, 5], summary: '', count: { parts: 2, flows: 0 } })).toBe('Main moved to 9c41e07. PRs 4, 5 landed. 2 parts changed. Redraw: https://example.com/pull/9');
+    .toBe('Main moved to 9c41e07. PR 1335 landed: On the Desktop app sheet, stable now shows a corner, not a header. 1 part changed.');
+  expect(redrawNote({ ...base, prs: [], summary: '', count: { parts: 0, flows: 2 } })).toBe('Main moved to 9c41e07. 2 lines changed.');
+  expect(redrawNote({ ...base, prs: [4, 5], summary: '', count: { parts: 2, flows: 0 }, also: ['src/a.ts'] })).toBe('Main moved to 9c41e07. PRs 4, 5 landed. 2 parts changed. This redraw also changed: src/a.ts.');
 });
 
 test('a command past its time bound is stopped with its whole process group, children included', async () => {
