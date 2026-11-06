@@ -24,7 +24,7 @@
 
 import { existsSync, lstatSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { dirname, isAbsolute, join, resolve } from "node:path";
 import { citations, formatIssue, MAX_FILE_BYTES, parseRevision, type LoadIssue } from "@plannotator/system";
 import {
   check,
@@ -34,6 +34,7 @@ import {
   launchAgentsDir,
   load,
   loadCommitted,
+  overfullPlacements,
   schedule,
   SYSTEM_TICK_INTERVAL_SECONDS,
   systemPaths,
@@ -216,7 +217,7 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
       const by = citedBy[m]?.length ? `cited by ${citedBy[m]!.join(", ")}; ` : "";
       lines.push(`missing: ${m} (${by}${where})`);
     }
-    if (clean) lines.push(`clean: ${relative(deps.cwd, dir) || "."}`);
+    if (clean) lines.push(`clean: ${resolve(dir)}`);
     await out(lines.join("\n"));
   }
   if (clean) return 0;
@@ -328,6 +329,9 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
     for (const p of problems) err(`revision_refused: ${formatIssue(p)}`);
     return 1;
   }
+
+  // stored anyway: the renderer narrows the parts to fit
+  for (const w of overfullPlacements(committed.model, revision)) err(`warning: ${formatIssue(w)}`);
 
   const project = await resolveInboxProjectRoot(root);
   // the Inbox's own key for this folder, as the Shape store files under it

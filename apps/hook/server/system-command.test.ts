@@ -178,7 +178,7 @@ describe("plannotator system check", () => {
     const yaml = join(box.repo, ".plannotator/system/system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/database.ts", "src/store/db.ts"));
     const fixed = await cli(box, ["check"]);
-    expect(fixed).toEqual({ code: 0, stdout: "clean: .plannotator/system\n", stderr: "" });
+    expect(fixed).toEqual({ code: 0, stdout: `clean: ${join(box.repo, ".plannotator/system")}\n`, stderr: "" });
   }, 30_000);
 
   test("a line's missing end is named by its end; a path cited twice names both fields", async () => {
@@ -392,6 +392,20 @@ describe("plannotator system revision", () => {
     expect(other.code).toBe(1);
     expect(other.stderr).toBe("revision_refused: revision pr: is 13; --pr says 12\n");
     expect(existsSync(join(box.dataDir, "system"))).toBe(false);
+  }, 30_000);
+
+  test("warns on stderr when a placement takes a band past 12 columns, and stores it anyway; 12 is quiet", async () => {
+    const box = sandbox();
+    const sheet = join(box.repo, ".plannotator/system/sheets/L-101.yaml");
+    writeFileSync(sheet, readFileSync(sheet, "utf8").replace("row: [store, mail]", "row: [store 6, mail 4]"));
+    commit(box.repo, "System: widen the work band");
+    const args = ["revision", "--project", box.repo, "--pr", "example.com/acme/ledger#12", "--head", "a5cb1c9", "-"];
+    const over = await cli(box, args, { stdin: REVISION.replace("after: mail }", "after: mail, span: 4 }") });
+    expect(over.code).toBe(0);
+    expect(over.stderr).toBe("warning: revision add.place.L-101.receipt: takes band work of sheets/L-101.yaml to 14 columns; a band holds at most 12\n");
+    expect(JSON.parse(over.stdout).revision).toBe("PR-12");
+    const fits = await cli(box, args, { stdin: REVISION.replace("after: mail }", "after: mail, span: 2 }") });
+    expect(fits).toMatchObject({ code: 0, stderr: "" });
   }, 30_000);
 
   test("loads against the committed drawing, not an edit on disk", async () => {
