@@ -1190,7 +1190,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    it fits, nothing moves; when it does not, the chip goes to a second row instead of being cut off. */
 .ib-pfoot > .ib-acts { flex-wrap: wrap; }
 /* The closed foot (approval "thread-foot-status-right", option A): the buttons on the left in today's order,
-   the draft status and the skip chip at the row's right end. Two flex items, so the row breaks only between
+   the draft status at the row's right end (the skip chip moved into the open questions list, approval
+   "reply-bar-pairs"; a phone draws no status, its Edit draft carries the draft's count). Two flex items, so the row breaks only between
    them: wrap-reverse puts the status's line ABOVE the buttons when the row cannot hold both, and
    space-between aligns a line holding one item to the start. Direction-aware, so RTL mirrors. */
 .ib-pfoot > .ib-acts.ib-footrow { flex-wrap: wrap-reverse; justify-content: space-between; row-gap: 8px; }
@@ -1203,10 +1204,9 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
    and the text itself keep them. */
 /* Step 0: the keycaps go first; they are for the eye only (aria-keyshortcuts and the map keep the key). */
 .ib-footrow[data-fit~="keys"] .ib-btn-kbd { display: none; }
-.ib-footrow[data-fit~="skip"] .ib-skipchip .ib-fl,
 .ib-footrow[data-fit~="edit"] [data-edit-draft] .ib-fl,
 .ib-footrow[data-fit~="draft"] .ib-draft-foot .ib-st { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
-/* Step 4 drops the pick words; the comment count stays, as a glyph and the number inside the Draft pill
+/* The draft step drops the pick words; the comment count stays, as a glyph and the number inside the Draft pill
    ("Draft 💬3"; aria-hidden, the words "3 comments" stay as hidden text). No comments: "Draft" alone. */
 .ib-draft-comma { font-size: 0; }
 .ib-draft-pc { display: none; align-items: center; gap: 3px; margin-left: 5px; font-variant-numeric: tabular-nums; }
@@ -1219,13 +1219,8 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .pn-inbox .ib-footrow[data-fit~="tight"] .ib-draft-pc { margin-left: 4px; }
 .pn-inbox .ib-footrow[data-fit~="tight"] .ib-footbtns .ib-btn { padding-left: 10px; padding-right: 10px; gap: 5px; }
 .pn-inbox .ib-footrow[data-fit~="tight"] .ib-oq-btn .ib-oq-chev { display: none; }
-/* A phone only, after tight: Edit draft as its pencil (its words stay as hidden text, so the name is still
-   "Edit draft"), and the gaps 4 px. */
-.pn-inbox .ib-footrow[data-fit~="icon"] { column-gap: 4px; }
-.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns,
-.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footstatus { gap: 4px; }
-.pn-inbox .ib-footrow[data-fit~="icon"] .ib-footbtns .ib-btn[data-edit-draft] { width: 44px; padding-left: 0; padding-right: 0; justify-content: center; }
-.ib-footrow[data-fit~="icon"] [data-edit-draft] > span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; margin: 0; }
+/* A phone's Edit draft (approval "reply-bar-pairs"): "✎ Draft 2", the count quieter than the word. */
+.ib-draft-n { font-variant-numeric: tabular-nums; font-weight: 600; color: var(--muted-foreground); }
 .ib-error[data-foot-error="above"] { margin: 0 0 8px; }
 .ib-reply-l { font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); margin-bottom: 6px; }
 .ib-rbox { border: 1px solid color-mix(in oklch, var(--primary) 60%, transparent); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 14%, transparent); border-radius: 8px; background: var(--card); margin-bottom: 10px; }
@@ -5346,6 +5341,16 @@ ol.ib-rl-two .ib-rw-cmd { font-weight: 400; margin-top: 6px; }
 .ib-oq-pos[data-phone] .ib-oq-selbar { padding: 8px 0 0; }
 .ib-oq-pos[data-phone] .ib-oq-bbtn { height: 44px; padding: 0 16px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
 .ib-oq-pos[data-phone] .ib-oq-bbtn.ib-oq-pri { flex: 1 1 auto; }
+/* The list's skip row (approval "reply-bar-pairs"): what this Send does with the unanswered questions, and the toggle. */
+.ib-oq-skiprow { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 0 8px; align-items: center; flex: none; min-height: 40px; padding: 2px 2px 2px 8px; }
+.ib-oq-skipico { display: grid; place-items: center; color: var(--muted-foreground); }
+.ib-oq-skipwords { min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); color: var(--foreground); line-height: 1.35; }
+.ib-oq-skipbtn { display: inline-flex; align-items: center; justify-content: center; min-height: 32px; padding: 0 12px; border-radius: var(--ib-lr-sm, 8px); box-shadow: inset 0 0 0 1px var(--border); font-size: var(--ib-fs-13, 13px); font-weight: 500; color: var(--foreground); white-space: nowrap; cursor: default; outline: none; user-select: none; }
+.ib-oq-skipbtn[data-highlighted] { background: var(--ib-hover-s, var(--ib-hover)); }
+.ib-oq-skipbtn:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
+.ib-oq-pos[data-phone] .ib-oq-skiprow { grid-template-columns: 24px minmax(0, 1fr) auto; gap: 0 12px; min-height: 52px; }
+.ib-oq-pos[data-phone] .ib-oq-skipwords { font-size: var(--ib-fs-15, 15px); }
+.ib-oq-pos[data-phone] .ib-oq-skipbtn { min-height: 44px; padding: 0 16px; border-radius: 12px; font-size: var(--ib-fs-15, 15px); }
 
 /* ── Thread steps (approval "inbox-thread-steps", A1 "Linear"; the mock's round-3 rules, source/steps.css) ──
    One text weight; colour only on the step in progress (primary) and the step that waits on the person (amber).
@@ -7466,6 +7471,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox button.ib-comments-link::after { content: ""; position: absolute; inset: -11px -6px; }
 .pn-inbox button.ib-draft-pc.ib-comments-link { text-decoration: none; }
 .pn-inbox button.ib-draft-pc.ib-comments-link:hover { color: inherit; text-decoration: underline; }
+/* At the foot row's right end the link's hit area stops at its own edge: past it, it widened the row (scrollWidth) by 6 px. */
+.pn-inbox .ib-footrow .ib-st > button.ib-comments-link:last-child::after { right: 0; }
 /* Step 4 clips the words out of sight (footFit.ts): the pill's count is the way in, and the words leave the Tab order. */
 .ib-footrow[data-fit~="draft"] .ib-draft-foot .ib-st .ib-comments-link { visibility: hidden; }
 .pn-inbox button.ib-fcomp-chip { border: 0; font: inherit; font-weight: 600; cursor: pointer; }

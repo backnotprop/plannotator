@@ -98,6 +98,25 @@ export interface OpenQuestionsButtonProps {
   /** The button's keycap and `aria-keyshortcuts`, from the registry (the caller reads them; this draws them). */
   keyHint?: ReactNode;
   keyShortcuts?: string;
+  /**
+   * What this Send does with the unanswered questions (approval "reply-bar-pairs", which moved the foot's
+   * "N questions stay open · Skip them" chip here; approval "inbox-explicit-skip"): the list's first row, and
+   * "N to skip" on the button once skipped. Absent or no unanswered question: no row.
+   */
+  skip?: OpenQuestionsSkip | null;
+}
+
+/** The list's skip row: the count it speaks of, whether this Send keeps them open (the default), and the toggle. */
+export interface OpenQuestionsSkip {
+  count: number;
+  keepOpen: boolean;
+  onToggle: () => void;
+}
+
+/** The skip row's words: "6 stay open when you send" / "6 skipped when you send". */
+export function skipRowWords(skip: OpenQuestionsSkip): string {
+  const n = formatCount(skip.count);
+  return skip.keepOpen ? `${n} ${skip.count === 1 ? 'stays' : 'stay'} open when you send` : `${n} skipped when you send`;
 }
 
 /**
@@ -115,7 +134,7 @@ export interface OpenQuestionsButtonProps {
  * usual spacing and then a tighter one; a phone tries the long form first too.
  * The name always holds the whole count.
  */
-export function OpenQuestionsButton({ questions, actions = [], reask = null, decide = null, triggerRef, phone, measure, onPick, onPickAction, onSetSkipped, rowForm = null, openRequest = 0, keyHint = null, keyShortcuts }: OpenQuestionsButtonProps) {
+export function OpenQuestionsButton({ questions, actions = [], reask = null, decide = null, triggerRef, phone, measure, onPick, onPickAction, onSetSkipped, rowForm = null, openRequest = 0, keyHint = null, keyShortcuts, skip = null }: OpenQuestionsButtonProps) {
   const [open, setOpen] = useState(false);
   /** Select mode (approval "oq-skip-select"): rows are checkboxes; ticks save nothing until the bar's button. */
   const [selecting, setSelecting] = useState(false);
@@ -135,11 +154,15 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
   // The list is drawn inside the window's root, so the window's styles (and theme) reach it.
   const [portal, setPortal] = useState<HTMLElement | null>(null);
   useLayoutEffect(() => setPortal(trigger.current?.closest<HTMLElement>('.pn-inbox') ?? null), []);
-  // The button counts both kinds: "3 open questions", "1 open action item", "2 questions, 1 action item".
-  const n = questions.length;
+  // The button counts both kinds: "3 open questions", "1 open action item", "2 questions, 1 action item". Only the
+  // unanswered questions: one picked and not sent is the draft's to count (approval "reply-bar-pairs"); its row stays.
+  const n = questions.filter((q) => !q.picked).length;
   const a = actions.length;
   // Only a launched agent's permission prompts wait (no other question, no action item): "1 permission waiting" (screen 09).
   const permission = a === 0 && n > 0 && questions.every((q) => isInboxPermissionSession(q.question.asked_by_agent_id));
+  // This Send skips the unanswered questions: "6 to skip", with the skip glyph.
+  const skipRow = skip && skip.count > 0 ? skip : null;
+  const skipping = skipRow !== null && !skipRow.keepOpen;
   const reaskTipId = useId();
   const skipTipId = useId();
   // The long form first on a phone too (owner, 2026-10-30: "it should say both"); "5 open" and "5" when it does not fit.
@@ -160,7 +183,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       if (!button || !words.current || !buttons || !row) return;
       if (rowForm) {
         // The row chose: draw it (the row's own fit already left the page this way).
-        fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}`;
+        fittedFor.current = `row:${rowForm}|${n}|${a}|${permission}|${skipping}`;
         const next = { form: rowForm, tight: false };
         drawOpenQuestionsForm(button, next);
         // The row's `steps` step narrows the checklist there (data-fit), not this fit.
@@ -172,7 +195,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         .filter((el) => el !== button)
         .map((el) => el.textContent ?? '')
         .join('|');
-      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${max}|${others}`;
+      const key = `${row.getBoundingClientRect().width}|${n}|${a}|${permission}|${skipping}|${max}|${others}`;
       if (!force && key === fittedFor.current) return;
       fittedFor.current = key;
       // The checklist button beside it gives way first (its chevron), so these words stay whole longest.
@@ -187,7 +210,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       apply(next);
       setFitted((current) => (current.form === next.form && current.tight === next.tight ? current : next));
     },
-    [n, a, permission, max, rowForm],
+    [n, a, permission, skipping, max, rowForm],
   );
   // Every render: a button beside it may have come or gone (Send, 👍) with no resize.
   useLayoutEffect(() => fit());
@@ -218,8 +241,14 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
       }, 0);
     };
   }, []);
-  const label = permission ? openQuestionsLabel(n, 'permission') : openItemsLabel(n, a);
-  const heading = permission ? openQuestionsHeading(n, 'permission') : openItemsHeading(n, a);
+  const label =
+    n + a === 0
+      ? 'Questions'
+      : permission
+        ? openQuestionsLabel(n, 'permission')
+        : `${openItemsLabel(n, a)}${skipping ? ', skipped when you send' : ''}`;
+  // The list's name counts its rows: a question in the draft is listed too ("Draft · Yes").
+  const heading = permission ? openQuestionsHeading(questions.length, 'permission') : openItemsHeading(questions.length, a);
 
   // Skipping from the list (approval "oq-skip-select", variant A).
   const canSkip = !!onSetSkipped && questions.some(openQuestionSkippable);
@@ -362,7 +391,7 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         className="ib-btn ib-oq-btn"
         data-open-questions=""
         // A shorter form ("5 open", "5"): the name keeps the whole count.
-        aria-label={form === 'full' ? undefined : label}
+        aria-label={form === 'full' && !skipping ? undefined : label}
         aria-keyshortcuts={keyShortcuts}
         data-label-form={form}
         data-fit-tight={tight ? '' : undefined}
@@ -370,11 +399,12 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
         data-oq-n={n}
         data-oq-actions={a}
         data-oq-permission={permission ? '' : undefined}
+        data-oq-skipping={skipping ? '' : undefined}
         data-oq-label={label}
       >
-        <Icon name="question" size={15} />
+        <Icon name={skipping ? 'forward' : 'question'} size={15} />
         <span ref={words} data-oq-words="">
-          {openQuestionsFormText(n, form, a, permission)}
+          {openQuestionsFormText(n, form, a, permission, skipping)}
         </span>
         {keyHint}
         <span className="ib-oq-chev" aria-hidden="true">
@@ -417,6 +447,29 @@ export function OpenQuestionsButton({ questions, actions = [], reask = null, dec
                 <span aria-hidden="true">{ticks.size > 0 ? `${formatCount(ticks.size)} selected` : 'Select questions to skip'}</span>
                 {phone && skipAllButton}
               </div>
+            )}
+            {/* What this Send does with the unanswered questions (the foot's skip chip, moved here): its words and
+                Skip them / Keep open, which leaves the list open so the person sees the change. Not in select mode. */}
+            {skipRow && !selecting && (
+              <>
+                <div className="ib-oq-skiprow" role="none" data-open-questions-skip-row={skipRow.keepOpen ? 'keep' : 'skip'}>
+                  <span className="ib-oq-skipico" aria-hidden="true">
+                    <Icon name={skipRow.keepOpen ? 'question' : 'forward'} size={phone ? 16 : 14} />
+                  </span>
+                  <span className="ib-oq-skipwords">{skipRowWords(skipRow)}</span>
+                  <Menu.Item
+                    className="ib-oq-skipbtn"
+                    data-skip-toggle=""
+                    label={skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}
+                    aria-label={`${skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}: ${skipRowWords(skipRow)}`}
+                    closeOnClick={false}
+                    onClick={() => skipRow.onToggle()}
+                  >
+                    {skipRow.keepOpen ? `Skip ${skipRow.count === 1 ? 'it' : 'them'}` : 'Keep open'}
+                  </Menu.Item>
+                </div>
+                <Menu.Separator className="ib-oq-sep" />
+              </>
             )}
             {/* Decision mode's way in: the same dialog, scoped to this thread. Not while choosing what to skip. */}
             {decide && !selecting && (

@@ -18,6 +18,9 @@
  * (approval "oq-skip-select", variant A): no Skip on a row, a skipped row
  * quiet at rest, "Skip…" entering a select mode whose ticks save nothing until
  * "Skip N", which saves what the card's own Skip saves; then the phone sheet.
+ * The button counts only the unanswered questions (approval "reply-bar-pairs":
+ * a picked one is the draft's to count, its row stays), and with a pick waiting
+ * the list's first row is this Send's skip (the foot's old skip chip).
  *
  * Build the binary first (see inbox.spec.ts), then `bun run test:e2e:inbox`.
  * PNGs (desktop 1440 and a phone, light and dark) land in
@@ -173,8 +176,9 @@ test('desktop: the button sits after Edit draft, its list names state and place,
   await expect(pane.getByRole('heading', { name: 'Retry worker for failed Stripe charges' })).toBeVisible();
   const foot = pane.locator('.ib-pfoot');
   const button = foot.locator('[data-open-questions]');
-  // 6 open: the queue, rate limits, the 409, the flag (picked), the new logging one, the runbook. The replaced one is left out.
-  await expect(button).toHaveText('6 open questions');
+  // 6 listed: the queue, rate limits, the 409, the flag (picked), the new logging one, the runbook. The replaced one is
+  // left out. The button counts the 5 unanswered: the flag is in the draft (approval "reply-bar-pairs").
+  await expect(button).toHaveText('5 open questions');
   await expect(button).toHaveAttribute('aria-haspopup', 'menu');
   await expect(button).toHaveAttribute('aria-expanded', 'false');
   await expect(foot.getByRole('button', { name: 'Re-ask', exact: true })).toHaveCount(0);
@@ -182,8 +186,8 @@ test('desktop: the button sits after Edit draft, its list names state and place,
   const [re, oq] = await Promise.all([edit.boundingBox(), button.boundingBox()]);
   expect(Math.abs(re!.y - oq!.y)).toBeLessThanOrEqual(1);
   expect(oq!.x).toBeGreaterThan(re!.x);
-  // The skip chip is unchanged beside it.
-  await expect(foot.locator('[data-skip-chip]')).toContainText('questions stay open');
+  // No skip chip beside it: this Send's skip is the list's first row.
+  await expect(foot.locator('[data-skip-chip]')).toHaveCount(0);
 
   await button.click();
   const list = page.locator('[data-open-questions-list]');
@@ -196,10 +200,12 @@ test('desktop: the button sits after Edit draft, its list names state and place,
   await expect(list).not.toContainText('Choose one');
   const rows = list.locator('.ib-oq-row');
   await expect(rows).toHaveCount(6);
-  // The rows, then the last row: Re-ask and "Skip…" (approval "oq-skip-select"). No Skip on any row.
-  await expect(list.getByRole('menuitem')).toHaveCount(8);
+  // This Send's skip first, the rows, then the last row: Re-ask and "Skip…" (approval "oq-skip-select"). No Skip on any row.
+  await expect(list.getByRole('menuitem')).toHaveCount(9);
+  await expect(list.locator('[data-open-questions-skip-row]')).toContainText('5 stay open when you send');
+  await expect(list.getByRole('menuitem').first()).toHaveText('Skip them');
   await expect(list.locator('[data-open-question-skip]')).toHaveCount(0);
-  await expect(list.getByRole('menuitem').nth(6)).toHaveText('Re-ask in one new message');
+  await expect(list.getByRole('menuitem').nth(7)).toHaveText('Re-ask in one new message');
   await expect(list.getByRole('menuitem').last()).toHaveText('Skip…');
   await expect(rows.nth(1)).toContainText('How many times should a rate-limited charge be retried?');
   await expect(rows.nth(1).locator('.ib-oq-when')).toHaveText(/ · in a folded message$/);
@@ -243,10 +249,10 @@ test('phone (WebKit, iPhone 15) with a pick waiting: the buttons on one row, and
       const page = await context.newPage();
       await page.goto(`${world.url}#thread=${world.threadId}`);
       const button = page.locator('.ib-pfoot [data-open-questions]');
-      // A pick waits: Send, Edit draft and this button share one row, so the label is as short as it must be.
-      await expect(page.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('1 pick');
-      await expect(button).toHaveText(/^6( open)?$/);
-      await expect(button).toHaveAttribute('aria-label', '6 open questions');
+      // A pick waits: Send, Draft 1 and this button share one row, so the label is as short as it must be.
+      await expect(page.locator('.ib-pfoot [data-edit-draft] [data-draft-count]')).toHaveText('1');
+      await expect(button).toHaveText(/^5( open( questions)?)?$/);
+      await expect(button).toHaveAccessibleName('5 open questions');
       expect((await button.boundingBox())!.height).toBeGreaterThanOrEqual(44);
       await expectOneRow(page);
       await button.click();
@@ -282,8 +288,8 @@ test('beside a file (the 440 px thread column) with a pick waiting: every foot b
     await expect(pane.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('1 pick');
     const button = pane.locator('.ib-pfoot [data-open-questions]');
     // Without a Re-ask button beside it (it is in the list now) the full words may fit; the name is whole either way.
-    await expect(button).toHaveAccessibleName('6 open questions');
-    await expect(button).toHaveText(/^6( open)?( questions)?$/);
+    await expect(button).toHaveAccessibleName('5 open questions');
+    await expect(button).toHaveText(/^5( open)?( questions)?$/);
     await expectOneRow(page);
     if (width === 1280) {
       await page.mouse.move(10, 10);
@@ -293,7 +299,7 @@ test('beside a file (the 440 px thread column) with a pick waiting: every foot b
   await page.setViewportSize({ width: 1440, height: 900 });
   // Without a file the full words come back.
   await page.goto(`${world.url}#thread=${world.threadId}`);
-  await expect(page.locator('section.ib-pane .ib-pfoot [data-open-questions]')).toHaveText('6 open questions');
+  await expect(page.locator('section.ib-pane .ib-pfoot [data-open-questions]')).toHaveText('5 open questions');
   expect(world.errors).toEqual([]);
 });
 
@@ -302,8 +308,8 @@ test('phone (Chromium, Pixel 7) with a pick waiting: every foot button on one ro
   try {
     const page = await context.newPage();
     await page.goto(`${world.url}#thread=${world.threadId}`);
-    await expect(page.locator('.ib-pfoot [data-foot-status] [data-draft-foot]')).toContainText('1 pick');
-    await expect(page.locator('.ib-pfoot [data-open-questions]')).toHaveAttribute('aria-label', '6 open questions');
+    await expect(page.locator('.ib-pfoot [data-edit-draft] [data-draft-count]')).toHaveText('1');
+    await expect(page.locator('.ib-pfoot [data-open-questions]')).toHaveAccessibleName('5 open questions');
     await expectOneRow(page);
     await shot(page, 'fix-phone-412-pick');
   } finally {
@@ -432,7 +438,8 @@ test('Skip from the list: "Skip…", tick two, "Skip 2" saves what the card\'s S
     await expect(row(id)).toHaveAttribute('data-skipped', '');
   }
   expect(skipShape(byCard.answer)).toMatchObject({ selected: [], skipped: true });
-  await expect(button).toHaveText('6 open questions');
+  // Saved skips are answers in the draft: the button counts the 2 still unanswered (the 409 and the logging one).
+  await expect(button).toHaveText('2 open questions');
   // At rest again: three skipped rows, quiet.
   await page.mouse.move(10, 10);
   for (const scheme of ['light', 'dark'] as const) {
