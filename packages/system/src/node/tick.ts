@@ -12,8 +12,9 @@
 // agent runs as it normally does, with its full tools (owner ruling
 // 2026-11-06: no limits on agents); whatever it changes is offered in the
 // redraw pull request for the person to review, and files outside the drawing
-// are named there and in the note. Every child process has a time bound, so a
-// hung agent, git, hook or gh cannot hold the schedule. The agent, the forge
+// are named there and in the note. Every child the tick starts itself has a
+// time bound, so a hung agent, git, hook or gh cannot hold the schedule, and
+// a tick that is stopped (Ctrl-C, `schedule remove`) stops its children too. The agent, the forge
 // (gh) and the note are injectable so the whole path runs in tests with no
 // model, no network and no real gh.
 //
@@ -21,8 +22,9 @@
 // redraw branch, gh signed out, a time bound hit) and a set-aside worktree are
 // recorded only in state.json (`last_error`, `set_aside`). The Inbox's System
 // thread should surface them; that is a follow-up on the Inbox side.
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
 import { constants } from 'node:fs';
+import { constants as osConstants } from 'node:os';
 import { access, cp, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
@@ -93,43 +95,123 @@ export type Run = { code: number; stdout: string; stderr: string; timedOut: bool
 
 const minutes = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`);
 
+/** How long a stopped child gets after SIGTERM before SIGKILL, and how long its pipes may stay open after it ends. */
+const KILL_GRACE_MS = 5000;
+
+/** Stop a child and everything it started: its process group, or on Windows its process tree. */
+function killGroup(pid: number, signal: NodeJS.Signals): void {
+  try {
+    if (process.platform === 'win32') spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore', windowsHide: true });
+    else process.kill(-pid, signal);
+  } catch {
+    // already gone
+  }
+}
+
+// The children running now, by pid. Each runs in its own process group, so
+// a signal to the tick does not reach them by itself: while any runs, the tick
+// passes SIGINT, SIGTERM and SIGHUP on to every group, and SIGKILLs them at exit.
+const live = new Set<number>();
+const STOP_SIGNALS = ['SIGINT', 'SIGTERM', 'SIGHUP'] as const;
+let stopping: NodeJS.Signals | null = null;
+let exitWhenStopped: (() => void) | null = null;
+let exitHooked = false;
+
+function onStopSignal(signal: NodeJS.Signals): void {
+  if (stopping) return;
+  stopping = signal;
+  for (const pid of live) killGroup(pid, 'SIGTERM');
+  // with no other listener the signal would have ended the process: end it,
+  // once the children are gone or the grace runs out
+  const sole = process.listenerCount(signal) <= 1;
+  const end = () => {
+    for (const pid of live) killGroup(pid, 'SIGKILL');
+    if (sole) process.exit(128 + (osConstants.signals[signal] ?? 0));
+    // another listener kept the process: it may start commands again
+    stopping = null;
+    exitWhenStopped = null;
+    if (!live.size) for (const s of STOP_SIGNALS) process.off(s, onStopSignal);
+  };
+  const hard = setTimeout(end, KILL_GRACE_MS);
+  if (!sole) hard.unref();
+  exitWhenStopped = () => {
+    clearTimeout(hard);
+    end();
+  };
+}
+
+function track(pid: number): void {
+  if (!exitHooked) {
+    exitHooked = true;
+    process.on('exit', () => {
+      for (const p of live) killGroup(p, 'SIGKILL');
+    });
+  }
+  if (!live.size && !stopping) for (const s of STOP_SIGNALS) process.on(s, onStopSignal);
+  live.add(pid);
+}
+
+function untrack(pid: number): void {
+  if (!live.delete(pid) || live.size) return;
+  if (stopping) exitWhenStopped?.();
+  else for (const s of STOP_SIGNALS) process.off(s, onStopSignal);
+}
+
 /**
  * Run one command to the end, or until `timeoutMs`: then its process group
  * (it and everything it started) is stopped and `timedOut` is set. Output past
- * `keep` bytes keeps only its tail.
+ * `keep` bytes keeps only its tail. It returns once the command has ended and
+ * its pipes are closed, or KILL_GRACE_MS after it ended when something that
+ * left its group still holds them.
  */
 export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; stdin?: string | null; env?: Record<string, string>; keep?: number }): Promise<Run> {
   const keep = o.keep ?? 16 * 1024 * 1024;
+  if (stopping) return Promise.resolve({ code: 1, stdout: '', stderr: `not started: the tick got ${stopping}`, timedOut: false });
   return new Promise((done) => {
     // its own process group, so a stop reaches what it started too
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
+    const child = spawn(argv[0]!, argv.slice(1), {
+      cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: true,
+    });
+    const pid = child.pid;
+    if (pid) track(pid);
     let stdout = '';
     let stderr = '';
     let timedOut = false;
+    let ended = false;
     const group = (signal: NodeJS.Signals) => {
-      try {
-        if (child.pid) process.kill(-child.pid, signal);
-      } catch {
-        // already gone
-      }
+      if (pid) killGroup(pid, signal);
     };
     let hard: ReturnType<typeof setTimeout> | undefined;
+    let drain: ReturnType<typeof setTimeout> | undefined;
     const timer = setTimeout(() => {
       timedOut = true;
       group('SIGTERM');
-      hard = setTimeout(() => group('SIGKILL'), 5000);
+      hard = setTimeout(() => group('SIGKILL'), KILL_GRACE_MS);
     }, o.timeoutMs);
     const tail = (s: string) => (s.length > keep ? s.slice(-keep) : s);
     child.stdout.on('data', (d: Buffer) => (stdout = tail(stdout + d.toString('utf8'))));
     child.stderr.on('data', (d: Buffer) => (stderr = tail(stderr + d.toString('utf8'))));
     const finish = (r: Omit<Run, 'timedOut'>) => {
+      if (ended) return;
+      ended = true;
       clearTimeout(timer);
       clearTimeout(hard);
+      clearTimeout(drain);
       if (timedOut) group('SIGKILL');
+      if (pid) untrack(pid);
       done({ ...r, timedOut });
     };
     child.on('error', (e) => finish({ code: 127, stdout, stderr: stderr + e.message }));
     child.on('close', (code) => finish({ code: code ?? 1, stdout, stderr }));
+    // a process that left the group can hold the pipes open after the command
+    // ended: give the output a grace to arrive, then let the pipes go
+    child.on('exit', (code) => {
+      drain = setTimeout(() => {
+        child.stdout.destroy();
+        child.stderr.destroy();
+        finish({ code: code ?? 1, stdout, stderr });
+      }, KILL_GRACE_MS);
+    });
     child.stdin.on('error', () => {});
     child.stdin.end(o.stdin ?? '');
   });
@@ -150,10 +232,13 @@ const runGit = (cwd: string, args: string[]) => runCommand(['git', '-C', cwd, ..
 
 async function git(cwd: string, args: string[]): Promise<string> {
   const r = await runGit(cwd, args);
-  if (r.code !== 0) throw new Error(failure(`git ${args[0]}`, r, TICK_TIMEOUTS_MS.git));
+  if (r.code !== 0 || r.timedOut) throw new Error(failure(`git ${args[0]}`, r, TICK_TIMEOUTS_MS.git));
   return r.stdout;
 }
-const gitOk = async (cwd: string, args: string[]) => (await runGit(cwd, args)).code === 0;
+const gitOk = async (cwd: string, args: string[]) => {
+  const r = await runGit(cwd, args);
+  return r.code === 0 && !r.timedOut;
+};
 const commitOf = async (cwd: string, ref: string) => (await git(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${checkRef(ref)}^{commit}`]).catch(() => '')).trim() || null;
 
 /** The default branch's name, from origin/HEAD, else main or master. */
@@ -274,13 +359,13 @@ const commandAgent = (deps: TickDeps | undefined): RunAgent => async ({ setup, c
 const ghForge: Forge = {
   async findOpenPr({ cwd, head }) {
     const r = await runCommand(['gh', 'pr', 'list', '--head', head, '--state', 'open', '--json', 'url', '--limit', '1'], { cwd, env: { GH_PROMPT_DISABLED: '1' }, timeoutMs: TICK_TIMEOUTS_MS.gh });
-    if (r.code !== 0) throw new Error(failure('gh pr list', r, TICK_TIMEOUTS_MS.gh));
+    if (r.code !== 0 || r.timedOut) throw new Error(failure('gh pr list', r, TICK_TIMEOUTS_MS.gh));
     const rows = JSON.parse(r.stdout || '[]') as { url?: string }[];
     return rows[0]?.url ?? null;
   },
   async openPr({ cwd, base, head, title, body }) {
     const r = await runCommand(['gh', 'pr', 'create', '--base', base, '--head', head, '--title', title, '--body-file', '-'], { cwd, stdin: body, env: { GH_PROMPT_DISABLED: '1' }, timeoutMs: TICK_TIMEOUTS_MS.gh });
-    if (r.code !== 0) throw new Error(failure('gh pr create', r, TICK_TIMEOUTS_MS.gh));
+    if (r.code !== 0 || r.timedOut) throw new Error(failure('gh pr create', r, TICK_TIMEOUTS_MS.gh));
     return r.stdout.trim().split('\n').pop()!.trim();
   },
 };
@@ -289,7 +374,7 @@ const ghForge: Forge = {
 const inboxNotify = (plannotator: string): Notify => async ({ project, subject, body, replyTo }) => {
   const message = { body, project_path: project, ...(replyTo ? { reply_to: replyTo } : { subject }) };
   const r = await runCommand([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message), timeoutMs: TICK_TIMEOUTS_MS.note });
-  if (r.code !== 0) throw new Error(failure('plannotator inbox call send_message', r, TICK_TIMEOUTS_MS.note));
+  if (r.code !== 0 || r.timedOut) throw new Error(failure('plannotator inbox call send_message', r, TICK_TIMEOUTS_MS.note));
 };
 
 /**
@@ -337,7 +422,7 @@ async function prepareWorktree(root: string, wt: string, base: string, merge: st
   }
   if (merge && !(await gitOk(wt, ['merge-base', '--is-ancestor', merge, 'HEAD']))) {
     const r = await runGit(wt, ['merge', '--no-edit', '--quiet', merge]);
-    if (r.code !== 0) {
+    if (r.code !== 0 || r.timedOut) {
       await runGit(wt, ['merge', '--abort']);
       throw new Error(r.timedOut ? failure('git merge', r, TICK_TIMEOUTS_MS.git) : `the redraw branch does not merge with ${merge}: ${(r.stderr || r.stdout).trim()}`);
     }

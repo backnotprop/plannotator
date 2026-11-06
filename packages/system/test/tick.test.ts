@@ -1,5 +1,5 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Forge, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
@@ -30,6 +30,23 @@ afterAll(() => {
 
 const KEY = 'small-1a2b3c';
 const cleanups: (() => void)[] = [];
+const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
+const alive = (pid: number) => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+/** A shell step that forks a child into its own session (out of every process group) that keeps the step's stdout and stderr open for 30 s, its pid in `pidFile`. */
+const escapee = (pidFile: string) =>
+  `perl -MPOSIX -e 'exit if fork; POSIX::setsid(); open(my $f, ">", $ARGV[0]); print $f $$; close $f; sleep 30' '${pidFile}'`;
+const killPidFile = (pidFile: string) => {
+  const pid = existsSync(pidFile) ? Number(readFileSync(pidFile, 'utf8').trim()) : 0;
+  if (pid && alive(pid)) process.kill(pid, 'SIGKILL');
+};
+
 afterEach(() => cleanups.splice(0).forEach((f) => f()));
 
 /** The drawing in the teammate's clone, drawn at `at`. */
@@ -282,6 +299,61 @@ echo changed > src/main.ts`);
     expect(state).toMatchObject({ gated: tip, last_error: null, failed: null });
   });
 
+  for (const signal of ['SIGTERM', 'SIGINT'] as const) {
+    test(`a tick stopped by ${signal} mid-redraw stops the agent's whole process group before it exits`, async () => {
+      const p = project();
+      p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+      const pidFile = join(p.dir, 'agent-child.pid');
+      const script = join(p.dir, 'run-tick.ts');
+      writeFileSync(script, [
+        `import { tick } from ${JSON.stringify(join(import.meta.dir, '..', 'src', 'node', 'index.ts'))};`,
+        'const [root, dataDir, key, pidFile] = process.argv.slice(2);',
+        'await tick({ root, dataDir, key, deps: {',
+        "  agentCommand: () => ({ command: ['sh', '-c', `sleep 30 & echo $! > '${pidFile}'; wait`], stdin: null }),",
+        "  forge: { findOpenPr: async () => null, openPr: async () => 'https://example.com/pull/1' },",
+        '  notify: async () => {},',
+        '} });',
+        '',
+      ].join('\n'));
+      const child = spawn(process.execPath, [script, p.root, p.dataDir, KEY, pidFile], { stdio: 'ignore' });
+      const exited = new Promise<number | null>((ok) => child.on('exit', (code) => ok(code)));
+      let agentChild = 0;
+      try {
+        for (let i = 0; i < 150 && !agentChild; i++) {
+          await sleep(100);
+          if (existsSync(pidFile)) agentChild = Number(readFileSync(pidFile, 'utf8').trim()) || 0;
+        }
+        expect(agentChild).toBeGreaterThan(0);
+        child.kill(signal);
+        expect(await exited).toBe(signal === 'SIGTERM' ? 143 : 130);
+        for (let i = 0; i < 30 && alive(agentChild); i++) await sleep(100);
+        expect(alive(agentChild)).toBe(false);
+      } finally {
+        if (agentChild && alive(agentChild)) process.kill(agentChild, 'SIGKILL');
+        child.kill('SIGKILL');
+      }
+    }, 30_000);
+  }
+
+  test('an agent whose escaped child holds its output open is still stopped: the tick returns within the bound and the grace', async () => {
+    const p = project();
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+    const f = fakes();
+    const pidFile = join(p.dir, 'escapee.pid');
+    const started = Date.now();
+    try {
+      const r = await tick({
+        root: p.root, dataDir: p.dataDir, key: KEY,
+        deps: { agentCommand: () => ({ command: ['sh', '-c', `${escapee(pidFile)}; sleep 30`], stdin: null }), agentTimeoutMs: 300, forge: f.forge, notify: f.notify },
+      });
+      expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('stopped after') });
+      expect(Date.now() - started).toBeLessThan(300 + 5000 + 4000);
+      expect(existsSync(p.paths.lock)).toBe(false);
+    } finally {
+      killPidFile(pidFile);
+    }
+  }, 30_000);
+
   test('a hung agent is stopped at its time bound, the failure is recorded and the lock let go', async () => {
     const p = project();
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
@@ -422,6 +494,20 @@ test('a command past its time bound is stopped with its whole process group, chi
   for (let i = 0; i < 50 && alive(); i++) await new Promise((ok) => setTimeout(ok, 100));
   expect(alive()).toBe(false);
 });
+
+test('a command that ends while an escaped child still holds its output returns after the grace, with its output and code', async () => {
+  const t = tempDir();
+  cleanups.push(t.done);
+  const pidFile = join(t.dir, 'escapee.pid');
+  const started = Date.now();
+  try {
+    const r = await runCommand(['sh', '-c', `${escapee(pidFile)}; echo done`], { cwd: t.dir, timeoutMs: 60_000 });
+    expect(r).toMatchObject({ code: 0, stdout: 'done\n', timedOut: false });
+    expect(Date.now() - started).toBeLessThan(5000 + 4000);
+  } finally {
+    killPidFile(pidFile);
+  }
+}, 30_000);
 
 test('a command that ends in time is not marked as stopped', async () => {
   const t = tempDir();
