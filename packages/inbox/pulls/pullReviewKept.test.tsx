@@ -31,6 +31,7 @@ import { act, useEffect, useState, type ComponentType } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxPull, InboxPullLink, InboxPullsAnswer } from '@plannotator/core/inbox-types';
 import type { PlatformPostProps } from '../guide/platform-post-types';
+import { SidebarProvider } from '../shell/sidebar';
 
 const hasDom = typeof document !== 'undefined';
 interface ReaderProps {
@@ -249,7 +250,7 @@ async function open(pulls: InboxPull[], layer: InboxPull, scope: 'layer' | 'stac
   document.body.appendChild(host);
   act(() => {
     root = createRoot(host!);
-    root.render(<div className="pn-inbox"><Review pulls={pulls} layerKey={layer.key} scope={scope} /></div>);
+    root.render(<SidebarProvider><div className="pn-inbox"><Review pulls={pulls} layerKey={layer.key} scope={scope} /></div></SidebarProvider>);
   });
   await settle();
 }

@@ -422,6 +422,11 @@ export interface AllFilesCodeViewProps {
   /** No scroller of its own: as tall as its content, windowed and sticky against the page's scroller. Read once, at mount. */
   scrollsWithPage?: boolean;
   /**
+   * No spacing around a hunk separator, nor at the foot of a file beyond the code's padding, so a host's files sit
+   * flush (the Inbox's PR page). `scrollsWithPage` already draws them so, and takes its own metrics. Absent: as before.
+   */
+  flushFiles?: boolean;
+  /**
    * Portable / read-only host (the exported Guided Review viewer): no line or
    * gutter selection, no annotation toolbar or comment popovers, no global
    * keyboard shortcuts, no /api/file-content augmentation, no open-in
@@ -783,6 +788,7 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
   getAIHistoryForFile,
   allowScrollChaining = false,
   onContentHeightChange,
+  flushFiles = false,
   scrollsWithPage = false,
   enableEditSuggestions = false,
   onAddSuggestionsForFile,
@@ -3331,11 +3337,13 @@ export const AllFilesCodeView: React.FC<AllFilesCodeViewProps> = ({
       diffHeaderHeight: compactTouchLayout ? COMPACT_PANEL_HEADER_HEIGHT : PANEL_HEADER_HEIGHT,
       hunkSeparatorHeight: HUNK_SEPARATOR_HEIGHT,
       // HUNK_SEPARATOR_HEIGHT already holds the drawn margins. In a box that is as tall as this layout, Pierre's gaps
-      // around each separator would be empty space the rows float in.
-      ...(scrollsWithPage && { spacing: 0 }),
+      // around each separator would be empty space the rows float in, and the code draws no foot padding there
+      // (SCROLLS_WITH_PAGE_CSS). Files that sit flush without scrolling with the page drop the gaps too, but keep the
+      // code's 8 px foot: Pierre's `spacing` is also that padding, hence the second key.
+      ...(scrollsWithPage ? { spacing: 0 } : flushFiles ? { spacing: 0, paddingBottom: 8 } : {}),
       ...(customLineHeight != null && { lineHeight: customLineHeight }),
     }),
-    [compactTouchLayout, customLineHeight, scrollsWithPage],
+    [compactTouchLayout, customLineHeight, flushFiles, scrollsWithPage],
   );
   itemMetricsRef.current = itemMetrics;
 

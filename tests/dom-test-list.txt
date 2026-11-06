@@ -525,12 +525,16 @@ packages/inbox/reviewVerdict.test.ts
 packages/inbox/reviewPane.test.tsx
 packages/inbox/reviewPaneGuide.test.tsx
 packages/inbox/reviewJump.test.tsx
+packages/inbox/reviewAllFilesTree.test.tsx
 packages/inbox/pulls/pullFilter.test.tsx
 packages/inbox/guideGlobalComment.test.tsx
 packages/inbox/guideExpandContext.test.tsx
 packages/inbox/guideScrollsWithPage.test.tsx
 packages/inbox/pulls/pullReview.test.tsx
+packages/inbox/pulls/pullAllFiles.test.tsx
+packages/inbox/pulls/railTree.test.tsx
 packages/inbox/pulls/usePulls.test.tsx
+packages/inbox/shortcuts/useSheetEscape.test.tsx
 packages/inbox/pulls/pullReviewGlobalComments.test.tsx
 packages/inbox/pulls/pullReviewKept.test.tsx
 packages/ui/components/shape/ShapeDrawn.test.tsx

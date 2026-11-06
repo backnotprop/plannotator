@@ -110,6 +110,7 @@ async function renderView(
     state?: GuideHostValue<Record<string, unknown>>;
     onFocusFile?: (path: string) => void;
     bare?: boolean;
+    actionsHost?: HTMLElement | null;
     threadHeading?: boolean;
     sourceLine?: string;
     engineLabel?: string;
@@ -132,6 +133,7 @@ async function renderView(
           onFocusFile={handleFocusFile}
           onRegenerate={options.onRegenerate}
           bare={options.bare}
+          actionsHost={options.actionsHost}
           threadHeading={options.threadHeading}
           sourceLine={options.sourceLine}
           engineLabel={options.engineLabel}
@@ -938,5 +940,19 @@ describe('GuideView bare (the Inbox PR page)', () => {
     await renderView(guide, { state: withTab });
     expect(host!.querySelector('[data-guide-global-comment-add]')!.closest('[data-guide-section-tab]')).toBeNull();
     expect(host!.querySelector('[data-guide-section-tab-lead]')).toBeNull();
+  });
+
+  // Guards the PR review's strip: its controls leave the files' column, and the host's element is all they need.
+  test.skipIf(!hasDom)('bare with a host element, the actions are drawn there, no row above the content', async () => {
+    const guide = makeGuide();
+    const strip = document.createElement('div');
+    document.body.appendChild(strip);
+    try {
+      await renderView(guide, { bare: true, actionsHost: strip, state: { ...makeState({ files: [makeFile('a.ts')] }), globalComments: { comments: [], onAdd: () => {} } } });
+      expect(strip.querySelectorAll('[data-guide-global-comment-add]')).toHaveLength(1);
+      expect(host!.querySelector('[data-guide-global-comment-add]')).toBeNull();
+    } finally {
+      strip.remove();
+    }
   });
 });

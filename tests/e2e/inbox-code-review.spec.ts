@@ -336,6 +336,11 @@ test('the review card, the full-window review with a comment and a Viewed tick, 
   const added = (line: number) => retry.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(12)).toBeVisible({ timeout: 30_000 });
   await shot(page, '4-review-mode');
+  // The PR page's quiet scrollbar is its own: this window keeps its bar. Its file head is 33 px, as in every reader.
+  const scrollbar = retry.locator('[data-diff-hscrollbar]');
+  await expect(scrollbar).toBeAttached();
+  await expect(scrollbar.locator('> div')).toHaveCSS('opacity', '1');
+  expect(await scrollbar.evaluate((bar) => bar.parentElement!.getBoundingClientRect().height)).toBe(33);
 
   await retry.hover();
   await added(12).click();
@@ -1104,6 +1109,7 @@ test('the chapter menu after a key press: a quiet ring on its button, none round
 
 test('Code review off: the same review opens in the full-window review, with no verdict, Viewed ticks or Show me, and Write the reply back to the thread', async () => {
   const { page, claude } = world;
+  await setCodeReview(true);
   const review = await claude.submitGuide({ project_path: world.project, guide: REVIEW_GUIDE, patch: world.patch, thread: 'off-after', subject: 'Retry failed payouts', body: 'Ready.', review: true } as never);
   await setCodeReview(false);
   try {
@@ -1118,6 +1124,22 @@ test('Code review off: the same review opens in the full-window review, with no 
     await expect(pane.getByRole('button', { name: /^Approve/ })).toHaveCount(0);
     await expect(pane.getByRole('button', { name: /Viewed/ })).toHaveCount(0);
     await expect(pane.getByRole('button', { name: 'Show me' })).toHaveCount(0);
+    // The 33 px file head is every reader's, this one's too.
+    const shell = pane.locator('[data-guide-file-shell="src/payouts/retry.ts"]');
+    await expect(shell.locator('[data-line-type="change-addition"]').first()).toBeVisible({ timeout: 30_000 });
+    expect((await shell.locator('[data-file-header]').first().boundingBox())!.height).toBe(33);
+
+    // A comment here reads as on main: no name line, on the card or in the comments.
+    const added = shell.locator('[data-line-type="change-addition"][data-column-number="12"]');
+    await shell.scrollIntoViewIfNeeded();
+    await shell.hover();
+    await added.click();
+    const composer = page.getByPlaceholder('Leave feedback...');
+    await expect(composer).toBeVisible();
+    await composer.fill('Unsigned while Code review is off.');
+    await page.getByRole('button', { name: 'Add Comment' }).click();
+    await expect(page.getByText('Unsigned while Code review is off.').first()).toBeVisible();
+    await expect(page.getByText(/\(me\)/)).toHaveCount(0);
     // The way out: the thread, its reply box open.
     await pane.locator('[data-review-write-reply]').click();
     await expect(pane).toHaveCount(0);

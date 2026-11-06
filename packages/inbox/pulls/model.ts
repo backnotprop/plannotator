@@ -109,7 +109,7 @@ function isTree(open: readonly InboxPull[]): boolean {
 }
 
 /** The open layers from the bottom up to `tip`, each based on the one under it (the layers its Whole stack reads). */
-function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
+export function chainTo(open: readonly InboxPull[], tip: InboxPull): InboxPull[] {
   const chain: InboxPull[] = [];
   for (let at: InboxPull | null = tip; at && !chain.includes(at); at = parentIn(open, at)) chain.unshift(at);
   return chain;

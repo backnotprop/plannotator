@@ -1906,6 +1906,11 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     return saved;
   };
 
+  /** The name on the person's comments (config.json `displayName`); null when never set. */
+  const displayNameState = (): string | null => {
+    const name = loadConfig().displayName;
+    return typeof name === 'string' && name ? name : null;
+  };
   /**
    * The window's text size (config.json `inboxTextSize`): the body size in px
    * the Inbox's type ramp scales from, 12 to 15; 14 (the window as it has
@@ -2474,6 +2479,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     ...(guest ? {} : { cookie_host: cookieHostWire() }),
     /** Plannotator's appearance (config.json `theme`), shared with plan review; null when never chosen. */
     theme: themeState(),
+    /** The name on this person's comments (config.json `displayName`), shared with plan and code review; null when never set. Not for a guest. */
+    ...(guest ? {} : { display_name: displayNameState() }),
     /** The window's text size in px (config.json `inboxTextSize`), 14 unless chosen. */
     text_size: textSizeState(),
     /** How the list's rows look (config.json `inboxRows`): the options that are on, null until first saved; `rows_rev` counts the saves. */
@@ -3778,7 +3785,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       // projects' repositories, read with this computer's gh / glab, and the agent thread each is tied to. Only
       // while Code review is on (refused before anything runs otherwise), only the owner's window (this computer's,
       // or the owner's over the tailnet), never on the device door (not on its allowlist), never another site.
-      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar") {
+      if (path === "/api/inbox/pulls" || path === "/api/inbox/pulls/diff" || path === "/api/inbox/pulls/file" || path === "/api/inbox/pulls/avatar" || path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
         if (req.method !== "GET") return json({ error: "Use GET." }, 405);
         if (!ownerOrLocal(req, via)) return localOnly();
         if (!isSameOriginOrNoOrigin(origin, req.headers.get("host") ?? "", req.headers.get("sec-fetch-site"))) {
@@ -3804,6 +3811,14 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
               "cross-origin-resource-policy": "same-origin",
             },
           });
+        }
+        // The rail's All files: the PR's repository at a head this Inbox read for it, and one file of it, answered as the
+        // review app's `/api/repo-files` and `/api/repo-file` (its tree and file view read them unchanged). Read only.
+        if (path === "/api/inbox/pulls/repo-files" || path === "/api/inbox/pulls/repo-file") {
+          const key = url.searchParams.get("key") ?? "";
+          if (key.length === 0 || key.length > 600) throw new InboxError("validation_error", "key: a pull request's key from the list.", { field: "key" });
+          const result = path === "/api/inbox/pulls/repo-files" ? await pulls.repoFiles(key, url.searchParams) : await pulls.repoFile(key, url.searchParams);
+          return json(result.body, result.status);
         }
         if (path === "/api/inbox/pulls/diff") {
           const key = url.searchParams.get("key") ?? "";
