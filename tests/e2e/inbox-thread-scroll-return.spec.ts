@@ -360,7 +360,7 @@ test("a comment opened from the reply box's list right after a file closes lands
   expect(saved).toBe(200);
   await loadThread(p);
   // The reply box open first, so nothing scrolls the thread between the close and the comment.
-  await p.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ }).first().click();
+  await p.locator('section.ib-pane .ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ }).first().click();
   await expect(p.locator('[data-annotations-chip]')).toBeVisible();
   const tile = openerSelector('foot', 'rollout.md');
   await p.locator(tile).scrollIntoViewIfNeeded();

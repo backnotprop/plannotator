@@ -92,7 +92,7 @@ async function openReply(page: Page, threadId: string): Promise<Locator> {
   const pane = page.locator('section.ib-pane');
   await expect(pane.locator('h2.ib-subject')).toBeVisible();
   const box = pane.getByRole('textbox', { name: /^Reply to/ });
-  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const reply = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)/ });
   for (let attempt = 0; attempt < 10 && !(await box.isVisible()); attempt += 1) {
     await reply.click({ timeout: 1_000 }).catch(() => {});
   }
