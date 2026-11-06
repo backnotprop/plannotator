@@ -23,7 +23,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 
 ## Topic guides
 
-- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, build, marketing site.
+- [`project-and-development.md`](docs/agent-guides/project-and-development.md): repository map, server runtimes, installation, development, Testing Rules, build, [local binary installation](docs/agent-guides/project-and-development.md#local-binary-installation), marketing site.
 - [`environment.md`](docs/agent-guides/environment.md): every environment variable and config-only setting.
 - [`plan-review.md`](docs/agent-guides/plan-review.md): plan review flow, Guides in VS Code, Pi plan review and the Pi `plannotator` tool.
 - [`claude-code-mod.md`](docs/agent-guides/claude-code-mod.md): the Claude Code hooks module (non-blocking flows, the `plannotator` tool, its Ask this session client and Inbox wake, version skew).
@@ -32,7 +32,7 @@ This file is a map. The full guidance lives in focused guides under [`docs/agent
 - [`annotate.md`](docs/agent-guides/annotate.md): annotate flow, bundles, drafts, strict gates, live app annotation.
 - [`inbox.md`](docs/agent-guides/inbox.md): index to the Plannotator Inbox guides (`inbox-*.md`).
 - [`server-and-storage.md`](docs/agent-guides/server-and-storage.md): archive, Server API tables and guards, plan history, feedback archive, plan diff.
-- [`guides-and-shared-ui.md`](docs/agent-guides/guides-and-shared-ui.md): portable Guided Reviews, data types, parser, annotation system, question blocks, WebMCP, shortcuts, sharing, settings, syntax highlighting.
+- [`guides-and-shared-ui.md`](docs/agent-guides/guides-and-shared-ui.md): portable Guided Reviews, data types, parser, annotation system, question blocks, WebMCP, [mobile panels, gestures and scroll memory](docs/agent-guides/guides-and-shared-ui.md#mobile-edge-swipes), shortcuts, sharing, settings, syntax highlighting.
 
 ## Where new docs go
 
