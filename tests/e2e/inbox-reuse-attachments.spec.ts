@@ -428,7 +428,8 @@ test("a phone's HTML page opens clear: the pill keeps its room; the button comes
     const pill = phone.locator('[data-fcomp-pill]');
     await expect(pill).toBeVisible();
     const bar = phone.locator('[data-reuse-surface="bar"]').first();
-    await expect(bar).toBeHidden();
+    // Not drawn, not merely hidden: every button in the bar stays a 44 px target (inbox-phone-stepping.spec.ts).
+    await expect(phone.locator('[data-reuse-surface="bar"]')).toHaveCount(0);
     const pillBox = (await pill.boundingBox())!;
     const toolbar = (await phone.locator('[data-full-view-bar]').boundingBox())!;
     expect(pillBox.x + pillBox.width).toBeLessThanOrEqual(toolbar.x);

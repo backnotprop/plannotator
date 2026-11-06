@@ -8212,8 +8212,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-reuse-pane { width: 30px; height: 30px; border-radius: 7px; }
 .pn-inbox .ib-reuse-bar { width: 30px; height: 30px; border-radius: 7px; }
 .ib-fvbar-phone .ib-reuse-bar { width: 44px !important; height: 44px !important; }
-/* A phone's HTML page opens clear, the pill and the toolbar in one row (approval "inbox-html-attachments-phone"): no room until the pill opens the card. */
-[data-full-view]:has([data-fcomp-pill]) .ib-fvbar-phone .ib-reuse-bar { display: none; }
+/* A phone's HTML page opens clear, the pill and the toolbar in one row (approval "inbox-html-attachments-phone"): no room
+   until the pill opens the card, so AttachmentPane draws no bar button while the pill shows (`phonePillShown`). */
 /* A screen with no hover: nothing new rests on the thread's tiles and pictures; the viewer holds the button.
    A download tile opens no viewer, so its button rests on it (q-0136fc02, A). */
 @media (hover: none) {
