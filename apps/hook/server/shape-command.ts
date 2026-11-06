@@ -23,6 +23,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { dirname, isAbsolute, join, resolve } from "node:path";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { createShapeStore, type ShapeProject, type ShapeStore } from "@plannotator/shared/shape/store";
+import { expandBoardStamps } from "@plannotator/shared/shape/stamps";
 import { diffShapeVersions, shapeBoardNotes, summarizeShapeDiff, type ShapeSession } from "@plannotator/shared/shape/format";
 import { inboxHostSessionFromEnv, inboxProjectFolderFor, inboxSessionProjectFromEnv } from "./inbox-mcp-shim";
 import { SHAPE_SWITCH_NOT_SAVED, setShapeSwitch } from "@plannotator/shared/shape/switch";
@@ -230,6 +231,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     } catch (error) {
       return refuse("invalid", `could not read ${path} as JSON: ${(error as Error).message}`);
     }
+    // Icons, logos and drawn things named in the drawing become plain SVG here, so the stored board
+    // holds the drawing and nothing is looked up when it is shown (shared/shape/stamps.ts).
+    board = expandBoardStamps(board).board;
     let project: ShapeProject | null = null;
     if (c.id) {
       const record = store.get(c.id);
@@ -300,7 +304,9 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     // The notes count as received only once the agent has them: written first, marked after.
     const waiting = store.waiting(id);
     try {
-      await out(JSON.stringify({ shape: record, version, notes: waiting }, null, 2));
+      // A box's picture: its full path, so the agent can open it.
+      const notes = waiting.map((n) => (n.picture ? { ...n, picture: store.filePath(id, n.picture) ?? n.picture } : n));
+      await out(JSON.stringify({ shape: record, version, notes }, null, 2));
     } catch (error) {
       err(`output_failed: the notes were not handed over and still wait: ${(error as Error).message}`);
       return 1;
