@@ -18,6 +18,8 @@ symlinkSync(outside, join(home, "away"));
 symlinkSync(join(home, ".ssh"), join(home, "code", "sshlink"));
 symlinkSync(join(home, "code", ".cache"), join(home, "cachelink"));
 mkdirSync(join(home, "x"), { recursive: true });
+// A link back to home itself.
+symlinkSync(home, join(home, "code", "homelink"));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 describe("folders under home, by name only", () => {
@@ -58,6 +60,23 @@ describe("folders under home, by name only", () => {
       expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "hidden" }]);
       expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "hidden" }]);
     }
+  });
+
+  test("a path that isn't there answers as its nearest folder that is: never a way to learn what a hidden folder, or one outside home, holds", () => {
+    for (const typed of ["~/code/sshlink/nope", "~/code/sshlink/nope/deeper", "~/cachelink/nope"]) {
+      expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "hidden" }]);
+      expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "hidden" }]);
+    }
+    for (const typed of ["~/code/out-link/nope", "~/away/nope/deeper"]) {
+      expect([typed, resolveHomeFolder(home, typed)]).toEqual([typed, { ok: false, refused: "outside" }]);
+      expect([typed, listHomeFolders(home, typed)]).toEqual([typed, { refused: "outside" }]);
+    }
+    // In a folder that is there and is neither: still just not there.
+    expect(resolveHomeFolder(home, "~/code/srv-link/nope")).toEqual({ ok: true, exists: false, real: null, shown: "~/code/srv-link/nope" });
+  });
+
+  test("a link back to home is not listed: home is never a folder to start in", () => {
+    expect(listHomeFolders(home, "~/code")).toMatchObject({ exists: true, folders: ["billing-api", "billing-svc", "infra", "srv-link"] });
   });
 
   test("home itself is listed, and is home (never a folder to start in)", () => {

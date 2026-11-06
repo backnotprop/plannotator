@@ -6,7 +6,8 @@
  * A typed path is `~`, `~/…`, or a full path inside home. A segment that is empty from a doubled slash is skipped;
  * `.` or `..` (anything that would step out), a segment with a backslash or a NUL (a path separator to some file
  * calls), a path outside home, or a symlink whose target is outside home is `outside`; a segment that starts with a
- * dot is `hidden`, and so is a path whose real place under home is in a hidden folder (a symlink to `~/.ssh`). Home
+ * dot is `hidden`, and so is a path whose real place under home is in a hidden folder (a symlink to `~/.ssh`); a path
+ * that isn't there is judged by its nearest folder that is, so it never tells what a hidden folder holds. Home
  * itself resolves (its folders are listed) but is never a folder to start in (`isHomeItself`). A path that isn't
  * there (or is a file) is `{ exists: false }`, with the nearest folder above it that is (`nearest`), so the window
  * can offer what is there.
@@ -55,7 +56,18 @@ export function resolveHomeFolder(home: string, typed: string): HomeFolder {
   if (segments.some((segment) => segment.startsWith("."))) return { ok: false, refused: "hidden" };
   const shown = segments.length === 0 ? "~" : `~/${segments.join("/")}`;
   const real = realOr(join(home, ...segments));
-  if (real === null) return { ok: true, exists: false, real: null, shown };
+  if (real === null) {
+    // Not there: answer as its nearest folder that is, so a missing path never tells what a hidden folder, or one
+    // outside home, holds (`~/code/sshlink/nope` is hidden, as `~/code/sshlink/sub` is).
+    for (let n = segments.length - 1; n >= 0; n--) {
+      const above = realOr(join(home, ...segments.slice(0, n)));
+      if (above === null) continue;
+      if (!inside(above, realHome)) return { ok: false, refused: "outside" };
+      if (hiddenUnder(above, realHome)) return { ok: false, refused: "hidden" };
+      break;
+    }
+    return { ok: true, exists: false, real: null, shown };
+  }
   if (!inside(real, realHome)) return { ok: false, refused: "outside" };
   if (hiddenUnder(real, realHome)) return { ok: false, refused: "hidden" };
   let folder = false;
@@ -67,7 +79,7 @@ export function resolveHomeFolder(home: string, typed: string): HomeFolder {
   return folder ? { ok: true, exists: true, real, shown } : { ok: true, exists: false, real: null, shown };
 }
 
-/** The folder names in a real folder under home: no hidden ones, none a typed path could not name, no links out of home or into a hidden folder. */
+/** The folder names in a real folder under home: no hidden ones, none a typed path could not name, no links out of home, into a hidden folder, or back to home. */
 function foldersIn(real: string, realHome: string): string[] | null {
   let entries: import("node:fs").Dirent[];
   try {
@@ -81,7 +93,8 @@ function foldersIn(real: string, realHome: string): string[] | null {
     if (entry.isDirectory()) folders.push(entry.name);
     else if (entry.isSymbolicLink()) {
       const target = realOr(join(real, entry.name));
-      if (target && inside(target, realHome) && !hiddenUnder(target, realHome) && statSync(target, { throwIfNoEntry: false })?.isDirectory()) folders.push(entry.name);
+      // Not a link back to home itself: it would offer home as a folder to start in, which is refused.
+      if (target && target !== realHome && inside(target, realHome) && !hiddenUnder(target, realHome) && statSync(target, { throwIfNoEntry: false })?.isDirectory()) folders.push(entry.name);
     }
   }
   folders.sort((a, b) => a.localeCompare(b));
