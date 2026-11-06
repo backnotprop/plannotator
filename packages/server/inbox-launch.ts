@@ -60,6 +60,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
+import { listHomeFolders, resolveHomeFolder } from "./inbox-home-folders";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -87,7 +88,9 @@ const HOST_TTL_MS = 10_000;
  * Compose's `to.launch`: a project's folder, or a new scratch folder. `trust`: the person pressed Trust and start on
  * this reading of it; the press is the consent, so the Send saves the trust ("Trusting a folder").
  */
-export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true }) & { trust?: InboxLaunchTrust };
+export type InboxLaunchTarget = ({ agent: InboxLaunchAgent; project_id: string } | { agent: InboxLaunchAgent; scratch: true } | { agent: InboxLaunchAgent; folder: string }) & {
+  trust?: InboxLaunchTrust;
+};
 
 /** The reading a press was made on, or nothing when the press came without one. */
 function trustOfTarget(value: Record<string, unknown>): { trust?: InboxLaunchTrust } {
@@ -725,6 +728,23 @@ export function createInboxLaunch(options: {
     scratch_dir_shown: options.displayFolder(scratchRoot()),
   });
   /**
+   * "Another folder on <machine>…": the folder names in one folder under home (`listHomeFolders`). The owner's window
+   * only: a guest gets `owner_only`; an agent's call, MCP and the CLI (no same-origin fetch) and a linked machine
+   * without the window's mark get `window_only`; a phone's door never reaches it (a machine-only door route).
+   */
+  const homeFolders = (req: Request, via: string, owner: boolean, door: { platform: string; window: boolean } | null): Response => {
+    if (req.method !== "GET") return json({ error: "Use GET." }, 405);
+    if (!owner || options.isGuest?.(req, via)) return json({ error: "Only this computer's owner can list its folders.", code: "owner_only" }, 403);
+    const window = door ? door.window : req.headers.get("sec-fetch-site") === "same-origin";
+    if (!window) return json({ error: "Folders are listed in the Inbox window only.", code: "window_only" }, 403);
+    const listed = listHomeFolders(options.homeDir, new URL(req.url).searchParams.get("path") ?? "~");
+    if ("refused" in listed) {
+      return json(listed.refused === "hidden" ? { error: "Hidden folders aren't listed.", code: "folder_hidden" } : { error: "Only folders inside the home folder.", code: "folder_outside_home" }, 422);
+    }
+    return json(listed);
+  };
+
+  /**
    * `owner`: the machine's owner, here or over the tailnet (a guest the allow list let in is not). `door`: the request
    * came through the device door (a linked machine's Stop, Try again, Trust folder or Delete; remote launch). A
    * machine is the owner's, and acts only for a press in a window there (`window`), never for an agent's bare call.
@@ -736,6 +756,10 @@ export function createInboxLaunch(options: {
     owner: boolean = via === "local",
     door: { platform: string; window: boolean } | null = null,
   ): Promise<Response | null> => {
+    if (path === "/api/inbox/launch/folders") {
+      if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
+      return homeFolders(req, via, owner, door);
+    }
     const match = /^\/api\/inbox\/launch\/(settings|lch_[0-9A-HJKMNP-TV-Z]{26})(?:\/(stop|open|delete|retry|trust))?$/.exec(path);
     if (!match) return null;
     if (!enabled()) return json({ error: "Launch is off.", code: "launch_off" }, 404);
@@ -1004,9 +1028,11 @@ export function createInboxLaunch(options: {
       const value = (to as { launch: unknown }).launch as Record<string, unknown> | null;
       const host = value && typeof value === "object" && typeof value.agent === "string" && Object.hasOwn(hosts, value.agent) ? hosts[value.agent]! : null;
       if (host && value!.scratch === true && value!.project_id === undefined) return { agent: host.agent, scratch: true, ...trustOfTarget(value!) };
+      // "Another folder on <machine>…": a folder under home that is not a project yet (`~/…`).
+      if (host && typeof value!.folder === "string" && value!.project_id === undefined && value!.scratch === undefined) return { agent: host.agent, folder: value!.folder, ...trustOfTarget(value!) };
       if (!host || typeof value!.project_id !== "string") {
         const agent = hostList.map((h) => `"${h.agent}"`).join(" | ");
-        throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
+        throw new InboxError("validation_error", `to.launch: { agent: ${agent}, project_id }, { agent: ${agent}, folder } or { agent: ${agent}, scratch: true }.`, { field: "to.launch" });
       }
       return { agent: host.agent, project_id: value!.project_id, ...trustOfTarget(value!) };
     },
@@ -1024,7 +1050,12 @@ export function createInboxLaunch(options: {
     ): Promise<{ project: InboxProject; to: { host: string; session: string }; launch: InboxLaunchRecord; trust: LaunchTrustOffer | null }> {
       const host = Object.hasOwn(hosts, target.agent) ? hosts[target.agent]! : null;
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
-      const chosen = "project_id" in target ? store.project(target.project_id) : null;
+      // A folder under home (not a project yet): by the folder listing's rules; it becomes a project below.
+      const typed = "folder" in target ? resolveHomeFolder(options.homeDir, target.folder) : null;
+      if (typed && !typed.ok) throw new InboxError("validation_error", typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      if (typed && (!typed.exists || !typed.real)) throw new InboxError("folder_missing", `${typed.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
+      const folderTarget = typed?.ok && typed.real ? typed.real : null;
+      const chosen = "project_id" in target ? store.project(target.project_id) : folderTarget ? (store.listProjects().find((p) => p.root === folderTarget) ?? null) : null;
       if ("project_id" in target && !chosen) throw new InboxError("project_not_found", `No project ${target.project_id}.`);
       if (chosen && !isFolder(chosen.root)) {
         throw new InboxError("folder_missing", `${options.displayFolder(chosen.root)} isn't there any more. Pick another project. Nothing was sent.`, { field: "to.launch" });
@@ -1053,9 +1084,9 @@ export function createInboxLaunch(options: {
       // Inbox start).
       if (reading || shell === null) await readLogin();
       // After the shell read (it says where the agent's own files are), and before a scratch folder is made.
-      const trust = pressedTrust(host, chosen ? chosen.root : scratchRoot(), target.trust);
-      const made = chosen ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
-      const folder = made ? made.folder : chosen!.root;
+      const trust = pressedTrust(host, chosen ? chosen.root : (folderTarget ?? scratchRoot()), target.trust);
+      const made = chosen || folderTarget ? null : makeScratch(input.name?.trim() || derivePersonThreadSubject(input.body));
+      const folder = made ? made.folder : chosen ? chosen.root : folderTarget!;
       let project: InboxProject;
       try {
         project = chosen ?? (await input.resolveProject(folder));
@@ -1069,7 +1100,7 @@ export function createInboxLaunch(options: {
         agent: host.agent,
         session_ref: null,
         folder,
-        scratch: !chosen,
+        scratch: !!made,
         ...(made ? { scratch_inode: made.inode } : {}),
         started_at: new Date(now()).toISOString(),
         ...(start.full ? { full_permissions: true } : {}),
