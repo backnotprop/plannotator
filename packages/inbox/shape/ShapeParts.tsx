@@ -90,7 +90,7 @@ export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: 
           host={host}
           id={id}
           onClose={onClose}
-          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} /> : undefined}
+          renderThread={thread ? ({ flash }) => <ShapeThreadTab thread={thread} flash={flash} openInFiles={!!host.fileAction} /> : undefined}
           headStart={isMobile ? undefined : <SidebarTrigger />}
           crosshair
           onAddToReply={thread ? onAddToReply : undefined}
@@ -101,7 +101,7 @@ export function ShapeLayer({ host, id, onClose, thread, onAddToReply }: { host: 
 }
 
 /** The board's Thread tab: the thread's messages, read-only, each marked for the board's "jump to the message". */
-export function ShapeThreadTab({ thread, flash }: { thread: InboxThread; flash: string | null }) {
+export function ShapeThreadTab({ thread, flash, openInFiles = false }: { thread: InboxThread; flash: string | null; openInFiles?: boolean }) {
   return (
     <div className="ib-shape-thread">
       {thread.messages.map((m) => (
@@ -110,7 +110,7 @@ export function ShapeThreadTab({ thread, flash }: { thread: InboxThread; flash: 
             <b>{m.author.kind === 'person' ? 'You' : agentName(m.author)}</b>
             <span>{whenTime(m.created_at)}</span>
           </div>
-          <MessageBody message={m} projectRoot={thread.project.root} repo={thread.project.repo ?? null} readOnly answers={NO_ANSWERS} onPick={noop} footerFor={noFooter} onOpenAttachment={noop} />
+          <MessageBody message={m} projectRoot={thread.project.root} openInFiles={openInFiles} repo={thread.project.repo ?? null} readOnly answers={NO_ANSWERS} onPick={noop} footerFor={noFooter} onOpenAttachment={noop} />
         </article>
       ))}
     </div>
