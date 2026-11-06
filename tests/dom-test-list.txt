@@ -138,6 +138,7 @@ packages/inbox/listRowEnded.test.tsx
 packages/inbox/multiAgentNames.test.tsx
 packages/inbox/replyRecipient.test.tsx
 packages/inbox/compose.test.tsx
+packages/inbox/decisionAsk.test.tsx
 packages/inbox/composeTrust.test.tsx
 packages/inbox/openInTerminal.test.tsx
 packages/inbox/runTrustHowto.test.tsx

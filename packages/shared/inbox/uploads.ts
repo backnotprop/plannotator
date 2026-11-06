@@ -44,6 +44,7 @@ import {
   inboxAttachmentId,
   inboxAttachmentNameRefusal,
   inboxBoardRequestBlock,
+  INBOX_DECISION_ASK_BLOCK,
   inboxId,
   INBOX_UPLOAD_MAX_BYTES,
   isInboxId,
@@ -111,19 +112,22 @@ export function inboxViewingLine(message: { viewing?: InboxReplyViewing | null }
 /**
  * The words an agent reads for a person's message: its body, then `inboxViewingLine`,
  * then `inboxAttachedLines`, then, on a message sent with compose's Board chip on,
- * the Board request (`inboxBoardRequestBlock`). The stored body never holds them.
+ * the Board request (`inboxBoardRequestBlock`), or on an Ask from Decision data its
+ * instructions (`INBOX_DECISION_ASK_BLOCK`). The stored body never holds them.
  */
 export function inboxBodyForAgent(message: {
   body: string;
   thread_id?: string;
   attachments?: readonly InboxAttachment[] | null;
   board_request?: true;
+  decision_ask?: true;
   viewing?: InboxReplyViewing | null;
 }): string {
   const after = [inboxViewingLine(message), inboxAttachedLines(message)].filter((part) => part !== "").join("\n\n");
   // A reply of pasted files alone may have no words.
   let words = !after ? message.body : message.body.trim() ? `${message.body}\n\n${after}` : after;
   if (message.board_request === true && message.thread_id) words = `${words}\n\n${inboxBoardRequestBlock(message.thread_id)}`;
+  if (message.decision_ask === true) words = `${words}\n\n${INBOX_DECISION_ASK_BLOCK}`;
   return words;
 }
 const PENDING_DIR = "pending";
