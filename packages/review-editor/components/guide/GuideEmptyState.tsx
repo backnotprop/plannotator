@@ -10,7 +10,7 @@ import { PI_THINKING, REVIEW_ENGINE_LABEL } from '@plannotator/ui/components/Age
 // Ask AI use (useGuideLaunch → useModelCatalogs).
 import { effortSelectOptions, modelSelectOptions } from '@plannotator/ui/hooks/useModelCatalogs';
 import { ModelSourceHint } from '@plannotator/ui/components/ModelSourceHint';
-import { InlinePicker, type InlinePickerOption as Option } from './InlinePicker';
+import { InlinePicker, type InlinePickerOption as Option } from '@plannotator/ui/components/InlinePicker';
 import { useGuideLaunch } from '../../hooks/guide/useGuideLaunch';
 
 /** "2d ago" style age for the previous-guides rows (local convention — same

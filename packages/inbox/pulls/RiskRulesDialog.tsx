@@ -1,7 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import type { InboxPullRiskAnswer, InboxPullRiskModels } from '@plannotator/core/inbox-types';
 import { modelSelectOptions } from '@plannotator/core/model-catalog';
-import { InlinePicker } from '@plannotator/review-editor/components/guide/InlinePicker';
+import { InlinePicker } from '@plannotator/ui/components/InlinePicker';
 import { inboxApi } from '../api';
 import { Modal } from '../components/Updates';
 

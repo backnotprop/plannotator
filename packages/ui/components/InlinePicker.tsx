@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { ChevronDown } from 'lucide-react';
-import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from '@plannotator/ui/components/AgentControls';
+import { groupModelOptions, labelWithinGroup, SEARCHABLE_THRESHOLD } from './AgentControls';
 
 export type InlinePickerOption = { value: string; label: string };
 

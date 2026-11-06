@@ -21,7 +21,7 @@ const hasDom = typeof document !== 'undefined';
 const { inboxApi } = (hasDom ? await import('../api') : {}) as typeof import('../api');
 const { PullsPage } = (hasDom ? await import('./PullsPage') : {}) as typeof import('./PullsPage');
 const { SidebarProvider } = (hasDom ? await import('../shell/sidebar') : {}) as typeof import('../shell/sidebar');
-const { InlinePicker } = (hasDom ? await import('@plannotator/review-editor/components/guide/InlinePicker') : {}) as typeof import('@plannotator/review-editor/components/guide/InlinePicker');
+const { InlinePicker } = (hasDom ? await import('@plannotator/ui/components/InlinePicker') : {}) as typeof import('@plannotator/ui/components/InlinePicker');
 const { RiskRulesDialog } = (hasDom ? await import('./RiskRulesDialog') : {}) as typeof import('./RiskRulesDialog');
 
 const key = (n: number) => `github.com/n/b#${n}`;

@@ -697,7 +697,7 @@ export const pullDiffCliRunner: PullDiffRunner = async (cli, args, maxBytes, rea
       stdin: "ignore",
       stdout: "pipe",
       stderr: "pipe",
-      ...(reading?.signal ? { signal: reading.signal } : {}),
+      signal: reading?.signal,
     });
   } catch {
     return { stdout: "", stderr: `${cli}: not found`, exitCode: 127 };
