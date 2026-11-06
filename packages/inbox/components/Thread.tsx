@@ -611,6 +611,12 @@ export function MessageBody({
     },
     [imageOf, refOf],
   );
+  /** A picture choice's size, recorded when the message was sent, so its card is laid out before the picture loads. */
+  const pictureSizeOf = useCallback((src: string) => {
+    const image = imageOf(src);
+    return image?.width && image.height ? { width: image.width, height: image.height } : null;
+    // A new identity when the records change (an older message's pictures are captured on its first open).
+  }, [imageOf, message.inline_images]);
   const onImageRef = useRef(onImage);
   onImageRef.current = onImage;
   const onImageClick = useCallback((src: string, alt: string) => (onImageRef.current ? onImageRef.current(src, alt) : void openImage(src, alt)), [openImage]);
@@ -964,6 +970,7 @@ export function MessageBody({
         questionReadOnly={answerLocked}
         questionStatusLabel={statusLabel}
         questionPictureBadge={pictureBadge}
+        questionPictureSize={pictureSizeOf}
         renderQuestionCard={renderReplacedCard ? questionCard : undefined}
         renderQuestionBelowPrompt={renderReplacesLine ? belowPrompt : undefined}
         renderDirectiveBlock={renderActions ? directiveBlock : undefined}

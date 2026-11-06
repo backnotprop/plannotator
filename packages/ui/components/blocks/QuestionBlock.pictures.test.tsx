@@ -55,7 +55,7 @@ const loads: ImageResolver = (src) => ({ kind: 'src', src: `data:image/gif;name=
 let latest: Annotation[] = [];
 const zoomed: Array<[string, string]> = [];
 
-function Harness({ markdown, resolver = loads, readOnly = false, badge }: { markdown: string; resolver?: ImageResolver; readOnly?: boolean; badge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null }) {
+function Harness({ markdown, resolver = loads, readOnly = false, badge, sizes }: { markdown: string; resolver?: ImageResolver; readOnly?: boolean; badge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null; sizes?: (url: string) => { width: number; height: number } | null }) {
   const blocks = parseMarkdownToBlocks(markdown);
   const index = indexQuestionBlocks(blocks);
   const [annotations, setAnnotations] = useState<Annotation[]>([]);
@@ -75,6 +75,7 @@ function Harness({ markdown, resolver = loads, readOnly = false, badge }: { mark
             onAnswerQuestion={readOnly ? undefined : (blockId, answer, key) => setAnnotations((current) => upsertQuestionAnswerAnnotation(current, blockId, answer, key))}
             onImageClick={(src, alt) => zoomed.push([src, alt])}
             questionPictureBadge={badge}
+            questionPictureSize={sizes}
           />
         );
       })}
@@ -199,6 +200,74 @@ describe('picture choices', () => {
     }
     expect(tiles(el)).toHaveLength(0);
     expect(el.querySelectorAll('label[data-question-option]').length).toBe(3);
+  });
+});
+
+// The size the host recorded for each picture, by the src it was written with (the loads resolver keeps it in the URL).
+const RECORDED: Record<string, { width: number; height: number }> = {
+  'drawer-a.png': { width: 1170, height: 2532 },
+  'drawer-b.png': { width: 1170, height: 8000 },
+  'c.png': { width: 64, height: 64 },
+};
+const recorded = (url: string) => RECORDED[decodeURIComponent(/name=([^;]+)/.exec(url)?.[1] ?? '')] ?? null;
+
+describe('the layout facts a host draws from (approval "picture-choices-layout")', () => {
+  const names = (el: HTMLElement) => [...el.querySelectorAll<HTMLInputElement>('[data-question-tile] input')].map((input) => input.labels?.[0]?.textContent);
+
+  test.skipIf(!hasDom)('each picture\'s size and shape are on its tile before it loads, and the set\'s count, shape and words on the grid', async () => {
+    const el = await mount(<Harness markdown={SINGLE} sizes={recorded} />);
+    const grid = el.querySelector<HTMLElement>('[data-question-tiles]')!;
+    expect(grid.getAttribute('data-question-tiles-count')).toBe('3');
+    expect(grid.getAttribute('data-question-tiles-shape')).toBe('mixed');
+    expect(grid.getAttribute('data-question-tiles-words')).toBe('short');
+    expect(grid.hasAttribute('data-question-tiles-bare')).toBe(false);
+    expect(tiles(el).map((t) => t.getAttribute('data-question-tile-shape'))).toEqual(['tall', 'scroll', 'square']);
+    // No image has loaded (happy-dom loads nothing): the box's ratio and the natural width are already there.
+    const box = tiles(el)[0]!.querySelector<HTMLElement>('[data-question-tile-picture]')!;
+    expect(box.style.getPropertyValue('--question-picture-ratio')).toBe('1170 / 2532');
+    expect(box.style.getPropertyValue('--question-picture-width')).toBe('1170px');
+    expect(tiles(el)[2]!.querySelector<HTMLElement>('[data-question-tile-picture]')!.style.getPropertyValue('--question-picture-width')).toBe('64px');
+  });
+
+  test.skipIf(!hasDom)('with no recorded size the tiles carry no size and no shape (the host reserves its default box); the set counts as wide', async () => {
+    const el = await mount(<Harness markdown={SINGLE} />);
+    const box = el.querySelector<HTMLElement>('[data-question-tile-picture]')!;
+    expect(box.style.getPropertyValue('--question-picture-ratio')).toBe('');
+    expect(tiles(el).every((t) => !t.hasAttribute('data-question-tile-shape'))).toBe(true);
+    expect(el.querySelector('[data-question-tiles]')!.getAttribute('data-question-tiles-shape')).toBe('wide');
+  });
+
+  test.skipIf(!hasDom)('the facts change no choice\'s accessible name, and the pictures, radios and zoom keep their order', async () => {
+    const plain = await mount(<Harness markdown={SINGLE} />);
+    const before = names(plain);
+    const order = (el: HTMLElement) => [...el.querySelectorAll('[data-question-tile] :is(img, input, button)')].map((n) => n.tagName);
+    const beforeOrder = order(plain);
+    await act(async () => root!.unmount());
+    host?.remove();
+    const sized = await mount(<Harness markdown={SINGLE} sizes={recorded} />);
+    expect(names(sized)).toEqual(before);
+    expect(order(sized)).toEqual(beforeOrder);
+  });
+
+  test.skipIf(!hasDom)('a choice without a picture is marked on its tile and on the grid', async () => {
+    const el = await mount(<Harness markdown={[':::question', 'Which?', '', '- [ ] A — ![A](drawer-a.png)', '- [ ] B, no picture', ':::'].join('\n')} sizes={recorded} />);
+    expect(el.querySelector('[data-question-tiles]')!.hasAttribute('data-question-tiles-bare')).toBe(true);
+    expect(tiles(el).map((t) => t.hasAttribute('data-question-tile-no-picture'))).toEqual([false, true]);
+  });
+
+  test.skipIf(!hasDom)('a picture that failed to load is marked failed; one the host holds is not', async () => {
+    const held: ImageResolver = (src) => (src === 'c.png' ? { kind: 'unavailable', title: 'Remote image held' } : loads(src));
+    const el = await mount(<Harness markdown={SINGLE} resolver={held} sizes={recorded} />);
+    await act(async () => {
+      tiles(el)[0]!.querySelector('img')!.dispatchEvent(new Event('error'));
+    });
+    const placeholders = tiles(el).map((t) => t.querySelector('[data-image-unavailable]'));
+    expect(placeholders[0]!.hasAttribute('data-question-picture-failed')).toBe(true);
+    expect(placeholders[1]).toBeNull();
+    expect(placeholders[2]!.hasAttribute('data-question-picture-failed')).toBe(false);
+    expect(placeholders[2]!.getAttribute('title')).toBe('Remote image held');
+    // A failed picture has no size to carry.
+    expect(tiles(el)[0]!.hasAttribute('data-question-tile-shape')).toBe(false);
   });
 });
 
