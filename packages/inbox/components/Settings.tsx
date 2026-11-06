@@ -34,6 +34,7 @@ const TOOL_HOSTS: { host: AgentToolHost; name: string }[] = [
   { host: 'pi', name: 'Pi' },
   { host: 'opencode', name: 'OpenCode' },
   { host: 'dsh', name: 'DeepSeek Harness' },
+  { host: 'cline', name: 'Cline' },
 ];
 
 const SECTION_ICON: Record<SettingsSection, IconName> = {
@@ -630,7 +631,7 @@ function AgentsSection({
       <section className="ib-sgroup" aria-labelledby="ib-g-tool">
         <h2 id="ib-g-tool">The Inbox in your agent&apos;s tools</h2>
         <p>
-          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode and DeepSeek Harness send every tool&apos;s definition with each request, so they start
+          Lets an agent send, read and wait for replies from its own tool list. Pi, OpenCode, DeepSeek Harness and Cline send every tool&apos;s definition with each request, so they start
           off.
         </p>
         {env !== null && (

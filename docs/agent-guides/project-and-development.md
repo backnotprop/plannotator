@@ -26,6 +26,7 @@ plannotator/
 │   ├── amp-plugin/               # Amp plugin
 │   │   ├── plannotator.ts        # Native Amp command-palette integration
 │   │   └── README.md             # Install and local development notes
+│   ├── cline-plugin/             # Cline plugin (@plannotator/cline): the Inbox tool and the reply wake (inbox.ts), built to dist/index.js
 │   ├── droid-plugin/             # Droid plugin
 │   │   ├── .factory-plugin/plugin.json
 │   │   ├── commands/             # Slash command entrypoints

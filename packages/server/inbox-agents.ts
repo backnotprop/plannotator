@@ -689,6 +689,46 @@ export function dshPluginInstalled(e: AgentEnvironment): boolean {
   });
 }
 
+/** Plannotator's Cline plugin package (apps/cline-plugin). */
+export const CLINE_PLUGIN_PACKAGE = "@plannotator/cline";
+
+/** Cline's home: `$CLINE_DIR` when set, else `~/.cline` (Cline's own rule; a blank value counts as unset). */
+export function clineDir(e: AgentEnvironment): string {
+  return envDir(e, "CLINE_DIR") ?? join(e.homeDir, ".cline");
+}
+
+/**
+ * Whether Plannotator's Cline plugin (`@plannotator/cline`) is in Cline's
+ * global plugin store, as `cline plugin install` writes it:
+ * `<cline>/plugins/_installed/npm/<id>/package/node_modules/@plannotator/cline`
+ * for `npm:@plannotator/cline`, `<cline>/plugins/_installed/local/<id>/package`
+ * for a local folder. Read only: Plannotator never runs cline.
+ */
+export function clinePluginInstalled(e: AgentEnvironment): boolean {
+  const installed = join(clineDir(e), "plugins", "_installed");
+  for (const kind of ["npm", "local"]) {
+    let ids: string[];
+    try {
+      ids = readdirSync(join(installed, kind));
+    } catch {
+      continue;
+    }
+    for (const id of ids) {
+      const root = join(installed, kind, id, "package");
+      for (const manifest of [join(root, "node_modules", "@plannotator", "cline", "package.json"), join(root, "package.json")]) {
+        const read = readAgentFile(manifest);
+        if (read.kind !== "file") continue;
+        try {
+          if ((JSON.parse(read.text) as { name?: unknown }).name === CLINE_PLUGIN_PACKAGE) return true;
+        } catch {
+          // Not this one.
+        }
+      }
+    }
+  }
+  return false;
+}
+
 const CLAUDE_PLUGIN_ID = /^plannotator@/;
 
 /** One Claude Code settings file, parsed (null: missing or unreadable). */
@@ -1047,9 +1087,13 @@ export const AGENT_SPECS: readonly AgentSpec[] = [
   },
   {
     id: "cline",
-    detect: (e) => !!e.which("cline"),
-    // Cline CLI's `mcp add` and its config file are not verified (and a positional word can start a task), so a person adds it.
-    way: async () => ({ kind: "manual", why: "Cline's MCP command is not verified; add it in Cline's MCP settings" }),
+    detect: (e) => clinePluginInstalled(e) || !!e.which("cline"),
+    // With Plannotator's plugin: its tool, and the wake (apps/cline-plugin). Without it, Cline CLI's `mcp add` and its
+    // config file are not verified (and a positional word can start a task), so a person adds the plugin or the server.
+    way: async (e) =>
+      clinePluginInstalled(e)
+        ? { kind: "tool", host: "cline" }
+        : { kind: "manual", why: `add Plannotator's Cline plugin (cline plugin install npm:${CLINE_PLUGIN_PACKAGE}), or the server in Cline's MCP settings` },
     file: () => null,
     raw: () => null,
   },
