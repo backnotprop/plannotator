@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
-import type { InboxAccount, InboxMachineAccountsRead, InboxUsageWindow } from '@plannotator/core/inbox-types';
+import { INBOX_ACCOUNT_SWITCHING, type InboxAccount, type InboxMachineAccountsRead, type InboxUsageWindow } from '@plannotator/core/inbox-types';
 import { HostMark, Icon } from '../icons';
 import { usePhone } from '../phone';
 import { accountsFailure, SELF, useAccounts, type AccountsFailure, type AccountSwitch, type AccountsView, type SwitchLine } from '../useAccounts';
@@ -618,6 +618,9 @@ function AccountRow({
         data-hot={inUse && hot ? '' : undefined}
         data-pending={state.confirming || state.going ? '' : undefined}
         data-failed={isFailure(state.note?.line ?? null) ? '' : undefined}
+        // The owner, 2026-11-06: while switching is off, an empty circle looks pressable and does nothing, so rows not in
+        // use show none. It keeps its place, so the names stay in line; the in-use mark stays.
+        data-blank={!INBOX_ACCOUNT_SWITCHING && !inUse ? '' : undefined}
       />
       <span className="ib-acct-n">
         <span className="ib-acct-name">

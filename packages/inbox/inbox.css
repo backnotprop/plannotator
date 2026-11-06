@@ -1692,6 +1692,8 @@ button.ib-acct-r:focus-visible .ib-acct-sw { opacity: 0.72; }
 .ib-acct-dot[data-on][data-hot]::after { background: var(--warning-foreground); }
 .ib-acct-dot[data-pending] { border: 2px solid var(--primary); box-shadow: 0 0 0 3px color-mix(in oklch, var(--primary) 16%, transparent); }
 .ib-acct-dot[data-failed] { border-color: var(--destructive); }
+/* Switching off: no empty circle on a row not in use (its column stays, so the names line up). */
+.ib-acct-dot[data-blank] { visibility: hidden; }
 .ib-acct-n { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: var(--ib-fs-13-5, 13.5px); color: color-mix(in oklch, var(--foreground) 82%, transparent); }
 .ib-acct-name { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ib-acct-num { color: var(--muted-foreground); font-weight: 400; }

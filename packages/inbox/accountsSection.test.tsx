@@ -1161,6 +1161,28 @@ test.skipIf(!hasDom)('"on <machine>" has its own box after the other notes, so t
   expect(rowEl.querySelector('.ib-acct-cut')?.textContent).toBe('Home · Sign in again ·');
 });
 
+test.skipIf(!hasDom)('the circles: the in-use mark always; a row not in use has its empty circle only while switching is on, its column kept either way', async () => {
+  answer({ stdout: LIST });
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farList({ alias: 'personal', active: true }, { alias: 'build' }) }];
+  for (const onPhone of [false, true]) {
+    phone = onPhone;
+    const el = await open('accounts');
+    await until(() => order(el, 'ibx_mini').length === 2, "the other machine's rows");
+    for (const rowEl of el.querySelectorAll('[data-account]')) {
+      const dot = rowEl.querySelector('.ib-acct-dot');
+      // Every row keeps its circle's place: the first column, so the names line up.
+      expect(rowEl.firstElementChild?.classList.contains('ib-acct-dot')).toBe(true);
+      const inUse = rowEl.hasAttribute('data-in-use');
+      expect(dot?.hasAttribute('data-on')).toBe(inUse);
+      expect(dot?.hasAttribute('data-blank')).toBe(!inUse && !INBOX_ACCOUNT_SWITCHING);
+    }
+    if (!onPhone) {
+      act(() => root?.unmount());
+      host?.remove();
+    }
+  }
+});
+
 /** Everything in the list a person could press or Tab to. Refresh sits by the page's title, outside it. */
 const pressable = (el: ParentNode) => [...(el.querySelector('.ib-accts')?.querySelectorAll('button, a[href], input, select, textarea, [tabindex]:not([tabindex="-1"]), [role="button"], [aria-expanded]') ?? [])];
 
