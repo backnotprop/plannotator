@@ -8,6 +8,7 @@
 import type { ComposeAction } from '../compose/model';
 import {
   INBOX_SEARCH_GROUPS,
+  inboxSearchRanges,
   type InboxSearchFrom,
   type InboxSearchGroupId,
   type InboxSearchRow,
@@ -139,9 +140,9 @@ export const FROM_OPTIONS: readonly { value: InboxSearchFrom | null; label: stri
   { value: 'me', label: 'Me' },
 ];
 
-/** What a set chip reads: "in plannotator", "Archived", "From me". */
+/** What a set chip reads: "Only in plannotator" (a search that starts in a project says so), "Archived", "From me". */
 export function chipText(kind: keyof SearchFilters, filters: SearchFilters, projectName: (id: string) => string): string {
-  if (kind === 'project') return filters.project ? `in ${projectName(filters.project)}` : 'All projects';
+  if (kind === 'project') return filters.project ? `Only in ${projectName(filters.project)}` : 'All projects';
   if (kind === 'status') return STATUS_OPTIONS.find((o) => o.value === filters.status)?.label ?? 'Any status';
   return filters.from === 'me' ? 'From me' : filters.from === 'agent' ? 'From agents' : 'From anyone';
 }
@@ -229,6 +230,17 @@ export function markedRuns(text: string, marks: readonly [number, number][]): { 
   }
   if (at < text.length) out.push({ text: text.slice(at), mark: false });
   return out;
+}
+
+/**
+ * The query's words in a field the answer carries no marks for (the thread's
+ * name, the project's name as this window shows it, an agent's name, a
+ * folder), as [start, length]: the server's own rule for `title_marks`
+ * (@plannotator/core/inbox-search, the last term as a prefix), over the
+ * answer's `terms`, so the window marks what the index matched.
+ */
+export function termMarks(text: string, terms: readonly string[]): [number, number][] {
+  return inboxSearchRanges(text, terms).map(([start, end]) => [start, end - start]);
 }
 
 /** Text as compared for "the row already shows it": a cut's "…" dropped, whitespace as one space, case folded. */

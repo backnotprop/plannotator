@@ -3871,18 +3871,26 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 .ib-sp-p .ib-sp-m, .ib-sp-s .ib-sp-m { font-weight: 650; color: var(--foreground); }
 /* The matched words in the first line: semibold and underlined in the primary colour (the whole line is bright, so weight alone no longer stands out). */
 .ib-sp-p .ib-sp-m { font-weight: 600; text-decoration: underline 2px var(--primary); text-underline-offset: 3px; text-decoration-skip-ink: none; }
+/* A result's first line shows its words whole: a thread's subject, a project's name and a message's sentence around
+   the match wrap instead of ending in "…" (the owner, "search improvements": he could not see why a result matched). */
+.ib-sp-row[data-result] .ib-sp-p { white-space: normal; overflow-wrap: anywhere; }
+/* The matched words in the second line (the thread's name, the project, an agent, a folder): as the first line's,
+   at the second line's weight. */
+.ib-sp-s .ib-sp-m { text-decoration: underline 1.5px var(--primary); text-underline-offset: 2px; text-decoration-skip-ink: none; }
 /* A result's second line (MetaLine): the thread chip first, the list's own chip (.ib-key), then what the result
-   is · project · section · time on one line. The project and the chip give way together; the rest keep their place.
-   Every part cuts at its own end (a right-to-left part included). */
-.ib-sp-s.ib-sp-tl { position: relative; display: flex; align-items: center; min-width: 0; }
-.ib-sp-tl > span:not(.ib-key) { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ib-sp-tl .ib-sp-lead, .ib-sp-tl .ib-sp-sec, .ib-sp-tl .ib-sp-at { flex: none; }
-.ib-sp-tl bdi { display: inline; max-width: none; }
+   is · project · section · time. Nothing is cut: the chip and the project show their whole words and the line wraps
+   (after a "·", or inside the chip or the project when one alone is wider than the row). The lead, the section and
+   the time never break inside. */
+.ib-sp-s.ib-sp-tl { position: relative; display: block; min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.6; }
+.ib-sp-tl > span:not(.ib-key) { white-space: normal; }
+.ib-sp-tl .ib-sp-lead, .ib-sp-tl .ib-sp-sec, .ib-sp-tl .ib-sp-at { white-space: nowrap; }
+/* The project moves to the next line whole ("workspaces-desktop-app", never "workspaces-desktop-" / "app"); it breaks
+   inside only when it alone is wider than the row. */
+.ib-sp-tl > span.ib-sp-pj > bdi { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: bottom; }
+.ib-sp-tl bdi { display: inline; max-width: none; white-space: inherit; }
 .ib-sp-tl .ib-sp-sep { padding: 0 5px; color: var(--muted-foreground); }
-.ib-sp-tl .ib-sp-lead { max-width: 30%; }
-.ib-sp-tl > span.ib-sp-pj { flex: 0 1 auto; min-width: 2.5em; }
-.ib-sp-tl .ib-key.ib-sp-key { flex: 0 1 auto; min-width: 4.5em; max-width: min(55%, 24em); margin-right: 10px; }
-.ib-sp-key > .ib-keyt { display: block; min-width: 0; max-width: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-sp-tl .ib-key.ib-sp-key { display: inline-block; max-width: 100%; white-space: normal; overflow-wrap: anywhere; margin-right: 8px; line-height: 1.45; }
+.ib-sp-key > .ib-keyt { display: inline; min-width: 0; max-width: none; overflow: visible; text-overflow: clip; white-space: normal; }
 /* A thread with no name: its subject in the chip, in the row's face (the monospace face is for names). */
 .ib-sp-key.ib-sp-key-subj { font-family: inherit; }
 /* Arabic, Hebrew: the monospace face has no joined letter forms; such a name keeps the row's face. */
@@ -3900,6 +3908,11 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 .ib-sp-skel { height: 46px; padding: 6px 8px; display: flex; flex-direction: column; gap: 6px; justify-content: center; }
 .ib-sp-skel i { display: block; height: 10px; border-radius: 4px; background: color-mix(in oklch, var(--muted) 90%, var(--foreground) 6%); }
 .ib-sp-skel i + i { width: 40%; height: 8px; opacity: 0.7; }
+/* Results found inside a filter (a search opened from a project starts in it): what was left out, and the one click
+   that searches everything. Under the list, so it shows however many results there are. */
+.ib-sp-scope { padding: 8px 16px; border-top: 1px solid var(--ib-sep-s, var(--ib-sp-line)); font-size: var(--ib-fs-12-5, 12.5px); line-height: 1.45; color: var(--muted-foreground); overflow-wrap: anywhere; }
+.pn-inbox .ib-sp-scope button { color: var(--primary); background: none; border: 0; padding: 0; font: inherit; font-weight: 550; cursor: pointer; }
+.pn-inbox .ib-sp-scope button:hover { text-decoration: underline; }
 .ib-sp-indexing { padding: 2px 8px 6px; font-size: var(--ib-fs-12, 12px); color: var(--muted-foreground); }
 .ib-sp-foot { display: flex; align-items: center; gap: 18px; height: 40px; padding: 0 16px; border-top: 1px solid var(--ib-sp-line); font-size: var(--ib-fs-12-5, 12.5px); color: var(--ib-sp-quiet); white-space: nowrap; overflow: hidden; }
 .ib-sp-foot > span { display: inline-flex; align-items: center; gap: 6px; }
@@ -3939,6 +3952,8 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort { flex: 1; flex-wrap: nowrap; margin-left: 0; padding: 2px; gap: 2px; }
   .pn-inbox dialog.ib-sp[data-phone] .ib-sp-sort .ib-seg-o { flex: 1; justify-content: center; height: 32px; font-size: var(--ib-fs-13-5, 13.5px); border-radius: 6px; }
   dialog.ib-sp[data-phone] .ib-sp-s { font-size: var(--ib-fs-12-5, 12.5px); }
+  dialog.ib-sp[data-phone] .ib-sp-scope { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); font-size: var(--ib-fs-13-5, 13.5px); }
+  .pn-inbox dialog.ib-sp[data-phone] .ib-sp-scope button { min-height: 32px; }
   dialog.ib-sp[data-phone] .ib-sp-menu { position: fixed; left: 8px; right: 8px; bottom: calc(8px + env(safe-area-inset-bottom)); top: auto; max-width: none; max-height: 60vh; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); }
   dialog.ib-sp[data-phone] .ib-sp-mi { height: 44px; font-size: var(--ib-fs-15, 15px); }
 }

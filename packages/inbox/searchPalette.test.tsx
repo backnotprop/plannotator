@@ -21,6 +21,10 @@
  * - recent searches: a click runs one; Clear forgets them; opening a
  *   result remembers its query;
  * - the landing highlight finds the words in the message's text nodes;
+ * - the query's words marked in the thread's name, the project and the agent
+ *   (fields the answer has no marks for); a file name kept whole when its cut
+ *   would hide a match; results found inside a filter say so under the list,
+ *   with Search everywhere;
  * - a message's mark from its agent's host, every mark first and hidden;
  *   the time column and the key footer (desktop), the time in the meta
  *   line and no footer (phone).
@@ -315,7 +319,7 @@ test.skipIf(!hasDom)('chips: the Project chip starts on the current project; a m
   await waitFor(() => searches().length === 1);
   expect(searches()[0]!.url.searchParams.get('project')).toBe(project.id);
   expect(searches()[0]!.url.searchParams.get('current')).toBe(project.id);
-  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('in plannotator');
+  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('Only in plannotator');
   expect(host!.querySelector('[data-unset="project"]')).not.toBeNull();
   // Clear the project, then pick Status → Archived by keys.
   await act(async () => {
@@ -505,6 +509,65 @@ test.skipIf(!hasDom)('every result in a thread draws the list’s thread chip: i
   expect(chip('thread', 'msg_t5')).toBeNull();
   // One chip per row, never more.
   for (const option of options()) expect(option.querySelectorAll('.ib-key').length).toBeLessThanOrEqual(1);
+});
+
+test.skipIf(!hasDom)('why a result matched: the words marked in the thread’s name, the project and the agent; a file name whole when its cut would hide a match', async () => {
+  const where = { project, section: 'quiet' as const, archived: false, at: '2026-10-09T14:03:00Z' };
+  const name = 'Launch agents from Plannotator Cloud for the superfans beta';
+  const longFile = 'superfans-onboarding-notes-for-the-beta-launch-plannotator-cloud-checklist-2026.md';
+  const threads: InboxSearchRow[] = [threadRow('msg_t1', 'Superfans folder', { thread_name: name })];
+  const messages: InboxSearchRow[] = [
+    { type: 'message', id: 'msg_a', thread_id: 'msg_t1', ...where, author: { kind: 'agent', name: 'Cloud Plannotator Bot' }, title: 'Superfans folder', thread_name: name, snippet: { text: 'launch agents from Plannotator Cloud', marks: [[19, 11], [31, 5]] }, question: null },
+  ];
+  const files: InboxSearchRow[] = [
+    { type: 'file', id: 'att_1', thread_id: 'msg_t1', message_id: 'msg_t1', ...where, name: longFile, name_marks: [[47, 11], [59, 5]], folder: 'docs', kind: 'md', title: 'Superfans folder', thread_name: name },
+  ];
+  respond = async (call) =>
+    call.url.searchParams.get('q')
+      ? answer({ q: 'plannotator cloud', terms: ['plannotator', 'cloud'], totals: totals({ threads: 1, messages: 1, files: 1 }), groups: { threads, messages, files }, recent: null })
+      : answer({});
+  await render();
+  await type('plannotator cloud');
+  await waitFor(() => options().length === 3);
+  const marked = (el: Element | null) => [...(el?.querySelectorAll('.ib-sp-m') ?? [])].map((m) => m.textContent);
+  const thread = host!.querySelector('[data-result="thread"]')!;
+  // The thread row matched by its name: the chip shows it whole, the words marked.
+  expect(thread.querySelector('.ib-keyt')!.textContent).toBe(name);
+  expect(marked(thread.querySelector('.ib-key'))).toEqual(['Plannotator', 'Cloud']);
+  // The project, as this window names it, marked by the same rule.
+  expect(marked(thread.querySelector('.ib-sp-pj'))).toEqual(['plannotator']);
+  // The agent's name, which the index also searches.
+  const message = host!.querySelector('[data-result="message"]')!;
+  expect(marked(message.querySelector('.ib-sp-lead'))).toEqual(['Cloud', 'Plannotator']);
+  expect(marked(message.querySelector('.ib-sp-snip'))).toEqual(['Plannotator', 'Cloud']);
+  // The middle cut would take the matched words: the whole name instead, marked.
+  const file = host!.querySelector('[data-result="file"]')!;
+  expect(file.querySelector('.ib-sp-p')!.textContent).toBe(longFile);
+  expect(marked(file.querySelector('.ib-sp-p'))).toEqual(['plannotator', 'cloud']);
+});
+
+test.skipIf(!hasDom)('started inside a project: the chip says Only in, the results say what was left out, and Search everywhere asks again everywhere', async () => {
+  respond = async (call) => (call.url.searchParams.get('q') ? results(call.url.searchParams.get('q')!) : answer({}));
+  await render({ currentProject: project.id });
+  await waitFor(() => searches().length === 1);
+  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('Only in plannotator');
+  // No words yet: nothing to say about results.
+  expect(host!.querySelector('[data-search-scope]')).toBeNull();
+  await type('rate');
+  await waitFor(() => options().length === 10);
+  expect(host!.querySelector('[data-search-scope]')!.textContent).toBe('Searched only plannotator. Search everywhere');
+  expect(host!.querySelector('[data-search-live]')!.textContent).toBe('13 results in 2 groups. Searched only plannotator');
+  const asked = searches().length;
+  await act(async () => {
+    host!.querySelector<HTMLElement>('[data-search-scope] [data-clear-filters]')!.click();
+  });
+  await waitFor(() => searches().length === asked + 1 && host!.querySelector('[data-search-scope]') === null);
+  const last = searches().at(-1)!.url.searchParams;
+  expect(last.get('q')).toBe('rate');
+  expect(last.get('project')).toBeNull();
+  expect(host!.querySelector('[data-chip="project"]')!.textContent).toBe('All projects');
+  expect(host!.querySelector('[data-search-live]')!.textContent).toBe('13 results in 2 groups');
+  expect(document.activeElement).toBe(input());
 });
 
 test.skipIf(!hasDom)('the subject chip is left out only when the first line is, begins with or starts the subject; never for a word met inside the text', async () => {

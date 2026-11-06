@@ -51,6 +51,7 @@ import {
   searchRowMark,
   type SearchShape,
   sectionLabel,
+  termMarks,
   typeCountWords,
   type SearchFilters,
   type SearchGroupView,
@@ -126,6 +127,14 @@ function Marked({ text, marks }: { text: string; marks: readonly [number, number
   );
 }
 
+/** The query's words marked in a field the answer carries no marks for (`termMarks`: the server's rule, the answer's terms). */
+function Words({ text, terms }: { text: string; terms: readonly string[] }) {
+  return terms.length > 0 ? <Marked text={text} marks={termMarks(text, terms)} /> : <>{text}</>;
+}
+
+/** No terms (the recent view, filters with no words): one array, so the memoized rows keep their props. */
+const NO_TERMS: readonly string[] = [];
+
 /** A composed secondary line: each part apart, user-written parts in <bdi> that truncate on their own. */
 function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) {
   const shown = parts.filter((p): p is ReactNode => p !== null && p !== false && p !== '');
@@ -146,9 +155,11 @@ function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) 
  * in the list's monospace face, or, for a thread with no name, its subject in
  * the row's face. Its tooltip and accessible words carry the whole thread:
  * "Thread nightly-deploy: Investigate why…" (always for a named thread, whose
- * subject is not on screen; a subject chip only while it is cut).
+ * subject is not on screen; a subject chip only while it is cut). Its words are
+ * shown whole (they wrap inside the chip) with the query's words marked, so a
+ * thread found by its name says why.
  */
-function ThreadChip({ chip }: { chip: RowThreadChip }) {
+function ThreadChip({ chip, terms }: { chip: RowThreadChip; terms: readonly string[] }) {
   const whole = chip.kind === 'name' && chip.subject ? `${chip.text}: ${chip.subject}` : chip.text;
   const named = chip.kind === 'name' && Boolean(chip.subject);
   return (
@@ -156,7 +167,7 @@ function ThreadChip({ chip }: { chip: RowThreadChip }) {
       <span className={`ib-key ib-sp-key${chip.kind === 'subject' ? ' ib-sp-key-subj' : ''}`} data-result-thread={chip.kind}>
         <span className="ib-sr">Thread: </span>
         <bdi className="ib-keyt" dir="auto">
-          {chip.text}
+          <Words text={chip.text} terms={terms} />
         </bdi>
         {chip.kind === 'name' && chip.subject && <span className="ib-sr">, {chip.subject}</span>}
         <span className="ib-sr">, </span>
@@ -169,19 +180,19 @@ function ThreadChip({ chip }: { chip: RowThreadChip }) {
  * A result's second line: the thread chip first (where a phone's list row
  * draws it, ahead of what the thread holds), then what the result is (its
  * author or folder), the project, the section, the time, apart
- * by "·" (", " for a screen reader). One line: the project and the chip give way
- * together; the lead, the section and the time keep their place. Each
- * user-written part is a `<bdi dir="auto">` cut at its own end, its whole
- * text in the DOM and in a tooltip while it is cut.
+ * by "·" (", " for a screen reader). Nothing is cut: the chip and the project
+ * show their whole words, with the query's words marked, and the line wraps
+ * after a "·" (a `<wbr>`) when they do not fit; the lead, the section and the
+ * time never break inside. Each user-written part is a `<bdi dir="auto">`.
  */
-function MetaLine({ chip, lead, project, section, at }: { chip: RowThreadChip | null; lead?: ReactNode; project: string; section?: string | null; at?: string | null }) {
+function MetaLine({ chip, lead, project, section, at, terms }: { chip: RowThreadChip | null; lead?: ReactNode; project: string; section?: string | null; at?: string | null; terms: readonly string[] }) {
   const parts: { node: ReactNode; className: string }[] = [];
   if (lead) parts.push({ node: lead, className: 'ib-sp-lead' });
   parts.push({
     node: (
-      <Tip content={project} when={(trigger) => isTextCut(trigger.closest('.ib-sp-pj'))}>
-        <bdi dir="auto">{project}</bdi>
-      </Tip>
+      <bdi dir="auto">
+        <Words text={project} terms={terms} />
+      </bdi>
     ),
     className: 'ib-sp-pj',
   });
@@ -189,7 +200,8 @@ function MetaLine({ chip, lead, project, section, at }: { chip: RowThreadChip | 
   if (at) parts.push({ node: at, className: 'ib-sp-at' });
   return (
     <span className="ib-sp-s ib-sp-tl">
-      {chip && <ThreadChip chip={chip} />}
+      {chip && <ThreadChip chip={chip} terms={terms} />}
+      {chip && <wbr />}
       {parts.map((part, i) => (
         <span key={i} className={part.className}>
           {i > 0 && (
@@ -198,6 +210,7 @@ function MetaLine({ chip, lead, project, section, at }: { chip: RowThreadChip | 
                 ·
               </span>
               <span className="ib-sr">, </span>
+              <wbr />
             </>
           )}
           {part.node}
@@ -271,16 +284,16 @@ function KeyFooter() {
 
 /** A result's mark and lines. Memoized: moving the highlight re-renders the option elements, not what they hold
  *  (the row is the answer's own object, so it stays the same until a new answer lands). */
-const ResultContent = memo(function ResultContent({ row, phone, projectName }: { row: InboxSearchRow; phone: boolean; projectName: string }) {
+const ResultContent = memo(function ResultContent({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
   return (
     <>
       <RowMark row={row} />
-      <RowBody row={row} phone={phone} projectName={projectName} />
+      <RowBody row={row} phone={phone} projectName={projectName} terms={terms} />
     </>
   );
 });
 
-function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: boolean; projectName: string }) {
+function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phone: boolean; projectName: string; terms: readonly string[] }) {
   const chip = rowThreadChip(row);
   // The time: in its own column on a desktop, at the end of the meta line on a phone (a column would take the title's width).
   const time = row.type === 'project' ? null : searchTime(row.at);
@@ -296,7 +309,7 @@ function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: bool
                 <Marked text={row.title} marks={row.title_marks} />
               </span>
             </Tip>
-            <MetaLine chip={chip} project={projectName} section={label} at={metaAt} />
+            <MetaLine chip={chip} project={projectName} section={label} at={metaAt} terms={terms} />
           </span>
           {row.archived ? <span className="ib-sp-chip">Archived</span> : row.section === 'stopped' ? <span className="ib-sp-chip ib-sp-warn">Stopped</span> : null}
           {!phone && <TimeColumn at={time} />}
@@ -312,7 +325,21 @@ function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: bool
                 <Marked text={row.snippet.text} marks={row.snippet.marks} />
               </span>
             </Tip>
-            <MetaLine chip={chip} lead={row.author.kind === 'me' ? 'You' : <bdi dir="auto">{row.author.name}</bdi>} project={projectName} at={metaAt} />
+            <MetaLine
+              chip={chip}
+              lead={
+                row.author.kind === 'me' ? (
+                  'You'
+                ) : (
+                  <bdi dir="auto">
+                    <Words text={row.author.name} terms={terms} />
+                  </bdi>
+                )
+              }
+              project={projectName}
+              at={metaAt}
+              terms={terms}
+            />
           </span>
           {/* An action item (an Inbox `:::action`, key `a-…`) reads "Action item", not "Question". */}
           {row.question && <span className="ib-sp-chip">{row.question.key.startsWith('a-') ? 'Action item' : 'Question'}</span>}
@@ -323,7 +350,9 @@ function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: bool
       );
     case 'file':
     case 'guide': {
-      const cut = middleCutInboxName(row.name, phone ? 30 : 46, row.name_marks);
+      // Cut in the middle to fit, unless the cut would take a matched word: then the whole name, wrapped.
+      const short = middleCutInboxName(row.name, phone ? 30 : 46, row.name_marks);
+      const cut = short.marks.length < row.name_marks.length ? { text: row.name, marks: row.name_marks } : short;
       return (
         <>
           <span className="ib-sp-rs">
@@ -333,7 +362,12 @@ function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: bool
                 <Marked text={cut.text} marks={cut.marks} />
               </span>
             </Tip>
-            <MetaLine chip={chip} lead={<bdi dir="auto">{row.type === 'guide' ? 'Guided review' : row.folder ? `${row.folder}/` : 'File'}</bdi>} project={projectName} />
+            <MetaLine
+              chip={chip}
+              lead={<bdi dir="auto">{row.type === 'guide' ? 'Guided review' : row.folder ? <Words text={`${row.folder}/`} terms={terms} /> : 'File'}</bdi>}
+              project={projectName}
+              terms={terms}
+            />
           </span>
           <span className="ib-sp-chip ib-sp-kind">{row.kind}</span>
           {row.archived && <span className="ib-sp-chip">Archived</span>}
@@ -350,10 +384,41 @@ function RowBody({ row, phone, projectName }: { row: InboxSearchRow; phone: bool
             </span>
           </Tip>
           {/* The name's tooltip names the whole folder. */}
-          <Secondary parts={['Project', <bdi>{row.root}</bdi>]} />
+          <Secondary
+            parts={[
+              'Project',
+              <bdi>
+                <Words text={row.root} terms={terms} />
+              </bdi>,
+            ]}
+          />
         </span>
       );
   }
+}
+
+/**
+ * "Searched only plannotator. Search everywhere": what a filtered search left
+ * out, and the one click that searches everything (every chip back to its
+ * start). Under "No matches", and under the results while a filter is set, so
+ * a search that started inside a project never misses a thread without saying so.
+ */
+function SearchedOnly({ scope, onEverywhere }: { scope: readonly string[]; onEverywhere: () => void }) {
+  return (
+    <>
+      Searched only{' '}
+      {scope.map((s, i) => (
+        <span key={i}>
+          {i > 0 && ', '}
+          <bdi>{s}</bdi>
+        </span>
+      ))}
+      .{' '}
+      <button type="button" data-clear-filters="" onClick={onEverywhere}>
+        Search everywhere
+      </button>
+    </>
+  );
 }
 
 /** A mouse press in the list keeps focus in the input; the click still runs. */
@@ -395,6 +460,8 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   const names = useMemo(() => projectNames(projects), [projects]);
   const projectName = useCallback((id: string) => names.get(id) ?? id, [names]);
+  const projectNameRef = useRef(projectName);
+  projectNameRef.current = projectName;
 
   // ── the dialog ──
   useEffect(() => {
@@ -472,7 +539,10 @@ export default function SearchPalette(props: SearchPaletteProps) {
           setPending(false);
           setExpanded({});
           setAnswered({ key, q: query.trim(), model, type: nextType, sort: nextSort });
-          setLive(nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters)));
+          const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
+          // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
+          const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType).join(', ') : '';
+          setLive(only ? `${said}. Searched only ${only}` : said);
         })
         .catch((cause) => {
           if (seq !== requestSeq.current || (cause instanceof DOMException && cause.name === 'AbortError')) return;
@@ -898,17 +968,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
           </span>
           {scope.length > 0 && (
             <span className="ib-sp-e2">
-              Searched only{' '}
-              {scope.map((s, i) => (
-                <span key={i}>
-                  {i > 0 && ', '}
-                  <bdi>{s}</bdi>
-                </span>
-              ))}
-              .{' '}
-              <button type="button" data-clear-filters="" onClick={clearFilters}>
-                Search everywhere
-              </button>
+              <SearchedOnly scope={scope} onEverywhere={clearFilters} />
             </span>
           )}
         </div>
@@ -1005,7 +1065,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
             const row = option.row;
             return (
               <div key={`${row.type}-${row.id}`} className="ib-sp-row" {...common} data-result={row.type} data-result-id={row.id}>
-                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} />
+                <ResultContent row={row} phone={phone} projectName={projectName(row.project.id)} terms={answered?.model.terms ?? NO_TERMS} />
               </div>
             );
           })}
@@ -1016,6 +1076,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
   })();
 
   const anyFilter = filtered;
+  // Results found inside a filter (a search opened from a project starts in it): say what was left out, under the list.
+  const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtered && options.length > 0);
+  const resultScope = scopeShown ? scopeWords(filters, projectName, answered!.type) : [];
   // The order only means something for words: the recent view and filters alone keep their own order.
   const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (
@@ -1115,6 +1178,11 @@ export default function SearchPalette(props: SearchPaletteProps) {
         </div>
         <div className="ib-sp-fade ib-sp-bot" data-on={fades.bottom ? '' : undefined} />
       </div>
+      {resultScope.length > 0 && (
+        <div className="ib-sp-scope" data-search-scope="" onMouseDown={keepInputFocus}>
+          <SearchedOnly scope={resultScope} onEverywhere={clearFilters} />
+        </div>
+      )}
       {!phone && <KeyFooter />}
       <div className="ib-sr" role="status" aria-live="polite" data-search-live="">
         {live}
