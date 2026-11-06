@@ -386,10 +386,163 @@ describe('diffShapeVersions', () => {
 });
 
 describe('checkShapeNoteInput', () => {
+  test('a box note keeps its box, code and picture; anything off is refused, not stored', () => {
+    const base = { kind: 'change', v: 1, view: 'picture', text: 'x' };
+    const box = { x: 0.1, y: 0.2, w: 0.3, h: 0.4 };
+    const ok = checkShapeNoteInput({ ...base, box, code: ['src/a.ts#L42'], picture: 'data:image/png;base64,iVBORw0KGgo=' });
+    expect(ok.ok && [ok.value.box, ok.value.code, ok.value.picture]).toEqual([box, ['src/a.ts#L42'], 'data:image/png;base64,iVBORw0KGgo=']);
+    expect(checkShapeNoteInput({ ...base, box: { ...box, x: 2 } }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, view: null, box }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, code: ['/etc/passwd#L1'] }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: 'data:image/svg+xml;base64,PHN2Zz4=' }).ok).toBe(false);
+    expect(checkShapeNoteInput({ ...base, picture: `data:image/png;base64,${'A'.repeat(6_000_001)}` }).ok).toBe(false);
+  });
+
   test('a general comment needs no part; a part needs its view', () => {
     expect(checkShapeNoteInput({ kind: 'change', v: 1, text: 'Simpler, please' }).ok).toBe(true);
     expect(checkShapeNoteInput({ kind: 'ask', v: 1, view: 'code', text: 'Why two files?' }).ok).toBe(true);
     const orphan = checkShapeNoteInput({ kind: 'change', v: 1, part: 'p-kettle', text: 'x' });
     expect(orphan.ok).toBe(false);
+  });
+});
+
+// ── How it works examples ("Follow an example") ──
+// An invented drawing: a kettle with an arrow named by data-edge.
+const KETTLE_HOW = {
+  html: '<div data-mark="how-boil">Water boils</div><svg><g data-edge="hot"><path d="M0 0 H10"/></g></svg><span data-edge="hot">hot enough</span><div data-mark="how-whistle">It whistles</div><div data-mark="how-quiet">Stays quiet</div>',
+  width: 800,
+  height: 400,
+};
+
+function step(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    part: 'how-boil',
+    tag: '100 °C',
+    text: 'The water boils',
+    inputs: [{ name: 'temp', value: '100', type: 'number', reading: '100 °C', from: { path: 'src/kettle.ts', line: 12 } }],
+    signature: 'boils(temp: number): boolean',
+    checks: [{ code: 'temp >= BOIL', constant: '100', saw: '100', result: 'pass', decides: true }],
+    output: { name: 'boiling', value: 'true', type: 'boolean' },
+    code: { path: 'src/kettle.ts', line: 10 },
+    ...overrides,
+  };
+}
+
+function withExamples(examples: unknown, how: Record<string, unknown> = KETTLE_HOW) {
+  const b = board();
+  return checkShapeBoard({ ...b, views: { ...b.views, how: { ...how, examples } } });
+}
+
+describe('checkShapeBoard: examples on How it works', () => {
+  test('a whole example is kept, with its handed-on value and its failing check', () => {
+    const examples = [
+      {
+        name: 'Nothing sounds',
+        title: 'The water stops at 90 °C',
+        steps: [
+          step({
+            tag: '90 °C',
+            checks: [
+              { code: 'temp >= BOIL', constant: '100', saw: '90', result: 'fail', decides: true, short: '10 short' },
+              { code: 'lid.closed', result: 'not-reached' },
+            ],
+            output: { name: 'boiling', value: 'false', type: 'boolean' },
+          }),
+          step({ part: 'how-quiet', arrow: 'hot', tag: 'quiet', inputs: [{ name: 'boiling', value: 'false', from: { step: 1 } }, { name: 'mode', value: "'eco'", from: 'the settings' }] }),
+        ],
+      },
+    ];
+    const r = withExamples(examples);
+    if (!r.ok) throw new Error(r.errors.join('\n'));
+    const out = r.value.views.how!.examples!;
+    expect(out[0]!.steps[1]!.inputs.map((i) => i.from)).toEqual([{ step: 1 }, 'the settings']);
+    expect(out[0]!.steps[0]!.checks.map((c) => c.result)).toEqual(['fail', 'not-reached']);
+    expect(out[0]!.steps[1]!.arrow).toBe('hot');
+  });
+
+  test('a step that takes nothing in and checks nothing may leave both lists out', () => {
+    const r = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ inputs: undefined, checks: undefined })] }]);
+    if (!r.ok) throw new Error(r.errors.join('\n'));
+    const kept = r.value.views.how!.examples![0]!.steps[0]!;
+    expect([kept.inputs, kept.checks]).toEqual([[], []]);
+  });
+
+  test('a step must light a part or an arrow the drawing has, in the tall drawing too', () => {
+    const r = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ part: 'how-kettle' }), step({ part: undefined, arrow: 'cold' })] }]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors).toContain('views.how.examples[0].steps[0].part: "how-kettle" is not a data-mark in views.how.html');
+    expect(r.errors.some((e) => e.startsWith('views.how.examples[0].steps[1].arrow: "cold" is not a data-edge in views.how.html'))).toBe(true);
+
+    const tall = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ part: 'how-whistle' })] }], { ...KETTLE_HOW, tall: { html: '<div data-mark="how-boil">Boils</div>' } });
+    expect(tall.ok).toBe(false);
+    if (!tall.ok) expect(tall.errors).toContain('views.how.examples[0].steps[0].part: "how-whistle" is not a data-mark in views.how.tall.html');
+
+    const neither = withExamples([{ name: 'It sounds', title: 'Boils', steps: [step({ part: undefined })] }]);
+    expect(neither.ok).toBe(false);
+    if (!neither.ok) expect(neither.errors[0]).toContain('needs a part (a data-mark) or an arrow (a data-edge)');
+  });
+
+  test('checks: one decides, nothing runs after a failure, a shortfall only on a failure', () => {
+    const r = withExamples([
+      {
+        name: 'It sounds',
+        title: 'Boils',
+        steps: [
+          step({ checks: [{ code: 'a', saw: '1', result: 'pass' }, { code: 'b', saw: '2', result: 'pass' }] }),
+          step({ checks: [{ code: 'a', saw: '1', result: 'fail', decides: true }, { code: 'b', saw: '2', result: 'pass' }] }),
+          step({ checks: [{ code: 'a', saw: '1', result: 'pass', decides: true, short: '3 short' }] }),
+          step({ checks: [{ code: 'a', result: 'not-reached', decides: true }, { code: 'b', saw: '2', result: 'maybe' }] }),
+        ],
+      },
+    ]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const f = 'views.how.examples[0].steps';
+    expect(r.errors).toContain(`${f}[0].checks: mark exactly one check "decides": true, the one that settled the step (0 are marked)`);
+    expect(r.errors).toContain(`${f}[1].checks[1].result: must be "not-reached": an earlier check failed, so the code never got here`);
+    expect(r.errors).toContain(`${f}[2].checks[0].short: only a failing check has a shortfall`);
+    expect(r.errors).toContain(`${f}[3].checks[0].decides: a check that was not reached cannot decide the step`);
+    expect(r.errors).toContain(`${f}[3].checks[1].result: must be "pass", "fail" or "not-reached"`);
+  });
+
+  test('a handed-on value names an earlier step; sources and code stay in the project', () => {
+    const r = withExamples([
+      {
+        name: 'It sounds',
+        title: 'Boils',
+        steps: [
+          step({ inputs: [{ name: 'x', value: '1', from: { step: 1 } }] }),
+          step({ inputs: [{ name: 'x', value: '1', from: { step: 2 } }, { name: 'y', value: '2', from: { path: '../etc/passwd', line: 1 } }], code: { path: '/abs.ts', line: 1 } }),
+        ],
+      },
+    ]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    const f = 'views.how.examples[0].steps';
+    expect(r.errors).toContain(`${f}[0].inputs[0].from.step: the first step has no earlier step; name the code it is read from: { path, line }`);
+    expect(r.errors).toContain(`${f}[1].inputs[0].from.step: must be a whole number from 1 to 1`);
+    expect(r.errors.some((e) => e.startsWith(`${f}[1].inputs[1].from.path:`))).toBe(true);
+    expect(r.errors.some((e) => e.startsWith(`${f}[1].code.path:`))).toBe(true);
+  });
+
+  test('names, steps and outputs are required, and examples go only on How it works', () => {
+    const r = withExamples([
+      { name: 'Twice', title: 'A', steps: [step()] },
+      { name: 'Twice', title: 'B', steps: [] },
+      { title: 'C', steps: [step({ output: { name: 'x', value: '1' }, signature: 'not a call' })] },
+    ]);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.errors).toContain('views.how.examples[1].name: "Twice" is used twice; name each example by where it ends');
+    expect(r.errors).toContain('views.how.examples[1].steps: needs at least one step');
+    expect(r.errors).toContain('views.how.examples[2].name: is required');
+    expect(r.errors).toContain('views.how.examples[2].steps[0].output.type: is required');
+    expect(r.errors.some((e) => e.startsWith('views.how.examples[2].steps[0].signature: must start with the function'))).toBe(true);
+
+    const b = board();
+    const onPicture = checkShapeBoard({ ...b, views: { ...b.views, picture: { ...b.views.picture!, examples: [] } } });
+    expect(onPicture.ok).toBe(false);
+    if (!onPicture.ok) expect(onPicture.errors[0]).toContain('views.picture.examples: examples go on views.how');
   });
 });

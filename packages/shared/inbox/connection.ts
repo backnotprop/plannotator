@@ -480,7 +480,7 @@ export const INBOX_AGENT_ACTION_LEADS: Readonly<Record<string, string>> = {
  * field and `plannotator inbox --help` carry it whole.
  */
 export const INBOX_PICTURES_RULE =
-  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each: `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
+  'Pictures go in the body where you write about them, `![alt](/abs/path.png)`, never only in `attachments`; do not also attach one the body shows. Visual options are picture choices, one picture each, inside the choice (not in the text above the question): `- [ ] A · Label — ![alt](path) what it means`; the label comes back.'
 
 /** The `attachments` field's line on pictures (fixed text, on every copy of the field). */
 export const INBOX_ATTACHMENTS_PICTURES_LINE =
@@ -1389,3 +1389,10 @@ export function inboxWakeText(
  * never this long without one.
  */
 export const INBOX_SESSION_LIVE_MS = 30_000
+
+/**
+ * A claimed reply whose claimant stopped saying it is alive for this long has
+ * a claimant that quit: the Claude Code mod reports it then, and the Inbox
+ * reads it as stuck once that session is gone too.
+ */
+export const INBOX_UNDELIVERED_AFTER_MS = 60_000

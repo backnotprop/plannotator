@@ -677,8 +677,17 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
       if (!record) return { ok: false, code: "not_found", message: `No shape ${id}.` };
       if (record.state === "finished") return { ok: false, code: "finished", message: `${id} is finished. Reopen it to change it.` };
       if (checked.value.v > record.latest) return { ok: false, code: "no_version", message: `${id} has no version ${checked.value.v}.` };
+      const noteId = shapeNoteId(now());
+      let picture: string | undefined;
+      if (checked.value.picture) {
+        // A box's picture: a file the shape keeps, named for its note.
+        const name = `note-${noteId}.png`;
+        ensureDir(join(folder, "files"));
+        writeFileSync(join(folder, "files", name), Buffer.from(checked.value.picture.slice(checked.value.picture.indexOf(",") + 1), "base64"), { mode: 0o600 });
+        picture = `files/${name}`;
+      }
       const note: ShapeNote = {
-        id: shapeNoteId(now()),
+        id: noteId,
         at: iso(),
         kind: checked.value.kind,
         v: checked.value.v,
@@ -689,6 +698,9 @@ export function createShapeStore(options: { dataDir: string; now?: () => number 
         from: "you",
         re: null,
         delivered: null,
+        ...(checked.value.box ? { box: checked.value.box } : {}),
+        ...(checked.value.code ? { code: checked.value.code } : {}),
+        ...(picture ? { picture } : {}),
       };
       appendLine(join(folder, "chat.jsonl"), note);
       return { ok: true, note };
