@@ -217,6 +217,19 @@ export const outboxView = (entry: OutboxEntry): OutboxView => ({
 const FORWARD = /^\/api\/inbox\/m\/(ibx_[0-9A-HJKMNP-TV-Z]{26})\/(.+)$/;
 const SNOOZE_ROUTE = /^threads\/[^/]+\/snooze$/;
 const REPLY_ROUTE = /^messages\/[^/]+\/reply$/;
+/** A tailnet guest of this Inbox, acting on another machine or on what waits for one. */
+const OWNER_ONLY_BODY = { error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" } as const;
+/** Of a forwarded read's query, what a guest never passes on: `sessions`' folder-trust facts. */
+const GUEST_STRIPPED = ["trust_agent", "trust_project"] as const;
+
+/** A forwarded read's query: a guest reads as before, but never another machine's folder-trust facts (Trust and start is the owner's). */
+export function forwardedReadSearch(search: string, guest: boolean): string {
+  if (!guest) return search;
+  const query = new URLSearchParams(search);
+  if (!GUEST_STRIPPED.some((name) => query.has(name))) return search;
+  for (const name of GUEST_STRIPPED) query.delete(name);
+  return query.size > 0 ? `?${query}` : "";
+}
 /** A launched agent's buttons on another machine (remote launch): Stop, Try again, Trust folder, Delete. */
 const LAUNCH_ROUTE = /^launch\/[^/]+\/(stop|retry|trust|delete)$/;
 
@@ -635,15 +648,16 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const offline = () =>
       json({ error: `${links.get(machine)?.name ?? "That machine"} cannot be reached now.`, code: "machine_offline", machine: machinesView().find((m) => m.id === machine) }, 503);
     if (req.method === "GET") {
+      const search = forwardedReadSearch(url.search, context.isGuest(req, via));
       try {
-        return passAnswer(await peer.request(route, url.search, { method: "GET", headers: pick(req.headers, PASS_REQUEST), signal: req.signal }));
+        return passAnswer(await peer.request(route, search, { method: "GET", headers: pick(req.headers, PASS_REQUEST), signal: req.signal }));
       } catch {
         return offline();
       }
     }
     if (req.method !== "POST") return json({ error: "Use GET or POST." }, 405);
     // A guest let onto this Inbox's tailnet was never let onto that machine: it writes nothing there. Reads stay as they are.
-    if (context.isGuest(req, via)) return json({ error: "Only this computer's owner can act on another machine from this Inbox.", code: "owner_only" }, 403);
+    if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
     // Rule 8's table decides, by route: a write it has not classified never reaches another machine.
     const kind = doorWriteKind(route);
     if (!kind) return json({ error: "Not a forwarded route.", code: "not_found" }, 404);
@@ -822,12 +836,18 @@ export function createInboxMachines(context: InboxMachinesContext) {
       return json({ waiting: waiting.map(outboxView), notices: outbox.notices().map(outboxView) });
     }
     // Cancel a write still waiting that never left (a launch held for a machine that is asleep): it is never sent.
+    // The owner's, from any of their devices; a held launch only from a window, as the forward took it.
     const cancel = /^\/api\/inbox\/outbox\/([^/]+)\/cancel$/.exec(path);
     if (cancel) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
-      const stale = staleTab(await context.readBody(req));
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
+      const body = await context.readBody(req);
+      const stale = staleTab(body);
       if (stale) return stale;
-      const entry = outbox.cancel(decodeURIComponent(cancel[1]!));
+      const key = decodeURIComponent(cancel[1]!);
+      const held = outbox.get(key);
+      if (held && startsAgentThere(held.route, held.body) && !isWindowRequest(req, body, context.serverSession)) return json(INBOX_MACHINE_WINDOW_ONLY_BODY, 403);
+      const entry = outbox.cancel(key);
       if (!entry) return json({ error: "No such write.", code: "not_found" }, 404);
       if (entry.state !== "cancelled") {
         const name = links.get(entry.machine)?.name ?? entry.machine_name ?? "the other machine";
@@ -838,6 +858,7 @@ export function createInboxMachines(context: InboxMachinesContext) {
     const dismiss = /^\/api\/inbox\/outbox\/([^/]+)\/dismiss$/.exec(path);
     if (dismiss) {
       if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      if (context.isGuest(req, via)) return json(OWNER_ONLY_BODY, 403);
       const stale = staleTab(await context.readBody(req));
       if (stale) return stale;
       const entry = outbox.dismiss(decodeURIComponent(dismiss[1]!));
