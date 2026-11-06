@@ -14,7 +14,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { delimiter, dirname, join, resolve } from "node:path";
 import { isIgnoredPath, LOCKFILE_NAMES, SYSTEM_COMMANDS, TEST_FOLDERS } from "@plannotator/system";
 import { inboxProjectKey } from "@plannotator/shared/inbox/project-key";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
@@ -33,12 +33,22 @@ beforeAll(() => {
 });
 afterAll(() => removeStubbedHtml(stubs));
 afterEach(() => {
+  const tripped = roots.filter((root) => existsSync(join(root, LAUNCHCTL_LOG))).map((root) => readFileSync(join(root, LAUNCHCTL_LOG), "utf8"));
   for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true });
+  // a child that reached launchctl fails the test that ran it, with what it ran
+  if (tripped.length) throw new Error(`a test ran launchctl: ${tripped.join("")}`);
 });
 // After the cleanup hooks: a stub's failure stops the hooks registered behind it.
 const agents = stubbedAgentClis();
 
 const GIT_ENV = { GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_NOSYSTEM: "1" };
+
+/**
+ * Where a sandbox's launchctl tripwire writes. Every child gets a `launchctl`
+ * first on PATH that records its arguments here and exits 1, so no test can
+ * reach the real one (which would load a job into the developer's session).
+ */
+const LAUNCHCTL_LOG = "launchctl-tripwire.log";
 
 function git(root: string, ...args: string[]): string {
   return execFileSync("git", ["-C", root, "-c", "user.name=Maya Chen", "-c", "user.email=maya@example.com", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main", ...args], {
@@ -110,8 +120,12 @@ function sandbox(o: { storePath?: string } = {}) {
   const drawnAt = commit(repo, "the code");
   write(repo, drawing(drawnAt, o.storePath));
   const drawn = commit(repo, "System: first drawing of ledger");
+  const tripwire = join(root, "tripwire");
+  mkdirSync(tripwire, { recursive: true });
+  writeFileSync(join(tripwire, "launchctl"), `#!/bin/sh\nprintf 'launchctl %s\\n' "$*" >> '${join(root, LAUNCHCTL_LOG)}'\necho 'launchctl tripwire: tests never run launchctl' >&2\nexit 1\n`, { mode: 0o755 });
   const env: Record<string, string> = {
     ...agents.env,
+    PATH: [tripwire, agents.env.PATH].join(delimiter),
     ...GIT_ENV,
     HOME: home,
     TMPDIR: tmpdir(),
@@ -448,6 +462,11 @@ describe("plannotator system schedule", () => {
     const install = await cli(box, ["schedule", "install", "--project", box.repo, "--key", "ledger"]);
     expect(install.code).toBe(1);
     expect(install.stderr).toStartWith("not_installed: ");
+    // the tripwire saw nothing (afterEach fails any test it did see)
+    expect(existsSync(join(box.root, LAUNCHCTL_LOG))).toBe(false);
+    // and it is the launchctl every child finds first
+    const which = Bun.spawnSync(["/bin/sh", "-c", "command -v launchctl"], { env: box.env, stdout: "pipe" });
+    expect(which.stdout.toString().trim()).toBe(join(box.root, "tripwire", "launchctl"));
     expect((await cli(box, ["schedule", "start"])).code).toBe(2);
   }, 30_000);
 
