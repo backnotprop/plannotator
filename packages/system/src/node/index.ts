@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { citations } from '../format/cited.ts';
 import { MAX_FILE_BYTES, MAX_TOTAL_BYTES } from '../format/keys.ts';
 import { loadFiles } from '../format/load.ts';
-import type { LoadIssue, LoadResult, SystemFiles } from '../format/types.ts';
+import type { LoadIssue, LoadResult, SystemFiles, SystemModel } from '../format/types.ts';
 import { decodeUtf8, git, gitBytes, isGitRepo, lsTree, resolveCommit } from './git.ts';
 
 /** Where a drawing lives inside a repo. */
@@ -181,6 +181,21 @@ async function lookupIn(root: string, at: string | undefined, name: string, erro
   };
 }
 
+/** A band holds 12 columns. Written spans past that are not wrapped: the renderer narrows every part to fit. */
+const BAND_COLUMNS = 12;
+function overfullBands(model: SystemModel): LoadIssue[] {
+  const out: LoadIssue[] = [];
+  for (const [code, sheet] of Object.entries(model.sheets)) {
+    sheet.bands.forEach((band, i) => {
+      const written = band.row.reduce((n, c) => n + (c.type === 'gap' ? (c.fixed ? c.span : 0) : (c.span ?? 0)), 0);
+      if (written > BAND_COLUMNS) {
+        out.push({ file: `sheets/${code}.yaml`, field: `bands[${i}].row`, message: `the spans add up to ${written} columns; a band holds at most ${BAND_COLUMNS}` });
+      }
+    });
+  }
+  return out;
+}
+
 export type CheckResult = { errors: LoadIssue[]; warnings: LoadIssue[]; missing: string[] };
 
 /**
@@ -231,13 +246,14 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
   for (const alias of unchecked) {
     warnings.push({ file: 'system.yaml', field: `sources.repos.${alias}`, message: `paths in repo "${alias}" were not checked: no checkout of it was given` });
   }
+  warnings.push(...overfullBands(model));
   return { errors, warnings, missing };
 }
 
 export { gateRepo, parseNameStatus } from './gate-repo.ts';
 
 // The recipes, the agents and the scheduled check (step A6).
-export { DRAW_BRANCH, firstDrawPrompt, recipes, REDRAW_BRANCH, updatePrompt, type UpdatePromptInput } from '../recipe/prompts.ts';
+export { DRAW_BRANCH, firstDrawPrompt, recipes, REDRAW_BRANCH, reviewPrompt, updatePrompt, type ReviewPromptInput, type UpdatePromptInput } from '../recipe/prompts.ts';
 export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from '../agent/setup.ts';
 export { agentModel } from '../agent/model.ts';
 export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from '../agent/docs.ts';

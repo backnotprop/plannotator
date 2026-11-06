@@ -10,22 +10,27 @@ The facts of this job (the project, the folder to work in, what to read) are lis
 ## Rules
 
 - Work only in the drawing's worktree, the folder named above. Never edit, switch or commit in the person's own
-  checkout. Every command below runs in the worktree, and every check reads the worktree's own
-  `.plannotator/system/`, never another copy of the drawing.
+  checkout; making the worktree from it in step 1 is the one thing you run there. Every other command below runs in
+  the worktree, and every check reads the worktree's own `.plannotator/system/`, never another copy of the drawing.
 - Draw what the code says today, never what you remember or what a README or a marketing page claims. Every part,
   line and label must trace to a file you read. If you cannot point to a file for a claim, leave the claim out.
 - Read only. Other repos are cloned read only into a temporary folder. Never push to the default branch; you push one
   branch, `plannotator/system`, and open one pull request.
-- Write to the person in the Inbox only where these steps say so: one message when you start reading and one when
-  you are done. Send them with your Plannotator Inbox tool's `send_message`, into this thread. If you have no Inbox
-  tool, run `plannotator inbox call send_message '{"body": "<text>"}'` in a shell.
+- Write to the person in the Inbox only where these steps say so: one message once `system.yaml` is first written
+  (step 3) and one when you are done (step 8). Send them with your Plannotator Inbox tool's `send_message`, into the
+  drawing's thread as the facts above name it: with a thread named, each message is a reply to it (`reply_to`, that
+  message's id); with none, the first message starts it with the subject `System: <project>` and the last is a reply
+  to the first. If you have no Inbox tool, run
+  `plannotator inbox call send_message '{"body": "<text>", "reply_to": "<message id>"}'` in a shell (with
+  `"subject": "System: <project>"` in place of `reply_to` for a first message that starts the thread).
 
 ## Steps
 
 1. **Get the worktree ready.** If the worktree folder does not exist, make it from the project's folder:
    `git -C <project folder> fetch origin` and then
    `git -C <project folder> worktree add -b plannotator/system <worktree> origin/<default branch>`.
-   Find the default branch with `git -C <project folder> symbolic-ref --short refs/remotes/origin/HEAD`. If no
+   Find the default branch with `git -C <project folder> symbolic-ref --short refs/remotes/origin/HEAD`: it prints
+   `origin/<default branch>`, for example `origin/main`, which is the last argument above. If no
    worktree folder was named above, make one in a new empty folder of your own outside the project. Then work only
    there. Note the commit you are drawing from: `git -C <worktree> rev-parse HEAD`.
 
@@ -35,7 +40,9 @@ The facts of this job (the project, the folder to work in, what to read) are lis
    read only (`git clone --filter=blob:none <url> <a temporary folder>`) and note its commit with
    `git rev-parse HEAD`. Read the doc sites named above for names and intent, but draw only what the code confirms.
    - A switch that is off by default is drawn with "off" in its part's `sub` or its band's `means`, and the file the
-     switch lives in is in the part's `code:`. Read the default; do not guess it.
+     switch lives in is in the part's `code:`. When the part it turns on is outside (no `code:`), put "off" on that
+     outside part too, and put the switch's file in the `code:` of the project part that reads the switch. Read the
+     default; do not guess it.
    - Retired, removed or dead code is not drawn.
    - A part is a runtime piece (a process, server, worker, window, store, agent host, outside service) or a module
      someone working on the code must be able to find. A helper module is not a part: cite it in the `code:` of the
