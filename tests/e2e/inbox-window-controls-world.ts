@@ -104,7 +104,10 @@ export async function openRoute(page: Page, world: ControlsWorld, hash: string, 
   const isDocked = (await docked.count()) > 0;
   // The list's own toggle first: a layer on the route may cover the window's.
   if (isDocked && (await docked.getAttribute('data-state')) !== wanted) {
-    await page.locator('.ib-lhead .ib-sb-trigger').click();
+    // A pointer left on the 20 px strip at the left edge brings the peek out over the toggle: move it into the page and let the peek go.
+    await page.mouse.move(900, 500);
+    await page.locator('[data-sidebar-peek][data-visible]').waitFor({ state: 'detached', timeout: 10_000 });
+    await page.locator('.ib-lhead .ib-sb-trigger').click({ timeout: 10_000 });
     await settled();
   }
   if (hash) {
