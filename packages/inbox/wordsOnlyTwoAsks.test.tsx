@@ -202,6 +202,17 @@ function type(el: HTMLElement, words: string) {
 
 const replies = () => posted.filter((p) => p.path.endsWith('/reply'));
 
+/** Base UI opens a menu (and presses its items) on the pointer's press, as a person's click does. */
+async function press(target: HTMLElement) {
+  await act(async () => {
+    target.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, button: 0 }));
+    target.dispatchEvent(new PointerEvent('pointerup', { bubbles: true, button: 0, pointerType: 'mouse' }));
+    target.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
+    target.click();
+  });
+}
+
 /** What every words-only Send in this thread must come to, on the wire and on the server. */
 async function expectWordsOnly(firstId: string, secondId: string, words: string) {
   expect(replies().map((p) => p.path)).toEqual([`/api/inbox/messages/${secondId}/reply`]);
@@ -368,13 +379,20 @@ test.skipIf(!hasDom)('one session asked twice: a pick on the second, the first s
   act(() => (card.querySelector('[data-question-option] input') as HTMLInputElement).click());
   await until(async () => (await readThread(world.waiting)).thread.messages.flatMap((m) => m.questions ?? []).some((q) => q.state === 'picked'), 'the pick saved');
   await settle();
-  // The default: the other question stays open.
-  const chip = () => el.querySelector('[data-skip-chip]') as HTMLElement;
-  await until(() => chip()?.textContent?.includes('1 question stays open') === true, 'the chip');
-  expect(chip().getAttribute('data-skip-chip')).toBe('keep');
-  act(() => button(chip(), 'Skip it').click());
-  expect(chip().getAttribute('data-skip-chip')).toBe('skip');
-  expect(chip().textContent).toContain('1 question will be skipped');
+  // The default: the other question stays open. The skip for this Send is the open questions list's first row
+  // (approval "reply-bar-pairs").
+  const skipRow = () => document.querySelector<HTMLElement>('[data-open-questions-list] [data-open-questions-skip-row]');
+  await until(() => !!el.querySelector('.ib-pfoot [data-open-questions]'), 'the open questions button');
+  await press(el.querySelector('.ib-pfoot [data-open-questions]') as HTMLElement);
+  await until(() => skipRow()?.textContent?.includes('1 stays open when you send') === true, 'the skip row');
+  expect(skipRow()!.getAttribute('data-open-questions-skip-row')).toBe('keep');
+  await press(skipRow()!.querySelector('[data-skip-toggle]') as HTMLElement);
+  await until(() => skipRow()?.getAttribute('data-open-questions-skip-row') === 'skip', 'skipped for this Send');
+  expect(skipRow()!.textContent).toContain('1 skipped when you send');
+  await act(async () => {
+    (document.activeElement ?? document.body).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  });
+  await until(() => !skipRow(), 'the list closed');
   act(() => button(el.querySelector('.ib-pfoot') as HTMLElement, 'Send').click());
   await until(() => replies().length > 0 && el.querySelector('.ib-pfoot button[disabled]') === null, 'the Send');
   await settle();

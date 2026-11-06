@@ -141,6 +141,7 @@ import { noteStarred } from './starPop';
 import type { PinnedAction } from './components/PinnedRow';
 import { copyTextToClipboard } from '@plannotator/ui/utils/clipboard';
 import { newBatchId, projectAllArchived, projectBatchToast, projectsWithReadable, shownProjects, type ProjectAction } from './projectMenu';
+import { projectActivity } from './projectSort';
 import { lookBoundary } from './folding';
 import { latestAgentSeq } from './seenOnSight';
 import { isPhone, isTouchPhone, trackKeyboard, usePhone } from './phone';
@@ -4247,6 +4248,7 @@ function Inbox() {
     for (const project of projects) counts.set(project.id, waitingCount(latestSections, project.id));
     return counts;
   }, [projects, latestSections]);
+  const latestProjectActivity = useMemo(() => projectActivity(latestGroups), [latestGroups]);
 
   const context: ConnectContext | null = settings
     ? { command: settings.mcp_command, mcpUrl: settings.mcp_url, platform: platformOf() }
@@ -6035,6 +6037,7 @@ function Inbox() {
             }
             projectNames={projectNames}
             projectCounts={projectCounts}
+            projectActivity={latestProjectActivity}
             projectsReadable={projectsReadable}
             onProjectAction={(projectId, action) => void projectAction(projectId, action)}
             onProjectRename={renameProject}
