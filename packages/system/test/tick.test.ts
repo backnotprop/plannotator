@@ -1,10 +1,11 @@
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { execFileSync, spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, utimesSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
 import { git, isolateGitConfig, smallDrawing, tempDir, writeTree } from './helpers.ts';
+import { gitBytes } from '../src/node/git.ts';
 
 // A real project: a bare origin in a temp folder (a local path, no network),
 // a teammate's clone that lands commits on main, and the person's clone that
@@ -147,17 +148,21 @@ const drawingFiles = (dir: string) => {
   return out;
 };
 
-/** Everything a tick could change in the person's repo: git status, the refs, the config, worktrees, and every file under .git but the index. */
+/**
+ * Everything a tick could change in the person's repo: git status, the refs, the config, worktrees, and every file
+ * under .git, the index included. The snapshot's own status takes no optional lock, so it never refreshes the index
+ * itself, and a tick that refreshes it (a `git status` in the person's repo) shows here.
+ */
 function repoSnapshot(root: string) {
   const files: string[] = [];
   const walk = (rel: string) => {
     for (const e of readdirSync(join(root, '.git', rel), { withFileTypes: true })) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (e.isDirectory()) walk(r);
-      else if (r !== 'index') files.push(`${r} ${createHash('sha256').update(readFileSync(join(root, '.git', r))).digest('hex')}`);
+      else files.push(`${r} ${createHash('sha256').update(readFileSync(join(root, '.git', r))).digest('hex')}`);
     }
   };
-  const status = git(root, 'status', '--porcelain=v2', '--branch', '--untracked-files=all', '--ignored');
+  const status = git(root, '--no-optional-locks', 'status', '--porcelain=v2', '--branch', '--untracked-files=all', '--ignored');
   walk('');
   return {
     status,
@@ -251,8 +256,11 @@ describe('tick', () => {
     expect(existsSync(p.paths.lock)).toBe(false);
   });
 
-  test('a full tick leaves the person\'s repo byte for byte as it was: status, refs, config, worktrees and every file under .git', async () => {
+  test('a full tick leaves the person\'s repo byte for byte as it was: status, refs, config, worktrees and every file under .git, the index included', async () => {
     const p = project();
+    // a tracked file touched since the index was written: any index refresh in the person's repo now rewrites the index
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(join(p.root, 'src', 'main.ts'), later, later);
     const before = repoSnapshot(p.root);
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const agent = `${ADD_JOBS}
@@ -519,6 +527,152 @@ echo changed > src/main.ts`);
     expect(readFileSync(join(p.paths.source, '.git', 'objects', 'info', 'alternates'), 'utf8')).toContain(join(moved, '.git', 'objects'));
   });
 
+  test('a tick stopped between the two renames of the swap left no drawing: the next tick puts the last good one back and redraws', async () => {
+    const p = project();
+    const good = drawingFiles(p.paths.drawing);
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    // what a kill between `drawing -> previous` and `redraw -> drawing` leaves
+    renameSync(p.paths.drawing, p.paths.previous);
+    writeTree(p.paths.redraw, { 'system.yaml': 'the checked copy\n' });
+    const now = new Date('2026-11-07T09:00:00Z');
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'redrew', gated: tip });
+    expect(drawingFiles(p.paths.drawing)['system.yaml']).toContain(`at: "${tip}"`);
+    expect(drawingFiles(p.paths.previous)).toEqual(good);
+    expect(readFileSync(join(p.paths.failed, 'interrupted-2026-11-07T09-00-00-000Z', 'drawing', 'system.yaml'), 'utf8')).toBe('the checked copy\n');
+  });
+
+  test('a drawing still being drawn (sheets under wanted:) is not redrawn or fetched for; once nothing is wanted, the next tick redraws', async () => {
+    const p = project();
+    const half = drawing(p.drawnAt);
+    half['system.yaml'] += 'wanted:\n  - { code: F-201, kind: flow, question: "How a job runs." }\n';
+    writeTree(p.paths.drawing, half);
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE });
+    expect(r).toMatchObject({ ran: 'nothing', why: expect.stringContaining('still being drawn') });
+    expect(existsSync(p.paths.source)).toBe(false);
+    expect(drawingFiles(p.paths.drawing)).toEqual(half);
+    // the drawer finished: nothing is wanted
+    writeTree(p.paths.drawing, drawing(p.drawnAt));
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
+  });
+
+  test('a redraw that leaves a sheet under wanted: is refused, so a finished drawing never stops later redraws', async () => {
+    const p = project();
+    const before = drawingFiles(p.paths.drawing);
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const agent = scriptAgent(`${ADD_JOBS}\nprintf 'wanted:\\n  - { code: F-201, kind: flow, question: "How a job runs." }\\n' >> "$DRAWING/system.yaml"`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('wanted: still lists F-201') });
+    expect(drawingFiles(p.paths.drawing)).toEqual(before);
+  });
+
+  test("a private repo: the person's repo-local url.<base>.insteadOf and an includeIf'd core.sshCommand reach origin from the source clone, and are read again each tick", async () => {
+    const p = project();
+    const dir = p.dir;
+    const script = (name: string, body: string) => {
+      writeFileSync(join(dir, name), `#!/bin/sh\n${body}\n`);
+      chmodSync(join(dir, name), 0o755);
+      return join(dir, name);
+    };
+    // the ssh command of the person's work account: records its call and runs the remote command here (no network)
+    const recorder = (name: string) => script(`${name}.sh`, `echo "$*" >> "${join(dir, `${name}.log`)}"\nfor last; do :; done\nexec sh -c "$last"`);
+    recorder('ssh-work');
+    recorder('ssh-work-2');
+    // the plain ssh git would run without the person's config: never the real ssh in a test
+    const tripwire = script('ssh-tripwire.sh', `echo "$*" >> "${join(dir, 'tripwire.log')}"\nexit 1`);
+    // origin by an alias that only the person's repo rewrites, to an ssh address
+    git(p.root, 'remote', 'set-url', 'origin', 'work:origin.git');
+    git(p.root, 'config', `url.ssh://git.example.test${dir}/.insteadOf`, 'work:');
+    // a second account's ssh key, in a file only the person's checkout includes
+    const work = join(dir, 'work.gitconfig');
+    const sshCommand = (name: string) => git(dir, 'config', '--file', work, 'core.sshCommand', `sh "${join(dir, `${name}.sh`)}"`);
+    sshCommand('ssh-work');
+    const global = join(dir, 'global.gitconfig');
+    writeFileSync(global, `[includeIf "gitdir:${realpathSync(p.root)}/"]\n\tpath = ${work}\n`);
+    const saved = { GIT_CONFIG_GLOBAL: process.env.GIT_CONFIG_GLOBAL, GIT_SSH: process.env.GIT_SSH };
+    process.env.GIT_CONFIG_GLOBAL = global;
+    process.env.GIT_SSH = tripwire;
+    try {
+      expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'main has not moved', gated: p.drawnAt });
+      expect(readFileSync(join(dir, 'ssh-work.log'), 'utf8')).toContain(`git.example.test git-upload-pack '${dir}/origin.git'`);
+      expect(existsSync(join(dir, 'tripwire.log'))).toBe(false);
+      // the clone's own config reaches origin, with no global config: the agent's own git works there too
+      const own = execFileSync('git', ['-C', p.paths.source, 'ls-remote', 'origin', 'refs/heads/main'], {
+        env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8',
+      });
+      expect(own).toContain(p.drawnAt);
+      // the person moves to a new key: the next tick fetches with it
+      sshCommand('ssh-work-2');
+      const tip = p.land({ 'src/util.ts': 'x\n' }, 'add util');
+      expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent('true').runAgent, ...fakes() } })).toMatchObject({ gated: tip });
+      expect(readFileSync(join(dir, 'ssh-work-2.log'), 'utf8')).toContain('git-upload-pack');
+      expect(existsSync(join(dir, 'tripwire.log'))).toBe(false);
+    } finally {
+      for (const [k, v] of Object.entries(saved)) {
+        if (v === undefined) delete process.env[k];
+        else process.env[k] = v;
+      }
+    }
+  });
+
+  test('a checkout in the source clone downloads no Git LFS objects: every smudge runs with GIT_LFS_SKIP_SMUDGE=1', async () => {
+    const p = project();
+    p.land({ '.gitattributes': '*.bin filter=lfs diff=lfs merge=lfs -text\n', 'assets/model.bin': 'a pointer file\n' }, 'Add a model');
+    // the person ran `git lfs install`: a global smudge filter, here a stand-in that records what git-lfs would read
+    const smudge = join(p.dir, 'smudge.sh');
+    writeFileSync(smudge, `#!/bin/sh\necho "skip=$GIT_LFS_SKIP_SMUDGE" >> "${join(p.dir, 'smudge.log')}"\ncat\n`);
+    chmodSync(smudge, 0o755);
+    const global = join(p.dir, 'global.gitconfig');
+    writeFileSync(global, `[filter "lfs"]\n\tclean = cat\n\tsmudge = ${smudge}\n\trequired = true\n`);
+    const saved = process.env.GIT_CONFIG_GLOBAL;
+    process.env.GIT_CONFIG_GLOBAL = global;
+    try {
+      const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent('true').runAgent, ...fakes() } });
+      expect(r).toMatchObject({ ran: 'gated' });
+    } finally {
+      if (saved === undefined) delete process.env.GIT_CONFIG_GLOBAL;
+      else process.env.GIT_CONFIG_GLOBAL = saved;
+    }
+    const calls = readFileSync(join(p.dir, 'smudge.log'), 'utf8').trim().split('\n');
+    expect(calls.length).toBeGreaterThan(0);
+    expect(new Set(calls)).toEqual(new Set(['skip=1']));
+  });
+
+  test('a commit in the new range whose objects the source clone borrowed and lost is found: the clone is made again and the redraw goes on', async () => {
+    const p = project();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('nothing'); // the source clone is made
+    // two commits land and the person fetches them: the source clone's next fetch borrows their objects
+    p.land({ 'src/main.ts': 'main, now with a banner\n' }, 'A banner (#11)');
+    const b = git(p.team, 'rev-parse', 'HEAD').trim();
+    const tip = p.land({ 'src/main.ts': 'main, banner and footer\n', 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    git(p.root, 'fetch', '-q', 'origin');
+    // the blob only the middle commit has is lost from the person's object store; the tip and the drawing's commit read whole
+    const blob = git(p.root, 'rev-parse', `${b}:src/main.ts`).trim();
+    renameSync(join(p.root, '.git', 'objects', blob.slice(0, 2), blob.slice(2)), join(p.dir, 'lost-blob'));
+    // the agent reads every commit that landed, as a redraw does
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(`git log -p ${p.drawnAt}..HEAD > /dev/null`).runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'gated', gated: tip });
+    expect(oldClones(p.paths.failed)).toHaveLength(1);
+    git(p.paths.source, 'cat-file', '-e', blob);
+  });
+
+  test('a re-clone keeps the newest two old source clones under failed/ and removes the older ones', async () => {
+    const p = project();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).ran).toBe('nothing'); // the source clone is made
+    const earlier = ['source-2026-01-01T00-00-00-000Z', 'source-2026-02-01T00-00-00-000Z', 'source-2026-03-01T00-00-00-000Z'];
+    for (const n of earlier) mkdirSync(join(p.paths.failed, n, '.git'), { recursive: true });
+    mkdirSync(join(p.paths.failed, 'interrupted-2026-01-01T00-00-00-000Z'), { recursive: true });
+    const moved = `${p.root}-moved`;
+    renameSync(p.root, moved);
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const now = new Date('2026-11-07T10:00:00Z');
+    expect((await tick({ root: moved, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes() } })).ran).toBe('redrew');
+    expect(oldClones(p.paths.failed).sort()).toEqual(['source-2026-03-01T00-00-00-000Z', 'source-2026-11-07T10-00-00-000Z']);
+    // other things set aside are not touched
+    expect(existsSync(join(p.paths.failed, 'interrupted-2026-01-01T00-00-00-000Z'))).toBe(true);
+  });
+
   test('a live tick holds the lock; a dead one is taken over', async () => {
     const p = project();
     p.land({ 'src/util.ts': 'x\n' }, 'add util');
@@ -567,6 +721,16 @@ test('a redraw prompt lists the pull request that renamed a drawn file', async (
   expect(prompt).toContain('src/main.ts');
   expect(prompt).toContain('  - PR 12');
   expect(prompt).toContain('  - PR 13');
+});
+
+test("the CLI's git reads (check and gate against the person's repo) take no optional lock: a status through them leaves a stale index as it was", async () => {
+  const p = project();
+  const later = new Date(Date.now() + 60_000);
+  utimesSync(join(p.root, 'src', 'main.ts'), later, later);
+  const index = () => createHash('sha256').update(readFileSync(join(p.root, '.git', 'index'))).digest('hex');
+  const before = index();
+  await gitBytes(p.root, ['status', '--porcelain']);
+  expect(index()).toBe(before);
 });
 
 test('redrawNote: the words of the note', () => {

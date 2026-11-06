@@ -238,11 +238,19 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
 - `source/`: Plannotator's clone of the project for the agent to read main's code (`prepareSource`). Made with
   `git clone --reference <the repo's git folder> <its origin URL>`: the objects the person already has are borrowed,
   not copied, and each tick fetches the default branch from origin into it, so the tick sees what merged even when
-  the person has not fetched. Toward the person's repo it only reads: the origin URL, the git folder and its objects.
+  the person has not fetched. Toward the person's repo it only reads: the origin URL as configured, its
+  remote-access config, the git folder and its objects. Every git call System makes runs with `--no-optional-locks`
+  and `GIT_OPTIONAL_LOCKS=0`, so no read refreshes the person's index or takes `index.lock`. The remote-access config
+  (`core.sshCommand`, `core.askPass`, `core.gitProxy`, `ssh.variant`, `credential.*`, `url.*`, `http.*`, as git reads them in the
+  person's repo, repo-local and `includeIf` files included) goes to the clone at clone time and into
+  `source/.git/plannotator-remote.config`, which the clone's config includes and every tick rewrites, so a private
+  repo is fetched with the person's own account. Checkouts run with `GIT_LFS_SKIP_SMUDGE=1`: Git LFS files stay
+  pointer files. Submodules are not cloned.
   A plain `git clone --shared` from the person's repo would see only what they last fetched. Borrowed objects can go
   away (a `git gc`, a moved or deleted repo, a lost object file): a clone whose alternates folder is gone, or that
-  cannot read the tip or the drawing's `at` whole, is moved to `failed/source-<time>/` and cloned again, once per tick,
-  and with its own copy of every object when the person's repo lacks them too. The move is named in `set_aside`.
+  cannot read the tip, the drawing's `at` or the commits between them whole, is moved to `failed/source-<time>/` and
+  cloned again, once per tick, and with its own copy of every object when the person's repo lacks them too. The move
+  is named in `set_aside`; the newest two old clones are kept and older ones removed.
 - `redraw/`: a redraw in progress, a copy of `drawing/` the agent edits. `previous/`: the drawing before the last
   redraw. `redraw-summary.txt`: the agent's sentences, read and deleted by the tick.
 - `reviews/`: revisions of open pull requests (written by `plannotator system revision`). `changed/<commit>/`: files a
@@ -255,7 +263,9 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577). Everything is 
 Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, commit, push or pull request.
 
 1. No setup.json: `nothing`. A live tick holds `tick.lock`: `nothing` (a dead pid's lock is taken over).
-2. No drawing in `drawing/` yet: `nothing` (the first drawing is not done).
+2. A tick stopped between the swap's two renames (step 9) left no `drawing/`, with `previous/` and `redraw/`: put
+   `previous/` back as `drawing/` (step 6 then sets `redraw/` aside). No drawing in `drawing/` yet: `nothing`. A
+   drawing that still lists sheets under `wanted:` is still being drawn: `nothing`, and nothing is fetched.
 3. `prepareSource`: make the source clone when missing, then `git fetch origin <default>` into it with the person's
    own credentials; the default branch is the clone's `origin/HEAD`, else `main` or `master`.
 4. From: the newer of `sources.repos.self.at` and `state.json`'s `gated`. If main has not moved past it: `nothing`.
@@ -271,7 +281,8 @@ Replaced 2026-11-06 by the owner's ruling (row 7689, q-122e6577): no branch, com
    requests, the summary file and the allowed doc sites.
 8. Files the agent changed in the source clone, its own commits included, are kept under `changed/<commit>/` and the
    clone is put back at the tip. Refuse the redraw (`failed`, the copy kept under `failed/<commit>/drawing/`, the
-   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean. If the
+   drawing as it was) when the agent failed, threw or hit its time bound, or the copy does not check clean or still
+   lists a sheet under `wanted:`. If the
    copy is the drawing unchanged: `gated`. A failure before the agent ran (no network, no origin) marks nothing, so
    the next tick tries again.
 9. Set `sources.repos.self.at` to the tip (only that value's text), move `drawing/` to `previous/` and the checked copy
