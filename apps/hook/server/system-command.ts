@@ -22,7 +22,7 @@
  * a model or reach GitHub.
  */
 
-import { existsSync, statSync } from "node:fs";
+import { existsSync, lstatSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { citations, formatIssue, MAX_FILE_BYTES, parseRevision, type LoadIssue } from "@plannotator/system";
@@ -117,6 +117,16 @@ function findDrawingRoot(start: string): string | null {
   }
 }
 
+/** True when something is at `path`, a symlink included (dangling or not). */
+const lexists = (path: string) => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
 const isDir = (path: string) => {
   try {
     return statSync(path).isDirectory();
@@ -168,6 +178,9 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
   }
   const at = one(f, "--at");
   if (at !== undefined && (at.startsWith("-") || /\s/.test(at))) throw new UsageError(`--at takes a commit, not "${at}"`);
+
+  // no system.yaml at all is no drawing, as gate says it, not a finding; a symlinked one is the loader's to report
+  if (!lexists(join(dir, "system.yaml"))) throw new Refusal("no_drawing", `no drawing in ${dir}`);
 
   const result = await check({ dir, root, roots, ...(at ? { at } : {}) });
   // which fields cite each missing path, so the fix is one look away

@@ -232,6 +232,15 @@ describe("plannotator system check", () => {
     expect(none.code).toBe(1);
     expect(none.stdout).toBe("");
     expect(none.stderr).toStartWith("no_drawing: ");
+    // a folder given with no drawing in it is no drawing too, as gate says it, not a finding
+    const empty = join(box.root, "empty");
+    mkdirSync(empty);
+    for (const args of [["check", "--root", empty], ["check", "--root", box.repo, "--dir", empty], ["check", "--root", empty, "--json"], ["gate", "--project", empty, "--from", "main", "--to", "main"]]) {
+      const r = await cli(box, args);
+      expect(r.code).toBe(1);
+      expect(r.stdout).toBe("");
+      expect(r.stderr).toStartWith("no_drawing: no drawing in ");
+    }
   }, 60_000);
 });
 
