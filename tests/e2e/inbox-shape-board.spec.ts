@@ -4,7 +4,8 @@
  *
  * What it proves:
  *  - the kit's `pick` works: a radio inside a drawing fades the other paths, with annotation off and on, and opens no box;
- *  - annotation is off until Annotate: no ring on hover, no box on a click; on, both work, and an SVG part can be picked;
+ *  - annotation is off until the crosshair (Comment): no box on a click; on, a click picks an SVG part, and nothing
+ *    rings under the pointer (inbox-shape-box.spec.ts has the crosshair itself);
  *  - a nested SVG clips (a crop stays cropped), and a lone `class="dash"` is an outline, not a solid box;
  *  - a picture a drawing names is copied in and loads, on the board and on the grid's thumbnail;
  *  - a number shows its bubble on hover, with its picture and line;
@@ -75,6 +76,8 @@ async function openBoard(browser: Browser, id: string, options: Parameters<Brows
   return { context, page, problems };
 }
 const view = (page: Page, name: string) => page.locator('.shp-dock').getByRole('button', { name, exact: true }).click();
+/** The Inbox's comment mode: the crosshair in Annotate's place. */
+const crosshair = (page: Page) => page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true });
 /** Reads the live drawing, in its shadow root. */
 const drawing = <T,>(page: Page, fn: (root: ShadowRoot) => T) =>
   page.evaluate(`(${fn.toString()})(document.querySelector('.shp-view:not(.leaving) .shp-drawn-host').shadowRoot)`) as Promise<T>;
@@ -101,7 +104,7 @@ test('pick follows a path, off and on annotation, and opens no box', async ({ br
   expect(await drawing(page, (r) => (r.querySelector('input.f-a') as HTMLInputElement).checked)).toBe(true);
   await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
 
-  await page.locator('.shp-dock').getByRole('button', { name: 'Annotate' }).click();
+  await crosshair(page).click();
   await page.locator('.shp-view:not(.leaving) label.pick', { hasText: 'All paths' }).click();
   await page.waitForTimeout(500);
   expect(await faded()).toEqual(['1.00', '1.00']);
@@ -120,10 +123,11 @@ test('annotation is off until asked for; an SVG part can be picked once it is on
   await part.click();
   await expect(page.locator('[data-comment-popover]')).toHaveCount(0);
 
-  await page.locator('.shp-dock').getByRole('button', { name: 'Annotate' }).click();
+  await crosshair(page).click();
   await page.mouse.move(5, 5);
   await part.hover();
-  await expect(page.locator('.shp-pin-hover')).toHaveCount(1);
+  // The crosshair rings nothing under the pointer; the click still picks the part.
+  await expect(page.locator('.shp-pin-hover')).toHaveCount(0);
   await part.click();
   await expect(page.locator('[data-comment-popover]')).toContainText('Path A box');
   expect(problems).toEqual([]);

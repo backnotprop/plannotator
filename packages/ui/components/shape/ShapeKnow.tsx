@@ -1,10 +1,11 @@
 // `views.know`, under the drawing in the Shape view: what the person needs to
 // know, in a paragraph or two of plain prose. Each paragraph is a part the person
 // can mark. An old board's Requirements show here too, as plain lines.
-import React from 'react';
+import React, { useLayoutEffect, useRef } from 'react';
 import { shapeKnowParagraphs, type ShapeRequirements } from '@plannotator/core/shape';
 import type { MarkState } from './ShapeDrawn';
 import { ShapeInline } from './inline';
+import { syncKeptBoxes, type KeptBox } from './boxSelect';
 
 const st = (i: number) => ({ 'data-step': '', style: { ['--i' as string]: i } as React.CSSProperties });
 
@@ -12,10 +13,14 @@ function markClass(id: string, marks: MarkState) {
   return ['mk', marks.erasing.has(id) && 'erasing', marks.fresh.has(id) && 'fresh', marks.noted.has(id) && 'noted'].filter(Boolean).join(' ');
 }
 
-export function ShapeKnow({ know, reqs, marks, onCode }: { know?: string; reqs?: ShapeRequirements; marks: MarkState; onCode?: (path: string, line: number) => void }) {
+export function ShapeKnow({ know, reqs, marks, onCode, boxes }: { know?: string; reqs?: ShapeRequirements; marks: MarkState; onCode?: (path: string, line: number) => void; boxes?: readonly KeptBox[] }) {
   let i = 0;
+  const rootRef = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    if (rootRef.current && boxes) syncKeptBoxes(rootRef.current, boxes);
+  }, [boxes]);
   return (
-    <div className="shp-know">
+    <div ref={rootRef} className="shp-know">
       {shapeKnowParagraphs(know ?? '').map((text, n) => (
         <p key={n} data-mark={`know-${n + 1}`} className={markClass(`know-${n + 1}`, marks)} {...st(i++)}>
           <ShapeInline text={text} />

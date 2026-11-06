@@ -405,9 +405,9 @@ for (const colorScheme of ['light', 'dark'] as const) {
       await expect(page.locator('[data-open-in-menu="src/retry.ts"] [data-open-in-item="reveal"]')).toBeVisible();
       await page.keyboard.press('Escape');
       await expect(page.locator('[data-open-in-menu]')).toHaveCount(0);
-      // Annotating, a click on the words picks them: no menu.
+      // Commenting (the crosshair, in Annotate's place), a click on the words picks them: no menu.
       await page.locator('.shp-tbtn', { hasText: 'Shape' }).first().click();
-      await page.locator('.shp-tbtn', { hasText: 'Annotate' }).click();
+      await page.locator('.shp-dock').getByRole('button', { name: 'Comment', exact: true }).click();
       await expect(page.locator('.shp-know [data-open-in-span]')).toHaveCount(0);
       await page.locator('.shp-know code', { hasText: 'src/ledger.ts:1' }).click();
       await page.waitForTimeout(350);

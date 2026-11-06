@@ -27,7 +27,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { GuideReaderPart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
-import { parseDiffToFiles, type DiffFile } from '@plannotator/core/diff-files';
+import { parseDiffToFiles, patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
 import { anchorStillMatches, captureAnchor } from '@plannotator/ui/utils/codeAnnotationAnchor';
 import type { KeptComment } from '../guide/platform-post-types';
 import { formatCount, plural } from '@plannotator/core/inbox-format';
@@ -403,6 +403,17 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   // that could not be read (the header then offers Open on GitHub).
   const postHead = diff?.head_sha ?? (scope === 'layer' ? null : (layer?.head_sha ?? null));
   const canPost = !!postablePull(layer) && !diffError && (!diff || !!postHead);
+  // The expand arrows' whole files, at the commits this diff runs between.
+  // Asked only with the blobs the patch names, so the server can refuse a text that is not this patch's file; a patch
+  // without them (GitLab's whole stack), or a diff whose head moved during its read, opens nothing.
+  const headMoved = !!diff && !diff.head_sha;
+  const fileContents = useCallback(
+    async (path: string, signal: AbortSignal, patch: string) => {
+      const ids = headMoved ? null : patchBlobIds(patch);
+      return ids ? inboxApi.pullFile(layerKey, scope, path, ids, signal) : { oldContent: null, newContent: null };
+    },
+    [layerKey, scope, headMoved],
+  );
   const [picked, pick] = useReviewDestination();
   const ending = canPost ? reviewEnding(layer, canDecide, picked) : canDecide ? 'agent' : null;
   const [posted, setPosted] = useState<{ label: string; url: string; action: string } | null>(null);
@@ -774,7 +785,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             // arrive says so here (GuidePane).
             <ReaderPart key={diff?.patch} diff={snapshot.review.rawPatch}>
               <OpenInCodeSpans scope={{ repo: repoKey ?? '' }} on={!!repoKey}>
-                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} />
+                <GuideReader bare snapshot={snapshot} reviewed={[]} onReviewedChange={() => {}} comments={readerComments} mode="files" reveal={reveal} viewed={{ files: viewedSet, onToggle: toggleViewed }} fileOpenIn={fileOpenIn} fileContents={fileContents} />
               </OpenInCodeSpans>
             </ReaderPart>
           ) : (
