@@ -30,10 +30,13 @@ const hasDom = typeof document !== 'undefined';
 const shown: { patch: string; title: string }[] = [];
 /** The reader's comment seam as the review last gave it (a test writes a comment through it). */
 let readerComments: { onSave: (annotation: unknown) => void } | undefined;
+/** The reader's whole-file seam as the review last gave it. */
+let readerFiles: ((path: string, signal: AbortSignal, patch: string) => Promise<unknown>) | undefined;
 if (hasDom) {
   mock.module('#guide-reader', () => ({
-    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void } }) => {
+    default: (props: { snapshot: { review: { rawPatch: string }; guide: { title: string } }; comments?: { onSave: (annotation: unknown) => void }; fileContents?: typeof readerFiles }) => {
       readerComments = props.comments;
+      readerFiles = props.fileContents;
       shown.push({ patch: props.snapshot.review.rawPatch, title: props.snapshot.guide.title });
       return null;
     },
@@ -121,8 +124,12 @@ const liveSession = (session: string, _project: string) => ({ session, host: 'cl
 let sessionsAnswer: Record<string, unknown> = {};
 /** What `POST /api/inbox/pulls/review` answers (Post to GitHub/GitLab), and its status. */
 let reviewAnswer: { status: number; body: Record<string, unknown> } = { status: 200, body: {} };
-/** The head commit the layer patch is read at (`InboxPullDiffAnswer.head_sha`). */
+/** The head commit the patch is read at (`InboxPullDiffAnswer.head_sha`). */
 let diffHead: string | null = 'a'.repeat(40);
+/** The diff door's patch instead of the one named after the layer. */
+let diffPatch: string | null = null;
+/** The whole files asked for behind the expand arrows. */
+let fileAsks: string[] = [];
 /** What starting a thread answers for one session (an ended agent: 409 session_not_live), and how often compose's sessions were read. */
 let refuse: Record<string, { status: number; body: Record<string, unknown> }> = {};
 /** Thread names another open thread already has: starting a thread with one answers 409 thread_name_taken. */
@@ -150,6 +157,8 @@ beforeEach(() => {
   shown.length = 0;
   reviewAnswer = { status: 200, body: { ok: true, prUrl: '', submission: { status: 'complete' } } };
   diffHead = 'a'.repeat(40);
+  diffPatch = null;
+  fileAsks = [];
   refuse = {};
   takenNames = [];
   sessionReads = 0;
@@ -176,13 +185,17 @@ beforeEach(() => {
       return Response.json(sessionsAnswer);
     }
     if (url.pathname.endsWith('/pulls/details')) return Response.json({ serverSession: 's', key: url.searchParams.get('key'), description: null, labels: [], reviewers: [], checks: [], comments: [] });
+    if (url.pathname.endsWith('/pulls/file')) {
+      fileAsks.push(url.searchParams.get('scope')!);
+      return Response.json({ serverSession: 's', oldContent: 'a\n', newContent: 'b\n' });
+    }
     if (url.pathname.endsWith('/pulls/diff')) {
       const key = url.searchParams.get('key')!;
       const scope = url.searchParams.get('scope')!;
       asked.push({ key, scope });
       if (diffOverride) return diffOverride(key, scope);
       const patch = `diff --git a/${scope}-${key.split('#')[1]}.ts b/${scope}-${key.split('#')[1]}.ts\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n`;
-      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch, ...(scope === 'layer' ? { head_sha: diffHead } : {}) });
+      return Response.json({ serverSession: 's', key, scope, base: scope === 'stack' ? 'main' : 'x', head: 'y', patch: diffPatch ?? patch, head_sha: diffHead });
     }
     return Response.json({});
   }) as typeof fetch;
@@ -226,6 +239,30 @@ const el = <T extends Element = HTMLElement>(selector: string) => {
   if (!found) throw new Error(`${selector} did not render`);
   return found as unknown as T;
 };
+
+// Guards a whole file read at another commit than the patch on screen, in either scope.
+test.skipIf(!hasDom)('a diff whose head moved during its read asks for no whole files; one that held does', async () => {
+  diffPatch = 'diff --git a/a.ts b/a.ts\nindex 1111111..2222222 100644\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n';
+  const theirs = { ...model.pulls.find((p) => p.number === 880)!, head_sha: SHA };
+  const answer = { ...model, pulls: model.pulls.map((p) => (p.number === 880 ? theirs : p)) };
+  const ask = async (scope: 'layer' | 'stack', head: string | null, pushed: string) => {
+    diffHead = head;
+    // Its own push time: the window keeps a patch read a moment ago per push.
+    const fresh = { ...answer, pulls: answer.pulls.map((p) => (p.number === 880 ? { ...theirs, updated_at: pushed } : p)) };
+    mount(<PullReview model={fresh} modelError={null} stackId={theirs.key} layerKey={theirs.key} scope={scope} onLayer={() => {}} onBack={() => {}} onSent={() => {}} />);
+    await settle();
+    await readerFiles!('a.ts', new AbortController().signal, diffPatch!);
+    act(() => root!.unmount());
+    root = null;
+    host!.remove();
+  };
+  await ask('layer', null, '2026-11-03T13:00:00.000Z');
+  await ask('stack', null, '2026-11-03T13:01:00.000Z');
+  expect(fileAsks).toEqual([]);
+  await ask('layer', 'c'.repeat(40), '2026-11-03T13:02:00.000Z');
+  await ask('stack', 'c'.repeat(40), '2026-11-03T13:03:00.000Z');
+  expect(fileAsks).toEqual(['layer', 'stack']);
+});
 
 test.skipIf(!hasDom)('a layer opens its own diff; Whole stack asks for the stack up to it; Next layer moves up', async () => {
   mount(<Review stackId={STACK_ID} from={stack[0]!.key} answer={model} />);

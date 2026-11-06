@@ -551,8 +551,8 @@ describe("the Pi and OpenCode wake (agent-link) for a reply that tags", () => {
       }
       expect(message?.delivery).toMatchObject({ host: "pi", session: "ses-pi" });
       expect(message?.tags?.[0]?.delivery).toMatchObject({ host: "opencode", session: "ses-oc" });
-      // Two claims in the one folder: the owner's by the reply id, the tagged session's by the id and its session.
-      expect(readdirSync(join(dataDir, "inbox", "claims")).sort()).toEqual([sent.id, `${sent.id}.ses-oc`].sort());
+      // Two claims in the one folder, each by the reply id and its session.
+      expect(readdirSync(join(dataDir, "inbox", "claims")).sort()).toEqual([`${sent.id}.ses-oc`, `${sent.id}.ses-pi`].sort());
       await Bun.sleep(300);
       expect(toPi).toHaveLength(1);
       expect(toOc).toHaveLength(1);
