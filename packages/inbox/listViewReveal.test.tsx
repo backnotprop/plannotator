@@ -4,8 +4,8 @@
  *
  * What regresses: the dialog showing on load, or with any one blocker present (under five rows, a dev build, the list
  * already List, another one-time dialog or reveal this load, a toast, something typed or open, a thread open or left
- * for another thread); "Use List" not switching the list at once or not remembering it as the ⋮ menu does; "Keep
- * Grouped" or Escape switching anything; the dialog showing a second time in the same browser (a reload, after any
+ * for another thread); "Simple list" not switching the list at once or not remembering it as the ⋮ menu does; "Smart
+ * groups" or Escape switching anything; the dialog showing a second time in the same browser (a reload, after any
  * way out); a keyboard shortcut or a server call of its own.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
@@ -20,6 +20,8 @@ const hasDom = typeof document !== 'undefined';
 const reveal = (hasDom ? await import('./reveal') : {}) as typeof import('./reveal');
 const { ListViewIntro } = (hasDom ? await import('./components/ListViewIntro') : {}) as typeof import('./components/ListViewIntro');
 const listView = await import('./listView');
+const { ThemeProvider } = (hasDom ? await import('@plannotator/ui/components/ThemeProvider') : {}) as typeof import('@plannotator/ui/components/ThemeProvider');
+const { readListLook } = await import('./listLook');
 const { setStorageBackend, resetStorageBackend } = await import('@plannotator/ui/utils/storage');
 
 const TIMES = { pageAgeMs: 300, readMs: 60, settledMs: 60, momentMs: 1500, recheckMs: 20, claimRetryMs: 30 };
@@ -70,8 +72,24 @@ async function until(done: () => boolean, ms = 2_000): Promise<void> {
 }
 const dialog = () => document.querySelector<HTMLDialogElement>('dialog[data-dialog="list-view-intro"]');
 
-function row(id: string): InboxListRow {
-  return { thread_id: id, section: 'new', unseen: 0 } as unknown as InboxListRow;
+function row(id: string, n: number): InboxListRow {
+  const at = `2026-11-05T09:0${n}:00.000Z`;
+  return {
+    thread_id: id,
+    project: { id: 'prj_a', name: 'billing-svc' },
+    subject: `Thread ${id}`,
+    thread_name: null,
+    author: { kind: 'agent', host: 'claude-code', session: 'ses_1', name: 'Claude Code' },
+    last_at: at,
+    last_agent_at: at,
+    last_author: 'agent',
+    section: 'new',
+    unread: true,
+    unseen: 0,
+    questions: { open: 0, picked: 0, stopped: false, holds_up: [] },
+    sent: null,
+    resolved_at: null,
+  } as unknown as InboxListRow;
 }
 const FIVE = ['a', 'b', 'c', 'd', 'e'].map(row);
 
@@ -88,7 +106,7 @@ const BASE: State = { release: true, blocked: false, rows: FIVE, toast: false, t
 /** The view the list would draw (App reads the same hook). */
 let drawn: ListView = 'grouped';
 
-/** App's wiring (App.tsx): due read once per load, the cookie written as it opens, "Use List" through the menu's setter. */
+/** App's wiring (App.tsx): due read once per load, the cookie written as it opens, "Simple list" through the menu's setter. */
 function Harness({ state, due }: { state: State; due: boolean }) {
   const [view, setView] = listView.useListView();
   drawn = view;
@@ -111,14 +129,20 @@ function Harness({ state, due }: { state: State; due: boolean }) {
     if (open) listView.markListViewIntroSeen();
   }, [open]);
   return open ? (
-    <ListViewIntro
-      phone={false}
-      onKeep={r.close}
-      onUseList={() => {
-        setView('list');
-        r.close();
-      }}
-    />
+    <ThemeProvider>
+      <ListViewIntro
+        groups={[{ id: 'new', label: 'New since you looked', count: FIVE.length, rows: FIVE }]}
+        flat={FIVE.map((row) => ({ row, drawn: 'new' as const }))}
+        look={readListLook()}
+        phone={false}
+        current={view}
+        onSmart={r.close}
+        onSimple={() => {
+          setView('list');
+          r.close();
+        }}
+      />
+    </ThemeProvider>
   ) : null;
 }
 
@@ -158,7 +182,7 @@ async function leave(state: Partial<State> = {}, to: string | null = null) {
 }
 
 describe.skipIf(!hasDom)('the List view announcement', () => {
-  test('never on load; back on the list after reading a thread it opens once, and "Use List" switches the list at once, remembered', async () => {
+  test('never on load; back on the list after reading a thread it opens once, and "Simple list" switches the list at once, remembered', async () => {
     const set = mount({ ...BASE, thread: 'a' });
     await wait(TIMES.pageAgeMs + 100);
     expect(dialog()).toBeNull();
@@ -167,12 +191,23 @@ describe.skipIf(!hasDom)('the List view announcement', () => {
     expect(dialog()).not.toBeNull();
     // Spent as it opens: a reload now would not show it again.
     expect(stored.has(listView.LIST_VIEW_INTRO_COOKIE)).toBe(true);
-    // Named and described for a screen reader; focus on its main button.
-    expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('List view');
-    expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('Every thread in one list, newest first.');
-    expect(document.activeElement?.hasAttribute('data-list-view-intro-use')).toBe(true);
+    // Named and described for a screen reader; focus on the question, so neither choice looks picked.
+    expect(document.getElementById(dialog()!.getAttribute('aria-labelledby')!)?.textContent).toBe('Smart groups or a simple list?');
+    expect(document.getElementById(dialog()!.getAttribute('aria-describedby')!)?.textContent).toBe('You can change this any time in the ⋮ menu.');
+    expect(document.activeElement?.id).toBe('ib-lvc-title');
+    // Two equals, each with the person's own rows in its picture: the groups with their band, the list without.
+    const col = (key: string) => dialog()!.querySelector(`[data-list-view-choice="${key}"]`)!.closest('.ib-lvc-col')!;
+    expect(dialog()!.querySelectorAll('.ib-lvc-col [data-list-intro-preview]').length).toBe(2);
+    expect(col('smart').querySelector('.ib-band')).not.toBeNull();
+    expect(col('simple').querySelector('.ib-band')).toBeNull();
+    expect(col('simple').querySelectorAll('[data-thread-id]').length).toBe(FIVE.length);
+    // Smart groups' button is the primary one (the owner's pick); Simple list's is plain.
+    expect(dialog()!.querySelector('[data-list-view-choice="smart"]')!.classList.contains('ib-pri')).toBe(true);
+    expect(dialog()!.querySelector('[data-list-view-choice="simple"]')!.classList.contains('ib-pri')).toBe(false);
+    // What the list draws now is marked "In use": the groups.
+    expect([...dialog()!.querySelectorAll('[data-list-view-in-use]')].map((tag) => tag.closest('.ib-lvc-col')?.querySelector('[data-list-view-choice]')?.getAttribute('data-list-view-choice'))).toEqual(['smart']);
     expect(drawn).toBe('grouped');
-    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-intro-use]')!.click());
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="simple"]')!.click());
     expect(dialog()).toBeNull();
     expect(drawn).toBe('list');
     expect(stored.get(listView.LIST_VIEW_COOKIE)).toBe('list');
@@ -180,10 +215,10 @@ describe.skipIf(!hasDom)('the List view announcement', () => {
     expect(fetched).toEqual([]);
   });
 
-  test('"Keep Grouped" and Escape leave the groups; it never shows again in this browser', async () => {
+  test('"Smart groups" and Escape leave the groups; it never shows again in this browser', async () => {
     await leave();
     await until(() => dialog() !== null);
-    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-intro-keep]')!.click());
+    act(() => dialog()!.querySelector<HTMLButtonElement>('[data-list-view-choice="smart"]')!.click());
     expect(dialog()).toBeNull();
     expect(drawn).toBe('grouped');
     expect(stored.has(listView.LIST_VIEW_COOKIE)).toBe(false);
@@ -227,6 +262,27 @@ describe.skipIf(!hasDom)('the List view announcement', () => {
     await leave();
     await wait(400);
     expect(dialog()).toBeNull();
+  });
+
+  test('"In use" follows the view the list draws: Simple list when the list is List', () => {
+    for (const current of ['grouped', 'list'] as const) {
+      host = document.createElement('div');
+      host.className = 'pn-inbox';
+      document.body.appendChild(host);
+      act(() => {
+        root = createRoot(host!);
+        root.render(
+          <ThemeProvider>
+            <ListViewIntro groups={[]} flat={[]} look={readListLook()} phone={false} current={current} onSmart={() => {}} onSimple={() => {}} />
+          </ThemeProvider>,
+        );
+      });
+      const marked = [...dialog()!.querySelectorAll('[data-list-view-in-use]')];
+      expect(marked.map((tag) => tag.textContent)).toEqual(['In use']);
+      const choice = marked[0]!.closest('.ib-lvc-col')?.querySelector('[data-list-view-choice]');
+      expect(choice?.getAttribute('data-list-view-choice')).toBe(current === 'grouped' ? 'smart' : 'simple');
+      unmount();
+    }
   });
 
   test('releaseVersion: only a release build', () => {

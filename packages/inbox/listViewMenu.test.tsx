@@ -144,7 +144,7 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
   test('two choices a screen reader hears with their state, Grouped chosen in an untouched browser', async () => {
     const popup = await openMenu(render());
     const radios = [...popup.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
-    expect(radios.map((radio) => radio.textContent)).toEqual(['Grouped', 'List']);
+    expect(radios.map((radio) => radio.textContent)).toEqual(['Smart groups', 'Simple list']);
     expect(radios.map((radio) => radio.getAttribute('aria-checked'))).toEqual(['true', 'false']);
     // Under its own label, before the rows' options, as the menu's other groups are.
     const group = radios[0]!.closest('[role="group"]')!;

@@ -244,7 +244,7 @@ test('the ⋮ menu: View, Grouped or List, each heard with its state; List shows
   await quiet.click();
   await openMenu(page);
   const radios = page.locator('[data-tidy-menu-popup] [role="menuitemradio"]');
-  await expect(radios).toHaveText(['Grouped', 'List']);
+  await expect(radios).toHaveText(['Smart groups', 'Simple list']);
   await expect(radios.nth(0)).toHaveAttribute('aria-checked', 'true');
   await page.mouse.move(1300, 400);
   await page.waitForTimeout(200);

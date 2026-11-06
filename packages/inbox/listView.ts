@@ -30,8 +30,8 @@ export const LIST_VIEW_COOKIE = 'plannotator-inbox-list-view';
 /** The ⋮ menu's words: the group's label and its two choices, in their order. */
 export const LIST_VIEW_LABEL = 'View';
 export const LIST_VIEW_OPTIONS: ReadonlyArray<{ value: ListView; label: string }> = [
-  { value: 'grouped', label: 'Grouped' },
-  { value: 'list', label: 'List' },
+  { value: 'grouped', label: 'Smart groups' },
+  { value: 'list', label: 'Simple list' },
 ];
 
 /** The remembered choice; anything but "list" (or no cookie) is Grouped. */

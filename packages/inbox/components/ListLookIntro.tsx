@@ -18,7 +18,7 @@
  */
 import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
-import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
+import type { InboxListGroupId, InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
 import { listLookClasses, LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
 import { LIST_INTRO_PREVIEW, LIST_INTRO_SWAP_MS } from '../listIntro';
 import { ListRow } from './InboxList';
@@ -48,8 +48,12 @@ export interface ListIntroGroup {
 const noop = () => {};
 const reducedMotion = () => typeof window !== 'undefined' && window.matchMedia?.('(prefers-reduced-motion: reduce)').matches === true;
 
-/** The picture: the list column as it stands beside a thread (or a phone's list), with `look`. Not interactive. */
-function PreviewList({ groups, projectNames, awayMachines, look, phone }: { groups: readonly ListIntroGroup[]; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string>; look: ListLook; phone: boolean }) {
+/**
+ * The picture: the list column as it stands beside a thread (or a phone's list), with `look`. Not interactive. With
+ * `flat`, the List view's one run of rows instead of the groups (the List view's choice dialog, ListViewIntro.tsx);
+ * `head: false` leaves out the list header.
+ */
+export function PreviewList({ groups, flat, projectNames, awayMachines, look, phone, head = true }: { groups: readonly ListIntroGroup[]; flat?: readonly { row: InboxListRow; drawn: InboxListGroupId }[]; projectNames?: ReadonlyMap<string, string>; awayMachines?: ReadonlySet<string>; look: ListLook; phone: boolean; head?: boolean }) {
   const section = useRef<HTMLElement>(null);
   const classes = listLookClasses(look);
   const shownLook = useRef(classes);
@@ -60,9 +64,30 @@ function PreviewList({ groups, projectNames, awayMachines, look, phone }: { grou
     if (reducedMotion()) return;
     section.current?.animate?.([{ opacity: 0.35 }, { opacity: 1 }], { duration: LIST_INTRO_SWAP_MS, easing: 'cubic-bezier(0.22, 1, 0.36, 1)' });
   }, [classes]);
+  const previewRow = (row: InboxListRow, drawn: InboxListGroupId) => (
+    <ListRow
+      key={row.thread_id}
+      row={row}
+      project={projectNames?.get(row.project.id) ?? row.project.name}
+      away={!!row.machine && (awayMachines?.has(row.machine) ?? false)}
+      drawn={drawn}
+      shape={phone ? 'phone' : 'narrow'}
+      full={false}
+      filtered={false}
+      selected={false}
+      lit={false}
+      onOpen={noop}
+      day=""
+      menu={false}
+      pinned={false}
+      pinColumn={false}
+      pill={look.highlight}
+      compact={look.compact}
+    />
+  );
   return (
     <section ref={section} className={`ib-listcol${phone ? '' : ' ib-narrow'} ib-lo-list${classes}`} aria-hidden="true" data-list-intro-preview="">
-      {!phone && (
+      {!phone && head && (
         <div className="ib-lhead">
           <h1 dir="auto">Inbox</h1>
           <span className="ib-tidytrig ib-lhead-more">
@@ -71,36 +96,21 @@ function PreviewList({ groups, projectNames, awayMachines, look, phone }: { grou
         </div>
       )}
       <div className="ib-lbody">
-        {groups.map((group) => (
-          <div className="ib-group" data-section-id={group.id} key={group.id}>
-            <div className="ib-band">
-              {group.label} <span className="ib-n">{group.count}</span>
-              {group.id === 'quiet' && <Icon name="chevR" size={14} />}
-            </div>
-            {group.id !== 'quiet' &&
-              group.rows.map((row) => (
-                <ListRow
-                  key={row.thread_id}
-                  row={row}
-                  project={projectNames?.get(row.project.id) ?? row.project.name}
-                  away={!!row.machine && (awayMachines?.has(row.machine) ?? false)}
-                  drawn={group.id}
-                  shape={phone ? 'phone' : 'narrow'}
-                  full={false}
-                  filtered={false}
-                  selected={false}
-                  lit={false}
-                  onOpen={noop}
-                  day=""
-                  menu={false}
-                  pinned={false}
-                  pinColumn={false}
-                  pill={look.highlight}
-                  compact={look.compact}
-                />
-              ))}
+        {flat ? (
+          <div className="ib-group" data-section-id="list" data-flat-list="">
+            {flat.map(({ row, drawn }) => previewRow(row, drawn))}
           </div>
-        ))}
+        ) : (
+          groups.map((group) => (
+            <div className="ib-group" data-section-id={group.id} key={group.id}>
+              <div className="ib-band">
+                {group.label} <span className="ib-n">{group.count}</span>
+                {group.id === 'quiet' && <Icon name="chevR" size={14} />}
+              </div>
+              {group.id !== 'quiet' && group.rows.map((row) => previewRow(row, group.id))}
+            </div>
+          ))
+        )}
       </div>
     </section>
   );

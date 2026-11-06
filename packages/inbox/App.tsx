@@ -51,7 +51,7 @@ import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openT
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import { listViewIntroSeen, markListViewIntroSeen, useListView, type ListSort } from './listView';
+import { flatRows, listViewIntroSeen, markListViewIntroSeen, useListView, type ListSort } from './listView';
 import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { deliveriesReadList } from './rowDelivery';
@@ -4496,6 +4496,10 @@ function Inbox() {
   useEffect(() => {
     if (listViewIntroOpen) markListViewIntroSeen();
   }, [listViewIntroOpen]);
+  const listViewChoiceOpen = listViewIntroOpen && shown !== null;
+  // The choice's two pictures: the person's own list as the groups draw it, and as the Simple list draws it.
+  const listViewChoiceGroups: ListIntroGroup[] = listViewChoiceOpen && shown ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 8) }] : [])) : [];
+  const listViewChoiceFlat = listViewChoiceOpen && shown ? flatRows(filterList(shown), null, { epoch: 0, keep: null }).rows.slice(0, 10) : [];
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
@@ -6110,11 +6114,17 @@ function Inbox() {
         <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
       )}
       {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
-      {listViewReveal.stage === 'open' && (
+      {listViewChoiceOpen && (
         <ListViewIntro
+          groups={listViewChoiceGroups}
+          flat={listViewChoiceFlat}
+          look={readListLook()}
+          awayMachines={machines.away}
+          projectNames={projectNames}
           phone={phone}
-          onKeep={listViewReveal.close}
-          onUseList={() => {
+          current={listView}
+          onSmart={listViewReveal.close}
+          onSimple={() => {
             setListView('list');
             listViewReveal.close();
           }}
