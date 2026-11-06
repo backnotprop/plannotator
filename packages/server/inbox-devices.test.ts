@@ -34,6 +34,8 @@ import {
   worldEnv,
   type InboxWorld,
 } from "../../tests/helpers/inbox-world";
+import { inboxId } from "@plannotator/core/inbox-types";
+import { inboxUploadAttachments } from "@plannotator/shared/inbox/uploads";
 import { resetServedHostnamesForTests } from "./request-host-guard";
 import { INBOX_ASKER_RESTART_GRACE_MS } from "./inbox-sessions";
 import { startInboxServer } from "./inbox";
@@ -269,6 +271,7 @@ describe("the device door, on the binary", () => {
       ["GET", "skills"],
       ["GET", "skills/content?name=readback"],
       ["POST", "uploads?name=a.txt"],
+      ["POST", "uploads/reuse"],
       ["POST", "markups"],
       ["POST", `messages/${guideMessage}/guide/annotations`],
       ["POST", `messages/${threadId}/annotations`],
@@ -1424,6 +1427,22 @@ describe("the door's parity routes, in process (7.39 to 7.49)", () => {
     const read = await door(`markups/${markup.name}`);
     expect(Buffer.from(await read.arrayBuffer()).equals(ONE_PIXEL_PNG)).toBe(true);
     expect((await door("markups?idempotency_key=mk-2", { raw: "<svg/>" })).status).toBe(422);
+  });
+
+  test("a phone adds a file it can see through the door: no bytes, the same pending upload the window gets", async () => {
+    const { ledger, inbox, door } = await world();
+    const { store } = inbox;
+    const project = store.ensureProject({ name: "ledger", root: ledger });
+    const uploaded = await door("uploads?name=shot.png&idempotency_key=reuse-up-1", { raw: ONE_PIXEL_PNG, headers: { "Content-Type": "image/png" } });
+    const upload = ((await uploaded.json()) as Json).upload;
+    const asked = store.sendMessage({ project_id: project.id, author: { kind: "agent", host: "claude-code", session: "ses-a", name: null }, body: "A picture.", thread: "Shots", attachments: await inboxUploadAttachments(store.dir, [upload.upload_id], new Date().toISOString()) }).message;
+    const source = asked.attachments![0]!;
+    const answer = await door("uploads/reuse", { body: { attachment_id: source.id, version: "sent", idempotency_key: "reuse-1" } });
+    expect(answer.status).toBe(200);
+    const reused = ((await answer.json()) as Json).upload;
+    expect([reused.name, reused.sha256]).toEqual(["shot.png", source.sent_sha256]);
+    const unknown = await door("uploads/reuse", { body: { attachment_id: inboxId("att"), version: "sent", idempotency_key: "reuse-2" } });
+    expect([unknown.status, ((await unknown.json()) as Json).code]).toEqual([404, "upload_not_found"]);
   });
 
   test("7.57: a reply carries uploads through the door unchanged: they become the reply's attachments, a replay copies nothing, a gone id is the window's 404", async () => {

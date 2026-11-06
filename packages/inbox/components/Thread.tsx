@@ -1,6 +1,6 @@
 import { perfInteraction, perfKeystroke } from '../perfMarks';
 import { inboxUrl, machineOf } from '../inboxUrl';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { capturePlace, holdPlace, openerOf, opensFile, parsePlaceLayout, placeInView, placeLayoutKey, placeSelector, placeShown, restorePlace, type ThreadPlace } from '../threadPlace';
 import { Viewer, type ViewerHandle } from '@plannotator/ui/components/Viewer';
@@ -32,7 +32,7 @@ import { splitReplyFeedback } from '../replyFeedback';
 import { replyViewingOf } from '../replyViewing';
 import { AttachmentTiles, AttachmentsCount, changedCount } from './AttachmentTiles';
 import { AttachmentPane, type AttachmentPaneHandle } from './AttachmentPane';
-import { OpenInCodeSpans, OpenInFile, type OpenInSurface } from './OpenIn';
+import { OpenInCodeHover, OpenInCodeSpans, type OpenInSurface } from './OpenIn';
 import { stepsOf } from '../stepping';
 import { optionOf, optionSetId, optionSetOf } from '../optionSets';
 import { artifactKey, artifactOfFile, newestViewableFile, threadArtifacts } from '../artifacts';
@@ -73,6 +73,9 @@ import { UndeliveredBand, UndeliveredText, useMinuteClock } from './Undelivered'
 import { SendToAnotherSession } from '../compose/SendToAnotherSession';
 import { authorWithLabel, labelOf, shortLabel, useSessionLabels } from '../sessionLabels';
 import { ROW_LABEL_MAX } from './RowAgents';
+import { attachmentImageUrl, readableVersion } from '../attachments';
+import { pickComposerMode } from '../fullScreenComposer';
+import { InlineReuseLayer, ReuseContext, sourceOf, type ReuseApi } from '../reuse';
 import { AttachFilesButton, ComposeFileTiles, attachedAnnouncement, pastedSignature, useComposeFiles, useFileDrop } from '../compose/ComposeFiles';
 import {
   AskerEndedNote,
@@ -727,12 +730,20 @@ export function MessageBody({
       }
       const attachment = attachmentForLink(href, { attachments: message.attachments ?? [], root: projectRoot, base: message.base_path ?? null });
       if (!attachment) {
-        // Not attached, but a file of the project: its Open in (nothing when it is not on this computer).
+        // Not attached, but a file of the project: its code on hover, with Open in (nothing when there is no such file).
         const projectFile = openInFiles ? projectFileOfLink(href) : null;
         return {
           kind: 'unavailable',
           title: NOT_ATTACHED_TITLE,
-          ...(projectFile ? { after: <OpenInFile scope={{ thread: message.thread_id, message: message.id }} path={projectFile.path} line={projectFile.line} /> } : {}),
+          ...(projectFile
+            ? {
+                wrap: (text: ReactNode) => (
+                  <OpenInCodeHover scope={{ thread: message.thread_id, message: message.id }} path={projectFile.path} line={projectFile.line} lineEnd={projectFile.lineEnd} title={NOT_ATTACHED_TITLE}>
+                    {text}
+                  </OpenInCodeHover>
+                ),
+              }
+            : {}),
         };
       }
       return {
@@ -984,6 +995,7 @@ export function MessageBody({
           ))}
         </div>
       )}
+      <InlineReuseLayer bodyRef={bodyRef} />
       {fallback && createPortal(<ImageLightbox src={fallback.src} alt={fallback.alt} onClose={() => setFallback(null)} />, document.body)}
     </div>
     </OpenInCodeSpans>
@@ -1611,6 +1623,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // words; Put back, Undo and the browser's undo return it there. Full screen's card writes the same words.
   const replyFiles = useComposeFiles(NO_UPLOADS, {
     onPasted: (names) => announce(attachedAnnouncement(names)),
+    onAlready: (name) => announce(`${name} is already in your reply`),
     onPutBack: () => announce('The pasted text is back in your reply.'),
     machine: machine?.id ?? null,
     text: {
@@ -4480,6 +4493,8 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
   // stopped before it took it (after the asker grace). Read every few seconds while the reply waits.
   const { model: pendingLive, load: loadPendingLive } = useLiveSessions(thread.thread_id, recipientSession, waitingOnWake, 3_000);
   const undelivered = !!lastTo && !last.delivery && pendingLive?.asker?.session === lastTo.session && pendingLive.asker.live === false;
+  // Taken by that session's connection, which stopped while delivering it: that session never gets it, so it may move.
+  const stuck = !!replySession && !last.delivery && pendingLive?.asker?.session === replySession && pendingLive.asker.stuck?.includes(last.id) === true;
   const recipientConnection = pendingLive?.asker?.session === recipientSession ? pendingLive?.asker?.connection : undefined;
   const ackConnection = ackWaiting && !replySession && pendingLive?.asker?.session === ackSession ? pendingLive.asker.connection : undefined;
   // A reply that tags agents (approval "inbox-tag-agents", Lines): one line per tagged session, each with
@@ -4514,6 +4529,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             undelivered: undelivered ? { host: hostName(lastTo.host) } : null,
+            stuck,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           })
         : deliveryLine({
@@ -4526,6 +4542,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
             sendingNow: !!last.deliver_now_at,
             connection: recipientConnection,
             askerEnded: wordsEnded && wordsAsking ? { name: wordsAsking.name } : null,
+            stuck,
             ...waitInputs(recipientConnection, last.id, { ...last, into_turn: last.delivery?.into_turn ?? null }),
           });
   // A hand-off inside its Undo window (approval "inbox-tag-handoff") goes to nobody yet: its line says when.
@@ -5364,7 +5381,43 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
     linkOf: linkOf ?? ((messageId) => threadLink(thread.thread_id, null, window.location.origin, messageId)),
   };
 
+  // The one thing every reuse button in this pane calls. Stable between changes of what it shows, so the buttons and the
+  // pictures' layer (which measures) draw only when a file comes or goes.
+  const reuseToggle = useRef<ReuseApi['toggle']>(() => {});
+  reuseToggle.current = (f, version) => {
+    const source = sourceOf(f, version ?? readableVersion(f), attachmentImageUrl);
+    if (boxRef.current.open && replyFiles.holding(source.sha256)) {
+      replyFiles.removeHolding(source.sha256);
+      announce(`${source.name} taken out of your reply`);
+      return;
+    }
+    openBehind();
+    replyFiles.addExisting(source);
+    setError(null);
+    // Full screen's card shows the file under its Reply tab: a comment's words wait on theirs, and the person sees it went in.
+    pickComposerMode(thread.thread_id, 'reply');
+  };
+  // A refused tile holds nothing: it says why, and the button can try again. A tile answers to both hashes: the one the
+  // page knew and the bytes the Inbox gave, which is a stat for a big changed file until it is read.
+  const reuseHeld = replyFiles.files
+    .filter((f) => f.state !== 'refused')
+    .flatMap((f) => [f.reuse?.sha256, f.upload?.sha256, f.upload?.shown_sha256])
+    .filter(Boolean)
+    .join();
+  const reuseOffered = !resolved && newMessage?.kind !== 'compose' && replyFiles.canReuse;
+  const reuseApi = useMemo<ReuseApi | null>(
+    () =>
+      reuseOffered
+        ? {
+            fileOf: (id) => allFiles.find((f) => f.id === id),
+            isAdded: (f, version) => box.open && reuseHeld.split(',').includes(sourceOf(f, version ?? readableVersion(f), attachmentImageUrl).sha256),
+            toggle: (f, version) => reuseToggle.current(f, version),
+          }
+        : null,
+    [reuseOffered, allFiles, box.open, reuseHeld],
+  );
   return (
+    <ReuseContext.Provider value={reuseApi}>
     <>
     <section
       ref={sectionRef}
@@ -6197,10 +6250,11 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                     {sendNowError}
                   </p>
                 )}
-                {/* A plain reply saved for a session that ended moves the same way (the server checks that it ended). */}
-                {message === last && delivered?.ended && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
+                {/* A plain reply saved for a session that ended, or that its session took and will never deliver, moves the same way (the server checks). */}
+                {message === last && (delivered?.ended || delivered?.stuck) && !lastTo && askedSession && !isDelivered(last, thread.messages[0]!) && (
                   <SendToAnotherSession
                     messageId={last.id}
+                    stuck={delivered.stuck === true}
                     ended={{ host: repliedTo?.author.kind === 'agent' ? (repliedTo.author.host ?? '') : '', session: askedSession }}
                     taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
@@ -6213,6 +6267,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
                 {message === last && (shownRun ? shownRun.state === 'missing' && waitingCanMove : delivered?.state === 'undelivered') && lastTo && (
                   <SendToAnotherSession
                     messageId={last.id}
+                    stuck={delivered?.stuck === true}
                     ended={lastTo}
                     taken={lastTags.filter((tag) => tag.delivery && !tag.handed_away).map((tag) => tag.session)}
                     project={thread.project.name}
@@ -6726,6 +6781,7 @@ export function ThreadPane({ notice, thread, threadSteps = null, codeReview = fa
       />
     )}
     </>
+    </ReuseContext.Provider>
   );
 }
 

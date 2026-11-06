@@ -155,7 +155,7 @@ describe("the pure parts", () => {
     const text = codexWakeText(command);
     expect(text.split("\n")[1]).toBe(asCodex(INBOX_WAKE_INSTRUCTION));
     expect(text).toContain("answer in the same thread: send_message with reply_to");
-    expect(text).toContain("more: read_thread");
+    expect(text).toContain("[for context: read_thread");
     expect(text).toContain("Ask plannotator_inbox send_message to do it.");
     expect(text.replace(command.body, "")).not.toContain("plannotator_inbox");
   });
@@ -820,6 +820,17 @@ describe("tags and New message", () => {
     expect(calls.find((c) => c.thread === OTHER_THREAD)!.message).toContain("for B");
     expect(calls.find((c) => c.thread === THREAD)!.message).not.toContain("for B");
   });
+});
+
+test("a wake Codex holds in its queue never says nothing open, since the agent may ask first; the person's words stay", async () => {
+  const w = await world();
+  const sent = await codexSends(w.client, w.project, "A plain update.");
+  await reply(w.server, sent.message_id, { idempotency_key: "k1", words: "Keep going, nothing open on my side." });
+  await w.server.codexWake.sweep();
+  const text = argOf(queues(w.fake)[0]!.args, "message")!;
+  expect(text.split("\n")[2]).toBe(`[Thread ${sent.thread_id}: 2 messages. Your last message was just now]`);
+  expect(text.split("nothing open")).toHaveLength(2);
+  expect(text).toContain("Keep going, nothing open on my side.");
 });
 
 describe("a reply moved back to the Codex thread told to stop", () => {
