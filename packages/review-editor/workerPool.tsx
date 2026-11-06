@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import React, { useEffect, useRef, useState, type ReactNode } from 'react';
 import { WorkerPoolContextProvider, useWorkerPool } from '@pierre/diffs/react';
 import type { WorkerInitializationRenderOptions, WorkerPoolOptions } from '@pierre/diffs/react';
-import { getOrCreateWorkerPoolSingleton, type WorkerPoolManager } from '@pierre/diffs/worker';
 // Vite-inlined worker (base64 blob) — required by the single-file HTML build:
 // the review UI ships as one self-contained file, so there is no separate
 // asset URL to load a worker script from.
@@ -49,62 +48,6 @@ export function ReviewWorkerPoolProvider({ children }: { children: ReactNode }) 
 // applies highlights asynchronously, so a dead pool degrades to unhighlighted
 // content — never a blank view.
 const POOL_READY_TIMEOUT_MS = 5_000;
-
-// The shared pool's watchdog (guides.show's PoolWatchdog, for a pool that lives as long as the page): a pool whose
-// workers fail to start, or that is not initialized in time, is dropped once, and every diff after it draws on the
-// main thread without waiting.
-let sharedPoolDead = false;
-let watchedPool: WorkerPoolManager | undefined;
-const sharedPoolListeners = new Set<() => void>();
-
-function watchSharedPool(pool: WorkerPoolManager): void {
-  if (watchedPool === pool) return;
-  watchedPool = pool;
-  if (pool.isInitialized()) return;
-  let done = false;
-  let unsubscribe: (() => void) | undefined;
-  const stop = () => {
-    done = true;
-    clearTimeout(timer);
-    unsubscribe?.();
-  };
-  const dead = () => {
-    if (done) return;
-    stop();
-    console.warn('Plannotator: highlight worker pool did not start — drawing on the main thread.');
-    sharedPoolDead = true;
-    for (const listener of sharedPoolListeners) listener();
-  };
-  const timer = setTimeout(dead, POOL_READY_TIMEOUT_MS);
-  // The callback fires immediately with the current state.
-  unsubscribe = pool.subscribeToStatChanges((stats) => {
-    if (stats.workersFailed) dead();
-    else if (stats.managerState === 'initialized' && !done) stop();
-  });
-  if (done) unsubscribe();
-}
-
-/**
- * The same pool, for a host that highlights only some diffs in it (the Inbox: only the very large ones, see GuideDiff).
- * It starts on first use and stays for the life of the page; none once its workers failed to start.
- */
-export function getSharedWorkerPool(): WorkerPoolManager | undefined {
-  if (sharedPoolDead) return undefined;
-  const pool = getOrCreateWorkerPoolSingleton({ poolOptions, highlighterOptions });
-  watchSharedPool(pool);
-  return pool;
-}
-
-function subscribeSharedPool(listener: () => void): () => void {
-  sharedPoolListeners.add(listener);
-  return () => sharedPoolListeners.delete(listener);
-}
-
-/** The shared pool when `wanted`, until it is dropped: then undefined, and the caller re-renders on the main thread. */
-export function useSharedWorkerPool(wanted: boolean): WorkerPoolManager | undefined {
-  const dead = useSyncExternalStore(subscribeSharedPool, () => sharedPoolDead, () => sharedPoolDead);
-  return wanted && !dead ? getSharedWorkerPool() : undefined;
-}
 
 /**
  * True once the pool finished initializing (or when no pool exists — callers

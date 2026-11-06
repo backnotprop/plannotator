@@ -218,25 +218,15 @@ test('a jump far down a review of 300 files lands exactly, and mounts nothing it
   expect(world.errors).toEqual([]);
 });
 
-test('a jump to a file nearby scrolls smoothly and lands exactly', async () => {
+// The Inbox's readers fit their boxes to their content, so a jump there goes at once however near (GuideFileCard); the
+// smooth nearby jump of other readers is GuideViewportManager.test.tsx's. Here only where the file lands is checked.
+test('a jump to a file nearby lands exactly', async () => {
   const { page } = world;
   const fixture = manyFiles();
   const body = await openFiles(fixture);
   await jumpToFile(page, fixture.paths[100]);
   expect(await settledPlace(page, body, fixture.paths[100])).toBe(PLACE);
-
-  const stops = body.evaluate((el) => new Promise<number>((done) => {
-    const seen = new Set<number>();
-    const started = performance.now();
-    const look = () => {
-      seen.add(Math.round(el.scrollTop));
-      if (performance.now() - started < 700) requestAnimationFrame(look);
-      else done(seen.size);
-    };
-    requestAnimationFrame(look);
-  }));
   await jumpToFile(page, fixture.paths[103]);
-  expect(await stops, 'the places the scroll went through on its way').toBeGreaterThan(3);
   expect(await settledPlace(page, body, fixture.paths[103])).toBe(PLACE);
 });
 

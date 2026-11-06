@@ -276,15 +276,16 @@ class GuideViewportManager {
   /**
    * Takes this file to the top of the view. Near, the scroll is smooth; far, it goes at once, so nothing on the way
    * mounts. Files above the target may still swap their estimated height for a measured one as they draw, so this
-   * keeps the target in place until they settle, unless the person scrolls first.
+   * keeps the target in place until they settle, unless the person scrolls first. `instant`: at once however near
+   * (a reader whose boxes fit their content, where the page's own place-holding would stop a smooth scroll).
    */
-  jumpTo = (id: string): void => {
+  jumpTo = (id: string, options: { instant?: boolean } = {}): void => {
     const element = this.entries.get(id)?.element;
     if (!element) return;
     this.endLanding();
     const root = this.scrollRoot ?? (this.host ? findScrollRoot(this.host) : null);
     const view = root?.getBoundingClientRect() ?? new DOMRectReadOnly(0, 0, window.innerWidth, window.innerHeight);
-    const smooth = Math.abs(element.getBoundingClientRect().top - view.top) <= SMOOTH_JUMP_VIEWS * view.height;
+    const smooth = !options.instant && Math.abs(element.getBoundingClientRect().top - view.top) <= SMOOTH_JUMP_VIEWS * view.height;
     element.scrollIntoView({ behavior: smooth ? 'smooth' : 'instant', block: 'start' });
     // Arrived in this frame: what is on screen there draws in it too, not when the observer next reports.
     if (!smooth) {
@@ -573,7 +574,7 @@ export function useGuideFileWindow(id: string, pinned = false): {
   mounted: boolean;
   register: (element: HTMLElement | null) => void;
   requestMount: () => void;
-  jumpTo: () => void;
+  jumpTo: (options?: { instant?: boolean }) => void;
 } {
   const manager = useContext(GuideViewportContext);
   if (!manager) throw new Error('useGuideFileWindow must be used within GuideViewportProvider');
@@ -583,7 +584,7 @@ export function useGuideFileWindow(id: string, pinned = false): {
   const mounted = useSyncExternalStore(subscribe, getSnapshot, () => false);
   const register = useCallback((element: HTMLElement | null) => manager.register(id, element), [manager, id]);
   const requestMount = useCallback(() => manager.requestMount(id), [manager, id]);
-  const jumpTo = useCallback(() => manager.jumpTo(id), [manager, id]);
+  const jumpTo = useCallback((options?: { instant?: boolean }) => manager.jumpTo(id, options), [manager, id]);
 
   // The guide has one focus arbiter. The focused file is pinned: it stays mounted
   // (with any open annotation composer) while it scrolls out of the window. Focus

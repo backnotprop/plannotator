@@ -560,7 +560,7 @@ describe('a jump', () => {
       calls.push(behavior);
       if (behavior === 'instant') targetTop = 16;
     };
-    let jump: () => void = () => {};
+    let jump: (options?: { instant?: boolean }) => void = () => {};
     function Target({ id, target }: { id: string; target?: boolean }) {
       const { mounted, register, jumpTo } = useGuideFileWindow(id);
       if (target) jump = jumpTo;
@@ -580,7 +580,7 @@ describe('a jump', () => {
     shell.getBoundingClientRect = () => new DOMRectReadOnly(0, targetTop, 1_000, 300);
     return {
       calls,
-      jump: () => act(async () => jump()),
+      jump: (options?: { instant?: boolean }) => act(async () => jump(options)),
       moveTarget: (top: number) => {
         targetTop = top;
       },
@@ -603,6 +603,18 @@ describe('a jump', () => {
     const view = await setup(1_900);
     await view.jump();
     expect(view.calls).toEqual(['smooth']);
+  });
+
+  // Guards the Inbox's content-fit readers (GuideFileCard), where the page's own place-holding would stop a smooth scroll.
+  test.skipIf(!hasDom)('asked to go at once, a near jump goes at once and still holds its place', async () => {
+    const view = await setup(1_900);
+    await view.jump({ instant: true });
+    expect(view.calls).toEqual(['instant']);
+    expect(mountedIds()).toContain(ids[20]);
+    await view.frames(2);
+    view.moveTarget(-599);
+    await view.frames(2);
+    expect(view.top()).toBe(16);
   });
 
   test.skipIf(!hasDom)('files above swapping their height do not move the target off its place', async () => {

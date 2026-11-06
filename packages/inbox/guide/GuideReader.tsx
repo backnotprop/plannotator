@@ -31,6 +31,9 @@ import type {
   ConventionalLabel,
   TokenAnnotationMeta,
 } from '@plannotator/ui/types';
+import { ReviewWorkerPoolProvider } from '@plannotator/review-editor/worker-pool';
+import { openedLinesQuote } from '../attachments';
+import { wholeFileReader, type KeptWholeFiles } from './wholeFileReader';
 import type { GuideReaderProps } from './types';
 import type ReaderShape from './reader-module';
 import { GuideHostProvider, GuideView, type GuideDiffRendererContext, type GuideDiffRendererProps, type GuideGlobalComments } from '@plannotator/guide-viewer';
@@ -39,11 +42,9 @@ import { CommentPopover, restoreCommentDraft } from '@plannotator/ui/components/
 import { CodeSpanContext } from '@plannotator/ui/components/LocalLinkContext';
 import { parseDiffToFiles } from '@plannotator/guide-viewer/diffParser';
 import { engineLabel } from '@plannotator/guide-viewer/GuideViewer';
-import { WorkerPoolContext } from '@pierre/diffs/react';
 import { AllFilesCodeView, type AllFilesCodeViewProps } from '@plannotator/review-editor/components/AllFilesCodeView';
-import { getSharedWorkerPool, useSharedWorkerPool } from '@plannotator/review-editor/worker-pool';
 import type { DiffSelectionActions } from '@plannotator/review-editor/components/SelectionChooser';
-import { extractLinesFromPatch } from '@plannotator/review-editor/utils/patchParser';
+import { extractLinesFromPatch, isLineRangeInPatch } from '@plannotator/review-editor/utils/patchParser';
 import { useConfigValue } from '@plannotator/ui/config';
 import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { reviewSourceLine } from './sourceLine';
@@ -51,14 +52,6 @@ import { usePhone } from '../phone';
 
 /** A line range the review app selects on (Pierre's). */
 type SelectedLineRange = NonNullable<AllFilesCodeViewProps['pendingSelection']>;
-
-/**
- * A diff past this size highlights in a worker. The Inbox highlights on the main thread so no line paints plain first,
- * at about 100 ms per 50,000 characters: a far larger diff would freeze the window for seconds, so it paints plain for
- * a moment instead.
- */
-const LARGE_DIFF_CHARS = 50_000;
-const isLargeDiff = (file: { patch: string }) => file.patch.length > LARGE_DIFF_CHARS;
 
 const NO_ANNOTATIONS: never[] = [];
 const noop = () => {};
@@ -108,11 +101,11 @@ export const GuideDiff: FC<
     /** The review's Viewed ticks (the header's Viewed control). Absent: none, as before. */
     viewedFiles?: Set<string>;
     onToggleViewed?: (filePath: string) => void;
+    /** Reads a file's whole text for the expand arrows. Absent: the diff shows as it came. */
+    fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
     fileOpenIn?: (filePath: string) => ReactNode;
-    /** Highlight a very large diff in a worker (the window; the phone's surface page keeps its main thread). */
-    largeDiffsInWorker?: boolean;
   }
-> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, largeDiffsInWorker, ...props }) => {
+> = ({ comments, diffStyleOverride, viewedFiles, onToggleViewed, fileOpenIn, ...props }) => {
   const savedDiffStyle = useConfigValue('diffStyle');
   const diffStyle = diffStyleOverride ?? savedDiffStyle;
   const diffOverflow = useConfigValue('diffOverflow');
@@ -123,37 +116,34 @@ export const GuideDiff: FC<
   const expandUnchanged = useConfigValue('diffExpandUnchanged');
   const fontFamily = useConfigValue('diffFontFamily');
   const fontSize = useConfigValue('diffFontSize');
-  const pool = useSharedWorkerPool(!!largeDiffsInWorker && props.files.some(isLargeDiff));
   return (
-    <WorkerPoolContext.Provider value={pool}>
-      <AllFilesCodeView
-        {...props}
-        readOnly={!comments}
-        commentOnly={!!comments}
-        fileOpenIn={fileOpenIn}
-        contextExpansionAvailable={false}
-        diffStyle={diffStyle}
-        diffOverflow={diffOverflow}
-        diffIndicators={diffIndicators}
-        lineDiffType={lineDiffType}
-        disableLineNumbers={!showLineNumbers}
-        disableBackground={!showBackground}
-        expandUnchanged={expandUnchanged}
-        fontFamily={fontFamily || undefined}
-        fontSize={fontSize || undefined}
-        annotations={comments?.annotations ?? NO_ANNOTATIONS}
-        selectedAnnotationId={comments?.selectedAnnotationId ?? null}
-        scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
-        pendingSelection={comments?.pendingSelection ?? null}
-        onLineSelection={comments?.onLineSelection ?? noop}
-        onAddAnnotationForFile={comments?.onAddAnnotationForFile ?? noop}
-        onEditAnnotation={comments?.onEditAnnotation ?? noop}
-        onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
-        onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
-        {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
-        {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
-      />
-    </WorkerPoolContext.Provider>
+    <AllFilesCodeView
+      {...props}
+      readOnly={!comments}
+      commentOnly={!!comments}
+      fileOpenIn={fileOpenIn}
+      contextExpansionAvailable={false}
+      diffStyle={diffStyle}
+      diffOverflow={diffOverflow}
+      diffIndicators={diffIndicators}
+      lineDiffType={lineDiffType}
+      disableLineNumbers={!showLineNumbers}
+      disableBackground={!showBackground}
+      expandUnchanged={expandUnchanged}
+      fontFamily={fontFamily || undefined}
+      fontSize={fontSize || undefined}
+      annotations={comments?.annotations ?? NO_ANNOTATIONS}
+      selectedAnnotationId={comments?.selectedAnnotationId ?? null}
+      scrollTargetAnnotation={comments?.scrollTargetAnnotation ?? null}
+      pendingSelection={comments?.pendingSelection ?? null}
+      onLineSelection={comments?.onLineSelection ?? noop}
+      onAddAnnotationForFile={comments?.onAddAnnotationForFile ?? noop}
+      onEditAnnotation={comments?.onEditAnnotation ?? noop}
+      onSelectAnnotation={comments?.onSelectAnnotation ?? noop}
+      onDeleteAnnotation={comments?.onDeleteAnnotation ?? noop}
+      {...(comments?.selectionActions ? { selectionActions: comments.selectionActions } : {})}
+      {...(onToggleViewed ? { viewedFiles, onToggleViewed } : {})}
+    />
   );
 };
 
@@ -176,7 +166,19 @@ function allFilesGuide(snapshot: GuideSnapshot, files: readonly { path: string }
   };
 }
 
-export default function GuideReader({
+/**
+ * Highlighting runs off the page's thread, or a long file freezes it. The pool's three workers start with the first
+ * reader on screen and end with the last, so a page with no diff does not hold them.
+ */
+export default function GuideReader(props: GuideReaderProps) {
+  return (
+    <ReviewWorkerPoolProvider>
+      <Reader {...props} />
+    </ReviewWorkerPoolProvider>
+  );
+}
+
+function Reader({
   snapshot,
   reviewed,
   onReviewedChange,
@@ -191,14 +193,13 @@ export default function GuideReader({
   renderHeadActions,
   highlight = null,
   bare = false,
+  fileContents,
   threadHeading = false,
 }: GuideReaderProps) {
   const savedDiffStyle = useConfigValue('diffStyle');
   const files = useMemo(() => parseDiffToFiles(snapshot.review.rawPatch), [snapshot.review.rawPatch]);
-  // Started now so a very large diff is not left waiting for its worker when the reader reaches it.
-  useEffect(() => {
-    if (files.some(isLargeDiff)) getSharedWorkerPool();
-  }, [files]);
+  const wholeFiles = useRef<KeptWholeFiles>(new Map());
+  const fetchFileContent = useMemo<AllFilesCodeViewProps['fetchFileContent']>(() => (fileContents ? wholeFileReader(fileContents, wholeFiles.current) : undefined), [fileContents]);
   const walkthrough = useMemo<CodeGuideData>(
     () => ({
       title: snapshot.guide.title,
@@ -269,7 +270,11 @@ export default function GuideReader({
       const side = range.side === 'additions' ? 'new' : 'old';
       const file = files.find((f) => f.path === filePath);
       // The lines as the person read them, quoted in the reply.
-      const selectedText = file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
+      // On a line an expand arrow opened: no forge takes it inline, so a PR's review posts it in its main comment, the code quoted.
+      const outsideDiff = !!file && !isLineRangeInPatch(file.patch, lineStart, lineEnd, side);
+      const whole = wholeFiles.current.get(filePath);
+      const openedCode = outsideDiff && whole ? openedLinesQuote(whole.contents, side, lineStart, lineEnd) : '';
+      const selectedText = !outsideDiff && file ? extractLinesFromPatch(file.patch, lineStart, lineEnd, side) : '';
       wiring.onSave({
         id: newCommentId(),
         type,
@@ -283,6 +288,7 @@ export default function GuideReader({
         originalCode,
         ...(tokenMeta && { charStart: tokenMeta.charStart, charEnd: tokenMeta.charEnd, tokenText: tokenMeta.tokenText }),
         ...(selectedText && { selectedText }),
+        ...(outsideDiff && { outsideDiff: true, ...(openedCode && { anchorText: openedCode }) }),
         createdAt: Date.now(),
         conventionalLabel,
         decorations,
@@ -355,11 +361,11 @@ export default function GuideReader({
       diffStyleOverride?: 'unified';
       viewedFiles?: Set<string>;
       onToggleViewed?: (filePath: string) => void;
+      fetchFileContent?: AllFilesCodeViewProps['fetchFileContent'];
       fileOpenIn?: (filePath: string) => ReactNode;
-      largeDiffsInWorker: boolean;
     } => ({
-      largeDiffsInWorker: true,
       ...(phone && { diffStyleOverride: 'unified' as const }),
+      ...(fetchFileContent && { fetchFileContent }),
       ...(fileOpenIn ? { fileOpenIn } : {}),
       ...(viewedSet && viewed ? { viewedFiles: viewedSet, onToggleViewed: viewed.onToggle } : {}),
       ...(comments
@@ -380,7 +386,7 @@ export default function GuideReader({
           }
         : {}),
     }),
-    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fileOpenIn],
+    [phone, comments, annotations, scrollTarget, pendingSelection, addComment, editComment, selectComment, deleteComment, viewedSet, viewed, selectionActions, fetchFileContent, fileOpenIn],
   );
   // Global comments: the list under the header and its button, while the review takes comments (as line comments).
   // One chosen in the list is shown where the pane lists comments (its folded sheet opens on it).
@@ -422,8 +428,9 @@ export default function GuideReader({
       ...(globalComments ? { globalComments } : {}),
       // What GuideDiff draws (a phone: always Unified), for a file box's first estimate.
       diffStyle: phone ? ('unified' as const) : savedDiffStyle,
+      opensWholeFiles: !!fetchFileContent,
     }),
-    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle],
+    [files, getDiffRendererProps, revealFile, phone, renderSectionTab, renderOverviewDiagram, renderOverviewFigure, renderHeadActions, globalComments, savedDiffStyle, fetchFileContent],
   );
 
   // The window's wrap for a code span, for the viewer's own inline parser.
