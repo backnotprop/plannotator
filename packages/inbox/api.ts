@@ -873,7 +873,10 @@ export type TagMode = 'ask' | 'add' | 'handoff';
 
 /** Where a referenced file's project-relative path starts: the server finds the folder (packages/server/inbox-open-in.ts). */
 /** `from: 'root'`: a diff's path, which starts at the top of the repository wherever the agent stood. */
-export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string };
+export type OpenInFileScope = { thread: string; message?: string; from?: 'root' } | { shape: string } | { repo: string; pull?: string };
+
+/** A referenced file's text for its hover: this computer's, or a pull request's at its head commit (`pull`). */
+export type OpenInFileCode = { found: false } | { found: true; contents: string; pull?: { label: string; platform: 'github' | 'gitlab'; url: string } };
 
 async function post<T>(path: string, body: Record<string, unknown>): Promise<T> {
   refuseContested(path);
@@ -1119,6 +1122,8 @@ export function resetListReads(): void {
 export const inboxApi = {
   /** Keep a ```html fence's page and get the URL of its sandboxed document (approval "inbox-inline-html"). */
   embed: (html: string) => post<{ id: string; url: string }>(inboxUrl('/embeds'), { html }),
+  /** An attached HTML page's frame document, kept by the Inbox and served under its own policy (inbox-pages.ts). */
+  page: (html: string) => post<{ id: string; url: string }>(inboxUrl('/pages'), { html }),
   /** The global skills the composers' `/` and `$` picker lists (raw entries; ui's catalog layer normalizes them). */
   skills: () => get<{ skills?: unknown }>(inboxUrl('/skills')),
   /** One human-only skill's SKILL.md, read when the person sends a message that references it. */
@@ -1428,6 +1433,7 @@ export const inboxApi = {
   /** A referenced file in its scope: whether it is on this computer, its real path and kind. 403 through the tailnet. */
   openInFileCheck: (scope: OpenInFileScope, path: string) =>
     get<{ found: boolean; path?: string; kind?: string }>(inboxUrl(`/open-in/file?${new URLSearchParams({ ...scope, path })}`)),
+  openInFileCode: (scope: OpenInFileScope, path: string) => get<OpenInFileCode>(inboxUrl(`/open-in/file/code?${new URLSearchParams({ ...scope, path })}`)),
   openInFile: (scope: OpenInFileScope, path: string, appId: string, line?: number) =>
     post<{ ok: boolean; error?: string }>(inboxUrl('/open-in/file'), { ...scope, path, app_id: appId, ...(line ? { line } : {}) }),
   /** Keep a marked-up image (a comment drawn on an image attachment): its path rides the comment's `images`. */
