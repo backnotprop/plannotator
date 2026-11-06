@@ -87,7 +87,7 @@ describe("the drawing's own commit in a one-commit clone", () => {
     const o = origin();
     const clone = ciClone(o.root);
     expect(git(clone, 'rev-parse', '--is-shallow-repository').trim()).toBe('true');
-    expect(() => git(clone, 'cat-file', '-e', `${o.drawnAt}^{commit}`)).toThrow();
+    expect(git(clone, 'rev-list', '--all').trim().split('\n')).toEqual([o.head]);
     const dir = join(clone, '.plannotator', 'system');
 
     const s = commitAt(clone, o.drawnAt);
