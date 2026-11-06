@@ -32,35 +32,19 @@ on:
       - 'package.json'
       - 'bun.lock'
       - '.github/workflows/inbox-pi.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'apps/pi-extension/**'
-      - 'packages/server/inbox*'
-      - 'packages/shared/inbox/**'
-      - 'packages/core/inbox*'
-      - 'packages/shared/config.ts'
-      - 'apps/hook/server/index.ts'
-      - 'apps/hook/server/inbox*'
-      - 'tests/helpers/inbox-world.ts'
-      - 'tests/helpers/inbox-process.ts'
-      - 'tests/helpers/real-data-dir.ts'
-      - 'tests/helpers/hook-dist-stub.ts'
-      - 'tests/setup/sandbox-data-dir.ts'
-      - 'packages/shared/data-dir.ts'
-      - 'tests/helpers/scripted-model.ts'
-      - 'package.json'
-      - 'bun.lock'
-      - '.github/workflows/inbox-pi.yml'
+  # Main is not run after every merge: the merge train already ran this
+  # workflow on the tree it merges. A nightly run on main catches a hand
+  # merge, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "27 7 * * *"
+  workflow_dispatch:
 
 permissions:
   contents: read
 
-# One run per PR, and one per main: a newer push cancels the older run (main
-# included: only its newest commit needs the heavy suites). Adding any other
-# label starts a run that skips every job; it gets a group of its own so it
-# cannot cancel the real one.
+# One run per PR: a newer push cancels the older run. Adding any other label
+# starts a run that skips every job; it gets a group of its own so it cannot
+# cancel the real one. Nightly and manual runs each get a group of their own.
 concurrency:
   group: inbox-pi-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true

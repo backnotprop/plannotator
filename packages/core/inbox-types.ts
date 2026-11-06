@@ -1795,6 +1795,13 @@ export interface InboxHealth {
   inbox_id?: string;
   /** The machine-link protocol this Inbox speaks (additive; absent: it cannot link). */
   machine_links?: number;
+  /**
+   * The page honours `--pn-window-controls-width` and `-height` on `:root`, for
+   * a desktop host that draws the window's buttons over it, and from 2 names
+   * the line they go on in `--pn-window-controls-center-y` (additive; absent
+   * from an older Inbox).
+   */
+  window_controls?: number;
 }
 
 /** What an Inbox window reports about its browser's notification permission for its own origin. */
@@ -1950,6 +1957,31 @@ export function inboxRowsList(value: unknown): InboxRowsOption[] | null {
 export function inboxRowsRead(value: unknown): InboxRowsOption[] | null {
   if (!Array.isArray(value)) return null;
   return inboxRowsCanonical(INBOX_ROWS_OPTIONS.filter((name) => value.includes(name)));
+}
+
+/**
+ * The look for someone who chose none: smaller thread names on, every other option off (the owner, 2026-11-05: "I
+ * feel like we should make it the default"). Before that, every option was off.
+ */
+export const INBOX_ROWS_DEFAULT: readonly InboxRowsOption[] = ["smallNames"];
+
+/**
+ * The defaults a look is saved under (config.json `inboxRowsDefaults`): 2 since smaller thread names are on by
+ * default. Every save writes it beside `inboxRows`.
+ */
+export const INBOX_ROWS_DEFAULTS_VERSION = 2;
+
+/**
+ * A kept look as the windows read it. One saved before the defaults changed (`savedUnder` unset) that is the old
+ * defaults, every option off, was never a choice (a window saves the look whenever it is touched, Balanced
+ * included): it is today's defaults, so the person gets the smaller names like someone who never saved one. Any
+ * other old look is the person's own and stays as it is. A look saved since then (`savedUnder` 2) is read as is, so
+ * "every option off" chosen today stays off.
+ */
+export function inboxRowsSaved(rows: InboxRowsOption[] | null, savedUnder: unknown): InboxRowsOption[] | null {
+  const current = typeof savedUnder === "number" && savedUnder >= INBOX_ROWS_DEFAULTS_VERSION;
+  if (rows && rows.length === 0 && !current) return [...INBOX_ROWS_DEFAULT];
+  return rows;
 }
 
 /**
@@ -2505,6 +2537,10 @@ export interface InboxUpload {
   media_type?: string;
   width?: number;
   height?: number;
+  /** A film's length, when the file came from a message that knew it (a reuse, inboxUploadFromAttachment). */
+  duration_ms?: number;
+  /** The listing's stat name for a big changed file this was added from, so the button knows its tile after a reload. */
+  shown_sha256?: string;
 }
 
 /** The session a draft was written for, with enough to name it after it has ended. */
