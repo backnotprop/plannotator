@@ -1191,8 +1191,8 @@ export const inboxApi = {
   saveCodeReview: (on: boolean) => post<{ code_review: { on: boolean } }>(inboxUrl('/settings'), { code_review: { on } }),
   saveShape: (on: boolean) => post<{ shape: { on: boolean } }>(inboxUrl('/settings'), { shape: { on } }),
   /** System's setup dialog (System on only): the projects found on this Mac with a git remote, and one project's save. */
-  systemSetup: () => get<SystemSetupAnswer>('/api/inbox/system/setup'),
-  saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>('/api/inbox/system/setup', { ...input }),
+  systemSetup: () => get<SystemSetupAnswer>(inboxUrl('/system/setup')),
+  saveSystemSetup: (input: SystemSetupInput) => post<{ setup: SystemSetup }>(inboxUrl('/system/setup'), { ...input }),
   // Shape (packages/server/shape-routes.ts): this computer's boards only, never another machine's.
   shapes: (signal?: AbortSignal) => get<{ shapes: InboxShapeSummary[] }>('/api/shapes?preview=1', signal),
   /** Where a board's kept picture loads from. */
