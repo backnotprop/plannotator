@@ -111,7 +111,8 @@ bands:                              # rows, top to bottom
     label: Ways in                  # sentence case, never capitals
     means: started by a request     # optional: a short line under the label
     tone: sand                      # sand, mist, stone or sage
-    row: [web 6, worker 6]          # part ids left to right; "id N" spans N columns, at most 12 in a band
+    row: [web 6, worker 6]          # part ids left to right; "id N" spans N of 12 columns, a preference:
+                                    # a fuller band is narrowed to fit
                                     # a part of another scope may stand here when a line on this sheet needs it
   - id: data
     label: On disk
@@ -177,8 +178,8 @@ remove:
 lines:
   worker: "worker.ts and 2 more · +120 −31"   # the diff counts per part
 steps:                              # optional: the one sequence the change makes, about eight hops
-                                    # each hop takes a flow sheet's hop fields (from and to, or on and do; says,
-                                    # reply, at, payload) and `is`
+                                    # each hop takes from and to (or on and do), says, reply, at, payload, note
+                                    # and `is`; not a flow sheet hop's id or flow
   title: A price on the way to a charge
   lanes: [worker, cache, db]
   hops:
@@ -190,8 +191,9 @@ steps:                              # optional: the one sequence the change make
 `is` is `added` or `changed`; a hop with no `is` was there before.
 
 The open form is for a pull request that is not merged yet, so the drawing does not have its new parts. Each added
-part or line is a full entry, and `place` says where each new part goes on each sheet. An added line needs no place:
-it is drawn on every sheet that draws one of its ends.
+part or line is a full entry, and `place` says where each new part goes on each sheet. In a revision, an added line
+needs no place: it is drawn on every sheet that draws one of its ends. In a drawing, a line is drawn only where a
+sheet's `show` names it.
 
 ```yaml
 revision: PR-415

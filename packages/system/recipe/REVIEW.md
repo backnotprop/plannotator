@@ -22,8 +22,9 @@ review you are doing.
 
 2. **Read the drawing as committed** on the base branch:
    `git -C <project folder> show origin/<base>:.plannotator/system/system.yaml`, and each sheet the touched parts are
-   on (`git -C <project folder> show origin/<base>:.plannotator/system/sheets/<CODE>.yaml`). Note the ids of the
-   parts, lines and bands you will name.
+   on (`git -C <project folder> grep -l <part id> origin/<base> -- .plannotator/system/sheets` lists them;
+   `git -C <project folder> show origin/<base>:.plannotator/system/sheets/<CODE>.yaml` reads one). Note the ids of
+   the parts, lines and bands you will name.
 
 3. **Read the change.** `git -C <project folder> diff --name-status -M <merge base> <head>` and
    `git -C <project folder> diff --numstat <merge base> <head>`, then the diff of every changed file the gate did not
@@ -36,7 +37,9 @@ review you are doing.
    - `add.parts` and `add.flows`: each new part and line as a full entry, with `code:` where it rests on code (an
      outside part has none). `place`: for each new part, the sheet and band it goes in
      (`{ <CODE>: { <id>: { band: <band id>, after: <part id>, span: <1 to 12> } } }`); it takes the first `~` gap
-     after `after:`, else it is put right after it. A band's spans add up to at most 12 columns.
+     after `after:`, else it is put right after it. Put a new part in the band it belongs in, even a full one: spans
+     are a preference, and Plannotator narrows a full band to fit. Leave out `span:` or keep it. Never put a part in
+     another band to make room.
    - `change`: one sentence per part or line whose behaviour the diff changes, naming what it now does. `touched`
      lists every part and line citing a changed file; one whose file changed in a way that leaves it doing the same
      thing gets no sentence.

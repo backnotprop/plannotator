@@ -22,7 +22,8 @@ that cite a changed file, and the file to write your summary in.
 ## Steps
 
 1. **Read what changed.** Run `git -C <worktree> diff --name-status -M <from> <to>` and
-   `git -C <worktree> log --oneline <from>..<to>`. Read the diff of each file named in "why you were woken"
+   `git -C <worktree> log --oneline <from>..<to>`. Read the diff of each file named in "why you were woken", and of
+   each other changed file that a part or line named above cites (`why` names only the files that woke the check)
    (`git -C <worktree> diff -M <from> <to> -- <path>`). A `cited-gone` path that was renamed shows there as deleted;
    its new path is in the `--name-status -M` line, so read the diff of both paths. Tests, docs, lockfiles and the
    drawing's own files under `.plannotator/system/` do not count. Look for new, deleted and renamed files, and for new
@@ -43,13 +44,15 @@ that cite a changed file, and the file to write your summary in.
    - A switch: read its default in the code. Off by default is drawn with "off" in the part's `sub` or its band's
      `means`, and the file the switch lives in is in `code:`.
    - Removed code: delete its part and its lines from `system.yaml`, and take its id out of every sheet (band rows,
-     `show`, `quiet`, `says`, `notes`, `callouts`, flow `lanes` and `hops`). Never draw removed code as live.
+     `show`, `quiet`, `says`, `notes`, `callouts`, flow `lanes` and `hops`). Never draw removed code as live. An
+     outside part (no `code:`) that no line reaches once the code is gone goes too.
    - A moved or renamed file: change its path in every `code:` map that cites it.
 
 4. **Place each new part and line on a sheet.** A new part goes in one band `row` on the logical sheet of its scope;
-   a new line goes in that sheet's `show`. If the change alters a walk, change the hops of its flow sheet. If a sheet
-   passes about 30 parts or its lines tangle, move a group into a window (a part with `child:`, a new scope and a new
-   sheet).
+   a new line goes in the `show` of each sheet that draws both its ends (a line that leaves a window goes on the
+   sheet where the window part stands, as `leaves:` or `lands:` says). If the change alters a walk, change the hops
+   of its flow sheet. If a sheet passes about 30 parts or its lines tangle, move a group into a window (a part with
+   `child:`, a new scope and a new sheet).
 
 5. **Keep the change, when a stored review is named above.** A stored review is the change a reviewer drew while the
    pull request was open. Use it as a head start for steps 3 and 4. You may also keep it in the repo as
