@@ -1798,10 +1798,11 @@ export interface InboxEventHandlers {
   /**
    * A row's delivery may have moved with the live sessions (a turn started or
    * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox. `labels`: a session's label changed too (issue #2450), so the rows' agents
+   * Never called by an older Inbox. `sessions`: a session ended or came back, so a row's "Session ended" may have
+   * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
    * and the authors read the list again.
    */
-  onDeliveries?: (change?: { labels: boolean }) => void;
+  onDeliveries?: (change?: { labels: boolean; sessions: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -1931,12 +1932,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'deliveries': {
       let labels = false;
+      let sessions = false;
       try {
-        labels = (JSON.parse(frame.data) as { labels?: unknown } | null)?.labels === true;
+        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown } | null;
+        labels = change?.labels === true;
+        sessions = change?.sessions === true;
       } catch {
         // An empty or malformed frame is a delivery change alone.
       }
-      handlers.onDeliveries?.({ labels });
+      handlers.onDeliveries?.({ labels, sessions });
       return;
     }
     case 'pins':

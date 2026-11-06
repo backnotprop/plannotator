@@ -1,7 +1,7 @@
 /**
  * Session labels everywhere else (issue #2450, after #2467's To picker), on the compiled binary. Nothing is mocked:
- * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (HOME is never set; every agent home is a temp
- * folder), sessions are the bridge's real long-polls carrying a `label` as the Claude Code mod sends it, and their
+ * `plannotator inbox --background` under a temp PLANNOTATOR_DATA_DIR (HOME and every agent home are temp
+ * folders), sessions are the bridge's real long-polls carrying a `label` as the Claude Code mod sends it, and their
  * messages go through the Inbox's own MCP `send_message`. No real agent runs.
  *
  * Three named Claude Code sessions in one project, one unnamed, one that stops before it takes a message, and a named
@@ -218,6 +218,7 @@ test.beforeAll(async () => {
   );
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     NO_ANON_PING: '1',
     PLANNOTATOR_BROWSER: NO_BROWSER,
