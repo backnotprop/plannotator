@@ -210,6 +210,7 @@ packages/inbox/componentTooltips.test.tsx
 packages/inbox/toast.test.tsx
 packages/inbox/attachmentsHeader.test.tsx
 packages/inbox/threadArtifacts.test.tsx
+packages/inbox/threadLinksDrawn.test.tsx
 packages/inbox/sentQuestionLocked.test.tsx
 packages/inbox/perfMarks.test.ts
 packages/inbox/themeToggle.test.tsx
