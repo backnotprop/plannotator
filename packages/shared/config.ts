@@ -499,7 +499,7 @@ export interface PlannotatorConfig {
    * The queue of one-time reveals for returning users (approval
    * "inbox-feature-reveal"; rules in packages/shared/inbox/reveals.ts). Written
    * only by the server. `lastShownAt`: the last one-time announcement claimed
-   * on this machine (list options, voice, Snooze, the Board), the 48 h
+   * on this machine (list options, voice, Snooze, the Board), the one-day
    * spacing's clock. `waitingSince`: when each reveal first became next, for
    * the 3-day patience. `board.shownAt`: the Board reveal was claimed.
    * `steps.shownAt`: the Checklist reveal was claimed. `key` beside either:
@@ -507,7 +507,7 @@ export interface PlannotatorConfig {
    * shown it again (any other key is not). The schedule (approval
    * "inbox-one-time-dialogs"): `dayShownAt`, the last dialog of the line on
    * any day (the agent note included: one a day); `notNowAt`, the last offer
-   * closed with Not now (four days before the next); `shownLoad`, the page
+   * closed with Not now (three days before the next); `shownLoad`, the page
    * load that showed the last dialog (never on two loads in a row; the loads
    * seen since are kept in memory). `agentNote.shownFor`: the agents the
    * agent note was shown for (once each, so an unanswered note never takes

@@ -9,7 +9,8 @@
  * here: they are registered in a test table the way their branches register (`heavyUse`, `minThreads`), so the line's
  * seam is what is tested.
  *
- * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one every two days); List
+ * What regresses: a heavy user's dialogs leaving their approved days (setup on day 0, then one a day from day 2: the
+ * owner, 2026-11-06, "one day apart, three after a Not now: a heavy user sees all five by about day 5"); List
  * view not going ahead of the other offers once its moment comes (the approval's change: not day 10, but the first free
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
@@ -182,15 +183,15 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, Snooze on 2, Bro mode on 4; the list outgrows the screen on day 5, so List view goes on 6, ahead of the Board (8) and the Checklist (10)", () => {
+  test("setup on day 0, then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
       ["snooze", 2],
-      [BRO, 4],
-      [LIST_VIEW, 6],
-      ["board", 8],
-      ["steps", 10],
+      [BRO, 3],
+      ["board", 4],
+      [LIST_VIEW, 5],
+      ["steps", 6],
     ]);
     expectOnePerDay(shown);
   });
@@ -200,16 +201,16 @@ describe("30 days of a heavy user", () => {
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
       [LIST_VIEW, 2],
-      ["snooze", 4],
-      [BRO, 6],
-      ["board", 8],
-      ["steps", 10],
+      ["snooze", 3],
+      [BRO, 4],
+      ["board", 5],
+      ["steps", 6],
     ]);
   });
 
-  test("a Not now on Bro mode: the next offer waits four days, not two", () => {
+  test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 4, [LIST_VIEW]: 8, board: 10, steps: 12 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8 });
   });
 });
 
@@ -231,15 +232,15 @@ describe("30 days of a light user", () => {
 });
 
 describe("an update day", () => {
-  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 4: never back to back, and List view never ahead of them", () => {
+  test("the sound on the update day, the agent note the day after, list options on day 2, voice on day 3: one a day, and nothing ahead of them", () => {
     const shown = simulate(UPGRADER);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["sound", 0],
       ["agent_note", 1],
       ["list_intro", 2],
-      ["voice", 4],
-      [LIST_VIEW, 6],
-      [BRO, 8],
+      ["voice", 3],
+      [BRO, 4],
+      [LIST_VIEW, 5],
     ]);
     expectOnePerDay(shown);
   });
@@ -261,11 +262,12 @@ describe("the line's rules", () => {
     const morning = at(10, 8).toISOString();
     expect(revealNext(base({ dayShownAt: morning }), NOW)).toBeNull();
     expect(revealLineFree("setup", base({ dayShownAt: morning }), NOW)).toBe(false);
-    // An offer yesterday evening: the agent note may show today, the next offer waits out its two days.
+    // An offer yesterday evening: the agent note may show today, the next offer waits out its full day.
     const yesterday = at(9, 21).toISOString();
     expect(revealLineFree("setup", base({ lastShownAt: yesterday, dayShownAt: yesterday }), NOW)).toBe(true);
     expect(revealNext(base({ lastShownAt: yesterday, dayShownAt: yesterday }), NOW)).toBeNull();
-    expect(revealNext(base({ lastShownAt: yesterday, dayShownAt: yesterday }), new Date(Date.parse(yesterday) + 2 * DAY))).toBe("board");
+    expect(revealNext(base({ lastShownAt: yesterday, dayShownAt: yesterday }), new Date(Date.parse(yesterday) + DAY - 1))).toBeNull();
+    expect(revealNext(base({ lastShownAt: yesterday, dayShownAt: yesterday }), new Date(Date.parse(yesterday) + DAY))).toBe("board");
   });
 
   test("never on two page loads in a row: the load after the one that showed a dialog shows none; the next load may", () => {
@@ -284,13 +286,14 @@ describe("the line's rules", () => {
     expect(revealAfterShowLoad(saved.shownLoad, loads, null)).toBe(false);
   });
 
-  test("the gap after Not now: four days, where it is two otherwise", () => {
+  test("the gap after Not now: three days, where it is one otherwise (the owner, 2026-11-06)", () => {
     const shownAt = at(4, 12).toISOString();
     const after = (ms: number, notNow: boolean) => revealNext(base({ lastShownAt: shownAt, dayShownAt: shownAt, notNowAt: notNow ? shownAt : null, open: { steps: true } }), new Date(Date.parse(shownAt) + ms));
-    expect(after(2 * DAY, false)).toBe("steps");
-    expect(after(2 * DAY, true)).toBeNull();
-    expect(after(4 * DAY - 1, true)).toBeNull();
-    expect(after(4 * DAY, true)).toBe("steps");
+    expect(after(DAY - 1, false)).toBeNull();
+    expect(after(DAY, false)).toBe("steps");
+    expect(after(DAY, true)).toBeNull();
+    expect(after(3 * DAY - 1, true)).toBeNull();
+    expect(after(3 * DAY, true)).toBe("steps");
   });
 
   test("an offer whose moment never comes retires after 14 days, and the one behind it goes", () => {

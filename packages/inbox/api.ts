@@ -1602,8 +1602,8 @@ export const inboxApi = {
       ...(agents && agents.length > 0 ? { agents } : {}),
     }),
   /**
-   * An offer of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits four
-   * days. Offers only (an update-day dialog's Not now keeps the usual two). Best effort: a lost answer only shortens that wait.
+   * An offer of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits three
+   * days. Offers only (an update-day dialog's Not now keeps the usual one). Best effort: a lost answer only shortens that wait.
    */
   revealNotNow: (id: InboxRevealOfferId) => post<{ show: boolean }>(inboxUrl('/reveal'), { id, answer: 'not_now' }).then(
     () => undefined,

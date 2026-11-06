@@ -8,7 +8,7 @@
  * claim stamping the Board's first-visit welcome (the owner, #2598 finding 5: the first visit to a Board turned on from
  * the offer, or later in Settings, shows it with Copy prompt; once seen, never again); a lost claim answer losing the
  * offer (the same page's key is shown it again, no other key is); `card` or any other agent word arriving
- * after the claim and Not now, or not after Turn it on; a dev build deciding it; the Snooze announcement losing its 48 h
+ * after the claim and Not now, or not after Turn it on; a dev build deciding it; the Snooze announcement losing its one-day
  * spacing or its stamp of the spacing clock; a stuck Snooze holding the Board back. The Checklist reveal (approval
  * "inbox-checklist-reveal", 2026-11-04): its claim writing `inboxSteps` or touching a Checklist the person set; agent
  * text after Not now not byte-equal to a Checklist off, or not the steps text after Turn it on; a guest claiming it; its
@@ -228,7 +228,7 @@ describe("the Board reveal at day 4", () => {
     expect(await w.next()).toBeNull();
   });
 
-  test("Not now, then the Board turned on later in Settings: the first visit shows the welcome; the 48 h runs from the offer", async () => {
+  test("Not now, then the Board turned on later in Settings: the first visit shows the welcome; the spacing runs from the offer", async () => {
     const w = await world({ days: 6 });
     expect((await w.claim()).show).toBe(true);
     const at = w.saved().inboxReveals.board.shownAt;
@@ -277,8 +277,8 @@ describe("the Board reveal at day 4", () => {
 
   // Review of #2598, finding 2: the phone's network drops after the Inbox stamped the claim but before its answer
   // arrives. With opt-in that would lose the offer for good, the Board still off. The page's retry, with its key, is
-  // shown it again; nothing else is (another tab, the phone), and the 48 h spacing still runs from the one stamp.
-  test("a lost answer: the same page's key is shown it again; any other key, tab or device is not; one stamp, the 48 h kept", async () => {
+  // shown it again; nothing else is (another tab, the phone), and the spacing still runs from the one stamp.
+  test("a lost answer: the same page's key is shown it again; any other key, tab or device is not; one stamp, the spacing kept", async () => {
     const w = await world({ days: 6, tailnet: "owner" });
     const KEY = "0b6f6c1e-4d0a-4c55-9d43-2b1f7a3c9e11";
     expect((await w.claim("board", KEY)).show).toBe(true);
@@ -291,7 +291,7 @@ describe("the Board reveal at day 4", () => {
     expect((await w.claim("board", "6a1d2b4c-other-tab")).show).toBe(false);
     expect((await w.claim("board")).show).toBe(false);
     expect(((await (await w.viaTailnet(OWNER, "/api/inbox/reveal", { id: "board", key: "phone-key-1234" })).json()) as Json).show).toBe(false);
-    // The same key never claims another reveal: the Checklist (due at day 6) waits out the 48 h after the Board.
+    // The same key never claims another reveal: the Checklist (due at day 6) waits out the day after the Board.
     expect((await w.claim("steps", KEY)).show).toBe(false);
     expect(readFileSync(join(w.dataDir, "config.json"), "utf8")).toBe(stamped);
     // Turned on meanwhile (Turn it on, or Settings): the retry is not shown the offer.
@@ -459,7 +459,7 @@ describe("the Checklist reveal at day 6", () => {
     expect(w.saved().inboxBoard).toBe(false);
   });
 
-  test("after the Board in the queue: an undecided Board goes first, and the Checklist waits out the 48 h after it", async () => {
+  test("after the Board in the queue: an undecided Board goes first, and the Checklist waits out the day after it", async () => {
     const w = await world({ days: 6 });
     expect(await w.next()).toBe("board");
     expect((await w.claim("steps")).show).toBe(false);
@@ -560,7 +560,7 @@ describe("over the tailnet", () => {
 });
 
 describe("the queue with Snooze", () => {
-  test("Snooze first at day 4 when it was never shown; its claim stamps the spacing clock, and the Board waits 48 h", async () => {
+  test("Snooze first at day 4 when it was never shown; its claim stamps the spacing clock, and the Board waits a day", async () => {
     const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() } } });
     expect(await w.next()).toBe("snooze");
     // A tab that armed the Board (loaded earlier) is refused while Snooze is next.
@@ -572,8 +572,8 @@ describe("the queue with Snooze", () => {
     expect((await w.claim("board")).show).toBe(false);
   });
 
-  test("Snooze gains the spacing: another announcement under 48 h ago holds it back", async () => {
-    const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() }, inboxReveals: { lastShownAt: new Date(Date.now() - 47 * HOUR).toISOString() } } });
+  test("Snooze gains the spacing: another announcement under a day ago holds it back", async () => {
+    const w = await world({ config: { inboxSnoozeIntro: { firstUseAt: new Date(Date.now() - 4 * DAY).toISOString() }, inboxReveals: { lastShownAt: new Date(Date.now() - 23 * HOUR).toISOString() } } });
     expect((await w.settings()).snooze_intro).toEqual({ due: false });
     expect(((await (await w.post("/api/inbox/snooze-intro")).json()) as Json).show).toBe(false);
     expect(w.saved().inboxSnoozeIntro.shownAt).toBeUndefined();

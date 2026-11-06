@@ -20,9 +20,10 @@
  *  - Never on two page loads in a row: the load right after the one that showed the last dialog shows none
  *    (`revealAfterShowLoad`; each page sends its load id, and a load counts once, when it is first seen, so an old tab
  *    reading settings again never becomes the newest load).
- *  - Spacing: `REVEAL_SPACING_MS` (2 days) after the last dialog that stamps the clock (every one but the agent note),
- *    `REVEAL_NOT_NOW_SPACING_MS` (4 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
- *    update-day dialog's Not now keeps the 2 days). The clock also
+ *  - Spacing (changed 2026-11-06: "one day apart, three after a Not now"): `REVEAL_SPACING_MS` (1 day) after the last
+ *    dialog that stamps the clock (every one but the agent note; one clock, so the update-day dialogs keep it too),
+ *    `REVEAL_NOT_NOW_SPACING_MS` (3 days) after an offer closed with Not now (`inboxReveals.notNowAt`; offers only, an
+ *    update-day dialog's Not now keeps the 1 day). The clock also
  *    reads the announcements' own `shownAt` stamps from before that key existed (`revealLastShown`).
  *  - Patience: an entry that has been next for `REVEAL_PATIENCE_MS` (3 days) without its moment lets the next entry
  *    that qualifies go first. It stays in line: when every qualifying entry has waited that long, the one that has
@@ -71,8 +72,8 @@ export interface RevealEntry {
 
 /** The queue, in order. */
 export const INBOX_REVEALS: readonly RevealEntry[] = [
-  // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day and two
-  // days apart: the sound on the update day, list options two days later, voice two after that.
+  // The update-day dialogs (who: config.json `inboxSound`, `inboxListIntro`, `inboxVoiceIntro`), one a day (the line's
+  // one-day spacing): the sound on the update day, then list options and voice on later days, each at its moment.
   { id: "sound", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   { id: "list_intro", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
   { id: "voice", kind: "update", tenureMs: 0, minThreads: 0, enabled: true },
@@ -91,10 +92,13 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
 ];
 
-/** Never two dialogs within this long on one machine (the agent note apart). */
-export const REVEAL_SPACING_MS = 48 * 60 * 60 * 1000;
-/** After an offer closed with Not now, the next waits this long. */
-export const REVEAL_NOT_NOW_SPACING_MS = 4 * DAY_MS;
+/**
+ * Never two dialogs within this long on one machine (the agent note apart): one day (the owner, 2026-11-06, "one day
+ * apart"; it was 48 h). One clock for every dialog of the line, the update-day dialogs included.
+ */
+export const REVEAL_SPACING_MS = DAY_MS;
+/** After an offer closed with Not now, the next waits this long: three days (the owner, 2026-11-06; it was four). */
+export const REVEAL_NOT_NOW_SPACING_MS = 3 * DAY_MS;
 /** An entry next this long without its moment lets the next one go first. */
 export const REVEAL_PATIENCE_MS = 3 * DAY_MS;
 /** An entry next this long without its moment retires. */
@@ -137,7 +141,7 @@ export function revealDay(at: number): string {
   return `${d.getFullYear()}-${d.getMonth() + 1}-${d.getDate()}`;
 }
 
-/** The spacing holds: two days since the last dialog that stamps the clock, four since a Not now. */
+/** The spacing holds: a day since the last dialog that stamps the clock, three since an offer's Not now. */
 export function revealSpaced(lastShownAt: string | null | undefined, now: Date, notNowAt?: string | null): boolean {
   const last = time(lastShownAt);
   if (last !== null && now.getTime() - last < REVEAL_SPACING_MS) return false;
@@ -229,7 +233,7 @@ export function revealMayClaim(id: RevealId, state: RevealState, now: Date, tabl
   return revealNext(state, now, table) === id || revealAhead(state, now, table).includes(id);
 }
 
-/** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual 2 days. */
+/** A Not now may be stamped for `id`: an offer of the queue. An update-day dialog's Not now keeps the usual day. */
 export function revealNotNowAllowed(id: unknown, table: readonly RevealEntry[] = INBOX_REVEALS): id is RevealId {
   return table.some((entry) => entry.id === id && entry.kind === "offer");
 }
@@ -315,7 +319,7 @@ export function revealStamp<T extends RevealsSaved>(saved: T | undefined, at: st
   };
 }
 
-/** The saved line once an offer is closed with Not now: the next waits four days. */
+/** The saved line once an offer is closed with Not now: the next waits three days. */
 export function revealStampNotNow<T extends RevealsSaved>(saved: T | undefined, at: string): T {
   return { ...(saved ?? ({} as T)), notNowAt: at };
 }

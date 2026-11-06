@@ -6083,7 +6083,7 @@ function Inbox() {
           mcpCommand={settings?.mcp_command ?? null}
           phone={phone}
           onClose={() => {
-            // Not now (Escape, a click outside): the line's next dialog waits four days.
+            // Not now (Escape, a click outside): the line's next dialog waits three days.
             void inboxApi.revealNotNow('board');
             boardReveal.close();
           }}

@@ -2046,7 +2046,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
    */
   const claimSoundDialog = (via: RequestVia, load: string | null = null): boolean => {
     if (via !== "local" || !soundState().dialog_due) return false;
-    // The line of one-time dialogs (shared/inbox/reveals.ts): one a day, never on the load after one, two days apart.
+    // The line of one-time dialogs (shared/inbox/reveals.ts): one a day, never on the load after one, a day apart.
     if (!lineFree("spaced", load)) return false;
     const { dialogDueFor, ...rest } = savedSound();
     saveConfig({ inboxSound: { ...rest, dialogShownFor: dialogDueFor }, ...lineStamp(new Date().toISOString(), true, load) });
@@ -2120,7 +2120,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
   }
   /**
    * Whether it is due, and for this page: the owner's (this computer or their phone), never a tailnet guest's. Its own
-   * rules, and the reveals' queue (shared/inbox/reveals.ts): the 48 h spacing, and the Board going first once Snooze waited
+   * rules, and the reveals' queue (shared/inbox/reveals.ts): the one-day spacing, and the Board going first once Snooze waited
    * three days for its moment.
    */
   const snoozeIntroState = (owner: boolean, load: string | null = null) => ({
@@ -2469,7 +2469,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
       line: snoozeIntroRelease,
     };
   };
-  /** An offer closed with Not now (Escape, a click outside): the next dialog waits four days. A release build, the owner. */
+  /** An offer closed with Not now (Escape, a click outside): the next dialog waits three days. A release build, the owner. */
   const revealNotNow = (owner: boolean) => {
     if (!owner || !snoozeIntroRelease) return;
     saveConfig({ inboxReveals: revealStampNotNow(loadConfig().inboxReveals, new Date().toISOString()) });
@@ -4389,7 +4389,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         const id = body.id;
         if (body.answer !== undefined && body.answer !== "not_now") throw new InboxError("validation_error", "answer: not_now.", { field: "answer" });
         // A claim: Snooze, the agent note or an offer of the line. Not now: an offer of the queue (an update-day dialog's
-        // Not now keeps the usual two days, approval "inbox-one-time-dialogs").
+        // Not now keeps the usual day, approval "inbox-one-time-dialogs").
         if (body.answer === "not_now") {
           if (!revealNotNowAllowed(id)) throw new InboxError("validation_error", `id: ${INBOX_REVEALS.filter((entry) => entry.kind === "offer").map((entry) => entry.id).join(", ")}.`, { field: "id" });
         } else if (!(id === "snooze" || id === "agent_note" || (typeof id === "string" && id in lineOffers))) {
@@ -4403,7 +4403,7 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
         if (key !== undefined && (typeof key !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(key))) throw new InboxError("validation_error", "key: 8 to 64 letters, digits, - or _.", { field: "key" });
         const owner = ownerOrLocal(req, via);
         const load = revealLoadId(req.headers.get("x-plannotator-load"));
-        // Not now on an offer already shown: the line waits four days. Nothing is claimed.
+        // Not now on an offer already shown: the line waits three days. Nothing is claimed.
         if (body.answer === "not_now") {
           revealNotNow(owner);
           return json({ show: false, reveal: { next: revealNow(owner, load) }, board: { on: boardOn() }, steps: { on: stepsOn() } });
