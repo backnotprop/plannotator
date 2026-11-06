@@ -81,8 +81,39 @@ import type {
 import { browserSharedEventsEnv, sharedInboxEventsSupported, subscribeOwnInboxEvents, subscribeSharedInboxEvents } from './sharedEvents';
 import { newUuid } from './uuid';
 
-/** A reveal for returning users, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server side). */
-export type InboxRevealId = 'snooze' | 'board' | 'steps';
+/**
+ * A dialog of the line of one-time dialogs, as the Inbox names it (the queue: packages/shared/inbox/reveals.ts, server
+ * side): the update-day dialogs, then the offers. A registered dialog (Bro mode, List view) adds its id here.
+ */
+export type InboxRevealId = 'sound' | 'list_intro' | 'voice' | 'snooze' | 'board' | 'steps';
+/** An offer of the line (not an update-day dialog): only an offer's Not now stamps the four-day gap. */
+export type InboxRevealOfferId = Exclude<InboxRevealId, 'sound' | 'list_intro' | 'voice'>;
+/** What a page claims through `POST /api/inbox/reveal`: Snooze, an offer, or the agent note. */
+export type InboxRevealClaimId = InboxRevealOfferId | 'agent_note';
+
+/**
+ * This page load's id, sent with every read and write (`X-Plannotator-Load`): the line of one-time dialogs never shows
+ * one on the load right after the load that showed the last (packages/shared/inbox/reveals.ts).
+ */
+const pageLoad = newUuid();
+
+/** The last reply this page sent, and its length in words: voice's moment is a long reply just sent. */
+let lastReply: { at: number; words: number } | null = null;
+const replyListeners = new Set<(reply: { at: number; words: number }) => void>();
+/** Listen for this page's replies (each one sent: when, and its words). Returns the unsubscribe. */
+export function onReplySent(listener: (reply: { at: number; words: number }) => void): () => void {
+  replyListeners.add(listener);
+  return () => replyListeners.delete(listener);
+}
+/** The last reply this page sent, or null. */
+export function lastReplySent(): { at: number; words: number } | null {
+  return lastReply;
+}
+function noteReplySent(words: string): void {
+  const count = words.trim() === '' ? 0 : words.trim().split(/\s+/).length;
+  lastReply = { at: Date.now(), words: count };
+  for (const listener of replyListeners) listener(lastReply);
+}
 
 export type AgentToolHost = 'claude-code' | 'pi' | 'opencode' | 'dsh';
 
@@ -400,8 +431,13 @@ export interface SettingsModel {
   list_intro?: { due: boolean };
   /** The one-time Snooze announcement waits to be claimed by this page (POST /api/inbox/snooze-intro). Absent from an older Inbox. */
   snooze_intro?: { due: boolean };
-  /** The reveals for returning users: the one this page may arm (POST /api/inbox/reveal), or null. Absent from an older Inbox. */
-  reveal?: { next: InboxRevealId | null };
+  /**
+   * The line of one-time dialogs: the one this page may arm, or null; `ahead`: the offers it may also arm, each going
+   * as soon as its own moment comes (List view); `setup`: the agent note may show on this load (absent from an older
+   * Inbox: it may); `line`: this Inbox keeps the line (a release build), so the update-day dialogs (sound, list
+   * options, voice) show only when `next` names them. The whole field is absent from an older Inbox.
+   */
+  reveal?: { next: InboxRevealId | null; ahead?: InboxRevealId[]; setup?: boolean; line?: boolean };
   /** Voice dictation (config.json inboxVoice). Absent from an Inbox that predates it. */
   voice?: InboxVoiceSettings;
   /** Settings → About: update notices and automatic updates (`env`: the env var decides). Absent from an older Inbox. */
@@ -752,7 +788,7 @@ async function get<T>(path: string, signal?: AbortSignal): Promise<T> {
   refuseContested(path);
   const machine = forwardedTo(path);
   resumeDebugLog();
-  const response = await fetch(path, { headers: { Accept: 'application/json' }, cache: 'no-store', signal });
+  const response = await fetch(path, { headers: { Accept: 'application/json', 'X-Plannotator-Load': pageLoad }, cache: 'no-store', signal });
   learnDebugLog(response);
   if (machine && (await localInstead(response))) return get<T>(localRoute(path), signal);
   const answer = await readJson<T>(response);
@@ -887,7 +923,7 @@ async function post<T>(path: string, body: Record<string, unknown>): Promise<T> 
   const sent = machine && typeof body.idempotency_key !== 'string' ? { ...body, idempotency_key: newUuid() } : body;
   const response = await fetch(path, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(machine ? threadHeader(path) : {}) },
+    headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Plannotator-Load': pageLoad, ...(machine ? threadHeader(path) : {}) },
     body: JSON.stringify(pageSession ? { ...sent, serverSession: pageSession } : sent),
   });
   if (machine && (await localInstead(response))) return post<T>(localRoute(path), body);
@@ -1051,6 +1087,19 @@ export interface StartThreadInput {
   board_request?: true;
   /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
   decision_ask?: true;
+}
+
+/** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
+export async function reuseAttachment(attachmentId: string, version: 'current' | 'sent', options: { signal?: AbortSignal; sha256?: string } = {}): Promise<InboxUpload> {
+  const response = await fetch(inboxUrl('/uploads/reuse'), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ attachment_id: attachmentId, version, ...(options.sha256 ? { sha256: options.sha256 } : {}), serverSession: pageServerSession() }),
+    signal: options.signal,
+  });
+  const body = (await response.json().catch(() => ({}))) as { upload?: InboxUpload; error?: string; code?: string };
+  if (!response.ok || !body.upload) throw new InboxApiError(response.status, body.code ?? 'error', body.error ?? 'Not attached: that file could not be added.');
+  return body.upload;
 }
 
 /**
@@ -1329,7 +1378,10 @@ export const inboxApi = {
     // To another machine: the newest seq the person saw there rides along (rule 11), and a reply its Inbox has not
     // confirmed yet is held (`held`): the Send went into this Inbox's outbox, not into the thread.
     post<ReplyResult>(messageUrl(messageId, `/reply`), { ...input, ...seenThrough(messageId) }).then(
-      (result) => ({ ...result, questions: questionsOnly(result.questions) }),
+      (result) => {
+        noteReplySent(input.words);
+        return { ...result, questions: questionsOnly(result.questions) };
+      },
       heldReply,
     ),
   /**
@@ -1572,8 +1624,21 @@ export const inboxApi = {
    * A reveal for returning users: `show: true` only while it is still next (a compare-and-set over the queue). It turns
    * nothing on. `key`: the page's own for this claim, so a retry after a lost answer is shown it again (Board, Checklist).
    */
-  claimReveal: (id: InboxRevealId, key?: string) =>
-    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), { id, ...(key ? { key } : {}) }),
+  claimReveal: (id: InboxRevealClaimId, key?: string, agents?: readonly string[]) =>
+    post<{ show: boolean; reveal: { next: InboxRevealId | null }; board: { on: boolean }; steps?: { on: boolean } }>(inboxUrl('/reveal'), {
+      id,
+      ...(key ? { key } : {}),
+      // The agent note: the agents it would ask about (it shows once for each).
+      ...(agents && agents.length > 0 ? { agents } : {}),
+    }),
+  /**
+   * An offer of the line closed with Not now (or Escape, or a click outside) without taking it: the next one waits three
+   * days. Offers only (an update-day dialog's Not now keeps the usual one). Best effort: a lost answer only shortens that wait.
+   */
+  revealNotNow: (id: InboxRevealOfferId) => post<{ show: boolean }>(inboxUrl('/reveal'), { id, answer: 'not_now' }).then(
+    () => undefined,
+    () => undefined,
+  ),
   saveVoice: (change: { on?: boolean; phones_only?: boolean; engine?: InboxVoiceEngine }) => post<{ voice: InboxVoiceSettings }>(inboxUrl('/settings'), { voice: change }),
   /** Only on this computer; the answer never holds the key. Null removes it. */
   saveVoiceKey: (key: string | null) => post<{ key: InboxVoiceKeyState }>(inboxUrl('/voice/key'), { key }),

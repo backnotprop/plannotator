@@ -44,7 +44,9 @@ import { deleteInboxDraft, inboxDraftUploadIds, listInboxDrafts, saveInboxDraft 
 import { InboxError } from "@plannotator/shared/inbox/schema";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import {
+  assertInboxUploadsPending,
   inboxUploadAttachments,
+  inboxUploadFromAttachment,
   INBOX_UPLOAD_MAX_BYTES,
   readInboxUploadText,
   receiveInboxUpload,
@@ -179,10 +181,12 @@ export function createInboxCompose(options: {
     const project = prepared ? prepared.project : target.root !== null ? await options.resolveProject(root) : store.projectByRoot(root);
     if (!project) throw new InboxError("project_not_found", "That session's project is gone.");
     const at = now().toISOString();
-    let attachments: ReturnType<typeof inboxUploadAttachments> = [];
+    let attachments: Awaited<ReturnType<typeof inboxUploadAttachments>> = [];
     let result: ReturnType<InboxStore["startPersonThread"]>;
     try {
-      attachments = uploads.length > 0 ? inboxUploadAttachments(store.dir, uploads, at) : [];
+      attachments = uploads.length > 0 ? await inboxUploadAttachments(store.dir, uploads, at) : [];
+      // The same Send while this one copied is a replay, below; another Send of these files already has them.
+      if (uploads.length > 0 && !store.personThreadByKey(key)) assertInboxUploadsPending(store.dir, uploads, attachments);
       // Trust and start: every check first, the trust next, and only then the thread. A name the thread would be
       // refused must not leave the folder trusted, and `trust_failed` sends nothing.
       if (prepared?.trust) {
@@ -346,6 +350,19 @@ export function createInboxCompose(options: {
         throw new InboxError("upload_too_large", `Not attached: a file is at most ${INBOX_UPLOAD_MAX_BYTES / (1024 * 1024)} MB.`, { max_bytes: INBOX_UPLOAD_MAX_BYTES });
       }
       const upload = await receiveInboxUpload(store.dir, url.searchParams.get("name"), req.body, { at: now().toISOString() });
+      return json({ upload });
+    }
+    // A file the Inbox already holds, for the message being written: no bytes in the body.
+    if (path === "/api/inbox/uploads/reuse") {
+      if (req.method !== "POST") return json({ error: "Use POST." }, 405);
+      const body = await options.readBody(req);
+      const stale = staleTab(body);
+      if (stale) return stale;
+      const hit = typeof body.attachment_id === "string" ? store.attachment(body.attachment_id) : null;
+      if (!hit) throw new InboxError("upload_not_found", "That file is no longer in the Inbox.");
+      const version = body.version === "current" ? "current" : "sent";
+      const sha256 = typeof body.sha256 === "string" ? body.sha256 : undefined;
+      const upload = await inboxUploadFromAttachment(store.dir, hit.attachment, version, { at: now().toISOString(), ...(sha256 ? { sha256 } : {}) });
       return json({ upload });
     }
     const textMatch = /^\/api\/inbox\/uploads\/([A-Za-z0-9_]+)\/text$/.exec(path);
