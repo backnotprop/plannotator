@@ -76,6 +76,8 @@ export type TickDeps = {
   agentCommand?: (setup: SystemSetup, prompt: string) => { command: string[]; stdin: string | null };
   /** The default agent's time bound; TICK_TIMEOUTS_MS.agent unless given. */
   agentTimeoutMs?: number;
+  /** The rename the swap of a checked redraw uses; node's unless given (the tests pass one that fails). */
+  rename?: (from: string, to: string) => Promise<void>;
 };
 
 /**
@@ -725,10 +727,17 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
  * drawing/ with previous/ there, is put back by `restoreDrawing` at the start
  * of the next tick, which then redraws again.
  */
-async function swapIn(paths: ReturnType<typeof systemPaths>): Promise<void> {
+async function swapIn(paths: ReturnType<typeof systemPaths>, move: (from: string, to: string) => Promise<void> = rename): Promise<void> {
   await rm(paths.previous, { recursive: true, force: true });
-  await rename(paths.drawing, paths.previous);
-  await rename(paths.redraw, paths.drawing);
+  await move(paths.drawing, paths.previous);
+  try {
+    await move(paths.redraw, paths.drawing);
+  } catch (e) {
+    // the second rename failed (on Windows a file held open in redraw/: EBUSY, EPERM): put the drawing back
+    // before the failure sets redraw/ aside, or no drawing would be left
+    await move(paths.previous, paths.drawing);
+    throw e;
+  }
 }
 
 /**
@@ -836,7 +845,7 @@ async function afterAgent(
   // the checked copy becomes the drawing; the one before it is kept as previous/
   const after = (await load(work)).model;
   if (after?.wanted.length) return fail(`the redraw does not check clean: system.yaml wanted: still lists ${after.wanted.map((w) => w.code).join(', ')}; a redraw draws every sheet it plans`);
-  await swapIn(r.paths);
+  await swapIn(r.paths, r.deps?.rename);
 
   const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(r.model, after) : { parts: 0, flows: 0 }, also });
   const notify = r.deps?.notify ?? inboxNotify(r.deps?.plannotator ?? (await plannotatorProgram()));

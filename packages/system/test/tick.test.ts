@@ -542,6 +542,23 @@ echo changed > src/main.ts`);
     expect(readFileSync(join(p.paths.failed, 'interrupted-2026-11-07T09-00-00-000Z', 'drawing', 'system.yaml'), 'utf8')).toBe('the checked copy\n');
   });
 
+  test('a swap whose second rename fails puts the drawing back: the redraw is refused and the last good drawing stays', async () => {
+    const p = project();
+    const good = drawingFiles(p.paths.drawing);
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    // a file held open in redraw/ (Windows: EBUSY) fails the rename that would put the redraw in place
+    const rename: TickDeps['rename'] = async (from, to) => {
+      if (from === p.paths.redraw && to === p.paths.drawing) throw Object.assign(new Error(`EBUSY: resource busy or locked, rename '${from}'`), { code: 'EBUSY' });
+      renameSync(from, to);
+    };
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, ...fakes(), rename } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('EBUSY') });
+    expect(drawingFiles(p.paths.drawing)).toEqual(good);
+    expect(readFileSync(join(p.paths.failed, tip, 'drawing', 'system.yaml'), 'utf8')).toContain('jobsp');
+    // the next tick still has a drawing: it waits for main to move, as after any refused redraw
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: expect.stringContaining('failed; waiting for main to move') });
+  });
+
   test('a drawing still being drawn (sheets under wanted:) is not redrawn or fetched for; once nothing is wanted, the next tick redraws', async () => {
     const p = project();
     const half = drawing(p.drawnAt);
