@@ -255,3 +255,14 @@ test('focus in a row of the group that closes moves to its header', () => {
   click(header('new'));
   expect(focused()).toBe('row t_stopped');
 });
+
+test('with storage that keeps nothing (cookies blocked), a header still closes and opens its group', () => {
+  if (!hasDom) return;
+  setStorageBackend({ getItem: () => null, setItem: () => {}, removeItem: () => {} });
+  draw(sections());
+  click(header('waiting'));
+  expect(isOpen('waiting')).toBe(false);
+  expect(rowsIn('waiting')).toBe(0);
+  click(header('waiting'));
+  expect(isOpen('waiting')).toBe(true);
+});

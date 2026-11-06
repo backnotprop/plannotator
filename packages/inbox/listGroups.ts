@@ -48,7 +48,9 @@ export function groupState(choices: Choices, id: InboxListGroupId): GroupState {
 }
 
 const listeners = new Set<() => void>();
-const read = () => storage.getItem(LIST_GROUPS_COOKIE) ?? '';
+// The last value written, only while storage did not keep it (cookies blocked): the toggle still works until a reload.
+let written: string | null = null;
+const read = () => storage.getItem(LIST_GROUPS_COOKIE) ?? written ?? '';
 const subscribe = (listener: () => void) => {
   listeners.add(listener);
   return () => void listeners.delete(listener);
@@ -58,6 +60,7 @@ function write(next: Choices): void {
   const value = formatListGroups(next);
   if (value) storage.setItem(LIST_GROUPS_COOKIE, value);
   else storage.removeItem(LIST_GROUPS_COOKIE);
+  written = (storage.getItem(LIST_GROUPS_COOKIE) ?? '') === value ? null : value;
   for (const listener of [...listeners]) listener();
 }
 
