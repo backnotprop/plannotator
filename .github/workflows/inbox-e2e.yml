@@ -207,7 +207,10 @@ jobs:
   inbox-window-e2e:
     name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
-    runs-on: ubuntu-24.04
+    # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
+    # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
+    # it moves them without a PR, and deleting it moves them back.
+    runs-on: ${{ vars.E2E_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
