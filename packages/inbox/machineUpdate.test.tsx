@@ -276,3 +276,20 @@ test('Snooze on an older machine stays, and its press opens the dialog instead o
   expect(pressed).toBe(1);
   expect(document.querySelector('[data-snooze-choice]')).toBeNull();
 });
+
+test('Not back offers to put back the version it ran, with each install script, and only for a release they can install', async () => {
+  await dialog(view('not_back'), { state: 'offline' });
+  const back = commands().filter((c) => c?.includes('0.28.46'));
+  expect(back).toHaveLength(2);
+  expect(back.some((c) => c!.includes('install.sh') && c!.includes('--version v0.28.46'))).toBe(true);
+  expect(back.some((c) => c!.includes('install.ps1') && c!.includes('-Version v0.28.46') && !c!.includes('&&'))).toBe(true);
+  act(() => root?.unmount());
+  host?.remove();
+  // A development build or an unknown version: nothing the scripts could put back, so no line for it.
+  for (const from of ['0.28.46-dev.3', null]) {
+    await dialog(view('not_back', { from }), { state: 'offline', version: from });
+    expect([from, commands()]).toEqual([from, ['plannotator inbox --background']]);
+    act(() => root?.unmount());
+    host?.remove();
+  }
+});

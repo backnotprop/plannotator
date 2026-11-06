@@ -17,6 +17,14 @@ export const UPDATE_BY_HAND_FULL_PATH = '~/.local/bin/plannotator update && ~/.l
 /** Windows PowerShell 5.1 refuses `&&`, and the full path above does not exist there. Shown to everyone: an older machine does not say what it runs on. */
 export const UPDATE_BY_HAND_POWERSHELL = 'plannotator update; plannotator inbox restart';
 
+/** Puts a version back with the install scripts' own version flag, for a machine whose new version does not start. */
+export function putBackCommands(version: string): { sh: string; ps: string } {
+  return {
+    sh: `curl -fsSL https://plannotator.ai/install.sh | bash -s -- --version v${version}`,
+    ps: `& ([scriptblock]::Create((irm https://plannotator.ai/install.ps1))) -Version v${version}`,
+  };
+}
+
 /** The word in the sidebar, beside the machine: its own target, while the row still filters. */
 export function MachineSidebarWord({ notice, name, onPress }: { notice: MachineNotice; name: string; onPress: () => void }) {
   const mark = notice.busy ? (
@@ -156,12 +164,23 @@ export function MachineUpdateDialog({ machine, snooze, onClose }: { machine: Mac
     );
   }
   if (notice?.kind === 'not_back') {
+    // The version it ran before the restart, when it is a plain release the install scripts can put back.
+    const before = machine.update?.from;
+    const putBack = before && /^\d+\.\d+\.\d+$/.test(before) ? { version: before, ...putBackCommands(before) } : null;
     return (
       <Modal label={`${name} has not come back`} onClose={onClose} testId="machine-update-not-back">
         <h2>{name} has not come back</h2>
         <p className="ib-sub">It was restarting on {to}. Its threads come back as soon as it does.</p>
         <p className="ib-sum">If it stays away, on {name}, in a terminal:</p>
         <Command text="plannotator inbox --background" />
+        {putBack && (
+          <>
+            <p className="ib-sum ib-quietline">If that does not start it, put {putBack.version} back:</p>
+            <Command text={putBack.sh} />
+            <p className="ib-sum ib-quietline">In PowerShell on Windows:</p>
+            <Command text={putBack.ps} />
+          </>
+        )}
         <div className="ib-acts-row">{close}</div>
       </Modal>
     );
