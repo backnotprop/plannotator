@@ -168,13 +168,13 @@ function NoteMark({ l, className, style }: { l: string; className: string; style
   const ctx = useContext(NotesCtx);
   const [open, setOpen] = useState(false);
   const n = ctx.notes.find((x) => x.l === l);
-  if (!n) return <span className={className} style={style}>{l}</span>;
+  // a still picture (a thumb) draws the letter only: its note opens on a live sheet
+  if (!n || !ctx.live) return <span className={className} style={style}>{l}</span>;
   return (
     <button
       type="button"
       className={className + ' sys-peek'}
       style={style}
-      tabIndex={ctx.live ? 0 : -1}
       aria-label={`Note ${l}: ${n.text}`}
       onPointerEnter={() => setOpen(true)}
       onPointerLeave={() => setOpen(false)}

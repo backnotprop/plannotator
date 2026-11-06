@@ -116,7 +116,6 @@
 .sys-mark-mcp { font-family: var(--font-mono); font-weight: 500; border: 1px solid currentColor; border-radius: 3px; padding: 1px 3px; line-height: 1; color: var(--sys-ink); }
 .sys-top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .sys-sub { color: var(--sys-ink3); font-family: var(--font-sans); }
-.sys-sub .sys-mono { font-size: 0.94em; }
 
 .sys-plate { background: var(--sys-box); border: 1.4px solid var(--sys-ink); border-radius: 3px; padding: 13px 15px; }
 .sys-plate .sys-top .sys-marks { align-self: flex-start; }

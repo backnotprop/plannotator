@@ -1,6 +1,6 @@
 // @plannotator/system/react: the drawing as React components that take props.
 // No fetching, no routes, no storage. Browser-safe: nothing here reaches Node
-// or Bun. Load the styles once with `@plannotator/system/system.css`; they read
+// or Bun APIs. Load the styles once with `@plannotator/system/system.css`; they read
 // the Inbox's tokens (packages/ui and packages/inbox), light and dark.
 export { SystemView, type Reading, type SystemViewProps } from './view/SystemView.tsx';
 export { SystemThumb, type SystemThumbProps } from './view/SystemThumb.tsx';
