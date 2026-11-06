@@ -397,6 +397,9 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       expect(((await (await read("~/code/biling-api")).json()) as Json).exists).toBe(false);
       expect(((await (await read("~/.claude")).json()) as Json).code).toBe("folder_hidden");
       expect(((await (await read("~/..")).json()) as Json).code).toBe("folder_outside_home");
+      // A backslash is never a way into a hidden folder, and a missing folder offers the nearest one above it.
+      expect(((await (await read("~/x\\..\\.claude")).json()) as Json).code).toBe("folder_outside_home");
+      expect(((await (await read("~/code/biling-api")).json()) as Json).nearest).toMatchObject({ path: "~/code", folders: expect.arrayContaining([`billing-api-${here.name.toLowerCase()}`]) });
       // An agent's bare read through the forward, and a read at the other door with this machine's token but no mark.
       const bare = await read("~/code", {});
       expect([bare.status, ((await bare.json()) as Json).code]).toEqual([403, "window_only"]);
@@ -416,6 +419,12 @@ describe("remote launch, on two real Inboxes linked both ways", () => {
       // A folder that isn't there: refused, nothing starts.
       const missing = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-missing-${here.name}`, body: "x", to: { launch: { agent: "claude-code", folder: "~/code/nope" } } });
       expect([missing.status, ((await missing.json()) as Json).code]).toEqual([422, "folder_missing"]);
+      // Home itself, and a hidden folder by a backslash: refused there, nothing starts.
+      for (const folder of ["~", "~/\\.claude"]) {
+        const refused = await windowPost(here, `/api/inbox/m/${there.id}/messages`, { idempotency_key: `k-folder-refused-${here.name}-${folder}`, body: "x", to: { launch: { agent: "claude-code", folder } } });
+        expect([folder, refused.status, ((await refused.json()) as Json).code]).toEqual([folder, 422, "validation_error"]);
+      }
+      expect(startsIn(there, realpathSync(agentsHome(there)))).toEqual([]);
     }
   }, 90_000);
 });

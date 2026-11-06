@@ -60,7 +60,7 @@
  *   POST /api/inbox/launch/:id/permission  the hook's long poll; the answer is the person's, from the thread
  */
 
-import { listHomeFolders, resolveHomeFolder } from "./inbox-home-folders";
+import { isHomeItself, listHomeFolders, resolveHomeFolder } from "./inbox-home-folders";
 import { inboxLaunchNotReadyWords } from "@plannotator/core/inbox-launch-ready";
 import { appendFileSync, existsSync, lstatSync, mkdirSync, realpathSync, rmSync, statSync } from "node:fs";
 import { basename, delimiter, dirname, isAbsolute, join, resolve } from "node:path";
@@ -1052,7 +1052,10 @@ export function createInboxLaunch(options: {
       if (!host) throw new InboxError("agent_unavailable", `${target.agent} can't be started here. Nothing was sent.`);
       // A folder under home (not a project yet): by the folder listing's rules; it becomes a project below.
       const typed = "folder" in target ? resolveHomeFolder(options.homeDir, target.folder) : null;
-      if (typed && !typed.ok) throw new InboxError("validation_error", typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      // Home itself is listed, never started in: an agent there reaches every folder under it, hidden ones too.
+      if (typed && (!typed.ok || (typed.real && isHomeItself(options.homeDir, typed.real)))) {
+        throw new InboxError("validation_error", typed.ok === false && typed.refused === "hidden" ? "Hidden folders can't be picked. Nothing was sent." : "Pick a folder inside the home folder. Nothing was sent.", { field: "to.launch" });
+      }
       if (typed && (!typed.exists || !typed.real)) throw new InboxError("folder_missing", `${typed.shown} isn't there. Pick another folder. Nothing was sent.`, { field: "to.launch" });
       const folderTarget = typed?.ok && typed.real ? typed.real : null;
       const chosen = "project_id" in target ? store.project(target.project_id) : folderTarget ? (store.listProjects().find((p) => p.root === folderTarget) ?? null) : null;
