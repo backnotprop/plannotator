@@ -546,6 +546,11 @@ export interface LiveSessionsModel {
      * person's message reads it ("Queued", "Sending", Send now).
      */
     connection?: RecipientConnection | null;
+    /**
+     * The thread's items that session's connection took and will never deliver (its wake stopped mid-delivery):
+     * their line says not delivered, and they may move. Absent when none, and from an older Inbox.
+     */
+    stuck?: string[];
   };
   /**
    * Asked for with `?recipients=a,b` (approval "inbox-tag-agents"): how each
