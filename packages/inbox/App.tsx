@@ -154,7 +154,8 @@ import { adoptSavedTheme, inboxServerSync } from './theme';
 import { adoptSavedDiffStyle } from './diffStyle';
 import { adoptSavedTextSize, applyRememberedTextSize } from './textSize';
 import { parseSettingsHash, settingsHash, type SettingsSection } from './settingsRoute';
-import { ComposeDialog, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { ComposeDialog, type ComposeHeld, type ComposeRequest, type ComposeSent } from './compose/ComposeDialog';
+import { heldLaunchToast } from './compose/heldLaunch';
 import { DraftsPage } from './compose/DraftsPage';
 import { BoardPage, type BoardMove } from './board/BoardPage';
 import { PullsPage, ReviewsOff } from './pulls/PullsPage';
@@ -168,7 +169,7 @@ import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
 import { useComposeSessions } from './compose/useComposeSessions';
-import { composeActions, composeTargets, hostLabel, type ComposeAction } from './compose/model';
+import { composeActions, composeTargets, hostLabel, launchHistory, type ComposeAction } from './compose/model';
 import type { CardsModel, DraftView, InboxStorageModel, UpdateCheckFailing } from './api';
 import { NO_RESTART_AGENTS, restartAgentsOf } from './restartAgents';
 import type { InboxRestartAgents } from '@plannotator/core/inbox-types';
@@ -2631,6 +2632,18 @@ function Inbox() {
       },
       7000,
     );
+  };
+  /**
+   * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
+   * answer). Compose has closed; the toast says it starts when that machine is back, and Cancel takes it back while it
+   * has not left (`POST /api/inbox/outbox/:key/cancel`).
+   */
+  const composeHeld = (held: ComposeHeld) => {
+    if (held.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== held.draftId));
+    closeCompose(held.draftId ? draftNeighbour(held.draftId) : null);
+    if (held.draftId) void refreshDrafts();
+    const { toast: heldToast, ms } = heldLaunchToast(held, showToast, dismissToast);
+    showToast(heldToast, ms);
   };
   const lastSentRef = useRef(lastSent);
   const rememberSent = (session: string) => {
@@ -5179,6 +5192,8 @@ function Inbox() {
     }
   }, [stack.thread, view, route.thread, phone]);
 
+  // Remote launch: where the person last started an agent on each machine, from the merged list's launched rows.
+  const composeLaunched = useMemo(() => launchHistory(latest ? [...latest.sections.flatMap((section) => section.threads), ...(latest.snoozed ?? [])] : []), [latest]);
   // The project compose treats as current: the list's filter, else the open thread's.
   const composeCurrent = (() => {
     const id = route.page === 'inbox' ? (route.project ?? thread?.project.id ?? null) : null;
@@ -6240,6 +6255,8 @@ function Inbox() {
           lastSent={lastSent}
           home={settings?.home ?? null}
           board={boardEnabled === true}
+          launched={composeLaunched}
+          onHeld={composeHeld}
           onSent={(sent) => {
             rememberSent(sent.session);
             composeSent(sent);
