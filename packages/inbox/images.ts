@@ -13,12 +13,21 @@
  * to the file's folder (#2228); a Markdown file a link in it opened adds
  * `&document=<its path in that folder>` (#2230). There is no route that takes a bare path.
  *
- * Remote images (`http(s)`, protocol-relative `//host/…`) are left as
- * written, and load from their site: the window's CSP allows `https:` and
- * `http:` images, for an attached HTML page's web pictures (inbox.ts).
+ * Remote images (`http(s)`, protocol-relative `//host/…`) never load in the
+ * window: an agent's text never makes the browser call a site when the person
+ * reads it (the owner's rule, kept for "Pages only", 2026-11-05). The window's
+ * CSP allows `https:` and `http:` images only because an attached HTML page,
+ * a srcdoc frame, inherits it (inbox.ts `WINDOW_CSP`), so the window's own
+ * renderers refuse them: `inboxBodyImageResolver` draws one as its alt text,
+ * `refuseWebImage` does for every other surface (`InboxWebImagePolicy`), and
+ * `inboxImageSrcResolver` turns one into a URL that loads nothing.
  */
 import { inboxUrl, machineOf } from './inboxUrl';
 import type { ImageSrcResolver } from '@plannotator/ui/configure';
+import { createElement, type ReactNode } from 'react';
+import { getImageSrc } from '@plannotator/ui/components/ImageThumbnail';
+import { ImageResolverContext, type ImageResolution, type ImageResolver } from '@plannotator/ui/components/ImageResolverContext';
+import { GuideImageSrcContext, type GuideImageSrcResolver } from '@plannotator/guide-viewer/renderInlineMarkdown';
 import { tourAssetUrl, tourMarkupUrl } from './tour/assets';
 
 const MESSAGE_BASE_PREFIX = 'inbox-message:';
@@ -80,9 +89,57 @@ export function inboxMarkdownImageBase(attachmentId: string, version: 'current' 
   return `${ATTACHMENT_BASE_PREFIX}${attachmentId}:${version}${document ? `:${encodeURIComponent(document)}` : ''}`;
 }
 
-/** The window's image resolver: message and Markdown images use scoped Inbox routes. */
+/**
+ * A picture from the web, as the browser would read the src: `https:`/`http:`
+ * (with or without slashes) or protocol-relative (`//host`, and `\\host`,
+ * which a URL parser reads the same way), after any leading space.
+ */
+export function isWebImageSrc(src: string): boolean {
+  return /^[\s\u0000-\u001f]*(?:https?:|[\\/]{2})/i.test(src);
+}
+
+/** What a web picture in the window draws as: its alt text in a quiet chip, nothing fetched. */
+export const WEB_IMAGE_REFUSED = { kind: 'unavailable', title: 'Pictures from the web are not loaded here' } as const satisfies ImageResolution;
+
+/** A src that loads nothing (an empty `data:` URL, which the window's CSP allows and no request is made for). */
+export const NO_IMAGE_SRC = 'data:,';
+
+/** The window's default for any rendered text (`InboxWebImagePolicy`): a web picture is refused, anything else is the renderer's own. */
+export const refuseWebImage: ImageResolver = (src) => (isWebImageSrc(src) ? WEB_IMAGE_REFUSED : null);
+
+/** A guide's picture in the window: a web one is not drawn (a guide's images are all web ones), as when the CSP held it. */
+const refuseWebGuideImage: GuideImageSrcResolver = (src) => (isWebImageSrc(src) ? null : src);
+
+/**
+ * Around the whole window (InboxApp): every surface that draws text without its own image resolver
+ * (decision and action cards, card panels, a question's context, guides) refuses a web picture. A
+ * surface with its own resolver (`inboxBodyImageResolver`) refuses one itself.
+ */
+export function InboxWebImagePolicy({ children }: { children?: ReactNode }) {
+  return createElement(
+    ImageResolverContext.Provider,
+    { value: refuseWebImage },
+    createElement(GuideImageSrcContext.Provider, { value: refuseWebGuideImage }, children),
+  );
+}
+
+/**
+ * A message body's, a Markdown attachment's or a context's images (`imageBaseDir` from
+ * `inboxMessageImageBase` or `inboxMarkdownImageBase`): `data:` and `blob:` keep their URL, a web
+ * picture is refused, and anything else loads from the Inbox's scoped route, so ui draws one the Inbox
+ * refuses (403 image_hidden, 404) as its alt text in a quiet chip: markdown images, `<img>` in raw-HTML
+ * blocks and question cards' pictures alike.
+ */
+export function inboxBodyImageResolver(imageBaseDir: string): ImageResolver {
+  return (src) => {
+    if (isWebImageSrc(src)) return WEB_IMAGE_REFUSED;
+    return { kind: 'src', src: /^(data|blob):/i.test(src) ? src : getImageSrc(src, imageBaseDir) };
+  };
+}
+
+/** The window's image resolver: message and Markdown images use scoped Inbox routes; a web picture loads nothing. */
 export const inboxImageSrcResolver: ImageSrcResolver = (path, base) => {
-  if (/^(https?:)?\/\//i.test(path)) return path;
+  if (isWebImageSrc(path)) return NO_IMAGE_SRC;
   // A marked-up image the person drew on an image attachment: kept in the
   // Inbox's data dir, shown back by its file name only.
   const markup = inboxMarkupUrl(path);

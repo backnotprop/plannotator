@@ -70,7 +70,7 @@ import {
 } from './settle';
 import { formatCount, plural, shortAgentName, tildePath } from './format';
 import { copyMarkdown, threadMarkdown } from './copyMarkdown';
-import { inboxImageSrcResolver } from './images';
+import { InboxWebImagePolicy, inboxImageSrcResolver } from './images';
 import { shellLine, type ConnectContext } from './harnesses';
 import { Sidebar } from './components/Sidebar';
 import { UsagePeek } from './components/Usage';
@@ -6304,7 +6304,10 @@ export function InboxApp() {
       {/* Every tooltip in the window (Tip): 150 ms to open, and the next one at once within 400 ms. */}
       <TooltipProvider delayDuration={TIP_DELAY_MS} skipDelayDuration={TOOLTIP_SKIP_DELAY_MS} disableHoverableContent>
         <AccountsProvider>
-          <Inbox />
+          {/* No picture from the web in the window's own text (images.ts); an attached HTML page shows its own. */}
+          <InboxWebImagePolicy>
+            <Inbox />
+          </InboxWebImagePolicy>
         </AccountsProvider>
       </TooltipProvider>
     </ThemeProvider>

@@ -748,9 +748,11 @@ export const WINDOW_CSP = [
   // WebAssembly; it does not allow eval() or new Function().
   "script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'",
   "style-src 'self' 'unsafe-inline'",
-  // https: and http: so an attached HTML page's web pictures load (img, srcset,
-  // CSS backgrounds): the page is a srcdoc frame, which inherits this policy.
-  // Pictures only; script, connect, frame and font sources stay this origin's.
+  // https: and http: only so an attached HTML page's web pictures load (img,
+  // srcset, CSS backgrounds): the page is a srcdoc frame, which inherits this
+  // policy. The window's own text never loads one: its renderers refuse a web
+  // picture (packages/inbox/images.ts, InboxWebImagePolicy). Pictures only;
+  // script, connect, frame and font sources stay this origin's.
   "img-src 'self' data: blob: https: http:",
   "font-src 'self' data:",
   "connect-src 'self'",

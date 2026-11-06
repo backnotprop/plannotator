@@ -21,6 +21,29 @@ function GuideCodeSpan({ text, children }: { text: string; children: React.React
   return <>{wrap && isCodeFilePath(text) ? wrap(text, children) : children}</>;
 }
 
+/**
+ * A host's say over a guide's pictures (`![alt](https://…)`), given the src as written: the src to load, or
+ * null to draw no picture (the Plannotator Inbox window loads none from the web). With no provider, every
+ * picture loads as written.
+ */
+export type GuideImageSrcResolver = (src: string) => string | null;
+export const GuideImageSrcContext = React.createContext<GuideImageSrcResolver | null>(null);
+
+function GuideImage({ src, alt, resolveImageSrc }: { src: string; alt: string; resolveImageSrc?: (src: string) => string }) {
+  const host = React.useContext(GuideImageSrcContext);
+  const shown = host ? host(src) : src;
+  if (shown === null) return null;
+  return (
+    <img
+      src={resolveImageSrc?.(shown) ?? shown}
+      alt={alt}
+      loading="lazy"
+      className="max-w-full h-auto rounded my-1"
+      onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
+    />
+  );
+}
+
 export interface InlineMarkdownOptions {
   renderLink?: GuideLinkRenderer;
   resolveImageSrc?: (src: string) => string;
@@ -92,17 +115,8 @@ function renderInline(text: string, startKey: number, opts?: InlineMarkdownOptio
       key++;
     } else if (match[1] && match[2] && match[3]) {
       if (isImage) {
-        // Markdown image: ![alt](url). Broken sources hide themselves.
-        nodes.push(
-          <img
-            key={key++}
-            src={opts?.resolveImageSrc?.(match[3]) ?? match[3]}
-            alt={match[2]}
-            loading="lazy"
-            className="max-w-full h-auto rounded my-1"
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }}
-          />
-        );
+        // Markdown image: ![alt](url). Broken sources hide themselves; a host may refuse one (GuideImageSrcContext).
+        nodes.push(<GuideImage key={key++} src={match[3]} alt={match[2]} resolveImageSrc={opts?.resolveImageSrc} />);
       } else {
         // Markdown link: [text](url)
         nodes.push(

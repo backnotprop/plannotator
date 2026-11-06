@@ -196,7 +196,8 @@ describe("annotate keeps serving only the page's folder", () => {
 describe("the attached page's policies", () => {
   const directives = (csp: string) => new Map(csp.split(";").map((part) => part.trim().split(/\s+/)).map(([name, ...values]) => [name!, values]));
 
-  test("the window (whose policy the page's srcdoc frame inherits) allows web pictures and nothing else from the web", () => {
+  test("the window (whose policy the page's srcdoc frame inherits) allows web pictures, for the page, and nothing else from the web", () => {
+    // The window's own text refuses a web picture itself: packages/inbox/images.test.tsx.
     const window = directives(WINDOW_CSP);
     expect(window.get("img-src")).toEqual(expect.arrayContaining(["https:", "http:", "'self'"]));
     for (const name of ["default-src", "script-src", "connect-src", "font-src", "style-src", "worker-src", "frame-ancestors"]) {

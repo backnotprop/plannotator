@@ -1,6 +1,6 @@
 /**
  * Images on the What's new page: an image the Inbox saved loads from its own
- * route (never from GitHub: the window's CSP allows only its own origin), and
+ * route (never from GitHub: the window loads no picture from the web), and
  * one it did not save is drawn as its alt text in a quiet chip, never as a
  * broken image.
  */
