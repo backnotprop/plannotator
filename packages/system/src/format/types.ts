@@ -7,11 +7,18 @@ export const FORMAT = 1;
 /** A drawing's files by their path inside `.plannotator/system/`: 'system.yaml', 'sheets/C-001.yaml', 'revisions/PR-2543.yaml'. */
 export type SystemFiles = Record<string, string>;
 
+/** One problem in one file. `field` is where in the file (`parts.api.in`, `bands[0].row`), or '' for the whole file. */
+export type LoadIssue = { file: string; field: string; message: string };
+
 export type LoadResult = {
-  /** The model, or null when there is nothing to load (no files) or anything failed (errors is not empty). */
+  /**
+   * The model, or null when there is nothing to load (no files) or system.yaml itself does not load. When system.yaml
+   * loads, the model holds every sheet and revision that loaded clean; a file with errors is left out and its errors
+   * are listed, so a half-written sheet in the middle of a draw leaves the rest usable.
+   */
   model: SystemModel | null;
-  errors: string[];
-  warnings: string[];
+  errors: LoadIssue[];
+  warnings: LoadIssue[];
 };
 
 /** One file a part or a line rests on. `repo` is the alias in `sources.repos` (`self` for this repo). */

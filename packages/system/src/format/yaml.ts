@@ -2,6 +2,7 @@
 // and lint for coordinates and split brackets.
 import { parse } from 'yaml';
 import { COORDS, NAMED } from './keys.ts';
+import type { LoadIssue } from './types.ts';
 
 const depthOf = (t: string) => {
   let d = 0;
@@ -23,7 +24,8 @@ const unbalanced = (t: string) => {
 };
 
 /** Schema lines under request: and response: (and a payload's lines:) are code, one line each: a lone brace is right there. */
-const isCodeLines = (path: string) => /\.lines$/.test(path);
+const isCodeLines = (path: string) => /(^|\.)lines$/.test(path);
+const join = (path: string, k: string) => (path ? `${path}.${k}` : k);
 
 /**
  * In a YAML flow sequence, [f(a, b), g()] splits at every comma, brackets or
@@ -57,40 +59,43 @@ function rejoin(node: unknown, path = ''): void {
     }
     node.forEach((v, i) => rejoin(v, `${path}[${i}]`));
   } else if (node && typeof node === 'object') {
-    for (const [k, v] of Object.entries(node)) rejoin(v, `${path}.${k}`);
+    for (const [k, v] of Object.entries(node)) rejoin(v, join(path, k));
   }
 }
 
-function lint(node: unknown, path: string, errors: string[], warnings: string[], named = 0): void {
+function lint(file: string, node: unknown, path: string, errors: LoadIssue[], warnings: LoadIssue[], named = 0): void {
   if (Array.isArray(node)) {
     node.forEach((v, i) => {
       if (typeof v === 'string' && !isCodeLines(path) && unbalanced(v)) {
-        warnings.push(`${path}[${i}]: "${v}" has an unbalanced bracket; a comma inside [ ] split it. Write this list as a block list (one "- item" per line).`);
+        warnings.push({
+          file, field: `${path}[${i}]`,
+          message: `"${v}" has an unbalanced bracket; a comma inside [ ] split it. Write this list as a block list (one "- item" per line).`,
+        });
       }
-      lint(v, `${path}[${i}]`, errors, warnings);
+      lint(file, v, `${path}[${i}]`, errors, warnings);
     });
   } else if (node && typeof node === 'object') {
     for (const [k, v] of Object.entries(node)) {
-      if (!named && COORDS.has(k)) errors.push(`${path}.${k}: coordinates are not allowed; place parts by band, order and span`);
-      lint(v, `${path}.${k}`, errors, warnings, named ? named - 1 : NAMED[k] || 0);
+      if (!named && COORDS.has(k)) errors.push({ file, field: join(path, k), message: 'coordinates are not allowed; place parts by band, order and span' });
+      lint(file, v, join(path, k), errors, warnings, named ? named - 1 : Object.hasOwn(NAMED, k) ? NAMED[k]! : 0);
     }
   }
 }
 
 /** Parse one file. Returns the document (a map), or null after pushing an error. */
-export function readYaml(where: string, text: string, errors: string[], warnings: string[]): Record<string, unknown> | null {
+export function readYaml(file: string, text: string, errors: LoadIssue[], warnings: LoadIssue[]): Record<string, unknown> | null {
   let doc: unknown;
   try {
     doc = parse(text);
   } catch (e) {
-    errors.push(`${where}: ${String((e as Error).message).split('\n')[0]}`);
+    errors.push({ file, field: '', message: String((e as Error).message).split('\n')[0]! });
     return null;
   }
   if (!doc || typeof doc !== 'object' || Array.isArray(doc)) {
-    errors.push(`${where}: expected a map of keys at the top of the file`);
+    errors.push({ file, field: '', message: 'expected a map of keys at the top of the file' });
     return null;
   }
   rejoin(doc);
-  lint(doc, where, errors, warnings);
+  lint(file, doc, '', errors, warnings);
   return doc as Record<string, unknown>;
 }
