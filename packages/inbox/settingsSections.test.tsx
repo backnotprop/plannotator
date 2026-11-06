@@ -234,6 +234,27 @@ test.skipIf(!hasDom)('#settings opens General; the nav moves between sections by
   await until(() => heading(again) === 'General', 'General for an unknown section');
 });
 
+test.skipIf(!hasDom)('nothing asks the server to count until Decision data is shown: not the list, not Settings opening, not another section', async () => {
+  const counted = () => requests.filter((line) => line.includes('/decision-data')).length;
+  const el = await renderApp(`#thread=${current!.thread}`);
+  act(() => (el.querySelector('.ib-setrow .ib-nav') as HTMLButtonElement).click());
+  await until(() => heading(el) === 'General', 'Settings');
+  for (const section of ['storage', 'archived', 'about'] as const) {
+    act(() => navLink(el, section).click());
+    await until(() => navLink(el, section).getAttribute('aria-current') === 'page', section);
+  }
+  expect(counted()).toBe(0);
+  act(() => navLink(el, 'decision-data').click());
+  await until(() => heading(el) === 'Decision data', 'Decision data');
+  await until(() => counted() === 1, 'the count');
+  // Leaving asks for nothing more; coming back asks once.
+  act(() => navLink(el, 'about').click());
+  await until(() => heading(el) === 'About', 'About');
+  expect(counted()).toBe(1);
+  act(() => navLink(el, 'decision-data').click());
+  await until(() => counted() === 2, 'the next count');
+});
+
 test.skipIf(!hasDom)('the Inbox sidebar closes while Settings is open and comes back on leaving, without its cookie being written; ← Inbox returns to where the person was', async () => {
   const el = await renderApp(`#thread=${current!.thread}`);
   await until(() => sidebarState(el) === 'expanded', 'the sidebar open');
