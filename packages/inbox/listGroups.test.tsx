@@ -8,7 +8,8 @@
  * the tour's list ignores it; something new inside a closed group bolds its
  * count without opening it, and opening then closing again clears that;
  * closed Stopped and Holding up work keep the warning triangle; focus in a row
- * of the group that closes goes to its header.
+ * of the group that closes goes to its header; with cookies that are not kept,
+ * a header still toggles its group.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
