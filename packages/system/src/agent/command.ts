@@ -2,6 +2,8 @@
 // `plannotator system` command the recipes call.
 import { agentModel } from './model.ts';
 import type { SystemSetup } from './setup.ts';
+// The gate's fixed patterns, for the command's help: it lists them as the gate reads them.
+export { LOCKFILE_NAMES, TEST_FOLDERS } from '../gate/gate.ts';
 
 /**
  * The `plannotator system` subcommands the recipes and the scheduled job

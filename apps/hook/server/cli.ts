@@ -5,7 +5,7 @@ import { INBOX_REF_LINK_RULE, INBOX_TOOL_ACTIONS } from "@plannotator/shared/inb
 import { FEEDBACK_HEREDOC_END } from "@plannotator/core/product-feedback";
 import { SHAPE_GUIDE, SHAPE_HELP_INTRO } from "@plannotator/core/shape-skill";
 import { INBOX_LINK_USAGE } from "./inbox-link-command";
-import { SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS } from "@plannotator/system/commands";
+import { LOCKFILE_NAMES, SYSTEM_COMMANDS, SYSTEM_TICK_INTERVAL_SECONDS, TEST_FOLDERS } from "@plannotator/system/commands";
 
 const HELP_FLAGS = new Set(["--help", "-h"]);
 
@@ -337,6 +337,20 @@ export const FEEDBACK_COMMAND_USAGE = [
   "Exit 0 sent, 1 not sent (the reason on stderr), 2 bad usage.",
 ].join("\n");
 
+/** Words in lines of at most `width` characters, each indented by `indent` spaces. */
+function wrapWords(text: string, indent: number, width: number): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of text.split(" ")) {
+    if (line && indent + line.length + 1 + word.length > width) {
+      lines.push(" ".repeat(indent) + line);
+      line = word;
+    } else line = line ? `${line} ${word}` : word;
+  }
+  if (line) lines.push(" ".repeat(indent) + line);
+  return lines;
+}
+
 /**
  * `plannotator system …` (system-command.ts): System's drawing of a project,
  * for the agents that draw it and the launchd job that keeps it current. The
@@ -362,6 +376,10 @@ export const SYSTEM_COMMAND_USAGE = [
   "<alias>:<path> is a file in another repo, named under sources.repos.",
   "sources.repos.self.at is the commit the drawing was drawn from. None of these",
   "commands edits a file in the repo.",
+  "",
+  "check and gate read the drawing from disk, so a fix to it needs no commit before you",
+  "run them. A fix lasts only once it is committed: tick and revision read the drawing",
+  "committed on the default branch, and so does everyone else.",
   "",
   "Every command prints its result on stdout and nothing else: check one line per",
   "finding (or one JSON value with --json), the others one JSON value. Exit 0 ok, 1",
@@ -410,8 +428,9 @@ export const SYSTEM_COMMAND_USAGE = [
   "  pass that sha: --from \"$(git merge-base main <branch>)\" --to <branch>.",
   "  The drawing is read from disk, from <repo folder>/.plannotator/system as it is now,",
   "  whichever branch is checked out there; the branch being gated is not checked out",
-  "  for you. touched names parts of that copy. To review a teammate's branch, have the",
-  "  base branch (main) checked out, so the gate reads the drawing the change lands on.",
+  "  for you. touched names the parts and lines of that copy. To review a teammate's",
+  "  branch, have the base branch (main) checked out, so the gate reads the drawing the",
+  "  change lands on.",
   "  --project <repo folder>  The repo. Default: as check's --root.",
   "  Prints one JSON value:",
   '    { "touched": { "parts": [<id>...], "flows": [<id>...] }, "wake": true | false,',
@@ -420,13 +439,35 @@ export const SYSTEM_COMMAND_USAGE = [
   "           changed file, or a folder holding one: what the change touches, and what",
   "           may now be stale.",
   "  wake     true when the change may alter the drawing's shape, so it wants a redraw:",
-  "           a file was added, deleted or renamed, a file matching a watch: glob",
-  "           changed, or a cited file is gone. Edits to files that already exist do",
-  "           not wake it, cited or not, unless they match watch:.",
-  "  why      Each file that woke it, with its reason: added, deleted, renamed, watched",
-  "           or cited-gone. Empty when wake is false.",
-  "  ignored  Changed tests, docs, lockfiles and the drawing itself. They never wake it,",
-  "           and touch a part only when it cites that very file.",
+  "           a file was added, deleted or renamed, or an edited file matches a watch:",
+  "           glob. Other edits to files that already exist do not wake it, cited or not.",
+  "  why      Each file that woke it, with exactly one reason:",
+  "             added       a new file, or a copy of one (the new path)",
+  "             cited-gone  a file deleted, or renamed away, whose exact path a part or",
+  "                         line cites; the path given is the old one",
+  "             deleted     any other deleted file (one inside a cited folder included)",
+  "             renamed     any other renamed file; the path given is the new one",
+  "             watched     an edited file that matches a watch: glob",
+  "           So a deleted file a part cites by its own path gets cited-gone, never also",
+  "           deleted. why is empty when wake is false.",
+  "  watch:   An optional top-level key in system.yaml: a list of path globs, relative to",
+  "           the repo's root, whose edits count as a shape change (** crosses folders,",
+  "           * and ? stay inside one). For example:",
+  "             watch: [wrangler.toml, config/**/*.yaml]",
+  "  ignored  Changed files the gate skips: they never wake it and touch nothing. A file",
+  "           is skipped when it is:",
+  "             a test      a folder anywhere in its path named",
+  ...wrapWords(TEST_FOLDERS.join(", "), 25, 86),
+  "                         or a name ending .test.<ext> or .spec.<ext>, <ext> one of",
+  "                         js, jsx, ts, tsx, with an optional c or m first (mjs, cts)",
+  "             a doc       a name ending .md or .mdx (any case), or a folder named docs",
+  "                         anywhere in its path",
+  "             a lockfile  a file, in any folder, named",
+  ...wrapWords(LOCKFILE_NAMES.join(", "), 25, 86),
+  "             the drawing anything under .plannotator/system/",
+  "           A rename is skipped only when both its paths are. A part or line that cites",
+  "           such a file by its exact path makes it count like any other file; a cited",
+  "           folder does not.",
   "",
   "tick: one scheduled check of one project (the launchd job runs it)",
   "  Fetches the default branch, gates from the last checked commit to its tip, and when",

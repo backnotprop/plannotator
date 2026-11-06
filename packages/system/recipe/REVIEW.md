@@ -15,7 +15,7 @@ its head commit and its base branch.
    `plannotator system gate --project <project folder> --from <merge base> --to <head>`, with the merge base as the
    sha `merge-base` printed: the gate diffs exactly the two commits it is given and finds no merge base itself. It
    reads the drawing on disk in the project folder, whichever branch is checked out there, so run it where the base
-   branch is checked out: `touched` then names parts of the drawing the change lands on. It prints JSON: `touched`
+   branch is checked out: `touched` then names the parts and lines of the drawing the change lands on. It prints JSON: `touched`
    (the parts and lines that cite a changed file), `wake` and `why`. If `wake` is false, stop here: the change is
    drawn from `touched` alone, with no revision from you.
 

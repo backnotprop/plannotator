@@ -73,14 +73,22 @@ the model, or send the files and let the window call `loadFiles()`.
 If every changed file is already named by the drawing and the change adds no process, store, host, route, connection
 or switch, the drawing does not change. A script cannot read "adds a process", so the gate wakes on what stands for it:
 
-- an added, deleted or renamed file (`added`, `deleted`, `renamed`);
-- a modified file that matches a `watch:` glob (`watched`);
-- a cited path that is gone, deleted or renamed away (`cited-gone`).
+- an added file, or a copy (`added`, the new path);
+- a deleted or renamed file whose exact path a part or line cites (`cited-gone`, the old path);
+- any other deleted or renamed file (`deleted`; `renamed`, the new path);
+- a modified file that matches a `watch:` glob (`watched`): a top-level list in `system.yaml` of globs relative to
+  the repo's root, `**` crossing folders and `*` and `?` staying inside one (`watch: [wrangler.toml, config/**/*.yaml]`).
 
-A modified file that no part cites does not wake it. Every part and line that cites a changed path (a cited folder
-covers its files) is in `touched`, whether or not the gate wakes. Tests, docs, lockfiles and `.plannotator/system/`
-itself are ignored and never wake it, even inside a cited folder; only a file the drawing cites by its own path counts.
-The patterns are fixed in the package (`isIgnoredPath`), not settings.
+Each file gets one reason at most: a deleted file a part cites by its own path is `cited-gone`, never also `deleted`.
+Any other edit of a file that stays does not wake it, cited or not. Every part and line that cites a changed path (a
+cited folder covers its files) is in `touched`, whether or not the gate wakes.
+
+Ignored files never wake it and touch nothing, even inside a cited folder; only a file the drawing cites by its own
+path counts, and a rename is ignored only when both its paths are. Ignored are: a test (a folder named `test`, `tests`,
+`__tests__`, `e2e`, `fixtures`, `test-fixtures` or `__snapshots__` (`TEST_FOLDERS`) anywhere in the path, or a name ending `.test.` or `.spec.` then `js`, `jsx`, `ts` or `tsx` with an optional `c` or `m` first), a doc
+(a name ending `.md` or `.mdx` in any case, or a folder named `docs` anywhere), a lockfile (a name in
+`LOCKFILE_NAMES`, in any folder) and anything under `.plannotator/system/`. The patterns are fixed in the package
+(`isIgnoredPath`), not settings, and the command's help is built from the same lists.
 
 ## Commands
 
@@ -104,7 +112,8 @@ plannotator system schedule install --project <repo folder> --key <project key> 
   `parts.<id>.code`, or `flows.<id>.code.from` or `.to` for a line's end.
 - `check` and `gate` read the drawing on disk in `<repo>/.plannotator/system`, whichever branch is checked out there,
   so an edit counts before a commit, and a gate of a teammate's branch reads the drawing of the branch checked out
-  (have the base checked out for a review). With no `--root` or `--project`, the repo is the nearest folder up from
+  (have the base checked out for a review). A fix lasts only once it is committed: `tick` and `revision` read the
+  drawing committed on the default branch. With no `--root` or `--project`, the repo is the nearest folder up from
   here that holds a drawing.
 - `gate` diffs exactly the `--from` and `--to` it is given (a sha, a branch, a tag); it does not find a merge base.
   To gate a branch, pass `--from "$(git merge-base main <branch>)"`.

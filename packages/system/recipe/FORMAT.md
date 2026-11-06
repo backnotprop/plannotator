@@ -25,7 +25,7 @@ sources:                            # what you read
     self: { repo: github.com/acme/acme, at: "<full commit sha>" }   # this repo; at: the commit you drew from, quoted
     api: { repo: github.com/acme/api, at: "<full commit sha>" }     # another repo, under an alias you choose
   docs: [https://docs.example.com]
-watch: [deploy/*.toml]              # optional: globs of files whose edit changes the shape (configs, channel lists)
+watch: [deploy/*.toml]              # optional: globs (** crosses folders, * and ? stay in one) of files whose edit changes the shape
 scopes: { root: Acme, app: The app } # a scope is what a window opens into; root is the landing
 wanted:                             # sheets planned and not drawn yet; take each out once its file is written
   - { code: A-201, kind: algorithm, question: "How an order is priced, step by step." }

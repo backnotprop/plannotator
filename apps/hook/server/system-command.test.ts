@@ -15,7 +15,7 @@ import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
-import { SYSTEM_COMMANDS } from "@plannotator/system";
+import { isIgnoredPath, LOCKFILE_NAMES, SYSTEM_COMMANDS, TEST_FOLDERS } from "@plannotator/system";
 import { inboxProjectKey } from "@plannotator/shared/inbox/project-key";
 import { resolveInboxProjectRoot } from "@plannotator/server/inbox-project-root";
 import { stubbedAgentClis } from "../../../tests/helpers/agent-cli-guard";
@@ -283,6 +283,38 @@ describe("plannotator system gate", () => {
     const onBranch = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
     expect(onBranch.touched.parts).toEqual(["mail", "receipt"]);
   }, 30_000);
+
+  test("one reason per file: a cited file deleted is cited-gone, a file in a cited folder deleted, an edit woken only by watch:", async () => {
+    const box = sandbox();
+    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    writeFileSync(yaml, readFileSync(yaml, "utf8").replace("scopes:", "watch: [wrangler.toml, config/**/*.yaml]\nscopes:"));
+    write(box.repo, { "wrangler.toml": "name = 1\n", "config/a/b/db.yaml": "x: 1\n", "config/top.json": "{}\n" });
+    const before = commit(box.repo, "configs");
+    git(box.repo, "rm", "-q", "src/store/db.ts", "src/mail/send.ts");
+    write(box.repo, { "wrangler.toml": "name = 2\n", "config/a/b/db.yaml": "x: 2\n", "config/top.json": "[]\n", "src/server/routes.ts": "export const route = 9;\n" });
+    const after = commit(box.repo, "deletes and edits");
+    const r = JSON.parse((await cli(box, ["gate", "--from", before, "--to", after])).stdout);
+    expect(r.why.sort((a: { path: string }, b: { path: string }) => a.path.localeCompare(b.path))).toEqual([
+      { path: "config/a/b/db.yaml", reason: "watched" },
+      { path: "src/mail/send.ts", reason: "deleted" },
+      { path: "src/store/db.ts", reason: "cited-gone" },
+      { path: "wrangler.toml", reason: "watched" },
+    ]);
+    expect(r.touched).toEqual({ parts: ["mail", "routes", "store"], flows: ["use"] });
+  }, 30_000);
+
+  test("the help's ignore lists are what the gate skips, and a look-alike is not skipped", () => {
+    for (const name of TEST_FOLDERS) {
+      expect(SYSTEM_COMMAND_USAGE).toContain(name);
+      expect(isIgnoredPath(`src/${name}/a.ts`)).toBe(true);
+    }
+    for (const name of LOCKFILE_NAMES) {
+      expect(SYSTEM_COMMAND_USAGE).toContain(name);
+      expect(isIgnoredPath(`tools/${name}`)).toBe(true);
+    }
+    for (const path of ["src/a.test.mts", "src/a.spec.jsx", "README.MD", "site/docs/x.ts", ".plannotator/system/system.yaml"]) expect(isIgnoredPath(path)).toBe(true);
+    for (const path of ["src/testing/a.ts", "src/a.test.py", "src/Docs/x.ts", "src/latest/a.ts"]) expect(isIgnoredPath(path)).toBe(false);
+  });
 
   test("a ref git does not know fails with git's first line; a missing --to is bad usage", async () => {
     const box = sandbox();
