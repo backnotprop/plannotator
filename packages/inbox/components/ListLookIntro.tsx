@@ -2,12 +2,12 @@
  * The one-time list options dialog (approval "inbox-list-options-intro", 2026-10-31; A-r3 with the r4 preview):
  * shaped like the Board intro. The picture is the person's own list, drawn by the real rows (InboxList's `ListRow`)
  * in a column the list's width, its bottom fading out (each thread name on one line, cut with "…"); under it a title,
- * one line and the four options of the list's ⋮ menu as switches. It opens at the list's look as it stands (the defaults, all off, for someone who never opened
+ * one line and the four options of the list's ⋮ menu as switches. It opens at the list's look as it stands (the defaults, smaller names on, for someone who never opened
  * the ⋮ menu), so Done never undoes a choice made there. Done saves the switches as shown (every list takes them at
  * once); Keep as it is and Escape change nothing. App retires it either way (the Inbox's claim, once per machine).
  *
- * As it opens it plays a short preview (listIntro.ts `LIST_INTRO_PREVIEW`): the switches turn on one at a time and
- * the rows change, then all turn off. The switches are inert meanwhile (no pointer, no focus, out of the
+ * As it opens it plays a short preview (listIntro.ts `listIntroPreview`): the switches that are off turn on one at a
+ * time and the rows change, then all go back to how it opened. The switches are inert meanwhile (no pointer, no focus, out of the
  * accessibility tree, so a screen reader never hears them flip), drawn as usual. Any key, click or touch ends it at
  * once and snaps back to where it opened; the input still does its normal job (so the first Tab reaches the
  * switches). None under reduced motion.
@@ -20,7 +20,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { flushSync } from 'react-dom';
 import type { InboxListRow, InboxSectionId } from '@plannotator/core/inbox-types';
 import { listLookClasses, LIST_LOOK_OPTIONS, type ListLook, type ListLookKey } from '../listLook';
-import { LIST_INTRO_PREVIEW, LIST_INTRO_SWAP_MS } from '../listIntro';
+import { listIntroPreview, LIST_INTRO_SWAP_MS } from '../listIntro';
 import { ListRow } from './InboxList';
 import { Modal } from './Updates';
 import { Icon } from '../icons';
@@ -111,13 +111,13 @@ function PreviewList({ groups, projectNames, awayMachines, look, phone }: { grou
  * or touch) puts back the look it opened at. A key ends it synchronously, before the key reaches the dialog, so the
  * switches are no longer inert when a first Tab moves focus.
  */
-function usePreview(set: (key: ListLookKey, on: boolean) => void, reset: () => void): boolean {
+function usePreview(opened: ListLook, set: (key: ListLookKey, on: boolean) => void, reset: () => void): boolean {
   const [playing, setPlaying] = useState(() => !reducedMotion());
   const latest = useRef({ set, reset });
   latest.current = { set, reset };
   useEffect(() => {
     if (!playing) return;
-    const timers = LIST_INTRO_PREVIEW.map((step) =>
+    const timers = listIntroPreview(opened).map((step) =>
       setTimeout(() => {
         if (step.key) latest.current.set(step.key, true);
         else {
@@ -162,7 +162,7 @@ export function ListLookIntro({ groups, initial, projectNames, awayMachines, pho
   const [opened] = useState(initial);
   const [look, setLook] = useState<ListLook>(opened);
   const set = (key: ListLookKey, on: boolean) => setLook((current) => (current[key] === on ? current : { ...current, [key]: on }));
-  const playing = usePreview(set, () => setLook(opened));
+  const playing = usePreview(opened, set, () => setLook(opened));
   const base = useId();
   const { lightTheme } = useTheme();
   return (
