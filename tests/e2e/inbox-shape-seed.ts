@@ -22,7 +22,7 @@ export function shapeWorldEnv(root: string): Record<string, string> {
   mkdirSync(scratchConfig, { recursive: true });
   return {
     PATH: process.env.PATH ?? '',
-    HOME: root,
+    HOME: scratchConfig,
     PLANNOTATOR_DATA_DIR: join(root, 'data'),
     PLANNOTATOR_BROWSER: NO_BROWSER,
     NO_BROWSER: '1',
