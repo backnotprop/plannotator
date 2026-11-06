@@ -606,7 +606,7 @@ echo changed > src/main.ts`);
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const agent = scriptAgent(`${ADD_JOBS}\nprintf 'wanted:\\n  - { code: F-201, kind: flow, question: "How a job runs." }\\n' >> "$DRAWING/system.yaml"`);
     const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
-    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('wanted: still lists F-201') });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('Sheet F-201 is still under wanted:') });
     expect(drawingFiles(p.paths.drawing)).toEqual(before);
   });
 
@@ -714,6 +714,31 @@ echo changed > src/main.ts`);
     expect(oldClones(p.paths.failed).sort()).toEqual(['source-2026-03-01T00-00-00-000Z', 'source-2026-11-07T10-00-00-000Z']);
     // other things set aside are not touched
     expect(existsSync(join(p.paths.failed, 'interrupted-2026-01-01T00-00-00-000Z'))).toBe(true);
+  });
+
+  test('a tick whose lock another holder broke stops before the swap: it swaps, saves and moves nothing more', async () => {
+    const p = project();
+    const before = drawingFiles(p.paths.drawing);
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    // while the agent runs, another holder breaks the tick's lock and takes it (its heartbeat looked stale)
+    const other = JSON.stringify({ token: 'another-holder', pid: process.pid });
+    const agent = scriptAgent(`${ADD_JOBS}\nprintf '%s' '${other}' > '${p.paths.lock}'`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('lost tick.lock') });
+    expect(drawingFiles(p.paths.drawing)).toEqual(before);
+    expect(existsSync(p.paths.redraw)).toBe(true); // the other holder's to deal with
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: null, failed: null, last_error: null });
+    expect(readFileSync(p.paths.lock, 'utf8')).toBe(other);
+  });
+
+  test('a lock that cannot be taken (a file system that refuses it) is a failed tick recorded in state.json, never a throw', async () => {
+    const p = project();
+    const takeLock: TickDeps['takeLock'] = async () => {
+      throw Object.assign(new Error('EIO: i/o error, link'), { code: 'EIO' });
+    };
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { ...NONE, takeLock } });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('EIO') });
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ last_error: expect.stringContaining('tick.lock could not be taken: EIO') });
   });
 
   test('a live tick holds the lock; a dead one is taken over', async () => {

@@ -47,7 +47,7 @@ import { updatePrompt } from '../recipe/prompts.ts';
 import { gateRepo } from './gate-repo.ts';
 import { checkRef } from './git.ts';
 import { check, load, readFiles } from './index.ts';
-import { readSetup, readState, systemPaths, takeLock, writeState, type TickState } from './state.ts';
+import { readSetup, readState, systemPaths, takeLock, writeState, type HeldLock, type TickState } from './state.ts';
 
 export type TickResult = {
   /**
@@ -84,7 +84,13 @@ export type TickDeps = {
   agentTimeoutMs?: number;
   /** The rename the swap of a checked redraw uses; node's unless given (the tests pass one that fails). */
   rename?: (from: string, to: string) => Promise<void>;
+  /** How tick.lock is taken; `takeLock` unless given (the tests pass one that throws). */
+  takeLock?: (path: string) => Promise<HeldLock | null>;
 };
+
+/** Why a tick stopped when another holder broke its tick.lock (a sleep or a pause made its heartbeat look stale). */
+const LOST_LOCK = 'this tick lost tick.lock to another holder and stopped: it swapped and saved nothing after that';
+class LostLock extends Error {}
 
 /**
  * Time bounds on the tick's own child processes: an engineering default, not
@@ -672,13 +678,28 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   const setup = await readSetup(o.dataDir, o.key);
   if (!setup) return { ran: 'nothing', gated: '', why: 'not set up: no setup.json for this project' };
   await mkdir(paths.dir, { recursive: true, mode: 0o700 });
-  const release = await takeLock(paths.lock);
+  let release: HeldLock | null;
+  try {
+    release = await (o.deps?.takeLock ?? takeLock)(paths.lock);
+  } catch (e) {
+    // a file system the lock cannot be made on, a folder that cannot be written: recorded, never thrown
+    const before = await readState(o.dataDir, o.key);
+    const error = `tick.lock could not be taken: ${(e as Error).message}`;
+    await writeState(o.dataDir, o.key, { ...before, last_error: error }).catch(() => {});
+    return { ran: 'failed', gated: before.gated ?? '', error };
+  }
   if (!release) return { ran: 'nothing', gated: '', why: 'another tick is running' };
+  const lock = release;
   const now = () => (o.now ?? new Date()).toISOString();
   const state = await readState(o.dataDir, o.key);
+  /** Throws LostLock when another holder has broken this tick's lock: what follows must not touch the shared folders. */
+  const holding = async () => {
+    if (!(await lock.check())) throw new LostLock(LOST_LOCK);
+  };
   // every save builds on the last one, so a later save keeps an earlier field (set_aside)
   let current = state;
   const save = async (s: Partial<TickState>) => {
+    await holding();
     current = { ...current, ...s };
     await writeState(o.dataDir, o.key, current);
   };
@@ -716,8 +737,9 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
       await save({ gated: target, gated_at: now(), last_error: null, failed: null });
       return { ran: 'gated', gated: target };
     }
-    return await redraw({ ...o, setup, paths, from, target, model, result, state, save, now });
+    return await redraw({ ...o, setup, paths, from, target, model, result, state, save, now, holding });
   } catch (e) {
+    if (e instanceof LostLock) return { ran: 'failed', gated: state.gated ?? '', error: LOST_LOCK };
     // before any agent ran: nothing was spent, so the next tick tries again
     const error = (e as Error).message;
     await save({ last_error: error }).catch(() => {});
@@ -791,6 +813,8 @@ async function restoreDrawing(paths: ReturnType<typeof systemPaths>): Promise<vo
 }
 
 type RedrawInput = {
+  /** Throws LostLock when this tick no longer holds tick.lock. */
+  holding: () => Promise<void>;
   root: string;
   key: string;
   deps?: TickDeps;
@@ -812,6 +836,7 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   // A redraw cut off before it ended (a reboot, a logout, a kill) left its
   // copy of the drawing, and maybe changes in the source clone: both are set
   // aside, the last good drawing stays, and this redraw goes on.
+  await r.holding();
   const interrupted = join(r.paths.failed, `interrupted-${r.now().replace(/[:.]/g, '-')}`);
   const kept: string[] = [];
   if (await stat(work).then(() => true, () => false)) kept.push(await moveAside(work, join(interrupted, 'drawing')));
@@ -832,6 +857,8 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
     summaryFile: summaryPath, docs,
   });
   const fail = async (error: string): Promise<TickResult> => {
+    // another holder has the folders now: leave redraw/ and source/ to it
+    if (!(await r.holding().then(() => true, () => false))) return { ran: 'failed', gated: r.state.gated ?? '', error: LOST_LOCK };
     // the drawing stays as it was; the agent's copy and its changes are kept
     const into = join(r.paths.failed, r.target);
     await moveAside(work, join(into, 'drawing')).catch(() => {});
@@ -883,6 +910,7 @@ async function afterAgent(
 
   // the checked copy becomes the drawing; the one before it is kept as previous/
   const after = (await load(work)).model;
+  await r.holding();
   await swapIn(r.paths, r.deps?.rename);
 
   const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(r.model, after) : { parts: 0, flows: 0 }, also });

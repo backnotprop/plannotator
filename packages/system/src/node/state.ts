@@ -15,8 +15,8 @@
 //
 // Every function takes `dataDir`; nothing here reads ~/.plannotator itself.
 import { randomBytes } from 'node:crypto';
-import { link, mkdir, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
-import { join } from 'node:path';
+import { link, mkdir, open, readdir, readFile, rename, stat, unlink, utimes, writeFile } from 'node:fs/promises';
+import { basename, dirname, join } from 'node:path';
 import { parseSetup, type SystemSetup } from '../agent/setup.ts';
 
 /** A project key as the Inbox makes it (`<name>-<6 hex>`): one plain folder name. */
@@ -112,13 +112,35 @@ function alive(pid: number): boolean {
  * The holder touches the lock (its mtime is the heartbeat) every `heartbeatMs`.
  * A lock is broken only when its holder's pid is dead, or its heartbeat is
  * older than `staleMs` (a pid reused by another process, a holder that hangs),
- * and only when a second look `settleMs` later (for a stale heartbeat, after
- * `heartbeatMs` more, so a live holder that was asleep has touched it) still
- * shows the same holder that way. An empty or unreadable lock younger than
- * `staleMs` is held: a lock written by an older Plannotator is never half
- * written, and one from this one never is.
+ * and only when a second look still shows the same holder that way: `settleMs`
+ * later for a dead pid, `staleSettleMs` later (two and a half heartbeats) for a
+ * stale heartbeat, so a live holder that a sleep, a busy wake or a clock jump
+ * made late has touched it by then. An empty or unreadable lock younger than
+ * `staleMs` is held: a taker on a file system with no hard links writes its lock
+ * after making it.
  */
-export const LOCK_TIMINGS = { heartbeatMs: 10_000, staleMs: 60_000, settleMs: 1_000 };
+export const LOCK_TIMINGS = { heartbeatMs: 10_000, staleMs: 60_000, settleMs: 1_000, staleSettleMs: 25_000 };
+
+export type LockOptions = {
+  pid?: number;
+  heartbeatMs?: number;
+  staleMs?: number;
+  settleMs?: number;
+  staleSettleMs?: number;
+  /** The hard link the lock is made with; node's unless given (the tests pass one that fails). */
+  link?: (existing: string, name: string) => Promise<void>;
+  /** Run inside the lock-breaking guard, after the lock was read again and before it is removed (the tests use it to order two takers). */
+  beforeBreak?: () => Promise<void>;
+};
+
+/**
+ * A held tick.lock: call it to let the lock go. `lost` turns true, and
+ * `signal` aborts, once the heartbeat finds the lock no longer this holder's
+ * (another taker broke it); `check()` looks now. A holder that lost its lock
+ * stops: the tick before it swaps a drawing or saves state.json, the Inbox's
+ * first draw by stopping its agent (`signal`).
+ */
+export type HeldLock = (() => Promise<void>) & { readonly lost: boolean; readonly signal: AbortSignal; check: () => Promise<boolean> };
 
 type Holder = { token: string | null; pid: number | null; mtimeMs: number };
 
@@ -144,6 +166,44 @@ async function readHolder(path: string): Promise<Holder | null> {
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const sameHolder = (a: Holder, b: Holder) => a.token === b.token && a.pid === b.pid && (a.token !== null || a.mtimeMs === b.mtimeMs);
 
+/** Errors of a file system with no hard links (FAT, exFAT, many SMB mounts, some sync folders). */
+const NO_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);
+
+/**
+ * Make `name` hold `text`, failing with EEXIST when it is there: a temp file
+ * linked to its name, so the file is whole the moment it exists, or where the
+ * file system has no hard links, an exclusive create, then the write.
+ */
+async function createWhole(name: string, text: string, pid: number, token: string, linkFn: (a: string, b: string) => Promise<void>): Promise<void> {
+  const tmp = `${name}.tmp-${pid}-${token}`;
+  await writeFile(tmp, text, { mode: 0o600 });
+  try {
+    await linkFn(tmp, name);
+    return;
+  } catch (e) {
+    if (!NO_LINKS.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+  } finally {
+    await unlink(tmp).catch(() => {});
+  }
+  const fh = await open(name, 'wx', 0o600);
+  try {
+    await fh.writeFile(text);
+    await fh.sync().catch(() => {});
+  } finally {
+    await fh.close();
+  }
+}
+
+/** Remove the temp files of takers that died between writing one and linking it (`<lock>.tmp-<pid>-<token>`, the guard's too). */
+async function removeDeadTemps(path: string): Promise<void> {
+  const base = basename(path);
+  const names = await readdir(dirname(path)).catch(() => [] as string[]);
+  for (const n of names) {
+    const m = new RegExp(`^${base.replace(/[.]/g, '\\.')}(?:\\.break)?\\.tmp-(\\d+)-[0-9a-f]+$`).exec(n);
+    if (m && !alive(Number(m[1]))) await unlink(join(dirname(path), n)).catch(() => {});
+  }
+}
+
 /**
  * Take tick.lock, or null when a live holder has it.
  *
@@ -154,48 +214,50 @@ const sameHolder = (a: Holder, b: Holder) => a.token === b.token && a.pid === b.
  * agent: the process that runs the agent, taking the lock before it starts
  * the agent and letting it go when the agent ends. It must not be a longer
  * lived process that could restart while the agent runs, and the holder keeps
- * the heartbeat going (this function does it) for as long as it holds.
+ * the heartbeat going (this function does it) for as long as it holds. It
+ * stops its agent when the lock's `signal` aborts.
  *
  * The lock file holds `{ token, pid }` and is made whole in one step (written
  * to a temp file, then linked to its name, which fails when the name is
- * taken). A dead or stale lock is removed only under a second lock
- * (`tick.lock.break`), and only while it is still the one the taker looked at
- * twice, so two takers never both break it and both run. The returned function stops the heartbeat and
- * deletes the lock only while it still holds this taker's token.
+ * taken; an exclusive create where hard links fail). A dead or stale lock is
+ * removed only under a second lock (`tick.lock.break`), and only while it is
+ * still the one the taker looked at twice and the guard is still the taker's,
+ * so two takers never both break it and both run. The returned function stops
+ * the heartbeat and deletes the lock only while it still holds this taker's
+ * token.
  */
-export async function takeLock(
-  path: string,
-  o: number | { pid?: number; heartbeatMs?: number; staleMs?: number; settleMs?: number } = {},
-): Promise<(() => Promise<void>) | null> {
-  const opts = typeof o === 'number' ? { pid: o } : o;
+export async function takeLock(path: string, o: number | LockOptions = {}): Promise<HeldLock | null> {
+  const opts: LockOptions = typeof o === 'number' ? { pid: o } : o;
   const pid = opts.pid ?? process.pid;
-  const { heartbeatMs, staleMs, settleMs } = { ...LOCK_TIMINGS, ...opts };
+  const { heartbeatMs, staleMs, settleMs, staleSettleMs } = { ...LOCK_TIMINGS, ...opts };
+  const linkFn = opts.link ?? link;
   const token = randomBytes(12).toString('hex');
   const breakable = (h: Holder) => (h.pid !== null && !alive(h.pid)) || Date.now() - h.mtimeMs > staleMs;
+  await removeDeadTemps(path);
   for (let attempt = 0; attempt < 3; attempt++) {
-    const tmp = `${path}.${token}.tmp`;
-    await writeFile(tmp, JSON.stringify({ token, pid }), { mode: 0o600 });
     try {
-      await link(tmp, path);
-      await unlink(tmp).catch(() => {});
+      await createWhole(path, JSON.stringify({ token, pid }), pid, token, linkFn);
       return held(path, token, heartbeatMs);
     } catch (e) {
-      await unlink(tmp).catch(() => {});
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     }
     const first = await readHolder(path);
     if (!first) continue;
     if (!breakable(first)) return null;
-    // a second look: a live holder whose heartbeat was late (a Mac waking up) touches it meanwhile
+    // a second look: a live holder whose heartbeat was late (a Mac waking up, a clock jump) touches it meanwhile
     const pidDead = first.pid !== null && !alive(first.pid);
-    await sleep(pidDead ? settleMs : heartbeatMs + settleMs);
+    await sleep(pidDead ? settleMs : staleSettleMs);
     const second = await readHolder(path);
     if (!second) continue;
     if (!sameHolder(first, second) || !breakable(second)) return null;
     // break it under a second lock, so one taker at a time removes a lock and only the one it looked at twice
-    const broke = await underGuard(`${path}.break`, token, staleMs, async () => {
+    const guard = `${path}.break`;
+    const broke = await underGuard(guard, pid, token, staleMs, linkFn, async () => {
       const now = await readHolder(path);
       if (now && !sameHolder(first, now)) return false;
+      await opts.beforeBreak?.();
+      // a taker that took the guard over as stale while this one paused is breaking now
+      if ((await readFile(guard, 'utf8').catch(() => '')) !== token) return false;
       if (now) await unlink(path).catch(() => {});
       return true;
     });
@@ -205,46 +267,58 @@ export async function takeLock(
 }
 
 /**
- * Run `fn` holding the lock-breaking guard at `guard`, made whole in one step
- * as tick.lock is; false when another taker holds it (that taker is breaking
- * the lock and takes it next). A guard left by a taker that died while
- * breaking (older than `staleMs`) is removed, and this taker tries again on
- * its next run.
+ * Run `fn` holding the lock-breaking guard at `guard`, made whole as tick.lock
+ * is; false when another taker holds it (that taker is breaking the lock and
+ * takes it next). A guard left by a taker that died while breaking (older
+ * than `staleMs`) is removed, and this taker tries again on its next run. The
+ * guard is let go only while it still holds this taker's token.
  */
-async function underGuard(guard: string, token: string, staleMs: number, fn: () => Promise<boolean>): Promise<boolean> {
-  const tmp = `${guard}.${token}.tmp`;
-  await writeFile(tmp, token, { mode: 0o600 });
+async function underGuard(guard: string, pid: number, token: string, staleMs: number, linkFn: (a: string, b: string) => Promise<void>,
+  fn: () => Promise<boolean>): Promise<boolean> {
   try {
-    await link(tmp, guard);
+    await createWhole(guard, token, pid, token, linkFn);
   } catch (e) {
     if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
     const info = await stat(guard).catch(() => null);
     if (info && Date.now() - info.mtimeMs > staleMs) await unlink(guard).catch(() => {});
     return false;
-  } finally {
-    await unlink(tmp).catch(() => {});
   }
   try {
     return await fn();
   } finally {
-    await unlink(guard).catch(() => {});
+    if ((await readFile(guard, 'utf8').catch(() => '')) === token) await unlink(guard).catch(() => {});
   }
 }
 
-/** A held lock: its heartbeat runs until the returned release, which deletes the lock only while it holds `token`. */
-function held(path: string, token: string, heartbeatMs: number): () => Promise<void> {
-  const mine = async () => (await readHolder(path))?.token === token;
+/** A held lock: its heartbeat runs until the release, which deletes the lock only while it holds `token`. */
+function held(path: string, token: string, heartbeatMs: number): HeldLock {
+  const abort = new AbortController();
+  let lost = false;
+  const check = async () => {
+    if (lost) return false;
+    const holder = await readHolder(path);
+    if (holder?.token === token) return true;
+    lost = true;
+    abort.abort(new Error('tick.lock was taken by another holder'));
+    return false;
+  };
   const beat = setInterval(() => {
-    void mine().then((ok) => {
+    void check().then((ok) => {
       if (ok) {
         const now = new Date();
         return utimes(path, now, now);
       }
+      clearInterval(beat);
     }).catch(() => {});
   }, heartbeatMs);
   beat.unref?.();
-  return async () => {
+  const release = async () => {
     clearInterval(beat);
-    if (await mine()) await unlink(path).catch(() => {});
+    if (await check()) await unlink(path).catch(() => {});
   };
+  return Object.defineProperties(release, {
+    check: { value: check },
+    signal: { value: abort.signal },
+    lost: { get: () => lost },
+  }) as HeldLock;
 }
