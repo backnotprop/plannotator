@@ -119,9 +119,12 @@ function Harness({ state }: { state: State }) {
   agentNoteMayGo = offer.settled;
   return (
     <>
-      <button type="button" data-opener="">
-        Something on the page
-      </button>
+      <main className="ib-main">
+        <h1>Inbox</h1>
+        <button type="button" data-opener="">
+          Something on the page
+        </button>
+      </main>
       {offer.stage === 'open' && (
         <CodeReviewOffer
           phone={false}
@@ -308,6 +311,25 @@ describe.skipIf(!hasDom)("Code review's offer on day 0", () => {
     act(() => notNow.click());
     expect(document.activeElement).toBe(document.querySelector('[data-opener]'));
   });
+});
+
+describe.skipIf(!hasDom)('focus on a fresh load', () => {
+  for (const [name, way] of [
+    ['Not now', (d: HTMLDialogElement) => d.querySelector<HTMLButtonElement>('[data-code-review-offer-close]')!.click()],
+    ['Turn on', (d: HTMLDialogElement) => d.querySelector<HTMLButtonElement>('[data-code-review-offer-on]')!.click()],
+    ['Escape', (d: HTMLDialogElement) => d.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }))],
+  ] as const) {
+    test(`nothing focused before it opened: ${name} gives focus to the page's heading, never to nowhere`, async () => {
+      const set = mount(DAY0);
+      (document.activeElement as HTMLElement | null)?.blur?.();
+      expect(document.activeElement === null || document.activeElement === document.body).toBe(true);
+      set({ tourScreen: false });
+      await until(() => dialog() !== null);
+      act(() => way(dialog()!));
+      expect(dialog()).toBeNull();
+      expect(document.activeElement).toBe(document.querySelector('.ib-main h1'));
+    });
+  }
 });
 
 describe.skipIf(!hasDom)("the offer's art", () => {

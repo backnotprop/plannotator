@@ -14,7 +14,7 @@ import { Modal } from './Updates';
 export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; onClose: () => void; onTurnOn: () => void }) {
   useFirstFocusOnDialog();
   return (
-    <Modal labelledBy="ib-cro-title" describedBy="ib-cro-feats" testId="code-review-offer" onClose={onClose} ownKeys className={`ib-cro${phone ? ' ib-cro-phone' : ''}`}>
+    <Modal labelledBy="ib-cro-title" describedBy="ib-cro-feats" testId="code-review-offer" onClose={onClose} ownKeys fallbackFocus={pageHeading} className={`ib-cro${phone ? ' ib-cro-phone' : ''}`}>
       <CodeReviewOfferArt phone={phone} />
       <div className="ib-cro-body">
         <h2 id="ib-cro-title">Code review, in your Inbox</h2>
@@ -45,6 +45,13 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
       </div>
     </Modal>
   );
+}
+
+/** Focus after the dialog when nothing focusable opened it (it opens at once on a fresh load): the page's heading. */
+function pageHeading(): HTMLElement | null {
+  const heading = document.querySelector<HTMLElement>('.ib-main h1');
+  if (heading && !heading.hasAttribute('tabindex')) heading.setAttribute('tabindex', '-1');
+  return heading;
 }
 
 /**
