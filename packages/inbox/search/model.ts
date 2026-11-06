@@ -233,14 +233,30 @@ export function markedRuns(text: string, marks: readonly [number, number][]): { 
 }
 
 /**
- * The query's words in a field the answer carries no marks for (the thread's
- * name, the project's name as this window shows it, an agent's name, a
- * folder), as [start, length]: the server's own rule for `title_marks`
+ * The query's words in a field the answer carries no marks for, as
+ * [start, length]: the server's own rule for `title_marks`
  * (@plannotator/core/inbox-search, the last term as a prefix), over the
- * answer's `terms`, so the window marks what the index matched.
+ * answer's `terms`. The window calls it only for a field the row's own
+ * document indexes (a thread row's name and project, a message row's agent, a
+ * file row's folder, a project row's folder), so it marks what the index
+ * matched, never a word the row was not found by.
  */
 export function termMarks(text: string, terms: readonly string[]): [number, number][] {
   return inboxSearchRanges(text, terms).map(([start, end]) => [start, end - start]);
+}
+
+/**
+ * A thread row's project marks: the words of the name the index holds
+ * (`indexed`, the row's `project.name`), placed on the name this window shows
+ * (`shown`: a renamed project's own name, or "api · work") only where the shown
+ * name holds the indexed one. A project shown as "Cloud app" but found as
+ * "plannotator" gets no mark; "api · work" marks "api", never "work".
+ */
+export function projectMarks(shown: string, indexed: string, terms: readonly string[]): [number, number][] {
+  if (terms.length === 0 || !indexed) return [];
+  const at = shown.indexOf(indexed);
+  if (at < 0) return [];
+  return termMarks(indexed, terms).map(([start, length]) => [at + start, length]);
 }
 
 /** Text as compared for "the row already shows it": a cut's "…" dropped, whitespace as one space, case folded. */

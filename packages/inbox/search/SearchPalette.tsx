@@ -21,7 +21,7 @@
  * group alone, 50 at a time. It starts on All types at every open.
  */
 
-import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { Fragment, memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { INBOX_SEARCH_GROUPS, middleCutInboxName, type InboxSearchGroupId, type InboxSearchRow, type InboxSearchSort } from '@plannotator/core/inbox-search';
 import { inboxApi, saveRecentSearch, searchInbox, type SearchModel } from '../api';
 
@@ -42,6 +42,7 @@ import {
   formatCount,
   markedRuns,
   moreLabel,
+  projectMarks,
   projectNames,
   resultTarget,
   rowThreadChip,
@@ -103,6 +104,8 @@ interface Answered {
   key: string;
   q: string;
   model: SearchModel;
+  /** The filters it was asked with: the "Searched only" line names these, not the chips' newer picks still on their way. */
+  filters: SearchFilters;
   /** The type it was asked for (null: All types). The list draws an answer as its own type, so a pick still on its way never redraws the last answer under the new chip. */
   type: InboxSearchGroupId | null;
   /** The order it was asked in ("Show all" pages go on in it). */
@@ -134,8 +137,10 @@ function Words({ text, terms }: { text: string; terms: readonly string[] }) {
 
 /** No terms (the recent view, filters with no words): one array, so the memoized rows keep their props. */
 const NO_TERMS: readonly string[] = [];
+/** No marks: a field the row's document does not index. */
+const NO_MARKS: readonly [number, number][] = [];
 
-/** A composed secondary line: each part apart, user-written parts in <bdi> that truncate on their own. */
+/** A composed secondary line (a project row's): each part apart, user-written parts in <bdi>; it wraps, never cut (the folder is searched). */
 function Secondary({ parts }: { parts: readonly (ReactNode | null | false)[] }) {
   const shown = parts.filter((p): p is ReactNode => p !== null && p !== false && p !== '');
   return (
@@ -181,17 +186,19 @@ function ThreadChip({ chip, terms }: { chip: RowThreadChip; terms: readonly stri
  * draws it, ahead of what the thread holds), then what the result is (its
  * author or folder), the project, the section, the time, apart
  * by "·" (", " for a screen reader). Nothing is cut: the chip and the project
- * show their whole words, with the query's words marked, and the line wraps
- * after a "·" (a `<wbr>`) when they do not fit; the lead, the section and the
- * time never break inside. Each user-written part is a `<bdi dir="auto">`.
+ * show their whole words and the line wraps after a "·" (a `<wbr>`) when they
+ * do not fit, never before one: each part holds the "·" after it (a line never
+ * starts with one). The section and the time never break inside. Each user-written part is a `<bdi dir="auto">`.
+ * The chip and the project carry marks only on a thread row (`chipTerms`,
+ * `projectMarks`): a message, file or guide row was not found by them.
  */
-function MetaLine({ chip, lead, project, section, at, terms }: { chip: RowThreadChip | null; lead?: ReactNode; project: string; section?: string | null; at?: string | null; terms: readonly string[] }) {
+function MetaLine({ chip, chipTerms, lead, project, projectMarks, section, at }: { chip: RowThreadChip | null; chipTerms: readonly string[]; lead?: ReactNode; project: string; projectMarks: readonly [number, number][]; section?: string | null; at?: string | null }) {
   const parts: { node: ReactNode; className: string }[] = [];
   if (lead) parts.push({ node: lead, className: 'ib-sp-lead' });
   parts.push({
     node: (
       <bdi dir="auto">
-        <Words text={project} terms={terms} />
+        <Marked text={project} marks={projectMarks} />
       </bdi>
     ),
     className: 'ib-sp-pj',
@@ -200,21 +207,24 @@ function MetaLine({ chip, lead, project, section, at, terms }: { chip: RowThread
   if (at) parts.push({ node: at, className: 'ib-sp-at' });
   return (
     <span className="ib-sp-s ib-sp-tl">
-      {chip && <ThreadChip chip={chip} terms={terms} />}
+      {chip && <ThreadChip chip={chip} terms={chipTerms} />}
       {chip && <wbr />}
       {parts.map((part, i) => (
-        <span key={i} className={part.className}>
-          {i > 0 && (
-            <>
-              <span className="ib-sp-sep" aria-hidden="true">
-                ·
-              </span>
-              <span className="ib-sr">, </span>
-              <wbr />
-            </>
-          )}
-          {part.node}
-        </span>
+        <Fragment key={i}>
+          {/* A part keeps its "·" (no break between them), and the line may break after it. */}
+          <span className={part.className}>
+            {part.node}
+            {i < parts.length - 1 && (
+              <>
+                <span className="ib-sp-sep" aria-hidden="true">
+                  ·
+                </span>
+                <span className="ib-sr">, </span>
+              </>
+            )}
+          </span>
+          {i < parts.length - 1 && <wbr />}
+        </Fragment>
       ))}
     </span>
   );
@@ -304,12 +314,11 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
       return (
         <>
           <span className="ib-sp-rs">
-            <Tip content={row.title} cut>
-              <span className="ib-sp-p" dir="auto">
-                <Marked text={row.title} marks={row.title_marks} />
-              </span>
-            </Tip>
-            <MetaLine chip={chip} project={projectName} section={label} at={metaAt} terms={terms} />
+            <span className="ib-sp-p" dir="auto">
+              <Marked text={row.title} marks={row.title_marks} />
+            </span>
+            {/* The thread's document indexes its subject, its name and its project's name: the chip and the project are marked. */}
+            <MetaLine chip={chip} chipTerms={terms} project={projectName} projectMarks={projectMarks(projectName, row.project.name, terms)} section={label} at={metaAt} />
           </span>
           {row.archived ? <span className="ib-sp-chip">Archived</span> : row.section === 'stopped' ? <span className="ib-sp-chip ib-sp-warn">Stopped</span> : null}
           {!phone && <TimeColumn at={time} />}
@@ -320,13 +329,13 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
       return (
         <>
           <span className="ib-sp-rs">
-            <Tip content={row.snippet.text} cut>
-              <span className="ib-sp-p ib-sp-snip" dir="auto">
-                <Marked text={row.snippet.text} marks={row.snippet.marks} />
-              </span>
-            </Tip>
+            <span className="ib-sp-p ib-sp-snip" dir="auto">
+              <Marked text={row.snippet.text} marks={row.snippet.marks} />
+            </span>
+            {/* A message's document indexes its body, its questions and its agent's name: only the agent is marked. */}
             <MetaLine
               chip={chip}
+              chipTerms={NO_TERMS}
               lead={
                 row.author.kind === 'me' ? (
                   'You'
@@ -337,8 +346,8 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
                 )
               }
               project={projectName}
+              projectMarks={NO_MARKS}
               at={metaAt}
-              terms={terms}
             />
           </span>
           {/* An action item (an Inbox `:::action`, key `a-…`) reads "Action item", not "Question". */}
@@ -362,11 +371,13 @@ function RowBody({ row, phone, projectName, terms }: { row: InboxSearchRow; phon
                 <Marked text={cut.text} marks={cut.marks} />
               </span>
             </Tip>
+            {/* A file's document indexes its name and its folder; a guide's, its title: neither marks the chip or the project. */}
             <MetaLine
               chip={chip}
+              chipTerms={NO_TERMS}
               lead={<bdi dir="auto">{row.type === 'guide' ? 'Guided review' : row.folder ? <Words text={`${row.folder}/`} terms={terms} /> : 'File'}</bdi>}
               project={projectName}
-              terms={terms}
+              projectMarks={NO_MARKS}
             />
           </span>
           <span className="ib-sp-chip ib-sp-kind">{row.kind}</span>
@@ -532,13 +543,13 @@ export default function SearchPalette(props: SearchPaletteProps) {
           if (seq !== requestSeq.current) return;
           if (model.indexing) {
             // Skeletons and the indexing line until the index is built; ask again.
-            setAnswered({ key, q: query.trim(), model, type: nextType, sort: nextSort });
+            setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
             retryTimer.current = setTimeout(() => run(query, nextFilters, nextType), SEARCH_INDEXING_RETRY_MS);
             return;
           }
           setPending(false);
           setExpanded({});
-          setAnswered({ key, q: query.trim(), model, type: nextType, sort: nextSort });
+          setAnswered({ key, q: query.trim(), model, filters: nextFilters, type: nextType, sort: nextSort });
           const said = nextType ? typeCountWords(model, query, nextType) : countWords(model, query, filtersSet(nextFilters));
           // Found inside a filter: the count says so, as the line under the list does ("2 results in 2 groups. Searched only plannotator").
           const only = said && query.trim() && filtersSet(nextFilters) && !said.startsWith('No ') ? scopeWords(nextFilters, projectNameRef.current, nextType).join(', ') : '';
@@ -954,7 +965,7 @@ export default function SearchPalette(props: SearchPaletteProps) {
     if (options.length === 0) {
       if (answered.type && !answered.q) return <div className="ib-sp-empty ib-sp-quiet" data-search-type-empty="">Type to search {GROUP_LABELS[answered.type].noun}.</div>;
       if (!answered.q && !filtered) return <div className="ib-sp-empty ib-sp-quiet">Type to search threads, messages and files.</div>;
-      const scope = scopeWords(filters, projectName, answered.type);
+      const scope = scopeWords(answered.filters, projectName, answered.type);
       return (
         <div className="ib-sp-empty" data-search-none="">
           <span>
@@ -1077,8 +1088,9 @@ export default function SearchPalette(props: SearchPaletteProps) {
 
   const anyFilter = filtered;
   // Results found inside a filter (a search opened from a project starts in it): say what was left out, under the list.
-  const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtered && options.length > 0);
-  const resultScope = scopeShown ? scopeWords(filters, projectName, answered!.type) : [];
+  // The filters the shown answer was asked with: a chip changed since keeps the line true until its own answer lands.
+  const scopeShown = Boolean(answered && answered.q && !indexing && !error && filtersSet(answered.filters) && options.length > 0);
+  const resultScope = scopeShown ? scopeWords(answered!.filters, projectName, answered!.type) : [];
   // The order only means something for words: the recent view and filters alone keep their own order.
   const sortSwitch = q.trim() ? <SortSwitch sort={sort} onChange={changeSort} name={`ib-sp-sort-${uid}`} /> : null;
   return (

@@ -3877,13 +3877,20 @@ dialog.ib-sp:not([data-phone]) .ib-sp-fcell[data-cell="project"] { flex: 0 1 aut
 /* The matched words in the second line (the thread's name, the project, an agent, a folder): as the first line's,
    at the second line's weight. */
 .ib-sp-s .ib-sp-m { text-decoration: underline 1.5px var(--primary); text-underline-offset: 2px; text-decoration-skip-ink: none; }
+/* A project row's second line ("Project · /Users/…/backnotprop/plannotator"): the folder is searched, so it wraps
+   whole instead of ending in "…", and its matched words show. */
+.ib-sp-row[data-result="project"] .ib-sp-s { white-space: normal; overflow: visible; text-overflow: clip; overflow-wrap: anywhere; }
+.ib-sp-row[data-result="project"] .ib-sp-s bdi { display: inline; max-width: none; white-space: normal; }
 /* A result's second line (MetaLine): the thread chip first, the list's own chip (.ib-key), then what the result
    is · project · section · time. Nothing is cut: the chip and the project show their whole words and the line wraps
-   (after a "·", or inside the chip or the project when one alone is wider than the row). The lead, the section and
-   the time never break inside. */
+   (after a "·", never before one, or inside the chip or the project when one alone is wider than the row). The section
+   and the time never break inside; the lead (an agent's name, a folder) wraps like the project. */
 .ib-sp-s.ib-sp-tl { position: relative; display: block; min-width: 0; white-space: normal; overflow: visible; text-overflow: clip; line-height: 1.6; }
 .ib-sp-tl > span:not(.ib-key) { white-space: normal; }
-.ib-sp-tl .ib-sp-lead, .ib-sp-tl .ib-sp-sec, .ib-sp-tl .ib-sp-at { white-space: nowrap; }
+/* Each part holds the "·" after it and never breaks before it, so no line starts with a "·" (it breaks at the <wbr>
+   after the "·"). The section and the time never break inside; the lead and the project wrap inside their <bdi>. */
+.ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj, .ib-sp-sec, .ib-sp-at) { white-space: nowrap; }
+.ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj) > bdi { white-space: normal; }
 /* The project moves to the next line whole ("workspaces-desktop-app", never "workspaces-desktop-" / "app"); it breaks
    inside only when it alone is wider than the row. */
 .ib-sp-tl > span.ib-sp-pj > bdi { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: bottom; }
