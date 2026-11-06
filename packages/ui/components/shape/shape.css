@@ -89,6 +89,15 @@
 .shp-stage.reduce .shp-know .mk.erasing { animation: shp-fade-out .12s linear forwards; mask-image: none; -webkit-mask-image: none; }
 .shp-stage.reduce .shp-know .mk.fresh { animation: none; background-size: 100% 100%; }
 
+/* A box being dragged: a thin line and hardly any fill, like the Mac's screenshot selection. */
+@media (pointer: fine) {
+  .shp-stage.boxing, .shp-stage.boxing * { cursor: crosshair; -webkit-user-select: none; user-select: none; }
+  .shp-stage.boxing .shp-know [data-mark] { cursor: crosshair; }
+}
+.shp-cross-btn { padding: 0 9px; }
+.shp-tbtn.shp-cross-btn.on { color: var(--primary); }
+.shp-box-band { position: fixed; pointer-events: none; z-index: 31; border-radius: 2px; box-shadow: 0 0 0 1px color-mix(in oklab, var(--primary) 85%, transparent); background: color-mix(in oklab, var(--primary) 5%, transparent); }
+
 .shp-pin-hover { position: fixed; pointer-events: none; border-radius: 8px; box-shadow: 0 0 0 1.5px color-mix(in oklab, var(--primary) 75%, transparent); background: color-mix(in oklab, var(--primary) 5%, transparent); z-index: 30; transition: all .12s ease-out; }
 
 /* ── a drawn view: free-flowing, or a fixed canvas scaled to fit ── */
