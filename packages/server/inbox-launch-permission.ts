@@ -97,6 +97,20 @@ export function openPermissionSince(store: InboxStore, threadId: string): number
   return open.length === 0 ? null : Math.min(...open.map((q) => q.at));
 }
 
+/** When the person last answered a permission question of a launched thread (their reply's time), or null. */
+export function lastPermissionAnswerAt(store: InboxStore, threadId: string): number | null {
+  let latest: number | null = null;
+  for (const id of store.threadMessageIds(threadId)) {
+    const message = store.message(id);
+    if (!message || message.author.kind !== "agent" || !isInboxPermissionSession(message.author.session)) continue;
+    for (const question of store.questionsOf(id)) {
+      const reply = question.state === "sent" && question.sent_reply_id ? store.message(question.sent_reply_id) : null;
+      if (reply) latest = Math.max(latest ?? 0, Date.parse(reply.created_at));
+    }
+  }
+  return latest;
+}
+
 /** What the Inbox found at a file tool's path: a Write's file exists, does not, or is not known; where a link points. */
 export type PermissionTarget = Pick<InboxPermissionOptions, "overwrite" | "linksTo">;
 

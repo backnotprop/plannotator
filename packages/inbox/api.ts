@@ -1037,6 +1037,8 @@ export interface StartThreadInput {
   thread_name_auto?: true;
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
+  /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
+  decision_ask?: true;
 }
 
 /** A file this Inbox already holds, as a pending upload (never another machine's: a thread there offers no reuse). No bytes travel. */
@@ -1391,7 +1393,7 @@ export const inboxApi = {
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**
    * The sidebar's Feedback dialog: the person's words go to the feedback Worker through this Inbox's server
-   * (packages/server/inbox-feedback.ts), which adds the version and the OS name and nothing else.
+   * (packages/server/inbox-feedback.ts), which adds the version, the OS name and the names of the agents used, and nothing else.
    */
   sendFeedback: (input: { message: string; category: 'bug' | 'idea' | 'other' | null; contact: string | null }) => sendFeedback(input),
   /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
