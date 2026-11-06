@@ -105,17 +105,21 @@ test.afterAll(async () => {
   }
 });
 
-test('Mark read, then the row menu’s Mark unread: the row is back in New and bold, a reload keeps it, and nothing is sent', async () => {
+test('Mark read, then the row menu’s Mark unread: the row is bold in place, back in New after a reload, and nothing is sent', async () => {
   const { page, threads } = world;
   await page.goto(world.url);
   await expect(row(page, threads.nightly)).toBeVisible();
   expect(await sectionOf(page, threads.nightly)).toBe('new');
   await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
 
-  // Mark read, from the row's hover action: the row leaves for Quiet (folded).
+  // Mark read, from the row's hover action: the row stays in New, read (the list holds still, approval
+  // "inbox-list-view", R7); the list's title tidies it into Quiet (folded).
   await row(page, threads.nightly).hover();
   await page.locator(`.ib-lbody [data-row="${threads.nightly}"] [data-row-mark-read]`).click();
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Moved to Quiet');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked read');
+  await expect(row(page, threads.nightly)).not.toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.nightly)).toBe('new');
+  await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.nightly)).toBe(null);
 
   // The row menu on the read row: Mark unread.
@@ -129,9 +133,11 @@ test('Mark read, then the row menu’s Mark unread: the row is back in New and b
   await expect(page.locator(`[data-row-menu="${threads.nightly}"] [data-row-action="unread"]`)).toHaveText('Move back');
   await item.click();
 
-  await expect.poll(() => sectionOf(page, threads.nightly)).toBe('new');
+  // Bold where it is, in Quiet (R7), and the toast does not say it moved; the next tidy puts it in New.
   await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.nightly)).toBe('quiet');
   await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
+  await expect(page.locator('[data-inbox-toast]')).not.toContainText('back in New');
   expect(await messageCount(threads.nightly)).toBe(1);
 
   // A reload reads the list from the Inbox: still New, still bold.
@@ -171,7 +177,7 @@ test('a thread read by opening it: the header’s Mark unread closes it, and the
   expect(world.errors).toEqual([]);
 });
 
-test('the row’s hover action on a read row is Mark unread: the row is back in New, bold, and the thread stays closed', async () => {
+test('the row’s hover action on a read row is Mark unread: the row is bold in place, in New after a tidy, and the thread stays closed', async () => {
   const { page, threads } = world;
   // Read it again by opening it, then leave: Quiet.
   await page.goto(`${world.url}#thread=${threads.nightly}`);
@@ -192,9 +198,13 @@ test('the row’s hover action on a read row is Mark unread: the row is back in 
   await expect(page.locator(`.ib-lbody [data-row="${threads.nightly}"] [data-row-mark-read]`)).toHaveCount(0);
   await action.click();
 
+  // Bold where it is, in Quiet (the list holds still, R7); the list's title tidies it into New.
+  await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
+  expect(await sectionOf(page, threads.nightly)).toBe('quiet');
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
+  await page.locator('[data-list-refresh]').click();
   await expect.poll(() => sectionOf(page, threads.nightly)).toBe('new');
   await expect(row(page, threads.nightly)).toHaveClass(/\bib-u\b/);
-  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked unread');
   await expect(pane).toHaveCount(0);
   expect(await messageCount(threads.nightly)).toBe(1);
   expect(world.errors).toEqual([]);
