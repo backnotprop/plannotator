@@ -111,6 +111,7 @@ import { inboxAgentTool, inboxReminderFor, type InboxToolInfo } from './inbox-co
 import { INBOX_DEFAULT_TOOLS } from './inbox-default-tools'
 import { COMMANDS, debugAppendArgv, INBOX_COMMAND, isModCommand, resolveDataDir, waitArgv } from './launch'
 import { PLAN_TOOL } from './plan'
+import { disposesOnSessionEnd, healAction, MOD_HEAL_EVERY_MS } from './self-heal'
 import { answerShellCall, SHELL_TOOL, shellTakeOver } from './take-over'
 import { PLANNOTATOR_TOOL_NAME, PLANNOTATOR_TOOL_TAILSCALE_DESCRIPTION, PLANNOTATOR_TOOL_TAILSCALE_INPUT_SCHEMA } from './tool'
 
@@ -297,6 +298,11 @@ let inboxToolName: string | null = null
 let inboxRanHere = false
 let mod: PlannotatorMod | null = null
 let switching: Promise<PlannotatorMod | null> | null = null
+/** The self-heal's timer (self-heal.ts), started once at the first session.start the mod runs in. */
+let healTimer: unknown = null
+let healing = false
+/** When this session's own `session.end` disposed the instance; null: it did not. */
+let endedAt: number | null = null
 
 /**
  * The reminder is on in this process: the switch, an Inbox that has run here,
@@ -509,7 +515,7 @@ function sessionTitleOf($: Engine, host: Host, sessionId: string): TranscriptTit
  * (restoring that session's open reviews) when it changed. The old one was
  * disposed at `session.end`, so its decisions never land in another session.
  */
-async function currentMod($: Engine): Promise<PlannotatorMod | null> {
+async function currentMod($: Engine, options: { healed?: boolean } = {}): Promise<PlannotatorMod | null> {
   const settings = allowed
   if (!settings) return null
   const sessionId = await $.session.id()
@@ -534,6 +540,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
       ...(inboxTools ? { inboxTools } : {}),
+      ...(options.healed ? { healed: true } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)
@@ -549,6 +556,34 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
   } finally {
     switching = null
   }
+}
+
+/**
+ * The self-heal (self-heal.ts): every MOD_HEAL_EVERY_MS while the mod runs
+ * here, rebuild an instance that is gone or disposed (a quiet one: no touch),
+ * else re-arm its Inbox tick if that stopped. Once per process.
+ */
+function startSelfHeal($: Engine): void {
+  if (healTimer) return
+  healTimer = $.clock.every(MOD_HEAL_EVERY_MS, () => {
+    if (healing || !allowed) return
+    healing = true
+    void (async () => {
+      const action = healAction(mod, endedAt, Date.now())
+      if (action === 'wait') return
+      // Live and still this session's: only its tick is looked at. A session id that moved with no hook is rebuilt.
+      if (action === 'check' && mod && mod.session.sessionId === (await $.session.id())) return await mod.inbox?.ensureTicking()
+      const previous = mod
+      const instance = await currentMod($, { healed: true })
+      if (instance && instance !== previous && allowed?.debugPath) {
+        hostOf($, allowed.debugPath).debug(`self-heal: made the instance for ${instance.session.sessionId} again (${previous ? 'it was disposed' : 'there was none'})`)
+      }
+    })()
+      .catch(() => undefined)
+      .finally(() => {
+        healing = false
+      })
+  })
 }
 
 /** Whether the mod runs here (on unless the user turned it off) and where its data dir is; null: stay inert. */
@@ -677,6 +712,7 @@ export function register(on: On) {
     }
     const instance = await currentMod($)
     if (!instance) return result
+    startSelfHeal($)
     await registerCommands($)
     // Decided once per process, here: the tool list is part of Claude's
     // prompt, so it never changes under a running session.
@@ -686,8 +722,23 @@ export function register(on: On) {
 
   on('session.end', async ($: Engine, e: any, next: Next) => {
     // Stop delivering for the session that ended; its open reviews stay in
-    // the store and reattach if it is resumed.
-    mod?.dispose()
+    // the store and reattach if it is resumed. Only this instance's own
+    // session: another one's end (a fork, a side session, a subagent) left
+    // it disposed with nothing polling the Inbox until the next turn.
+    const current = mod && !mod.isDisposed ? mod : null
+    const processSessionId = await Promise.resolve()
+      .then(() => $.session.id())
+      .then(String, () => '')
+    const disposes = disposesOnSessionEnd(current ? current.session : null, e, processSessionId)
+    if (current && disposes) {
+      current.dispose()
+      endedAt = Date.now()
+    }
+    if (allowed?.debugPath) {
+      hostOf($, allowed.debugPath).debug(
+        `session.end: sessionId ${String(e?.sessionId ?? 'none')}, agentId ${String(e?.agentId ?? 'none')}, reason ${String(e?.reason ?? 'none')}; ${current ? (disposes ? `disposed ${current.session.sessionId}` : `kept ${current.session.sessionId}`) : 'no live instance'}`,
+      )
+    }
     return next(e)
   })
 

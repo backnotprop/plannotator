@@ -16,6 +16,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { PlannotatorMod } from '../controller'
 import type { Host, HttpResult, ProcessResult } from '../host'
 import { discoverInboxTools } from '../inbox'
+import { disposesOnSessionEnd, healAction } from '../self-heal'
 import type { InboxToolInfo } from '../inbox-contract'
 
 /** The engine's frame around a plugin's prompt at `turn.start`. */
@@ -213,6 +214,53 @@ export class ClaudeSession {
     this.mod.dispose()
     for (const timer of this.host.timers) clearInterval(timer)
     this.host.timers.clear()
+  }
+
+  /** When this session's own `endSession` disposed the instance (self-heal.ts `healAction`). */
+  private endedAt: number | null = null
+
+  /**
+   * `session.end` raised with `sessionId` (and `agentId` for a subagent's): the
+   * instance is disposed only when register.ts would (`disposesOnSessionEnd`).
+   * The process goes on either way. Returns whether it disposed.
+   */
+  endSession(sessionId: string, agentId?: string): boolean {
+    const current = this.mod.isDisposed ? null : this.mod
+    const disposes = disposesOnSessionEnd(current ? current.session : null, { sessionId, ...(agentId ? { agentId } : {}) })
+    if (current && disposes) {
+      current.dispose()
+      this.endedAt = Date.now()
+    }
+    return disposes
+  }
+
+  /**
+   * register.ts's self-heal, every `everyMs` (MOD_HEAL_EVERY_MS there): a
+   * disposed instance is made again for the same session id, quietly (no
+   * touch), and a live one's Inbox tick is looked at.
+   */
+  startSelfHeal(everyMs: number): void {
+    let healing = false
+    this.host.every(everyMs, () => {
+      if (healing) return
+      healing = true
+      void (async () => {
+        const action = healAction(this.mod, this.endedAt, Date.now(), everyMs)
+        if (action === 'check') return await this.mod.inbox?.ensureTicking()
+        if (action === 'wait') return
+        const previous = this.mod
+        this.mod = new PlannotatorMod(this.host, {
+          sessionId: previous.session.sessionId,
+          dataDir: this.dataDir,
+          interactive: true,
+          healed: true,
+          ...(this.inboxTools ? { inboxTools: this.inboxTools, cwd: async () => this.cwd } : {}),
+        })
+        this.mod.carryQueued(previous)
+      })().finally(() => {
+        healing = false
+      })
+    })
   }
 
   /** The tool call register.ts answers for `mcp__plannotator__plannotator_inbox`. */
