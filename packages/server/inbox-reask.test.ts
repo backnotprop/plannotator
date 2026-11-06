@@ -19,7 +19,7 @@ import {
   inboxReaskInstruction,
   inboxReaskRedirectedLine,
   inboxRedirectedLine,
-  inboxWakeClosingLine,
+  INBOX_WAKE_CLOSING_LINE,
   inboxWakeText,
   parseInboxBridgeCommands,
 } from "@plannotator/shared/inbox/connection";
@@ -141,7 +141,7 @@ describe("Re-ask reaches the agent", () => {
     const wake = inboxWakeText(command!);
     expect(wake.split("\n")[1]).toBe(INBOX_REASK_INSTRUCTION);
     expect(wake).not.toContain(INBOX_WAKE_INSTRUCTION);
-    expect(wake.endsWith(`${note.reply.body}\n\n${inboxWakeClosingLine(command!.thread_id)}`)).toBe(true);
+    expect(wake.endsWith(`${note.reply.body}\n\n${INBOX_WAKE_CLOSING_LINE}`)).toBe(true);
     expect((await bridge(server, INBOX_BRIDGE_EVENT_PATH, { session: "ses-a", host: "claude-code", type: "delivered", id: note.reply.id })).status).toBe(200);
     // Delivered, and still Sent: the agent has not asked again yet.
     expect((await row(server, t.thread)).section).toBe("sent");

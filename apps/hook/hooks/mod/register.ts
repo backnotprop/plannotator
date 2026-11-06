@@ -529,12 +529,7 @@ async function currentMod($: Engine): Promise<PlannotatorMod | null> {
       // and where a plan's history chain is also looked for (#2197).
       root: async () => String(await $.session.root()),
       label: async () => (await title.read().catch(() => null)) ?? sessionNameOf($, String(sessionId)),
-      ...(inboxTools
-        ? {
-            inboxTools,
-            ...(inboxToolName ? { inboxToolName } : {}),
-          }
-        : {}),
+      ...(inboxTools ? { inboxTools } : {}),
     })
     // A question queued behind the old session's turn still enters as a turn of the new one: the new instance drops it.
     instance.carryQueued(previous)

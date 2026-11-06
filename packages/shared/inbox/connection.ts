@@ -19,9 +19,10 @@
  *    session works and whether a turn runs (`project_path`, `started_at`,
  *    `busy`, `idle_since`), and a `state` event says when that changes: the
  *    Inbox's list of live sessions, the ones New message can reach.
- *  - The wake text: a stable first line, a stable fixed instruction line, then
- *    the person's words verbatim, framed as their answer or their message,
- *    then a closing line naming the thread, read_thread and --help.
+ *  - The wake text: a stable first line, a stable fixed instruction line, the
+ *    line naming the thread, then the person's words verbatim, framed as their
+ *    answer or their message, then a closing line naming read_thread, search
+ *    and --help.
  *
  * The CONTRACT section below is pure (no imports, no runtime APIs beyond the
  * language) because the Claude Code mod can import only its own folder: it
@@ -1003,6 +1004,44 @@ export interface InboxReplyCommand {
    * an older connection ignores it.
    */
   steps?: { done: number; total: number; doing: string | null }
+  /**
+   * What the wake's details line says about the thread (approval
+   * "inbox-wake-context"). Absent on a Tidy, a 👍, a hand-off notice and a
+   * brand new thread; an older connection ignores it and delivers `body` as
+   * it always did. Without it (an older Inbox too) the wake still names the
+   * thread, `[Thread <id>]`, and `body` stays whole.
+   */
+  context?: InboxWakeContext
+}
+
+/** A command's `context`: the thread at the moment the Inbox handed the command over. */
+export interface InboxWakeContext {
+  /** The thread's messages, as read_thread counts them. */
+  messages: number
+  /** What waits on the person in the thread, as read_thread's header lists it. */
+  open_questions: number
+  open_actions: number
+  /** When the session this goes to last wrote in the thread. Absent when it never did. */
+  last_agent_at?: string
+  /** The session's own message the person answered, only when it is not the session's latest. */
+  replying_to?: InboxWakeReplyingTo
+  /**
+   * The still-open sentence `body` carries for a connection that has no
+   * details line (`inboxStillOpenLine`): this connection's wake leaves it out.
+   * `body` stays as stored, so an older connection still says it.
+   */
+  still_open_line?: string
+  /** Where in `body` the store wrote it: the wake takes out that paragraph only, never words the person typed. */
+  still_open_at?: number
+}
+
+export interface InboxWakeReplyingTo {
+  id: string
+  at: string
+  /** About its first ten words, plain text. Without one, the wake counts what the message asked instead. */
+  quote?: string
+  questions?: number
+  actions?: number
 }
 
 /**
@@ -1157,7 +1196,7 @@ export function parseInboxBridgeCommands(text: string): InboxReplyCommand[] {
 
 /** The fixed second line of every wake: who is speaking, and how to answer. */
 export const INBOX_WAKE_INSTRUCTION =
-  "The person replied to you in the Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
+  "This is a user reply from Plannotator Inbox. Their reply follows as they wrote it: it is their answer to you. When they need to hear back, answer in the same thread: plannotator_inbox send_message with reply_to set to the id in parentheses on the line above."
 
 /**
  * The fixed second line of a Re-ask wake (approval "inbox-reask"): the person
@@ -1267,26 +1306,115 @@ export function inboxAckLine(messageId: string): string {
 }
 
 /**
- * The thread id a wake's closing line names: the Inbox's own id shape only
- * (`msg_` + a ULID today), so nothing else a command carries reaches the
- * prompt there. Anything else (an older Inbox without the field) is ''.
+ * The thread id a wake names: the Inbox's own id shape only (`msg_` + a ULID
+ * today), so nothing else a command carries reaches the prompt there.
+ * Anything else (an older Inbox without the field) is ''.
  */
 function wakeThreadId(value: unknown): string {
   return typeof value === 'string' && /^msg_[0-9A-Za-z]{1,64}$/.test(value) ? value : ''
 }
 
+/** The closing line of every wake but a 👍's, after the body: how to read more, and where the Inbox explains itself. */
+export const INBOX_WAKE_CLOSING_LINE = '[for context: read_thread (opt: set limit) or search · help: plannotator inbox --help]'
+
+/** How long ago `at` was, in short plain words ("a minute ago", "11 hours ago"), or '' when it is not a time. */
+export function inboxWakeAgo(at: unknown, now: number): string {
+  const then = typeof at === 'string' ? Date.parse(at) : Number.NaN
+  if (!Number.isFinite(then)) return ''
+  const minutes = Math.floor((now - then) / 60_000)
+  // Also a clock a little behind the writer's.
+  if (minutes < 1) return 'just now'
+  if (minutes < 2) return 'a minute ago'
+  if (minutes < 60) return `${minutes} minutes ago`
+  const hours = Math.floor(minutes / 60)
+  if (hours < 2) return 'an hour ago'
+  if (hours < 24) return `${hours} hours ago`
+  const days = Math.floor(hours / 24)
+  return days < 2 ? 'a day ago' : `${days} days ago`
+}
+
+const wakeCount = (value: unknown): number | null => (typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : null)
+
+const wakePlural = (n: number, word: string): string => `${n} ${word}${n === 1 ? '' : 's'}`
+
 /**
- * The closing line of every wake, after the body: which thread it is, how to
- * read more of it, and where the Inbox explains itself.
- * `[thread <id> · more: <tool> read_thread · how it works: plannotator inbox --help]`,
- * with the tool named as the host registered it (the mod's
- * `mcp__<server>__plannotator_inbox`). Without a thread id (an older Inbox)
- * the thread part is left out.
+ * `[Thread <id>: 14 messages, 1 question open, don't re-ask it. Your last
+ * message was a minute ago]`, under the wake's first lines, or '' without the
+ * Inbox's data (an older Inbox). A Re-ask asks for the questions again, so it
+ * leaves out "don't re-ask". `queued`: the text goes into a host's queue and
+ * may wait there through a turn, so it never says "nothing open": the agent
+ * may have asked something by the time it reads this.
  */
-export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX_TOOL_NAME): string {
+export function inboxWakeDetailsLine(threadId: unknown, context: unknown, options: { now: number; reask?: boolean; queued?: boolean }): string {
   const thread = wakeThreadId(threadId)
-  const tool = typeof toolName === 'string' && /^[A-Za-z0-9_.-]{1,128}$/.test(toolName.trim()) ? toolName.trim() : INBOX_TOOL_NAME
-  return `[${thread ? `thread ${thread} · ` : ''}more: ${tool} read_thread · how it works: plannotator inbox --help]`
+  if (!thread || !context || typeof context !== 'object') return ''
+  const { messages, open_questions, open_actions, last_agent_at } = context as Record<string, unknown>
+  const count = wakeCount(messages)
+  const questions = wakeCount(open_questions)
+  const actions = wakeCount(open_actions)
+  if (count === null || questions === null || actions === null) return ''
+  const open: string[] = []
+  if (questions > 0) open.push(`${wakePlural(questions, 'question')} open${options.reask ? '' : `, don't re-ask ${questions === 1 ? 'it' : 'them'}`}`)
+  if (actions > 0) open.push(`${wakePlural(actions, 'action item')} open`)
+  const state = open.join(', ') || (options.queued ? '' : 'nothing open')
+  const ago = inboxWakeAgo(last_agent_at, options.now)
+  return `[Thread ${thread}: ${wakePlural(count, 'message')}${state ? `, ${state}` : ''}${ago ? `. Your last message was ${ago}` : ''}]`
+}
+
+/**
+ * Text an agent wrote, as a wake may quote it: one line, no control, format or
+ * separator characters, and no brackets or double quotes, so it can neither
+ * start another line of the wake nor end this one early.
+ */
+function wakeQuote(value: unknown): string {
+  if (typeof value !== 'string') return ''
+  const flat = value
+    .replace(/[\p{Cc}\p{Cs}\p{Zl}\p{Zp}]+/gu, ' ')
+    .replace(/\p{Cf}+/gu, '')
+    .replace(/[[\]]/g, '')
+    .replace(/"/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim()
+  const chars = [...flat]
+  return chars.length > 120 ? `${chars.slice(0, 120).join('').trimEnd()}…` : flat
+}
+
+/**
+ * `[Replying to your message from 6 hours ago (<id>): "The first words…"]`, or,
+ * with no words to quote, `…(<id>), with 3 questions]`. '' without the Inbox's data.
+ */
+export function inboxWakeReplyingLine(target: unknown, now: number): string {
+  if (!target || typeof target !== 'object') return ''
+  const { id, at, quote, questions, actions } = target as Record<string, unknown>
+  const message = wakeThreadId(id)
+  const ago = inboxWakeAgo(at, now)
+  if (!message || !ago) return ''
+  const head = `Replying to your message from ${ago} (${message})`
+  const words = wakeQuote(quote)
+  if (words) return `[${head}: "${words}"]`
+  const asked: string[] = []
+  if ((wakeCount(questions) ?? 0) > 0) asked.push(wakePlural(questions as number, 'question'))
+  if ((wakeCount(actions) ?? 0) > 0) asked.push(wakePlural(actions as number, 'action item'))
+  return `[${head}${asked.length > 0 ? `, with ${asked.join(' and ')}` : ''}]`
+}
+
+/**
+ * The command as a wake with a details line words it: the body without the
+ * still-open sentence, only when the details line says it instead (it prints,
+ * and counts a question open). Otherwise, and when that sentence is all the
+ * body holds, the body stays.
+ */
+export function inboxWakeCommand<T extends { body: string; thread_id?: unknown; context?: unknown }>(command: T): T {
+  if (!command.context || typeof command.context !== 'object') return command
+  const { still_open_line: line, still_open_at: at, ...context } = command.context as Record<string, unknown>
+  if (typeof line !== 'string' || line === '') return command
+  if (!inboxWakeDetailsLine(command.thread_id, context, { now: 0 }) || !wakeCount(context.open_questions)) return { ...command, context }
+  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || !command.body.startsWith(line, at)) return { ...command, context }
+  const end = at + line.length
+  const alone = (at === 0 || command.body.slice(at - 2, at) === '\n\n') && (end === command.body.length || command.body.slice(end, end + 2) === '\n\n')
+  if (!alone) return { ...command, context }
+  const body = [command.body.slice(0, Math.max(0, at - 2)), command.body.slice(end + 2)].filter((part) => part !== '').join('\n\n')
+  return { ...command, context, body: body === '' ? command.body : body }
 }
 
 /**
@@ -1294,10 +1422,11 @@ export function inboxWakeClosingLine(threadId: unknown, toolName: string = INBOX
  * (the title is the command's `subject`, or `a reply` / `a message` without
  * one), the fixed instruction line for its type (a reply, a New message, or a
  * thread the person started; on a redirected reply, the line
- * saying so under it), then the words verbatim, then the closing line
- * (`inboxWakeClosingLine`, naming `toolName`, the tool as the host
- * registered it). Never the thread re-sent. A 👍 Looks good (`ack_of`) is the
- * first line and `inboxAckLine`, closed by `[thread <id>]` alone.
+ * saying so under it), the details and Replying to lines when the Inbox sent
+ * their data (`inboxWakeDetailsLine`, `inboxWakeReplyingLine`), then the words
+ * verbatim, then INBOX_WAKE_CLOSING_LINE. Never the thread re-sent. A 👍 Looks
+ * good (`ack_of`) is the first line and `inboxAckLine`, closed by
+ * `[thread <id>]` alone.
  */
 export function inboxWakeText(
   command: Pick<InboxReplyCommand, 'id' | 'subject' | 'body'> & {
@@ -1318,12 +1447,14 @@ export function inboxWakeText(
     reask_one?: unknown
     tidy?: boolean
     steps?: unknown
+    context?: unknown
   },
-  toolName: string = INBOX_TOOL_NAME,
+  now: number = Date.now(),
+  wording: { queued?: boolean } = {},
 ): string {
   // Tidy: the body is the wake; it spans threads, so the closing line names none.
   if (command.tidy === true) {
-    return `Plannotator Inbox: ${(command.subject ?? '').replace(/\s+/g, ' ').trim() || 'Tidy'} (${command.id})\n${command.body}\n\n${inboxWakeClosingLine(null, toolName)}`
+    return `Plannotator Inbox: ${(command.subject ?? '').replace(/\s+/g, ' ').trim() || 'Tidy'} (${command.id})\n${command.body}\n\n${INBOX_WAKE_CLOSING_LINE}`
   }
   if (typeof command.ack_of === 'string' && command.ack_of !== '') {
     const ackSubject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || 'a message'
@@ -1332,25 +1463,31 @@ export function inboxWakeText(
   }
   // The session's steps in this thread (approval "inbox-thread-steps"), its own paragraph before the closing line.
   const steps = wakeSteps(command.steps)
-  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${inboxWakeClosingLine(command.thread_id, toolName)}`
+  const closing = `${steps ? `\n\n${inboxStepsWakeLine(steps)}` : ''}\n\n${INBOX_WAKE_CLOSING_LINE}`
+  const { body, context } = inboxWakeCommand(command)
+  const details = inboxWakeDetailsLine(command.thread_id, context, { now, reask: command.reask === true, queued: wording.queued === true })
+  const target = details ? inboxWakeReplyingLine((context as { replying_to?: unknown }).replying_to, now) : ''
+  // No details (a brand new thread, a hand-off notice, an older Inbox): the wake still names its thread.
+  const thread = wakeThreadId(command.thread_id)
+  const facts = details ? `\n${details}${target ? `\n${target}` : ''}` : thread ? `\n[Thread ${thread}]` : ''
   const subject = (command.subject ?? '').replace(/\s+/g, ' ').trim() || (command.type === 'message' ? 'a message' : 'a reply')
   // The thread was handed to another session: the notice alone.
   if (command.handed_away && typeof command.handed_away === 'object') {
     const to = wakeName(command.handed_away.to) || 'another agent'
-    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${inboxHandedAwayLine(to)}${facts}${closing}`
   }
   // Handed this thread: it is this session's now; read it first.
   if (command.handoff && typeof command.handoff === 'object') {
     const from = wakeName(command.handoff.from) || 'another agent'
-    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_HANDOFF_INSTRUCTION}\n${inboxHandoffLine(from, command.id)}\n\n${command.body}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_HANDOFF_INSTRUCTION}\n${inboxHandoffLine(from, command.id)}${facts}\n\n${body}${closing}`
   }
   // Tagged into a thread another session owns: what it is, then read the thread first.
   if (command.tagged && typeof command.tagged === 'object') {
     const owner = wakeName(command.tagged.owner) || 'another agent'
     if (command.added === true) {
-      return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_ADDED_INSTRUCTION}\n${inboxAddedLine(owner, command.id)}\n\n${command.body}${closing}`
+      return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_ADDED_INSTRUCTION}\n${inboxAddedLine(owner, command.id)}${facts}\n\n${body}${closing}`
     }
-    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_TAGGED_INSTRUCTION}\n${inboxTaggedLine(owner, command.id)}\n\n${command.body}${closing}`
+    return `Plannotator Inbox: ${subject} (${command.id})\n${INBOX_TAGGED_INSTRUCTION}\n${inboxTaggedLine(owner, command.id)}${facts}\n\n${body}${closing}`
   }
   const others = Array.isArray(command.also_tagged)
     ? command.also_tagged
@@ -1379,7 +1516,7 @@ export function inboxWakeText(
       ? `\n${inboxContinuesLine(command.id)}`
       : ''
   const naming = command.name_thread === true ? `\n${INBOX_NAME_THREAD_LINE}` : ''
-  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}\n\n${command.body}${closing}`
+  return `Plannotator Inbox: ${subject} (${command.id})\n${instruction}${redirected}${also}${naming}${facts}\n\n${body}${closing}`
 }
 
 /**
