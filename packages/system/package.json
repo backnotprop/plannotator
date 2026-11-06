@@ -5,20 +5,33 @@
   "description": "System: a living drawing of a codebase. Format 1, its loader, the check of cited paths, and the gate that says when a drawing may be out of date.",
   "license": "Apache-2.0",
   "type": "module",
-  "sideEffects": false,
+  "sideEffects": ["*.css"],
   "exports": {
     ".": "./src/index.ts",
-    "./node": "./src/node/index.ts"
+    "./node": "./src/node/index.ts",
+    "./react": "./src/react.ts",
+    "./system.css": "./src/system.css"
   },
   "scripts": {
     "check": "bun src/node/check-cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "bun test"
+    "test": "bun test",
+    "demo": "bun demo/serve.ts"
   },
   "dependencies": {
     "yaml": "2.9.0"
   },
   "devDependencies": {
+    "@fontsource-variable/geist-mono": "5.3.0",
+    "@fontsource-variable/inter": "^5.3.0",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
     "typescript": "~5.8.2"
+  },
+  "peerDependencies": {
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1"
   }
 }
