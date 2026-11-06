@@ -339,6 +339,13 @@ export interface PlannotatorConfig {
    */
   agentTool?: boolean;
   /**
+   * Plan review of Claude Code's ExitPlanMode (Claude Code only: Pi and
+   * OpenCode have no such hook). `false` leaves plan approval to Claude
+   * Code's own dialog. The rest of Plannotator is unchanged.
+   * PLANNOTATOR_PLAN_REVIEW wins over this key. Default: true.
+   */
+  planReview?: boolean;
+  /**
    * The Plannotator Inbox's `plannotator_inbox` tool on the hosts that will
    * register it (the Claude Code mod, Pi, OpenCode 2), set from the Inbox's
    * own Settings: `true` / `false` for every host, or one boolean per host
@@ -406,6 +413,11 @@ export interface PlannotatorConfig {
   inboxRows?: string[];
   /** How many times `inboxRows` was saved: windows take a look only when it is newer than the last they took. */
   inboxRowsRev?: number;
+  /**
+   * The defaults `inboxRows` was saved under (core `INBOX_ROWS_DEFAULTS_VERSION`, 2: smaller thread names on).
+   * Unset: saved before that, so an empty `inboxRows` is read as today's defaults (core `inboxRowsSaved`).
+   */
+  inboxRowsDefaults?: number;
   /**
    * The Inbox's onboarding tour, per machine (approval "inbox-onboarding-tour"):
    * when it was started, finished or skipped, and whether the first real thread
@@ -1531,6 +1543,22 @@ export function resolveAgentTool(
   host: AgentToolHost,
 ): boolean {
   return parseAgentToolEnv(env) ?? parseConfigBoolean(config.agentTool) ?? AGENT_TOOL_DEFAULTS[host];
+}
+
+/** The PLANNOTATOR_PLAN_REVIEW override, or undefined when it does not decide. */
+export function parsePlanReviewEnv(env: NodeJS.ProcessEnv = process.env): boolean | undefined {
+  const v = env.PLANNOTATOR_PLAN_REVIEW?.trim().toLowerCase();
+  if (v === "1" || v === "true" || v === "on") return true;
+  if (v === "0" || v === "false" || v === "off" || v === "disabled") return false;
+  return undefined;
+}
+
+/**
+ * Whether Plannotator reviews Claude Code's ExitPlanMode.
+ * Priority: PLANNOTATOR_PLAN_REVIEW → config.planReview → on.
+ */
+export function resolvePlanReview(config: PlannotatorConfig, env: NodeJS.ProcessEnv): boolean {
+  return parsePlanReviewEnv(env) ?? parseConfigBoolean(config.planReview) ?? true;
 }
 
 /**

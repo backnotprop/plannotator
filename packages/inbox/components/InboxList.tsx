@@ -1056,7 +1056,7 @@ export function InboxList(props: InboxListProps) {
     const text = props.machineScope && props.machineScope !== machine.id ? null : awayLine(machine);
     return text ? [{ id: machine.id, text }] : [];
   });
-  // The list's look options in its ⋮ menu (listLook.ts), all off by default.
+  // The list's look options in its ⋮ menu (listLook.ts): smaller thread names on by default, the others off.
   const [look, setLook] = useListLook(props.rememberLook !== false);
   // Settings → Rows' "Project" off: every row drawn as one project's list draws it (no project, its columns).
   const noProject = props.filtered || look.hideProject;
