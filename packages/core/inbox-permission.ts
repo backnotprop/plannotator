@@ -312,6 +312,12 @@ function previewOf(event: InboxPermissionEvent, overwrite?: boolean): { preview:
     const lines = [...sign("-", text("old_string")!), ...sign("+", text("new_string")!)];
     return { preview: { kind: input.replace_all === true ? "diff-all" : "diff", text: lines.join("\n") }, keys: ["old_string", "new_string", "replace_all"] };
   }
+  // OpenCode's file change: its own unified diff (`diff`, no old and new strings), from the first hunk on.
+  if (event.tool_name === "Edit" && text("old_string") === null && text("diff") !== null) {
+    const lines = text("diff")!.replace(/\n$/, "").split("\n");
+    const at = lines.findIndex((line) => line.startsWith("@@ "));
+    if (at >= 0) return { preview: { kind: "diff", text: lines.slice(at).join("\n") }, keys: ["diff"] };
+  }
   if (event.tool_name === "MultiEdit" && Array.isArray(input.edits) && input.edits.length > 0) {
     const edits = input.edits as unknown[];
     const lines: string[] = [];

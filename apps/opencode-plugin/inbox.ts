@@ -229,6 +229,15 @@ export function dropInboxDuplicates(messages: unknown[]): number {
   return dropped;
 }
 
+/**
+ * OpenCode 1 in a server the Inbox started for a launch (`PLANNOTATOR_LAUNCH=lch_…`, set only by
+ * packages/server/inbox-launch-opencode.ts): the Inbox delivers the person's replies to its sessions as
+ * turns, so the tool and its reminder say replies come back by themselves.
+ */
+export function openCode1LaunchWakes(env: Readonly<Record<string, string | undefined>>): boolean {
+  return /^lch_[0-9A-HJKMNP-TV-Z]{26}$/.test(env.PLANNOTATOR_LAUNCH ?? "");
+}
+
 /** The Inbox connection for this OpenCode process, or null when the switch is off or no Inbox was found. */
 export async function findInboxConnection(): Promise<InboxAgentConnection | null> {
   if (!resolveInboxTool(loadConfig(), process.env, "opencode")) return null;
