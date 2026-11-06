@@ -367,6 +367,22 @@ export interface TailscaleSettings {
 /** Split (old beside new) or Unified (one column): the diff layout code review and guided reviews share. */
 export type InboxDiffStyle = 'split' | 'unified';
 
+/**
+ * How diffs are drawn (config.json `diffOptions`, shared with code review), by
+ * the wire's names: each null when never chosen. Whole file, Hide whitespace
+ * and the fonts are code review's alone.
+ */
+export interface InboxDiffOptions {
+  diff_style: InboxDiffStyle | null;
+  overflow: 'scroll' | 'wrap' | null;
+  indicators: 'bars' | 'classic' | 'none' | null;
+  line_diff_type: 'word-alt' | 'word' | 'char' | 'none' | null;
+  line_numbers: boolean | null;
+  background: boolean | null;
+  background_intensity: 'subtle' | 'normal' | 'strong' | null;
+  tab_size: number | null;
+}
+
 /** Settings → General's cookie switch (SettingsModel.cookie_host). */
 export interface InboxCookieHost {
   on: boolean;
@@ -430,6 +446,8 @@ export interface SettingsModel {
    * shared with code review: null when never chosen. Absent from an older Inbox.
    */
   diff_style?: InboxDiffStyle | null;
+  /** How diffs are drawn (config.json `diffOptions`, shared with code review). Absent from an older Inbox. */
+  diff_options?: InboxDiffOptions;
   /** Experimental features, each off unless switched on (`env`: PLANNOTATOR_EXPERIMENTAL decides). Absent from an older Inbox. */
   experimental?: InboxExperimentalSettings;
   /** The Board (config.json `inboxBoard`): off unless the person turned it on. Absent from an Inbox before the switch (the Board is then always there). */
@@ -1399,8 +1417,9 @@ export const inboxApi = {
   saveTextSize: (textSize: InboxTextSize) => post<{ text_size: InboxTextSize }>(inboxUrl('/settings'), { text_size: textSize }),
   /** How the list's rows look, written to config.json `inboxRows`: every window open hears it (`event: rows`). */
   saveRows: (rows: readonly InboxRowsOption[]) => post<{ rows: InboxRowsOption[]; rows_rev: number }>(inboxUrl('/settings'), { rows }),
-  /** The diff layout, written to config.json `diffOptions.diffStyle` (shared with code review). */
-  saveDiffStyle: (diffStyle: InboxDiffStyle) => post<{ diff_style: InboxDiffStyle | null }>(inboxUrl('/settings'), { diff_style: diffStyle }),
+  /** How diffs are drawn, written to config.json `diffOptions` (shared with code review): only the fields given. */
+  saveDiffOptions: (change: Partial<InboxDiffOptions>) =>
+    post<{ diff_style: InboxDiffStyle | null; diff_options: InboxDiffOptions }>(inboxUrl('/settings'), { diff_options: change }),
   saveTailscale: (on: boolean, replaceExposed = false) =>
     post<{ tailscale: TailscaleSettings }>(inboxUrl('/settings'), { tailscale: replaceExposed ? { on, replace_exposed: true } : { on } }),
   // Step 2: attachments (by id only), annotations, deleting.
