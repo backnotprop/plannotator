@@ -110,6 +110,9 @@ const NO_ANNOTATIONS: never[] = [];
 
 type RailMode = 'walkthrough' | 'files';
 
+/** How long a file's sideways bar stays after the last movement under a finger. */
+const FILE_MOVING_LINGER_MS = 700;
+
 export function ReviewPane({ thread, message, guest = false, onBack, onClose, onSent, onAsk }: ReviewPaneProps) {
   const state = useGuideState(thread, message);
   const { snapshot, error, reviewed, saveError, setSaveError, records, setRecords, comments, selectedId, setSelectedId, readOnly, changeReviewed, remove, edit, showComment, readerComments: stateComments, fileContents } = state;
@@ -235,6 +238,41 @@ export function ReviewPane({ thread, message, guest = false, onBack, onClose, on
       for (const kind of HAND) body.removeEventListener(kind, release);
     };
   }, [mode, snapshot, chapters.length]);
+  // No hover under a finger: the file being touched shows its sideways bar while it or the page moves (inbox.css).
+  // A sideways scroll stays inside the diff's shadow root, so the file's own root is listened to as well.
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    let shell: Element | null = null;
+    let timer = 0;
+    const moved = () => {
+      clearTimeout(timer);
+      timer = window.setTimeout(() => show(null), FILE_MOVING_LINGER_MS);
+    };
+    const show = (next: Element | null) => {
+      if (next === shell) return;
+      shell?.removeAttribute('data-review-file-moving');
+      shell?.querySelector('diffs-container')?.shadowRoot?.removeEventListener('scroll', moved, true);
+      shell = next;
+      shell?.setAttribute('data-review-file-moving', '');
+      shell?.querySelector('diffs-container')?.shadowRoot?.addEventListener('scroll', moved, { capture: true, passive: true });
+    };
+    const touched = (event: TouchEvent) => {
+      show(event.target instanceof Element ? event.target.closest('[data-guide-file-shell]') : null);
+      moved();
+    };
+    const scrolled = () => {
+      if (shell) moved();
+    };
+    body.addEventListener('touchmove', touched, { passive: true });
+    body.addEventListener('scroll', scrolled, { passive: true });
+    return () => {
+      clearTimeout(timer);
+      show(null);
+      body.removeEventListener('touchmove', touched);
+      body.removeEventListener('scroll', scrolled);
+    };
+  }, [snapshot]);
   const toChapter = (index: number | null) => {
     jumped.current = true;
     setCurrent(index);
