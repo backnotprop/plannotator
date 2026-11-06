@@ -4168,8 +4168,9 @@ export async function startReviewServer(
           }
 
           // The "Star the repo" ask on the done screen (packages/shared/star-ask.ts).
-          const starAsk = await handleStarAsk(req, url, "review", { remote: isRemote });
-          if (starAsk) return starAsk;
+          if (url.pathname.startsWith("/api/star-ask/")) {
+            return (await handleStarAsk(req, url, "review", { remote: isRemote })) ?? handleApiNotFound(url.pathname);
+          }
 
           // API: Serve images (local paths or temp uploads)
           if (url.pathname === "/api/image") {
