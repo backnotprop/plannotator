@@ -19,28 +19,68 @@ export function filesToHide(viewedFiles: ReadonlySet<string>, keptFrom: Readonly
 
 /**
  * `hiddenFiles` for the hide checks, and the pointer handlers for the panel
- * that holds the list. Turning Hide viewed on (or off and on) while the pointer
- * is in the panel hides everything viewed: the person asked for it.
+ * that holds the list.
+ *
+ * The hold is only for a pointer that is aiming at a row:
+ *  - a key press (j/k, the arrows, Home/End, ⌘P) releases it, so a keyboard
+ *    user resting the mouse over the panel still sees viewed files go; the
+ *    pointer's next move in the panel holds again from what is viewed then;
+ *  - turning Hide viewed on (or off and on) in the panel hides everything
+ *    viewed: the person asked for it;
+ *  - with Hide viewed off there is nothing to hold, so crossing the panel edge
+ *    costs no state change and no redraw.
  */
 export function useHiddenViewedFiles(viewedFiles: Set<string>, hideViewedFiles: boolean) {
   const [keptFrom, setKeptFrom] = useState<ReadonlySet<string> | null>(null);
   const viewedRef = useRef(viewedFiles);
   viewedRef.current = viewedFiles;
+  const hideRef = useRef(hideViewedFiles);
+  hideRef.current = hideViewedFiles;
   const insideRef = useRef(false);
+  const heldRef = useRef(false);
 
-  const onPointerEnter = useCallback(() => {
-    insideRef.current = true;
+  const hold = useCallback(() => {
+    if (!hideRef.current || heldRef.current) return;
+    heldRef.current = true;
     setKeptFrom(new Set(viewedRef.current));
   }, []);
-  const onPointerLeave = useCallback(() => {
-    insideRef.current = false;
+  const release = useCallback(() => {
+    if (!heldRef.current) return;
+    heldRef.current = false;
     setKeptFrom(null);
   }, []);
 
-  useEffect(() => {
-    if (insideRef.current) setKeptFrom(new Set(viewedRef.current));
-  }, [hideViewedFiles]);
+  const onPointerEnter = useCallback(() => {
+    insideRef.current = true;
+    hold();
+  }, [hold]);
+  const onPointerMove = useCallback(() => {
+    if (insideRef.current) hold();
+  }, [hold]);
+  const onPointerLeave = useCallback(() => {
+    insideRef.current = false;
+    release();
+  }, [release]);
 
-  const hiddenFiles = useMemo(() => filesToHide(viewedFiles, keptFrom), [viewedFiles, keptFrom]);
-  return { hiddenFiles, panelPointerProps: { onPointerEnter, onPointerLeave } };
+  // A toggle in the panel re-takes the hold from what is viewed now.
+  useEffect(() => {
+    release();
+    if (insideRef.current) hold();
+  }, [hideViewedFiles, hold, release]);
+
+  // Keyboard navigation moves the active file without aiming at a row.
+  useEffect(() => {
+    if (!hideViewedFiles) return;
+    const onKeyDown = () => {
+      if (insideRef.current) release();
+    };
+    window.addEventListener('keydown', onKeyDown, true);
+    return () => window.removeEventListener('keydown', onKeyDown, true);
+  }, [hideViewedFiles, release]);
+
+  const hiddenFiles = useMemo(
+    () => (hideViewedFiles ? filesToHide(viewedFiles, keptFrom) : viewedFiles),
+    [hideViewedFiles, viewedFiles, keptFrom],
+  );
+  return { hiddenFiles, panelPointerProps: { onPointerEnter, onPointerMove, onPointerLeave } };
 }
