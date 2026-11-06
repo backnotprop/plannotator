@@ -57,14 +57,14 @@ function compileReleaseBinary(): string {
 
 /**
  * An Inbox three days into use: the seeded log, every other one-time dialog and the tour already behind the person (so
- * nothing else shows on these loads), and every agent's home a temp folder. HOME is left as it is (never set).
+ * nothing else shows on these loads), and every agent's home a temp folder. HOME is the world's temp folder.
  */
 async function world(): Promise<World> {
   const root = realpathSync(mkdtempSync(join(scratch, 'world-')));
   const dataDir = join(root, 'data');
   const src = join(root, 'src');
   for (const dir of [dataDir, src, join(root, 'claude'), join(root, 'codex'), join(root, 'xdg-config'), join(root, 'xdg-data')]) mkdirSync(dir, { recursive: true });
-  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-snooze-intro-seed.ts'), dataDir, src, '3'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', PLANNOTATOR_DATA_DIR: dataDir } });
+  const seeded = spawnSync('bun', [join(repo, 'tests/e2e/inbox-snooze-intro-seed.ts'), dataDir, src, '3'], { cwd: repo, encoding: 'utf8', env: { PATH: process.env.PATH ?? '', HOME: root, PLANNOTATOR_DATA_DIR: dataDir } });
   expect(seeded.status, seeded.stderr).toBe(0);
   const ids = JSON.parse(seeded.stdout.trim()) as Record<string, string>;
   const past = '2026-10-01T10:00:00.000Z';
@@ -82,6 +82,7 @@ async function world(): Promise<World> {
   );
   const env = {
     PATH: process.env.PATH ?? '',
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     // A release version: never the live daily ping (packages/shared/daily-ping.ts).
     NO_ANON_PING: '1',
@@ -89,7 +90,7 @@ async function world(): Promise<World> {
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
     PLANNOTATOR_INBOX_PHONES: '0',
-    // HOME stays the runner's: the sandbox keeps this Inbox out of its skill folders.
+    // HOME is this world's temp folder: the sandbox keeps this Inbox out of any real skill folder.
     PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude'),
     CODEX_HOME: join(root, 'codex'),

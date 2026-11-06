@@ -55,7 +55,8 @@ import type { ForgeRefCardResult } from '@plannotator/core/forge-ref-card';
 import { learnDebugLog, resumeDebugLog } from './debugLog';
 import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
-import type { InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
+import type { PatchBlobIds } from '@plannotator/core/diff-files';
+import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
 import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
@@ -1037,6 +1038,8 @@ export interface StartThreadInput {
   thread_name_auto?: true;
   /** Compose's Board chip was on: the agent is asked to track the work on the Board (approval "inbox-compose-board-chip"). */
   board_request?: true;
+  /** Asked from Settings -> Decision data: the agent also receives how to answer it. */
+  decision_ask?: true;
 }
 
 /**
@@ -1333,6 +1336,9 @@ export const inboxApi = {
   /** The guided review a message carries: its record and the snapshot (validated by the server, parsed again here). */
   guide: (messageId: string) =>
     get<{ message_id: string; guide: InboxGuideRef; snapshot: unknown }>(messageUrl(messageId, `/guide`)),
+  /** One changed file's whole text as the guide's patch names it, for its expand arrows. */
+  guideFile: (messageId: string, path: string, signal?: AbortSignal) =>
+    get<InboxFileContents>(messageUrl(messageId, `/guide/file`, `path=${encodeURIComponent(path)}`), signal),
   /** The person's reviewed ticks on that guide, kept on the message. */
   saveGuideReviewed: (messageId: string, reviewed: boolean[]) =>
     post<{ message_id: string; reviewed: boolean[] }>(messageUrl(messageId, `/guide/reviewed`), { reviewed }),
@@ -1378,7 +1384,7 @@ export const inboxApi = {
   claimSoundDialog: () => post<{ show: boolean; sound: InboxSoundSettings }>(inboxUrl('/sound/dialog'), {}),
   /**
    * The sidebar's Feedback dialog: the person's words go to the feedback Worker through this Inbox's server
-   * (packages/server/inbox-feedback.ts), which adds the version and the OS name and nothing else.
+   * (packages/server/inbox-feedback.ts), which adds the version, the OS name and the names of the agents used, and nothing else.
    */
   sendFeedback: (input: { message: string; category: 'bug' | 'idea' | 'other' | null; contact: string | null }) => sendFeedback(input),
   /** Plannotator's appearance, written to config.json `theme` (shared with plan review). */
@@ -1516,6 +1522,9 @@ export const inboxApi = {
   /** One layer's diff, or the stack's from its base up to that layer (a PR the last list named). */
   pullDiff: (key: string, scope: InboxPullDiffScope, signal?: AbortSignal) =>
     get<InboxPullDiffAnswer>(inboxUrl(`/pulls/diff?key=${encodeURIComponent(key)}&scope=${scope}`), signal),
+  /** One changed file's whole text at both ends of that diff, for its expand arrows, while it is the blobs (`old`, `new`) the patch on screen names. */
+  pullFile: (key: string, scope: InboxPullDiffScope, path: string, ids: PatchBlobIds, signal?: AbortSignal) =>
+    get<InboxFileContents>(inboxUrl(`/pulls/file?key=${encodeURIComponent(key)}&scope=${scope}&path=${encodeURIComponent(path)}&old=${ids.oldId}&new=${ids.newId}`), signal),
   /** The person started a PR's (a stack's open layers') review thread with an agent: `threadId` is the thread the review picker (or compose's New thread) just started for it. */
   pullOwner: (keys: readonly string[], threadId: string, ask?: 'guide' | 'custom') => post<{ ok: true }>(inboxUrl('/pulls/owner'), { keys: [...keys], thread_id: threadId, ...(ask ? { ask } : {}) }),
   /** Before a hand-off is sent: may these PRs go to an agent in `projectId`? (404 `pull_unknown`, 422 another project's.) */
@@ -1798,10 +1807,11 @@ export interface InboxEventHandlers {
   /**
    * A row's delivery may have moved with the live sessions (a turn started or
    * ended, a session went away): no store line, so the list is read again.
-   * Never called by an older Inbox. `labels`: a session's label changed too (issue #2450), so the rows' agents
+   * Never called by an older Inbox. `sessions`: a session ended or came back, so a row's "Session ended" may have
+   * moved. `labels`: a session's label changed too (issue #2450), so the rows' agents
    * and the authors read the list again.
    */
-  onDeliveries?: (change?: { labels: boolean }) => void;
+  onDeliveries?: (change?: { labels: boolean; sessions: boolean }) => void;
   /**
    * The stream (re)connected: the server's `hello`. A reconnect carries the
    * URL it was first opened with, so its `permission=` may be stale (a grant
@@ -1931,12 +1941,15 @@ export function dispatchInboxFrame(frame: InboxEventFrame, handlers: InboxEventH
       return;
     case 'deliveries': {
       let labels = false;
+      let sessions = false;
       try {
-        labels = (JSON.parse(frame.data) as { labels?: unknown } | null)?.labels === true;
+        const change = JSON.parse(frame.data) as { labels?: unknown; sessions?: unknown } | null;
+        labels = change?.labels === true;
+        sessions = change?.sessions === true;
       } catch {
         // An empty or malformed frame is a delivery change alone.
       }
-      handlers.onDeliveries?.({ labels });
+      handlers.onDeliveries?.({ labels, sessions });
       return;
     }
     case 'pins':

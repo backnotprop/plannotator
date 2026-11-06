@@ -41,6 +41,7 @@ plugin({
 // The review app's worker pool imports Vite's `?worker&inline`, which Bun cannot load; the diffs then
 // highlight on the main thread. The same stand-in AllFilesCodeView.lifecycle.test.tsx installs.
 mock.module(resolve(import.meta.dir, '../review-editor/workerPool.tsx'), () => ({
+  ReviewWorkerPoolProvider: ({ children }: { children: unknown }) => children,
   useIsWorkerPoolReadyOrDisabled: () => true,
   useWorkerPoolThemeSync: () => {},
 }));
