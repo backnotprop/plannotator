@@ -3210,6 +3210,8 @@ export async function startInboxServer(options: InboxServerOptions = {}): Promis
     hostOf: live.hostOf,
     // A Codex reply whose `codex queue` ran out of time may not have gone: its row says it is saved, not queued.
     uncertain: (session, itemId) => codexWake.uncertain(session, itemId) || qwenWake.uncertain(session, itemId) || t3Wake.uncertain(session, itemId),
+    // Claimed by its session's connection and never to be delivered there (a wake killed mid-delivery).
+    stuck: live.stuck,
     autoSendAfterMs: live.autoSendAfterMs,
     waitOf: live.waitOf,
   });

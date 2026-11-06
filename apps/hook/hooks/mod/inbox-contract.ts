@@ -1345,3 +1345,10 @@ export function inboxWakeText(
  * never this long without one.
  */
 export const INBOX_SESSION_LIVE_MS = 30_000
+
+/**
+ * A claimed reply whose claimant stopped saying it is alive for this long has
+ * a claimant that quit: the Claude Code mod reports it then, and the Inbox
+ * reads it as stuck once that session is gone too.
+ */
+export const INBOX_UNDELIVERED_AFTER_MS = 60_000
