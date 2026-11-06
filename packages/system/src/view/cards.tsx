@@ -23,7 +23,7 @@ export function KeyCard({ notes, sheets, keys, pane }: { notes: boolean; sheets:
       {MOVES_ORDER.map((m) => (
         <div className="sys-kc-r" key={m}>
           <span className="sys-kc-i"><svg width="40" height="10" aria-hidden="true"><path d="M2 5H38" stroke={MOVES[m].ink} strokeWidth="2.2" /></svg></span>
-          <span>{MOVES[m].word}: {MOVES[m].key}</span>
+          <span><b className="sys-kc-w">{MOVES[m].word}</b> {MOVES[m].key}</span>
         </div>
       ))}
       <div className="sys-kc-h">Keys, with the drawing in focus</div>

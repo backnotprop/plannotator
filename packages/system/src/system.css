@@ -117,6 +117,7 @@
 .sys-notescard { width: min(560px, calc(100% - 28px)); display: grid; gap: 9px; }
 .sys-kc-h { font-size: var(--ib-fs-12, 12px); font-weight: 600; color: var(--sys-ink2); margin: 10px 0 5px; }
 .sys-kc-h:first-child { margin-top: 0; }
+.sys-kc-w { font-weight: 600; color: var(--sys-ink); margin-right: 2px; }
 .sys-kc-r { display: flex; align-items: center; gap: 10px; min-height: 22px; }
 .sys-kc-i { width: 40px; flex: none; display: inline-flex; justify-content: center; }
 .sys-kc-k { display: flex; align-items: center; gap: 4px; min-height: 22px; }
