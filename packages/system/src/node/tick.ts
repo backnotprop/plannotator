@@ -97,12 +97,24 @@ async function defaultBranch(root: string): Promise<string> {
   throw new Error('no default branch: origin has no HEAD, main or master');
 }
 
-/** Pull request numbers named by the first-parent commits in a range: "Merge pull request #n" and a squash's "(#n)". */
-export async function mergedPrs(root: string, from: string, to: string): Promise<number[]> {
-  const out = await git(root, ['log', '--first-parent', '--format=%s', '--end-of-options', `${checkRef(from)}..${checkRef(to)}`]);
+/**
+ * Pull request numbers named by the first-parent commits in a range ("Merge
+ * pull request #n", a squash's "(#n)"). With `paths`, only the commits that
+ * changed one of them: the pull requests that moved the drawing, not every
+ * one that landed.
+ */
+export async function mergedPrs(root: string, from: string, to: string, paths?: readonly string[]): Promise<number[]> {
+  const out = await git(root, [
+    'log', '--first-parent', '--diff-merges=first-parent', '--name-only', '-z', '--format=%x01%s', '--end-of-options', `${checkRef(from)}..${checkRef(to)}`,
+  ]);
+  const wanted = paths ? new Set(paths) : null;
   const prs = new Set<number>();
-  for (const line of out.split('\n')) {
-    const m = /^Merge pull request #(\d+)\b/.exec(line) ?? /\(#(\d+)\)\s*$/.exec(line);
+  for (const entry of out.split('\x01').slice(1)) {
+    // <subject> NUL, then each file NUL (the first after a newline)
+    const [subject = '', ...rest] = entry.split('\0');
+    const files = rest.map((f) => f.replace(/^\n/, '')).filter(Boolean);
+    if (wanted && !files.some((f) => wanted.has(f))) continue;
+    const m = /^Merge pull request #(\d+)\b/.exec(subject) ?? /\(#(\d+)\)\s*$/.exec(subject);
     if (m) prs.add(Number(m[1]));
   }
   return [...prs].sort((a, b) => a - b);
@@ -241,13 +253,18 @@ async function setAside(wt: string, into: string): Promise<void> {
   await git(wt, ['clean', '--quiet', '-fd']);
 }
 
-/** Set sources.repos.self.at in system.yaml, keeping the rest of the file as it is written. */
+/**
+ * Set sources.repos.self.at in system.yaml by replacing only that value's
+ * text, so every other byte stays as the agent wrote it (printing the parsed
+ * document again would refold its lines). With no such key it adds nothing:
+ * the check then names it.
+ */
 async function setDrawnAt(dir: string, commit: string): Promise<void> {
   const file = join(dir, 'system.yaml');
-  const doc = parseDocument(await readFile(file, 'utf8'));
-  if (doc.getIn(['sources', 'repos', 'self', 'at']) === commit) return;
-  doc.setIn(['sources', 'repos', 'self', 'at'], commit);
-  await writeFile(file, doc.toString());
+  const text = await readFile(file, 'utf8');
+  const node = parseDocument(text).getIn(['sources', 'repos', 'self', 'at'], true) as { value?: unknown; range?: [number, number, number] } | undefined;
+  if (!node?.range || node.value === commit) return;
+  await writeFile(file, `${text.slice(0, node.range[0])}"${commit}"${text.slice(node.range[1])}`);
 }
 
 /** The newer of two commits, by ancestry; either may be missing. With neither an ancestor of the other, `a`. */
@@ -336,7 +353,7 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   const onOrigin = await gitOk(r.root, ['fetch', '--quiet', 'origin', `+refs/heads/${REDRAW_BRANCH}:${remoteRedraw}`]);
   await prepareWorktree(r.root, wt, onOrigin ? remoteRedraw : r.target, onOrigin ? r.target : null);
 
-  const prs = await mergedPrs(r.root, r.from, r.target);
+  const prs = await mergedPrs(r.root, r.from, r.target, r.result.why.map((w) => w.path));
   const docs = unattendedDocs(r.setup.docs).allowed;
   const summaryPath = join(wt, SUMMARY_FILE);
   const prompt = updatePrompt({
@@ -350,6 +367,9 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
     return { ran: 'failed', gated: r.state.gated ?? '', error };
   };
 
+  const dir = join(wt, DRAWING_DIR);
+  // what this redraw starts from: main's drawing, or the open redraw's
+  const before = (await load(dir)).model ?? r.model;
   const agent = await runAgent({ setup: r.setup, cwd: wt, prompt, docs });
   if (!agent.ok) return fail(`the agent did not finish: ${agent.output.trim().slice(-400) || 'no output'}`);
   const outside = (await changedPaths(wt)).filter((p) => p !== SUMMARY_FILE && !p.startsWith(`${DRAWING_DIR}/`));
@@ -357,7 +377,6 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   const summary = (await readFile(summaryPath, 'utf8').catch(() => '')).trim();
   await unlink(summaryPath).catch(() => {});
 
-  const dir = join(wt, DRAWING_DIR);
   if (!(await changedPaths(wt)).length) {
     // the agent read the change and the drawing stands
     await r.save({ gated: r.target, gated_at: r.now(), last_error: null, failed: null });
@@ -383,7 +402,7 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   const pr = openPr ?? (await forge.openPr({ cwd: wt, base: r.main, head: REDRAW_BRANCH, title, body }));
 
   const after = (await load(dir)).model;
-  const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(r.model, after) : { parts: 0, flows: 0 }, pr });
+  const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(before, after) : { parts: 0, flows: 0 }, pr });
   let noteError: string | null = null;
   await notify({ project: r.root, subject: `System: ${r.model.name}`, body: note, replyTo: r.setup.thread_message }).catch((e: Error) => {
     noteError = `the note was not sent: ${e.message}`;

@@ -106,7 +106,9 @@ function launchd(o: { run?: CommandRunner; uid?: number }): { run: CommandRunner
   return { run: o.run ?? realRunner, domain: `gui/${uid}` };
 }
 
-const agentsDirOf = (o: { agentsDir?: string }) => o.agentsDir ?? join(homedir(), 'Library', 'LaunchAgents');
+/** The person's launchd agents folder, ~/Library/LaunchAgents. HOME first, so a test's temp HOME is the one used. */
+export const launchAgentsDir = () => join(process.env.HOME || homedir(), 'Library', 'LaunchAgents');
+const agentsDirOf = (o: { agentsDir?: string }) => o.agentsDir ?? launchAgentsDir();
 const plistPath = (dir: string, key: string) => join(dir, `${scheduleLabel(key)}.plist`);
 
 /**
