@@ -210,11 +210,16 @@ const COMPACT_TOUCH_GUTTER_UTILITY_CSS = `
  *   transparent, or the code shows through it while stuck.
  * - `--pn-diff-code-border`, `--pn-diff-code-radius`, `--pn-diff-code-overflow`:
  *   a border, corners and clipping (`clip`, so the rows' fills keep to the
- *   corners) on the code under the header.
+ *   corners) on the code under the header. The border is not in CodeView's
+ *   height metrics, so these assume one file per CodeView (the 2 px land in the
+ *   host's box padding); an outline would not show over the code's own layers.
+ *   The sideways scrollbar's track is inset by the radius, so the corners do
+ *   not cut its thumb's ends.
  *
  * Each fallback is what Pierre draws without them (its sticky and default
  * headers fill with `--diffs-bg`; `pre` has no border, radius or overflow of
- * its own), so the review app, which sets none, renders exactly as before.
+ * its own, nor the scrollbar track a margin), so the review app, which sets
+ * none, renders exactly as before.
  */
 const HOST_SURFACE_HOOKS_CSS = `
   [data-diffs-header][data-sticky], [data-diffs-header='default'] { background-color: var(--pn-diff-header-bg, var(--diffs-bg)); }
@@ -223,6 +228,7 @@ const HOST_SURFACE_HOOKS_CSS = `
     border-radius: var(--pn-diff-code-radius, 0);
     overflow: var(--pn-diff-code-overflow, visible);
   }
+  [data-code]::-webkit-scrollbar-track { margin: 0 var(--pn-diff-code-radius, 0); }
 `;
 
 export function usePierreTheme(options?: {
