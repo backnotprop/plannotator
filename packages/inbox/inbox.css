@@ -3926,9 +3926,11 @@ dialog.ib-sp:not([data-phone]) .ib-sp-filters > .ib-sp-end { padding-left: 10px;
 .ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj, .ib-sp-sec, .ib-sp-at) { white-space: nowrap; }
 .ib-sp-tl > span:is(.ib-sp-lead, .ib-sp-pj) > bdi { white-space: normal; }
 /* The project moves to the next line whole ("workspaces-desktop-app", never "workspaces-desktop-" / "app"); it breaks
-   inside only when it alone is wider than the row. */
-.ib-sp-tl > span.ib-sp-pj > bdi { display: inline-block; max-width: 100%; overflow-wrap: anywhere; vertical-align: bottom; }
+   inside only when it alone is wider than the row. The box is the project with its "·", so a name as wide as the row
+   breaks inside its last word to keep the "·" in the row, never past the row's edge. */
+.ib-sp-tl > span.ib-sp-pj { display: inline-block; max-width: 100%; vertical-align: bottom; }
 .ib-sp-tl bdi { display: inline; max-width: none; white-space: inherit; }
+.ib-sp-tl > span.ib-sp-pj > bdi { overflow-wrap: anywhere; }
 .ib-sp-tl .ib-sp-sep { padding: 0 5px; color: var(--muted-foreground); }
 /* The thread's name: plain words in the line (no chip box, the row's face), then a "·" as between the line's other parts
    (a "·" a screen reader skips). */
