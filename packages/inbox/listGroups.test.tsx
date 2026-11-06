@@ -45,6 +45,7 @@ beforeEach(() => {
   });
 });
 afterEach(() => {
+  if (!hasDom) return;
   act(() => root?.unmount());
   root = null;
   host?.remove();
@@ -150,7 +151,7 @@ function focused(): string {
 /** The header's icons but the closed group's warning triangle (a chevron would be one). */
 const otherIcons = (id: InboxListGroupId) => [...header(id).querySelectorAll('svg')].filter((svg) => !svg.closest('.ib-zband-tri'));
 
-test('every header is a button that closes and opens its group, with no chevron; defaults as before', () => {
+test.skipIf(!hasDom)('every header is a button that closes and opens its group, with no chevron; defaults as before', () => {
   if (!hasDom) return;
   draw(sections());
   for (const id of GROUPS) {
@@ -176,7 +177,7 @@ test('every header is a button that closes and opens its group, with no chevron;
   }
 });
 
-test('the closed groups are this browser’s, kept across a remount; the tour ignores them', () => {
+test.skipIf(!hasDom)('the closed groups are this browser’s, kept across a remount; the tour ignores them', () => {
   if (!hasDom) return;
   draw(sections());
   click(header('waiting'));
@@ -204,7 +205,7 @@ test('the closed groups are this browser’s, kept across a remount; the tour ig
   expect(stored.get(LIST_GROUPS_COOKIE)).toBe(before);
 });
 
-test('something new inside a closed group bolds its count and never opens it', () => {
+test.skipIf(!hasDom)('something new inside a closed group bolds its count and never opens it', () => {
   if (!hasDom) return;
   draw(sections());
   click(header('new'));
@@ -234,7 +235,7 @@ test('something new inside a closed group bolds its count and never opens it', (
   expect(rowsIn('new')).toBe(2);
 });
 
-test('closed Stopped and Holding up work keep the warning triangle; other closed groups have none', () => {
+test.skipIf(!hasDom)('closed Stopped and Holding up work keep the warning triangle; other closed groups have none', () => {
   if (!hasDom) return;
   draw(sections());
   const tri = (id: InboxListGroupId) => header(id).querySelector('[data-folded-blocker]');
@@ -248,7 +249,7 @@ test('closed Stopped and Holding up work keep the warning triangle; other closed
   expect(header('snoozed').querySelector('[data-snooze-blocker][data-stopped]')).not.toBeNull();
 });
 
-test('focus in a row of the group that closes moves to its header', () => {
+test.skipIf(!hasDom)('focus in a row of the group that closes moves to its header', () => {
   if (!hasDom) return;
   draw(sections());
   const focusable = group('waiting').querySelector<HTMLElement>('[data-thread-id]')!;
@@ -265,7 +266,7 @@ test('focus in a row of the group that closes moves to its header', () => {
   expect(focused()).toBe('row t_stopped');
 });
 
-test('with storage that keeps nothing (cookies blocked), a header still closes and opens its group', () => {
+test.skipIf(!hasDom)('with storage that keeps nothing (cookies blocked), a header still closes and opens its group', () => {
   if (!hasDom) return;
   setStorageBackend({ getItem: () => null, setItem: () => {}, removeItem: () => {} });
   draw(sections());
@@ -297,7 +298,7 @@ const drawnRects = () => {
   return () => void (Element.prototype.getClientRects = real);
 };
 
-test('↓ ↑ stop on the headers; Home and End go to the first and last thread, past the closed groups’ headers', () => {
+test.skipIf(!hasDom)('↓ ↑ stop on the headers; Home and End go to the first and last thread, past the closed groups’ headers', () => {
   if (!hasDom) return;
   const restore = drawnRects();
   try {
@@ -319,7 +320,7 @@ test('↓ ↑ stop on the headers; Home and End go to the first and last thread,
   }
 });
 
-test('J K with no thread open go along the threads only: over a header, and from a header to its first thread', () => {
+test.skipIf(!hasDom)('J K with no thread open go along the threads only: over a header, and from a header to its first thread', () => {
   if (!hasDom) return;
   const restore = drawnRects();
   try {
@@ -339,7 +340,7 @@ test('J K with no thread open go along the threads only: over a header, and from
   }
 });
 
-test('a closed header looks as an open one: same fill, words, weight and no outline; only a new count is bold', () => {
+test.skipIf(!hasDom)('a closed header looks as an open one: same fill, words, weight and no outline; only a new count is bold', () => {
   if (!hasDom) return;
   draw(sections());
   click(header('waiting'));
