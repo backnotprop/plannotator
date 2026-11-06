@@ -58,8 +58,7 @@ export interface InboxListProps {
   selectedThreadId: string | null;
   /**
    * The held list's "N new" (held.ts `heldNotice`): how many, and the one project they are in when all are in
-   * one. In the list's header beside the title, never above the rows, so no row moves when it comes or goes
-   * (approval "inbox-list-view", R1). Always one line: a long project name is cut with "…", the whole line then in a tooltip.
+   * one. Always one line: a long project name is cut with "…", the whole line then in a tooltip.
    */
   notice: { count: number; project?: string | null } | null;
   /**
@@ -381,36 +380,35 @@ function countWords(row: InboxListRow, now: number): { short: ReactNode; long: R
   return null;
 }
 
+/** A group's count: its rows but those archived and waiting for the list to settle without them, as the sidebar counts. */
+function liveCount(rows: readonly InboxListRow[]): number {
+  let n = 0;
+  for (const row of rows) if (!inboxRowArchived(row)) n += 1;
+  return n;
+}
+
 /**
- * The held list's "N new · Show": a pill in the list's header beside the title (approval "inbox-list-view", R1: in
- * the list's body it pushed every row down under the pointer when it came, and up when it went). One line at every
- * width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…" wrapped onto two). "N new in" and Show never
- * shrink; the project's name takes the rest and is cut with "…", and while it is cut the whole line is the tooltip.
- * The button is the hit area (a finger's 44 px on a phone); the pill inside it is what shows.
+ * The held list's "N new" line: one line at every width (the owner, 2026-11-02: "1 new in appnotes · Users/ramos/…"
+ * wrapped onto two). "N new in" and Show never shrink; the project's name takes the rest and is cut with "…", and
+ * while it is cut the whole line is the tooltip.
  */
 function HeldNoticeLine({ count, project, onShow }: { count: number; project: string | null; onShow: () => void }) {
   const full = project ? `${count} new in ${project}` : `${count} new`;
   return (
     <Tip content={full} when={(button) => isTextCut(button.querySelector('.ib-notice-proj'))}>
-      <button type="button" className="ib-hnotice" onClick={onShow} data-inbox-notice="">
-        <span className="ib-hnotice-pill">
-          <Icon name="inbox" size={14} />
-          <span className="ib-notice-text">
-            <span className="ib-notice-n">
-              {`${count} new`}
-              {/* A phone's header has room for "1 new" and Show only: it hides " in <project>" for the eye alone. */}
-              {project && <span className="ib-notice-in"> in</span>}
-            </span>
-            {/* A space for the line's text and accessible name; the flex gap draws it. */}
-            {project && ' '}
-            {project && (
-              <bdi className="ib-notice-proj" data-notice-project={project}>
-                {project}
-              </bdi>
-            )}
-          </span>
-          <b>Show</b>
+      <button type="button" className="ib-notice" onClick={onShow} data-inbox-notice="">
+        <Icon name="inbox" size={15} />
+        <span className="ib-notice-text">
+          <span className="ib-notice-n">{project ? `${count} new in` : `${count} new`}</span>
+          {/* A space for the line's text and accessible name; the flex gap draws it. */}
+          {project && ' '}
+          {project && (
+            <bdi className="ib-notice-proj" data-notice-project={project}>
+              {project}
+            </bdi>
+          )}
         </span>
+        <b>Show</b>
       </button>
     </Tip>
   );
@@ -773,6 +771,8 @@ function RowWithAction({
     <div
       className="ib-rw"
       data-row={row.thread_id}
+      // Archived, waiting for the list to settle without it (approval "inbox-list-view", R7): faded in place.
+      data-archived={inboxRowArchived(row) ? '' : undefined}
       data-menu={menu ? '' : undefined}
       onPointerEnter={(event) => {
         if (!actionTip && opensTips(event)) setActionTip(true);
@@ -1123,17 +1123,17 @@ export function InboxList(props: InboxListProps) {
   const resizable = props.narrow && !isMobile;
   const visible = props.sections.filter((s) => s.threads.length > 0);
   // List's rows (listView.ts): every group's but the Snoozed band's, newest first, each keeping its place until the
-  // list is sorted whole (`props.sort`), as the groups keep theirs. Worked out in both views, so a switch to List
-  // finds the places the list on screen has.
+  // list is sorted whole (`props.sort`), as the groups keep theirs. Only while List shows: a switch to List is a
+  // sort of the whole list (the held list's rows, so nothing behind "N new" comes in).
   const places = useRef<ListPlaces | null>(null);
   const sortEpoch = props.sort?.epoch;
   const sortKeep = props.sort?.keep ?? null;
   const flat = useMemo(
-    () => flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }),
-    [props.sections, sortEpoch, sortKeep],
+    () => (asList ? flatRows(props.sections, sortEpoch === undefined ? null : places.current, { epoch: sortEpoch ?? 0, keep: sortKeep }) : null),
+    [asList, props.sections, sortEpoch, sortKeep],
   );
   useLayoutEffect(() => {
-    places.current = flat.places;
+    places.current = flat?.places ?? null;
   }, [flat]);
   // List draws the Snoozed band as the groups do: folded, under the rows.
   const listBand = asList ? (visible.find((s) => s.id === 'snoozed') ?? null) : null;
@@ -1283,8 +1283,6 @@ export function InboxList(props: InboxListProps) {
             Refresh the list
           </span>
         )}
-        {/* "N new · Show" beside the title: the header's height never changes, so no row moves when it comes or goes. */}
-        {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
         {/* Search shows where New message does: a phone always, a wider window only while the main sidebar (which holds its own Search) is closed. */}
         {props.onSearch && headerCompose && (
           <Tip content={withShortcut('Search', { scope: inboxSearchShortcuts, action: 'openSearch' })}>
@@ -1366,11 +1364,13 @@ export function InboxList(props: InboxListProps) {
               {line.text}
             </p>
           ))}
+          {props.notice && <HeldNoticeLine count={props.notice.count} project={props.notice.project ?? null} onShow={props.onShowNew} />}
           {/* The band alone is an empty list with a band under it: nothing else says the list is clear. */}
-          {visible.every((section) => section.id === 'snoozed') && props.empty}
+          {/* So is a list whose rows are all archived, waiting for the list to settle without them (Archive all). */}
+          {visible.every((section) => section.id === 'snoozed' || section.threads.every(inboxRowArchived)) && props.empty}
           {/* The rows' tooltips mount on first use (RowTip.tsx): drawing every row's at once is most of a redraw. */}
           <LazyRowTips.Provider value={true}>
-          {asList && flat.rows.length > 0 && (
+          {flat && flat.rows.length > 0 && (
             // List: one run of rows, newest first, no bands; each row keeps the group it is drawn in for its actions.
             <div className="ib-group" data-section-id="list" data-flat-list="">
               {flat.rows.map(({ row, drawn }) => renderRow(row, drawn))}
@@ -1386,13 +1386,13 @@ export function InboxList(props: InboxListProps) {
               <div key={section.id} className="ib-group" data-section-id={section.id} role="group" aria-label={section.label}>
                 {folds ? (
                   <button type="button" className="ib-band" onClick={() => toggle((v) => !v)} aria-expanded={open}>
-                    {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
+                    {section.label} <span className="ib-n">{formatCount(liveCount(section.threads))}</span>
                     {snoozed && !open && <FoldedBlocker rows={section.threads} />}
                     <Icon name={open ? 'chevD' : 'chevR'} size={14} />
                   </button>
                 ) : (
                   <div className="ib-band">
-                    {section.label} <span className="ib-n">{formatCount(section.threads.length)}</span>
+                    {section.label} <span className="ib-n">{formatCount(liveCount(section.threads))}</span>
                   </div>
                 )}
                 {open && section.threads.map((row) => renderRow(row, section.id))}

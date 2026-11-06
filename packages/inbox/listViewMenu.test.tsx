@@ -1,17 +1,18 @@
 /**
- * The List view in the list (approval "inbox-list-view", 2026-11-05): its ⋮ menu choice, what List draws, and "N new ·
- * Show" in the header.
+ * The List view in the list (approval "inbox-list-view", 2026-11-05): its ⋮ menu choice, what List draws, "N new ·
+ * Show" in its place above the rows in both views, and a row archived in place (R7) faded, left out of its count.
  *
  * What this catches: a menu choice a screen reader does not hear as one of two with its state; List hiding a thread
  * the grouped view shows (folded Quiet, Sent) or drawing section bands; a choice forgotten on the next load; the tour
- * following this browser's choice; "N new · Show" back in the list's body, where it pushed every row down when it came.
+ * following this browser's choice; List losing "N new · Show" or moving it; a row archived in place that reads as live
+ * (not faded, counted in its group) or an Archive all that never shows the project's empty state.
  * Rows not moving in a real browser (their tops measured before and after news), keyboard steps through List and the
  * phone are proved against the compiled binary by tests/e2e/inbox-list-view.spec.ts.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test';
-import { act } from 'react';
+import { act, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import type { InboxListGroupId, InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
 import type { TidyController } from './components/Tidy';
@@ -69,6 +70,7 @@ function row(id: string, last_at: string, section: InboxListRow['section'], extr
     unseen: 0,
     questions: { open: 0, picked: 0, stopped: false, holds_up: [] },
     sent: null,
+    resolved_at: null,
     ...extra,
   } as unknown as InboxListRow;
 }
@@ -86,7 +88,9 @@ const LIST = sections({
   snoozed: [row('zz', T(5), 'new', { snoozed: { until: '2026-11-06T09:00:00Z', at: T(4) } } as unknown as Partial<InboxListRow>)],
 });
 
-function render(options: { notice?: { count: number; project?: string | null } | null; rememberLook?: boolean; onShowNew?: () => void } = {}): HTMLElement {
+function render(
+  options: { notice?: { count: number; project?: string | null } | null; rememberLook?: boolean; onShowNew?: () => void; sections?: InboxListSection[]; empty?: ReactNode } = {},
+): HTMLElement {
   host = document.createElement('div');
   host.className = 'pn-inbox';
   document.body.append(host);
@@ -97,7 +101,8 @@ function render(options: { notice?: { count: number; project?: string | null } |
         <InboxList
           title="Inbox"
           path={null}
-          sections={LIST}
+          sections={options.sections ?? LIST}
+          empty={options.empty}
           sort={{ epoch: 1, keep: null }}
           filtered={false}
           narrow={false}
@@ -114,6 +119,8 @@ function render(options: { notice?: { count: number; project?: string | null } |
   });
   return host;
 }
+
+const renderSections = (sections: InboxListSection[], empty?: ReactNode) => render({ sections, empty });
 
 async function openMenu(el: HTMLElement): Promise<HTMLElement> {
   act(() => el.querySelector<HTMLButtonElement>('[data-tidy-menu]')!.click());
@@ -181,20 +188,45 @@ describe.skipIf(!hasDom)('the ⋮ menu choice', () => {
   });
 });
 
-describe.skipIf(!hasDom)('"N new · Show" in the header', () => {
+describe.skipIf(!hasDom)('"N new · Show" in List', () => {
   for (const view of ['grouped', 'list'] as const) {
-    test(`beside the title, never in the list's body (${view})`, () => {
+    test(`today's line above the rows, in the list's body (${view})`, () => {
       if (view === 'list') stored.set(LIST_VIEW_COOKIE, 'list');
       const shown: number[] = [];
       const el = render({ notice: { count: 2, project: 'docs-site' }, onShowNew: () => shown.push(1) });
-      const notice = el.querySelector<HTMLButtonElement>('[data-inbox-notice]')!;
-      expect(notice.closest('.ib-lhead')).not.toBeNull();
-      expect(el.querySelector('.ib-lbody [data-inbox-notice]')).toBeNull();
-      // Right after the title, before the header's buttons.
-      expect(notice.closest('[data-tip-trigger], .ib-lhead > *')!.previousElementSibling?.matches('h1, [hidden]')).toBe(true);
+      const notice = el.querySelector<HTMLButtonElement>('.ib-lbody [data-inbox-notice]')!;
+      expect(notice.classList.contains('ib-notice')).toBe(true);
+      expect(el.querySelector('.ib-lhead [data-inbox-notice]')).toBeNull();
+      // Before every row: the rows come after it in the body.
+      const firstRow = el.querySelector('.ib-lbody [data-thread-id]')!;
+      expect(notice.compareDocumentPosition(firstRow) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
       expect(notice.textContent).toBe('2 new in docs-siteShow');
       act(() => notice.click());
       expect(shown).toEqual([1]);
     });
   }
+});
+
+describe.skipIf(!hasDom)('a row archived in place, waiting for the list to settle (R7)', () => {
+  const archived = (row: InboxListRow): InboxListRow => ({ ...row, resolved_at: T(10), section: 'quiet', unread: false });
+
+  test('faded (data-archived), left out of its group count; the others are not', () => {
+    const [wait] = LIST.find((s) => s.id === 'waiting')!.threads;
+    const sections = LIST.map((s) => (s.id === 'new' ? { ...s, threads: s.threads.map((r) => (r.thread_id === 'new2' ? archived(r) : r)) } : s));
+    const el = renderSections(sections);
+    expect(el.querySelector('[data-row="new2"]')?.hasAttribute('data-archived')).toBe(true);
+    expect(el.querySelector(`[data-row="${wait!.thread_id}"]`)?.hasAttribute('data-archived')).toBe(false);
+    expect(el.querySelector('[data-section-id="new"] .ib-n')?.textContent).toBe('1');
+    expect(el.querySelector('[data-section-id="waiting"] .ib-n')?.textContent).toBe('1');
+  });
+
+  test('a list whose rows are all archived shows its empty state above them (Archive all)', () => {
+    const all = LIST.map((s) => (s.id === 'snoozed' ? s : { ...s, threads: s.threads.map(archived) }));
+    const el = renderSections(all, <p data-empty-state="">Everything is archived.</p>);
+    expect(el.querySelector('[data-empty-state]')).not.toBeNull();
+    // One live row left: no empty state.
+    unmount();
+    const one = all.map((s) => (s.id === 'new' ? { ...s, threads: [LIST.find((x) => x.id === 'new')!.threads[0]!, ...s.threads.slice(1)] } : s));
+    expect(renderSections(one, <p data-empty-state="">Everything is archived.</p>).querySelector('[data-empty-state]')).toBeNull();
+  });
 });

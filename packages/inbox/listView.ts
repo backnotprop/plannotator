@@ -78,6 +78,30 @@ export function useListView(remember = true): [ListView, (view: ListView) => voi
   return [view, remember ? writeListView : noChange];
 }
 
+/**
+ * The List view's one-time announcement (reveal.ts `useListViewReveal`, components/ListViewIntro.tsx): shown once per
+ * browser, remembered in its own cookie the moment it opens, so a reload or another tab never shows it again.
+ */
+export const LIST_VIEW_INTRO_COOKIE = 'plannotator-inbox-list-view-intro';
+
+/** This browser has had the announcement (or cannot keep a cookie, so it never risks showing twice). */
+export function listViewIntroSeen(): boolean {
+  try {
+    return storage.getItem(LIST_VIEW_INTRO_COOKIE) !== null;
+  } catch {
+    return true;
+  }
+}
+
+/** The announcement opened: never again in this browser. */
+export function markListViewIntroSeen(): void {
+  try {
+    storage.setItem(LIST_VIEW_INTRO_COOKIE, 'shown');
+  } catch {
+    // No cookies: the page's own latch (it opened) keeps it from showing again on this load.
+  }
+}
+
 /** Tests only: a fresh page that has read nothing. */
 export function resetListViewForTests(): void {
   current = null;

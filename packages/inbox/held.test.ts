@@ -5,7 +5,7 @@
  */
 import { describe, expect, test } from 'bun:test';
 import type { InboxListRow, InboxListSection } from '@plannotator/core/inbox-types';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread } from './held';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, heldNotice, listGroups, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, settleOwn, settlesOnBack, settleThread, snoozeChangedRows } from './held';
 
 function row(id: string, project: string, last_at: string, last_author: 'agent' | 'person'): InboxListRow {
   return { thread_id: id, project: { id: `prj_${project}`, name: project }, last_at, last_author } as InboxListRow;
@@ -520,6 +520,43 @@ describe('the Snoozed band', () => {
     const sooner = { ...asleep(b), snoozed: { until: '2026-10-07T18:00:00Z', at: '2026-10-07T10:00:00Z' } } as InboxListRow;
     const both = settleThread(settled, model([], [asleep(a), sooner]), 'b');
     expect(both.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['b', 'a']);
+  });
+
+  // P1 of the #2716 review: with no thread open, `event: snoozes` settled the person's own pending reads and
+  // archives too, so a clock or another tab moved rows under the pointer. Only the rows whose snooze changed move.
+  test('snoozeChangedRows: a row snoozed or unsnoozed elsewhere moves; a return by the clock and every other row do not', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent');
+    const c = row('c', 'docs-site', '2026-10-07T08:00:00Z', 'agent');
+    const d = row('d', 'docs-site', '2026-10-07T07:00:00Z', 'agent');
+    // On screen: a and b in Waiting, b read in place (held: section quiet), c and d snoozed in the band.
+    const readB = { ...b, section: 'quiet', unread: false } as InboxListRow;
+    const shown = model([a, readB], [asleep(c), asleep(d)]);
+    // Read now: a snoozed in another tab, c unsnoozed there, d back by the clock, b still read.
+    const back = { ...d, snooze_back: '2026-10-08T12:00:00Z', last_at: '2026-10-08T12:00:00Z' } as InboxListRow;
+    const latest = model([readB, { ...c, section: 'waiting' } as InboxListRow, back], [asleep(a)]);
+    const moving = snoozeChangedRows(shown, latest);
+    expect(moving.sort()).toEqual(['a', 'c']);
+    const next = moving.reduce((list, id) => settleThread(list, latest, id), shown);
+    expect(drawnSection(next, 'a')).toBe('snoozed');
+    expect(drawnSection(next, 'c')).toBe('waiting');
+    // b keeps its place in Waiting until the list settles; d waits behind "N new" in the band.
+    expect(drawnSection(next, 'b')).toBe('waiting');
+    expect(drawnSection(next, 'd')).toBe('snoozed');
+    // Nothing changed: nothing moves.
+    expect(snoozeChangedRows(next, latest).filter((id) => id !== 'd')).toEqual([]);
+  });
+
+  // N1 of the #2716 review: Undo of a write whose row the list already settled away puts the row back; a snoozed
+  // one goes into the band, not its own section.
+  test('addOwnThreads puts a snoozed row into the band, soonest first', () => {
+    const a = row('a', 'billing-svc', '2026-10-07T10:00:00Z', 'agent');
+    const b = row('b', 'docs-site', '2026-10-07T09:00:00Z', 'agent');
+    const shown = model([], [asleep(b)]);
+    const sooner = { ...asleep(a), snoozed: { until: '2026-10-07T18:00:00Z', at: '2026-10-07T10:00:00Z' } } as InboxListRow;
+    const next = addOwnThreads(shown, model([], [sooner, asleep(b)]), ['a']);
+    expect(next.find((s) => s.id === 'snoozed')!.threads.map((r) => r.thread_id)).toEqual(['a', 'b']);
+    expect(next.find((s) => s.id === 'waiting')!.threads).toEqual([]);
   });
 });
 

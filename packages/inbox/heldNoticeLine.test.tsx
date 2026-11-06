@@ -33,12 +33,12 @@ afterEach(() => {
   sheet = null;
 });
 
-/** The `.ib-notice` and header `.ib-hnotice` rules of the window's stylesheet (outside the phone block), as the page has them. */
+/** The `.ib-notice` rules of the window's stylesheet (outside the phone block), as the page has them. */
 function noticeRules(): string {
   const css = readFileSync(join(import.meta.dir, 'inbox.css'), 'utf8');
   return css
     .split('\n')
-    .filter((line) => /^\.ib-h?notice/.test(line))
+    .filter((line) => /^\.ib-notice/.test(line))
     .join('\n');
 }
 

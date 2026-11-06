@@ -2,14 +2,17 @@
  * The List view and two steadiness fixes (approval "inbox-list-view", 2026-11-05, issue #2714), in Chromium against
  * the compiled binary, with agents writing through `plannotator inbox mcp` (scripts/inbox-sim.ts):
  *
- *  - R1: "N new · Show" sits in the list's header beside the title. News arriving while the pointer rests on a row
- *    moves no row (every row's top measured before and after), in the grouped view and in List, on a desktop and on
- *    a 390 px phone; Show still brings the news in.
+ *  - Held order in List as in the groups: news arriving while the pointer rests on a row reorders nothing and
+ *    brings no row in; "N new · Show" comes in its place above the rows (the owner kept it there), so every row
+ *    moves down by its height alike, in the grouped view and in List, on a desktop and on a 390 px phone; Show still
+ *    brings the news in.
  *  - List: the ⋮ menu's View choice (Grouped, List; `menuitemradio` with its state). List shows every thread the
  *    grouped view shows (Quiet and Sent included; the snoozed stay in their folded band), newest first, no bands; the
  *    choice survives a reload; ↓ steps through its rows.
  *  - R7: a hover Mark read with news waiting behind "N new" brings none of it in: the row stays where it is, not
- *    bold; Undo makes it bold again in place; Show still works after.
+ *    bold; Undo makes it bold again in place; Show still works after. With a read waiting in place, a snooze made
+ *    elsewhere moves only its own row (#2716 review P1); an Archive's Undo after the list settled brings the row
+ *    back (N1).
  *
  * HOME and the data dir are temp folders. PNGs land in PLANNOTATOR_LIST_VIEW_SHOTS (default .local/proof/list-view),
  * and with PLANNOTATOR_LIST_VIEW_VIDEO set, a recording of news arriving under a resting pointer is saved there as
@@ -72,7 +75,7 @@ async function rowTops(page: Page): Promise<{ scroll: number; tops: Record<strin
 }
 
 const shownIds = (page: Page) => page.locator('.ib-listcol .ib-lbody [data-thread-id]').evaluateAll((els) => els.map((el) => el.getAttribute('data-thread-id')!));
-const notice = (page: Page) => page.locator('.ib-listcol .ib-lhead [data-inbox-notice]');
+const notice = (page: Page) => page.locator('.ib-listcol .ib-lbody [data-inbox-notice]');
 
 /** An agent starts a thread the held list keeps behind "N new". */
 async function agentNews(project = world.docs): Promise<string> {
@@ -122,8 +125,19 @@ async function restOn(page: Page, id: string): Promise<void> {
   await page.mouse.move(box.x + box.width * 0.35, box.y + box.height / 2);
 }
 
-/** News arrives with the pointer at rest: "N new · Show" comes in the header, and no row moves. */
-async function newsMovesNothing(page: Page, restId: string, name: string): Promise<string> {
+/**
+ * The rows held: the same rows in the same order, each moved by the same amount (`by`: the "N new" line's height when
+ * it came, 0 when nothing above them changed). A row that reorders, or comes in, fails it.
+ */
+function expectHeld(before: Awaited<ReturnType<typeof rowTops>>, after: Awaited<ReturnType<typeof rowTops>>, by: number | null = 0): void {
+  expect(Object.keys(after.tops)).toEqual(Object.keys(before.tops));
+  const moves = Object.keys(before.tops).map((id) => Math.round((after.tops[id]! - before.tops[id]!) * 10) / 10);
+  expect(new Set(moves).size).toBe(1);
+  if (by !== null) expect(Math.abs(moves[0]! - by)).toBeLessThanOrEqual(0.5);
+}
+
+/** News arrives with the pointer at rest: "N new · Show" comes above the rows, and the rows keep their order. */
+async function newsKeepsOrder(page: Page, restId: string, name: string): Promise<string> {
   await restOn(page, restId);
   await page.waitForTimeout(300);
   const before = await rowTops(page);
@@ -133,7 +147,7 @@ async function newsMovesNothing(page: Page, restId: string, name: string): Promi
   await page.waitForTimeout(400);
   const after = await rowTops(page);
   if (name) await page.screenshot({ path: join(shots, `${name}-after.png`) });
-  expect(after).toEqual(before);
+  expectHeld(before, after, null);
   expect(await page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`).count()).toBe(0);
   return id;
 }
@@ -207,13 +221,13 @@ test.afterAll(async () => {
   }
 });
 
-test('grouped: news arriving under a resting pointer moves no row; "N new · Show" is in the header; Show brings it in', async () => {
+test('grouped: news arriving under a resting pointer reorders no row; "N new · Show" above the rows, as before; Show brings it in', async () => {
   const { page } = world;
   await expect(page.locator('.ib-listcol [data-section-id="quiet"] .ib-band')).toBeVisible();
-  const id = await newsMovesNothing(page, world.threads.new1, 'grouped-news');
+  const id = await newsKeepsOrder(page, world.threads.new1, '');
   await expect(notice(page)).toHaveText(/^1 new in docs-site\s*Show$/);
-  await expect(page.locator('.ib-listcol .ib-lbody [data-inbox-notice]')).toHaveCount(0);
-  await page.locator('.ib-listcol .ib-lhead').screenshot({ path: join(shots, 'notice-header-desktop.png') });
+  await expect(notice(page)).toHaveClass(/\bib-notice\b/);
+  await expect(page.locator('.ib-listcol .ib-lhead [data-inbox-notice]')).toHaveCount(0);
   await notice(page).click();
   await expect(notice(page)).toHaveCount(0);
   await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`)).toBeVisible();
@@ -272,10 +286,11 @@ test('List: ↓ steps through the rows in their order', async () => {
   await page.locator('body').click({ position: { x: 1300, y: 880 } }).catch(() => {});
 });
 
-test('List: news arriving moves no row; a hover Mark read with news waiting brings none in; Undo; Show', async () => {
+test('List: news arriving reorders no row; a hover Mark read with news waiting brings none in; Undo; Show', async () => {
   const { page } = world;
-  const held = await newsMovesNothing(page, world.threads.new2, 'list-news');
-  await shot(page, 'list-notice-1440');
+  const held = await newsKeepsOrder(page, world.threads.new2, '');
+  await page.mouse.move(1300, 880);
+  await shot(page, 'list-news-1440');
   // Mark read on a bold row with the news still behind "N new".
   const target = world.threads.new2;
   const row = page.locator(`.ib-listcol .ib-lbody [data-thread-id="${target}"]`);
@@ -286,7 +301,7 @@ test('List: news arriving moves no row; a hover Mark read with news waiting brin
   await expect(row).not.toHaveClass(/\bib-u\b/);
   await page.waitForTimeout(500);
   // Nothing came in, nothing moved, the news still waits.
-  expect(await rowTops(page)).toEqual(before);
+  expectHeld(before, await rowTops(page));
   await expect(notice(page)).toHaveText(/^1 new in docs-site\s*Show$/);
   expect(await page.locator(`.ib-listcol .ib-lbody [data-thread-id="${held}"]`).count()).toBe(0);
   // Mark unread is now under the pointer, on the same row.
@@ -296,7 +311,7 @@ test('List: news arriving moves no row; a hover Mark read with news waiting brin
   await page.getByRole('button', { name: 'Undo', exact: true }).click();
   await expect(row).toHaveClass(/\bib-u\b/);
   await page.waitForTimeout(300);
-  expect(await rowTops(page)).toEqual(before);
+  expectHeld(before, await rowTops(page));
   await expect(notice(page)).toBeVisible();
   // Show still works: the news comes in.
   await notice(page).click();
@@ -317,14 +332,58 @@ test('grouped: the same hover Mark read keeps the row in its group, not bold, an
   await page.locator(`.ib-listcol .ib-rw[data-row="${target}"] [data-row-mark-read]`).click();
   await expect(row).not.toHaveClass(/\bib-u\b/);
   await page.waitForTimeout(500);
-  expect(await rowTops(page)).toEqual(before);
+  expectHeld(before, await rowTops(page));
   expect(await page.locator(`.ib-listcol .ib-lbody [data-thread-id="${held}"]`).count()).toBe(0);
+  await page.screenshot({ path: join(shots, 'grouped-mark-read-in-place.png') });
   await notice(page).click();
   await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${held}"]`)).toBeVisible();
+});
+
+test('grouped: with a read waiting in place, a snooze made elsewhere moves only its own row (review P1)', async () => {
+  const { page, threads } = world;
+  const waiting = page.locator(`.ib-listcol .ib-lbody [data-section-id="waiting"] [data-thread-id="${threads.waiting}"]`);
+  await expect(waiting).toBeVisible();
+  // Mark read from the row's menu (a question thread: it goes to Quiet at the next tidy).
+  await waiting.click({ button: 'right' });
+  await page.locator('[data-row-action="read"]').click({ timeout: 10_000 });
+  await expect(page.locator('[data-inbox-toast]')).toContainText('Marked read');
+  await expect(waiting).toBeVisible();
+  const snoozed = threads.new1;
+  await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${snoozed}"]`)).toBeVisible();
+  // Another tab snoozes a row: `event: snoozes` reaches this one.
+  expect((await post(`/api/inbox/threads/${snoozed}/snooze`, { until: new Date(Date.now() + 86_400_000).toISOString() })).status).toBe(200);
+  await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${snoozed}"]`)).toHaveCount(0);
+  await page.waitForTimeout(600);
+  // The read waiting in place stays in Waiting: no tidy came with the snooze.
+  await expect(waiting).toBeVisible();
+  await expect(page.locator('.ib-listcol [data-section-id="quiet"] .ib-band')).toBeVisible();
+  // Unsnoozed there: it comes back alone, and the read still waits in place.
+  expect((await post(`/api/inbox/threads/${snoozed}/snooze`, { until: null })).status).toBe(200);
+  await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${snoozed}"]`)).toBeVisible();
+  await expect(waiting).toBeVisible();
+});
+
+test('grouped: an Archive waits in place, faded; after the list settles without it, its Undo brings the row back (review N1)', async () => {
+  const { page, threads } = world;
+  const id = threads.new2;
+  const wrap = page.locator(`.ib-listcol .ib-lbody .ib-rw[data-row="${id}"]`);
+  await page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`).click({ button: 'right', timeout: 10_000 });
+  await page.locator('[data-row-action="archive"]').click({ timeout: 10_000 });
+  await expect(wrap).toHaveAttribute('data-archived', '');
+  await expect(wrap).toContainText('Archived');
+  const toast = page.locator('[data-inbox-toast]');
+  await expect(toast).toContainText('Archived');
+  // The list's title tidies it: the row leaves.
+  await page.locator('[data-list-refresh]').click();
+  await expect(wrap).toHaveCount(0);
+  await toast.getByRole('button', { name: /Undo/ }).click({ timeout: 5_000 });
+  await expect(wrap).toBeVisible();
+  await expect(wrap).not.toHaveAttribute('data-archived', '');
+  await expect(notice(page)).toHaveCount(0);
   await chooseView(page, 'list');
 });
 
-test('a 390 px phone: List from the ⋮ sheet; news moves no row; "1 new" and Show fit the header; Show works', async ({ browser }) => {
+test('a 390 px phone: List from the ⋮ sheet; news reorders no row; "N new · Show" above the rows; Show works', async ({ browser }) => {
   const context = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, isMobile: true, hasTouch: true, colorScheme: 'light' });
   try {
     const page = await context.newPage();
@@ -344,20 +403,10 @@ test('a 390 px phone: List from the ⋮ sheet; news moves no row; "1 new" and Sh
     const id = await agentNews(world.mobile);
     await expect(notice(page)).toBeVisible();
     await page.waitForTimeout(400);
-    expect(await rowTops(page)).toEqual(before);
-    // The header keeps its buttons; the line reads "1 new" and Show, the project for a screen reader.
+    expectHeld(before, await rowTops(page), null);
     await expect(notice(page)).toHaveAccessibleName(/^1 new in mobile-app\s*Show$/);
-    const head = page.locator('.ib-listcol .ib-lhead');
-    for (const button of ['[data-open-search]', '[data-open-compose]', '[data-tidy-menu]']) await expect(head.locator(button)).toBeInViewport({ ratio: 1 });
-    // Neither the title nor "1 new" is cut at 390 px.
-    const cut = (selector: string) => head.locator(selector).evaluate((el) => el.scrollWidth > el.clientWidth + 0.5);
-    expect(await cut('.ib-lhead-tt')).toBe(false);
-    expect(await cut('.ib-notice-text')).toBe(false);
-    const pill = (await notice(page).locator('.ib-hnotice-pill').boundingBox())!;
-    expect(pill.height).toBeLessThan(40);
-    expect((await notice(page).boundingBox())!.height).toBeGreaterThanOrEqual(44);
-    await shot(page, 'phone-notice');
-    await head.screenshot({ path: join(shots, 'notice-header-phone.png') });
+    await expect(notice(page)).toBeInViewport({ ratio: 1 });
+    await shot(page, 'phone-list-news');
     await notice(page).tap();
     await expect(page.locator(`.ib-listcol .ib-lbody [data-thread-id="${id}"]`)).toBeVisible();
   } finally {
@@ -365,7 +414,7 @@ test('a 390 px phone: List from the ⋮ sheet; news moves no row; "1 new" and Sh
   }
 });
 
-test('a recording: news arrives three times under a resting pointer, in List, and nothing moves', async ({ browser }) => {
+test('a recording: news arrives three times under a resting pointer, in List, and no row reorders', async ({ browser }) => {
   test.skip(!process.env.PLANNOTATOR_LIST_VIEW_VIDEO, 'set PLANNOTATOR_LIST_VIEW_VIDEO to record');
   const dir = join(shots, 'video');
   const context = await browser.newContext({ viewport: { width: 1280, height: 800 }, colorScheme: 'light', recordVideo: { dir, size: { width: 1280, height: 800 } } });
@@ -382,7 +431,7 @@ test('a recording: news arrives three times under a resting pointer, in List, an
       await agentNews(i === 1 ? world.billing : world.docs);
       await page.waitForTimeout(2200);
     }
-    expect(await rowTops(page)).toEqual(before);
+    expectHeld(before, await rowTops(page), null);
     await page.waitForTimeout(800);
     await notice(page).click();
     await page.waitForTimeout(3000);

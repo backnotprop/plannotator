@@ -307,6 +307,9 @@ test('archiving a pinned thread keeps it pinned, shown archived; it opens as an 
   const { page, threads } = world;
   await rowButton(page, threads.nightly).click({ button: 'right' });
   await page.locator('[data-row-action="archive"]').click();
+  // Archived in place, faded, until the list settles (approval "inbox-list-view", R7); the list's title tidies it away.
+  await expect(page.locator(`.ib-lbody [data-row="${threads.nightly}"]`)).toHaveAttribute('data-archived', '');
+  await page.locator('[data-list-refresh]').click();
   await expect(rowButton(page, threads.nightly)).toHaveCount(0);
   await expect(pinned(page, threads.nightly)).toHaveAttribute('data-state', 'archived');
   await expect(pinned(page, threads.nightly)).toHaveAccessibleName(/Archived$/);

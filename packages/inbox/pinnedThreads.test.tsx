@@ -426,7 +426,9 @@ test.skipIf(!hasDom)('an archived thread stays pinned, shown archived, and opens
   await act(async () => {
     rowMenu()!.querySelector<HTMLElement>('[data-row-action="archive"]')!.click();
   });
-  await until(() => !rowButton(ids.same), 'the row to leave the list');
+  // The list holds still (approval "inbox-list-view", R7): the row stays where it was, archived and faded, until the
+  // list next settles.
+  await until(() => document.querySelector(`.ib-lbody [data-row="${ids.same}"]`)?.hasAttribute('data-archived') === true, 'the row archived in place');
   await until(() => pinnedRow(ids.same)?.getAttribute('data-state') === 'archived', 'the pinned row shown archived');
   expect(pinnedRow(ids.same)!.getAttribute('aria-label')).toMatch(/Archived$/);
   expect(pinnedRow(ids.same)!.classList.contains('ib-calm')).toBe(true);

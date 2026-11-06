@@ -51,8 +51,8 @@ import { listsThread, newRecordBatch, noteRecord, openThreadRead } from './openT
 import { draftsReadOwed, replyDraftsDiffer, unsentThreads } from './draftsReads';
 import { filterMachineRows, machineCounts, machineProjectNames, machinesModel, rowSnoozes, threadAwayLine, threadOutbox } from './machines';
 import { discardPreparedInboxEvents, prepareInboxEvents } from './sharedEvents';
-import type { ListSort } from './listView';
-import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, waitingCount, type OpenThread } from './held';
+import { listViewIntroSeen, markListViewIntroSeen, useListView, type ListSort } from './listView';
+import { addOwnThreads, adoptKeepingOpen, drawnSection, filterSections, heldNotice, listGroups, lookedRow, markHeldRowArchived, markHeldRowLooked, putRowBack, refreshHeldRows, replaceHeldRow, settleOwn, settlesOnBack, settleThread, showBroughtIn, snoozeChangedRows, waitingCount, type OpenThread } from './held';
 import { inboxSnoozeDelay, inboxSnoozeRunning, inboxSnoozeWhen, type InboxRowSnooze } from '@plannotator/core/inbox-snooze';
 import { hasMovingDelivery } from './rowDelivery';
 import {
@@ -120,7 +120,7 @@ import { adoptVoiceSettings } from './voice';
 import { useVoiceIntro } from './voiceIntro';
 import { SnoozeIntro } from './components/SnoozeIntro';
 import { oneTimeDialogShownThisLoad, snoozeIntroBlockedBy, useSnoozeIntro } from './snoozeIntro';
-import { revealArmed, useBoardReveal, useStepsReveal } from './reveal';
+import { releaseVersion, revealArmed, useBoardReveal, useListViewReveal, useStepsReveal } from './reveal';
 import { type RevealFeature, turnOnFromReveal as turnOnRevealFeature } from './revealTurnOn';
 import { namesCapability, withCapabilities } from './capabilities';
 import { openSnoozeMenu } from './snoozeIntroTry';
@@ -164,6 +164,7 @@ import { pullFilterOf, pullGroups, type PullFilter } from './pulls/model';
 import { reviewsAlias } from './reviewsRoute';
 import { BoardOff } from './board/BoardOff';
 import { BoardIntro } from './board/BoardIntro';
+import { ListViewIntro } from './components/ListViewIntro';
 import { ChecklistIntro } from './steps/ChecklistIntro';
 import { CardChip } from './board/CardChip';
 import { boardFilterHash, boardInitiativeOf, boardViewOf, cardsInInitiative, liveInitiatives, newCardProject, type BoardView } from './board/model';
@@ -1354,13 +1355,24 @@ function Inbox() {
       return null;
     }
   }, [armSlide, sortedWhole]);
-  /** The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this window's clock). */
+  /**
+   * The list read again after a snooze changed or ran out, whichever said so first (`event: snoozes`, or this
+   * window's clock). With no thread open only the rows whose snooze changed move (held.ts `snoozeChangedRows`), each
+   * alone and with the settle's slide; nothing is sorted whole, so the person's pending reads and archives keep their
+   * places (approval "inbox-list-view", R7) and a return by the clock waits behind "N new".
+   */
   const refreshSnoozes = useCallback(async () => {
     const next = await refreshList(false);
     if (next) flushNotifications(next);
     void refreshDecisions();
-    if (!routeRef.current.thread) settleList('own', true);
-  }, [refreshList, flushNotifications, refreshDecisions, settleList]);
+    const drawn = shownRef.current;
+    if (routeRef.current.thread || !next || !drawn) return;
+    const groups = listGroups(next);
+    const moving = snoozeChangedRows(drawn, groups);
+    if (moving.length === 0) return;
+    armSlide();
+    setShown((current) => (current ? moving.reduce((list, threadId) => settleThread(list, groups, threadId), current) : current));
+  }, [refreshList, flushNotifications, refreshDecisions, armSlide]);
 
   /**
    * Seen on sight (seenOnSight.ts): messages that arrived in the open thread
@@ -2798,16 +2810,19 @@ function Inbox() {
    * "inbox-list-view", R7: a hover Mark read with nothing open used to bring in everything behind "N new" and slide
    * another row under the pointer): every row shows its own state in place (held.ts `refreshHeldRows`), and the rows
    * written (`written`) take the server's row in place even where an agent's message there waits behind "N new", so
-   * the write always shows. Agent activity anywhere else keeps waiting for Show.
+   * the write always shows. A written row the list on screen lost (Undo of an Archive after the list settled
+   * without it) goes back in at its place (held.ts `addOwnThreads`), never behind "N new". Agent activity anywhere
+   * else keeps waiting for Show.
    */
   const afterWrite = async (written: readonly string[] = []) => {
     const open = routeRef.current.thread;
     if (open) await refreshThread(open);
     const next = await refreshList(false);
     if (!next || written.length === 0) return;
-    const rows = new Map(listGroups(next).flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const));
+    const groups = listGroups(next);
+    const rows = new Map(groups.flatMap((section) => section.threads).map((row) => [row.thread_id, row] as const));
     const fresh = written.flatMap((id) => rows.get(id) ?? []);
-    if (fresh.length > 0) setShown((current) => (current ? fresh.reduce(replaceHeldRow, current) : current));
+    if (fresh.length > 0) setShown((current) => (current ? addOwnThreads(fresh.reduce(replaceHeldRow, current), groups, written) : current));
   };
 
   const rowOf = (threadId: string): InboxListRow | undefined =>
@@ -2985,7 +3000,7 @@ function Inbox() {
     const before = rowOf(threadId);
     if (read && before) {
       const drawn = drawnSection(shownRef.current, threadId);
-      if (seenHeldInNew(before, drawn)) return moveSeenToQuiet(threadId, before);
+      if (seenHeldInNew(before, drawn)) return routeRef.current.thread ? moveSeenToQuiet(threadId, before) : seenStaysPut(before);
       // Once the look landed nothing waits here any more (the thread closed and the list settled, say).
       if (looks && !canToggleRead(before, drawn)) return;
     }
@@ -3035,10 +3050,21 @@ function Inbox() {
   };
 
   /**
+   * Mark read on a seen update the list still holds in New (markRead.ts `seenHeldInNew`) with no thread open: the
+   * thread is already Quiet on the server and its row already reads as read, so nothing is written and nothing moves
+   * (the list holds still, approval "inbox-list-view", R7); it goes to Quiet when the list next settles. The toast
+   * names it, as any row's Mark read does. Nothing to undo.
+   */
+  const seenStaysPut = (row: InboxListRow) => {
+    const { lead, detail } = markReadToast(row, 'held');
+    showToast({ lead, detail, icon: 'check' });
+  };
+
+  /**
    * Mark read on a seen update the list still holds in New (markRead.ts
-   * `seenHeldInNew`): the thread is already Quiet on the server, so nothing is
-   * written; its row moves to Quiet now, sliding as the row's hover Mark read
-   * does. Undo puts it back where it was drawn.
+   * `seenHeldInNew`) beside an open thread: the thread is already Quiet on the
+   * server, so nothing is written; its row moves to Quiet now, with the
+   * settle's slide. Undo puts it back where it was drawn.
    */
   const moveSeenToQuiet = (threadId: string, row: InboxListRow) => {
     const before = shownRef.current;
@@ -3115,12 +3141,14 @@ function Inbox() {
       return;
     }
     await afterWrite([threadId]);
-    if (routeRef.current.thread === threadId) {
+    // The open thread closes and the list settles with its row in New; any other row is bold where it is (R7).
+    const wasOpen = routeRef.current.thread === threadId;
+    if (wasOpen) {
       if (fromCard) backToCard();
       else close({ ...routeRef.current, thread: null, file: null });
     }
     showToast({
-      ...markUnreadToast(before ?? { subject: null }),
+      ...markUnreadToast(before ?? { subject: null }, wasOpen),
       icon: 'unread',
       onUndo: () => {
         dismissToast();
@@ -4259,6 +4287,11 @@ function Inbox() {
     (sections: readonly InboxListSection[]) => filterMachineRows(filterSections(sections, route.project), machines, filterMachine?.id ?? null, hideAway),
     [route.project, machines, filterMachine, hideAway],
   );
+  /** The list's sections as drawn, kept between renders that change none of it (InboxList's List memo reads them). */
+  const listSections = useMemo(() => {
+    const drawn = listShown ?? shown;
+    return drawn ? filterList(drawn) : null;
+  }, [listShown, shown, filterList]);
   // The list's name: Inbox, or the project's window name (or the machine's); its back buttons read the same.
   const listTitle = filterProject ? (projectNames.get(filterProject.id) ?? filterProject.name) : filterMachine ? filterMachine.name : 'Inbox';
   const heldNews = shown && latest ? heldNotice(filterList(shown), filterList(latestGroups), openedHere.current, heldOpen(), projectNames) : null;
@@ -4434,6 +4467,35 @@ function Inbox() {
     on: settings?.steps?.on === true,
     onStepsOn: () => setSettings((current) => (current ? { ...current, steps: { on: true } } : current)),
   });
+  // The List view's announcement (reveal.ts `useListViewReveal`): the same calm moment, once per browser, while the list
+  // is grouped. It waits for a load with no other reveal armed (the Inbox's queue goes first) and no other dialog.
+  const [listView, setListView] = useListView();
+  const listViewIntroDue = useRef<boolean | null>(null);
+  listViewIntroDue.current ??= !listViewIntroSeen();
+  const listViewReveal = useListViewReveal({
+    due: listViewIntroDue.current,
+    release: releaseVersion(latest?.version),
+    listLoaded: snoozeIntroLatch.current !== null,
+    firstRun,
+    blocked:
+      revealBlocked ||
+      (snoozeIntroLatch.current?.next ?? null) !== null ||
+      snoozeIntro.stage !== 'none' ||
+      boardReveal.stage !== 'none' ||
+      stepsReveal.stage !== 'none',
+    grouped: listView === 'grouped',
+    rows: snoozeIntroRows,
+    toast: toast !== null,
+    thread: route.page === 'inbox' ? (route.thread ?? null) : null,
+    clear: listIntroClear,
+    place: `${route.thread}|${route.project}|${route.machine}`,
+    heldBack: revealHeldBack,
+  });
+  // Opened: never again in this browser, whichever way it closes.
+  const listViewIntroOpen = listViewReveal.stage === 'open';
+  useEffect(() => {
+    if (listViewIntroOpen) markListViewIntroSeen();
+  }, [listViewIntroOpen]);
   /** A reveal's "Turn it on" (revealTurnOn.ts): Settings' own save; not saved, the switch goes back off and a toast says so. */
   const turnOnFromReveal = (feature: RevealFeature, close: () => void) =>
     void turnOnRevealFeature(feature, close, {
@@ -4486,7 +4548,9 @@ function Inbox() {
     boardReveal.stage !== 'open' &&
     boardReveal.stage !== 'claimed' &&
     stepsReveal.stage !== 'open' &&
-    stepsReveal.stage !== 'claimed';
+    stepsReveal.stage !== 'claimed' &&
+    listViewReveal.stage !== 'open' &&
+    listViewReveal.stage !== 'claimed';
   const listIntroGroups: ListIntroGroup[] =
     listIntro === 'open' && shown
       ? filterList(shown).flatMap((section) => (section.id !== 'snoozed' && section.threads.length > 0 ? [{ id: section.id, label: section.label, count: section.threads.length, rows: section.threads.slice(0, 12) }] : []))
@@ -5559,7 +5623,7 @@ function Inbox() {
           // One project's list: its window name, the path beside it.
           title={listTitle}
           path={filterProject ? tildePath(filterProject.root, settings?.home) : null}
-          sections={filterList(listShown ?? shown)}
+          sections={listSections ?? filterList(listShown ?? shown)}
           sort={listSort}
           filtered={filterProject !== null}
           projectNames={projectNames}
@@ -6046,6 +6110,16 @@ function Inbox() {
         <BoardIntro mcpCommand={settings?.mcp_command ?? null} phone={phone} onClose={boardReveal.close} onTurnOn={() => turnOnFromReveal('board', boardReveal.close)} />
       )}
       {stepsReveal.stage === 'open' && <ChecklistIntro phone={phone} onClose={stepsReveal.close} onTurnOn={() => turnOnFromReveal('steps', stepsReveal.close)} />}
+      {listViewReveal.stage === 'open' && (
+        <ListViewIntro
+          phone={phone}
+          onKeep={listViewReveal.close}
+          onUseList={() => {
+            setListView('list');
+            listViewReveal.close();
+          }}
+        />
+      )}
       {voiceIntro.stage === 'open' && (
         <VoiceIntro
           phone={phone}

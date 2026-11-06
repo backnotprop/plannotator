@@ -859,6 +859,9 @@ dialog.ib-dlg::backdrop { background: oklch(0 0 0 / 0.45); }
 .ib-row { --ib-row-fill: transparent; }
 .ib-row:hover, .ib-rw[data-menu] .ib-row { --ib-row-fill: var(--ib-hover); }
 .ib-row.ib-sel { --ib-row-fill: var(--ib-sel); }
+/* A row archived in place, waiting for the list to settle without it (approval "inbox-list-view", R7; InboxList.tsx
+   `data-archived`): its words faded, its fill and its place as they were; the same under reduced motion. */
+.ib-rw[data-archived] :is(.ib-row, .ib-nrow, .ib-mrow) > * { opacity: 0.55; }
 .ib-row.ib-sel:hover, .ib-rw[data-menu] .ib-row.ib-sel { --ib-row-fill: var(--ib-sel-hover); }
 .ib-row .ib-bcol .ib-badge.ib-b-stop { background: linear-gradient(var(--ib-badge-stop-bg), var(--ib-badge-stop-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
 .ib-row .ib-bcol .ib-badge.ib-b-hold { background: linear-gradient(var(--ib-badge-hold-bg), var(--ib-badge-hold-bg)), linear-gradient(var(--ib-row-fill), var(--ib-row-fill)) var(--card); }
@@ -1083,17 +1086,6 @@ button.ib-band:hover { background: var(--ib-band-hover-s, var(--ib-band)); }
 .ib-notice-text { display: flex; align-items: baseline; gap: 0.3em; min-width: 0; overflow: hidden; }
 .ib-notice-n { flex-shrink: 0; }
 .ib-notice-proj { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-/* "N new · Show" in the list's header beside the title (approval "inbox-list-view", R1): never above the rows, so
-   no row moves when it comes or goes. The button is the hit area; the pill inside is what shows. It shrinks before
-   the buttons after it, its project's name first (above). */
-.ib-hnotice { display: flex; align-items: center; flex: 0 1 auto; min-width: 0; height: 32px; padding: 0; margin: 0; border: 0; background: none; color: inherit; font: inherit; white-space: nowrap; text-align: left; cursor: pointer; border-radius: 999px; }
-.ib-hnotice-pill { display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 100%; height: 28px; padding: 0 11px 0 9px; border-radius: 999px; background: color-mix(in oklch, var(--primary) 10%, var(--card)); border: 1px solid color-mix(in oklch, var(--primary) 25%, transparent); font-size: var(--ib-fs-13, 13px); font-weight: 450; }
-.ib-hnotice-pill > svg, .ib-hnotice-pill b { flex-shrink: 0; }
-.ib-hnotice-pill > svg { color: var(--muted-foreground); }
-.ib-hnotice-pill b { color: var(--primary); font-weight: 550; }
-.ib-hnotice:hover .ib-hnotice-pill { background: color-mix(in oklch, var(--primary) 15%, var(--card)); }
-.pn-inbox .ib-hnotice:focus-visible { outline: none; }
-.pn-inbox .ib-hnotice:focus-visible .ib-hnotice-pill { outline: 2px solid var(--ring); outline-offset: 2px; }
 /* "Inbox updated to X · Reload" (StalePageNotice, stalePage.ts): the "N new · Show" line, its words one button (Reload)
    and a × beside them. The line's own padding moves into the buttons, so each fills its height. */
 .ib-notice.ib-stale { padding: 0; gap: 0; overflow: hidden; }
@@ -3074,16 +3066,6 @@ button.ib-vtime:hover { background: color-mix(in oklch, var(--primary) 22%, tran
   .ib-lbody button.ib-band { height: 44px; }
   .ib-group + .ib-group { margin-top: 0; }
   .ib-notice { height: auto; min-height: 44px; margin: 10px 12px; width: calc(100% - 24px); }
-  /* The header's "N new · Show" on a phone: a finger's height, between the title and the header's buttons, which
-     keep their 44 px. The room left reads "1 new" and Show; "in <project>" stays for a screen reader. */
-  .ib-hnotice { position: relative; flex-shrink: 0; height: 44px; margin-left: 2px; }
-  .ib-hnotice-pill { height: 30px; padding: 0 10px; gap: 5px; }
-  .ib-hnotice-pill > svg { display: none; }
-  /* "N new" and Show never shrink (the title gives way first), and the title's resting ↻, invisible on a phone
-     (no hover), gives its room back while the pill shows; a refresh still turns it. */
-  .ib-hnotice .ib-notice-text { flex-shrink: 0; }
-  .ib-lhead:has(.ib-hnotice) .ib-lhead-title:not([data-refreshing]) svg.ib-ic-refresh { display: none; }
-  .ib-hnotice :is(.ib-notice-in, .ib-notice-proj) { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
   /* The stale page notice's ×: a finger's width. */
   .pn-inbox .ib-stale .ib-stale-x { width: 44px; }
   .ib-askline { margin: 10px 12px; }
@@ -6493,6 +6475,35 @@ dialog.ib-dlg.ib-bi { width: min(560px, calc(100vw - 32px)); }
 .ib-bi-text .ib-bi-q { color: var(--muted-foreground); font-size: var(--ib-fs-13, 13px); margin-top: 10px; }
 .ib-bi-acts { display: flex; align-items: center; gap: 8px; padding: 18px 18px 18px 22px; }
 .pn-inbox .ib-bi-copy, dialog .ib-bi-copy { min-width: 142px; justify-content: center; }
+/* The List view's announcement (ListViewIntro.tsx): Bro mode's poster card (#2693, the name as the picture) in the
+   window's own colours, so it follows light and dark; beside the name a small list folds its groups into one. */
+dialog.ib-dlg.ib-bi.ib-lvi { --lvi-ink: var(--foreground); --lvi-wash: color-mix(in oklch, var(--primary) 12%, var(--card)); width: min(480px, calc(100vw - 32px)); border: 0; border-radius: 16px; background: var(--card); box-shadow: 0 18px 50px oklch(0 0 0 / 0.28), 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); }
+.ib-lvi .ib-lvi-poster { position: relative; display: flex; align-items: flex-end; justify-content: space-between; gap: 18px; padding: 22px 26px 22px 22px; background: var(--lvi-wash); overflow: hidden; }
+.ib-lvi .ib-lvi-poster::before { content: ""; position: absolute; inset: 0; background: radial-gradient(circle at center, color-mix(in oklch, var(--lvi-ink) 18%, transparent) 0 1.1px, transparent 1.4px) 0 0 / 8px 8px; -webkit-mask-image: linear-gradient(to bottom, #000 20%, transparent 85%); mask-image: linear-gradient(to bottom, #000 20%, transparent 85%); pointer-events: none; }
+dialog.ib-dlg.ib-lvi h2 { position: relative; margin: 0; font-size: 124px; font-weight: 800; line-height: 0.8; letter-spacing: -0.06em; color: var(--lvi-ink); }
+.ib-lvi-art { --lvi-dur: 5.2s; position: relative; flex: none; width: 150px; height: 136px; }
+.ib-lvi-band { position: absolute; left: 0; width: 46%; height: 8px; border-radius: 3px; background: color-mix(in oklch, var(--muted-foreground) 45%, transparent); animation: ib-lvi-band var(--lvi-dur) infinite both; }
+.ib-lvi-row { position: absolute; left: 0; right: 0; top: 0; height: 14px; display: grid; grid-template-columns: 7px 1fr; grid-template-rows: 4px 3px; column-gap: 7px; row-gap: 3px; align-content: center; padding: 0 6px; border-radius: 4px; background: var(--card); box-shadow: 0 0 0 1px color-mix(in oklch, var(--border) 70%, transparent); transform: translateY(var(--g)); animation: ib-lvi-row var(--lvi-dur) infinite both; will-change: transform; }
+.ib-lvi-row i { grid-row: 1 / 3; align-self: center; width: 7px; height: 7px; border-radius: 50%; background: var(--primary); }
+.ib-lvi-row[data-dot="stop"] i { background: var(--destructive, oklch(0.6 0.2 25)); }
+.ib-lvi-row[data-dot="ask"] i { background: var(--warning, oklch(0.75 0.15 85)); }
+.ib-lvi-row[data-dot="read"] i { background: transparent; box-shadow: inset 0 0 0 1.5px color-mix(in oklch, var(--muted-foreground) 55%, transparent); }
+.ib-lvi-row b { display: block; height: 4px; border-radius: 2px; background: color-mix(in oklch, var(--foreground) 32%, transparent); }
+.ib-lvi-row b + b { height: 3px; background: color-mix(in oklch, var(--muted-foreground) 30%, transparent); }
+/* The groups for a beat, then the bands fade and every row slides to its place in one list, then back. */
+@keyframes ib-lvi-row { 0%, 22% { transform: translateY(var(--g)); } 42%, 82% { transform: translateY(var(--l)); } 100% { transform: translateY(var(--g)); } }
+@keyframes ib-lvi-band { 0%, 18% { opacity: 1; } 32%, 86% { opacity: 0; } 100% { opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .ib-lvi-row { animation: none; transform: translateY(var(--l)); }
+  .ib-lvi-band { animation: none; opacity: 0; }
+}
+.ib-lvi .ib-bi-text { padding-top: 18px; }
+.ib-lvi .ib-bi-text p { font-size: var(--ib-fs-15, 15px); }
+@media (max-width: 560px) {
+  dialog.ib-dlg.ib-lvi h2 { font-size: 96px; }
+  .ib-lvi .ib-lvi-poster { padding: 18px 20px 18px 18px; }
+  .ib-lvi-art { width: 124px; }
+}
 
 /* The Checklist's reveal (approval "inbox-checklist-reveal"; ChecklistIntro.tsx): the Board dialog's frame, text and buttons (.ib-bi), over a
    small thread foot whose checklist ticks itself, its list open for a moment. The list and the button are the real

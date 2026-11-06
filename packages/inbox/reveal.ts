@@ -306,3 +306,68 @@ export function useStepsReveal(input: StepsRevealInput) {
     },
   });
 }
+
+/**
+ * The List view's announcement (approval "inbox-list-view", the owner's ask, 2026-11-05: "a dialogue … after a few
+ * threads start coming in"): the list holds this many rows or more.
+ */
+export const LIST_VIEW_REVEAL_MIN_ROWS = 5;
+
+/** A release build (the Inbox's own rule for its reveals, `normalizeStableVersion`): a dev or test build never shows it. */
+export function releaseVersion(version: string | null | undefined): boolean {
+  return typeof version === 'string' && /^v?\d{1,9}\.\d{1,9}\.\d{1,9}$/.test(version.trim());
+}
+
+/** What one load knows for the List view's announcement, and what holds now. */
+export interface ListViewRevealInput {
+  /** This browser has not had it (listView.ts `listViewIntroSeen`), read once per load. */
+  due: boolean;
+  /** The Inbox runs a release build (`releaseVersion` of the list's `version`). */
+  release: boolean;
+  listLoaded: boolean;
+  firstRun: boolean;
+  /** The tour, an update or another one-time dialog was on screen (or is due) on this load. */
+  blocked: boolean;
+  /** The list draws its groups (Grouped): the announcement is for someone who has not chosen List. */
+  grouped: boolean;
+  rows: readonly InboxListRow[];
+  toast: boolean;
+  thread: string | null;
+  clear: boolean;
+  place: string;
+  heldBack: () => boolean;
+}
+
+/** At a settled moment: a release build, the list loaded and grouped, the page old enough, and enough rows. */
+export function listViewRevealMayClaim(
+  gate: Pick<ListViewRevealInput, 'due' | 'release' | 'blocked' | 'listLoaded' | 'firstRun' | 'grouped' | 'rows'>,
+  pageAge: number,
+): boolean {
+  if (!gate.due || !gate.release || gate.blocked || !gate.listLoaded || gate.firstRun || !gate.grouped) return false;
+  return pageAge >= REVEAL_TIMES.pageAgeMs && gate.rows.length >= LIST_VIEW_REVEAL_MIN_ROWS;
+}
+
+/**
+ * The List view's one-time announcement: the Board's calm moment (back on the list after reading a thread, 60 s into
+ * the page, 5 rows or more), once per browser. Nothing on the Inbox: the claim is this page's own, and the cookie is
+ * written when the dialog opens (listView.ts `markListViewIntroSeen`). It opens only on the list itself with no thread
+ * open (so it never covers a question waiting in a thread, nor a phone's thread), and only while the list is grouped.
+ */
+export function useListViewReveal(input: ListViewRevealInput) {
+  const latest = useRef(input);
+  latest.current = input;
+  return useRevealMoment({
+    wanted: input.due && input.release && !input.blocked && input.grouped,
+    thread: input.thread,
+    rows: input.rows,
+    clear: input.clear && input.thread === null,
+    place: input.place,
+    heldBack: input.heldBack,
+    toast: input.toast,
+    leaveCounts: (visit, now, _row, next) => boardRevealLeaveCounts(visit, now, next),
+    mayClaim: (pageAge) => listViewRevealMayClaim(latest.current, pageAge),
+    // List chosen meanwhile (the ⋮ menu): nothing to announce.
+    holds: () => latest.current.grouped,
+    claim: async () => true,
+  });
+}
