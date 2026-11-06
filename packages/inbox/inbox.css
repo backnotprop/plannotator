@@ -2479,6 +2479,9 @@ pre code.pn-code[data-keep-layout] {
 .ib-sb-sheet { position: fixed; top: 0; bottom: 0; left: 0; z-index: 50; display: flex; flex-direction: column; width: var(--sidebar-width); box-shadow: var(--ib-shadow-sheet); outline: none; }
 .ib-sb-sheet-in { display: flex; flex-direction: column; width: 100%; height: 100%; }
 .ib-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+/* The window's live region, on the page and not under it: at its static place it made #root 1 px taller than the window,
+   and a scroll into view (a click or focus while the panes move) lifted every pane by that 1 px until a reload. */
+.pn-inbox > .ib-sr { top: 0; }
 @media (prefers-reduced-transparency: reduce) {
   .ib-sb-scrim { backdrop-filter: none; background-color: rgb(0 0 0 / 0.65); }
 }
