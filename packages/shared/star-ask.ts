@@ -13,8 +13,8 @@
  *    PLANNOTATOR_STAR_ASK_PREVIEW=1 turns it on, for a scratch build's pictures and e2e (gh is faked there);
  *  - the record is open (`starAskOpen`): never shown and never answered, on any surface;
  *  - a returning person: plan review, code review and annotate read the daily ping's first-use week
- *    (`starAskReturning`: week 2 or later). The Inbox's line has its own need (7 days, 10 threads:
- *    shared/inbox/reveals.ts) and its own calm moment;
+ *    (`starAskReturning`: week 2 or later). The Inbox's line has its own need (the second day of Inbox use, no thread
+ *    minimum: shared/inbox/reveals.ts) and its own calm moment;
  *  - the already-starred check, run only now, after every local rule passed, once: `gh api
  *    user/starred/backnotprop/plannotator` with the person's own gh login. 204: stamp `already`, show nothing. 404:
  *    show it, and the button stars with gh (`canStar`). gh missing, signed out, any other answer, or nothing within

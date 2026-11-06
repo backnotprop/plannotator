@@ -15,8 +15,8 @@
  * day after the list grows taller than the screen); a light user getting a heavy-use dialog; two dialogs on one day,
  * or on two page loads in a row (an old tab reading again included); the gap after an offer's Not now; an offer whose
  * moment never comes not retiring after 14 days (an update-day dialog never retires); update-day dialogs coming back to
- * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") going before a
- * feature reveal instead of last.
+ * back; an unanswered agent note taking another day; the "Star the repo" ask (approval "star-ask") not going on the
+ * second day of use (the owner, 2026-11-06), or going ahead of an offer that is next.
  */
 import { describe, expect, test } from "bun:test";
 import {
@@ -184,16 +184,16 @@ function expectOnePerDay(shown: Shown[]) {
 }
 
 describe("30 days of a heavy user", () => {
-  test("setup on day 0, then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6); the star ask last (7)", () => {
+  test("setup on day 0, the star ask on day 1 (nothing else is due yet), then one a day: Snooze 2, Bro mode 3, the Board 4; the list outgrows the screen on day 5, so List view goes on 5, ahead of the Checklist (6)", () => {
     const shown = simulate(HEAVY);
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       ["snooze", 2],
       [BRO, 3],
       ["board", 4],
       [LIST_VIEW, 5],
       ["steps", 6],
-      ["star", 7],
     ]);
     expectOnePerDay(shown);
   });
@@ -202,27 +202,28 @@ describe("30 days of a heavy user", () => {
     const shown = simulate({ ...HEAVY, moment: (id, day) => id !== "snooze" || day >= 1 });
     expect(shown.map((s) => [s.id, s.day])).toEqual([
       ["agent_note", 0],
+      ["star", 1],
       [LIST_VIEW, 2],
       ["snooze", 3],
       [BRO, 4],
       ["board", 5],
       ["steps", 6],
-      ["star", 7],
     ]);
   });
 
   test("a Not now on Bro mode: the next offer waits three days, not one", () => {
     const shown = simulate({ ...HEAVY, notNow: [BRO] });
-    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 9 });
+    expect(days(shown)).toEqual({ agent_note: 0, snooze: 2, [BRO]: 3, [LIST_VIEW]: 6, board: 7, steps: 8, star: 1 });
   });
 });
 
 describe("30 days of a light user", () => {
-  test("setup on day 0, Snooze about day 7, the Checklist late; never Bro mode, the Board or List view", () => {
+  test("setup on day 0; Snooze next from day 2 holds the star ask back until its patience runs out, so the star ask goes on day 7 and Snooze, passed, retires; the Checklist late; never Bro mode, the Board or List view", () => {
     const shown = simulate(LIGHT);
     const got = days(shown);
     expect(got.agent_note).toBe(0);
-    expect(got.snooze).toBe(7);
+    expect(got.star).toBe(7);
+    expect(got.snooze).toBeUndefined();
     expect(got.steps).toBeGreaterThanOrEqual(20);
     for (const never of [BRO, "board", LIST_VIEW]) expect(got[never]).toBeUndefined();
     expectOnePerDay(shown);

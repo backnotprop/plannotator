@@ -66,6 +66,8 @@ export interface RevealEntry {
    * (the list taller than the screen) is itself the heavy use. Only for `offer`.
    */
   ahead?: boolean;
+  /** First use must be on an earlier local calendar day (`revealDay`): from the second day of use. */
+  laterDay?: boolean;
   /** Off: never next and never claimed. */
   enabled: boolean;
 }
@@ -87,10 +89,11 @@ export const INBOX_REVEALS: readonly RevealEntry[] = [
   // Board's 5 threads; the Board need not be on. Opt-in, as the Board: the claim only stamps it, `ChecklistIntro` opens,
   // and only its "Turn it on" writes inboxSteps (unset -> true). Until then no word of it reaches an agent.
   { id: "steps", kind: "offer", tenureMs: 5 * DAY_MS, minThreads: 5, enabled: true },
-  // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): after every feature reveal,
-  // to a returning person (a week since first use, 10 threads), once across every surface (config.json `starAsk`). Its
-  // claim runs the already-starred check (gh) before it stamps anything; starred already, nothing shows.
-  { id: "star", kind: "offer", tenureMs: 7 * DAY_MS, minThreads: 10, enabled: true },
+  // The "Star the repo" ask (approval "star-ask", 2026-11-06; packages/shared/star-ask.ts): last in the line, shown
+  // from the second day of Inbox use (the owner, 2026-11-06: "Would rather show it on 2nd day of inbox use"; no thread
+  // minimum), once across every surface (config.json `starAsk`). Last in order, so on a day another offer is due that
+  // one goes first. Its claim runs the already-starred check (gh) before it stamps anything; starred already, nothing shows.
+  { id: "star", kind: "offer", tenureMs: 0, minThreads: 0, laterDay: true, enabled: true },
   // List view (#2716) goes here, last in order but ahead at its moment (`ahead`; approval "inbox-one-time-dialogs": once
   // the list is taller than the screen, at the next calm moment). `minThreads: 15` is the server's stand-in for "taller
   // than the screen": { id: "list_view", kind: "offer", tenureMs: 2 * DAY_MS, minThreads: 15, ahead: true, enabled: true }.
@@ -188,6 +191,7 @@ export function revealQualifies(entry: RevealEntry, state: RevealState, now: Dat
   if (first === null) {
     if (entry.kind !== "update") return false;
   } else if (now.getTime() - first < entry.tenureMs) return false;
+  if (entry.laterDay && (first === null || revealDay(first) === revealDay(now.getTime()))) return false;
   return state.threads >= entry.minThreads;
 }
 
