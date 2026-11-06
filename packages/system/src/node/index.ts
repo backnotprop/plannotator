@@ -241,7 +241,7 @@ export { DRAW_BRANCH, firstDrawPrompt, recipes, REDRAW_BRANCH, updatePrompt, typ
 export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from '../agent/setup.ts';
 export { agentModel } from '../agent/model.ts';
 export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from '../agent/docs.ts';
-export { CLAUDE_REDRAW_TOOLS, redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from '../agent/command.ts';
+export { redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from '../agent/command.ts';
 export { checkKey, EMPTY_STATE, readSetup, readState, systemPaths, takeLock, writeState, type TickState } from './state.ts';
-export { changedCount, mergedPrs, redrawNote, SUMMARY_FILE, tick, type Forge, type Notify, type RunAgent, type TickDeps, type TickResult } from './tick.ts';
+export { changedCount, mergedPrs, plannotatorProgram, redrawNote, runCommand, SUMMARY_FILE, tick, TICK_TIMEOUTS_MS, type Forge, type Notify, type Run, type RunAgent, type TickDeps, type TickResult } from './tick.ts';
 export { install, LABEL_PREFIX, launchAgentsDir, list, plist, remove, schedule, scheduleLabel, SYSTEM_TICK_INTERVAL_SECONDS, type CommandRunner, type ScheduleOptions } from './schedule.ts';

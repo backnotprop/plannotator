@@ -113,7 +113,8 @@ describe('install, list and remove', () => {
       await install({ ...base(s.dataDir), run, uid: 501 });
       expect(existsSync(join(s.dir, 'Library', 'LaunchAgents', `${scheduleLabel('acme-1a2b3c')}.plist`))).toBe(true);
     } finally {
-      process.env.HOME = before;
+      if (before === undefined) delete process.env.HOME;
+      else process.env.HOME = before;
     }
   });
 });

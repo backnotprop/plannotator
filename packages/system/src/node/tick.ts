@@ -9,11 +9,22 @@
 //   5. push the redraw branch, open or keep its one pull request, send one note.
 //
 // The tick never pushes to the default branch and never force-pushes. The
-// agent, the forge (gh) and the note are injectable so the whole path runs in
-// tests with no model, no network and no real gh.
+// agent runs as it normally does, with its full tools (owner ruling
+// 2026-11-06: no limits on agents); whatever it changes is offered in the
+// redraw pull request for the person to review, and files outside the drawing
+// are named there and in the note. Every child process has a time bound, so a
+// hung agent, git, hook or gh cannot hold the schedule. The agent, the forge
+// (gh) and the note are injectable so the whole path runs in tests with no
+// model, no network and no real gh.
+//
+// TODO(System B9, Ops' Inbox side): a stuck tick (a merge conflict on the
+// redraw branch, gh signed out, a time bound hit) and a set-aside worktree are
+// recorded only in state.json (`last_error`, `set_aside`). The Inbox's System
+// thread should surface them; that is a follow-up on the Inbox side.
 import { spawn } from 'node:child_process';
-import { cp, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { constants } from 'node:fs';
+import { access, cp, mkdir, readdir, readFile, realpath, stat, unlink, writeFile } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { parseDocument } from 'yaml';
 import { redrawCommand } from '../agent/command.ts';
 import { unattendedDocs } from '../agent/docs.ts';
@@ -56,37 +67,93 @@ export type Forge = {
   openPr(o: { cwd: string; base: string; head: string; title: string; body: string }): Promise<string>;
 };
 export type Notify = (o: { project: string; subject: string; body: string; replyTo: string | null }) => Promise<void>;
-/** `plannotator`: the command that sends the note, one word (the binary) or more (`bun <script>` from a source checkout). */
-export type TickDeps = { runAgent?: RunAgent; forge?: Forge; notify?: Notify; plannotator?: string | readonly string[] };
+export type TickDeps = {
+  runAgent?: RunAgent;
+  forge?: Forge;
+  notify?: Notify;
+  /** The plannotator binary the note is sent with, absolute; `plannotatorProgram()` unless given (pass the plist's program). */
+  plannotator?: string;
+  /** The default agent's command; `redrawCommand` unless given. */
+  agentCommand?: (setup: SystemSetup, prompt: string) => { command: string[]; stdin: string | null };
+  /** The default agent's time bound; TICK_TIMEOUTS_MS.agent unless given. */
+  agentTimeoutMs?: number;
+};
 
-type Run = { code: number; stdout: string; stderr: string };
+/**
+ * Time bounds on the tick's own child processes: an engineering default, not
+ * a limit a person meets. A child past its bound is stopped with its whole
+ * process group (SIGTERM, then SIGKILL 5 s later) and the tick records why
+ * in state.json, so a hung agent, a git hook or signing prompt that waits for
+ * a person, a stalled network or a gh that never answers cannot keep the job
+ * running, which would stop launchd from starting it again.
+ */
+export const TICK_TIMEOUTS_MS = { agent: 45 * 60_000, git: 5 * 60_000, gh: 2 * 60_000, note: 2 * 60_000 } as const;
 
-/** Run one command to the end. Output past `keep` bytes keeps only its tail. */
-function run(argv: string[], o: { cwd: string; stdin?: string | null; env?: Record<string, string>; keep?: number }): Promise<Run> {
+export type Run = { code: number; stdout: string; stderr: string; timedOut: boolean };
+
+const minutes = (ms: number) => (ms >= 60_000 ? `${Math.round(ms / 60_000)} minutes` : `${Math.round(ms / 1000)} seconds`);
+
+/**
+ * Run one command to the end, or until `timeoutMs`: then its process group
+ * (it and everything it started) is stopped and `timedOut` is set. Output past
+ * `keep` bytes keeps only its tail.
+ */
+export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; stdin?: string | null; env?: Record<string, string>; keep?: number }): Promise<Run> {
   const keep = o.keep ?? 16 * 1024 * 1024;
   return new Promise((done) => {
-    const child = spawn(argv[0]!, argv.slice(1), { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ['pipe', 'pipe', 'pipe'] });
+    // its own process group, so a stop reaches what it started too
+    const child = spawn(argv[0]!, argv.slice(1), { cwd: o.cwd, env: { ...process.env, ...o.env }, stdio: ['pipe', 'pipe', 'pipe'], detached: true });
     let stdout = '';
     let stderr = '';
+    let timedOut = false;
+    const group = (signal: NodeJS.Signals) => {
+      try {
+        if (child.pid) process.kill(-child.pid, signal);
+      } catch {
+        // already gone
+      }
+    };
+    let hard: ReturnType<typeof setTimeout> | undefined;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      group('SIGTERM');
+      hard = setTimeout(() => group('SIGKILL'), 5000);
+    }, o.timeoutMs);
     const tail = (s: string) => (s.length > keep ? s.slice(-keep) : s);
     child.stdout.on('data', (d: Buffer) => (stdout = tail(stdout + d.toString('utf8'))));
     child.stderr.on('data', (d: Buffer) => (stderr = tail(stderr + d.toString('utf8'))));
-    child.on('error', (e) => done({ code: 127, stdout, stderr: stderr + e.message }));
-    child.on('close', (code) => done({ code: code ?? 1, stdout, stderr }));
+    const finish = (r: Omit<Run, 'timedOut'>) => {
+      clearTimeout(timer);
+      clearTimeout(hard);
+      if (timedOut) group('SIGKILL');
+      done({ ...r, timedOut });
+    };
+    child.on('error', (e) => finish({ code: 127, stdout, stderr: stderr + e.message }));
+    child.on('close', (code) => finish({ code: code ?? 1, stdout, stderr }));
     child.stdin.on('error', () => {});
     child.stdin.end(o.stdin ?? '');
   });
 }
 
-/** git that never asks for a password or opens an editor: launchd has no terminal. */
+/** Why a child failed, in a line: its own words, or the time bound it hit. */
+const failure = (name: string, r: Run, timeoutMs: number) =>
+  r.timedOut ? `${name} was stopped after ${minutes(timeoutMs)} with no end` : `${name}: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`;
+
+/**
+ * git that never asks on a terminal or opens an editor: launchd has none. The
+ * repo's hooks and the person's signing setup run as they normally do; a hook
+ * or a signing prompt that waits for a person meets the time bound.
+ */
 const GIT_ENV = { GIT_TERMINAL_PROMPT: '0', GIT_EDITOR: 'true', GIT_MERGE_AUTOEDIT: 'no' };
 
+const runGit = (cwd: string, args: string[]) => runCommand(['git', '-C', cwd, ...args], { cwd, env: GIT_ENV, timeoutMs: TICK_TIMEOUTS_MS.git });
+
 async function git(cwd: string, args: string[]): Promise<string> {
-  const r = await run(['git', '-C', cwd, ...args], { cwd, env: GIT_ENV });
-  if (r.code !== 0) throw new Error(`git ${args[0]}: ${(r.stderr || r.stdout).trim()}`);
+  const r = await runGit(cwd, args);
+  if (r.code !== 0) throw new Error(failure(`git ${args[0]}`, r, TICK_TIMEOUTS_MS.git));
   return r.stdout;
 }
-const gitOk = async (cwd: string, args: string[]) => (await run(['git', '-C', cwd, ...args], { cwd, env: GIT_ENV })).code === 0;
+const gitOk = async (cwd: string, args: string[]) => (await runGit(cwd, args)).code === 0;
 const commitOf = async (cwd: string, ref: string) => (await git(cwd, ['rev-parse', '--verify', '--quiet', '--end-of-options', `${checkRef(ref)}^{commit}`]).catch(() => '')).trim() || null;
 
 /** The default branch's name, from origin/HEAD, else main or master. */
@@ -165,8 +232,12 @@ export function changedCount(before: SystemModel, after: SystemModel): { parts: 
 
 const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
 
-/** The note a redraw sends: "Main moved to 9c41e07. PR 1335 landed: <the agent's sentences> 1 part changed. Redraw: <link>" */
-export function redrawNote(o: { to: string; prs: number[]; summary: string; count: { parts: number; flows: number }; pr: string | null }): string {
+/**
+ * The note a redraw sends: "Main moved to 9c41e07. PR 1335 landed: <the
+ * agent's sentences> 1 part changed. This redraw also changed: <files outside
+ * the drawing>. Redraw: <link>"
+ */
+export function redrawNote(o: { to: string; prs: number[]; summary: string; count: { parts: number; flows: number }; also?: string[]; pr: string | null }): string {
   const words = [`Main moved to ${o.to.slice(0, 7)}.`];
   const summary = o.summary.replace(/\s+/g, ' ').trim();
   const said = summary && !/[.!?]$/.test(summary) ? `${summary}.` : summary;
@@ -175,49 +246,71 @@ export function redrawNote(o: { to: string; prs: number[]; summary: string; coun
   const { parts, flows } = o.count;
   if (parts && flows) words.push(`${plural(parts, 'part')} and ${plural(flows, 'line')} changed.`);
   else if (parts || flows) words.push(`${parts ? plural(parts, 'part') : plural(flows, 'line')} changed.`);
+  if (o.also?.length) words.push(`This redraw also changed: ${o.also.join(', ')}.`);
   if (o.pr) words.push(`Redraw: ${o.pr}`);
   return words.join(' ');
 }
 
-/** The default agent: the person's own agent CLI, headless, in the worktree. */
-const defaultRunAgent: RunAgent = async ({ setup, cwd, prompt, docs }) => {
-  const { command, stdin } = redrawCommand(setup, prompt, { docs });
-  const r = await run(command, { cwd, stdin, keep: 64 * 1024 });
+/** The default agent: the person's own agent CLI, headless, in the worktree, within its time bound. */
+const commandAgent = (deps: TickDeps | undefined): RunAgent => async ({ setup, cwd, prompt }) => {
+  const { command, stdin } = (deps?.agentCommand ?? redrawCommand)(setup, prompt);
+  const timeoutMs = deps?.agentTimeoutMs ?? TICK_TIMEOUTS_MS.agent;
+  const r = await runCommand(command, { cwd, stdin, env: GIT_ENV, timeoutMs, keep: 64 * 1024 });
+  if (r.timedOut) return { ok: false, output: `the agent was stopped after ${minutes(timeoutMs)} with no end` };
   return { ok: r.code === 0, output: `${r.stdout}${r.stderr ? `\n${r.stderr}` : ''}` };
 };
 
 /** The default forge: the GitHub CLI with the person's own sign-in. */
 const ghForge: Forge = {
   async findOpenPr({ cwd, head }) {
-    const r = await run(['gh', 'pr', 'list', '--head', head, '--state', 'open', '--json', 'url', '--limit', '1'], { cwd, env: { GH_PROMPT_DISABLED: '1' } });
-    if (r.code !== 0) throw new Error(`gh pr list: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`);
+    const r = await runCommand(['gh', 'pr', 'list', '--head', head, '--state', 'open', '--json', 'url', '--limit', '1'], { cwd, env: { GH_PROMPT_DISABLED: '1' }, timeoutMs: TICK_TIMEOUTS_MS.gh });
+    if (r.code !== 0) throw new Error(failure('gh pr list', r, TICK_TIMEOUTS_MS.gh));
     const rows = JSON.parse(r.stdout || '[]') as { url?: string }[];
     return rows[0]?.url ?? null;
   },
   async openPr({ cwd, base, head, title, body }) {
-    const r = await run(['gh', 'pr', 'create', '--base', base, '--head', head, '--title', title, '--body-file', '-'], { cwd, stdin: body, env: { GH_PROMPT_DISABLED: '1' } });
-    if (r.code !== 0) throw new Error(`gh pr create: ${(r.stderr || r.stdout).trim() || `exit ${r.code}`}`);
+    const r = await runCommand(['gh', 'pr', 'create', '--base', base, '--head', head, '--title', title, '--body-file', '-'], { cwd, stdin: body, env: { GH_PROMPT_DISABLED: '1' }, timeoutMs: TICK_TIMEOUTS_MS.gh });
+    if (r.code !== 0) throw new Error(failure('gh pr create', r, TICK_TIMEOUTS_MS.gh));
     return r.stdout.trim().split('\n').pop()!.trim();
   },
 };
 
 /** The default note: `plannotator inbox call send_message`, the JSON on stdin. */
-const inboxNotify = (plannotator: string | readonly string[]): Notify => async ({ project, subject, body, replyTo }) => {
+const inboxNotify = (plannotator: string): Notify => async ({ project, subject, body, replyTo }) => {
   const message = { body, project_path: project, ...(replyTo ? { reply_to: replyTo } : { subject }) };
-  const self = typeof plannotator === 'string' ? [plannotator] : [...plannotator];
-  const r = await run([...self, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message) });
-  if (r.code !== 0) throw new Error(`plannotator inbox call send_message: ${r.stderr.trim() || `exit ${r.code}`}`);
+  const r = await runCommand([plannotator, 'inbox', 'call', 'send_message', '-'], { cwd: project, stdin: JSON.stringify(message), timeoutMs: TICK_TIMEOUTS_MS.note });
+  if (r.code !== 0) throw new Error(failure('plannotator inbox call send_message', r, TICK_TIMEOUTS_MS.note));
 };
+
+/**
+ * The plannotator binary to send the note with, absolute: this process when
+ * it is the plannotator binary (the launchd job runs it by its absolute path),
+ * else the first plannotator on PATH, resolved. A caller that knows the
+ * plist's program passes it as `deps.plannotator` instead.
+ */
+export async function plannotatorProgram(): Promise<string> {
+  if (/^plannotator(?:\.exe)?$/.test(basename(process.execPath))) return process.execPath;
+  for (const dir of (process.env.PATH ?? '').split(':')) {
+    if (!dir || !isAbsolute(dir)) continue;
+    const candidate = join(dir, 'plannotator');
+    if (await access(candidate, constants.X_OK).then(() => true, () => false)) return realpath(candidate).catch(() => candidate);
+  }
+  return 'plannotator';
+}
 
 /** The same folder, after symlinks: macOS's /var and /private/var are one folder. */
 const same = async (a: string, b: string) => (await realpath(a).catch(() => resolve(a))) === (await realpath(b).catch(() => resolve(b)));
 
 /**
  * Put the drawing's worktree on the redraw branch at `base`, then merge
- * `merge` into it when given. Made when missing; an existing one must be a
- * clean worktree of this repo, or it is left alone.
+ * `merge` into it when given. Made when missing. An existing one must be a
+ * worktree of this repo. It is the tick's own: one left dirty by a redraw that
+ * was cut off (a reboot, a logout, a kill) is set aside under `interrupted`
+ * and reset, and the return says so, so one cut-off redraw never stops every
+ * later tick.
  */
-async function prepareWorktree(root: string, wt: string, base: string, merge: string | null): Promise<void> {
+async function prepareWorktree(root: string, wt: string, base: string, merge: string | null, interrupted: string): Promise<string | null> {
+  let setAsideNote: string | null = null;
   const exists = await stat(wt).then(() => true, () => false);
   if (!exists) {
     await mkdir(dirname(wt), { recursive: true, mode: 0o700 });
@@ -226,16 +319,20 @@ async function prepareWorktree(root: string, wt: string, base: string, merge: st
     const common = (await git(wt, ['rev-parse', '--path-format=absolute', '--git-common-dir']).catch(() => '')).trim();
     const own = (await git(root, ['rev-parse', '--path-format=absolute', '--git-common-dir'])).trim();
     if (!common || !(await same(common, own))) throw new Error(`${wt} is not a worktree of ${root}`);
-    if ((await changedPaths(wt)).length) throw new Error(`the drawing's worktree ${wt} has uncommitted changes; the check leaves it alone`);
+    if ((await changedPaths(wt)).length || (await gitOk(wt, ['rev-parse', '--verify', '--quiet', 'MERGE_HEAD']))) {
+      await setAside(wt, interrupted);
+      setAsideNote = `the redraw worktree was left with changes (a redraw cut off before it ended); they are kept in ${interrupted}`;
+    }
     await git(wt, ['checkout', '--quiet', '-B', REDRAW_BRANCH, base]);
   }
   if (merge && !(await gitOk(wt, ['merge-base', '--is-ancestor', merge, 'HEAD']))) {
-    const r = await run(['git', '-C', wt, 'merge', '--no-edit', '--quiet', merge], { cwd: wt, env: GIT_ENV });
+    const r = await runGit(wt, ['merge', '--no-edit', '--quiet', merge]);
     if (r.code !== 0) {
-      await run(['git', '-C', wt, 'merge', '--abort'], { cwd: wt, env: GIT_ENV });
-      throw new Error(`the redraw branch does not merge with ${merge}: ${(r.stderr || r.stdout).trim()}`);
+      await runGit(wt, ['merge', '--abort']);
+      throw new Error(r.timedOut ? failure('git merge', r, TICK_TIMEOUTS_MS.git) : `the redraw branch does not merge with ${merge}: ${(r.stderr || r.stdout).trim()}`);
     }
   }
+  return setAsideNote;
 }
 
 /**
@@ -244,6 +341,8 @@ async function prepareWorktree(root: string, wt: string, base: string, merge: st
  * next redraw starts clean and nothing the agent wrote is lost.
  */
 async function setAside(wt: string, into: string): Promise<void> {
+  // a merge left half done is undone first, so the reset below can run
+  await runGit(wt, ['merge', '--abort']);
   for (const rel of await changedPaths(wt)) {
     const from = join(wt, rel);
     if (await stat(from).then(() => true, () => false)) {
@@ -291,7 +390,12 @@ export async function tick(o: { root: string; dataDir: string; key: string; now?
   if (!release) return { ran: 'nothing', gated: '', why: 'another tick is running' };
   const now = () => (o.now ?? new Date()).toISOString();
   const state = await readState(o.dataDir, o.key);
-  const save = (s: Partial<TickState>) => writeState(o.dataDir, o.key, { ...state, ...s });
+  // every save builds on the last one, so a later save keeps an earlier field (set_aside)
+  let current = state;
+  const save = async (s: Partial<TickState>) => {
+    current = { ...current, ...s };
+    await writeState(o.dataDir, o.key, current);
+  };
   let target = '';
   try {
     const main = await defaultBranch(o.root);
@@ -344,8 +448,7 @@ type RedrawInput = {
 
 async function redraw(r: RedrawInput): Promise<TickResult> {
   const forge = r.deps?.forge ?? ghForge;
-  const runAgent = r.deps?.runAgent ?? defaultRunAgent;
-  const notify = r.deps?.notify ?? inboxNotify(r.deps?.plannotator ?? 'plannotator');
+  const runAgent = r.deps?.runAgent ?? commandAgent(r.deps);
   const wt = r.paths.worktree;
   const remoteRedraw = `refs/remotes/origin/${REDRAW_BRANCH}`;
 
@@ -354,7 +457,9 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   // The redraw branch goes on from where it is on origin (an open pull request
   // gets more commits), with main merged in: it is never force-pushed.
   const onOrigin = await gitOk(r.root, ['fetch', '--quiet', 'origin', `+refs/heads/${REDRAW_BRANCH}:${remoteRedraw}`]);
-  await prepareWorktree(r.root, wt, onOrigin ? remoteRedraw : r.target, onOrigin ? r.target : null);
+  const interrupted = join(r.paths.failed, `interrupted-${r.now().replace(/[:.]/g, '-')}`);
+  const setAsideNote = await prepareWorktree(r.root, wt, onOrigin ? remoteRedraw : r.target, onOrigin ? r.target : null, interrupted);
+  if (setAsideNote) await r.save({ set_aside: `${r.now()}: ${setAsideNote}` });
 
   const prs = await mergedPrs(r.root, r.from, r.target, r.result.why.map((w) => w.path));
   const docs = unattendedDocs(r.setup.docs).allowed;
@@ -373,10 +478,11 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
   const dir = join(wt, DRAWING_DIR);
   // what this redraw starts from: main's drawing, or the open redraw's
   const before = (await load(dir)).model ?? r.model;
-  const agent = await runAgent({ setup: r.setup, cwd: wt, prompt, docs });
-  // from here a model ran: any failure sets the work aside and waits for main to move
+  const start = (await git(wt, ['rev-parse', 'HEAD'])).trim();
+  // from here a model runs: any failure, a throw included, sets the work aside and waits for main to move
   try {
-    return await afterAgent(r, { agent, wt, dir, before, prs, summaryPath, openPr, forge, notify, fail });
+    const agent = await runAgent({ setup: r.setup, cwd: wt, prompt, docs });
+    return await afterAgent(r, { agent, wt, dir, before, start, prs, summaryPath, openPr, forge, fail });
   } catch (e) {
     return fail((e as Error).message);
   }
@@ -385,18 +491,17 @@ async function redraw(r: RedrawInput): Promise<TickResult> {
 async function afterAgent(
   r: RedrawInput,
   c: {
-    agent: { ok: boolean; output: string }; wt: string; dir: string; before: SystemModel; prs: number[]; summaryPath: string;
-    openPr: string | null; forge: Forge; notify: Notify; fail: (error: string) => Promise<TickResult>;
+    agent: { ok: boolean; output: string }; wt: string; dir: string; before: SystemModel; start: string; prs: number[]; summaryPath: string;
+    openPr: string | null; forge: Forge; fail: (error: string) => Promise<TickResult>;
   },
 ): Promise<TickResult> {
-  const { agent, wt, dir, before, prs, summaryPath, openPr, forge, notify, fail } = c;
+  const { agent, wt, dir, before, start, prs, summaryPath, openPr, forge, fail } = c;
   if (!agent.ok) return fail(`the agent did not finish: ${agent.output.trim().slice(-400) || 'no output'}`);
-  const outside = (await changedPaths(wt)).filter((p) => p !== SUMMARY_FILE && !p.startsWith(`${DRAWING_DIR}/`));
-  if (outside.length) return fail(`the agent changed files outside ${DRAWING_DIR}: ${outside.slice(0, 5).join(', ')}`);
   const summary = (await readFile(summaryPath, 'utf8').catch(() => '')).trim();
   await unlink(summaryPath).catch(() => {});
 
-  if (!(await changedPaths(wt)).length) {
+  const committed = (await git(wt, ['rev-parse', 'HEAD'])).trim() !== start;
+  if (!committed && !(await changedPaths(wt)).length) {
     // the agent read the change and the drawing stands
     await r.save({ gated: r.target, gated_at: r.now(), last_error: null, failed: null });
     return { ran: 'gated', gated: r.target, why: summary || 'the agent found nothing to change' };
@@ -407,21 +512,30 @@ async function afterAgent(
   issues.push(...checked.missing.map((m) => `missing: ${m}`));
   if (issues.length) return fail(`the redraw does not check clean: ${issues.slice(0, 5).join('; ')}`);
 
+  // Everything the agent changed goes in the pull request for the person to
+  // review, its own commits included; files outside the drawing are named.
   const title = `System: redraw for ${prs.length ? prs.map((n) => `PR ${n}`).join(', ') : r.target.slice(0, 7)}`;
+  const uncommitted = (await changedPaths(wt)).filter((p) => p !== SUMMARY_FILE);
+  if (uncommitted.length) {
+    await git(wt, ['add', '-A', '--', ...uncommitted]);
+    await git(wt, ['commit', '--quiet', '-m', title]);
+  }
+  const touched = (await git(wt, ['diff', '--name-only', '-z', '--no-renames', start, 'HEAD'])).split('\0').filter(Boolean);
+  const also = touched.filter((p) => !p.startsWith(`${DRAWING_DIR}/`)).sort();
   const body = [
     summary || 'The drawing follows the code at the new commit.',
     '',
     `Main moved from ${r.from.slice(0, 7)} to ${r.target.slice(0, 7)}. The files that woke the check:`,
     ...r.result.why.map((w) => `- ${w.path} (${w.reason})`),
+    ...(also.length ? ['', 'This redraw also changed files outside the drawing:', ...also.map((p) => `- ${p}`)] : []),
   ].join('\n');
-  await git(wt, ['add', '--', DRAWING_DIR]);
-  await git(wt, ['commit', '--quiet', '-m', title, '-m', body]);
   if (REDRAW_BRANCH === r.main) throw new Error('the redraw branch is the default branch; refusing to push');
   await git(wt, ['push', '--quiet', 'origin', `HEAD:refs/heads/${REDRAW_BRANCH}`]);
   const pr = openPr ?? (await forge.openPr({ cwd: wt, base: r.main, head: REDRAW_BRANCH, title, body }));
 
   const after = (await load(dir)).model;
-  const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(before, after) : { parts: 0, flows: 0 }, pr });
+  const note = redrawNote({ to: r.target, prs, summary, count: after ? changedCount(before, after) : { parts: 0, flows: 0 }, also, pr });
+  const notify = r.deps?.notify ?? inboxNotify(r.deps?.plannotator ?? (await plannotatorProgram()));
   let noteError: string | null = null;
   await notify({ project: r.root, subject: `System: ${r.model.name}`, body: note, replyTo: r.setup.thread_message }).catch((e: Error) => {
     noteError = `the note was not sent: ${e.message}`;

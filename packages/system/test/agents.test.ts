@@ -86,15 +86,10 @@ describe('unattendedDocUrl', () => {
 });
 
 describe('redrawCommand', () => {
-  test('Claude Code: headless, refused anything off the list, the model bare, the prompt on stdin, doc sites by host only', () => {
-    const { command, stdin } = redrawCommand({ agent: 'claude', model: 'anthropic/claude-opus-5-5' }, 'PROMPT', { docs: ['https://docs.example.com/a', 'https://docs.example.com/b'] });
-    expect(command.slice(0, 4)).toEqual(['claude', '-p', '--permission-mode', 'dontAsk']);
-    expect(command.slice(-2)).toEqual(['--model', 'claude-opus-5-5']);
-    const tools = command[command.indexOf('--allowedTools') + 1]!.split(',');
-    expect(tools.filter((t) => t.startsWith('WebFetch'))).toEqual(['WebFetch(domain:docs.example.com)']);
-    expect(tools.some((t) => /git push|gh |Bash\(\*|^Bash$/.test(t))).toBe(false);
+  test('Claude Code: headless with full tools, so nothing stops on a prompt; the model bare; the prompt on stdin', () => {
+    const { command, stdin } = redrawCommand({ agent: 'claude', model: 'anthropic/claude-opus-5-5' }, 'PROMPT');
+    expect(command).toEqual(['claude', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', '--model', 'claude-opus-5-5']);
     expect(stdin).toBe('PROMPT');
-    expect(command).not.toContain('PROMPT');
   });
 
   test('Pi and OpenCode get provider/model; OpenCode takes the prompt as its last argument', () => {

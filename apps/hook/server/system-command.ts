@@ -267,7 +267,7 @@ async function runTick(argv: readonly string[], deps: SystemCommandDeps, out: (t
   noWords(f, "tick");
   const key = keyOf(f);
   const root = projectFolder(deps, f);
-  const result = await tick({ root, dataDir: resolve(deps.dataDir), key, ...(deps.now ? { now: deps.now } : {}), deps: { plannotator: deps.self, ...deps.tick } });
+  const result = await tick({ root, dataDir: resolve(deps.dataDir), key, ...(deps.now ? { now: deps.now } : {}), deps: { ...(deps.self.length === 1 ? { plannotator: deps.self[0]! } : {}), ...deps.tick } });
   if (result.ran === "failed") throw new Refusal("tick_failed", result.error ?? "the tick failed");
   await out(JSON.stringify(result));
   return 0;

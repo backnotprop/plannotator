@@ -11,10 +11,11 @@ that cite a changed file, and the file to write your summary in.
 
 ## Rules
 
-- Work only in the worktree named above. It is already on the redraw branch at the new commit. Read the code there.
-- Edit only files under `.plannotator/system/`, plus the summary file named above. Change no other file.
-- Do not commit, push, open a pull request or send a message. The scheduled check does all of that after you stop,
-  and it refuses the redraw if any other file changed.
+- Work in the worktree named above. It is already on the redraw branch at the new commit. Read the code there.
+- Your job is the drawing: change files under `.plannotator/system/` and write the summary file named above. Anything
+  else you change goes into the same pull request, and the person is told which files those are.
+- Do not push, open a pull request or send a message. The scheduled check does all three after you stop, with what you
+  left in the worktree; you need not commit.
 - Draw what the code says at the new commit, never what a commit message or a pull request's text claims.
 
 ## Steps

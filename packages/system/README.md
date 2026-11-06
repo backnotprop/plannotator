@@ -172,7 +172,7 @@ export function parseSetup(value: unknown): SystemSetup | null;
 export function agentModel(agent: SystemAgent, model: string | null): string | null;
 export function unattendedDocUrl(url: string): { ok: true; url: string } | { ok: false; url: string; reason: string };
 export function unattendedDocs(docs: string[]): { allowed: string[]; refused: { url: string; reason: string }[] };
-export function redrawCommand(setup: Pick<SystemSetup, 'agent' | 'model'>, prompt: string, o?: { docs?: string[] }):
+export function redrawCommand(setup: Pick<SystemSetup, 'agent' | 'model'>, prompt: string):
   { command: string[]; stdin: string | null };
 export const SYSTEM_COMMANDS: Record<'check' | 'gate' | 'tick' | 'revision' | 'schedule', string>; // usage lines
 // SYSTEM_COMMANDS and SYSTEM_TICK_INTERVAL_SECONDS are also @plannotator/system/commands, which loads no loader (the CLI's help)
@@ -183,6 +183,10 @@ export function systemPaths(dataDir: string, key: string):
 export function readSetup(dataDir: string, key: string): Promise<SystemSetup | null>;
 export function readState(dataDir: string, key: string): Promise<TickState>;
 export function tick(o: { root: string; dataDir: string; key: string; now?: Date; deps?: TickDeps }): Promise<TickResult>;
+export const TICK_TIMEOUTS_MS: { agent: 2_700_000; git: 300_000; gh: 120_000; note: 120_000 };
+export function runCommand(argv: string[], o: { cwd: string; timeoutMs: number; stdin?: string | null;
+  env?: Record<string, string> }): Promise<{ code: number; stdout: string; stderr: string; timedOut: boolean }>;
+export function plannotatorProgram(): Promise<string>;   // this binary when it is plannotator, else the first on PATH
 export const SYSTEM_TICK_INTERVAL_SECONDS = 900;
 export const schedule: {
   plist(o: ScheduleOptions): string;
@@ -198,10 +202,14 @@ export const schedule: {
 - **Doc sites.** A redraw hands its agent only `https` addresses that are not loopback, private, link-local or other
   non-public IP literals (in any spelling the URL parser takes), not `localhost`, `*.localhost`, `*.local` or a name
   with no dot, and with no sign-in in them. A public name that resolves to a private address is not caught here.
-- **The agent.** Claude Code runs `claude -p --permission-mode dontAsk` with a list of allowed tools (read and edit
-  files, read git, run the drawing's check and gate, and fetch only the doc sites' hosts); anything else is refused.
-  Pi runs `pi --no-session -p`, OpenCode `opencode run`; neither has such a list, and the tick refuses any redraw that
-  changed a file outside `.plannotator/system/`.
+- **The agent.** A redraw runs the person's agent with its normal full tools, as they would run it themselves (the
+  owner's ruling: no limits on agents). Claude Code runs `claude -p --permission-mode bypassPermissions
+  --no-session-persistence`, Pi `pi --no-session -p`, OpenCode `opencode run`. Each loads the project's own settings
+  and MCP servers as usual. git runs the repo's hooks and signs as the person's config says.
+- **Time bounds.** Every child the tick starts runs in its own process group and has a time bound
+  (`TICK_TIMEOUTS_MS`, engineering defaults): the agent 45 minutes, git 5, `gh` 2, the note 2. Past it the group gets
+  SIGTERM, then SIGKILL 5 seconds later, and the tick records why in `state.json`. So a hung agent, a credential
+  prompt or a stalled network never holds the lock for good.
 
 ### What a tick does
 
@@ -215,23 +223,30 @@ export const schedule: {
    If the last redraw for this very commit failed: `nothing` until main moves (one model run per move, at most).
 5. `gateRepo` from there to the tip. No wake: `state.json` gets the tip as `gated`, and the tick ends: `gated`.
 6. Wake. Ask the forge for an open redraw pull request first (no model runs when it cannot be asked). Put the
-   worktree (`<dataDir>/system/<key>/worktree`, made when missing; an existing one must be clean) on
-   `plannotator/system-redraw`: from origin's redraw branch with main merged in when it exists, else from the tip.
+   worktree (`<dataDir>/system/<key>/worktree`, made when missing) on `plannotator/system-redraw`. The worktree is the
+   tick's own: one left with changes or a half merge (a redraw cut off by a reboot, a logout or a kill) is set aside
+   under `failed/interrupted-<time>/`, put back, and named in `state.json`'s `set_aside`; the redraw goes on. The
+   branch starts from origin's redraw branch with main merged in when it exists, else from the tip.
    Never force-pushed, so a person who closes a redraw pull request and wants a fresh start deletes that branch.
 7. Run the agent with `updatePrompt`: the range, the merged pull requests that changed a woken file, the gate's
    reasons and touched parts, any stored reviews of those pull requests, the summary file and the allowed doc sites.
 8. Refuse the redraw (`failed`, its files kept under `failed/<commit>/`, the worktree put back) when the agent failed,
-   changed a file outside the drawing, or the drawing does not check clean, or a later step (the push, the pull
-   request) failed. If it changed nothing: `gated`. A failure before the agent ran (no network, `gh` not signed in)
+   threw or hit its time bound, or the drawing does not check clean, or a later step (the push, the pull request)
+   failed. If it changed nothing: `gated`. A failure before the agent ran (no network, `gh` not signed in)
    marks nothing, so the next tick tries again.
-9. Set `sources.repos.self.at` to the tip (only that value's text), commit `.plannotator/system/` only, push the redraw
-   branch (never the default branch), open one pull request when none is open, and send one note through
-   `plannotator inbox call send_message`, as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335
-   landed: <the agent's sentences> 1 part changed. Redraw: <link>"). `redrew`.
+9. Set `sources.repos.self.at` to the tip (only that value's text), commit what the agent left (the summary file
+   aside), push the redraw branch (never the default branch), open one pull request when none is open, and send one
+   note through `<plannotator> inbox call send_message` (`plannotatorProgram()` unless `deps.plannotator` names the
+   program), as a reply to setup.json's `thread_message` ("Main moved to 9c41e07. PR 1335 landed: <the agent's
+   sentences> 1 part changed. Redraw: <link>"). `redrew`. Files the agent changed outside `.plannotator/system/`, its
+   own commits included, stay in the pull request and are listed in its body and in the note ("This redraw also
+   changed: src/main.ts.").
 
-`state.json` is `{ v: 1, gated, gated_at, redrew_at, redraw_pr, last_error, failed }`; `failed` is the commit a refused
-redraw was for. The agent, the forge (`gh`) and the note are `deps`, so the tests run the whole path on temp repos
-with a scripted stand-in agent, no model, no network and no real `gh`.
+`state.json` is `{ v: 1, gated, gated_at, redrew_at, redraw_pr, last_error, failed, set_aside }`; `failed` is the
+commit a refused redraw was for, `set_aside` the last time a cut-off redraw's leftovers were moved aside and where to.
+Showing `last_error` and `set_aside` in the Inbox is a later step. The agent, the forge (`gh`) and the note are
+`deps`, so the tests run the whole path on temp repos with a scripted stand-in agent, no model, no network and no real
+`gh`.
 
 ### The launchd job
 
@@ -241,7 +256,9 @@ One per drawn project: `~/Library/LaunchAgents/ai.plannotator.system.<key>.plist
 background, with `PLANNOTATOR_DATA_DIR` and the given environment (PATH above all) and its errors in
 `<dataDir>/system/<key>/tick.err.log`. `install` writes the plist, boots out any job under the label and bootstraps
 it in `gui/<uid>`; `remove` boots it out and deletes the plist; `list` gives the keys that have one. launchctl runs
-through an injectable runner, so the tests never load a job. macOS only.
+through an injectable runner, so the tests never load a job. macOS only. launchd skips a firing that falls while the
+Mac sleeps and runs none at wake; the next firing catches up, because a tick diffs from the last commit it checked, not
+from the time it missed.
 
 ## Format 1
 

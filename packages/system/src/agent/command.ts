@@ -28,40 +28,30 @@ export type SystemSubcommand = keyof typeof SYSTEM_COMMANDS;
 /**
  * How often the scheduled check runs: every 15 minutes while the Mac is awake.
  * Owner ruling 2026-11-06 (System build spec, settled default 5). The check
- * itself costs no model; launchd runs a missed interval when the Mac wakes and
- * nothing while it sleeps.
+ * itself costs no model. launchd skips a StartInterval firing that falls while
+ * the Mac sleeps (launchd.plist(5)) and runs none at wake; the next firing
+ * after wake catches up anyway, because a tick diffs from the last commit it
+ * checked (state.json `gated`, or the drawing's `at`) to the tip of main, not
+ * from the time of the firing it missed. Nothing relies on a run at wake.
+ * Here, beside the usage lines, so the command's help can say it.
  */
 export const SYSTEM_TICK_INTERVAL_SECONDS = 15 * 60;
 
 /**
- * What a Claude Code redraw may do with no one to ask: read, search and edit
- * files in its folder, read git, and run the drawing's check and gate. Any
- * other tool is refused (`--permission-mode dontAsk`), so a redraw cannot
- * push, open a pull request, reach the network or run a script the repo
- * ships. Doc sites are opened only by their host, one rule each.
- */
-export const CLAUDE_REDRAW_TOOLS = [
-  'Read', 'Glob', 'Grep', 'Edit', 'MultiEdit', 'Write',
-  'Bash(git diff:*)', 'Bash(git log:*)', 'Bash(git show:*)', 'Bash(git status:*)', 'Bash(git ls-files:*)', 'Bash(git ls-tree:*)',
-  'Bash(git rev-parse:*)', 'Bash(grep:*)', 'Bash(plannotator system check:*)', 'Bash(plannotator system gate:*)',
-] as const;
-
-/**
  * The command that runs one unattended redraw with the agent and model the
- * person chose in setup. `docs` are the doc sites already passed through
- * `unattendedDocs`. The prompt goes on stdin where the agent reads it there
- * (Claude Code and Pi), else as the last argument (OpenCode's `run`).
+ * person chose in setup. The agent runs as it normally does, with its full
+ * tools and the project's own settings and MCP servers (owner ruling
+ * 2026-11-06: no limits on agents). Claude Code runs with
+ * `--permission-mode bypassPermissions`, so a run with nobody there never
+ * stops on a permission prompt. The prompt goes on stdin where the agent
+ * reads it there (Claude Code and Pi), else as the last argument (OpenCode's
+ * `run`).
  */
-export function redrawCommand(setup: Pick<SystemSetup, 'agent' | 'model'>, prompt: string, o: { docs?: readonly string[] } = {}): { command: string[]; stdin: string | null } {
+export function redrawCommand(setup: Pick<SystemSetup, 'agent' | 'model'>, prompt: string): { command: string[]; stdin: string | null } {
   const model = agentModel(setup.agent, setup.model);
   const withModel = model ? ['--model', model] : [];
   if (setup.agent === 'claude') {
-    const hosts = [...new Set((o.docs ?? []).map((d) => new URL(d).hostname))];
-    const tools = [...CLAUDE_REDRAW_TOOLS, ...hosts.map((h) => `WebFetch(domain:${h})`)];
-    return {
-      command: ['claude', '-p', '--permission-mode', 'dontAsk', '--allowedTools', tools.join(','), '--no-session-persistence', ...withModel],
-      stdin: prompt,
-    };
+    return { command: ['claude', '-p', '--permission-mode', 'bypassPermissions', '--no-session-persistence', ...withModel], stdin: prompt };
   }
   if (setup.agent === 'pi') return { command: ['pi', '--no-session', ...withModel, '-p'], stdin: prompt };
   return { command: ['opencode', 'run', ...withModel, prompt], stdin: null };
