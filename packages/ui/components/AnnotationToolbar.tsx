@@ -44,6 +44,12 @@ interface AnnotationToolbarProps {
    *  keep the full toolbar. */
   commentOnly?: boolean;
   /**
+   * Opt-in: offer Delete on a `commentOnly` toolbar too (the Inbox's agent
+   * messages), in its usual place before Comment. The label picker and the
+   * Alt+digit label shortcuts stay off. Absent → Delete follows commentOnly.
+   */
+  showDelete?: boolean;
+  /**
    * Opt-in host capability: the host's own commands for this selection,
    * rendered as ONE wand button (`data-selection-actions`) that opens the
    * package's dropdown below it. Selecting an item calls `onSelect` with the
@@ -88,6 +94,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
   copyText,
   getRichCopy,
   commentOnly = false,
+  showDelete,
   hideCopyButton = false,
   closeOnScrollOut = false,
   isExiting = false,
@@ -318,7 +325,7 @@ export const AnnotationToolbar: React.FC<AnnotationToolbarProps> = ({
             <div className="w-px h-5 bg-border mx-0.5" />
           </>
         )}
-        {!commentOnly && (
+        {(showDelete ?? !commentOnly) && (
           <ToolbarButton
             onClick={() => handleTypeSelect(AnnotationType.DELETION)}
             icon={<TrashIcon />}
