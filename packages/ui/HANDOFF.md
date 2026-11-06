@@ -2819,3 +2819,9 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`ShapeGrid` / `ShapeThumb`** (approval `shape-landing-grid`): every board as a card (a scaled Picture, the title, `project · when`, a dot while it changed), newest first; `filterShapeItems` is its title-or-project match and `shapeAgo` its time words. `ShapeThumb` fills the box you give it (give it a height). A drawing's `#…` link scrolls inside the drawing and never changes the page's hash; an https link opens a new tab; any other link does nothing.
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
+
+## Delete on an answer-only document's words: `Viewer` `textDeletions`, `AnnotationToolbar` `showDelete` (unreleased; additive, opt-in, no core change)
+
+- **`Viewer` `textDeletions?: boolean`**, with `textComments` (and `answerOnly`, not `readOnly`): the comment-only selection toolbar also offers Delete, in its usual place before Comment. Delete hands `onAddAnnotation` the same `DELETION` row plan review makes (the words selected as `originalText`, no `text`), drawn struck through. The label picker and the Alt+digit label keys stay off. Without `textComments` it does nothing. The Plannotator Inbox passes it on agent messages (approval `inbox-toolbar-delete`).
+- **`AnnotationToolbar` `showDelete?: boolean`**: shows Delete on a `commentOnly` toolbar. Absent: Delete follows `commentOnly` as before.
+- A host that passes neither sees no change.

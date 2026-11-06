@@ -434,7 +434,7 @@ export function MessageBody({
    * Comments on the text (an agent's message that can still be answered;
    * approval "inbox-message-comments"): the person's comments on this message
    * waiting for a Send, drawn as highlights, and a selection opens the
-   * comment-only toolbar. `onSave` stores a new one (false: it was refused,
+   * toolbar (Delete, Comment, 👍; no label picker). `onSave` stores a new one (false: it was refused,
    * and its highlight goes). `onUnanchored` hears which could not be found by
    * their words; `onPainted` that highlights were drawn (the DOM changed).
    * Absent: the text takes no comments.
@@ -949,6 +949,8 @@ export function MessageBody({
         onSelectAnnotation={comments ? selectBadge : noop}
         selectedAnnotationId={comments ? (comments.revealed ?? comments.openId ?? selectedBadge) : null}
         textComments={comments !== undefined}
+        // Delete as plan review has it, before Comment (the owner's ask, approval "inbox-toolbar-delete").
+        textDeletions={comments !== undefined}
         suggestComment={comments?.suggest}
         allowImages={false}
         onRestoreReport={comments ? restoreReport : undefined}
