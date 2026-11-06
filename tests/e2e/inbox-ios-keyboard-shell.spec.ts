@@ -264,7 +264,7 @@ async function openReply(page: Page, thread: string): Promise<Locator> {
   await page.goto(`${world.url}#thread=${thread}`);
   const pane = page.locator('section.ib-pane');
   const box = pane.locator('.ib-pfoot textarea');
-  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^(Reply|Edit draft)$/ });
+  const open = pane.locator('.ib-pfoot').getByRole('button', { name: /^Reply$|Edit draft$/ });
   await expect(box.or(open).first()).toBeVisible();
   // A saved draft can open the box by itself just after "Edit draft" showed: then there is nothing left to click.
   await expect(async () => {

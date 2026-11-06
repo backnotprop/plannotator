@@ -89,6 +89,30 @@ export function resolveAgentToolEnabled(envValue: string | undefined, configText
 }
 
 /**
+ * Whether the mod reviews ExitPlanMode. Off with `PLANNOTATOR_PLAN_REVIEW=0`
+ * or `{ "planReview": false }`, and ExitPlanMode gets Claude Code's own dialog.
+ * Mirrors `resolvePlanReview(config, env)` in packages/shared/config.ts.
+ */
+export function resolvePlanReviewEnabled(envValue: string | undefined, configText: string | null | undefined): boolean {
+  const fromEnv = parseClaudeModEnv(envValue)
+  if (fromEnv !== undefined) return fromEnv
+  if (!configText) return true
+  let value: unknown
+  try {
+    value = (JSON.parse(configText) as Record<string, unknown> | null)?.planReview
+  } catch {
+    return true
+  }
+  if (typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    const v = value.trim().toLowerCase()
+    if (v === 'true' || v === '1') return true
+    if (v === 'false' || v === '0') return false
+  }
+  return true
+}
+
+/**
  * Whether the mod registers the `plannotator_inbox` tool and runs the reply
  * wake when nothing is set. Mirrors the claude-code
  * entry of `INBOX_TOOL_DEFAULTS` in packages/shared/config.ts.

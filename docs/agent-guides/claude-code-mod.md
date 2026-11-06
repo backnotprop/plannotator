@@ -606,6 +606,18 @@ Edit/Write while a plan is in review after the user leaves plan mode), the
 is always sent (`$.prompt.submit` waits for idle; draft text in the composer
 is left alone).
 
+**Plan review off (`PLANNOTATOR_PLAN_REVIEW=0` / `{ "planReview": false }`,
+Claude Code only, #2299).** Read at the first `session.start` like the other
+switches: the `tool.call` and `classic.PermissionRequest` hooks on
+ExitPlanMode call `next(e)`, and the classic command hook exits 0 with no
+decision, so Claude Code shows its own dialog ("Yes, clear context" only with
+its `showClearContextOnPlanAccept` setting on). In `-p` / SDK runs there is no
+dialog; the run's own permissions decide (see the env table row). Older Claude
+Code: before 2.1.268 PermissionRequest hooks did not run in `-p` at all, and
+before 2.1.287 (no mods) the command hook alone decides, with the same result.
+Version skew: a binary older than the switch opens the blocking review from
+the command hook, since the mod has already passed the call through.
+
 **Delivery.** Each decision is one plugin turn, in arrival order, prefixed
 `Plannotator: <subject> — <outcome>.`; a message over 12 KB is written in full
 to the launch's `feedback.md` and Claude is told to Read it (the feedback
