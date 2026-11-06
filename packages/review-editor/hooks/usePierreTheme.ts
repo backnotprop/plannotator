@@ -274,13 +274,16 @@ export function usePierreTheme(options?: {
           [data-diff-type='split'][data-overflow='scroll'] > [data-code][data-additions] [data-content] {
             min-width: 0 !important;
           }
-          /* Pierre's own horizontal scrollbar sits at the bottom of each
-             file's content, which is off-screen on any diff taller than the
-             panel (#1048). DiffHScrollbar replaces it, pinned to the file
-             header, so suppress this one. Height only — the vertical width
-             is already 0 upstream. */
-          [data-code] { scrollbar-width: none !important; }
-          [data-code]::-webkit-scrollbar { height: 0 !important; }
+          /* Pierre's own horizontal scrollbar, at the bottom of each file's
+             code (theme.css lets it keep its own size). Its thumb is
+             transparent until hover upstream; here it has a quiet mix of the
+             text colour that reads in light and dark. Firefox has no
+             -webkit- pseudo: its scrollbar-color. */
+          [data-code]::-webkit-scrollbar-thumb { background-color: color-mix(in srgb, ${fg} 28%, ${bg}) !important; }
+          [data-code]::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, ${fg} 45%, ${bg}) !important; }
+          @supports (-moz-appearance: none) {
+            [data-code] { scrollbar-color: color-mix(in srgb, ${fg} 28%, ${bg}) transparent; }
+          }
           .pn-token-hover {${tokenHoverUnderlineCss(primary || 'oklch(0.70 0.20 280)')}
           }
           .pn-token-nav {

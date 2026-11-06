@@ -194,15 +194,26 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
    ```
    Stage only the 9 version-bumped files and `packages/inbox/feedbackSearch.data.json`. Do not stage the release notes file (it's untracked by design).
 
-2. **Create and push the tag:**
+2. **Push the bump, then run the heavy suites on main and wait for them.** A push to main runs only the fast tier (Test, Security). The browser tests (Inbox window e2e) and the Windows, Inbox Pi, Inbox Claude Code and relay suites run on main only nightly, so start them on the bump commit by hand:
+   ```bash
+   git push origin main
+   for wf in inbox-e2e.yml windows.yml inbox-pi.yml inbox-claude-code.yml relay.yml; do gh workflow run "$wf" --ref main; done
+   # one dispatched run per workflow; check headSha is the bump commit
+   for wf in inbox-e2e.yml windows.yml inbox-pi.yml inbox-claude-code.yml relay.yml; do
+     gh run list --workflow "$wf" --branch main --event workflow_dispatch --limit 1 --json databaseId,headSha,status
+   done
+   gh run watch <run-id> --exit-status   # once per run
+   ```
+   Do not tag until all five runs succeeded on the bump commit. If one fails, fix it on main and run them again.
+
+3. **Create and push the tag:**
    ```bash
    git tag vX.Y.Z
-   git push origin main
    git push origin vX.Y.Z
    ```
    The `v*` tag push triggers the release pipeline (`.github/workflows/release.yml`).
 
-3. **The pipeline handles everything else:**
+4. **The pipeline handles everything else:**
    - Runs tests
    - Cross-compiles binaries for 6 platforms (macOS ARM64/x64, Linux x64/ARM64, Windows x64/ARM64)
    - Compiles paste service binaries (same 6 platforms)
@@ -220,9 +231,9 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
    **Exceptions:** there is no active production exception file. If a future release baseline needs one, do not add a loose ignore. Add a repository-reviewed OpenVEX document and explicitly wire it through `PLANNOTATOR_RELEASE_VEX`; each statement must match one exact package URL and vulnerability ID and carry `not_affected` status, an OpenVEX justification, impact statement, HTTPS evidence, owner, created date, and expiration date. The policy tests reject expired, malformed, broad, and nonmatching records.
 
-   **Note on immutable releases:** The repo has GitHub Immutable Releases enabled, so once the `v*` tag is pushed and the release is created, the tag→commit and tag→asset bindings are permanent. You cannot delete and re-create a tag to "fix" a bad release — you must ship a new version. Release notes remain editable (see step 5), but everything else is locked.
+   **Note on immutable releases:** The repo has GitHub Immutable Releases enabled, so once the `v*` tag is pushed and the release is created, the tag→commit and tag→asset bindings are permanent. You cannot delete and re-create a tag to "fix" a bad release — you must ship a new version. Release notes remain editable (see step 6), but everything else is locked.
 
-4. **Monitor the pipeline:**
+5. **Monitor the pipeline:**
    Watch the release workflow run until it completes:
    ```bash
    gh run list --workflow=release.yml --limit=1
@@ -262,7 +273,7 @@ If anything is missing, fix it before proceeding to Phase 4. Common fixes:
 
    If anything fails, investigate the logs and report to the user before retrying.
 
-5. **Replace the release notes:**
+6. **Replace the release notes:**
    Once the release is live and verified, replace the auto-generated notes body with the drafted release notes:
    ```bash
    gh release edit vX.Y.Z --notes-file RELEASE_NOTES_v<VERSION>.md
@@ -286,6 +297,7 @@ Before tagging, verify:
 - [ ] `bun run build:dsh` succeeded
 - [ ] `bun run build:pi` succeeded (or pi-specific build step)
 - [ ] Version bump committed
+- [ ] Inbox window e2e, Windows, Inbox Pi, Inbox Claude Code and relay dispatched on main (`gh workflow run`) and green on the bump commit
 - [ ] Pi parity gate passed (imports, vendor.sh, dry-run pack)
 - [ ] No stale build artifacts (clean builds, no cache issues — run `bun install` first if dependencies changed)
 - [ ] The PR-safe `release-security` job generated a schema-valid, sentinel-complete SBOM and accepted the Grype policy with a fresh database

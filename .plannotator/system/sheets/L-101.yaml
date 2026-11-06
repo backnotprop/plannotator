@@ -1,0 +1,34 @@
+# Inside the plannotator binary: who calls it, which local server it starts,
+# which page it serves, what it reads and writes.
+sheet: L-101
+scope: local
+kind: logical
+title: The plannotator binary
+question: Which agent calls it, which local server answers, what it touches.
+bands:
+  - id: hosts
+    label: Agent hosts
+    means: how each agent reaches plannotator
+    tone: sand
+    row: [hkopencode, hkclaude, hkcodex, hkother, hkcmds, hkpi]
+  - id: servers
+    label: Entry and local servers
+    means: one process per review; loopback, a free port each
+    tone: mist
+    row: [cliEntry, planSrv, annotateSrv, reviewSrv, guideJobs, askAI, piSrv]
+  - id: pages
+    label: Pages in your browser
+    means: single-file builds embedded in the binary
+    tone: sage
+    row: [vscode, editorUI, reviewUI]
+  - id: touches
+    label: What it reads and writes
+    means: on disk and outside
+    tone: stone
+    row: [dataDir, noteApps, repo, forges]
+show: [x-review, x-decision, x-you, x-share, x-guide, x-ping, x-ping-oc, x-ping-pi, d-ping, h-claude, h-codex, h-other, h-cmds, h-opencode, h-pi, s-plan, s-review, s-annotate, p-plan, p-annotate, p-review, p-pi, d-plan, r-repo, r-forge, r-guide, r-ai, n-apps, v-tabs]
+notes:
+  a: { on: cliEntry, text: "No subcommand means hook mode: the event comes on stdin and the decision goes out on stdout." }
+  b: { on: piSrv, text: "Two server runtimes change together: Bun in packages/server, node:http in the Pi extension. Only the Inbox is Bun-only." }
+  c: { on: hkclaude, text: "With the mod on (the default in interactive sessions), ExitPlanMode is denied at once, the review runs detached, and the decision returns as a new turn." }
+  d: { on: editorUI, text: "The pages are built to single HTML files and embedded in the binary; the server packs their scripts under /assets." }

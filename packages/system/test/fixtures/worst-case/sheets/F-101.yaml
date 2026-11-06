@@ -1,0 +1,11 @@
+sheet: F-101
+scope: core
+kind: flow
+title: Dispatch and billing core
+question: Follow one proof of delivery from a subcontractor's phone to the ledger, hop by hop.
+bands:
+  - { id: f1, label: Phone, row: [ android ] }
+  - { id: f2, label: Door, row: [ gateway ] }
+  - { id: f3, label: Work, row: [ dispatch, recon ] }
+  - { id: f4, label: Record, row: [ pg, ledger ] }
+show: [ g3, assign, bill, stops, post, ledgerpg ]
