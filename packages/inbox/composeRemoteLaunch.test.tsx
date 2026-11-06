@@ -240,15 +240,17 @@ test.skipIf(!hasDom)("asleep: Send says it starts when that machine is back, a l
   write('Rotate the staging password.');
   act(() => inDialog('[data-compose-send]')!.click());
   await until(() => held.length === 1, 'the held answer');
-  expect(held[0]).toMatchObject({ key: 'k1', queued: true, machineName: 'Mac mini', asleep: true, agentName: 'Claude Code' });
+  expect(held[0]).toMatchObject({ key: 'k1', queued: true, machineName: 'Mac mini', asleep: true, agentName: 'Claude Code', words: { body: 'Rotate the staging password.' } });
   expect(sent).toEqual([]);
   expect(inDialog('[data-compose-error]')).toBeNull();
 });
 
-test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, and Cancel takes it back and says nothing was sent", async () => {
+test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, and Cancel takes it back and puts its words in Drafts", async () => {
   const shown: Omit<InboxToastModel, 'id'>[] = [];
   let dismissed = 0;
-  const { toast } = heldLaunchToast({ key: 'k1', queued: true, machineName: 'Mac mini', asleep: true, agentName: 'Claude Code', draftId: null }, (t) => shown.push(t), () => (dismissed += 1));
+  let kept = 0;
+  const words = { body: 'Rotate the staging password.', thread_name: 'Rotate staging' };
+  const { toast } = heldLaunchToast({ key: 'k1', queued: true, machineName: 'Mac mini', asleep: true, agentName: 'Claude Code', draftId: null, words }, (t) => shown.push(t), () => (dismissed += 1), () => (kept += 1));
   expect(toast.lead).toBe("Claude Code starts on Mac mini when it's back");
   host = document.createElement('div');
   host.className = 'pn-inbox';
@@ -260,10 +262,16 @@ test.skipIf(!hasDom)("the held toast: it starts on that machine when it's back, 
   await act(async () => host!.querySelector<HTMLElement>('[data-toast-action]')!.click());
   await until(() => shown.length === 1, 'the cancelled toast');
   expect(dismissed).toBe(1);
-  expect(requests.filter((r) => r.method === 'POST').map((r) => r.path)).toEqual(['/api/inbox/outbox/k1/cancel']);
-  expect(shown[0]!.lead).toBe('Cancelled. Nothing was sent.');
+  const posts = requests.filter((r) => r.method === 'POST');
+  expect(posts[0]!.path).toBe('/api/inbox/outbox/k1/cancel');
+  // The words are not lost: the draft it was sent from is gone here, so a new one holds them.
+  expect(posts[1]!.path).toMatch(/^\/api\/inbox\/drafts\/drf_/);
+  expect(posts[1]!.body).toMatchObject({ ...words, to: null, project: null, files: [], base: null });
+  expect(posts).toHaveLength(2);
+  expect(kept).toBe(1);
+  expect(shown[0]!.lead).toBe('Cancelled. Nothing was sent; your words are in Drafts.');
   // Already on its way: no Cancel to offer.
-  expect(heldLaunchToast({ key: 'k2', queued: false, machineName: 'Mac mini', asleep: false, agentName: 'Claude Code', draftId: null }, () => {}, () => {}).toast.action).toBeUndefined();
+  expect(heldLaunchToast({ key: 'k2', queued: false, machineName: 'Mac mini', asleep: false, agentName: 'Claude Code', draftId: null, words }, () => {}, () => {}).toast.action).toBeUndefined();
 });
 
 test.skipIf(!hasDom)("Claude Code not ready on that machine: its group is one line in that machine's words, with the command to copy", async () => {

@@ -2636,13 +2636,13 @@ function Inbox() {
   /**
    * Remote launch: a new session for a linked machine waits in this Inbox's outbox (the machine is asleep, or slow to
    * answer). Compose has closed; the toast says it starts when that machine is back, and Cancel takes it back while it
-   * has not left (`POST /api/inbox/outbox/:key/cancel`).
+   * has not left (`POST /api/inbox/outbox/:key/cancel`) and puts its words back in Drafts.
    */
   const composeHeld = (held: ComposeHeld) => {
     if (held.draftId) setDrafts((current) => (current ?? []).filter((d) => d.id !== held.draftId));
     closeCompose(held.draftId ? draftNeighbour(held.draftId) : null);
     if (held.draftId) void refreshDrafts();
-    const { toast: heldToast, ms } = heldLaunchToast(held, showToast, dismissToast);
+    const { toast: heldToast, ms } = heldLaunchToast(held, showToast, dismissToast, () => void refreshDrafts());
     showToast(heldToast, ms);
   };
   const lastSentRef = useRef(lastSent);

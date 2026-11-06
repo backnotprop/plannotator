@@ -150,6 +150,8 @@ export interface ComposeHeld {
   /** "Claude Code". */
   agentName: string;
   draftId: string | null;
+  /** What was written, kept so Cancel can put it back in Drafts (the one it was sent from is gone here). */
+  words: { body: string; thread_name?: string; card?: InboxDraft['card']; pulls?: InboxDraft['pulls']; board_request?: true };
 }
 
 export interface ComposeTransport {
@@ -535,6 +537,7 @@ export function ComposeDialog(props: ComposeDialogProps) {
           asleep: cause.machine ? cause.machine.state === 'offline' : startAsleep,
           agentName: start.name,
           draftId: draft?.id ?? null,
+          words: { body, ...(threadName ? { thread_name: threadName } : {}), ...(card ? { card } : {}), ...(pulls ? { pulls } : {}), ...(boardRequest ? { board_request: true as const } : {}) },
         });
       } else if (cause instanceof InboxApiError && cause.code === 'session_not_live') {
         void load();

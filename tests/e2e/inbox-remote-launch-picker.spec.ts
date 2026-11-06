@@ -279,7 +279,7 @@ test("2. Mac mini asleep: Send waits for it, the toast says so, and Cancel takes
   const cancel = page.waitForResponse((r) => /\/api\/inbox\/outbox\/[^/]+\/cancel$/.test(r.url()));
   await toast.locator('[data-toast-action]').click();
   expect((await cancel).status()).toBe(200);
-  await expect(page.locator('.ib-toast')).toContainText('Cancelled. Nothing was sent.');
+  await expect(page.locator('.ib-toast')).toContainText('Cancelled. Nothing was sent; your words are in Drafts.');
   await shot(page, 'cancelled-1440');
   const outbox = await getJson(macbook, '/api/inbox/outbox');
   expect((outbox.waiting as unknown[]).length).toBe(0);
