@@ -46,7 +46,11 @@ function replaceFile(file: string, content: string, mode: number) {
   renameSync(temp, file);
 }
 
-/** One answer's lines, its files named after `name` in `dir`: read at the start, printed after any wait. */
+/**
+ * One answer's lines, its files named after `name` in `dir`: read at the start, printed after any wait.
+ * Printed in a subshell: when no one reads the pipe any more (the Inbox gone), the SIGPIPE ends only
+ * that subshell, and the run still goes on to its end. A builtin printf here would kill the shell itself.
+ */
 function answerLines(dir: string, name: string, answer: FakeCswapAnswer): string[] {
   replaceFile(join(dir, name), answer.stdout ?? '', 0o644);
   replaceFile(join(dir, `${name}.err`), answer.stderr ?? '', 0o644);
@@ -55,8 +59,8 @@ function answerLines(dir: string, name: string, answer: FakeCswapAnswer): string
     `err=$(/bin/cat ${quoted(join(dir, `${name}.err`))})`,
     ...(answer.hang ? [`while :; do printf . >> ${quoted(join(dir, 'ticks'))}; /bin/sleep 0.05; done`] : []),
     ...(answer.delay ? [`/bin/sleep ${answer.delay}`] : []),
-    `printf '%s' "$out"`,
-    `printf '%s' "$err" >&2`,
+    `(printf '%s' "$out")`,
+    `(printf '%s' "$err" >&2)`,
   ];
 }
 
