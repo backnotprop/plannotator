@@ -187,14 +187,25 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
     if (c.project) return isAbsolute(c.project) ? c.project : resolve(deps.cwd, c.project);
     return inboxProjectFolderFor(inboxSessionProjectFromEnv(deps.env), host ? { host: host.host, session: host.session } : null, deps.cwd);
   })();
+  /** Why the last `projectOf` found no project, as the one line `update` refuses with. */
+  let projectProblem = `${folder} is not a folder`;
   const projectOf = async () => {
     try {
       if (!statSync(folder).isDirectory()) throw new Error();
     } catch {
+      projectProblem = `${folder} is not a folder`;
       return null;
     }
     const rootOf = deps.projectRootOf ?? defaultProjectRoot;
-    const project = await rootOf(folder);
+    let project: ShapeProject;
+    try {
+      project = await rootOf(folder);
+    } catch (error) {
+      // An unreadable folder (or `/`): a line like every other refusal, not a stack trace.
+      const why = (error instanceof Error ? error.message : String(error)).replace(/^project_path:\s*/, "").replace(/\.$/, "");
+      projectProblem = `could not use ${folder} as the project: ${why}`;
+      return null;
+    }
     if (c.project || folder === deps.cwd) return project;
     // The session's folder does not follow a shell `cd`, and the checkout does: within the project, the one it runs in now.
     const here = await rootOf(deps.cwd).catch(() => null);
@@ -242,7 +253,7 @@ export async function runShapeCommand(argv: readonly string[], deps: ShapeComman
       project = (await projectOf().catch(() => null)) ?? record.project;
     } else {
       project = await projectOf();
-      if (!project) return refuse("project_unresolved", `${folder} is not a folder. Pass --project <folder>.`);
+      if (!project) return refuse("project_unresolved", `${projectProblem}. Pass --project <folder>.`);
     }
     const result = store.update({
       board,

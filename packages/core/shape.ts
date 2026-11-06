@@ -978,6 +978,20 @@ function checkCodePlace(c: Checker, value: unknown, field: string): string | und
   return text;
 }
 
+const CITE_RE = /\[\^\d{1,3}\]/;
+
+/**
+ * Words What's changed draws as they are (diff lines, a call path's steps and ends, a move's from and to): a `[^n]`
+ * there would show as written, so it is refused, naming the field.
+ */
+function plainText(c: Checker, value: string | undefined, field: string): string | undefined {
+  if (value !== undefined && CITE_RE.test(value)) {
+    c.fail(field, 'shows a [^n] as written: cite a reference in a title, a note, the summary or also');
+    return undefined;
+  }
+  return value;
+}
+
 /** `was` or `now`: one line, or a list of lines. Kept as written. */
 function checkDiffLines(c: Checker, value: unknown, field: string): string | string[] | undefined {
   if (value === undefined || value === null) return undefined;
@@ -988,10 +1002,10 @@ function checkDiffLines(c: Checker, value: unknown, field: string): string | str
       c.fail(field, 'is empty');
       return undefined;
     }
-    const out = lines.map((line, i) => c.text(line, `${field}[${i}]`, SHAPE_LIMITS.line));
+    const out = lines.map((line, i) => plainText(c, c.text(line, `${field}[${i}]`, SHAPE_LIMITS.line), `${field}[${i}]`));
     return out.every((line): line is string => line !== undefined) ? out : undefined;
   }
-  return c.text(value, field, SHAPE_LIMITS.line);
+  return plainText(c, c.text(value, field, SHAPE_LIMITS.line), field);
 }
 
 function checkFlowEnd(c: Checker, value: unknown, field: string): ShapeFlowEnd | undefined {
@@ -1000,8 +1014,8 @@ function checkFlowEnd(c: Checker, value: unknown, field: string): ShapeFlowEnd |
     c.fail(field, 'must be { was?, now }');
     return undefined;
   }
-  const was = c.text(value.was, `${field}.was`, SHAPE_LIMITS.line, false);
-  const now = c.text(value.now, `${field}.now`, SHAPE_LIMITS.line);
+  const was = plainText(c, c.text(value.was, `${field}.was`, SHAPE_LIMITS.line, false), `${field}.was`);
+  const now = plainText(c, c.text(value.now, `${field}.now`, SHAPE_LIMITS.line), `${field}.now`);
   return now === undefined ? undefined : { ...(was !== undefined ? { was } : {}), now };
 }
 
@@ -1016,14 +1030,30 @@ function checkFlowSteps(c: Checker, value: unknown, field: string): ShapeFlowSte
       c.fail(f, 'must be { call, is, note?, at? }');
       return [];
     }
-    const call = c.text(s.call, `${f}.call`, 200);
+    const call = plainText(c, c.text(s.call, `${f}.call`, 200), `${f}.call`);
     const is = FLOW_IS.includes(s.is as ShapeFlowStep['is']) ? (s.is as ShapeFlowStep['is']) : undefined;
     if (!is) c.fail(`${f}.is`, `must be one of ${FLOW_IS.join(', ')}`);
-    const note = c.text(s.note, `${f}.note`, SHAPE_LIMITS.line, false);
+    const note = plainText(c, c.text(s.note, `${f}.note`, SHAPE_LIMITS.line, false), `${f}.note`);
     const at = s.at === undefined || s.at === null ? undefined : checkCodePlace(c, s.at, `${f}.at`);
     return call !== undefined && is ? [{ call, is, ...(note !== undefined ? { note } : {}), ...(at !== undefined ? { at } : {}) }] : [];
   });
 }
+
+/** The fields of a change the board draws only for some kinds, and what each kind shows instead. */
+const CHANGE_FIELDS_NOT_DRAWN: Record<ShapeChangeKind, readonly ('was' | 'now' | 'from' | 'to' | 'lines')[]> = {
+  behaviour: ['from', 'to', 'lines'],
+  contract: ['from', 'to', 'lines'],
+  removed: ['from', 'to', 'lines'],
+  moved: ['was', 'now'],
+  check: ['was', 'now', 'from', 'to', 'lines'],
+};
+const CHANGE_FIELDS_DRAWN: Record<ShapeChangeKind, string> = {
+  behaviour: 'it shows was and now',
+  contract: 'it shows was and now',
+  removed: 'it shows was and now',
+  moved: 'it shows from, to and lines',
+  check: 'it shows its note',
+};
 
 function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged | undefined {
   if (value === undefined || value === null) return undefined;
@@ -1052,16 +1082,23 @@ function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged |
     const title = c.text(it.title, `${f}.title`, 200);
     const was = checkDiffLines(c, it.was, `${f}.was`);
     const now = checkDiffLines(c, it.now, `${f}.now`);
-    const from = c.text(it.from, `${f}.from`, 500, false);
-    const to = c.text(it.to, `${f}.to`, 500, false);
+    const from = plainText(c, c.text(it.from, `${f}.from`, 500, false), `${f}.from`);
+    const to = plainText(c, c.text(it.to, `${f}.to`, 500, false), `${f}.to`);
     const lines = c.int(it.lines, `${f}.lines`, 1, 10_000_000, false);
     const note = c.text(it.note, `${f}.note`, 1000, false);
-    if (kind === 'moved' && (from === undefined || to === undefined)) c.fail(f, 'a moved change needs from and to');
-    if (kind === 'removed' && was === undefined) c.fail(`${f}.was`, 'a removed change needs was: what is gone');
-    if (kind === 'check' && note === undefined) c.fail(`${f}.note`, 'a check needs a note: what to look at, and why');
-    if ((kind === 'behaviour' || kind === 'contract') && was === undefined && now === undefined) c.fail(f, `a ${kind} change needs was, now or both`);
+    // A kind's own rule only on a field the agent left out: one that is there but wrong already has its error.
+    const absent = (name: string) => it[name] === undefined || it[name] === null;
+    if (kind === 'moved' && (absent('from') || absent('to'))) c.fail(f, 'a moved change needs from and to');
+    if (kind === 'removed' && absent('was')) c.fail(`${f}.was`, 'a removed change needs was: what is gone');
+    if (kind === 'check' && absent('note')) c.fail(`${f}.note`, 'a check needs a note: what to look at, and why');
+    if ((kind === 'behaviour' || kind === 'contract') && absent('was') && absent('now')) c.fail(f, `a ${kind} change needs was, now or both`);
+    // A field the board does not draw for this kind is refused, not stored unseen.
+    if (kind) {
+      for (const name of CHANGE_FIELDS_NOT_DRAWN[kind]) if (!absent(name)) c.fail(`${f}.${name}`, `is not shown on a ${kind} change (${CHANGE_FIELDS_DRAWN[kind]})`);
+    }
     const codeList = c.list(it.code, `${f}.code`, 8);
-    const code = codeList?.map((p, j) => checkCodePlace(c, p, `${f}.code[${j}]`)).filter((p): p is string => p !== undefined);
+    // The same place twice is one link.
+    const code = codeList && [...new Set(codeList.map((p, j) => checkCodePlace(c, p, `${f}.code[${j}]`)).filter((p): p is string => p !== undefined))];
     const step = c.int(it.step, `${f}.step`, 1, SHAPE_LIMITS.sections, false);
     if (id === undefined || !kind || title === undefined) return;
     items.push({
@@ -1086,7 +1123,7 @@ function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged |
     if (!isRecord(fl)) return c.fail(f, 'must be { id, title, start, steps?, forks?, end? }');
     const id = ownId(fl.id, `${f}.id`);
     const title = c.text(fl.title, `${f}.title`, 200);
-    const start = c.text(fl.start, `${f}.start`, SHAPE_LIMITS.line);
+    const start = plainText(c, c.text(fl.start, `${f}.start`, SHAPE_LIMITS.line), `${f}.start`);
     const steps = checkFlowSteps(c, fl.steps, `${f}.steps`);
     const forkList = c.list(fl.forks, `${f}.forks`, SHAPE_LIMITS.forks);
     const forks = (forkList ?? []).flatMap((k, j) => {
@@ -1095,7 +1132,7 @@ function checkChanged(c: Checker, value: unknown, field: string): ShapeChanged |
         c.fail(ff, 'must be { when, steps?, end? }');
         return [];
       }
-      const when = c.text(k.when, `${ff}.when`, 200);
+      const when = plainText(c, c.text(k.when, `${ff}.when`, 200), `${ff}.when`);
       const kSteps = checkFlowSteps(c, k.steps, `${ff}.steps`);
       const end = checkFlowEnd(c, k.end, `${ff}.end`);
       return when === undefined ? [] : [{ when, ...(kSteps ? { steps: kSteps } : {}), ...(end ? { end } : {}) }];
@@ -1358,6 +1395,7 @@ export function shapeCitedRefs(board: ShapeBoard): Set<number> {
     fromText(item.title);
     fromText(item.note);
   }
+  for (const flow of board.views.changed?.flows ?? []) fromText(flow.title);
   fromText(board.views.know);
   for (const group of board.views.reqs?.groups ?? []) for (const item of group.items) fromText(item.text);
   for (const foot of board.views.reqs?.foot ?? []) fromText(foot.text);

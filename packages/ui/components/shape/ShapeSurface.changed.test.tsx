@@ -4,7 +4,10 @@
  * - a host that turns the Code view off still gets a Code tab, or a host that does not loses it;
  * - Guided review, Full review, a guide step or a `file:line` opens the wrong place in the review;
  * - a file the review does not change, or a board with no review, opens nothing (it must open the file viewer);
- * - a board with no review shows review buttons or guide-step links that lead nowhere.
+ * - a board with no review shows review buttons or guide-step links that lead nowhere;
+ * - a guide step past the review's steps shows as a button that does nothing;
+ * - a host whose `open` throws or rejects leaves an unhandled error, or no file viewer;
+ * - two links to the same place break the list; the call paths stay sticky when taller than the view.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import React, { act } from 'react';
@@ -129,8 +132,8 @@ describe.if(hasDom)("What's changed", () => {
     expect(document.querySelector('.shp-chg-meta')?.textContent).toBe('#123 files+20 -4');
     await click(button('Guided review')!);
     await click(button('Full review')!);
-    await click(button('Open the guided review at step 2')!);
-    await click(button('Open src/kettle.ts at line 42')!);
+    await click(button('Guide step 2, open the guided review there')!);
+    await click(button('kettle.ts:42, open src/kettle.ts at line 42')!);
     await wait();
     expect(opened).toEqual([{}, { files: true }, { step: 2 }, { path: 'src/kettle.ts', line: 42 }]);
   });
@@ -140,7 +143,7 @@ describe.if(hasDom)("What's changed", () => {
     const reads: string[] = [];
     await mount({ picture: PICTURE, changed: KETTLE_CHANGED }, { codeView: false, review: review(opened, false) }, reads);
     await openChanged();
-    await click(button('Open src/settings.ts at line 12')!);
+    await click(button('settings.ts:12, open src/settings.ts at line 12')!);
     for (let i = 0; i < 10 && !reads.length; i++) await wait();
     expect(opened).toEqual([{ path: 'src/settings.ts', line: 12 }]);
     expect(reads).toEqual(['src/settings.ts']);
@@ -154,8 +157,90 @@ describe.if(hasDom)("What's changed", () => {
     expect(button('Full review')).toBeNull();
     expect(document.querySelector('.shp-chg-step')).toBeNull();
     expect(document.querySelector('.shp-chg-meta')).toBeNull();
-    await click(button('Open src/kettle.ts at line 42')!);
+    await click(button('kettle.ts:42, open src/kettle.ts at line 42')!);
     for (let i = 0; i < 10 && !reads.length; i++) await wait();
     expect(reads).toEqual(['src/kettle.ts']);
+  });
+
+  test('each link is named first by its own words', async () => {
+    await mount({ picture: PICTURE, changed: KETTLE_CHANGED }, { codeView: false, review: review([]) });
+    await openChanged();
+    for (const b of document.querySelectorAll<HTMLButtonElement>('.shp-chg-loc, .shp-chg-step')) expect(b.getAttribute('aria-label')!.startsWith(b.textContent!.trim())).toBe(true);
+    // Each change's title is a heading under the Changes heading.
+    expect(document.querySelectorAll('.shp-chg-hunk h4.shp-chg-title').length).toBe(KETTLE_CHANGED.items.length);
+  });
+
+  test('a review that says how many steps it has shows only those; one that does not lands a missing step at its start', async () => {
+    await mount({ picture: PICTURE, changed: KETTLE_CHANGED }, { codeView: false, review: { ...review([]), steps: 1 } });
+    await openChanged();
+    expect([...document.querySelectorAll('.shp-chg-step')].map((b) => b.textContent)).toEqual(['Guide step 1']);
+    act(() => root!.unmount());
+    const opened: ShapeReviewAt[] = [];
+    await mount({ picture: PICTURE, changed: KETTLE_CHANGED }, { codeView: false, review: { open: async (at) => (opened.push(at), !at.step) } });
+    await openChanged();
+    await click(button('Guide step 2, open the guided review there')!);
+    for (let i = 0; i < 10 && opened.length < 2; i++) await wait();
+    expect(opened).toEqual([{ step: 2 }, {}]);
+  });
+
+  test('a host whose open throws or rejects: no unhandled error, and the file opens in the file viewer', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (e: unknown) => unhandled.push(e);
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      for (const open of [() => { throw new Error('host'); }, () => Promise.reject(new Error('host'))] as ShapeSurfaceReview['open'][]) {
+        const reads: string[] = [];
+        await mount({ picture: PICTURE, changed: KETTLE_CHANGED }, { codeView: false, review: { open } }, reads);
+        await openChanged();
+        await click(button('Guided review')!);
+        await click(button('Guide step 1, open the guided review there')!);
+        await click(button('kettle.ts:42, open src/kettle.ts at line 42')!);
+        for (let i = 0; i < 10 && !reads.length; i++) await wait();
+        expect(reads).toEqual(['src/kettle.ts']);
+        act(() => root!.unmount());
+      }
+      await wait();
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+
+  test('the same place twice is two links, not a broken list', async () => {
+    const errors: unknown[] = [];
+    const saved = console.error;
+    console.error = (...args: unknown[]) => errors.push(args.join(' '));
+    try {
+      const twice = { ...KETTLE_CHANGED, items: [{ ...KETTLE_CHANGED.items[0]!, code: ['src/kettle.ts:42', 'src/kettle.ts:42'] }] };
+      await mount({ picture: PICTURE, changed: twice }, { codeView: false, review: review([]) });
+      await openChanged();
+      expect(document.querySelectorAll('.shp-chg-hunk .shp-chg-loc').length).toBe(2);
+      expect(errors.filter((e) => String(e).includes('same key'))).toEqual([]);
+    } finally {
+      console.error = saved;
+    }
+  });
+
+  test('the call paths stick beside the changes only while they fit in the view', async () => {
+    const tall = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight');
+    const room = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
+    let paths = 300;
+    Object.defineProperty(HTMLElement.prototype, 'offsetHeight', { configurable: true, get() { return (this as HTMLElement).classList.contains('shp-chg-flows') ? paths : 0; } });
+    Object.defineProperty(HTMLElement.prototype, 'clientHeight', { configurable: true, get: () => 800 });
+    try {
+      await mount({ picture: PICTURE, changed: KETTLE_CHANGED });
+      await openChanged();
+      expect(document.querySelector('.shp-chg-flows')!.classList.contains('fits')).toBe(true);
+      act(() => root!.unmount());
+      paths = 2000;
+      await mount({ picture: PICTURE, changed: KETTLE_CHANGED });
+      await openChanged();
+      expect(document.querySelector('.shp-chg-flows')!.classList.contains('fits')).toBe(false);
+    } finally {
+      for (const [name, d] of [['offsetHeight', tall], ['clientHeight', room]] as const) {
+        if (d) Object.defineProperty(HTMLElement.prototype, name, d);
+        else delete (HTMLElement.prototype as unknown as Record<string, unknown>)[name];
+      }
+    }
   });
 });

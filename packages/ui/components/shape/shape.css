@@ -359,7 +359,9 @@
 .shp-chg-pt { margin: 0; font-size: 13px; line-height: 20px; font-weight: 600; }
 .shp-chg-ph .c { font: 400 12px/18px var(--font-mono); color: var(--muted-foreground); }
 .shp-chg-ph .key { margin-left: auto; display: flex; gap: 12px; font: 400 12px/18px var(--font-mono); color: var(--muted-foreground); white-space: nowrap; }
-.shp-chg-flows { display: grid; gap: 20px; position: sticky; top: 0; }
+.shp-chg-flows { display: grid; gap: 20px; }
+/* Beside the changes, the paths stay in sight while they fit in the view (ShapeChanged measures; taller ones scroll). */
+.shp-chg-flows.fits { position: sticky; top: 0; }
 
 /* A change: one hunk. */
 .shp-chg-hunk + .shp-chg-hunk { border-top: 1px solid var(--border); }
@@ -427,7 +429,7 @@
 /* A narrower board: one column. A phone's: the paths first, each line's kind and place over its words. */
 @container (max-width: 900px) {
   .shp-chg-cols { grid-template-columns: minmax(0, 1fr); }
-  .shp-chg-flows { position: static; }
+  .shp-chg-flows.fits { position: static; }
 }
 @container (max-width: 600px) {
   .shp-chg-cols { --chg-gut: 2ch; }

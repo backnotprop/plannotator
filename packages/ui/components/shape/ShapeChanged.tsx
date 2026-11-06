@@ -3,11 +3,18 @@
 // review's guide step, then − was and + now lines. The call paths beside it
 // are unified diffs of the path: Starts, +/−/~ steps, @@ fork rows, Ends.
 // Desktop sets the two side by side; a narrow board stacks them, paths first.
-import React from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import { parseShapeCodeTarget, type ShapeChangeFlow, type ShapeChangeItem, type ShapeChanged as ShapeChangedData, type ShapeCodeTarget, type ShapeFlowEnd, type ShapeFlowStep } from '@plannotator/core/shape';
 import type { MarkState } from './ShapeDrawn';
 import { ShapeInline } from './inline';
-import type { ShapeSurfaceReview } from './types';
+import type { ShapeReviewAt, ShapeSurfaceReview } from './types';
+
+/** A host's `open`, never throwing: a sync throw or a rejection answers false, as a place it cannot show does. */
+export function openShapeReview(review: ShapeSurfaceReview, at: ShapeReviewAt): Promise<boolean> {
+  return Promise.resolve()
+    .then(() => review.open(at))
+    .then((ok) => ok === true, () => false);
+}
 
 const KIND: Record<ShapeChangeItem['kind'], string> = { behaviour: 'Behaviour', contract: 'Contract', moved: 'Moved', removed: 'Removed', check: 'Check this' };
 /** The glyph is for the eye; the word is for a screen reader. */
@@ -42,6 +49,8 @@ function DiffWords({ text }: { text: string }) {
 interface Links {
   onCode?: (target: ShapeCodeTarget) => void;
   onStep?: (step: number) => void;
+  /** How many steps the review has, when the host says. */
+  steps?: number;
 }
 
 /** `path:line`, shown as `file.ts:42`. A link when the board can open code, plain words otherwise. */
@@ -50,8 +59,9 @@ function CodeLink({ at, onCode }: { at: string; onCode?: Links['onCode'] }) {
   if (!target) return null;
   const label = `${baseName(target.path)}:${target.line}`;
   if (!onCode) return <span className="shp-chg-loc plain">{label}</span>;
+  // The name starts with the words on the button (WCAG 2.5.3), then says where it goes.
   return (
-    <button type="button" className="shp-chg-loc" onClick={() => onCode(target)} title={`${target.path}:${target.line}`} aria-label={`Open ${target.path} at line ${target.line}`}>
+    <button type="button" className="shp-chg-loc" onClick={() => onCode(target)} title={`${target.path}:${target.line}`} aria-label={`${label}, open ${target.path} at line ${target.line}`}>
       {label}
     </button>
   );
@@ -59,17 +69,18 @@ function CodeLink({ at, onCode }: { at: string; onCode?: Links['onCode'] }) {
 
 function Hunk({ item, marks, links }: { item: ShapeChangeItem; marks: MarkState; links: Links }) {
   const code = item.code ?? [];
-  const step = item.step && links.onStep ? item.step : null;
+  // A step the review has (or may have: a host that does not say how many keeps the link, and it lands at the start).
+  const step = item.step && links.onStep && (links.steps === undefined || item.step <= links.steps) ? item.step : null;
   return (
     <article className={`shp-chg-hunk ${markClass(item.id, marks)}`} data-mark={item.id} data-change-kind={item.kind}>
       <div className="shp-chg-hh">
         <span className={`shp-chg-kind${item.kind === 'check' ? ' check' : ''}`}>{KIND[item.kind]}</span>
-        <h3 className="shp-chg-title"><ShapeInline text={item.title} /></h3>
+        <h4 className="shp-chg-title"><ShapeInline text={item.title} /></h4>
         {(code.length > 0 || step) && (
           <span className="shp-chg-links">
-            {code.map((at) => <CodeLink key={at} at={at} onCode={links.onCode} />)}
+            {code.map((at, n) => <CodeLink key={`${n}-${at}`} at={at} onCode={links.onCode} />)}
             {step && (
-              <button type="button" className="shp-chg-step" onClick={() => links.onStep!(step)} aria-label={`Open the guided review at step ${step}`}>
+              <button type="button" className="shp-chg-step" onClick={() => links.onStep!(step)} aria-label={`Guide step ${step}, open the guided review there`}>
                 Guide step {step}
               </button>
             )}
@@ -203,11 +214,53 @@ export interface ShapeChangedProps {
   onCode?: (target: ShapeCodeTarget) => void;
 }
 
+/** The nearest ancestor that scrolls (the board's view), or the page. */
+function scrollerOf(el: HTMLElement): HTMLElement | null {
+  for (let p = el.parentElement; p; p = p.parentElement) {
+    const y = getComputedStyle(p).overflowY;
+    if (y === 'auto' || y === 'scroll') return p;
+  }
+  return document.scrollingElement as HTMLElement | null;
+}
+
+/**
+ * The call paths stay in sight beside a long list of changes, but only while they fit in the view: taller ones
+ * scroll with the page, so their bottom is never out of reach until the list ends.
+ */
+function useStickWhenFits(on: boolean) {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const [fits, setFits] = useState(false);
+  useLayoutEffect(() => {
+    const el = ref.current;
+    if (!on || !el) return;
+    const scroller = scrollerOf(el);
+    if (!scroller) return;
+    const measure = () => {
+      const cs = getComputedStyle(scroller);
+      const room = scroller.clientHeight - (parseFloat(cs.paddingTop) || 0) - (parseFloat(cs.paddingBottom) || 0);
+      setFits(el.offsetHeight > 0 && el.offsetHeight <= room);
+    };
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const watch = new ResizeObserver(measure);
+    watch.observe(el);
+    watch.observe(scroller);
+    return () => watch.disconnect();
+  }, [on]);
+  return { ref, fits };
+}
+
 export function ShapeChanged({ changed, marks, review, onCode }: ShapeChangedProps) {
-  const links: Links = { onCode, onStep: review ? (step) => void review.open({ step }) : undefined };
+  const links: Links = {
+    onCode,
+    steps: review?.steps,
+    // A step the review turns out not to have opens the review at its start.
+    onStep: review ? (step) => void openShapeReview(review, { step }).then((ok) => (ok ? true : openShapeReview(review, {}))) : undefined,
+  };
   const meta = review ? [review.label, review.files !== undefined ? `${review.files} ${review.files === 1 ? 'file' : 'files'}` : null].filter(Boolean) : [];
   const counts = review && (review.additions !== undefined || review.deletions !== undefined);
   const flows = changed.flows ?? [];
+  const stick = useStickWhenFits(flows.length > 0);
   return (
     <div className={`shp-chg${flows.length ? '' : ' one'}`}>
       {(changed.summary || review) && (
@@ -227,8 +280,8 @@ export function ShapeChanged({ changed, marks, review, onCode }: ShapeChangedPro
           )}
           {review && (
             <div className="shp-chg-acts">
-              <button type="button" className="shp-chg-btn primary" onClick={() => void review.open({})}>Guided review</button>
-              <button type="button" className="shp-chg-btn" onClick={() => void review.open({ files: true })}>Full review</button>
+              <button type="button" className="shp-chg-btn primary" onClick={() => void openShapeReview(review, {})}>Guided review</button>
+              <button type="button" className="shp-chg-btn" onClick={() => void openShapeReview(review, { files: true })}>Full review</button>
             </div>
           )}
         </header>
@@ -248,7 +301,7 @@ export function ShapeChanged({ changed, marks, review, onCode }: ShapeChangedPro
           )}
         </section>
         {flows.length > 0 && (
-          <div className="shp-chg-flows">
+          <div ref={stick.ref} className={`shp-chg-flows${stick.fits ? ' fits' : ''}`}>
             {flows.map((flow, n) => <Flow key={flow.id} flow={flow} marks={marks} onCode={onCode} i={n + 2} />)}
           </div>
         )}

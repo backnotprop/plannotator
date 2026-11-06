@@ -69,6 +69,8 @@ export function ShapePebbleButton({ shape, open, onToggle }: { shape: InboxShape
  * sits at its title's left: the board can take the window's width.
  *
  * `onOpenReview`: the thread's review opens over the board (What's changed, and the board's `file:line` links).
+ * `covered`: that review is open over it. The board is inert meanwhile, so Esc and Tab go to the review, not to
+ * the board's panel, bubble or Show more under it.
  */
 export function ShapeLayer({
   host,
@@ -76,12 +78,14 @@ export function ShapeLayer({
   onClose,
   thread,
   onOpenReview,
+  covered = false,
 }: {
   host: ShapeHost;
   id: string;
   onClose: () => void;
   thread: InboxThread | null;
   onOpenReview?: (messageId: string, at: ShapeReviewAt | null) => void;
+  covered?: boolean;
 }) {
   // A phone has none: there the sidebar is a sheet and the board covers the window, as before.
   const { isMobile } = useSidebar();
@@ -107,7 +111,7 @@ export function ShapeLayer({
     setFailedOn(id);
   }, [id]);
   return (
-    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape">
+    <section className="ib-shape-layer pn-shape" data-shape-layer={id} aria-label="Shape" inert={covered || undefined}>
       <PanePart key={attempt} loading={<div className="ib-shape-loading" aria-busy="true" />} onFailed={failed}>
         <ShapeBoard
           host={host}

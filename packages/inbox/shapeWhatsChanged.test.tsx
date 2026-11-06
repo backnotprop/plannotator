@@ -5,7 +5,8 @@
  *  - the Code tab comes back on the Inbox's board;
  *  - What's changed leaves its place, or a board in a thread with a review cannot open that review from it;
  *  - a guide step or a `file:line` opens a review other than the thread's newest, or at the wrong place;
- *  - a board with no review in its thread shows review buttons that lead nowhere.
+ *  - a board with no review in its thread shows review buttons that lead nowhere;
+ *  - the board under an open review takes the first Esc (closing its own panel) instead of leaving it to the review.
  *
  * DOM-gated: runs under DOM_TESTS=1 (happy-dom), from tests/dom-test-list.txt.
  */
@@ -85,6 +86,8 @@ function board(): ShapeLoaded {
   return { shape: made.record, version: store.read(made.id)!, seen: 1, notes: [], session: { state: 'live', agent: 'Claude Code' } };
 }
 
+let cover: (on: boolean) => void = () => {};
+
 async function mount(thread: InboxThread | null): Promise<[string, ShapeReviewAt | null][]> {
   const loaded = board();
   const host: ShapeHost = {
@@ -101,15 +104,17 @@ async function mount(thread: InboxThread | null): Promise<[string, ShapeReviewAt
   el.className = 'pn-inbox';
   document.body.appendChild(el);
   root = createRoot(el);
-  act(() =>
+  const onOpenReview = (id: string, at: ShapeReviewAt | null) => opened.push([id, at]);
+  const draw = (covered: boolean) =>
     root!.render(
       <SidebarProvider open onOpenChange={() => {}}>
         <main className="ib-main" data-shape-open="">
-          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={thread} onOpenReview={(id, at) => opened.push([id, at])} />
+          <ShapeLayer host={host} id={loaded.shape.id} onClose={() => {}} thread={thread} onOpenReview={onOpenReview} covered={covered} />
         </main>
       </SidebarProvider>,
-    ),
-  );
+    );
+  cover = (on) => act(() => draw(on));
+  act(() => draw(false));
   for (let i = 0; i < 100 && !el.querySelector('.shp-dock'); i++) await wait();
   return opened;
 }
@@ -134,8 +139,8 @@ test.skipIf(!hasDom)("What's changed opens the thread's newest review: its butto
   expect(document.querySelector('.shp-chg-meta')?.textContent).toContain('#12');
   await act(async () => button('Guided review')!.click());
   await act(async () => button('Full review')!.click());
-  await act(async () => button('Open the guided review at step 2')!.click());
-  await act(async () => button('Open src/settings.ts at line 12')!.click());
+  await act(async () => button('Guide step 2, open the guided review there')!.click());
+  await act(async () => button('settings.ts:12, open src/settings.ts at line 12')!.click());
   for (let i = 0; i < 20 && opened.length < 4; i++) await wait();
   expect(opened).toEqual([[REVIEW, null], [REVIEW, { files: true }], [REVIEW, { step: 2 }], [REVIEW, { path: 'src/settings.ts', line: 12 }]]);
   expect(guideReads.every((p) => p.includes(REVIEW))).toBe(true);
@@ -148,4 +153,34 @@ test.skipIf(!hasDom)('a thread with no review: no review buttons or steps on the
   expect(document.querySelector('.shp-chg-step')).toBeNull();
   expect(tabs()).not.toContain('Code');
   expect(opened).toEqual([]);
+});
+
+test.skipIf(!hasDom)('with the review open over the board, Esc is the review\'s: the board is inert and keeps its panel', async () => {
+  await mount(THREAD);
+  await act(async () => document.querySelector<HTMLElement>('.shp-dock [title="References"]')!.click());
+  const panelOpen = () => !!document.querySelector('.shp-sidep.open');
+  expect(panelOpen()).toBe(true);
+  const esc = () => {
+    const e = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    act(() => void window.dispatchEvent(e));
+    return e;
+  };
+  cover(true);
+  expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(true);
+  // The host's own Esc (the Inbox: close the review) sees a key the board did not use.
+  expect(esc().defaultPrevented).toBe(false);
+  expect(panelOpen()).toBe(true);
+  // Back on the board: Esc closes its panel again, first.
+  cover(false);
+  expect(document.querySelector('[data-shape-layer]')!.hasAttribute('inert')).toBe(false);
+  expect(esc().defaultPrevented).toBe(true);
+  expect(panelOpen()).toBe(false);
+});
+
+test.skipIf(!hasDom)('a guide step the review does not have is not drawn', async () => {
+  const short = { ...THREAD, messages: [{ ...reviewMessage(REVIEW), guide: { ...reviewMessage(REVIEW).guide!, sections: 1 } }] } as unknown as InboxThread;
+  await mount(short);
+  await openChanged();
+  // KETTLE_CHANGED's steps are 1 and 2; a one-chapter review shows only step 1.
+  expect([...document.querySelectorAll('.shp-chg-step')].map((b) => b.textContent)).toEqual(['Guide step 1']);
 });

@@ -128,6 +128,11 @@ export interface ShapeSurfaceReview {
   additions?: number;
   deletions?: number;
   /**
+   * How many guide steps the review has. A change's "Guide step N" past it is not drawn. Absent: every step link
+   * shows, and one the review answers false to opens the review at its start.
+   */
+  steps?: number;
+  /**
    * Open the review's guided review there. False (or a promise of false) when it cannot show that place, such as a
    * file the review does not change: the board opens the file in its own viewer instead.
    */

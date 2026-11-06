@@ -5977,6 +5977,7 @@ function Inbox() {
               onClose={() => close({ ...routeRef.current, shape: null })}
               // Its review opens over the board, at the place a link names; Back or Esc comes back to the board.
               onOpenReview={(messageId, at) => go({ ...routeRef.current, guide: messageId, guideAt: at })}
+              covered={!!guideMessage}
             />
           )}
         </main>

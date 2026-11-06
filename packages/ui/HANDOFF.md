@@ -2769,7 +2769,10 @@ A new view and two optional `ShapeSurface` props. A host that passes neither pro
 - Core: `ShapeViewId` gains `'changed'`, and `SHAPE_VIEWS` lists it after `how` ("What's changed"). New types `ShapeChanged`, `ShapeChangeItem`, `ShapeChangeKind`, `ShapeChangeFlow`, `ShapeFlowStep`, `ShapeFlowEnd`, `SHAPE_CHANGE_KINDS`; `ShapeBoard.views.changed?`. `checkShapeBoard`'s "not a view" message now lists `changed`. A host that switches over `ShapeViewId` exhaustively needs a case for it.
 - `ShapeChanged` (exported from `components/shape`): the view on its own (`changed`, `marks`, `review?`, `onCode?`).
 - `ShapeSurfaceProps.codeView?: boolean` (default `true`): `false` drops the Code tab.
-- `ShapeSurfaceProps.review?: ShapeSurfaceReview | null`: `{ label?, files?, additions?, deletions?, open(at: ShapeReviewAt): boolean | Promise<boolean> }`, with `ShapeReviewAt` `{ path?, line?, step?, files? }`. It adds Guided review, Full review and "Guide step N" to What's changed, and a board's `file:line` asks it first after the Code view; `false` falls back to the file viewer (`host.readFile`).
+- `ShapeSurfaceProps.review?: ShapeSurfaceReview | null`: `{ label?, files?, additions?, deletions?, steps?, open(at: ShapeReviewAt): boolean | Promise<boolean> }`, with `ShapeReviewAt` `{ path?, line?, step?, files? }`. It adds Guided review, Full review and "Guide step N" to What's changed, and a board's `file:line` asks it first after the Code view; `false` falls back to the file viewer (`host.readFile`). `open` may throw or reject: the board takes that as `false`.
+- `ShapeSurfaceReview.steps?: number`: how many guide steps the review has. Pass it and a change's "Guide step N" past it is not drawn; leave it out and every step link shows, and one `open({ step })` answers false to opens the review at its start (`open({})`).
+- Esc and Tab: put `inert` on an ancestor of the board while something of yours covers it (the Inbox does while the review is open over the board). The board then leaves Esc to you: its panel, bubble or Show more do not take the first press.
+- `shape.css`: the call paths beside the changes are sticky only while they fit in the view (`.shp-chg-flows.fits`, set by `ShapeChanged`).
 - `shape.css` gains the `.shp-chg*` classes only.
 
 ## Shape: What to know (ui 0.62.0; not additive)

@@ -42,7 +42,8 @@ test('open goes to the review at a file it changes or a step it has, and answers
   let reads = 0;
   const read = async () => (reads++, { snapshot });
   const review = shapeReview(msg('msg_review', guide(true)), (id, at) => went.push([id, at]), read);
-  expect([review.label, review.files, review.additions, review.deletions]).toEqual(['#12', 2, 2, 2]);
+  // Its steps are the review's chapters: the board draws no "Guide step 3" for a two-chapter review.
+  expect([review.label, review.files, review.additions, review.deletions, review.steps]).toEqual(['#12', 2, 2, 2, 2]);
   expect(await review.open({ path: 'src/kettle.ts', line: 7 })).toBe(true);
   expect(await review.open({ path: 'src/elsewhere.ts', line: 1 })).toBe(false);
   expect(await review.open({ step: 2 })).toBe(true);

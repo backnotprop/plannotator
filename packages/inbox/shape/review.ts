@@ -76,6 +76,7 @@ export function shapeReview(message: InboxMessageWire, go: (messageId: string, a
     files: guide.files,
     additions: guide.additions,
     deletions: guide.deletions,
+    steps: guide.sections,
     async open(at) {
       if (at.step && at.step > guide.sections) return false;
       if (at.path) {

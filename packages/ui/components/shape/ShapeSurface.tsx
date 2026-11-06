@@ -44,12 +44,12 @@ import type { CodeAnnotation, EditorMode, InputMethod } from '../../types';
 import { Pebble, useReducedMotion } from './Pebble';
 import { NO_MARKS, ShapeDrawn, type MarkState } from './ShapeDrawn';
 import { ShapeKnow } from './ShapeKnow';
-import { ShapeChanged } from './ShapeChanged';
+import { ShapeChanged, openShapeReview } from './ShapeChanged';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
-import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps } from './types';
+import type { ShapeEvent, ShapeHost, ShapeLoaded, ShapePanelTab, ShapeSessionStatus, ShapeSurfaceProps, ShapeSurfaceReview } from './types';
 
 const DRAW_MS = 1500; // the longest draw-in, for Esc
 const DRAWN_MS = DRAW_MS + 1400; // when a view counts as drawn (its draw-in class is dropped)
@@ -406,6 +406,21 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     [host, id],
   );
 
+  // The review as the board uses it: a host's throw or rejection is a false, and an open bubble closes once the
+  // review is over the board (the host makes the board inert meanwhile, so Esc goes to the review).
+  const boardReview = useMemo<ShapeSurfaceReview | null>(
+    () =>
+      review && {
+        ...review,
+        open: async (at) => {
+          const ok = await openShapeReview(review, at);
+          if (ok) setPeek(null);
+          return ok;
+        },
+      },
+    [review],
+  );
+
   // A part that names a place in code (a drawn part's `data-code`, a What's changed link): the Code view's whole file
   // when it has one, else the review's guided review there (a board with no Code view), else the file viewer.
   const openCodeTarget = useCallback(async (at: ShapeCodeTarget) => {
@@ -414,10 +429,10 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       openCode(at.path, at.line);
       return;
     }
-    if (review && (await Promise.resolve(review.open({ path: at.path, line: at.line })).catch(() => false))) return;
+    if (boardReview && (await boardReview.open({ path: at.path, line: at.line }))) return;
     const contents = await readProjectFile(at.path);
     if (contents != null) setViewer({ kind: 'file', path: at.path, contents, line: at.line, token: Date.now() });
-  }, [readProjectFile, host, openCode, codeView, review]);
+  }, [readProjectFile, host, openCode, codeView, boardReview]);
   /** A `path` and `line` from the board's words (What to know, an answer's `code:` link): the Code view, or as a part's. */
   const showCode = useCallback((path: string, line: number) => {
     if (codeView) openCode(path, line);
@@ -428,6 +443,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer) return;
+      // A board the host covers (inert, such as the Inbox's review open over it) leaves Esc to what covers it.
+      if (rootRef.current?.closest('[inert]')) return;
       // An open menu (a host's fileAction) closes alone. By what is open, not by the key's target: focus may not be in it yet.
       if (document.querySelector('[role="menu"]')) return;
       // An open bubble goes first.
@@ -813,7 +830,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       const changed = version.views.changed;
       if (!changed) return null;
       const canOpenCode = !!review || !!host.readFile || (codeView && !!version.views.code);
-      return <ShapeChanged changed={changed} marks={vm} review={review} onCode={canOpenCode ? (at) => void openCodeTarget(at) : undefined} />;
+      return <ShapeChanged changed={changed} marks={vm} review={boardReview} onCode={canOpenCode ? (at) => void openCodeTarget(at) : undefined} />;
     }
     const knowCode = codeView ? (version.views.code ? openCode : undefined) : review || host.readFile ? showCode : undefined;
     if (v === 'know') return <ShapeKnow know={version.views.know} reqs={version.views.reqs} marks={vm} onCode={knowCode} />;
