@@ -81,7 +81,7 @@ test("hook command quoting executes safely with spaces and apostrophes and pins 
   mkdirSync(join(executable, ".."), { recursive: true });
   writeFileSync(executable, '#!/bin/sh\nprintf "%s\\n%s\\n" "$PLANNOTATOR_DATA_DIR" "$1"\n', { mode: 0o755 });
   const run = (entrypoint?: string) => Bun.spawnSync(["/bin/sh", "-c", t3HookCommand(executable, dataDir)],
-    { env: { PATH: "/usr/bin:/bin", ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
+    { env: { PATH: "/usr/bin:/bin", HOME: process.env.HOME!, ...(entrypoint === undefined ? {} : { CLAUDE_CODE_ENTRYPOINT: entrypoint }) }, stdout: "pipe", stderr: "pipe" });
   // T3 Code names itself `t3-code`; other Agent SDK apps report `sdk-…`.
   for (const entrypoint of ["sdk-ts", "sdk-py", "t3-code"]) {
     const result = run(entrypoint);
