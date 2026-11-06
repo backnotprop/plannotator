@@ -72,6 +72,7 @@
     "./data-dir": "./data-dir.ts",
     "./update-check": "./update-check.ts",
     "./daily-ping": "./daily-ping.ts",
+    "./star-ask": "./star-ask.ts",
     "./prompts": "./prompts.ts",
     "./improvement-hooks": "./improvement-hooks.ts",
     "./pfm-reminder": "./pfm-reminder.ts",
