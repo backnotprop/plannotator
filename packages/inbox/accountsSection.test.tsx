@@ -238,14 +238,21 @@ const refresh = (el: ParentNode) => el.querySelector('[data-accounts-refresh]') 
 const machineOf = (el: ParentNode, key = 'self') => el.querySelector(`[data-machine-key="${key}"]`) as HTMLElement | null;
 const row = (el: ParentNode, number: number, key = 'self') => machineOf(el, key)?.querySelector(`[data-account="${number}"]`) as HTMLElement;
 const nameOf = (rowEl: Element) => rowEl.querySelector('.ib-acct-name')?.textContent;
-/** The muted note beside a name ("on Mac mini"), or null. */
-const notesOf = (rowEl: Element) => rowEl.querySelector('[data-account-notes]')?.textContent ?? null;
+/** The muted notes beside a name ("on Mac mini"), as they read, or null. */
+const notesOf = (rowEl: Element) => {
+  const notes = rowEl.querySelector('[data-account-notes]');
+  return notes ? [...notes.querySelectorAll('small')].map((note) => note.textContent).join(' ') : null;
+};
 /** A row's limit as `label pct`: the one nearest to running out. Its label is in no text on the row, only on its figure. */
 const bars = (rowEl: Element) => [...rowEl.querySelectorAll('[data-account-use="bars"]')].map((use) => `${use.querySelector('b')?.getAttribute('data-usage')} ${use.querySelector('b')?.textContent}`);
 /** Everything a row keeps off its face: its hover title, one fact a line. */
 const detailOf = (rowEl: Element) => rowEl.getAttribute('title')?.split('\n') ?? [];
-/** What a row says on its face: its name, notes and figure. */
-const faceOf = (rowEl: Element) => rowEl.textContent ?? '';
+/** What a row says on its face: its name, notes and figure. Not the words kept for a screen reader. */
+const faceOf = (rowEl: Element) => {
+  const face = rowEl.cloneNode(true) as Element;
+  face.querySelectorAll('.ib-sr').forEach((hidden) => hidden.remove());
+  return face.textContent ?? '';
+};
 /** A machine's rows by name, in the order the list shows them. */
 const order = (el: ParentNode, key = 'self') => [...(machineOf(el, key)?.querySelectorAll('[data-account]') ?? [])].map((rowEl) => rowEl.querySelector('.ib-acct-n > .ib-acct-name')?.textContent);
 /** What the page calls this machine. */
@@ -1106,6 +1113,52 @@ test.skipIf(!hasDom)('Refresh reads every machine again, and one slow machine ho
   expect(machineReads.filter((url) => url.includes('ibx_mini')).at(-1)).toContain('fresh=1');
   await act(async () => letGo(farList({ alias: 'late', active: true })));
   await until(() => order(el, 'ibx_slow')[0] === 'late', 'the slow machine');
+});
+
+test.skipIf(!hasDom)("the hover's words reach a screen reader too: every row with a hover says the same words, hidden, inside the row", async () => {
+  answer({
+    stdout: listOf(
+      { alias: 'work', active: true, usage: { fiveHour: limit(95), sevenDay: limit(40) } },
+      { alias: 'roomy', usage: { fiveHour: limit(10) } },
+      { alias: 'old', usageAgeSeconds: 7_200, usage: { fiveHour: limit(30) } },
+      { alias: 'build key', email: 'api-key-4@token.local', usageStatus: 'api_key' },
+    ),
+  });
+  const el = await open('accounts');
+  for (const number of [1, 2, 3, 4]) {
+    const hidden = row(el, number).querySelector('[data-account-detail]');
+    expect(hidden?.classList.contains('ib-sr')).toBe(true);
+    expect(hidden?.textContent).toBe(detailOf(row(el, number)).join('. '));
+  }
+  expect(row(el, 2).querySelector('[data-account-detail]')?.textContent).toContain('Most room');
+  expect(row(el, 3).querySelector('[data-account-detail]')?.textContent).toContain('Last read 2h ago');
+  expect(row(el, 4).querySelector('[data-account-detail]')?.textContent).toBe('API key, billed per token');
+});
+
+test.skipIf(!hasDom)('a named API key says "API key" beside its name on a phone, which has no hover; on a desktop its hover says it', async () => {
+  const keys = listOf({ alias: 'work', active: true }, { alias: 'build key', email: 'api-key-2@token.local', usageStatus: 'api_key' }, { email: 'api-key-3@token.local', usageStatus: 'api_key' });
+  answer({ stdout: keys });
+  const desk = await open('accounts');
+  expect(notesOf(row(desk, 2))).toBeNull();
+  act(() => root?.unmount());
+  host?.remove();
+  phone = true;
+  const onPhone = await open('accounts');
+  expect(notesOf(row(onPhone, 2))).toBe('API key');
+  // A key with no name already reads "API key": not twice.
+  expect(nameOf(row(onPhone, 3))).toBe('API key');
+  expect(notesOf(row(onPhone, 3))).toBeNull();
+});
+
+test.skipIf(!hasDom)('"on <machine>" has its own box after the other notes, so they shorten first and it keeps its words', async () => {
+  answer({ stdout: listOf({ alias: 'work', email: 'w@fake.test', active: true }, { alias: 'side', email: 'p@fake.test', organizationName: 'Home', usageStatus: 'relogin_required' }, { alias: 'side', email: 'q@fake.test', organizationName: 'Away' }) });
+  linked = [{ id: 'ibx_mini', name: 'Mac mini', answer: () => farList({ alias: 'side', email: 'p@fake.test', organizationName: 'Home', active: true }) }];
+  const el = await open('accounts');
+  await until(() => order(el, 'ibx_mini').length === 1, "the other machine's row");
+  const rowEl = machineOf(el)!.querySelector('[data-account="2"]')!;
+  expect(notesOf(rowEl)).toBe('Home · Sign in again · on Mac mini');
+  expect(rowEl.querySelector('.ib-acct-on')?.textContent).toBe('on Mac mini');
+  expect(rowEl.querySelector('.ib-acct-cut')?.textContent).toBe('Home · Sign in again ·');
 });
 
 /** Everything in the list a person could press or Tab to. Refresh sits by the page's title, outside it. */

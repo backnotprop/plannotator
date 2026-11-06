@@ -503,11 +503,15 @@ function ToolList({
             const meter = tightest(account);
             const status = account.usageStatus ?? '';
             const on = usedElsewhere(machines, machine.key, account);
-            const notes = [
-              ...(name.organization ? [name.organization] : []),
-              ...(NEEDS_A_PERSON.has(status) || (!meter && status !== 'api_key') ? [noReadingReason(account)] : []),
-              ...(on.length > 0 ? [`on ${names(on)}`] : []),
-            ];
+            const notes: RowNotes = {
+              cut: [
+                ...(name.organization ? [name.organization] : []),
+                ...(NEEDS_A_PERSON.has(status) || (!meter && status !== 'api_key') ? [noReadingReason(account)] : []),
+                // A phone has no hover to say a named row is a key: it says so here, quietly.
+                ...(phone && status === 'api_key' && name.label !== 'API key' ? ['API key'] : []),
+              ],
+              on: on.length > 0 ? `on ${names(on)}` : null,
+            };
             const open = !active && confirming?.machine === machine.key && rowOfLogin(accounts, confirming.login) === account;
             const note = noteUnderRow === account ? noteHere : null;
             return (
@@ -555,6 +559,16 @@ function ToolList({
   );
 }
 
+/**
+ * The muted notes beside a name. `on` ("on Mac mini") has its own box and is
+ * never cut for the others: they shorten first, then the name.
+ */
+interface RowNotes {
+  /** The organization, why there is no reading, "API key" on a phone. */
+  cut: string[];
+  on: string | null;
+}
+
 /** Each row's own switch state. */
 interface RowSwitch {
   /** Its confirm is open. */
@@ -582,7 +596,7 @@ function AccountRow({
   account: InboxAccount;
   name: RowName;
   inUse: boolean;
-  notes: string[];
+  notes: RowNotes;
   /** Its limits, reset, age, "most room" or "API key": the hover title, off the row's face. */
   detail: string;
   /** The in-use row at 90% or more on a reading it can trust: its circle goes amber. */
@@ -610,9 +624,16 @@ function AccountRow({
           {name.label}
           {name.number !== null && <span className="ib-acct-num"> #{name.number}</span>}
         </span>
-        {notes.length > 0 && <small data-account-notes="">{notes.join(' · ')}</small>}
+        {(notes.cut.length > 0 || notes.on) && (
+          <span className="ib-acct-notes" data-account-notes="">
+            {notes.cut.length > 0 && <small className="ib-acct-cut">{`${notes.cut.join(' · ')}${notes.on ? ' ·' : ''}`}</small>}
+            {notes.on && <small className="ib-acct-on">{notes.on}</small>}
+          </span>
+        )}
       </span>
       <UsageCluster account={account} inUse={inUse} />
+      {/* The hover's words, for a screen reader: a title on a plain row is read by none, and a phone has no hover. */}
+      {detail && <span className="ib-sr" data-account-detail="">{detail.split('\n').join('. ')}</span>}
       {state.going ? (
         <span className="ib-acct-sw" data-going="">
           <span className="ib-spin" aria-hidden="true" />
