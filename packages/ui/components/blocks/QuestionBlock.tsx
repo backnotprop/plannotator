@@ -911,7 +911,8 @@ export const QuestionBlock: React.FC<QuestionBlockProps> = ({
                 renderText={inline}
                 labelProps={(label) => ({ onPointerDown: onRowPointerDown, onClickCapture: (event) => onRowClick(event, label) })}
                 pictureBadge={pictureBadge}
-                pictureSize={pictureSize}
+                // Asked by the picture's own URL, loaded or not: a picture that fails keeps the set's layout.
+                pictureSize={pictureSize ? (index) => (pictures[index] ? pictureSize(pictures[index]!) : null) : undefined}
               />
             ) : (
               question.choices.map((choice) => {
@@ -1162,8 +1163,9 @@ export interface QuestionPictureTilesProps {
   renderBadges?: (choice: QuestionPictureTileChoice, index: number) => React.ReactNode;
   /** A small label over a tile's picture, top left (the card's `pictureBadge`); null or absent draws none. */
   pictureBadge?: (choice: { label: string; image: { alt: string; src: string } }) => string | null;
-  /** Each shown picture's size in pixels, when the host knows it before it loads (the card's `pictureSize`). */
-  pictureSize?: (url: string, index: number) => QuestionPictureSize | null;
+  /** Each choice's picture size in pixels by its place in `choices`, when the host knows it before the picture loads
+   *  (the card's `pictureSize`). Asked whether or not the picture loaded, so one that fails leaves the layout as it was. */
+  pictureSize?: (index: number) => QuestionPictureSize | null;
 }
 
 /**
@@ -1193,10 +1195,9 @@ export const QuestionPictureTiles: React.FC<QuestionPictureTilesProps> = ({
   pictureSize,
 }) => {
   // Known before any picture loads, so a host's layout (inbox.css) never moves once they do.
-  const sizes = choices.map((choice, index) => {
-    const url = urls[index] ?? null;
-    return choice.image && url ? readQuestionPictureSize(pictureSize?.(url, index)) : null;
-  });
+  // A picture that fails to load keeps its recorded size and shape (the failed box draws none of it), so the set's
+  // shape, and with it the layout, stays as it was.
+  const sizes = choices.map((choice, index) => (choice.image ? readQuestionPictureSize(pictureSize?.(index)) : null));
   const shapes: (QuestionPictureShape | null)[] = sizes.map((size) => (size ? questionPictureShape(size) : null));
   const pictured = choices.flatMap((choice, index) => (choice.image ? [shapes[index] ?? null] : []));
   return (

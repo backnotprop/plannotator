@@ -11,8 +11,14 @@
  * - two wide pictures stop sharing the width, or a phone screenshot set stops
  *   getting narrow columns (three across in a 726 px card, two in a 390 px
  *   window, one in a 320 px one);
- * - a set with a choice that has no picture stops going to Rows, or in a
- *   right-to-left page its zoom button leaves the picture;
+ * - two choices where one has no picture stop going to Rows, or in a
+ *   right-to-left page its zoom button leaves the picture; three pictures and
+ *   a choice without one (the tour's picture step) leave columns, or the bare
+ *   choice draws a picture-tall empty box;
+ * - three choices with pictures of mixed shapes go Rows;
+ * - a recorded picture that fails to load re-lays out its set;
+ * - phone screenshots stop going one a row under a 360 px window, or a long
+ *   strip is drawn too thin to see, under the zoom button;
  * - one choice stops taking the full width, a small icon is blown up past
  *   its own size, or a picture that failed to load stops saying so;
  * - a panorama set stops taking the full width.
@@ -42,6 +48,10 @@ const QUESTIONS = {
   one: question('Ship the header button?', ['A · Header button — ![Header](shots/wide-a.png) shows while the sidebar is closed.']),
   odd: question('Which empty-state picture?', ['A · Icon — ![Icon](shots/icon.png) the 48 px icon.', 'B · Gone — ![Gone](shots/not-there.png) last week\'s.', 'C · List — ![List](shots/wide-b.png) the list.']),
   pano: question('Which terminal strip?', ['A · Full — ![Full](shots/pano.png) every line.', 'B · Short — ![Short](shots/pano.png) the last lines.']),
+  bare3: question('Which direction?', ['A · Tabs — ![A](shots/wide-a.png) one tab.', 'B · Split — ![B](shots/wide-b.png) beside the diff.', 'C · Panel — ![C](shots/wide-a.png) in a panel.', 'D · Ship as is now.']),
+  mixed3: question('Which header?', ['A · Laptop — ![A](shots/wide-a.png) wide.', 'B · Phone — ![B](shots/phone-a.png) narrow.', 'C · Menu — ![C](shots/wide-b.png) wide.']),
+  fails: question('Which phone list?', ['A · Cards — ![A](shots/phone-a.png) cards.', 'B · Rows — ![B](shots/phone-fails.png) rows.']),
+  strip: question('Which status line?', ['A · Full — ![A](shots/strip.png) every field.', 'B · Short — ![B](shots/strip.png) the branch only.']),
 };
 
 let context: BrowserContext;
@@ -78,6 +88,8 @@ test.beforeAll(async ({ browser }: { browser: Browser }) => {
   writeFileSync(join(project, 'shots', 'phone-b.png'), png(390, 844, [147, 51, 234]));
   writeFileSync(join(project, 'shots', 'icon.png'), png(48, 48, [190, 18, 60]));
   writeFileSync(join(project, 'shots', 'pano.png'), png(1800, 300, [15, 23, 42]));
+  writeFileSync(join(project, 'shots', 'phone-fails.png'), png(390, 844, [8, 145, 178]));
+  writeFileSync(join(project, 'shots', 'strip.png'), png(2400, 60, [15, 23, 42]));
   claude = await SimAgent.connect({ binary, env, name: 'Claude Code', host: 'claude-code' });
   threads = {} as typeof threads;
   for (const [name, body] of Object.entries(QUESTIONS)) {
@@ -170,10 +182,17 @@ test('phone screenshots: narrow columns, three across in a 726 px card, two in a
   let l = await loaded(6);
   expect(rows(l)).toEqual([3, 3]);
   expect(Math.max(...l.tiles.map((t) => t.tile.w))).toBeLessThanOrEqual(320);
-  await page.setViewportSize({ width: 390, height: 1000 });
+  // Two across from a 360 px window; one a row below it.
+  for (const width of [390, 360]) {
+    await page.setViewportSize({ width, height: 1000 });
+    await page.waitForTimeout(300);
+    l = await layout(page);
+    expect(rows(l)).toEqual([2, 2, 2]);
+  }
+  await page.setViewportSize({ width: 359, height: 1000 });
   await page.waitForTimeout(300);
   l = await layout(page);
-  expect(rows(l)).toEqual([2, 2, 2]);
+  expect(rows(l)).toEqual([1, 1, 1, 1, 1, 1]);
   await page.setViewportSize({ width: 320, height: 1000 });
   await page.waitForTimeout(300);
   l = await layout(page);
@@ -225,4 +244,83 @@ test('a small icon is never drawn past its own size; a picture that did not load
   const card = page.locator('section.ib-pane fieldset.question-block');
   await expect(card.getByRole('radio', { name: /B · Gone/ })).toHaveCount(1);
   await expect(card.getByRole('radio', { name: /Picture didn/ })).toHaveCount(0);
+});
+
+/** The "No picture" panel a bare choice draws (null: none), and its height. */
+const panelOf = (p: Page) => p.evaluate(() => {
+  const label = document.querySelector('section.ib-pane fieldset.question-block [data-question-tile-no-picture] > label')!;
+  const before = getComputedStyle(label, '::before');
+  return before.content === 'none' || before.content === 'normal' ? null : { content: before.content, height: Math.round(parseFloat(before.height)) };
+});
+
+test('three pictures and a choice without one stay columns (the tour\'s picture step); the bare choice holds a short panel', async () => {
+  await open('bare3');
+  let l = await loaded(3);
+  expect(l.room).toBeGreaterThanOrEqual(560);
+  expect(rows(l)).toEqual([2, 2]);
+  const [, , pictured, bare] = l.tiles;
+  // Side by side, captions level (the row shares its picture height), the panel 120 px, never picture tall.
+  expect(Math.abs(bare!.caption.y - pictured!.caption.y)).toBeLessThanOrEqual(1);
+  const panel = await panelOf(page);
+  expect(panel?.content).toContain('No picture');
+  expect(panel!.height).toBe(120);
+  // A phone: one column, and the bare choice draws no panel.
+  await page.setViewportSize({ width: 390, height: 1000 });
+  await page.waitForTimeout(300);
+  l = await layout(page);
+  expect(rows(l)).toEqual([1, 1, 1, 1]);
+  expect(await panelOf(page)).toBeNull();
+  await page.setViewportSize({ width: 1440, height: 1000 });
+  // Two choices where one has no picture: Rows, no panel.
+  await open('bare');
+  await loaded(1);
+  expect(await panelOf(page)).toBeNull();
+});
+
+test('three choices with pictures of mixed shapes stay columns in a middling room', async () => {
+  await open('mixed3');
+  await page.setViewportSize({ width: 1000, height: 1000 });
+  await page.waitForTimeout(300);
+  const l = await loaded(3);
+  expect(l.room).toBeGreaterThanOrEqual(560);
+  expect(l.room).toBeLessThan(900);
+  expect(rows(l)).toEqual([2, 1]);
+  await page.setViewportSize({ width: 1440, height: 1000 });
+});
+
+test('a recorded picture that fails to load leaves its set laid out as it was', async () => {
+  await open('fails');
+  // Both measured after a reload, so the window around the card is the same.
+  const reload = async () => {
+    await page.reload();
+    await expect(page.locator('section.ib-pane fieldset.question-block [data-question-tile]').first()).toBeVisible();
+  };
+  await reload();
+  const whole = await loaded(2);
+  expect(whole.tiles.length).toBe(2);
+  expect(rows(whole)).toEqual([2]);
+  const fails = (u: URL) => u.href.includes('phone-fails');
+  await page.route(fails, (route) => route.abort());
+  try {
+    await reload();
+    await expect(page.locator('section.ib-pane fieldset.question-block [data-question-picture-failed]')).toHaveCount(1);
+    const broken = await loaded(1);
+    expect(broken.tiles.map((t) => t.tile)).toEqual(whole.tiles.map((t) => t.tile));
+  } finally {
+    await page.unroute(fails);
+  }
+});
+
+test('a long strip on a phone: its box is tall enough to see, and the zoom stays on it', async () => {
+  await page.setViewportSize({ width: 390, height: 1000 });
+  try {
+    await open('strip');
+    const l = await loaded(2);
+    for (const t of l.tiles) {
+      expect(t.picture!.h).toBeGreaterThanOrEqual(40);
+      expect(inside(t.zoom!, t.picture!)).toBe(true);
+    }
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 1000 });
+  }
 });

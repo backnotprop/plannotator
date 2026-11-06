@@ -266,8 +266,18 @@ describe('the layout facts a host draws from (approval "picture-choices-layout")
     expect(placeholders[1]).toBeNull();
     expect(placeholders[2]!.hasAttribute('data-question-picture-failed')).toBe(false);
     expect(placeholders[2]!.getAttribute('title')).toBe('Remote image held');
-    // A failed picture has no size to carry.
-    expect(tiles(el)[0]!.hasAttribute('data-question-tile-shape')).toBe(false);
+  });
+
+  test.skipIf(!hasDom)('a picture that fails to load keeps its recorded shape, so the set\'s layout facts stay as they were', async () => {
+    const el = await mount(<Harness markdown={[':::question', 'Which?', '', '- [ ] A — ![A](drawer-a.png)', '- [ ] B — ![B](drawer-b.png)', '- [ ] C — ![C](drawer-a.png#2)', ':::'].join('\n')} sizes={(url) => recorded(url.replace('%232', '').replace('#2', ''))} />);
+    const grid = el.querySelector<HTMLElement>('[data-question-tiles]')!;
+    const facts = () => [grid.getAttribute('data-question-tiles-shape'), ...tiles(el).map((t) => t.getAttribute('data-question-tile-shape'))];
+    expect(facts()).toEqual(['tall', 'tall', 'scroll', 'tall']);
+    await act(async () => {
+      tiles(el)[1]!.querySelector('img')!.dispatchEvent(new Event('error'));
+    });
+    expect(tiles(el)[1]!.querySelector('[data-question-picture-failed]')).not.toBeNull();
+    expect(facts()).toEqual(['tall', 'tall', 'scroll', 'tall']);
   });
 });
 
