@@ -532,9 +532,10 @@ export interface PlannotatorConfig {
     notNowAt?: string;
     shownLoad?: string;
     agentNote?: { shownFor?: string[] };
-    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string };
+    waitingSince?: { sound?: string; list_intro?: string; voice?: string; snooze?: string; board?: string; steps?: string; list_view?: string };
     board?: { shownAt?: string; key?: string };
     steps?: { shownAt?: string; key?: string };
+    list_view?: { shownAt?: string; key?: string };
   };
   inboxSound?: {
     enabled?: boolean;
