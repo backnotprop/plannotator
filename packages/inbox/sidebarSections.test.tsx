@@ -171,7 +171,7 @@ test.skipIf(!hasDom)('a closed Pinned counts the pins waiting on the person; ope
   // Stopped, Holds and the question count: 3. The news dot and the quiet thread are not on the person.
   // "N waiting on you" is pinned on purpose: it is the header's accessible name for a screen reader.
   expect(header('pinned').querySelector('.ib-n')!.textContent).toBe('3 waiting on you');
-  expect(header('pinned').textContent).toContain('Pinned');
+  expect(header('pinned').textContent).toContain('Starred');
   expect(header('projects').querySelector('.ib-n')).toBeNull();
   draw({ pins: [PINS[3]!, PINS[4]!] });
   expect(header('pinned').querySelector('.ib-n')).toBeNull();
