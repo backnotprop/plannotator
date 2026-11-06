@@ -53,8 +53,9 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
     setOpen(false);
     opener.current?.focus({ preventScroll: true });
   };
-  // Escape closes the details before it closes the review: read ahead of App's ladder (in the capture), and marked used.
-  // The same Escape as the PR page's (`useSheetEscape`), not a new key.
+  // Escape closes the details before it closes the review: read on the document, after what is inside the page (a menu
+  // over the bar marks its own Escape) and ahead of App's ladder on the window, and marked used so the ladder stands
+  // down. The same Escape as the PR page's (`useSheetEscape`), not a new key.
   const closeRef = useRef(close);
   closeRef.current = close;
   const shown = open && !!pull;
@@ -67,14 +68,30 @@ export function useThreadPullDetails(thread: InboxThread, known: InboxPull | nul
       event.preventDefault();
       closeRef.current();
     };
-    window.addEventListener('keydown', onKey, true);
-    return () => window.removeEventListener('keydown', onKey, true);
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
   }, [shown]);
   useEffect(() => {
     if (open) panel.current?.focus({ preventScroll: true });
   }, [open]);
+  // Tabbing out of the details closes them, so focus never lands unseen on what they cover (a click beside them does
+  // not): the PR page's sheet keys.
+  const tabbing = useRef(false);
+  const keys = {
+    onKeyDown: (event: React.KeyboardEvent) => {
+      tabbing.current = event.key === 'Tab';
+    },
+    onKeyUp: () => {
+      tabbing.current = false;
+    },
+    onBlur: (event: React.FocusEvent<HTMLElement>) => {
+      const left = tabbing.current && event.relatedTarget instanceof Element && !event.currentTarget.contains(event.relatedTarget) && !inOverlay(event.relatedTarget);
+      tabbing.current = false;
+      if (left) setOpen(false);
+    },
+  };
   useEffect(() => setOpen(false), [key]);
-  return { pull, details, open: shown, toggle, close, shut: () => setOpen(false), panel };
+  return { pull, details, open: shown, toggle, close, shut: () => setOpen(false), panel, keys };
 }
 
 /** A phone's row under the bar: the PR's title, which opens the details full screen, as on the PR page. */
@@ -109,6 +126,8 @@ export function ThreadPullDetailsPanel({ state, phone, inDiff, onFile }: { state
       inDiff={inDiff}
       onClose={state.close}
       onFile={onFile}
+      keys={state.keys}
+      descriptionUnread={details.failed && !details.data}
     />
   );
 }

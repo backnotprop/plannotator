@@ -714,7 +714,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
       </p>
     </Tip>
   );
-  // The title opens the PR's details (the owner's suggestion), as the Details button beside it does.
+  // The title opens the PR's details (the owner's "title only"; with `DETAILS_BUTTON`, the Details button beside it too).
   const title = (
     <DetailsTitle
       name={scope === 'stack' ? `Whole stack up to ${label}` : `${label} ${layer.title}`}

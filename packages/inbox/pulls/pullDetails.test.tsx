@@ -129,6 +129,17 @@ test.if(hasDom)('held by the forge: it says so and until when, and Try again wai
   expect(host.querySelector('[data-pull-details-failed]')!.textContent).toBe('GitHub did not answer about the reviewers and checks. Try again');
 });
 
+test.if(hasDom)('a failed read where the description has no other source (the full review): never "No description.", and the note names it', () => {
+  const draw = (descriptionUnread: boolean) =>
+    act(() => root.render(<PullDetails layer={layer} description={undefined} data={null} failed onRetry={() => {}} forge="GitHub" panel={{ current: null }} phone={false} inDiff={() => false} onClose={() => {}} onFile={() => {}} descriptionUnread={descriptionUnread} />));
+  draw(true);
+  expect(host.textContent).not.toContain('No description.');
+  expect(host.querySelector('[data-pull-details-failed]')!.textContent).toBe('GitHub did not answer about the description, reviewers and checks. Try again');
+  // The PR page, whose description comes with the diff: an empty one there is none.
+  draw(false);
+  expect(host.textContent).toContain('No description.');
+});
+
 test.if(hasDom)('the details are read again when the PR moves (a new head), and a held answer carries its time', async () => {
   const keep = inboxApi.pullDetails;
   const asked: string[] = [];

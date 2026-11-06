@@ -7714,9 +7714,9 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-rj-btn .ib-ic { flex: none; color: var(--muted-foreground); }
 .ib-rj-btn .ib-rj-done { color: var(--success); }
 /* Where the bar is short of room the place (the switch, the chapter) keeps it, and the title goes: the heading under
-   the bar holds the same facts. */
+   the bar holds the same facts. A PR's title stays, shortened: it is the only way to the PR's details. */
 @media (min-width: 768px) and (max-width: 959px) {
-  .ib-rv-nav ~ .ib-rv-titlesep, .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title { display: none; }
+  .ib-rv-nav ~ .ib-rv-titlesep:not(:has(+ .ib-dtitle)), .ib-review.ib-rv-walk .ib-vhead .ib-rv-nav ~ .ib-rv-title:not(.ib-dtitle) { display: none; }
 }
 /* Less to read in the bar: Thread is its arrow, the destination its marks. Each keeps its name in a tooltip. */
 .pn-inbox .ib-rv-walk .ib-vhead .ib-back { gap: 0; padding-inline: 8px; }
@@ -8732,6 +8732,11 @@ a.ib-prd-rlink:hover .ib-prd-rname { text-decoration: underline; }
 /* In a title that is not a row (the full review's), the dot needs a box of its own. */
 .ib-dtitle .ib-prp-dot { display: inline-block; vertical-align: middle; }
 .ib-dtitle .ib-prp-count { vertical-align: middle; }
+/* The full review's PR title: its words give way, never the status at their end, and never the whole title (it is the
+   only way to the details): it keeps room for a few words where the bar is short. */
+.ib-review.ib-rv-walk .ib-vhead button.ib-rv-title.ib-dtitle { display: inline-flex; align-items: center; min-width: min(9rem, 100%); }
+.ib-rv-title.ib-dtitle > bdi { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ib-rv-title.ib-dtitle > .ib-prp-dot, .ib-rv-title.ib-dtitle > .ib-prp-count { flex: none; }
 /* A thread's review of one PR (ReviewPane): the PR page's Details button and panel, the panel over the review's body. */
 .ib-review:not(.ib-prreview) { --ib-prp-fill: color-mix(in oklab, var(--foreground) 7%, transparent); --ib-prp-h: 28px; }
 .ib-review:not(.ib-prreview) .ib-rsplit:has(> .ib-prd) { position: relative; }

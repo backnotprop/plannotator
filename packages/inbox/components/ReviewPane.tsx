@@ -625,7 +625,7 @@ export function ReviewPane({ thread, message, onBack, onClose, onSent, onAsk }: 
             </span>
           </Tip>
         )}
-        {/* A review of one PR: its title opens the PR's details, as the Details button beside it does. */}
+        {/* A review of one PR: its title opens the PR's details (and with `DETAILS_BUTTON`, the Details button beside it). */}
         {!phone && pullDetails.pull && (
           <>
             <DetailsTitle name={title} tip={titleTip} open={pullDetails.open} data={pullDetails.details.data} onToggle={pullDetails.toggle} className="ib-fn ib-rv-title" data-review-title="">
