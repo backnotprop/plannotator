@@ -1,6 +1,6 @@
 /**
  * ↑ ↓ Home End in the list (approval "inbox-keyboard-shortcuts"): focus moves
- * between the list's stops (each row, and the Quiet band's toggle) and never
+ * between the list's stops (each row, and each group's header) and never
  * opens a thread; Enter does. Tab order is unchanged (no roving tabindex: the
  * rows keep their own actions, design "Tab stays").
  */
@@ -21,7 +21,7 @@ export function listMoveIndex(count: number, index: number, move: ListMove): num
   }
 }
 
-/** The list's stops on screen, in order: rows (one element per row) and the Quiet band's toggle. */
+/** The list's stops on screen, in order: rows (one element per row) and the groups' headers. */
 export const LIST_STOPS = '[data-thread-id], button.ib-band';
 
 export function listStops(body: ParentNode): HTMLElement[] {
