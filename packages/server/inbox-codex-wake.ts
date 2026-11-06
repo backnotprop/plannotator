@@ -59,7 +59,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync
 import { lstat, open, readdir, type FileHandle } from "node:fs/promises";
 import { isAbsolute, join } from "node:path";
 import { INBOX_CODEX_HOST, codexCallWakes, codexCliQueues, codexThreadOfCall, isCodexThreadId, parseCodexCliVersion, type InboxMessage } from "@plannotator/core/inbox-types";
-import { INBOX_TOOL_NAME, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
+import { INBOX_TOOL_NAME, inboxWakeCommand, inboxWakeText, type InboxReplyCommand } from "@plannotator/shared/inbox/connection";
 import { INBOX_BOARD_REQUEST_CLOSE, INBOX_BOARD_REQUEST_OPEN, INBOX_DECISION_ASK_CLOSE, INBOX_DECISION_ASK_OPEN } from "@plannotator/core/inbox-types";
 import type { InboxStore } from "@plannotator/shared/inbox/store";
 import { agentHomeAllowed, codexHome, type AgentEnvironment } from "./inbox-agents";
@@ -291,8 +291,10 @@ const BODY_SLOT = "\u0000PLANNOTATOR_BODY\u0000";
  * connections). The person's words are never touched.
  */
 export function codexWakeText(command: InboxReplyCommand): string {
-  const template = inboxWakeText({ ...command, body: BODY_SLOT }).split(`${INBOX_TOOL_NAME} `).join("");
-  return template.replace(BODY_SLOT, () => command.body);
+  const { body } = inboxWakeCommand(command);
+  // Worded now and held by the host from here (Codex, Qwen, T3 Code): `queued`, so it never says "nothing open".
+  const template = inboxWakeText({ ...command, body: BODY_SLOT }, Date.now(), { queued: true }).split(`${INBOX_TOOL_NAME} `).join("");
+  return template.replace(BODY_SLOT, () => body);
 }
 
 /** The wake text, cut to INBOX_CODEX_MESSAGE_MAX_BYTES with a pointer to the thread when the reply is longer. */
