@@ -71,11 +71,10 @@ export async function readFiles(dir: string): Promise<{ files: SystemFiles; issu
 
 /** Load with the issues that kept files out, so a symlinked system.yaml reads as that and not as "missing". */
 function withIssues(files: SystemFiles, issues: LoadIssue[]): LoadResult {
-  // over the total cap nothing was read, and that is the one error
-  if (issues.some((i) => i.file === '')) return { model: null, errors: issues.filter((i) => i.file === ''), warnings: [] };
   const result = loadFiles(files);
   const kept = new Set(issues.map((i) => i.file));
   const errors = result.errors.filter((e) => !(e.message === 'is missing' && kept.has(e.file)));
+  // over the total cap nothing was read, and the cap is the one error
   if (issues.length && !result.model && !Object.keys(files).length) return { model: null, errors: issues, warnings: result.warnings };
   return { ...result, errors: [...issues, ...errors] };
 }

@@ -211,6 +211,20 @@ describe('the caps, read from disk and from git', () => {
     expect((await loadCommitted({ root, ref: 'HEAD' })).errors).toEqual([]);
   });
 
+  test('a committed drawing of exactly 8 MiB is read', async () => {
+    const root = temp();
+    git(root, 'init', '-q');
+    const files: Record<string, string> = { ...smallDrawing() };
+    const used = Object.values(files).reduce((n, t) => n + t.length, 0);
+    for (let i = 1; i <= 7; i++) files[`revisions/PR-${i}.yaml`] = revisionOfSize(`PR-${i}`, MAX_FILE_BYTES);
+    files['revisions/PR-8.yaml'] = revisionOfSize('PR-8', 8 * MAX_FILE_BYTES - used - 7 * MAX_FILE_BYTES);
+    writeTree(join(root, '.plannotator', 'system'), files);
+    commit(root);
+    const r = await loadCommitted({ root, ref: 'HEAD' });
+    expect(r.errors).toEqual([]);
+    expect(Object.keys(r.model!.revisions)).toHaveLength(8);
+  });
+
   test('a committed drawing over 8 MiB gives the cap error alone, not "system.yaml is missing"', async () => {
     const root = temp();
     git(root, 'init', '-q');
