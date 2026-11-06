@@ -146,7 +146,7 @@ describe('check', () => {
     expect(c.errors).toEqual([]);
     expect(c.warnings).toEqual([expect.objectContaining({ file: 'system.yaml', field: 'wanted', message: expect.stringContaining('Sheet F-201') })]);
     // it asks for the sheet to be drawn, never for it to be dropped to make the check pass
-    expect(c.warnings[0]!.message).toContain('Draw it, then remove it from wanted:');
+    expect(c.warnings[0]!.message).toBe('Sheet F-201 is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.');
     expect(c.warnings[0]!.message).not.toMatch(/take it out|leave it out|drop|instead|decided/i);
   });
 

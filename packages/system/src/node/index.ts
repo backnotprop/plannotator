@@ -235,7 +235,7 @@ export async function check(o: { dir: string; root: string; roots?: Record<strin
   // a check is the end of a draw: a sheet still wanted is one the drawer forgot, and while one is the
   // scheduled check never redraws the drawing (it reads it as still being drawn)
   for (const w of stillWanted(model)) {
-    warnings.push({ file: 'system.yaml', field: 'wanted', message: `Sheet ${w.code} is still under wanted: and no file draws it. Draw it, then remove it from wanted:.` });
+    warnings.push({ file: 'system.yaml', field: 'wanted', message: `Sheet ${w.code} is listed under wanted, but no file draws it yet. Draw it, then remove it from wanted.` });
   }
   return { errors, warnings, missing };
 }

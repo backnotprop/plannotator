@@ -166,13 +166,13 @@ async function readHolder(path: string): Promise<Holder | null> {
 const sleep = (ms: number) => new Promise((ok) => setTimeout(ok, ms));
 const sameHolder = (a: Holder, b: Holder) => a.token === b.token && a.pid === b.pid && (a.token !== null || a.mtimeMs === b.mtimeMs);
 
-/** Errors of a file system with no hard links (FAT, exFAT, many SMB mounts, some sync folders). */
-const NO_LINKS = new Set(['EPERM', 'ENOTSUP', 'EOPNOTSUPP', 'ENOSYS', 'EXDEV']);
 
 /**
  * Make `name` hold `text`, failing with EEXIST when it is there: a temp file
- * linked to its name, so the file is whole the moment it exists, or where the
- * file system has no hard links, an exclusive create, then the write.
+ * linked to its name, so the file is whole the moment it exists, or when the
+ * link fails for any reason but EEXIST (a file system with no hard links: FAT,
+ * exFAT, many SMB mounts, some sync folders, each with its own error code;
+ * Windows FAT gives EISDIR), an exclusive create, then the write.
  */
 async function createWhole(name: string, text: string, pid: number, token: string, linkFn: (a: string, b: string) => Promise<void>): Promise<void> {
   const tmp = `${name}.tmp-${pid}-${token}`;
@@ -181,7 +181,7 @@ async function createWhole(name: string, text: string, pid: number, token: strin
     await linkFn(tmp, name);
     return;
   } catch (e) {
-    if (!NO_LINKS.has((e as NodeJS.ErrnoException).code ?? '')) throw e;
+    if ((e as NodeJS.ErrnoException).code === 'EEXIST') throw e;
   } finally {
     await unlink(tmp).catch(() => {});
   }
@@ -296,8 +296,17 @@ function held(path: string, token: string, heartbeatMs: number): HeldLock {
   let lost = false;
   const check = async () => {
     if (lost) return false;
-    const holder = await readHolder(path);
-    if (holder?.token === token) return true;
+    // lost only when the lock is gone or names another holder; a read that fails otherwise (EMFILE, a Windows
+    // sharing violation from an antivirus) keeps it, and the next beat looks again
+    const text = await readFile(path, 'utf8').then((t) => t, (e: NodeJS.ErrnoException) => (e.code === 'ENOENT' ? null : undefined));
+    if (text === undefined) return true;
+    if (text !== null) {
+      try {
+        if ((JSON.parse(text) as { token?: unknown })?.token === token) return true;
+      } catch {
+        // not this holder's lock
+      }
+    }
     lost = true;
     abort.abort(new Error('tick.lock was taken by another holder'));
     return false;

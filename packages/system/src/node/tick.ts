@@ -881,6 +881,8 @@ async function afterAgent(
   r: RedrawInput,
   c: { agent: { ok: boolean; output: string }; prs: number[]; fail: (error: string) => Promise<TickResult> },
 ): Promise<TickResult> {
+  // the agent is the long step: a lock lost meanwhile is found here, before redraw/ or source/ is touched again
+  await r.holding();
   const { agent, prs, fail } = c;
   const { source, drawing, redraw: work, summary: summaryPath } = r.paths;
   if (!agent.ok) return fail(`the agent did not finish: ${agent.output.trim().slice(-400) || 'no output'}`);

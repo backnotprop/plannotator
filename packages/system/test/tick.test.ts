@@ -606,7 +606,7 @@ echo changed > src/main.ts`);
     p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
     const agent = scriptAgent(`${ADD_JOBS}\nprintf 'wanted:\\n  - { code: F-201, kind: flow, question: "How a job runs." }\\n' >> "$DRAWING/system.yaml"`);
     const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
-    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('Sheet F-201 is still under wanted:') });
+    expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('Sheet F-201 is listed under wanted') });
     expect(drawingFiles(p.paths.drawing)).toEqual(before);
   });
 
@@ -730,6 +730,31 @@ echo changed > src/main.ts`);
     expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: null, failed: null, last_error: null });
     expect(readFileSync(p.paths.lock, 'utf8')).toBe(other);
   });
+
+  for (const [what, extra, check] of [
+    ['changes nothing', '', (p: ReturnType<typeof project>) => {
+      // redraw/ is the new holder's now: not deleted
+      expect(existsSync(p.paths.redraw)).toBe(true);
+    }],
+    ['leaves a file in the source clone', `\necho stray > stray.txt`, (p: ReturnType<typeof project>) => {
+      // source/ is the new holder's now: not set aside or reset
+      expect(readFileSync(join(p.paths.source, 'stray.txt'), 'utf8')).toBe('stray\n');
+      expect(existsSync(p.paths.changed)).toBe(false);
+    }],
+  ] as const) {
+    test(`a tick whose lock was broken while its agent ran, an agent that ${what}, touches nothing after the agent`, async () => {
+      const p = project();
+      const before = drawingFiles(p.paths.drawing);
+      p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+      const other = JSON.stringify({ token: 'another-holder', pid: process.pid });
+      const agent = scriptAgent(`printf '%s' '${other}' > '${p.paths.lock}'${extra}`);
+      const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+      expect(r).toMatchObject({ ran: 'failed', error: expect.stringContaining('lost tick.lock') });
+      check(p);
+      expect(drawingFiles(p.paths.drawing)).toEqual(before);
+      expect(await readState(p.dataDir, KEY)).toMatchObject({ gated: null, failed: null, last_error: null });
+    });
+  }
 
   test('a lock that cannot be taken (a file system that refuses it) is a failed tick recorded in state.json, never a throw', async () => {
     const p = project();

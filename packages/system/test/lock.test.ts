@@ -1,5 +1,5 @@
 import { afterEach, expect, test } from 'bun:test';
-import { existsSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, unlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { takeLock } from '../src/node/index.ts';
 import { tempDir } from './helpers.ts';
@@ -142,4 +142,33 @@ test("a taker removes the temp lock files of takers that died mid-take, and keep
   expect(existsSync(deadGuard)).toBe(false);
   expect(existsSync(live)).toBe(true);
   await release!();
+});
+
+test('on a file system whose link() fails with another code (Windows FAT: EISDIR), the lock still falls back to an exclusive create', async () => {
+  const path = lockPath();
+  const link = async () => {
+    throw Object.assign(new Error('EISDIR: illegal operation on a directory, link'), { code: 'EISDIR' });
+  };
+  const first = await takeLock(path, { ...FAST, link });
+  expect(first).not.toBeNull();
+  expect(await takeLock(path, { ...FAST, link })).toBeNull();
+  await first!();
+  expect(existsSync(path)).toBe(false);
+});
+
+test('a lock file that cannot be read for a moment (not gone, not another token) is still held, and the next look sees it', async () => {
+  const path = lockPath();
+  const holder = await takeLock(path, { heartbeatMs: 60_000 });
+  expect(holder).not.toBeNull();
+  chmodSync(path, 0o000); // the read fails with EACCES, as EMFILE or a sharing violation would
+  try {
+    expect(await holder!.check()).toBe(true);
+    expect(holder!.lost).toBe(false);
+    expect(holder!.signal.aborted).toBe(false);
+  } finally {
+    chmodSync(path, 0o600);
+  }
+  expect(await holder!.check()).toBe(true);
+  await holder!();
+  expect(existsSync(path)).toBe(false);
 });
