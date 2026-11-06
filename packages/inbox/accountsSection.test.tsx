@@ -335,7 +335,10 @@ test.skipIf(!hasDom)('amber at 90% and over, judged on the figure shown: the in-
   expect(use(1).getAttribute('data-l')).toBe('hot');
   expect(row(el, 1).querySelector('.ib-acct-dot')?.hasAttribute('data-hot')).toBe(true);
   // The person's own clock, from the reset time: "5h resets 6:20 PM".
-  expect(detailOf(row(el, 1))).toContain(`5h resets ${inTwoHours.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}`);
+  // Two hours from now can be tomorrow late in the evening, where the row names the weekday too.
+  const time = inTwoHours.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
+  const day = inTwoHours.toDateString() === new Date().toDateString() ? '' : `${inTwoHours.toLocaleDateString([], { weekday: 'short' })} `;
+  expect(detailOf(row(el, 1))).toContain(`5h resets ${day}${time}`);
   expect(faceOf(row(el, 1))).not.toContain('resets');
   expect(use(2).hasAttribute('data-l')).toBe(false);
   // Another login near its limit is amber too, though quiet.
