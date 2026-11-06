@@ -6243,6 +6243,11 @@ export class InboxStore {
      * first Send's.
      */
     board_request?: unknown;
+    /**
+     * Sent from Settings -> Decision data's Ask: the root carries `decision_ask`, and what the agent receives for it
+     * says how to answer. Only `true` sets it; a replay keeps the first Send's.
+     */
+    decision_ask?: unknown;
     /** Launch: the agent the Inbox starts for this thread (the server's record; `to` is then its placeholder). */
     launch?: InboxLaunchRecord;
   }): { message: InboxMessage; replayed: boolean } {
@@ -6284,6 +6289,7 @@ export class InboxStore {
       started_by_person: true,
       ...(input.by_guest ? { by_guest: true as const } : {}),
       ...(input.board_request === true ? { board_request: true as const } : {}),
+      ...(input.decision_ask === true ? { decision_ask: true as const } : {}),
       ...(input.launch ? { launch: input.launch } : {}),
       ...(threadName ? { thread_name: threadName, named_by: { kind: auto ? ("auto" as const) : ("person" as const), at } } : {}),
       ...(input.attachments && input.attachments.length > 0 ? { attachments: input.attachments.map((attachment) => ({ ...attachment, sent_at: at })) } : {}),
