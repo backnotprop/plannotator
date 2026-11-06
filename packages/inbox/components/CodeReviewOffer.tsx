@@ -6,7 +6,7 @@ import { Modal } from './Updates';
 /**
  * Code review's one-time offer (approval "code-review-offer-card", 2026-11-06; the owner picked "Card"): a dialog over
  * the list with the brand kit's static storm on top, the title, what code review brings, and two buttons. Its words are
- * the owner's (the approval's 15:25Z addendum, take 1, as true on main today).
+ * the owner's (the approval's 15:25Z addendum, take 1; the risk line joins with #2664).
  * "Turn on code review" turns Code review on, as Settings → Capabilities does; "Not now", Escape and a click outside
  * leave it off. Every way out is final (the claim already spent it); Settings is the way on later. No keyboard
  * shortcut. Its slot in the line: `CODE_REVIEW_OFFER` (packages/shared/inbox/reveals.ts); its moment:
@@ -27,9 +27,8 @@ export function CodeReviewOffer({ phone, onClose, onTurnOn }: { phone: boolean; 
           </li>
           <li>
             <BoardIcon />
-            {/* The System clause joins this line when System is in the Inbox: ", and where it lands in your **System**". */}
             <span>
-              See each change as a <b className="ib-cro-name">Shape</b>
+              See each change as a <b className="ib-cro-name">Shape</b>, and where it lands in your <b className="ib-cro-name">System</b>
             </span>
           </li>
         </ul>
