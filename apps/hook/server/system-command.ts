@@ -6,11 +6,16 @@
  * REVIEW.md) name too; the help is SYSTEM_COMMAND_USAGE in cli.ts.
  *
  *  - check: the loader, then every cited path at `sources.repos.<alias>.at`.
- *  - gate: `gateRepo` over the drawing on disk.
+ *  - gate: `gateRepo` over the drawing folder.
  *  - tick: one scheduled check (`tick`), what the plist runs.
  *  - revision: store an open pull request's revision, refused unless it loads
- *    against the drawing committed on the default branch.
+ *    against the drawing folder.
  *  - schedule install | remove | list: the launchd job.
+ *
+ * The drawing lives in Plannotator's folder, `<data dir>/system/<key>/drawing/`
+ * (owner ruling 2026-11-06, row 7689): `--dir` names it, and by default it is
+ * the drawing folder of the project the repo folder belongs to. Nothing here
+ * commits, branches or pushes.
  *
  * The contract is `plannotator inbox call`'s: stdout the result (one JSON
  * value; check prints lines unless --json) and nothing on failure, stderr
@@ -22,18 +27,16 @@
  * a model or reach GitHub.
  */
 
-import { existsSync, lstatSync, statSync } from "node:fs";
+import { lstatSync, statSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
-import { dirname, isAbsolute, join, resolve } from "node:path";
+import { isAbsolute, join, resolve } from "node:path";
 import { citations, formatIssue, MAX_FILE_BYTES, parseRevision, type LoadIssue } from "@plannotator/system";
 import {
   check,
   checkKey,
-  DRAWING_DIR,
   gateRepo,
   launchAgentsDir,
   load,
-  loadCommitted,
   schedule,
   SYSTEM_TICK_INTERVAL_SECONDS,
   systemPaths,
@@ -109,14 +112,6 @@ function noWords(f: Flags, sub: string) {
   if (f.words.length) throw new UsageError(`${sub} takes no argument "${f.words[0]}"`);
 }
 
-/** The nearest folder, from `start` up, that holds a drawing; null when none does. */
-function findDrawingRoot(start: string): string | null {
-  for (let dir = resolve(start); ; dir = dirname(dir)) {
-    if (existsSync(join(dir, DRAWING_DIR, "system.yaml"))) return dir;
-    if (dirname(dir) === dir) return null;
-  }
-}
-
 /** True when something is at `path`, a symlink included (dangling or not). */
 const lexists = (path: string) => {
   try {
@@ -142,16 +137,29 @@ class Refusal extends Error {
   }
 }
 
-/** The repo folder a check or a gate is about: the flag, else the nearest folder with a drawing. */
-function repoFolder(deps: SystemCommandDeps, flag: string | undefined, name: string, from?: string): string {
-  if (flag !== undefined) {
-    const root = resolve(deps.cwd, flag);
-    if (!isDir(root)) throw new Refusal("not_a_folder", `${name} ${flag}: no such folder`);
-    return root;
-  }
-  const found = findDrawingRoot(from ?? deps.cwd);
-  if (!found) throw new Refusal("no_drawing", `no ${DRAWING_DIR}/system.yaml in ${from ?? deps.cwd} or any folder above it; pass ${name} <repo folder>`);
-  return found;
+/** A folder flag's folder, resolved from here; not_a_folder when nothing is there. */
+function folderFlag(deps: SystemCommandDeps, flag: string, name: string): string {
+  const folder = resolve(deps.cwd, flag);
+  if (!isDir(folder)) throw new Refusal("not_a_folder", `${name} ${flag}: no such folder`);
+  return folder;
+}
+
+/** The repo folder a check or a gate is about: the flag, else the repo (or folder) the current folder is in. */
+async function repoFolder(deps: SystemCommandDeps, flag: string | undefined, name: string): Promise<string> {
+  if (flag !== undefined) return folderFlag(deps, flag, name);
+  return (await resolveInboxProjectRoot(resolve(deps.cwd))).root;
+}
+
+/** The Inbox's key for the project a folder belongs to, as setup.json, the drawing and the stored reviews are filed. */
+async function projectKey(folder: string): Promise<string> {
+  const project = await resolveInboxProjectRoot(folder);
+  return inboxProjectKey(project.name, project.root);
+}
+
+/** The drawing folder: --dir, else `<data dir>/system/<key>/drawing` of the repo folder's project. */
+async function drawingFolder(deps: SystemCommandDeps, flag: string | undefined, root: string): Promise<string> {
+  if (flag !== undefined) return resolve(deps.cwd, flag);
+  return systemPaths(resolve(deps.dataDir), await projectKey(root)).drawing;
 }
 
 const firstLine = (text: string) => text.split("\n")[0]!.trim();
@@ -160,11 +168,8 @@ const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? "" : "s"}`;
 async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (text: string) => Promise<void>, err: (text: string) => void): Promise<number> {
   const f = parseFlags(argv, ["--root", "--dir", "--repo", "--at"], ["--json"], ["--repo"]);
   noWords(f, "check");
-  const dirFlag = one(f, "--dir");
-  const dir0 = dirFlag === undefined ? undefined : resolve(deps.cwd, dirFlag);
-  // with --dir and no --root, the repo is the nearest folder up from the drawing's that holds one
-  const root = repoFolder(deps, one(f, "--root"), "--root", dir0 ? join(dir0, "..", "..") : undefined);
-  const dir = dir0 ?? join(root, DRAWING_DIR);
+  const root = await repoFolder(deps, one(f, "--root"), "--root");
+  const dir = await drawingFolder(deps, one(f, "--dir"), root);
   const roots: Record<string, string> = Object.create(null);
   for (const spec of f.values.get("--repo") ?? []) {
     const eq = spec.indexOf("=");
@@ -226,14 +231,15 @@ async function runCheck(argv: readonly string[], deps: SystemCommandDeps, out: (
 }
 
 async function runGate(argv: readonly string[], deps: SystemCommandDeps, out: (text: string) => Promise<void>): Promise<number> {
-  const f = parseFlags(argv, ["--project", "--from", "--to"]);
+  const f = parseFlags(argv, ["--project", "--dir", "--from", "--to"]);
   noWords(f, "gate");
   const from = required(f, "--from");
   const to = required(f, "--to");
-  const root = repoFolder(deps, one(f, "--project"), "--project");
-  const loaded = await load(join(root, DRAWING_DIR));
+  const root = await repoFolder(deps, one(f, "--project"), "--project");
+  const dir = await drawingFolder(deps, one(f, "--dir"), root);
+  const loaded = await load(dir);
   if (!loaded.model) {
-    if (!loaded.errors.length) throw new Refusal("no_drawing", `no drawing in ${join(root, DRAWING_DIR)}`);
+    if (!loaded.errors.length) throw new Refusal("no_drawing", `no drawing in ${dir}`);
     throw new Refusal("drawing_broken", `the drawing does not load (${loaded.errors.map(formatIssue).slice(0, 3).join("; ")}); run plannotator system check`);
   }
   let result;
@@ -280,19 +286,6 @@ function parsePr(value: string): { repo: string; segments: [string, string, stri
   return { repo: `${m[1]}/${m[2]}/${m[3]}`, segments: [m[1]!, m[2]!, m[3]!], n: Number(m[4]) };
 }
 
-/** The drawing as the Inbox shows it to a teammate: committed on the default branch. */
-async function defaultBranchRef(root: string): Promise<string> {
-  const git = async (args: string[]) => {
-    const proc = Bun.spawn(["git", "-C", root, ...args], { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: { ...process.env, GIT_TERMINAL_PROMPT: "0" } });
-    const [text, code] = await Promise.all([new Response(proc.stdout).text(), proc.exited]);
-    return code === 0 ? text.trim() : null;
-  };
-  const head = await git(["symbolic-ref", "--quiet", "refs/remotes/origin/HEAD"]);
-  if (head) return head;
-  for (const b of ["main", "master"]) if (await git(["rev-parse", "--verify", "--quiet", `refs/remotes/origin/${b}^{commit}`])) return `refs/remotes/origin/${b}`;
-  return "HEAD";
-}
-
 async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out: (text: string) => Promise<void>, err: (text: string) => void): Promise<number> {
   const f = parseFlags(argv, ["--project", "--pr", "--head"]);
   if (f.words.length !== 1 || f.words[0] !== "-") throw new UsageError("revision reads the YAML on stdin: end the command with -");
@@ -301,23 +294,20 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
   const head = required(f, "--head");
   if (!/^[0-9a-f]{7,64}$/i.test(head)) throw new UsageError(`--head takes the pull request's head commit as a sha, not "${head}"`);
 
-  const ref = await defaultBranchRef(root);
-  let committed;
-  try {
-    committed = await loadCommitted({ root, ref });
-  } catch (e) {
-    throw new Refusal("git_failed", firstLine((e as Error).message));
-  }
-  if (!committed.model) {
-    if (!committed.errors.length) throw new Refusal("no_drawing", `no drawing committed at ${ref.replace(/^refs\/remotes\//, "")} in ${root}`);
-    throw new Refusal("drawing_broken", `the drawing at ${ref.replace(/^refs\/remotes\//, "")} does not load; run plannotator system check`);
+  // the Inbox's own key for this folder: the drawing and the stored reviews are filed under it
+  const key = await projectKey(root);
+  const paths = systemPaths(resolve(deps.dataDir), key);
+  const drawing = await load(paths.drawing);
+  if (!drawing.model) {
+    if (!drawing.errors.length) throw new Refusal("no_drawing", `no drawing in ${paths.drawing}`);
+    throw new Refusal("drawing_broken", `the drawing in ${paths.drawing} does not load; run plannotator system check --dir ${paths.drawing}`);
   }
   const read = deps.stdin ?? readStdin;
   const yaml = await read(MAX_FILE_BYTES);
   if (yaml === null) throw new Refusal("revision_refused", `the revision is more than ${MAX_FILE_BYTES} bytes`);
   if (!yaml.trim()) throw new Refusal("revision_refused", "stdin is empty: pipe the revision's YAML in");
 
-  const parsed = parseRevision(committed.model, yaml);
+  const parsed = parseRevision(drawing.model, yaml);
   const problems: LoadIssue[] = [...parsed.errors];
   const revision = parsed.revision;
   if (revision) {
@@ -329,10 +319,7 @@ async function runRevision(argv: readonly string[], deps: SystemCommandDeps, out
     return 1;
   }
 
-  const project = await resolveInboxProjectRoot(root);
-  // the Inbox's own key for this folder, as the Shape store files under it
-  const key = inboxProjectKey(project.name, project.root);
-  const dir = join(systemPaths(resolve(deps.dataDir), key).reviews, ...pr.segments);
+  const dir = join(paths.reviews, ...pr.segments);
   const sha7 = head.slice(0, 7).toLowerCase();
   const path = join(dir, `${pr.n}@${sha7}.yaml`);
   await mkdir(dir, { recursive: true, mode: 0o700 });

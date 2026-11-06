@@ -6,13 +6,14 @@
  *
  * What can regress: the JSON and exit code contract a script and launchd
  * read, check naming the field that cites a missing path, the gate's wake on
- * real commits, revision storing only what loads (against the committed
- * drawing, not the disk), and schedule touching launchctl. launchctl only ever
+ * real commits, check, gate and revision reading the drawing folder under
+ * the data dir (never a folder in the repo), revision storing only what
+ * loads, and schedule touching launchctl. launchctl only ever
  * runs in-process, through a recorder: never for real.
  */
 import { afterAll, afterEach, beforeAll, describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { isIgnoredPath, LOCKFILE_NAMES, SYSTEM_COMMANDS, TEST_FOLDERS } from "@plannotator/system";
@@ -70,10 +71,10 @@ const commit = (root: string, message: string) => {
   return git(root, "rev-parse", "HEAD").trim();
 };
 
-/** A drawing of the small ledger app, drawn at `at`, its store citing `storePath`. */
+/** A drawing of the small ledger app, drawn at `at`, its store citing `storePath`: the files of its drawing folder. */
 function drawing(at: string, storePath = "src/store/db.ts"): Record<string, string> {
   return {
-    ".plannotator/system/system.yaml": [
+    "system.yaml": [
       "format: 1",
       "system: Ledger",
       "root: C-001",
@@ -92,8 +93,8 @@ function drawing(at: string, storePath = "src/store/db.ts"): Record<string, stri
       "  read: { from: routes, to: store, says: reads it }",
       "",
     ].join("\n"),
-    ".plannotator/system/sheets/C-001.yaml": "sheet: C-001\nscope: root\nkind: conceptual\ntitle: Ledger\nbands:\n  - { id: all, row: [owner, server] }\nshow: [use]\n",
-    ".plannotator/system/sheets/L-101.yaml": "sheet: L-101\nscope: server\nkind: logical\ntitle: The server\nbands:\n  - { id: http, row: [routes] }\n  - { id: work, row: [store, mail] }\nshow: [read]\n",
+    "sheets/C-001.yaml": "sheet: C-001\nscope: root\nkind: conceptual\ntitle: Ledger\nbands:\n  - { id: all, row: [owner, server] }\nshow: [use]\n",
+    "sheets/L-101.yaml": "sheet: L-101\nscope: server\nkind: logical\ntitle: The server\nbands:\n  - { id: http, row: [routes] }\n  - { id: work, row: [store, mail] }\nshow: [read]\n",
   };
 }
 
@@ -105,8 +106,12 @@ const CODE = {
   "test/routes.test.ts": "// a test\n",
 };
 
-/** A sandbox: a temp HOME and data dir, and a git repo with the code committed and the drawing committed on top. */
-function sandbox(o: { storePath?: string } = {}) {
+/**
+ * A sandbox: a temp HOME and data dir, a git repo with the code committed,
+ * and the drawing in the project's drawing folder, `<data dir>/system/<key>/drawing`
+ * (nothing of it in the repo).
+ */
+async function sandbox(o: { storePath?: string } = {}) {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-system-cli-")));
   roots.push(root);
   const home = join(root, "home");
@@ -118,8 +123,10 @@ function sandbox(o: { storePath?: string } = {}) {
   git(repo, "init", "-q");
   write(repo, CODE);
   const drawnAt = commit(repo, "the code");
-  write(repo, drawing(drawnAt, o.storePath));
-  const drawn = commit(repo, "System: first drawing of ledger");
+  const project = await resolveInboxProjectRoot(repo);
+  const key = inboxProjectKey(project.name, project.root);
+  const drawingDir = join(dataDir, "system", key, "drawing");
+  write(drawingDir, drawing(drawnAt, o.storePath));
   const tripwire = join(root, "tripwire");
   mkdirSync(tripwire, { recursive: true });
   writeFileSync(join(tripwire, "launchctl"), `#!/bin/sh\nprintf 'launchctl %s\\n' "$*" >> '${join(root, LAUNCHCTL_LOG)}'\necho 'launchctl tripwire: tests never run launchctl' >&2\nexit 1\n`, { mode: 0o755 });
@@ -134,9 +141,9 @@ function sandbox(o: { storePath?: string } = {}) {
     PLANNOTATOR_INBOX_CONNECT: "0",
     PLANNOTATOR_UPDATE_CHECK: "0",
   };
-  return { root, home, dataDir, repo, drawnAt, drawn, env };
+  return { root, home, dataDir, repo, drawnAt, key, drawingDir, env };
 }
-type Box = ReturnType<typeof sandbox>;
+type Box = Awaited<ReturnType<typeof sandbox>>;
 
 async function cli(box: Box, args: string[], o: { cwd?: string; stdin?: string } = {}) {
   const proc = Bun.spawn([process.execPath, "run", entry, "system", ...args], {
@@ -152,7 +159,7 @@ async function cli(box: Box, args: string[], o: { cwd?: string; stdin?: string }
 
 describe("plannotator system --help", () => {
   test("prints every usage line the recipes name, with exit 0 and nothing run", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     for (const args of [["--help"], [], ["gate", "--help"]]) {
       const r = await cli(box, args);
       expect(r.code).toBe(0);
@@ -164,7 +171,7 @@ describe("plannotator system --help", () => {
 
 describe("plannotator system check", () => {
   test("a cited path the commit does not have: exit 1, the line names the field that cites it; fixed, it is clean", async () => {
-    const box = sandbox({ storePath: "src/store/database.ts" });
+    const box = await sandbox({ storePath: "src/store/database.ts" });
     const bad = await cli(box, ["check"], { cwd: join(box.repo, "src") });
     expect(bad.code).toBe(1);
     expect(bad.stdout).toBe(`missing: src/store/database.ts (cited by parts.store.code; not in the repo at ${box.drawnAt.slice(0, 12)})\n`);
@@ -174,16 +181,36 @@ describe("plannotator system check", () => {
     expect(json.code).toBe(1);
     expect(JSON.parse(json.stdout)).toEqual({ ok: false, errors: [], warnings: [], missing: ["src/store/database.ts"], cited_by: { "src/store/database.ts": ["parts.store.code"] } });
 
-    // the drawing is read from disk: the edit counts with no commit
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    // the drawing folder is read as it is: the edit counts at once
+    const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/database.ts", "src/store/db.ts"));
     const fixed = await cli(box, ["check"]);
-    expect(fixed).toEqual({ code: 0, stdout: `clean: ${join(box.repo, ".plannotator/system")}\n`, stderr: "" });
+    expect(fixed).toEqual({ code: 0, stdout: `clean: ${box.drawingDir}\n`, stderr: "" });
+  }, 30_000);
+
+  test("check --dir <drawing> --root <source>, as the recipes run it: a data-dir drawing against Plannotator's clone", async () => {
+    const box = await sandbox();
+    // Plannotator's clone of the project, beside the drawing folder; run from a folder outside both
+    const source = join(box.dataDir, "system", box.key, "source");
+    git(box.root, "clone", "-q", "--no-checkout", box.repo, source);
+    const args = ["check", "--dir", box.drawingDir, "--root", source];
+    expect(await cli(box, args, { cwd: box.home })).toEqual({ code: 0, stdout: `clean: ${box.drawingDir}\n`, stderr: "" });
+    expect(JSON.parse((await cli(box, [...args, "--json"], { cwd: box.home })).stdout)).toEqual({ ok: true, errors: [], warnings: [], missing: [], cited_by: {} });
+    // the paths are looked up in the clone at sources.repos.self.at
+    const yaml = join(box.drawingDir, "system.yaml");
+    writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/db.ts", "src/store/database.ts"));
+    const bad = await cli(box, args, { cwd: box.home });
+    expect(bad.code).toBe(1);
+    expect(bad.stdout).toBe(`missing: src/store/database.ts (cited by parts.store.code; not in the repo at ${box.drawnAt.slice(0, 12)})\n`);
+    // relative paths are taken from the current folder
+    writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/database.ts", "src/store/db.ts"));
+    const relative = await cli(box, ["check", "--dir", "drawing", "--root", "source"], { cwd: join(box.dataDir, "system", box.key) });
+    expect(relative).toEqual({ code: 0, stdout: `clean: ${box.drawingDir}\n`, stderr: "" });
   }, 30_000);
 
   test("a line's missing end is named by its end; a path cited twice names both fields", async () => {
-    const box = sandbox({ storePath: "src/store/gone.ts" });
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    const box = await sandbox({ storePath: "src/store/gone.ts" });
+    const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8")
       .replace("code: { to: src/server/routes.ts }", "code: { from: src/server/old.ts, to: src/server/routes.ts }")
       .replace("says: reads it }", "says: reads it, code: { from: src/server/old.ts, to: src/store/gone.ts } }"));
@@ -203,8 +230,8 @@ describe("plannotator system check", () => {
   }, 30_000);
 
   test("a file only on disk does not count at the drawn commit; --at a commit that has it does", async () => {
-    const box = sandbox();
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    const box = await sandbox();
+    const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("src/store/db.ts: reads invoices", "src/store/cache.ts: keeps invoices"));
     write(box.repo, { "src/store/cache.ts": "export const cache = 1;\n" });
     expect((await cli(box, ["check"])).stdout).toContain("missing: src/store/cache.ts");
@@ -214,15 +241,15 @@ describe("plannotator system check", () => {
   }, 30_000);
 
   test("a loader error names its file and field; another repo's paths are checked only with --repo", async () => {
-    const box = sandbox();
-    const sheet = join(box.repo, ".plannotator/system/sheets/L-101.yaml");
+    const box = await sandbox();
+    const sheet = join(box.drawingDir, "sheets/L-101.yaml");
     writeFileSync(sheet, readFileSync(sheet, "utf8").replace("{ id: http, row: [routes] }", "{ id: http, x: 4, row: [routes] }"));
     const coords = await cli(box, ["check"]);
     expect(coords.code).toBe(1);
     expect(coords.stdout).toMatch(/^error: sheets\/L-101\.yaml bands\[0\]\.x: /m);
     writeFileSync(sheet, readFileSync(sheet, "utf8").replace("x: 4, ", ""));
 
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8")
       .replace("    self:", "    pay: { repo: example.com/acme/pay, at: 0a1b2c3 }\n    self:")
       .replace("src/mail: sends email", "src/mail: sends email, pay:lib/charge.ts: charges the card"));
@@ -235,7 +262,7 @@ describe("plannotator system check", () => {
   }, 30_000);
 
   test("bad usage exits 2 and no drawing exits 1, each with nothing on stdout", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     for (const args of [["check", "--color"], ["check", "--repo", "pay"], ["check", "--at"], ["check", "extra"], ["nope"]]) {
       const r = await cli(box, args);
       expect(r.code).toBe(2);
@@ -260,7 +287,7 @@ describe("plannotator system check", () => {
 
 describe("plannotator system gate", () => {
   test("on real commits: an added file wakes it; edits to cited files only touch; tests are ignored", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     git(box.repo, "checkout", "-q", "-b", "receipts");
     write(box.repo, { "src/mail/receipt.ts": "export {};\n", "src/server/routes.ts": "export const route = 2;\n", "test/routes.test.ts": "// more\n" });
     commit(box.repo, "receipts");
@@ -276,40 +303,42 @@ describe("plannotator system gate", () => {
     git(box.repo, "checkout", "-q", "main");
     write(box.repo, { "src/store/db.ts": "export const db = 2;\n" });
     const edit = commit(box.repo, "an edit");
-    const edited = await cli(box, ["gate", "--project", box.repo, "--from", box.drawn, "--to", edit], { cwd: box.home });
+    const edited = await cli(box, ["gate", "--project", box.repo, "--from", box.drawnAt, "--to", edit], { cwd: box.home });
     expect(JSON.parse(edited.stdout)).toEqual({ touched: { parts: ["store"], flows: [] }, wake: false, why: [], ignored: [] });
   }, 30_000);
 
-  test("diffs exactly the refs given, with no merge base; reads the drawing of whatever is checked out", async () => {
-    const box = sandbox();
+  test("diffs exactly the refs given, with no merge base; reads the drawing folder whatever is checked out, or --dir", async () => {
+    const box = await sandbox();
     git(box.repo, "checkout", "-q", "-b", "receipts");
     write(box.repo, { "src/mail/receipt.ts": "export {};\n" });
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
-    writeFileSync(yaml, readFileSync(yaml, "utf8").replace("  mail:", "  receipt: { in: server, name: Receipt, code: { src/mail/receipt.ts: the receipt } }\n  mail:"));
-    const sheet = join(box.repo, ".plannotator/system/sheets/L-101.yaml");
-    writeFileSync(sheet, readFileSync(sheet, "utf8").replace("row: [store, mail]", "row: [store, mail, receipt]"));
-    commit(box.repo, "receipts, drawn");
+    commit(box.repo, "receipts");
     git(box.repo, "checkout", "-q", "main");
     write(box.repo, { "src/store/cache.ts": "export const cache = new Map<string, number>();\n" });
     commit(box.repo, "main moves on");
     const base = git(box.repo, "merge-base", "main", "receipts").trim();
 
-    // main checked out: main's drawing, which has no receipt part
+    // the project's drawing folder, which has no receipt part
     const onMain = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
     expect(onMain.touched.parts).toEqual(["mail"]);
     expect(onMain.why).toEqual([{ path: "src/mail/receipt.ts", reason: "added" }]);
     // --from main is main's tip, not the merge base: main's new file reads as deleted
     const tip = JSON.parse((await cli(box, ["gate", "--from", "main", "--to", "receipts"])).stdout);
     expect(tip.why).toContainEqual({ path: "src/store/cache.ts", reason: "deleted" });
-    // the branch checked out: its own drawing, which has the receipt part
+    // the branch checked out in the repo changes nothing: the drawing is not in it
     git(box.repo, "checkout", "-q", "receipts");
-    const onBranch = JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout);
-    expect(onBranch.touched.parts).toEqual(["mail", "receipt"]);
+    expect(JSON.parse((await cli(box, ["gate", "--from", base, "--to", "receipts"])).stdout)).toEqual(onMain);
+    // --dir reads another drawing folder: a copy that has the receipt part
+    const copy = join(box.root, "drawing-copy");
+    cpSync(box.drawingDir, copy, { recursive: true });
+    writeFileSync(join(copy, "system.yaml"), readFileSync(join(copy, "system.yaml"), "utf8").replace("  mail:", "  receipt: { in: server, name: Receipt, code: { src/mail/receipt.ts: the receipt } }\n  mail:"));
+    writeFileSync(join(copy, "sheets/L-101.yaml"), readFileSync(join(copy, "sheets/L-101.yaml"), "utf8").replace("row: [store, mail]", "row: [store, mail, receipt]"));
+    const withCopy = JSON.parse((await cli(box, ["gate", "--project", box.repo, "--dir", copy, "--from", base, "--to", "receipts"], { cwd: box.home })).stdout);
+    expect(withCopy.touched.parts).toEqual(["mail", "receipt"]);
   }, 30_000);
 
   test("one reason per file: a cited file deleted is cited-gone, a file in a cited folder deleted, an edit woken only by watch:", async () => {
-    const box = sandbox();
-    const yaml = join(box.repo, ".plannotator/system/system.yaml");
+    const box = await sandbox();
+    const yaml = join(box.drawingDir, "system.yaml");
     writeFileSync(yaml, readFileSync(yaml, "utf8").replace("scopes:", "watch: [wrangler.toml, config/**/*.yaml]\nscopes:"));
     write(box.repo, { "wrangler.toml": "name = 1\n", "config/a/b/db.yaml": "x: 1\n", "config/top.json": "{}\n" });
     const before = commit(box.repo, "configs");
@@ -340,7 +369,7 @@ describe("plannotator system gate", () => {
   });
 
   test("a ref git does not know fails with git's first line; a missing --to is bad usage", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const r = await cli(box, ["gate", "--from", "main", "--to", "nope"]);
     expect(r.code).toBe(1);
     expect(r.stdout).toBe("");
@@ -369,7 +398,7 @@ const REVISION = [
 
 describe("plannotator system revision", () => {
   test("stores a revision that loads, under the project's key, as it was sent", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const head = "a5cb1c9f9e58e2a08fbab7ec005d6b31e786c2a5";
     const r = await cli(box, ["revision", "--project", ".", "--pr", "example.com/acme/ledger#12", "--head", head, "-"], { stdin: REVISION });
     expect(r.stderr).toBe("");
@@ -382,7 +411,7 @@ describe("plannotator system revision", () => {
   }, 30_000);
 
   test("refuses a revision that does not load, or names another pull request, naming the field; stores nothing", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const args = ["revision", "--project", box.repo, "--pr", "example.com/acme/ledger#12", "--head", "a5cb1c9", "-"];
     const band = await cli(box, args, { stdin: REVISION.replace("band: work", "band: nowhere") });
     expect(band.code).toBe(1);
@@ -391,20 +420,34 @@ describe("plannotator system revision", () => {
     const other = await cli(box, args, { stdin: REVISION.replace("pr: 12", "pr: 13") });
     expect(other.code).toBe(1);
     expect(other.stderr).toBe("revision_refused: revision pr: is 13; --pr says 12\n");
-    expect(existsSync(join(box.dataDir, "system"))).toBe(false);
+    expect(existsSync(join(box.dataDir, "system", box.key, "reviews"))).toBe(false);
+    // a project with no drawing folder has no drawing to load against
+    const elsewhere = join(box.root, "elsewhere");
+    mkdirSync(elsewhere);
+    git(elsewhere, "init", "-q");
+    const none = await cli(box, ["revision", "--project", elsewhere, "--pr", "example.com/acme/ledger#12", "--head", "a5cb1c9", "-"], { stdin: REVISION });
+    expect(none.code).toBe(1);
+    expect(none.stderr).toStartWith("no_drawing: no drawing in ");
   }, 30_000);
 
-  test("loads against the committed drawing, not an edit on disk", async () => {
-    const box = sandbox();
-    const sheet = join(box.repo, ".plannotator/system/sheets/L-101.yaml");
+  test("loads against the drawing folder as it is, an edit with no commit included; nothing in the repo changes", async () => {
+    const box = await sandbox();
+    const args = ["revision", "--project", box.repo, "--pr", "example.com/acme/ledger#12", "--head", "a5cb1c9", "-"];
+    const stdin = REVISION.replace("band: work", "band: later");
+    const before = await cli(box, args, { stdin });
+    expect(before.code).toBe(1);
+    expect(before.stderr).toContain('has no band "later"');
+    const sheet = join(box.drawingDir, "sheets/L-101.yaml");
     writeFileSync(sheet, readFileSync(sheet, "utf8").replace("  - { id: work,", "  - { id: later, row: [] }\n  - { id: work,"));
-    const r = await cli(box, ["revision", "--project", box.repo, "--pr", "example.com/acme/ledger#12", "--head", "a5cb1c9", "-"], { stdin: REVISION.replace("band: work", "band: later") });
-    expect(r.code).toBe(1);
-    expect(r.stderr).toContain('has no band "later"');
+    const after = await cli(box, args, { stdin });
+    expect(after.stderr).toBe("");
+    expect(after.code).toBe(0);
+    expect(git(box.repo, "status", "--porcelain")).toBe("");
+    expect(git(box.repo, "rev-list", "--all", "--count").trim()).toBe("1");
   }, 30_000);
 
   test("bad usage: no -, a malformed --pr or --head", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const base = ["revision", "--project", box.repo, "--head", "a5cb1c9"];
     for (const args of [[...base, "--pr", "example.com/acme/ledger#12"], [...base, "--pr", "acme/ledger#12", "-"], ["revision", "--project", box.repo, "--pr", "example.com/acme/ledger#12", "--head", "main", "-"]]) {
       const r = await cli(box, args, { stdin: REVISION });
@@ -416,7 +459,7 @@ describe("plannotator system revision", () => {
 
 describe("plannotator system tick", () => {
   test("not set up: nothing; set up and main moved by an edit: gated, state.json at the tip; no origin: exit 1", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const origin = join(box.root, "origin.git");
     git(box.root, "init", "-q", "--bare", origin);
     git(box.repo, "remote", "add", "origin", origin);
@@ -427,7 +470,7 @@ describe("plannotator system tick", () => {
     expect(JSON.parse(nothing.stdout)).toMatchObject({ ran: "nothing", gated: "" });
 
     const dir = join(box.dataDir, "system", PROJECT);
-    mkdirSync(dir, { recursive: true });
+    cpSync(box.drawingDir, join(dir, "drawing"), { recursive: true });
     writeFileSync(join(dir, "setup.json"), JSON.stringify({ v: 1, repos: [], docs: [], agent: "claude", model: null, thread_message: null }));
     // a teammate edits a cited file on main: the gate does not wake, so no agent runs
     const team = join(box.root, "team");
@@ -452,7 +495,7 @@ describe("plannotator system tick", () => {
 
 describe("plannotator system schedule", () => {
   test("list reads the temp HOME's LaunchAgents; install from a source checkout is refused before launchctl", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const agentsDir = join(box.home, "Library", "LaunchAgents");
     mkdirSync(agentsDir, { recursive: true });
     writeFileSync(join(agentsDir, "ai.plannotator.system.ledger.plist"), "<plist/>");
@@ -471,7 +514,7 @@ describe("plannotator system schedule", () => {
   }, 30_000);
 
   test("install and remove (in process, launchctl recorded): the plist runs this binary's tick; remove deletes it", async () => {
-    const box = sandbox();
+    const box = await sandbox();
     const agentsDir = join(box.root, "agents");
     const calls: string[][] = [];
     const run = async (argv: string[]) => {
