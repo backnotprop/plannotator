@@ -501,6 +501,8 @@ button.ib-mut { border-radius: 6px; }
 /* Pinned and Projects share one scroll area (approval "inbox-pinned-threads": no limit on pins, so a long
    Pinned section scrolls with the projects instead of pushing them and the foot off the window). */
 .ib-sidescroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+/* A scroller clips sideways too: room for the selected row's ring and soft shadow (--ib-cur-shadow), taken back from the sides so nothing moves. */
+.ib-sidescroll { padding: 2px 3px 3px; margin: -2px -3px -3px; }
 .ib-sidescroll > * { flex-shrink: 0; }
 /* Only that scroll area gives up height when there are many projects or pins: Inbox and the foot keep theirs
    (they shrank from 32 to 20 px past about 17 projects). It fades at its foot while there is more to scroll. */
