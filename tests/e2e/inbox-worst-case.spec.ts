@@ -462,16 +462,17 @@ for (const width of [944, 1024, 1180, 1280]) {
 }
 
 test('a guided review at 1024 and 900 keeps its diffs readable, with its comments a button away (row 48)', async ({ browser }) => {
-  for (const width of [900, 1024, 1440]) {
+  // The full-window review (every guide opens it): its comments fold into the header's button below 1,500 px.
+  for (const width of [900, 1024, 1440, 1600]) {
     // The guide rides the thread's first message, whose id is the thread's.
     const { context, page } = await open(browser, { name: String(width), width, height: 800 }, `thread=${world.seed.threads.guide}&guide=${world.seed.threads.guide}`);
     try {
       await expect(page.locator('section.ib-viewer .ib-gbody')).toContainText('Guard the refresh entry point', { timeout: 20_000 });
       await page.waitForTimeout(500);
       const viewer = page.locator('section.ib-viewer');
-      if (width < 1280) {
+      if (width < 1500) {
         await expect(viewer).toHaveClass(/\bib-fold\b/);
-        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 260);
+        expect((await viewer.locator('.ib-gbody').boundingBox())!.width).toBeGreaterThan(width - 40);
         const button = viewer.locator('[data-guide-comments-sheet]');
         await button.click();
         await expect(viewer.locator('.ib-gpanel')).toBeVisible();
