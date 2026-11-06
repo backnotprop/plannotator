@@ -168,6 +168,9 @@ jobs:
   # reparented to PID 1 when its launcher exits, and the runner's own PID 1
   # (`tail -f /dev/null`) never reaps it, so a stopped Inbox stays a zombie and
   # the specs that stop one (stopScratchInbox) see it still there.
+  # `--ipc=host` shares the host's memory for IPC: Docker's default 64 MB
+  # /dev/shm is too small for Chromium, which then crashes at launch or runs
+  # the shard out of memory (exit 137). Playwright's Docker docs ask for it.
   inbox-window-e2e:
     name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
@@ -178,7 +181,7 @@ jobs:
     timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v${{ needs.build.outputs.playwright }}-noble
-      options: --user 1001 --init
+      options: --user 1001 --init --ipc=host
     strategy:
       fail-fast: false
       matrix:
