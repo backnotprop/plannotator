@@ -57,7 +57,7 @@ import type { RecipientConnection } from './deliveryLine';
 import { parseRestartAgents } from './restartAgents';
 import type { PatchBlobIds } from '@plannotator/core/diff-files';
 import type { InboxFileContents, InboxPullDiffAnswer, InboxPullDiffScope, InboxPullsAnswer, InboxRestartAgents, InboxTidyPlan, InboxTidyRun } from '@plannotator/core/inbox-types';
-import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchStatus } from '@plannotator/core/inbox-search';
+import type { InboxSearchAnswer, InboxSearchFrom, InboxSearchGroupId, InboxSearchSort, InboxSearchStatus } from '@plannotator/core/inbox-search';
 import type {
   InboxAgentId,
   InboxAccountsRead,
@@ -1046,6 +1046,8 @@ export interface SearchRequest {
   limit?: number;
   /** The project open in the list: a tie boost, never a filter. */
   current?: string | null;
+  /** Newest first instead of best match (sent only for `newest`, so a best-match request is what it was). */
+  sort?: InboxSearchSort | null;
 }
 
 /** GET /api/inbox/sessions: every live session, grouped by project (compose). */
@@ -1149,6 +1151,7 @@ export async function searchInbox(request: SearchRequest, signal?: AbortSignal):
   if (request.offset) query.set('offset', String(request.offset));
   if (request.limit) query.set('limit', String(request.limit));
   if (request.current) query.set('current', request.current);
+  if (request.sort === 'newest') query.set('sort', 'newest');
   return readJson<SearchModel>(await fetch(inboxUrl(`/search?${query}`), { headers: { Accept: 'application/json' }, cache: 'no-store', signal }));
 }
 
