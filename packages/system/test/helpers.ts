@@ -84,3 +84,48 @@ export function revisionOfSize(id: string, bytes: number): string {
   const head = `revision: ${id}\n# `;
   return head + 'x'.repeat(bytes - head.length - 1) + '\n';
 }
+
+/**
+ * Whether a drawing's own commit (`sources.repos.self.at`) is in a clone, and how it got there. CI clones one
+ * commit, so `at` is usually absent: one depth-limited fetch of exactly that commit is tried (depth 1 in a shallow
+ * clone, so the clone stays shallow; a plain fetch of the one commit in a full clone, so a full clone does not
+ * become shallow). It runs only when the commit is missing, with no prompt and a time bound. When it cannot get
+ * the commit, `reason` says why, for the test to print as its skip reason.
+ */
+export type AtState = { ok: true; at: string; how: 'present' | 'fetched' } | { ok: false; at: string; reason: string };
+
+export function commitAt(root: string, at: string, o: { timeoutMs?: number } = {}): AtState {
+  const run = (args: string[], timeout?: number) =>
+    execFileSync('git', ['-C', root, ...args], {
+      // no prompt, and no global or system git config: a CI checkout keeps its auth in the clone's own config
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' },
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout,
+    });
+  const has = () => {
+    try {
+      run(['cat-file', '-e', `${at}^{commit}`]);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  if (!/^[0-9a-f]{7,40}$/.test(at)) return { ok: false, at, reason: `${at} is not a commit id` };
+  if (has()) return { ok: true, at, how: 'present' };
+  let remote = '';
+  try {
+    remote = run(['remote', 'get-url', 'origin']).trim();
+  } catch {
+    return { ok: false, at, reason: `${at} is not in this clone, and it has no origin to fetch it from` };
+  }
+  const shallow = run(['rev-parse', '--is-shallow-repository']).trim() === 'true';
+  try {
+    run(['fetch', '--quiet', '--no-tags', ...(shallow ? ['--depth=1'] : []), 'origin', at], o.timeoutMs ?? 30_000);
+  } catch (e) {
+    const err = e as { stderr?: string; code?: string; message?: string };
+    const why = err.code === 'ETIMEDOUT' ? 'timed out' : (err.stderr || err.message || '').trim().split('\n').at(-1) || 'failed';
+    return { ok: false, at, reason: `${at} is not in this clone, and git fetch${shallow ? ' --depth=1' : ''} origin ${at} from ${remote} ${why.startsWith('timed') ? why : `failed: ${why}`}` };
+  }
+  return has() ? { ok: true, at, how: 'fetched' } : { ok: false, at, reason: `${at} is not in this clone, and fetching it from ${remote} did not bring it` };
+}
