@@ -1,8 +1,9 @@
-import { afterAll } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
+import { afterAll, mock } from "bun:test";
+import { mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { NO_BROWSER } from "../helpers/no-browser";
+import { isScratchDataDir } from "../helpers/real-data-dir";
 
 /**
  * Sandbox every test-run store before production modules capture their paths.
@@ -15,12 +16,32 @@ process.env.PLANNOTATOR_DATA_DIR = testDataDir;
 // Inbox helpers and tests/setup/sandbox-data-dir.ts apply).
 process.env.PLANNOTATOR_TEST_SANDBOX = testDataDir;
 
+// A test's home is a scratch folder too: HOME for code that reads the variable and
+// every child that inherits it, and a replaced `os.homedir()` in this process,
+// which Bun otherwise fixes at startup. mock.module, because an earlier preload's
+// named import keeps the old binding when the export is only reassigned. The real-home
+// guards ask /bin/sh, so they still see the account's home. A HOME that is already
+// scratch (a child `bun test`) stays. tests/never-real-home.test.ts.
+const givenHome = process.env.HOME?.trim();
+const ownHome = givenHome && isScratchDataDir(givenHome) ? null : realpathSync(mkdtempSync(join(tmpdir(), "plannotator-test-home-")));
+const testHome = ownHome ?? givenHome!;
+process.env.HOME = testHome;
+if (process.platform === "win32") process.env.USERPROFILE = testHome;
+const realOs = require("node:os");
+realOs.homedir = () => testHome;
+for (const name of ["node:os", "os"]) mock.module(name, () => ({ ...realOs, default: realOs }));
+// These would send the skill loader back to a real folder from the contributor's shell.
+delete process.env.CLAUDE_CONFIG_DIR;
+delete process.env.CODEX_HOME;
+delete process.env.XDG_CONFIG_HOME;
+
 // A preload's global afterAll runs after file hooks and their awaited subprocesses.
 // Use the runner lifecycle: bun test does not reliably emit process "exit".
 // Only this process owns this path: never clean up the current env value, which
 // a test may have overridden, or a directory inherited from a parent test run.
 afterAll(() => {
   rmSync(testDataDir, { recursive: true, force: true });
+  if (ownHome) rmSync(ownHome, { recursive: true, force: true });
 });
 
 // Keep the archive off by default, even when enabled in the contributor's shell.
