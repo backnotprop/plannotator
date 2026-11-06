@@ -27,6 +27,13 @@ export interface InboxClaimWake {
   startedAt: number | null;
 }
 
+/**
+ * How much earlier than the wake's own clock a folder's time may read. Linux stamps files from a coarse kernel clock
+ * that lags `Date.now()` by up to a tick (1 to 10 ms), so a claim the polling wake made just after it started can read
+ * as made before. Leaning this way keeps the rule's promise: a claim its claimant may still deliver is never stuck.
+ */
+const CLAIM_CLOCK_SLACK_MS = 50;
+
 const madeAt = (path: string): number | null => {
   try {
     return statSync(path).mtimeMs;
@@ -75,7 +82,7 @@ export function inboxClaimAbandoned(inboxDir: string, replyId: string, session: 
     if (existsSync(join(dir, "reported"))) return true;
     const pid = readNumber(join(dir, "pid"));
     if (pid !== null) return processGone(pid);
-    return !wake.there || (wake.startedAt !== null && made < wake.startedAt);
+    return !wake.there || (wake.startedAt !== null && made < wake.startedAt - CLAIM_CLOCK_SLACK_MS);
   }
   return false;
 }
