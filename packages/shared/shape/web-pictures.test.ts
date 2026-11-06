@@ -2,7 +2,10 @@
  * Web pictures on a Shape board (approval shape-any-picture). What regresses if these fail:
  * - a board naming an https picture is refused, or keeps the address (so viewing it would call the site);
  * - something that is not a picture (a page, a 404, a huge body) is kept as one;
- * - a board with a built-in logo, a screenshot on this computer and a web picture loses any of them.
+ * - a board with a built-in logo, a screenshot on this computer and a web picture loses any of them;
+ * - a refusal stops saying why (too large, timed out, not an image, the HTTP status, the network's own words), or a
+ *   real picture is refused because its address does not decode as a name;
+ * - a board of slow pictures keeps the agent waiting past the board's deadline (60 at 15 s each was 225 s).
  * The fetch is a stand-in: nothing here reaches the network.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -62,7 +65,7 @@ describe("fetching a board's web pictures", () => {
     const big = new Uint8Array(10 * 1024 * 1024 + 1);
     big.set(PNG);
     const w = web({
-      "https://example.com/page.png": () => new Response("<html><body>sign in</body></html>"),
+      "https://example.com/page.png": () => new Response("<html><body>sign in</body></html>", { headers: { "content-type": "text/html; charset=utf-8" } }),
       "https://example.com/big.png": () => new Response(big),
       "https://example.com/slow.png": () => new Response(new ReadableStream({ start() {} })),
     });
@@ -70,13 +73,41 @@ describe("fetching a board's web pictures", () => {
     const r = await fetchShapeWebPictures(board, { fetch: w.fetch, timeoutMs: 200 });
     expect(r.pictures.size).toBe(0);
     expect(r.errors).toEqual([
-      'views.picture.html: "https://example.com/page.png" is not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO image',
-      'views.picture.html: "https://example.com/gone.png" could not be fetched (HTTP 404)',
-      'views.picture.html: "https://example.com/big.png" is larger than 10485760 bytes',
-      'views.picture.html: "https://example.com/slow.png" did not arrive within 0.2 s',
+      'views.picture.html: "https://example.com/page.png" is not an image: its bytes are not a PNG, JPEG, GIF, WebP, SVG, AVIF or ICO (the site called it text/html)',
+      'views.picture.html: "https://example.com/gone.png" could not be fetched: the site answered HTTP 404; download it and name the file, or leave it out',
+      'views.picture.html: "https://example.com/big.png" is too large: more than 10 MB, the most a board keeps',
+      'views.picture.html: "https://example.com/slow.png" timed out: it did not arrive within 0.2 s; download it and name the file, or leave it out',
       'views.picture.html: "https://user:pw@example.com/a.png" is not a web address this board can fetch (http or https, with a host)',
     ]);
     expect(w.asked).not.toContain("https://user:pw@example.com/a.png");
+  });
+
+  test("a picture whose address does not decode as a name is kept, and a network failure says what the network said", async () => {
+    const w = web({ "https://example.com/logo%E0.png": () => new Response(PNG) });
+    const fetch = async (input: string | URL, init?: RequestInit) => {
+      if (String(input).includes("down.example")) throw Object.assign(new Error("Unable to connect. Is the computer able to access the url?"), { code: "ConnectionRefused" });
+      return w.fetch(input);
+    };
+    const r = await fetchShapeWebPictures(drawing('<img src="https://example.com/logo%E0.png"><img src="https://down.example/a.png">'), { fetch });
+    expect(r.pictures.get("https://example.com/logo%E0.png")?.name).toBe("logo_E0.png");
+    expect(r.errors).toEqual([
+      'views.picture.html: "https://down.example/a.png" could not be fetched (ConnectionRefused: Unable to connect. Is the computer able to access the url?); download it and name the file, or leave it out',
+    ]);
+  });
+
+  test("the whole board gets one deadline: past it, the agent hears back about every picture still on its way", async () => {
+    // Six that never answer and never listen to their signal, each allowed 10 s alone; the board, 0.3 s.
+    const fetch = async (input: string | URL) => (String(input).endsWith("/ok.png") ? new Response(PNG) : new Promise<Response>(() => {}));
+    const names = ["ok", "a", "b", "c", "d", "e", "f"];
+    const started = Date.now();
+    const r = await fetchShapeWebPictures(drawing(names.map((n) => `<img src="https://example.com/${n}.png">`).join("")), { fetch, timeoutMs: 10_000, boardTimeoutMs: 300 });
+    expect(Date.now() - started).toBeLessThan(3_000);
+    expect([...r.pictures.keys()]).toEqual(["https://example.com/ok.png"]);
+    expect(r.errors).toHaveLength(6);
+    // Four were on their way when the time ran out; the rest had not started.
+    expect(r.errors.filter((e) => e.includes("timed out: the board's web pictures get 0.3 s in all, and this one was still on its way"))).toHaveLength(4);
+    expect(r.errors.filter((e) => e.includes("was not fetched: the board's web pictures get 0.3 s in all"))).toHaveLength(2);
+    for (const e of r.errors) expect(e).toEndWith("; download it and name the file, or leave it out");
   });
 });
 

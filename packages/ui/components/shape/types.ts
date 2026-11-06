@@ -154,9 +154,10 @@ export interface ShapeSurfaceProps {
    */
   boxSelect?: ShapeBoxOptions;
   /**
-   * Each picture the board keeps (`files/…`, a screenshot or a logo from the web) sits on a rounded tile, light in
-   * both themes, so a white picture reads as a card and a dark logo holds on a dark board (Plannotator, by
-   * ShapeBoard). Absent: pictures are drawn as written, as before.
+   * On a dark board only (Plannotator, by ShapeBoard): box borders and zone edges at 3:1 against what they sit on, a
+   * box's fill distinct from its zone, words kept at least as readable as they were (up to 7:1), and each picture the
+   * board keeps (`files/…`) on a light tile so a dark logo holds. A light board is drawn exactly as without it. Absent:
+   * the board is drawn as written in both themes, as before. See `darkContrast.ts`.
    */
-  pictureTiles?: boolean;
+  darkContrast?: boolean;
 }

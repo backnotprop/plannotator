@@ -2820,15 +2820,21 @@ New classes: `.shp-title-row`, `.shp-head-side`, `.shp-drawing`, `.shp-finished`
 - **`@plannotator/ui/shape.css`**: the board's styles (`shp-` classes, theme variables only, light and dark, reduced motion). Plain CSS: import it next to your theme.
 - **Seams it needed, all opt-in (absent = unchanged):** `CommentPopover` `submitLabel`, `askAILabel`; `CodeFileView` `onAskAnnotation`, `commentSubmitLabel`, `commentAskLabel`.
 
-## Shape: picture tiles (unreleased; additive)
+## Shape: dark contrast (unreleased; additive)
 
 Shape boards can now show any picture: a file on this computer or a web picture, which `plannotator shape update` copies into the board's `files/` (#2756). The board itself still names only `files/<name>`. Nothing changes in the allowlist or in how `resolveSrc` / `assetUrl` resolve a picture.
 
-**`pictureTiles` on `ShapeSurface` and `ShapeDrawn` (default off: pictures are drawn as written, as before).** Plannotator passes it from `ShapeBoard`. With it, each `files/…` picture sits on a rounded tile:
-- the tile is white with a hairline border on a light board, and a soft grey (`#e4e6ea`) on a dark one (`--shp-pic-tile`);
-- the effect: a white screenshot reads as a card, not a hole cut in a dark zone, and a dark logo stays visible on a dark board.
+**`darkContrast` on `ShapeSurface` and `ShapeDrawn` (default off: the board is drawn as written, in both themes, as before).** Plannotator passes it from `ShapeBoard`. It acts on a dark board only. On a light board it sets nothing: the DOM and the pixels are the same as without it. The rule is in `components/shape/darkContrast.ts`.
 
-What the tile covers:
-- An SVG `<image>` gets a `rect.shp-pic-tile` before it: its box plus 3 to 10 px of room.
-- An `<img>` gets the same from CSS (`img[data-shp-pic]`: 6 px padding, `box-sizing: border-box`, so a declared size holds).
-- A picture the drawing frames itself (a `clip-path` on it or around it, as the kit's `pic()` does) is left alone. So is an `<image>` with no plain size, and a `data:` image (a built-in logo's).
+What it does on a dark board (`.board.dark-hold`):
+- Box borders (`--rule`) reach 3:1 against the paper, a box (`--surface`) and every zone fill (WCAG 1.4.11).
+- A box (`--surface`) reaches 1.25:1 against the paper and every zone fill. It gets lighter, or darker where the palette's box is already darker than its paper.
+- A zone that draws no line of its own (an SVG shape or an HTML box filled with `--blue-soft` and the like) gets a 1.5 px edge in its own hue (`--shp-edge-<zone>`, `data-shp-edge`). The edge is 3:1 against the paper and its fill.
+- Words: the ink and `--grey` keep at least the contrast they had on a box, up to 7:1.
+- Each kept SVG picture (`files/…`) gets a light tile (`rect.shp-pic-tile`, `#e4e6ea`) before it, with its `transform` and `data-step`. An `<img>` gets the same from CSS, with `object-fit: contain`. The tile skips a picture that the drawing clips or masks, a picture inside `defs`/`pattern`/`symbol`/`mask`, one with no plain size, and a `data:` image (a built-in logo's).
+
+How it runs:
+- Each value starts from the colour the board resolves now and moves in OKLab, only as far as it must. A colour that already holds stays as it is.
+- The pass reruns when the html element's `class`, `style` or `data-theme` changes and a theme token really changed, and when the system's light/dark changes. It runs in the next frame, after any other pass on the same mutation.
+- It sets inline variables on `.board` and puts back any inline value it replaced when it is taken back.
+- With #2721 (palette contrast, `holdShapeContrast`): that pass fixes zone colours, `--grey`, `--ink2`, `--mark`, `--alert` and the `-soft` fills against the ink. This pass reads the result as its starting point and adds what #2721 does not cover: `--rule`, `--surface`, zone edges and picture tiles. #2721 lifts `--grey` to 4.5:1, and this pass only lifts it further, so the two never pull a value in opposite directions.

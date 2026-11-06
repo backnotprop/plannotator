@@ -27,33 +27,16 @@ import {
 } from '@plannotator/core/shape';
 import { useReducedMotion } from './Pebble';
 import { syncKeptBoxes, type KeptBox } from './boxSelect';
+import { holdDarkBoard, releaseDarkBoard } from './darkContrast';
 
 /**
  * A drawing's files/ pictures get their real URL before the browser parses them, so nothing asks for the bare name first.
- * `tile`: each also carries `data-shp-pic`, for `tilePictures`.
+ * `tile`: each also carries `data-shp-pic`, for `darkContrast`'s picture tiles.
  */
 function resolveFiles(html: string, resolve: ((src: string) => string) | undefined, tile = false): string {
   if (!resolve && !tile) return html;
   const attr = (url: string) => url.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
   return html.replace(/(<(?:img|image)\b)([^>]*?\s(?:src|href)=")(files\/[^"]+)"/gi, (_, open: string, head: string, src: string) => `${open}${tile ? ' data-shp-pic' : ''}${head}${resolve ? attr(resolve(src)) : src}"`);
-}
-
-/**
- * `pictureTiles`: a rounded tile behind each SVG picture the board keeps, its box plus a little room. An `<img>`
- * gets the same from the frame's CSS. A picture the drawing clips itself (the kit's `pic()` frames its own) is left
- * as drawn, and so is one with no plain size.
- */
-function tilePictures(board: HTMLElement): void {
-  for (const image of board.querySelectorAll<SVGImageElement>('image[data-shp-pic]')) {
-    if (image.hasAttribute('clip-path') || image.closest('[clip-path]')) continue;
-    const [x, y, w, h] = ['x', 'y', 'width', 'height'].map((k) => Number(image.getAttribute(k) ?? (k === 'x' || k === 'y' ? 0 : NaN)));
-    if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) continue;
-    const pad = Math.max(3, Math.min(10, Math.min(w, h) * 0.12));
-    const tile = document.createElementNS(SVG_NS, 'rect');
-    tile.setAttribute('class', 'shp-pic-tile');
-    for (const [k, v] of [['x', x - pad], ['y', y - pad], ['width', w + pad * 2], ['height', h + pad * 2], ['rx', Math.min(12, pad + 5)]] as const) tile.setAttribute(k, String(Math.round(v * 10) / 10));
-    image.before(tile);
-  }
 }
 
 export interface MarkState {
@@ -118,10 +101,15 @@ svg .t-acc { fill: var(--mark); } svg .t-grey { fill: var(--grey); } svg .t-ink2
 a { color: var(--mark); text-decoration: none; }
 img { max-width: 100%; }
 svg .obj { filter: drop-shadow(0 3px 10px rgb(0 0 0 / .18)); }
-/* pictureTiles: a picture the board keeps sits on a light tile in both themes (white on a light board, a soft grey on a dark one). */
-.board { --shp-pic-tile: color-mix(in oklab, var(--surface) calc(100% - var(--shp-is-dark, 0) * 100%), #e4e6ea); }
-.shp-pic-tile { fill: var(--shp-pic-tile); stroke: color-mix(in oklab, var(--rule) calc(100% - var(--shp-is-dark, 0) * 100%), transparent); stroke-width: 1; }
-img[data-shp-pic] { background: var(--shp-pic-tile); padding: 6px; border-radius: 10px; box-sizing: border-box; box-shadow: 0 0 0 1px color-mix(in oklab, var(--rule) calc(100% - var(--shp-is-dark, 0) * 100%), transparent); }
+/* darkContrast, on a dark board only (.dark-hold, set by holdDarkBoard): a zone with no line of its own gets an edge in its hue, and a kept picture sits on a light tile. A light board gets none of it. */
+.board.dark-hold [data-shp-edge] { stroke-width: 1.5px; box-shadow: inset 0 0 0 1.5px var(--shp-edge); }
+.board.dark-hold [data-shp-edge="blue"] { stroke: var(--shp-edge-blue); --shp-edge: var(--shp-edge-blue); }
+.board.dark-hold [data-shp-edge="amber"] { stroke: var(--shp-edge-amber); --shp-edge: var(--shp-edge-amber); }
+.board.dark-hold [data-shp-edge="green"] { stroke: var(--shp-edge-green); --shp-edge: var(--shp-edge-green); }
+.board.dark-hold [data-shp-edge="plum"] { stroke: var(--shp-edge-plum); --shp-edge: var(--shp-edge-plum); }
+.board.dark-hold [data-shp-edge="alert"] { stroke: var(--shp-edge-alert); --shp-edge: var(--shp-edge-alert); }
+.board.dark-hold .shp-pic-tile { fill: #e4e6ea; stroke: none; }
+.board.dark-hold img[data-shp-pic] { background: #e4e6ea; padding: 6px; border-radius: 10px; box-sizing: border-box; object-fit: contain; }
 .if-dark { opacity: var(--shp-is-dark, 0); } .if-light { opacity: calc(1 - var(--shp-is-dark, 0)); }
 
 /* Draw: parts arrive in step order; lines draw on. */
@@ -323,8 +311,8 @@ export interface ShapeDrawnProps {
   onCode?: (target: ShapeCodeTarget, el: HTMLElement) => void;
   /** A `files/…` image's URL. */
   resolveSrc?: (src: string) => string;
-  /** Each `files/…` picture on a rounded tile, light in both themes (`ShapeSurfaceProps.pictureTiles`). Absent: as drawn. */
-  pictureTiles?: boolean;
+  /** On a dark board only: borders, zone edges, boxes and pictures held to contrast (`ShapeSurfaceProps.darkContrast`). Absent: as drawn. */
+  darkContrast?: boolean;
   /** Pointing at marked parts (Change it / Ask). Board only. */
   pinpoint?: boolean;
   /** Select mode: a text selection inside a mark picks it. Board only. */
@@ -402,9 +390,8 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
     const root = rootRef.current ?? host.attachShadow({ mode: 'open' });
     rootRef.current = root;
     const safeCss = shapeCssProblems(css).length ? '' : css;
-    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.pictureTiles)}</div>`;
+    root.innerHTML = `<style>${SHAPE_FRAME_CSS}\n${safeCss}</style><div class="board${scaled ? ' canvas' : ''}${handlers.current.onRefPeek ? ' peek' : ''}">${resolveFiles(sanitizeShapeHtml(html), handlers.current.resolveSrc, !!handlers.current.darkContrast)}</div>`;
     const board = root.querySelector<HTMLElement>('.board')!;
-    if (handlers.current.pictureTiles) tilePictures(board);
     // Steps: the agent's numbers, in order, become 0, 1, 2… however sparse.
     const steps = [...board.querySelectorAll<HTMLElement | SVGElement>('[data-step]')];
     const order = [...new Set(steps.map((el) => Number(el.getAttribute('data-step')) || 0))].sort((a, b) => a - b);
@@ -454,6 +441,40 @@ export function ShapeDrawn(props: ShapeDrawnProps) {
       board.style.width = board.style.height = board.style.transform = '';
     }
   }, [scaled, k, drawn.width, drawn.height, contentKey]);
+
+  // darkContrast: held on a dark board, again when the theme changes; a light board is left as drawn.
+  const darkContrast = !!props.darkContrast;
+  useLayoutEffect(() => {
+    const board = rootRef.current?.querySelector<HTMLElement>('.board');
+    if (!board) return;
+    if (!darkContrast) return releaseDarkBoard(board);
+    const tokens = () => {
+      const cs = getComputedStyle(board);
+      return ['--shp-paper', '--background', '--foreground', '--card', '--border', '--muted-foreground', '--primary', '--destructive'].map((t) => cs.getPropertyValue(t)).join('|');
+    };
+    let key = tokens();
+    holdDarkBoard(board);
+    let frame = 0;
+    const again = () => {
+      cancelAnimationFrame(frame);
+      frame = requestAnimationFrame(() => {
+        const now = tokens();
+        if (now === key) return;
+        key = now;
+        holdDarkBoard(board);
+      });
+    };
+    const watch = new MutationObserver(again);
+    watch.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme'] });
+    const scheme = typeof matchMedia === 'function' ? matchMedia('(prefers-color-scheme: dark)') : null;
+    scheme?.addEventListener?.('change', again);
+    return () => {
+      watch.disconnect();
+      cancelAnimationFrame(frame);
+      scheme?.removeEventListener?.('change', again);
+      releaseDarkBoard(board);
+    };
+  }, [darkContrast, contentKey]);
 
   // Motion and mode.
   useLayoutEffect(() => {
