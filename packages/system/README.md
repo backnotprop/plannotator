@@ -194,7 +194,9 @@ One per drawn project: `~/Library/LaunchAgents/ai.plannotator.system.<key>.plist
 background, with `PLANNOTATOR_DATA_DIR` and the given environment (PATH above all) and its errors in
 `<dataDir>/system/<key>/tick.err.log`. `install` writes the plist, boots out any job under the label and bootstraps
 it in `gui/<uid>`; `remove` boots it out and deletes the plist; `list` gives the keys that have one. launchctl runs
-through an injectable runner, so the tests never load a job. macOS only.
+through an injectable runner, so the tests never load a job. macOS only. launchd skips a firing that falls while the
+Mac sleeps and runs none at wake; the next firing catches up, because a tick diffs from the last commit it checked, not
+from the time it missed.
 
 ## Format 1
 

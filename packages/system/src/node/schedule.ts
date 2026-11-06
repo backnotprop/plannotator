@@ -16,8 +16,11 @@ import { checkKey, systemPaths } from './state.ts';
 /**
  * How often the check runs: every 15 minutes while the Mac is awake. Owner
  * ruling 2026-11-06 (System build spec, settled default 5). The check itself
- * costs no model; launchd runs a missed interval when the Mac wakes and
- * nothing while it sleeps.
+ * costs no model. launchd skips a StartInterval firing that falls while the
+ * Mac sleeps (launchd.plist(5)) and runs none at wake; the next firing after
+ * wake catches up anyway, because a tick diffs from the last commit it
+ * checked (state.json `gated`, or the drawing's `at`) to the tip of main, not
+ * from the time of the firing it missed. Nothing relies on a run at wake.
  */
 export const SYSTEM_TICK_INTERVAL_SECONDS = 15 * 60;
 
