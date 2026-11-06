@@ -17,10 +17,12 @@
  *  4. Trust and start across the link: B's untrusted folder is offered to A's window with B's own facts; one press
  *     trusts it on B (B's Claude config) and starts there.
  *  5. B asleep: a launch from A waits (202 queued). Cancel takes one back before it ever left; the other starts on
- *     B exactly once when B is back, and the cancelled one never does.
+ *     B exactly once when B is back, and the cancelled one never does; an agent's bare Cancel of a held launch can't.
  *  6. Readiness: A's machine list says B takes launches; B's Claude Code signed out shows in B's launch block, read
  *     through the forward, with the SSH cause when B's Inbox was started over SSH; a launch is refused in words that
  *     name B, nothing starts, and once signed in it starts at once. Launch off on B: its health says 0.
+ *  7. A permission prompt of an agent started on B: answered from A's window, never by an agent's bare call through
+ *     the forward, which B refuses in words that name A.
  */
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from "node:fs";
