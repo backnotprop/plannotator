@@ -63,11 +63,12 @@ test.beforeAll(async () => {
   const dataDir = join(root, 'data');
   const env = {
     PATH: `${stubs}:${process.env.PATH ?? ''}`,
+    HOME: root,
     PLANNOTATOR_DATA_DIR: dataDir,
     PLANNOTATOR_BROWSER: NO_BROWSER,
     PLANNOTATOR_INBOX_CONNECT: '0',
     PLANNOTATOR_UPDATE_CHECK: '0',
-    // HOME stays the runner's: the sandbox keeps this Inbox out of its skill folders.
+    // HOME is this world's temp folder: the sandbox keeps this Inbox out of any real skill folder.
     PLANNOTATOR_TEST_SANDBOX: root,
     CLAUDE_CONFIG_DIR: join(root, 'claude-config'),
   };
