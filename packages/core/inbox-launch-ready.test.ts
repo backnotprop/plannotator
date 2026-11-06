@@ -22,11 +22,13 @@ describe("why an agent can't start on a machine, in that machine's name", () => 
     expect(ssh.fix).not.toContain("`claude`");
   });
 
-  test("the plugin missing comes with the command to run there; nothing else hands one out", () => {
+  test("the plugin missing comes with the command to run there, in the fix itself too (a refusal has no copy button); nothing else hands one out", () => {
     for (const code of CODES) {
       const words = inboxLaunchNotReadyWords({ agent: "Claude Code", code, machine: "Mac mini" });
       expect(words.command).toBe(code === "plugin_off" ? INBOX_CLAUDE_PLUGIN_INSTALL : null);
     }
+    const fix = inboxLaunchNotReadyWords({ agent: "Claude Code", code: "plugin_off", machine: "Mac mini" }).fix!;
+    for (const line of INBOX_CLAUDE_PLUGIN_INSTALL.split("\n")) expect(fix).toContain(line);
   });
 
   test("launch off and a too-old Plannotator read differently: one is fixed by updating, the other is not", () => {

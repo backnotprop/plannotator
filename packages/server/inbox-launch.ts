@@ -221,6 +221,8 @@ export function createInboxLaunch(options: {
         if (login.PATH) loginPath = login.PATH.split(delimiter).filter(Boolean);
         const kept: LaunchEnv = {};
         for (const name of hostList.flatMap((host) => host.shellNames)) if (login[name] !== undefined) kept[name] = login[name]!;
+        // Only whether these are set (a sign-in token, a cloud provider's switch): never the value.
+        for (const name of hostList.flatMap((host) => host.shellFlags ?? [])) if (login[name]) kept[name] = "1";
         shell = { kept, at: now() };
         return login;
       } finally {
@@ -1035,7 +1037,11 @@ export function createInboxLaunch(options: {
         if (machine && ok.code) {
           const overSsh = ok.code === "signed_out" && options.startedOverSsh === true;
           const words = inboxLaunchNotReadyWords({ agent: host.name, code: ok.code, machine, overSsh });
-          throw new InboxError("agent_unavailable", `${words.line}.${words.fix ? ` ${words.fix}` : ""} Nothing was sent.`, { not_ready: ok.code, ...(overSsh ? { over_ssh: true } : {}) });
+          throw new InboxError("agent_unavailable", `${words.line}.${words.fix ? ` ${words.fix}` : ""} Nothing was sent.`, {
+            not_ready: ok.code,
+            ...(overSsh ? { over_ssh: true } : {}),
+            ...(words.command ? { command: words.command } : {}),
+          });
         }
         throw new InboxError("agent_unavailable", `${host.name} can't be started here: ${ok.reason}. Nothing was sent.`);
       }
