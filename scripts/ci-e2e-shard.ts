@@ -115,7 +115,8 @@ if (import.meta.main) {
   const expected = Math.round(wallTime(files, weigher()) / 60);
   console.log(`e2e shard ${k}/${E2E_SHARDS}: ${files.length} specs, ${E2E_WORKERS} workers, about ${expected} min\n  ${files.join('\n  ')}`);
   // The machine's peak memory while the specs run, when, and the largest processes then, so a smaller runner can be judged from the log.
-  let peak = usedMiB();
+  const atStart = usedMiB();
+  let peak = atStart;
   let peakAt = '';
   let topAtPeak = '';
   let snappedAt = 0;
@@ -135,6 +136,6 @@ if (import.meta.main) {
   });
   const code = await child.exited;
   clearInterval(sampler);
-  if (peak !== null) console.log(`e2e shard ${k}/${E2E_SHARDS}: peak memory in use on this machine ${peak} MiB${peakAt ? ` at ${peakAt}; largest processes near it:\n  ${topAtPeak}` : ''}`);
+  if (peak !== null) console.log(`e2e shard ${k}/${E2E_SHARDS}: peak memory in use on this machine ${peak} MiB (${atStart} MiB before the specs)${peakAt ? ` at ${peakAt}; largest processes near it:\n  ${topAtPeak}` : ''}`);
   process.exit(code ?? 1);
 }
