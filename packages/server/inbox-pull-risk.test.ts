@@ -1,7 +1,8 @@
 /**
  * PR risk ranking (inbox-pull-risk.ts). What regresses: the verdict's parse going soft (a guess, or a diff's own
  * "verdict" being believed); work or cost repeating (per head, across restarts, after a failure); running when it must
- * not (off, no rules, an agent the person didn't choose); a run allowed to act; a part of a big diff not reaching the agent; a refused or failed run reading as Low.
+ * not (off, no rules, an agent the person didn't choose); a run allowed to act; a part of a big diff not reaching the agent; a refused or failed run reading as Low;
+ * a diff the forge held back not read whole from a clone on this computer, or that read changing the clone's refs or worktree.
  */
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { chmodSync, writeFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
@@ -15,7 +16,7 @@ import { PiSDKProvider } from "@plannotator/ai/providers/pi-sdk";
 import { saveConfig } from "@plannotator/shared/config";
 import { INBOX_PULL_RISK_FILE, RISK_AGENT_PAUSE_MS, RISK_CONCURRENCY, RISK_RETRY_MS, createPullRisk, installedPath, runRiskAgent, startingRiskModel, type RiskRunResult, type RiskRun, type RiskRunner } from "./inbox-pull-risk";
 import { buildRiskPrompt, parseRiskAnswer } from "./inbox-pull-risk-prompt";
-import { INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, pullDiffCliRunner } from "./inbox-pulls";
+import { INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS, createInboxPulls, createPullGitRunner, pullDiffCliRunner } from "./inbox-pulls";
 
 const AGENTS = [{ id: "pi-sdk", label: "Pi" }];
 const HIGH = '{"risk":"high","why":"It changes the billing webhook."}';
@@ -124,8 +125,9 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
   type Answer = { stdout?: string; stderr?: string; exitCode?: number };
   const answered = (a: Answer) => ({ stdout: a.stdout ?? "", stderr: a.stderr ?? "", exitCode: a.exitCode ?? 0 });
   /** The real reader and queue. `whole` answers the one-document read, `paged` the per-file read; the rest of the forge just works. */
-  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; files?: number } = {}) {
+  async function reading(platform: "github" | "gitlab", script: { whole: Answer; paged?: Answer }, options: { now?: () => number; answer?: string; files?: number; head?: string; clones?: string[]; gitEnv?: Record<string, string> } = {}) {
     const github = platform === "github";
+    const node = { ...ghNode, headRefOid: options.head ?? ghNode.headRefOid };
     const endpoints: string[] = [];
     const run = async (cli: string, args: string[]) => {
       if (args[0] === "auth") {
@@ -135,16 +137,16 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       if (args.includes("graphql")) {
         if (args.some((a) => a.startsWith("query=query InboxPullsOthers"))) return answered({ stdout: JSON.stringify({ data: github ? { viewer: { login: "dana" } } : { currentUser: { username: "dana" } } }) });
         return answered({ stdout: JSON.stringify(github
-          ? { data: { viewer: { login: "dana" }, requested: { nodes: [{ ...ghNode, changedFiles: options.files ?? ghNode.changedFiles }] }, authored: { nodes: [] }, merged: { nodes: [] } } }
+          ? { data: { viewer: { login: "dana" }, requested: { nodes: [{ ...node, changedFiles: options.files ?? node.changedFiles }] }, authored: { nodes: [] }, merged: { nodes: [] } } }
           : { data: { currentUser: { username: "dana", requested: { nodes: [{ ...glNode, diffStatsSummary: { ...glNode.diffStatsSummary, fileCount: options.files ?? 1 } }] }, authored: { nodes: [] }, merged: { nodes: [] } } } }) });
       }
       const endpoint = args[3]!;
       endpoints.push(endpoint);
       if (/\/files\?|\/diffs\?/.test(endpoint)) return answered(script.paged ?? { stderr: "no paged read scripted", exitCode: 1 });
       if (endpoint.endsWith("/raw_diffs") || args.includes("Accept: application/vnd.github.v3.diff")) return answered(script.whole);
-      return answered({ stdout: github ? `${ghNode.headRefOid}\n` : JSON.stringify({ sha: glNode.diffHeadSha }) });
+      return answered({ stdout: github ? `${node.headRefOid}\n` : JSON.stringify({ sha: glNode.diffHeadSha }) });
     };
-    const pulls = createInboxPulls({ run, now: options.now });
+    const pulls = createInboxPulls({ run, now: options.now, ...(options.gitEnv ? { gitRun: createPullGitRunner(() => ({ ...process.env, ...options.gitEnv })) } : {}) });
     const listed = await pulls.list([github ? { host: "github.com", repo: "n/b", project_id: "p" } : { host: "gitlab.com", repo: "n/l", project_id: "p" }]);
     expect(listed.pulls).toHaveLength(1);
     const runs: RiskRun[] = [];
@@ -154,6 +156,7 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
       now: options.now,
       agents: () => AGENTS,
       pulls,
+      ...(options.clones ? { roots: async () => options.clones! } : {}),
       run: async (one) => {
         runs.push(one);
         return { text: options.answer ?? HIGH };
@@ -265,6 +268,99 @@ describe("reading the whole diff, through the reader and a scripted forge", () =
     ])("a complete read keeps Low: %s", async (_name, script) => {
       expect((await levelOf("github", script, LOW)).level).toBe("low");
     });
+  });
+
+  describe("a clone of the PR's repository on this computer", () => {
+    const LOW = '{"risk":"low","why":"Only the README wording changes."}';
+    const refused = { stderr: "gh: (HTTP 406)", exitCode: 1 };
+    // The forge sends src/pay.ts and holds vendor/huge.bin back.
+    const heldBack = { stdout: JSON.stringify([{ filename: "src/pay.ts", status: "modified", patch: "@@ -1 +1 @@\n-old\n+charge twice\n" }, { filename: "vendor/huge.bin", status: "modified" }]) };
+    let scratch: string;
+    let gitEnv: Record<string, string>;
+    beforeEach(() => {
+      scratch = realpathSync(mkdtempSync(join(tmpdir(), "plannotator-pull-risk-clone-")));
+      mkdirSync(join(scratch, "home"));
+      // git never reads the person's own config, here or in the Inbox's reads.
+      gitEnv = { HOME: join(scratch, "home"), XDG_CONFIG_HOME: join(scratch, "home"), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_AUTHOR_NAME: "t", GIT_AUTHOR_EMAIL: "t@example.com", GIT_COMMITTER_NAME: "t", GIT_COMMITTER_EMAIL: "t@example.com" };
+    });
+    afterEach(() => rmSync(scratch, { recursive: true, force: true }));
+    const git = (cwd: string, ...args: string[]) => {
+      const done = Bun.spawnSync(["git", ...args], { cwd, env: { ...process.env, ...gitEnv }, stdin: "ignore" });
+      if (done.exitCode !== 0) throw new Error(`git ${args.join(" ")}: ${done.stderr.toString()}`);
+      return done.stdout.toString().trim();
+    };
+    /**
+     * The forge's repository, and the person's clone of it made before the PR: the PR's head is only at
+     * refs/pull/880/head, and main moved on after the clone, so both have to be fetched.
+     */
+    const repositories = () => {
+      const upstream = join(scratch, "upstream");
+      mkdirSync(upstream);
+      git(upstream, "init", "-q", "-b", "main");
+      mkdirSync(join(upstream, "src"));
+      mkdirSync(join(upstream, "vendor"));
+      writeFileSync(join(upstream, "src", "pay.ts"), "old\n");
+      writeFileSync(join(upstream, "vendor", "huge.bin"), "v1\n");
+      writeFileSync(join(upstream, "README.md"), "teh\n");
+      git(upstream, "add", ".");
+      git(upstream, "commit", "-q", "-m", "base");
+      const clone = join(scratch, "clone");
+      git(scratch, "clone", "-q", upstream, clone);
+      git(upstream, "checkout", "-q", "-b", "topic");
+      writeFileSync(join(upstream, "src", "pay.ts"), "charge twice\n");
+      writeFileSync(join(upstream, "vendor", "huge.bin"), "v2 sends the card number home\n");
+      git(upstream, "commit", "-q", "-am", "the PR");
+      const head = git(upstream, "rev-parse", "HEAD");
+      git(upstream, "update-ref", "refs/pull/880/head", head);
+      git(upstream, "checkout", "-q", "main");
+      git(upstream, "branch", "-q", "-D", "topic");
+      // main moves on after the PR left it: none of this is the PR's.
+      writeFileSync(join(upstream, "README.md"), "the\n");
+      git(upstream, "commit", "-q", "-am", "main moves on");
+      // The person's own work in the clone: a branch, a change in the worktree, one staged, one stashed.
+      git(clone, "checkout", "-q", "-b", "mine");
+      writeFileSync(join(clone, "README.md"), "stashed\n");
+      git(clone, "stash", "-q");
+      writeFileSync(join(clone, "README.md"), "staged\n");
+      git(clone, "add", "README.md");
+      writeFileSync(join(clone, "src", "pay.ts"), "editing\n");
+      return { upstream, clone, head };
+    };
+    const stateOf = (clone: string) => ({
+      refs: git(clone, "for-each-ref", "--format=%(refname) %(objectname)"),
+      head: git(clone, "symbolic-ref", "HEAD"),
+      status: git(clone, "status", "--porcelain"),
+      stash: git(clone, "stash", "list"),
+      fetchHead: existsSync(join(clone, ".git", "FETCH_HEAD")),
+    });
+
+    test("the forge held a file back: git reads the whole diff there, so a Low stays Low, and nothing of the person's moves", async () => {
+      setRules();
+      const { clone, head } = repositories();
+      const before = stateOf(clone);
+      const { risk, runs, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head, clones: [clone], gitEnv });
+      await judge();
+      expect(runs).toHaveLength(1);
+      const { prompt } = runs[0]!;
+      // The held-back file's own lines, and the rest of the PR, from where it left main.
+      expect(prompt).toContain("+v2 sends the card number home");
+      expect(prompt).toContain("+charge twice");
+      expect(prompt).not.toContain("README");
+      expect(risk.answer().judgments[key]?.level).toBe("low");
+      // Objects only: every ref, the branch, the worktree, the index and the stash as they were, and no FETCH_HEAD.
+      expect(stateOf(clone)).toEqual(before);
+    }, 30_000);
+
+    test("no clone, or one git can't fetch the head into: the forge's read stands, and Low shows Medium", async () => {
+      setRules();
+      const { clone } = repositories();
+      for (const clones of [[], [clone]]) {
+        // A head the forge's repository doesn't have: the fetch brings nothing.
+        const { risk, judge, key } = await reading("github", { whole: refused, paged: heldBack }, { answer: LOW, head: "c".repeat(40), clones, gitEnv });
+        await judge();
+        expect(risk.answer().judgments[key]?.level).toBe("medium");
+      }
+    }, 30_000);
   });
 
   test("a page failing partway: the agent decides from the pages before it", async () => {

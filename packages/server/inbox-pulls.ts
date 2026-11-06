@@ -68,7 +68,7 @@ import {
 import { parseForgeRefUrl } from "@plannotator/core/forge-ref-card";
 import { fetchPRFileContent, ghEntryMissingContent, glEntryMissingContent, parsePaginatedArray, reconstructGhPatch, reconstructGitlabPatch, type GitHubFileEntry, type GitLabDiffEntry, type PRRef, type PRRuntime } from "@plannotator/shared/pr-provider";
 import { MAX_REPO_FILE_BYTES } from "@plannotator/shared/repo-file";
-import { MAX_REVIEW_FILE_CONTENT_BYTES, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
+import { MAX_REVIEW_FILE_CONTENT_BYTES, prepareGitCommand, readGitObjectBytes, validateFilePath } from "@plannotator/shared/review-core";
 import { runtime as gitRuntime } from "./git";
 import { REF_AUTH_HOSTS_MS, REF_FAILURE_MS, REF_RATE_LIMIT_MS, readSignedInHosts, refCliRunner, refErrorOf, type RefCli, type RefCommandResult, type RefRunner } from "./ref-cards";
 
@@ -593,9 +593,11 @@ export interface InboxPulls {
   /**
    * One layer's diff for an agent to read: no limit of ours on its size, and when the forge won't serve it as one
    * document, whatever its per-file read gives; `partial` when that is known to be less than the whole diff.
+   * When that read is partial or empty and `roots` holds a clone of the PR's repository on this computer, git reads
+   * the whole diff there instead (`localWholeDiff`), and it is not partial.
    * `head_sha` as `diff`'s. Throws InboxPullsError when there is nothing.
    */
-  wholeDiff(key: string, signal?: AbortSignal): Promise<{ patch: string; head_sha: string | null; partial: boolean }>;
+  wholeDiff(key: string, signal?: AbortSignal, roots?: readonly string[]): Promise<{ patch: string; head_sha: string | null; partial: boolean }>;
   /** The head commit of the last patch read for this PR, either scope (`diff`'s `head_sha`), or null. */
   readHead(key: string): string | null;
   /**
@@ -672,6 +674,39 @@ function compareRef(name: string): string {
 /** A diff read: the CLI's answer, or `tooLarge` once its output passed `maxBytes` (it is stopped there). */
 export type PullDiffRunner = (cli: RefCli, args: string[], maxBytes: number, reading?: { timeoutMs: number; signal?: AbortSignal }) => Promise<RefCommandResult & { tooLarge?: boolean }>;
 
+/** A git command in a clone on this computer, for an agent's diff read. Ends at `timeoutMs` and at `signal`. */
+export type PullGitRunner = (root: string, args: string[], reading: { timeoutMs: number; signal?: AbortSignal }) => Promise<RefCommandResult>;
+
+/**
+ * git with no way to ask anything (no credential or SSH prompt: `prepareGitCommand`'s "forbid"), and no automatic gc
+ * or maintenance started by a fetch. `environment`: tests give git a scratch HOME.
+ */
+export function createPullGitRunner(environment: () => Readonly<Record<string, string | undefined>> = () => process.env): PullGitRunner {
+  return async (root, args, reading) => {
+    const prepared = prepareGitCommand(args, { interaction: "forbid", timeoutMs: reading.timeoutMs, config: { "maintenance.auto": "false", "gc.auto": "0" } }, environment());
+    let proc: ReturnType<typeof Bun.spawn>;
+    try {
+      proc = Bun.spawn(["git", ...prepared.args], {
+        cwd: root,
+        env: { ...environment(), ...prepared.env },
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+        signal: reading.signal,
+      });
+    } catch {
+      return { stdout: "", stderr: "git: could not start", exitCode: 127 };
+    }
+    const timer = setTimeout(() => proc.kill(), reading.timeoutMs);
+    try {
+      const [stdout, stderr, exitCode] = await Promise.all([new Response(proc.stdout as ReadableStream).text(), new Response(proc.stderr as ReadableStream).text(), proc.exited]);
+      return { stdout, stderr, exitCode };
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+}
+
 /** A diff can take longer than a card's query. */
 export const INBOX_PULL_DIFF_TIMEOUT_MS = 30_000;
 /** An agent's read of a whole diff has the time the agent has. */
@@ -737,8 +772,9 @@ function cappedDiffRunner(run: RefRunner): PullDiffRunner {
   };
 }
 
-export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; now?: () => number } = {}): InboxPulls {
+export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffRunner; gitRead?: PullFileGitReader; gitRun?: PullGitRunner; now?: () => number } = {}): InboxPulls {
   const run = options.run ?? refCliRunner;
+  const gitRun = options.gitRun ?? createPullGitRunner();
   const diffRun = options.diffRun ?? (options.run ? cappedDiffRunner(options.run) : pullDiffCliRunner);
   const gitRead = options.gitRead ?? pullFileGitRead;
   const now = options.now ?? Date.now;
@@ -750,6 +786,42 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
   const signed =new Map<RefCli, { at: number; ttl: number; set: Promise<Set<string>>; missing: boolean }>();
   const diffs = new Map<string, { at: number; answer: InboxPullDiffAnswer }>();
   const readHeads = new Map<string, string>();
+  /**
+   * A PR's whole diff at `head`, read with git in a clone of its repository on this computer (its `origin` is the
+   * PR's repository: that is how the clone is one of its projects). What the clone lacks is fetched by the PR's own
+   * ref and the base branch, with no ref written: no branch, remote-tracking ref, tag or FETCH_HEAD changes, and the
+   * worktree, index and stash are never touched. The diff runs from where the head left the base's tip, as the
+   * forge's does. Null when no clone gives it; the forge's read stands then.
+   */
+  const localWholeDiff = async (pull: InboxPull, head: string, roots: readonly string[], signal?: AbortSignal): Promise<string | null> => {
+    if (!compareBranch(pull.base)) return null;
+    const baseRef = `refs/heads/${pull.base}`;
+    const pullRef = pull.platform === "github" ? `refs/pull/${pull.number}/head` : `refs/merge-requests/${pull.number}/head`;
+    const deadline = Date.now() + INBOX_PULL_WHOLE_DIFF_TIMEOUT_MS;
+    for (const root of new Set(roots)) {
+      if (signal?.aborted) return null;
+      const git = async (args: string[]) => {
+        const result = await gitRun(root, args, { timeoutMs: Math.max(1_000, deadline - Date.now()), signal }).catch(() => null);
+        return result && result.exitCode === 0 ? result.stdout : null;
+      };
+      const listed = await git(["ls-remote", "--refs", "origin", baseRef]);
+      const base = shaOf(listed?.split("\n").map((line) => line.split("\t")).find(([, ref]) => ref === baseRef)?.[0]);
+      if (!base) continue;
+      const has = async (sha: string) => (await git(["cat-file", "-e", `${sha}^{commit}`])) !== null;
+      const both = async () => (await has(head)) && (await has(base));
+      if (!(await both())) {
+        // `--refmap=` with no destination: nothing but objects is written, not even the remote-tracking branch.
+        await git(["fetch", "--no-write-fetch-head", "--refmap=", "--no-tags", "--no-prune", "--no-recurse-submodules", "--quiet", "origin", pullRef, baseRef]);
+        if (!(await both())) continue;
+      }
+      const from = shaOf((await git(["merge-base", base, head]))?.trim());
+      if (!from) continue;
+      // The person's own diff settings never apply: no external diff or textconv runs, and the prefixes are the forge's.
+      const patch = await git(["diff", "--no-ext-diff", "--no-textconv", "--find-renames", "--src-prefix=a/", "--dst-prefix=b/", from, head, "--"]);
+      if (patch?.trim()) return patch;
+    }
+    return null;
+  };
   const readHeadNow = async (pull: InboxPull, cli: RefCli): Promise<string | null> => {
     const parts = splitPath(pull.repo)!;
     const endpoint = pull.platform === "github" ? `repos/${parts.owner}/${parts.repo}/pulls/${pull.number}` : `projects/${encodeURIComponent(pull.repo)}/merge_requests/${pull.number}`;
@@ -1227,7 +1299,7 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
       while (diffs.size > 24) diffs.delete(diffs.keys().next().value!);
       return answer;
     },
-    async wholeDiff(key, signal) {
+    async wholeDiff(key, signal, roots = []) {
       const pull = known.get(key);
       if (!pull || !lastRepos.has(inboxPullRepoKey(pull.host, pull.repo))) throw new InboxPullsError("pull_unknown", "That pull request is not in the list. Refresh the list and try again.");
       const cli: RefCli = hosts.get(pull.host)?.cli ?? (pull.platform === "github" ? "gh" : "glab");
@@ -1264,6 +1336,12 @@ export function createInboxPulls(options: { run?: RefRunner; diffRun?: PullDiffR
           else gather(parsePaginatedArray<GitLabDiffEntry>(paged.stdout), reconstructGitlabPatch, glMayBeHeldBack);
         } catch {
           patch = "";
+        }
+        // Less than the whole diff, or nothing: a clone on this computer gives the whole of it, when there is one.
+        const local = (partial || !patch.trim()) && headBefore && roots.length > 0 ? await localWholeDiff(pull, headBefore, roots, signal) : null;
+        if (local) {
+          patch = local;
+          partial = false;
         }
         if (!patch.trim()) {
           if (paged.exitCode !== 0) throw new InboxPullsError("pull_diff_failed", stopFor(paged) ?? `${cli} could not read this diff. Try again, or open it on the forge.`);

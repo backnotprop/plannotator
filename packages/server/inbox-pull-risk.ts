@@ -242,6 +242,8 @@ export interface PullRiskOptions {
   dataDir: string;
   /** Reads a layer's whole diff. */
   pulls: Pick<InboxPulls, "wholeDiff">;
+  /** The clones of a PR's repository on this computer (the Inbox's projects on it): where git reads a diff the forge held back. */
+  roots?: (key: string) => Promise<readonly string[]>;
   /** Code review is on: checked again before each run. */
   isOn: () => boolean;
   /** Tests: stand-ins for the agent, the CLIs found and the clock. */
@@ -353,7 +355,8 @@ export function createPullRisk(options: PullRiskOptions): PullRisk {
     let patch: string;
     let partial: boolean;
     try {
-      const diff = await options.pulls.wholeDiff(pull.key, stopping.signal);
+      const roots = options.roots ? await options.roots(pull.key).catch(() => []) : [];
+      const diff = await options.pulls.wholeDiff(pull.key, stopping.signal, roots);
       // The diff read is the head judged: a push since the list waits for the next list's head.
       if (diff.head_sha !== pull.head_sha) {
         waits.set(job, now() + RISK_RETRY_MS);
