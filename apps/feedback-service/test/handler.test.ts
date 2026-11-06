@@ -50,7 +50,7 @@ describe("the one route", () => {
     expect(res.status).toBe(201);
     expect(await res.json()).toEqual({ ok: true });
     expect(d.store.rows).toEqual([
-      { message: "The sidebar is great", category: "idea", contact: "me@example.com", version: "0.28.33", os: "macOS", surface: "inbox", created_at: "2026-10-27T12:00:00.000Z" },
+      { message: "The sidebar is great", category: "idea", contact: "me@example.com", version: "0.28.33", os: "macOS", surface: "inbox", agents: null, created_at: "2026-10-27T12:00:00.000Z" },
     ]);
     // Nothing identifying is stored: the IP the Worker saw is not in the row.
     expect(JSON.stringify(d.store.rows)).not.toContain("203.0.113.7");
@@ -62,7 +62,7 @@ describe("the one route", () => {
     const d = deps();
     const res = await handleRequest(post({ message: "hi" }), d);
     expect(res.status).toBe(201);
-    expect(d.store.rows[0]).toMatchObject({ message: "hi", category: null, contact: null, version: null, os: null, surface: null });
+    expect(d.store.rows[0]).toMatchObject({ message: "hi", category: null, contact: null, version: null, os: null, surface: null, agents: null });
   });
 
   test("every other path is 404 and every other method on /feedback is 405; neither reads or writes", async () => {
@@ -126,6 +126,62 @@ describe("validation", () => {
     const d = deps();
     await handleRequest(post({ message: "line one\u0000\nline two\u0007" }), d);
     expect(d.store.rows[0]!.message).toBe("line one\nline two");
+  });
+});
+
+describe("agents", () => {
+  const stored = async (agents: unknown) => {
+    const d = deps();
+    const res = await handleRequest(post({ message: "The search box forgets my last query.", surface: "inbox", agents }), d);
+    return { status: res.status, rows: d.store.rows };
+  };
+
+  test("agent names are stored as one short list, in the order sent", async () => {
+    const { status, rows } = await stored(["Claude Code", "Codex", "Windsurf / Devin"]);
+    expect(status).toBe(201);
+    expect(rows[0]!.agents).toBe("Claude Code, Codex, Windsurf / Devin");
+  });
+
+  test("a request without agents (an older client) still stores, with agents null", async () => {
+    for (const agents of [undefined, null, []]) {
+      const { status, rows } = await stored(agents);
+      expect(status).toBe(201);
+      expect(rows[0]!.agents).toBeNull();
+    }
+  });
+
+  test("bad names are dropped, never stored, and never cost the feedback", async () => {
+    const { status, rows } = await stored([
+      "Codex",
+      "codex",
+      "  Claude   Code  ",
+      42,
+      null,
+      { name: "Pi" },
+      "",
+      "a, b",
+      "/Users/ada/secret-project",
+      "Users/ada/secret-project",
+      "x/../../etc",
+      "notes.md",
+      "<script>",
+      "x".repeat(41),
+    ]);
+    expect(status).toBe(201);
+    expect(rows[0]!.agents).toBe("Codex, Claude Code");
+  });
+
+  test("at most 8 names are kept", async () => {
+    const { rows } = await stored(Array.from({ length: 12 }, (_, i) => `Agent ${i + 1}`));
+    expect(rows[0]!.agents!.split(", ")).toEqual(Array.from({ length: 8 }, (_, i) => `Agent ${i + 1}`));
+  });
+
+  test("agents that is not a list, or a list far past any client's, is refused with 400 and nothing is written", async () => {
+    for (const agents of ["Claude Code", { 0: "Codex" }, 7, Array.from({ length: 65 }, () => "Codex")]) {
+      const { status, rows } = await stored(agents);
+      expect(status).toBe(400);
+      expect(rows).toHaveLength(0);
+    }
   });
 });
 
