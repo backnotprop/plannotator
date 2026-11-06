@@ -114,11 +114,20 @@ if (import.meta.main) {
   const files = shards()[k - 1];
   const expected = Math.round(wallTime(files, weigher()) / 60);
   console.log(`e2e shard ${k}/${E2E_SHARDS}: ${files.length} specs, ${E2E_WORKERS} workers, about ${expected} min\n  ${files.join('\n  ')}`);
-  // The machine's peak memory while the specs run, so a smaller runner can be judged from the log.
+  // The machine's peak memory while the specs run, when, and the largest processes then, so a smaller runner can be judged from the log.
   let peak = usedMiB();
+  let peakAt = '';
+  let topAtPeak = '';
+  let snappedAt = 0;
   const sampler = setInterval(() => {
     const now = usedMiB();
-    if (now !== null && (peak === null || now > peak)) peak = now;
+    if (now === null || (peak !== null && now <= peak)) return;
+    peak = now;
+    peakAt = new Date().toISOString();
+    if (now - snappedAt < 200) return;
+    snappedAt = now;
+    topAtPeak = Bun.spawnSync(['ps', '-eo', 'rss=,args=', '--sort=-rss']).stdout.toString().split('\n').slice(0, 8)
+      .map((line) => line.trim().replace(/^(\d+)\s+(.{0,140}).*$/, (_, kb, args) => `${Math.round(Number(kb) / 1024)} MiB  ${args}`)).join('\n  ');
   }, 2000);
   const child = Bun.spawn(['bunx', 'playwright', 'test', '-c', E2E_CONFIG, `--workers=${E2E_WORKERS}`, ...files.map(fileFilter)], {
     cwd: repoRoot,
@@ -126,6 +135,6 @@ if (import.meta.main) {
   });
   const code = await child.exited;
   clearInterval(sampler);
-  if (peak !== null) console.log(`e2e shard ${k}/${E2E_SHARDS}: peak memory in use on this machine ${peak} MiB`);
+  if (peak !== null) console.log(`e2e shard ${k}/${E2E_SHARDS}: peak memory in use on this machine ${peak} MiB${peakAt ? ` at ${peakAt}; largest processes near it:\n  ${topAtPeak}` : ''}`);
   process.exit(code ?? 1);
 }
