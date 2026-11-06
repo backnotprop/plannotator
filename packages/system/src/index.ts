@@ -15,4 +15,4 @@ export { DRAW_BRANCH, firstDrawPrompt, recipes, REDRAW_BRANCH, updatePrompt, typ
 export { parseSetup, SYSTEM_AGENTS, type SystemAgent, type SystemSetup } from './agent/setup.ts';
 export { agentModel } from './agent/model.ts';
 export { unattendedDocs, unattendedDocUrl, type DocUrlCheck } from './agent/docs.ts';
-export { CLAUDE_REDRAW_TOOLS, redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from './agent/command.ts';
+export { redrawCommand, SYSTEM_COMMANDS, type SystemSubcommand } from './agent/command.ts';

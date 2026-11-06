@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { mergedPrs, readState, redrawNote, systemPaths, tick, type Forge, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
+import { mergedPrs, readState, redrawNote, runCommand, systemPaths, tick, type Forge, type Notify, type RunAgent, type TickDeps } from '../src/node/index.ts';
 import { git, isolateGitConfig, smallDrawing, tempDir, writeTree } from './helpers.ts';
 
 // A real project: a bare origin in a temp folder (a local path, no network),
@@ -121,19 +121,32 @@ function fakes() {
 const noAgent: RunAgent = async () => {
   throw new Error('the agent must not run');
 };
+/** For ticks that must not reach the forge or the Inbox: never the real gh or plannotator. */
+const noForge: Forge = {
+  findOpenPr: async () => {
+    throw new Error('the forge must not be asked');
+  },
+  openPr: async () => {
+    throw new Error('the forge must not be asked');
+  },
+};
+const noNotify: Notify = async () => {
+  throw new Error('no note must be sent');
+};
+const NONE: TickDeps = { runAgent: noAgent, forge: noForge, notify: noNotify };
 
 describe('tick', () => {
   test('not set up, or no drawing on main yet: nothing runs', async () => {
     const p = project({ drawn: false });
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: 'other-000000' })).toMatchObject({ ran: 'nothing', why: 'not set up: no setup.json for this project' });
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent } })).toMatchObject({ ran: 'nothing', why: 'no drawing on main yet' });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: 'other-000000', deps: NONE })).toMatchObject({ ran: 'nothing', why: 'not set up: no setup.json for this project' });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'no drawing on main yet' });
   });
 
   test('the commit that added the drawing is gated with no agent; then main has not moved and nothing runs', async () => {
     const p = project();
     const tip = git(p.root, 'rev-parse', 'origin/main').trim();
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent } })).toEqual({ ran: 'gated', gated: tip });
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent } });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toEqual({ ran: 'gated', gated: tip });
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE });
     expect(r).toMatchObject({ ran: 'nothing', why: 'main has not moved' });
     expect(existsSync(p.paths.lock)).toBe(false);
   });
@@ -147,10 +160,10 @@ describe('tick', () => {
     expect(first.gated).toBe(tip);
     const tip2 = p.land({ 'src/util.ts': 'y\n', 'docs/guide.md': 'more\n' }, 'edit util');
     const now = new Date('2026-11-06T12:00:00Z');
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: noAgent } })).toEqual({ ran: 'gated', gated: tip2 });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: NONE })).toEqual({ ran: 'gated', gated: tip2 });
     expect(await readState(p.dataDir, KEY)).toMatchObject({ v: 1, gated: tip2, gated_at: '2026-11-06T12:00:00.000Z', last_error: null, failed: null });
     // and the next tick diffs from there
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent } })).toMatchObject({ ran: 'nothing' });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing' });
   });
 
   test('an added file wakes the agent: the redraw is committed on its own branch, pushed, offered as one PR, and noted once', async () => {
@@ -214,19 +227,74 @@ echo 'On the app sheet, the app sends mail' > .plannotator/redraw-summary.txt
     expect(f.notes[1]!.body).toBe(`Main moved to ${tip.slice(0, 7)}. PR 13 landed: On the app sheet, the app sends mail. 1 part changed. Redraw: https://example.com/acme/small/pull/7`);
   });
 
-  test('an agent that edits code outside the drawing is refused: nothing is pushed, its files are kept aside, and it waits for main to move', async () => {
+  test('files the agent changed outside the drawing, its own commits included, stay in the redraw and are named in the PR and the note', async () => {
     const p = project();
     const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
     const f = fakes();
-    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(`${ADD_JOBS}\necho hacked > src/main.ts`).runAgent, forge: f.forge, notify: f.notify } });
-    expect(r).toMatchObject({ ran: 'failed', error: 'the agent changed files outside .plannotator/system: src/main.ts' });
-    expect(() => git(p.origin, 'rev-parse', '--verify', '--quiet', 'refs/heads/plannotator/system-redraw')).toThrow();
-    expect(f.opened).toEqual([]);
-    expect(f.notes).toEqual([]);
-    expect(readFileSync(join(p.paths.failed, tip, 'src', 'main.ts'), 'utf8')).toBe('hacked\n');
+    const agent = scriptAgent(`${ADD_JOBS}
+echo extra > src/extra.ts && git add src/extra.ts && git commit -q -m "the agent's own commit"
+echo changed > src/main.ts`);
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, forge: f.forge, notify: f.notify } });
+    expect(r.ran).toBe('redrew');
+    const head = git(p.origin, 'rev-parse', 'refs/heads/plannotator/system-redraw').trim();
+    expect(git(p.origin, 'diff', '--name-only', tip, head).trim().split('\n').sort()).toEqual([
+      '.plannotator/system/sheets/L-101.yaml', '.plannotator/system/system.yaml', 'src/extra.ts', 'src/main.ts',
+    ]);
+    // the summary file is never committed
+    expect(git(p.origin, 'ls-tree', '-r', '--name-only', head)).not.toContain('redraw-summary.txt');
+    expect(f.opened[0]!.body).toContain('This redraw also changed files outside the drawing:\n- src/extra.ts\n- src/main.ts');
+    expect(f.notes[0]!.body).toContain('This redraw also changed: src/extra.ts, src/main.ts.');
     expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
-    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip, gated: null });
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent, ...f } })).toMatchObject({ ran: 'nothing', why: `the last redraw for ${tip.slice(0, 7)} failed; waiting for main to move` });
+  });
+
+  test('an agent that throws midway is set aside: the worktree is clean and its files are kept', async () => {
+    const p = project();
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+    const f = fakes();
+    const runAgent: RunAgent = async ({ cwd }) => {
+      writeFileSync(join(cwd, '.plannotator', 'system', 'half.yaml'), 'half\n');
+      throw new Error('the agent process went away');
+    };
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent, forge: f.forge, notify: f.notify } });
+    expect(r).toMatchObject({ ran: 'failed', error: 'the agent process went away' });
+    expect(readFileSync(join(p.paths.failed, tip, '.plannotator', 'system', 'half.yaml'), 'utf8')).toBe('half\n');
+    expect(git(p.paths.worktree, 'status', '--porcelain')).toBe('');
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip });
+  });
+
+  test('a redraw cut off before it ended (a dirty worktree) does not stop later ticks: it is set aside, recorded, and the redraw goes on', async () => {
+    const p = project();
+    p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#12)');
+    const f = fakes();
+    expect((await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: scriptAgent(ADD_JOBS).runAgent, forge: f.forge, notify: f.notify } })).ran).toBe('redrew');
+    // a later redraw was killed with its edits in the worktree
+    writeFileSync(join(p.paths.worktree, '.plannotator', 'system', 'system.yaml'), 'cut off\n');
+    writeFileSync(join(p.paths.worktree, 'stray.txt'), 'stray\n');
+    const tip = p.land({ 'src/mail.ts': 'mail\n' }, 'Add mail (#13)');
+    const now = new Date('2026-11-07T08:00:00Z');
+    const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, now, deps: { runAgent: scriptAgent("echo 'On the app sheet, nothing moved.' > .plannotator/redraw-summary.txt").runAgent, forge: f.forge, notify: f.notify } });
+    expect(r).toMatchObject({ ran: 'gated', gated: tip });
+    const kept = join(p.paths.failed, 'interrupted-2026-11-07T08-00-00-000Z');
+    expect(readFileSync(join(kept, '.plannotator', 'system', 'system.yaml'), 'utf8')).toBe('cut off\n');
+    expect(readFileSync(join(kept, 'stray.txt'), 'utf8')).toBe('stray\n');
+    const state = await readState(p.dataDir, KEY);
+    expect(state.set_aside).toContain(kept);
+    expect(state).toMatchObject({ gated: tip, last_error: null, failed: null });
+  });
+
+  test('a hung agent is stopped at its time bound, the failure is recorded and the lock let go', async () => {
+    const p = project();
+    const tip = p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs');
+    const f = fakes();
+    const started = Date.now();
+    const r = await tick({
+      root: p.root, dataDir: p.dataDir, key: KEY,
+      deps: { agentCommand: () => ({ command: ['sh', '-c', 'sleep 30'], stdin: null }), agentTimeoutMs: 300, forge: f.forge, notify: f.notify },
+    });
+    expect(Date.now() - started).toBeLessThan(15_000);
+    expect(r).toMatchObject({ ran: 'failed', error: 'the agent did not finish: the agent was stopped after 0 seconds with no end' });
+    expect(await readState(p.dataDir, KEY)).toMatchObject({ failed: tip, last_error: expect.stringContaining('stopped after') });
+    expect(existsSync(p.paths.lock)).toBe(false);
   });
 
   test('a redraw that does not check clean is refused, naming the problem', async () => {
@@ -253,6 +321,7 @@ echo 'On the app sheet, the app sends mail' > .plannotator/redraw-summary.txt
     const deps: TickDeps = {
       runAgent: noAgent,
       forge: { findOpenPr: async () => { throw new Error('gh pr list: not signed in'); }, openPr: async () => '' },
+      notify: noNotify,
     };
     expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps })).toMatchObject({ ran: 'failed', error: 'gh pr list: not signed in' });
     // nothing was spent, so the next tick tries again
@@ -280,7 +349,7 @@ echo 'On the app sheet, the app sends mail' > .plannotator/redraw-summary.txt
     const p = project();
     p.land({ 'src/util.ts': 'x\n' }, 'add util');
     writeFileSync(p.paths.lock, String(process.pid));
-    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: noAgent } })).toMatchObject({ ran: 'nothing', why: 'another tick is running' });
+    expect(await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: NONE })).toMatchObject({ ran: 'nothing', why: 'another tick is running' });
     expect(readFileSync(p.paths.lock, 'utf8')).toBe(String(process.pid));
     // a pid no process has
     writeFileSync(p.paths.lock, '99999999');
@@ -307,4 +376,31 @@ test('redrawNote: the words of the note', () => {
     .toBe('Main moved to 9c41e07. PR 1335 landed: On the Desktop app sheet, stable now shows a corner, not a header. 1 part changed. Redraw: https://example.com/pull/9');
   expect(redrawNote({ ...base, prs: [], summary: '', count: { parts: 0, flows: 2 } })).toBe('Main moved to 9c41e07. 2 lines changed. Redraw: https://example.com/pull/9');
   expect(redrawNote({ ...base, prs: [4, 5], summary: '', count: { parts: 2, flows: 0 } })).toBe('Main moved to 9c41e07. PRs 4, 5 landed. 2 parts changed. Redraw: https://example.com/pull/9');
+});
+
+test('a command past its time bound is stopped with its whole process group, children included', async () => {
+  const t = tempDir();
+  cleanups.push(t.done);
+  const dir = t.dir;
+  const pidFile = join(dir, 'child.pid');
+  const r = await runCommand(['sh', '-c', `sleep 30 & echo $! > '${pidFile}'; wait`], { cwd: dir, timeoutMs: 300 });
+  expect(r.timedOut).toBe(true);
+  const pid = Number(readFileSync(pidFile, 'utf8').trim());
+  const alive = () => {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+  for (let i = 0; i < 50 && alive(); i++) await new Promise((ok) => setTimeout(ok, 100));
+  expect(alive()).toBe(false);
+});
+
+test('a command that ends in time is not marked as stopped', async () => {
+  const t = tempDir();
+  cleanups.push(t.done);
+  const r = await runCommand(['sh', '-c', 'echo done'], { cwd: t.dir, timeoutMs: 10_000 });
+  expect(r).toMatchObject({ code: 0, stdout: 'done\n', timedOut: false });
 });

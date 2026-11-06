@@ -43,9 +43,15 @@ export type TickState = {
   last_error: string | null;
   /** The commit a refused or failed redraw was for: the agent is not run again until main moves past it. */
   failed: string | null;
+  /**
+   * The last time the tick found its own redraw worktree left dirty (a redraw
+   * cut off by a reboot, a logout or a kill) and set it aside to go on: when,
+   * and where the files it left are kept.
+   */
+  set_aside: string | null;
 };
 
-export const EMPTY_STATE: TickState = { v: 1, gated: null, gated_at: null, redrew_at: null, redraw_pr: null, last_error: null, failed: null };
+export const EMPTY_STATE: TickState = { v: 1, gated: null, gated_at: null, redrew_at: null, redraw_pr: null, last_error: null, failed: null, set_aside: null };
 
 const str = (v: unknown) => (typeof v === 'string' && v ? v : null);
 
@@ -65,7 +71,7 @@ export async function readState(dataDir: string, key: string): Promise<TickState
     if (v?.v !== 1) return { ...EMPTY_STATE };
     return {
       v: 1, gated: str(v.gated), gated_at: str(v.gated_at), redrew_at: str(v.redrew_at), redraw_pr: str(v.redraw_pr),
-      last_error: str(v.last_error), failed: str(v.failed),
+      last_error: str(v.last_error), failed: str(v.failed), set_aside: str(v.set_aside),
     };
   } catch {
     return { ...EMPTY_STATE };
