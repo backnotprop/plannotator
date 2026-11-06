@@ -28,6 +28,7 @@ sources:                            # what you read
 watch: [deploy/*.toml]              # optional: globs (** crosses folders, * and ? stay in one) of files whose edit changes the shape
 scopes: { root: Acme, app: The app } # a scope is what a window opens into; root is the landing
 wanted:                             # sheets planned and not drawn yet; take each out once its file is written
+                                    # when all are drawn: `wanted: []`, or no key
   - { code: A-201, kind: algorithm, question: "How an order is priced, step by step." }
 parts:
   person: { name: You, kind: people, role: Signs in and orders. }
@@ -110,7 +111,8 @@ bands:                              # rows, top to bottom
     label: Ways in                  # sentence case, never capitals
     means: started by a request     # optional: a short line under the label
     tone: sand                      # sand, mist, stone or sage
-    row: [web 6, worker 6]          # part ids left to right; "id N" spans N of 12 columns
+    row: [web 6, worker 6]          # part ids left to right; "id N" spans N columns, at most 12 in a band
+                                    # a part of another scope may stand here when a line on this sheet needs it
   - id: data
     label: On disk
     tone: stone
@@ -128,7 +130,8 @@ left: []                            # optional side columns: { label, means, ton
 right: []
 ```
 
-A flow sheet walks one request hop by hop:
+A flow sheet walks one request hop by hop. Its `scope` is the window a person dives into to find it; `root` when the
+walk crosses windows:
 
 ```yaml
 sheet: F-101
@@ -137,7 +140,7 @@ kind: flow
 title: Sign in
 question: How a sign-in travels, hop by hop.
 time: in order
-lanes: [person, web, db]            # parts, left to right
+lanes: [person, web, db]            # parts, left to right, from any scope
 places:                             # optional: bands over lanes
   - { label: Your browser, tone: mist, lanes: [person] }
 hops:
@@ -174,6 +177,8 @@ remove:
 lines:
   worker: "worker.ts and 2 more · +120 −31"   # the diff counts per part
 steps:                              # optional: the one sequence the change makes, about eight hops
+                                    # each hop takes a flow sheet's hop fields (from and to, or on and do; says,
+                                    # reply, at, payload) and `is`
   title: A price on the way to a charge
   lanes: [worker, cache, db]
   hops:
@@ -185,7 +190,8 @@ steps:                              # optional: the one sequence the change make
 `is` is `added` or `changed`; a hop with no `is` was there before.
 
 The open form is for a pull request that is not merged yet, so the drawing does not have its new parts. Each added
-part or line is a full entry, and `place` says where each new part goes on each sheet:
+part or line is a full entry, and `place` says where each new part goes on each sheet. An added line needs no place:
+it is drawn on every sheet that draws one of its ends.
 
 ```yaml
 revision: PR-415
@@ -210,7 +216,8 @@ lines:
 - No performance numbers (latency, rates, sizes of traffic) and no invented counts. A count goes on a sheet only when
   one cited file gives it exactly; when in doubt, leave the count out.
 - Something that is configured off, retired or removed is not drawn as live. Off by default is drawn with "off" in
-  its `sub` or its band's `means`, and the file the switch lives in is in its `code:`.
+  its `sub` or its band's `means`, and the file the switch lives in is in its `code:`. When the part it turns on is
+  outside, "off" goes on that outside part and the switch's file in the `code:` of the project part that reads it.
 
 ## Removed keys
 

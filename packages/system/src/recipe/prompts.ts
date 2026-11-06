@@ -24,10 +24,13 @@ const list = (items: readonly string[], none: string) => (items.length ? items.m
  * `plannotator/system` (the Inbox makes it at
  * `<PLANNOTATOR_DATA_DIR>/system/<project key>/worktree`); with none the agent
  * makes one of its own. `repo` is the project's own repo, `host/owner/name`;
- * `name` the project's name.
+ * `name` the project's name. `setup.thread_message`, when the Inbox started
+ * the drawing's thread, is the message both of the agent's messages reply to,
+ * the one every later redraw note replies to too; with none, the agent's
+ * first message starts the thread.
  */
 export function firstDrawPrompt(
-  setup: Pick<SystemSetup, 'repos' | 'docs'>,
+  setup: Pick<SystemSetup, 'repos' | 'docs'> & Partial<Pick<SystemSetup, 'thread_message'>>,
   projectRoot: string,
   o: { worktree?: string; name?: string; repo?: string } = {},
 ): string {
@@ -45,6 +48,9 @@ export function firstDrawPrompt(
     list(setup.repos, 'none'),
     '- Doc sites to read:',
     list(setup.docs, 'none'),
+    setup.thread_message
+      ? `- The drawing's Inbox thread: reply to message ${oneLine(setup.thread_message)} with both of your messages (\`reply_to\`).`
+      : `- The drawing's Inbox thread: none yet. Your first message starts it, with the subject "System: ${name}"; your last is a reply to the first.`,
   ];
   return [facts.join('\n'), DRAW, FORMAT].join('\n\n');
 }
@@ -73,7 +79,7 @@ export function updatePrompt(o: UpdatePromptInput): string {
     '# The job: redraw after main moved',
     '',
     `- The worktree, already on branch ${REDRAW_BRANCH} at the new commit: ${oneLine(o.worktree)}`,
-    `- From (the last commit the drawing was right for): ${oneLine(o.from)}`,
+    `- From (the last commit the drawing was checked against: its sources.repos.self.at, or a later commit the check found nothing to redraw for; the range may hold the drawing's own commits): ${oneLine(o.from)}`,
     `- To (the new commit; set sources.repos.self.at to it): ${oneLine(o.to)}`,
     '- Merged pull requests in that range:',
     list(o.prs.map((n) => `PR ${n}`), 'none named in the merge commits'),
@@ -90,4 +96,31 @@ export function updatePrompt(o: UpdatePromptInput): string {
     list(o.docs, 'none'),
   ];
   return [facts.join('\n'), UPDATE, FORMAT].join('\n\n');
+}
+
+export type ReviewPromptInput = {
+  /** The person's own checkout of the project, where the base branch is checked out. */
+  project: string;
+  /** The pull request, `host/owner/repo#n`. */
+  pr: string;
+  /** Its head commit. */
+  head: string;
+  /** Its base branch, without the remote (`main`). */
+  base: string;
+  /** The project's name; the folder's name when not given. */
+  name?: string;
+};
+
+/** The prompt that has an agent draw an open pull request's change: the four facts, then REVIEW.md, then the format. */
+export function reviewPrompt(o: ReviewPromptInput): string {
+  const name = oneLine(o.name ?? (o.project.replace(/\/+$/, '').split('/').pop() || 'the project'));
+  const facts = [
+    `# The job: draw pull request ${oneLine(o.pr)} on the system of ${name}`,
+    '',
+    `- The project folder: ${oneLine(o.project)}`,
+    `- The pull request: ${oneLine(o.pr)}`,
+    `- Its head commit: ${oneLine(o.head)}`,
+    `- Its base branch: ${oneLine(o.base)}`,
+  ];
+  return [facts.join('\n'), REVIEW, FORMAT].join('\n\n');
 }

@@ -62,7 +62,8 @@ the model, or send the files and let the window call `loadFiles()`.
   one commit), so an untracked, ignored or symlinked file does not count. Outside git it reads the disk, and a symlink
   anywhere on the path does not count. Paths are matched with their exact case, so a check on macOS agrees with one
   on Linux. Paths in another repo alias are checked only when `roots` gives a checkout of it, else a warning names the
-  alias.
+  alias. A band whose written spans (`id N`, `~ N`, a stack's `N`) add up to more than 12 columns is a warning: the
+  renderer does not wrap a band with written spans, it narrows every part in it to fit.
 - Limits: a drawing file is at most 1 MiB and a drawing at most 8 MiB; a file over either is an error, not read. A
   drawing file must be a plain file (not a symlink), UTF-8, and end in `.yaml` (a `.yml` file is an error that names
   the new name). The ids `__proto__`, `constructor` and `prototype` are refused. A ref that starts with `-` is refused
@@ -163,9 +164,11 @@ The browser entry carries them as strings (`src/recipe/text.ts`, generated; a te
 ```ts
 // @plannotator/system (and /node): pure
 export const recipes: { draw: string; update: string; review: string; format: string };
-export function firstDrawPrompt(setup: Pick<SystemSetup, 'repos' | 'docs'>, projectRoot: string,
-  o?: { worktree?: string; name?: string; repo?: string }): string;   // the facts, then DRAW.md, then FORMAT.md
+export function firstDrawPrompt(setup: Pick<SystemSetup, 'repos' | 'docs'> & { thread_message?: string | null },
+  projectRoot: string, o?: { worktree?: string; name?: string; repo?: string }): string;   // facts, DRAW.md, FORMAT.md
 export function updatePrompt(o: UpdatePromptInput): string;            // the tick's redraw prompt
+export function reviewPrompt(o: { project: string; pr: string; head: string; base: string; name?: string }): string;
+                                                                       // an open PR's change: facts, REVIEW.md, FORMAT.md
 export type SystemSetup = { v: 1; repos: string[]; docs: string[]; agent: 'claude' | 'pi' | 'opencode';
   model: string | null; thread_message: string | null };
 export function parseSetup(value: unknown): SystemSetup | null;
@@ -196,6 +199,9 @@ export const schedule: {
 };
 ```
 
+- **The drawing's thread.** `firstDrawPrompt` names the Inbox thread in its facts: setup.json's `thread_message`
+  when the Inbox started the thread (both of the agent's messages reply to it, as every redraw note does), else none,
+  and the agent's first message starts one with the subject `System: <project>`.
 - **Models.** setup.json may hold a model id bare (`claude-opus-5-5`) or in an agent's form. `agentModel` gives Claude
   Code the bare id and Pi and OpenCode `provider/model` (`anthropic/claude-opus-5-5`); an id with a `/` is kept, an
   unknown bare family is passed on. null is the agent's own default.

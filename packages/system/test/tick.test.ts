@@ -370,6 +370,31 @@ test('mergedPrs reads merge and squash subjects on the first-parent line, and ke
   expect(await mergedPrs(p.team, from, to, ['b.ts'])).toEqual([22]);
 });
 
+test('mergedPrs keeps a pull request whose rename touched a given file, by its old path or its new one', async () => {
+  const p = project();
+  const from = git(p.team, 'rev-parse', 'HEAD').trim();
+  git(p.team, 'mv', 'src/main.ts', 'src/app.ts');
+  git(p.team, 'commit', '-q', '-m', 'Rename the entry (#12)');
+  const to = p.land({ 'b.ts': 'b\n' }, 'Add b (#13)');
+  expect(await mergedPrs(p.team, from, to, ['src/main.ts'])).toEqual([12]);
+  expect(await mergedPrs(p.team, from, to, ['src/app.ts'])).toEqual([12]);
+  expect(await mergedPrs(p.team, from, to, ['src/main.ts', 'b.ts'])).toEqual([12, 13]);
+});
+
+test('a redraw prompt lists the pull request that renamed a drawn file', async () => {
+  const p = project();
+  git(p.team, 'mv', 'src/main.ts', 'src/app.ts');
+  git(p.team, 'commit', '-q', '-m', 'Rename the entry (#12)');
+  p.land({ 'src/jobs.ts': 'jobs\n' }, 'Run jobs (#13)');
+  const agent = scriptAgent('true');
+  const r = await tick({ root: p.root, dataDir: p.dataDir, key: KEY, deps: { runAgent: agent.runAgent, ...fakes() } });
+  expect(r.ran).toBe('gated');
+  const prompt = agent.prompts[0]!;
+  expect(prompt).toContain('src/main.ts');
+  expect(prompt).toContain('  - PR 12');
+  expect(prompt).toContain('  - PR 13');
+});
+
 test('redrawNote: the words of the note', () => {
   const base = { to: '9c41e07aaaa', pr: 'https://example.com/pull/9' };
   expect(redrawNote({ ...base, prs: [1335], summary: 'On the Desktop app sheet, stable now shows a corner, not a header.', count: { parts: 1, flows: 0 } }))

@@ -169,18 +169,28 @@ async function defaultBranch(root: string): Promise<string> {
  * Pull request numbers named by the first-parent commits in a range ("Merge
  * pull request #n", a squash's "(#n)"). With `paths`, only the commits that
  * changed one of them: the pull requests that moved the drawing, not every
- * one that landed.
+ * one that landed. A rename or copy counts under both its old and its new
+ * path, because the gate may name either one.
  */
 export async function mergedPrs(root: string, from: string, to: string, paths?: readonly string[]): Promise<number[]> {
   const out = await git(root, [
-    'log', '--first-parent', '--diff-merges=first-parent', '--name-only', '-z', '--format=%x01%s', '--end-of-options', `${checkRef(from)}..${checkRef(to)}`,
+    'log', '--first-parent', '--diff-merges=first-parent', '--name-status', '-M', '-z', '--format=%x01%s', '--end-of-options',
+    `${checkRef(from)}..${checkRef(to)}`,
   ]);
   const wanted = paths ? new Set(paths) : null;
   const prs = new Set<number>();
   for (const entry of out.split('\x01').slice(1)) {
-    // <subject> NUL, then each file NUL (the first after a newline)
+    // <subject> NUL, then per file <status> NUL <path> NUL (the first status
+    // after a newline); a rename or copy (R100, C75) has two paths, old then new
     const [subject = '', ...rest] = entry.split('\0');
-    const files = rest.map((f) => f.replace(/^\n/, '')).filter(Boolean);
+    const files: string[] = [];
+    for (let i = 0; i < rest.length; i++) {
+      const status = rest[i]!.replace(/^\n/, '');
+      if (!status) continue;
+      const paths = status[0] === 'R' || status[0] === 'C' ? 2 : 1;
+      files.push(...rest.slice(i + 1, i + 1 + paths));
+      i += paths;
+    }
     if (wanted && !files.some((f) => wanted.has(f))) continue;
     const m = /^Merge pull request #(\d+)\b/.exec(subject) ?? /\(#(\d+)\)\s*$/.exec(subject);
     if (m) prs.add(Number(m[1]));

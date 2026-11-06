@@ -37,6 +37,14 @@ describe('check', () => {
     expect(await check({ dir: drawingDir, root: repoRoot, at: 'HEAD' })).toEqual({ errors: [], warnings: [], missing: [] });
   });
 
+  test('a band whose written spans pass 12 columns is a warning naming the sheet and band; 12 is clean', async () => {
+    const r = smallRepo();
+    writeTree(r.dir, { 'sheets/L-101.yaml': 'sheet: L-101\nscope: app\nkind: logical\ntitle: The app\nbands:\n  - { id: inside, row: [api 4, ~ 8] }\n  - { id: more, row: [~ 6, [api, 10]] }\n' });
+    const over = await check({ dir: r.dir, root: r.root, at: r.sha });
+    expect(over.errors).toEqual([]);
+    expect(over.warnings).toEqual([{ file: 'sheets/L-101.yaml', field: 'bands[1].row', message: 'the spans add up to 16 columns; a band holds at most 12' }]);
+  });
+
   test('the committed drawing is clean at its own commit, when this clone has it', async () => {
     const { model } = await load(drawingDir);
     const at = model!.sources!.repos.self!.at;
