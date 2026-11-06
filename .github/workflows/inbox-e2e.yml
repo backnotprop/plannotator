@@ -229,6 +229,12 @@ jobs:
       - name: Install dependencies
         run: bun install --frozen-lockfile
 
+      # A fresh machine may still be running its own apt update when the job
+      # starts; without a wait, the browsers' system libraries fail on the
+      # dpkg lock and the whole shard has to be rerun.
+      - name: Let apt wait for the dpkg lock
+        run: echo 'DPkg::Lock::Timeout "600";' | sudo tee /etc/apt/apt.conf.d/90-lock-timeout
+
       - name: Read the pinned Playwright version
         id: playwright
         run: echo "version=$(node -p "require('./package.json').devDependencies['@playwright/test']")" >> "$GITHUB_OUTPUT"
