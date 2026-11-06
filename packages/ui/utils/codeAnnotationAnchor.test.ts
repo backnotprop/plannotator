@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
-import { parseDiffToFiles } from './diffParser';
-import type { CodeAnnotation } from '@plannotator/ui/types';
+import { parseDiffToFiles } from '@plannotator/core/diff-files';
+import type { CodeAnnotation } from '../types';
 import {
   annotationNavigation,
   canPostInline,
