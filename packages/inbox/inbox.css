@@ -497,7 +497,24 @@ button.ib-mut { border-radius: 6px; }
   .pn-inbox .ib-side-sec:hover svg.ib-side-sec-chev { visibility: visible; }
   .ib-side-sec:hover .ib-n { opacity: 0; }
 }
-.ib-pins[data-closed] + .ib-side-sec { margin-top: 2px; }
+.ib-pins[data-closed] + .ib-side-sec, .ib-pins[data-closed] + .ib-secrow { margin-top: 2px; }
+/* The order of Projects: beside the chevron, a sibling of the header so it stays one button; the row keeps the header's hover while the pointer is on it.
+   The header's margin is the row's, so the row is exactly the header and hovers only where a click opens or closes. */
+.ib-secrow { position: relative; margin-top: 12px; }
+.ib-secrow > .ib-side-sec { margin-top: 0; }
+/* Most recent moves a row while the person may be scrolled: scroll anchoring would follow it and jump the sidebar to the top. */
+.ib-projs[data-recent] { overflow-anchor: none; }
+.pn-inbox .ib-proj-sort { position: absolute; right: 24px; bottom: 3px; width: 24px; height: 24px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--ib-r8-s, 6px); color: var(--muted-foreground); }
+.pn-inbox .ib-proj-sort:focus-visible { outline-offset: 0; }
+.ib-proj-sort .ib-ic { width: 15px; height: 15px; }
+.ib-secrow:has(:focus-visible) svg.ib-side-sec-chev { visibility: visible; }
+@media (hover: hover) {
+  .pn-inbox .ib-proj-sort { opacity: 0; }
+  .pn-inbox .ib-secrow:hover .ib-proj-sort, .pn-inbox .ib-secrow:has(:focus-visible) .ib-proj-sort { opacity: 1; }
+  .ib-secrow:hover > .ib-side-sec { background: var(--ib-side-hover); color: var(--foreground); }
+  .pn-inbox .ib-secrow:hover svg.ib-side-sec-chev { visibility: visible; }
+  .pn-inbox .ib-proj-sort:hover { background: var(--ib-side-menu-s, var(--muted)); color: var(--foreground); }
+}
 /* Pinned and Projects share one scroll area (approval "inbox-pinned-threads": no limit on pins, so a long
    Pinned section scrolls with the projects instead of pushing them and the foot off the window). */
 .ib-sidescroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
@@ -3404,6 +3421,10 @@ body:has([data-shape-layer] .shp-pill) .ib-toast:not(.ib-toast-phone) { bottom: 
   .ib-side-sec-tail > * { grid-area: auto; }
   .pn-inbox .ib-side-sec svg.ib-side-sec-chev { visibility: visible; width: 44px; height: 14px; }
   .ib-side-sec:hover .ib-n, .ib-side-sec:focus-visible .ib-n { opacity: 1; }
+  /* The order of Projects on a phone: always shown, a 44 px target just left of the chevron's box. */
+  .ib-secrow { margin-top: 8px; }
+  .pn-inbox .ib-proj-sort { opacity: 1; right: 44px; bottom: 0; width: 44px; height: 44px; border-radius: 8px; }
+  .ib-proj-sort .ib-ic { width: 18px; height: 18px; }
   .ib-pm-scrim { display: block; position: fixed; inset: 0; z-index: 79; background: rgb(0 0 0 / 0.3); }
   .ib-pm-pos[data-phone] { position: fixed !important; left: 8px !important; right: 8px !important; top: auto !important; bottom: calc(8px + env(safe-area-inset-bottom)) !important; transform: none !important; width: auto !important; }
   .ib-pm-pos[data-phone] .ib-pm { min-width: 0; padding: 6px; border-radius: var(--ib-sheet-corner, 12px); animation: ib-pm-up 200ms cubic-bezier(0.23, 1, 0.32, 1); }
