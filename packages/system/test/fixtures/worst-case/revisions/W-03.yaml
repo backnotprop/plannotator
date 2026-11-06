@@ -1,0 +1,5 @@
+revision: W-03
+scope: core
+title: Small plan 3
+change:
+  s3: "Small change number 3."
