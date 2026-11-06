@@ -32,6 +32,9 @@ import {
 import { WorkspaceReviewSession } from "./generated/review-workspace.ts";
 import { parseReviewArgs } from "./generated/review-args.ts";
 import { warmFileListCache } from "./generated/resolve-file.ts";
+import { useScratchJjConfig } from "../../tests/helpers/jj-scratch-config";
+
+const jjConfig = useScratchJjConfig();
 
 const tempDirs: string[] = [];
 const originalCwd = process.cwd();
@@ -92,7 +95,7 @@ function hasJj(): boolean {
 }
 
 function jj(cwd: string, args: string[]): string {
-  const result = spawnSync("jj", ["-R", cwd, ...args], { encoding: "utf-8", env: childEnv() });
+  const result = spawnSync("jj", ["-R", cwd, ...args], { encoding: "utf-8", env: jjConfig.env() });
   if (result.status !== 0) {
     throw new Error(result.stderr || `jj ${args.join(" ")} failed`);
   }
@@ -189,7 +192,7 @@ function initJjRepo(): string {
   git(repoDir, ["add", "spacey.ts"]);
   git(repoDir, ["commit", "-m", "add spacey file"]);
 
-  const init = spawnSync("jj", ["git", "init", "--colocate", repoDir], { encoding: "utf-8", env: childEnv() });
+  const init = spawnSync("jj", ["git", "init", "--colocate", repoDir], { encoding: "utf-8", env: jjConfig.env() });
   if (init.status !== 0) {
     throw new Error(init.stderr || "jj git init --colocate failed");
   }
