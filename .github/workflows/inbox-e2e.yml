@@ -96,73 +96,18 @@ on:
       - 'apps/vscode-extension/scripts/esbuild.config.ts'
       - 'apps/vscode-extension/package.json'
       - '.github/workflows/inbox-e2e.yml'
-  push:
-    branches:
-      - main
-    paths:
-      - 'packages/inbox/**'
-      - 'apps/inbox/**'
-      - 'packages/server/inbox*'
-      - 'packages/server/ref-cards*'
-      - 'packages/shared/ref-cards*'
-      - 'packages/editor/**'
-      - 'packages/core/forge-ref*'
-      - 'packages/shared/inbox/**'
-      - 'packages/core/inbox*'
-      - 'packages/shared/config.ts'
-      - 'packages/shared/update-check.ts'
-      - 'packages/server/auto-update.ts'
-      - 'packages/server/html-assets.ts'
-      - 'packages/server/tailscale-serve.ts'
-      - 'packages/server/request-host-guard.ts'
-      - 'packages/server/index.ts'
-      - 'packages/server/annotate.ts'
-      - 'packages/shared/annotate*'
-      - 'packages/shared/draft.ts'
-      - 'packages/shared/review-draft.ts'
-      - 'packages/shared/doc-resolve.ts'
-      - 'packages/shared/tailscale.ts'
-      - 'packages/shared/html-assets.ts'
-      - 'packages/shared/html-assets-node.ts'
-      - 'packages/ui/**'
-      - 'packages/editor/**'
-      - 'packages/guide-viewer/**'
-      - 'packages/review-editor/**'
-      - 'packages/shared/repo-files.ts'
-      - 'packages/server/review*.ts'
-      - 'packages/server/guide/**'
-      - 'packages/core/guide*'
-      - 'apps/hook/server/index.ts'
-      - 'apps/hook/package.json'
-      - 'apps/hook/server/inbox*'
-      - 'build/**'
-      - 'package.json'
-      - 'bun.lock'
-      - 'tests/e2e/**'
-      - 'tests/helpers/inbox-world.ts'
-      - 'tests/helpers/inbox-process.ts'
-      - 'tests/helpers/real-data-dir.ts'
-      - 'tests/helpers/hook-dist-stub.ts'
-      - 'tests/setup/sandbox-data-dir.ts'
-      - 'packages/shared/data-dir.ts'
-      - 'tests/helpers/pinned-phone.ts'
-      - 'scripts/inbox-sim.ts'
-      - 'scripts/inbox-large-store.ts'
-      - 'scripts/ci-e2e-shard.ts'
-      - 'apps/vscode-extension/src/guides/webview/**'
-      - 'apps/vscode-extension/src/guides/core/**'
-      - 'apps/vscode-extension/src/guides/webview-csp.ts'
-      - 'apps/vscode-extension/scripts/esbuild.config.ts'
-      - 'apps/vscode-extension/package.json'
-      - '.github/workflows/inbox-e2e.yml'
+  # Main is not run after every merge: the merge train already ran this
+  # workflow on the tree it merges. A nightly run on main catches a hand
+  # merge, and a release dispatches it on main before the tag.
+  schedule:
+    - cron: "17 7 * * *"
 
 permissions:
   contents: read
 
-# One run per PR, and one per main: a newer push cancels the older run (main
-# included: only its newest commit needs the heavy suites). Adding any other
-# label starts a run that skips every job; it gets a group of its own so it
-# cannot cancel the real one.
+# One run per PR: a newer push cancels the older run. Adding any other label
+# starts a run that skips every job; it gets a group of its own so it cannot
+# cancel the real one. Nightly and manual runs each get a group of their own.
 concurrency:
   group: inbox-e2e-${{ github.event_name == 'pull_request' && github.event.action == 'labeled' && github.event.label.name != 'ci:full' && format('run-{0}', github.run_id) || github.event_name == 'pull_request' && format('pr-{0}', github.event.pull_request.number) || github.event_name == 'push' && github.ref || format('run-{0}', github.run_id) }}
   cancel-in-progress: true
@@ -207,7 +152,10 @@ jobs:
   inbox-window-e2e:
     name: Inbox window (Playwright against the compiled binary, ${{ matrix.shard }}/16)
     needs: build
-    runs-on: ubuntu-24.04
+    # The repo variable E2E_RUNNER picks the machine for the shards (e.g. a
+    # Namespace label); unset, they run on GitHub's own ubuntu-24.04. Setting
+    # it moves them without a PR, and deleting it moves them back.
+    runs-on: ${{ vars.E2E_RUNNER || 'ubuntu-24.04' }}
     timeout-minutes: 30
     strategy:
       fail-fast: false
@@ -225,6 +173,12 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # A fresh machine may still be running its own apt update when the job
+      # starts; without a wait, the browsers' system libraries fail on the
+      # dpkg lock and the whole shard has to be rerun.
+      - name: Let apt wait for the dpkg lock
+        run: echo 'DPkg::Lock::Timeout "600";' | sudo tee /etc/apt/apt.conf.d/90-lock-timeout
 
       - name: Read the pinned Playwright version
         id: playwright

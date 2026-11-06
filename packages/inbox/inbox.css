@@ -501,11 +501,14 @@ button.ib-mut { border-radius: 6px; }
 /* Pinned and Projects share one scroll area (approval "inbox-pinned-threads": no limit on pins, so a long
    Pinned section scrolls with the projects instead of pushing them and the foot off the window). */
 .ib-sidescroll { overflow-y: auto; min-height: 0; display: flex; flex-direction: column; }
+/* A scroller clips sideways too: room for the selected row's ring and soft shadow (--ib-cur-shadow), taken back from the sides so nothing moves. */
+.ib-sidescroll { padding: 2px 3px 3px; margin: -2px -3px -3px; }
 .ib-sidescroll > * { flex-shrink: 0; }
 /* Only that scroll area gives up height when there are many projects or pins: Inbox and the foot keep theirs
    (they shrank from 32 to 20 px past about 17 projects). It fades at its foot while there is more to scroll. */
 .ib-side > :not(.ib-sidescroll) { flex-shrink: 0; }
-.ib-sidescroll[data-more] { mask-image: linear-gradient(to bottom, #000 calc(100% - 28px), transparent); }
+/* The fade ends where the list's foot does: above the 3 px of room the selected row's shadow has under it. */
+.ib-sidescroll[data-more] { mask-image: linear-gradient(to bottom, #000 calc(100% - 31px), transparent calc(100% - 3px)); }
 .ib-proj { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 9px; border-radius: var(--ib-rl-sm-s, 7px); font-size: var(--ib-fs-13-5, 13.5px); width: 100%; text-align: left; }
 .ib-proj .ib-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ib-proj .ib-n { margin-left: auto; font-size: var(--ib-fs-12-5, 12.5px); color: var(--muted-foreground); font-variant-numeric: tabular-nums; }
@@ -7764,20 +7767,6 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .pn-inbox .ib-dctl .ib-dctl-b { height: 28px; }
 .pn-inbox .ib-dctl .ib-dctl-layout { color: var(--foreground); }
 .pn-inbox .ib-dctl .ib-dctl-b[data-popup-open] { background: var(--muted); color: var(--foreground); }
-/* The bar under a file's name shows with the pointer on the file, or under a finger while the file or the page moves
-   (ReviewPane). It sits over the header's edge, so showing it moves nothing; hidden, it takes no tap. Sideways scrolling is
-   the code's own and does not need it. */
-.ib-rv-walk [data-diff-hscrollbar] { pointer-events: none; }
-.ib-rv-walk [data-diff-hscrollbar] > div { opacity: 0; transition: opacity 120ms ease-out, background-color 150ms ease; }
-.ib-rv-walk [data-guide-file-shell][data-review-file-moving] [data-diff-hscrollbar]:has(> div) { pointer-events: auto; }
-.ib-rv-walk [data-guide-file-shell][data-review-file-moving] [data-diff-hscrollbar] > div { opacity: 1; }
-@media (hover: hover) {
-  .ib-rv-walk [data-guide-file-shell]:hover [data-diff-hscrollbar]:has(> div) { pointer-events: auto; }
-  .ib-rv-walk [data-guide-file-shell]:hover [data-diff-hscrollbar] > div { opacity: 1; }
-}
-@media (prefers-reduced-motion: reduce) {
-  .ib-rv-walk [data-diff-hscrollbar] > div { transition: background-color 150ms ease; }
-}
 /* The menu portals to the body, outside .pn-inbox. Long titles wrap and many chapters scroll; the count stays. */
 .ib-rj-menu[data-review-jump-menu] { display: flex; flex-direction: column; width: 380px; max-width: calc(100vw - 16px); padding: 6px; border-radius: 12px; border: 1px solid color-mix(in oklch, var(--border) 80%, transparent); box-shadow: 0 16px 40px -12px rgba(0, 0, 0, 0.28); }
 .ib-rj-menu[data-review-jump-menu]:focus-visible { outline: none; }
