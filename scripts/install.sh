@@ -861,31 +861,34 @@ if curl --retry-all-errors --version >/dev/null 2>&1; then
     curl_retry_args+=(--retry-all-errors)
 fi
 
-# download_release_file <url> <file> <max seconds>: each attempt must connect
-# within 30 s, gives up after a minute below 1 byte/s (an update holds its
-# lock while it runs) and after <max seconds> in all, and no retry starts
-# after <max seconds>. When curl still ends in an HTTP/2 error (92), one more
-# run goes over HTTP/1.1. Returns curl's exit status.
+# download_release_file <url> <file> <max seconds> [<retry seconds>]: each
+# attempt must connect within 30 s, gives up after a minute below 1 byte/s (an
+# update holds its lock while it runs) and after <max seconds>, and no retry
+# starts after <retry seconds> (default: <max seconds>). When curl still ends
+# in an HTTP/2 error (92), one more run goes over HTTP/1.1. Returns curl's
+# exit status.
 download_release_file() {
     _dl_status=0
-    curl -fsSL "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "$3" \
+    curl -fsSL "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
         --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
     if [ "$_dl_status" -eq 92 ]; then
         echo "The download hit an HTTP/2 error; trying again over HTTP/1.1..." >&2
         _dl_status=0
-        curl -fsSL --http1.1 "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "$3" \
+        curl -fsSL --http1.1 "${curl_retry_args[@]}" --connect-timeout 30 --max-time "$3" --retry-max-time "${4:-$3}" \
             --speed-limit 1 --speed-time 60 -o "$2" "$1" || _dl_status=$?
     fi
     return "$_dl_status"
 }
 
 tmp_file=$(mktemp)
-# An hour per attempt: a link at about 0.5 Mbit/s still finishes the ~200 MB
-# binary (a slow update must still succeed), and a connection that only
-# trickles stops instead of holding the update without end. Exit 1, not
-# curl's code: the updater gives some codes a meaning.
+# Six hours per attempt, and no retry starts after an hour: a link at about
+# 0.08 Mbit/s (10 KB/s) still finishes the ~200 MB binary (a slow update must
+# still succeed; a retry starts again from zero, so it never helps a slow
+# link), and a connection that only trickles stops instead of holding the
+# update without end. Exit 1, not curl's code: the updater gives some codes a
+# meaning.
 binary_status=0
-download_release_file "$binary_url" "$tmp_file" 3600 || binary_status=$?
+download_release_file "$binary_url" "$tmp_file" 21600 3600 || binary_status=$?
 if [ "$binary_status" -ne 0 ]; then
     rm -f "$tmp_file"
     echo "Could not download ${binary_name} ${latest_tag} (curl exit ${binary_status}). Nothing was changed; try again later." >&2

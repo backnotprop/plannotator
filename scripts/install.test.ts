@@ -2554,6 +2554,31 @@ describe.skipIf(process.platform === "win32" || !Bun.which("node"))(
       }
     });
 
+    // A retry starts the ~200 MB binary again from zero, so it never helps a
+    // slow link: one attempt gets 6 h (a 1 h cap failed every update below
+    // about 58 KB/s), while no retry starts after 1 h. The .sha256 keeps 120 s.
+    test("the binary attempt cap (6 h) and its retry window (1 h) are separate; the checksum keeps 120 s", () => {
+      const sandbox = setupInstallSandbox({ gh: "pass-all", binary });
+      const log = join(sandbox.home, "curl.log");
+      const result = runInstallSh(sandbox, args, { STUB_CURL_LOG: log, STUB_DOWNLOAD_FAIL: "92" });
+      expect(result.code).toBe(0);
+      const calls = readFileSync(log, "utf8").trim().split("\n");
+      const binaryCalls = calls.filter((c) => c.includes("/releases/download/") && !c.endsWith(".sha256"));
+      const checksumCalls = calls.filter((c) => c.includes("/releases/download/") && c.endsWith(".sha256"));
+      expect(binaryCalls).toHaveLength(2);
+      for (const call of binaryCalls) {
+        expect(call).toContain("--max-time 21600 --retry-max-time 3600");
+      }
+      expect(checksumCalls.length).toBeGreaterThan(0);
+      for (const call of checksumCalls) {
+        expect(call).toContain("--max-time 120 --retry-max-time 120");
+      }
+
+      const cmd = readScript("install.cmd");
+      expect(cmd).toContain('set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 ');
+      expect(cmd).toContain('set "CURL_SUM_LIMITS=--connect-timeout 30 --max-time 120 --retry-max-time 120"');
+    });
+
     test("a download that keeps failing stops cleanly: old binary kept, no temp file left, no HTTP/1.1 run for other errors", () => {
       const r = run({ STUB_DOWNLOAD_FAIL: "56" });
       expect(r.code).toBe(1);

@@ -793,14 +793,15 @@ REM (curl 7.71+) also retries what plain --retry treats as final, such as an
 REM HTTP/2 stream error (curl 92); the curl.exe of an older Windows rejects
 REM it, so it gets --retry alone. The probe puts the option before --version,
 REM which ends curl's option parsing. Each attempt must connect within 30 s,
-REM gives up after a minute below 1 byte/s and after an hour in all (the
-REM binary is about 200 MB, so a link at about 0.5 Mbit/s still finishes),
-REM and when curl still ends in an HTTP/2 error, one more run goes over
-REM HTTP/1.1.
+REM gives up after a minute below 1 byte/s and after six hours (the binary
+REM is about 200 MB, so a link at about 0.08 Mbit/s still finishes; a retry
+REM starts again from zero, so it never helps a slow link), no retry starts
+REM after an hour, and when curl still ends in an HTTP/2 error, one more run
+REM goes over HTTP/1.1.
 set "CURL_RETRY=--retry 3 --retry-delay 2"
 curl --retry-all-errors --version >nul 2>&1
 if !ERRORLEVEL! equ 0 set "CURL_RETRY=!CURL_RETRY! --retry-all-errors"
-set "CURL_LIMITS=--connect-timeout 30 --max-time 3600 --retry-max-time 3600 --speed-limit 1 --speed-time 60"
+set "CURL_LIMITS=--connect-timeout 30 --max-time 21600 --retry-max-time 3600 --speed-limit 1 --speed-time 60"
 set "TEMP_FILE=%TEMP%\plannotator-%RANDOM%.exe"
 curl -fsSL !CURL_RETRY! !CURL_LIMITS! "!BINARY_URL!" -o "!TEMP_FILE!"
 set "DL_STATUS=!ERRORLEVEL!"
