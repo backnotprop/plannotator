@@ -221,6 +221,30 @@ describe('register', () => {
     expect(seen[0].tool_input).toEqual({ command: 'ls' })
   })
 
+  // CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS (skip-rm-prompts.ts),
+  // with the engine's own `$`: the call's verdict reaches the mod's tool.check
+  // hook, and its removal prompt in bypass mode is answered with allow, unless
+  // the person's settings hold an ask rule for rm.
+  for (const [name, settings, answered] of [
+    ['answered with allow', {}, true],
+    ["left to the person's ask rule", { permissions: { ask: ['Bash(rm *)'] } }, false],
+  ] as const) {
+    test(`the variable set, in bypass mode: a removal prompt is ${name}`, async ($: any, on: any) => {
+      world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+      on('settings.read', () => ({ value: settings }))
+      const command = 'rm -rf t/logs/*/*'
+      on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+      on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
+      await $.session.start(SESSION)
+
+      const verdict = await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+      const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
+
+      expect(verdict.decision).toBe('ask')
+      expect(answer.decision).toEqual(answered ? { behavior: 'allow' } : { behavior: 'deny', message: 'beneath' })
+    })
+  }
+
   test('the decision arrives later as a plugin turn', async ($: any, on: any) => {
     const w = world(on)
     await $.session.start(SESSION)
@@ -624,6 +648,22 @@ describe('register', () => {
   const firstTurn = { answer: 'done', durationMs: 5, isAborted: false, reason: 'answer' as const }
   const SUMMARY_ROWS = [{ role: 'user', text: 'Summary: the handler is refactored.', toolUses: [] }]
   const skippedOf = (logs: string[]) => logs.filter((line) => line.startsWith('skipped: '))
+
+  // Under the guard the mod's Bash permission hook is passed by like every
+  // classic.* hook: the removal prompt stays exactly as it is today.
+  test('under the guard, a removal prompt in bypass mode with the variable set is left to the dialog', { plugins: [GUARD] }, async ($: any, on: any) => {
+    world(on, { env: { CLAUDE_CODE_EVEN_MORE_DANGEROUSLY_SKIP_PERMISSIONS: '1' } })
+    on('settings.read', () => ({ value: {} }))
+    const command = 'rm -rf t/logs/*/*'
+    on('tool.check', () => ({ decision: 'ask', reason: "Dangerous rm operation detected: '/work/t/logs/*/*'" }))
+    on('classic.PermissionRequest', () => ({ decision: { behavior: 'deny', message: 'beneath' } }))
+    await $.session.start(SESSION)
+
+    await $.tool.check({ tool: 'Bash', input: { command }, tool_use_id: 'toolu_rm' })
+    const answer = await $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: { command }, permission_mode: 'bypassPermissions' })
+
+    expect(answer.decision).toEqual({ behavior: 'deny', message: 'beneath' })
+  })
 
   test('under the guard, the mod has no prompt.context or classic.SessionStart hook for Claude Code to report skipped', { plugins: [GUARD] }, async ($: any, on: any) => {
     const w = world(on, { files: withRegistry(), fetch: inbox(TOOLS, []) })
