@@ -54,8 +54,9 @@
  *     between files, quiet words on that row, the comments column's fill, and
  *     a file's scrollbar only under the pointer.
  * 12. Every changed file stays in the review whatever the tree can hold; the
- *     folded sheets (comments, Files) cover the diff and nothing else; the
- *     controls' row and the foot on long words.
+ *     folded sheets (comments, Files) cover the diff and nothing else, but a
+ *     phone's Comments takes the whole window; the controls' row and the foot
+ *     on long words.
  *
  * Shots land in PLANNOTATOR_E2E_PROOF_DIR/pull-requests (desktop light and
  * dark at 1440, phone at 390), and a walkthrough video (webm) when
@@ -1561,8 +1562,8 @@ test('every changed file stays in the review: rows for what the tree cannot hold
   }
 });
 
-test('the sheets cover the diff and nothing else, at 390, 800 and 1100; on a phone the Files sheet opens the same tree', async ({ browser }) => {
-  for (const width of [1100, 800, 390]) {
+test('the sheets cover the diff and nothing else at 800 and 1100, a phone\'s Comments the whole window; on a phone the Files sheet opens the same tree', async ({ browser }) => {
+  for (const width of [1100, 800]) {
     const { context, page } = await stubbedReview(browser, width, COLLIDING_PATHS_DIFF);
     try {
       const review = page.locator('[data-pull-review]');
@@ -1583,6 +1584,32 @@ test('the sheets cover the diff and nothing else, at 390, 800 and 1100; on a pho
         }).length,
       );
       expect(uncovered).toBe(0);
+    } finally {
+      await context.close();
+    }
+  }
+
+  // A phone's Comments sheet takes the whole window, the page hidden under it; Close gives focus back to the button.
+  {
+    const { context, page } = await stubbedReview(browser, 390, COLLIDING_PATHS_DIFF);
+    try {
+      const review = page.locator('[data-pull-review]');
+      const button = review.locator('.ib-vcomments');
+      await button.click();
+      const panel = review.locator('.ib-gpanel');
+      await expect(panel).toBeVisible();
+      const sheet = (await panel.boundingBox())!;
+      const viewport = page.viewportSize()!;
+      expect(Math.abs(sheet.x)).toBeLessThanOrEqual(1);
+      expect(Math.abs(sheet.y)).toBeLessThanOrEqual(1);
+      expect(Math.abs(sheet.width - viewport.width)).toBeLessThanOrEqual(1);
+      expect(Math.abs(sheet.height - viewport.height)).toBeLessThanOrEqual(1);
+      await expect(review.locator('.ib-vhead')).toBeHidden();
+      await expect(review.locator('.ib-gbody')).toBeHidden();
+      await expect(panel.getByRole('button', { name: 'Close the comments' })).toBeFocused();
+      await panel.getByRole('button', { name: 'Close the comments' }).click();
+      await expect(review.locator('.ib-vhead')).toBeVisible();
+      await expect(button).toBeFocused();
     } finally {
       await context.close();
     }

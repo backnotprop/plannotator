@@ -7713,6 +7713,16 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
   .pn-inbox .ib-rv-jump { height: 44px; width: 100%; padding: 0 10px; border-radius: 8px; border: 1px solid var(--border); background: var(--card); color: var(--foreground); font-size: var(--ib-fs-16-in, 16px); }
   .ib-review .ib-vhead .ib-from { display: none; }
   .ib-review .ib-vhead .ib-fn { flex: 1; }
+  /* Comments: the whole screen, one row at its top. The review stays mounted, hidden under it, so Close finds the page
+     where it was (the list under an open thread's way). */
+  .pn-inbox .ib-viewer.ib-review.ib-fold.ib-panel-open .ib-gpanel { position: fixed; top: 0; left: 0; right: 0; bottom: calc(100% - var(--ib-vvh, 100%)); width: auto; z-index: 8; border-left: 0; box-shadow: none; padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
+  .ib-review.ib-fold.ib-panel-open > :not(.ib-rsplit), .ib-review.ib-fold.ib-panel-open > .ib-rsplit > :not(.ib-gpanel) { visibility: hidden; }
+  .ib-review.ib-fold .ib-sheet-h { height: 52px; padding: 0 4px 0 20px; font-size: var(--ib-fs-15, 15px); }
+  /* Each card's Edit and Delete: 44 px targets in a row no taller, the outer icon under the sheet's close. */
+  .ib-review .ib-gpanel [data-annotation-panel] .ml-auto { margin-right: -16px; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button { display: grid; place-items: center; width: 44px; height: 44px; margin-block: -10px; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] .ml-auto button::before { content: none; }
+  .pn-inbox .ib-review .ib-gpanel [data-annotation-panel] textarea + div button { height: 44px; min-width: 44px; padding-inline: 12px; }
   .ib-rvcard { padding: 12px 14px 14px; }
   .pn-inbox .ib-rvc-foot .ib-btn { min-height: 44px; }
 }
@@ -8144,7 +8154,8 @@ dialog.ib-zx .ib-listcol.ib-zx-list { position: relative; inset: auto; visibilit
 .ib-review.ib-prreview.ib-railfold .ib-rsplit { grid-template-columns: minmax(0, 1fr); position: relative; }
 .ib-prreview.ib-railfold .ib-rrail { display: none; }
 /* A folded sheet covers the diff and nothing else: its containing block is the diff's grid area, so the layers, the
-   scope, Split | Unified, Global comment and Next layer stay on screen and in reach, on a phone too. */
+   scope, Split | Unified, Global comment and Next layer stay on screen and in reach. A phone's Comments sheet takes
+   the whole window instead (the phone media query's .ib-review rules); the Files sheet still covers only the diff. */
 .ib-review.ib-prreview.ib-fold.ib-panel-open .ib-gpanel { grid-column: -2 / -1; grid-row: 2 / 3; padding-bottom: 0; clip-path: inset(0 0 0 -64px); }
 .pn-inbox .ib-prreview .ib-vhead .ib-vfiles { flex: none; white-space: nowrap; }
 /* Sidebar and page apart, on this page only (the owner on the 800 px picture): the review app's rows of layers sit on

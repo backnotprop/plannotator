@@ -26,6 +26,7 @@
  * window's storage per layer and scope until the verdict goes.
  */
 import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { GuideReaderPart, PanePart, PullAllFilesPart, PullRepoFilePart, ReaderPart } from '../lazyParts';
 import { buildGuideSnapshot } from '@plannotator/core/guide-format';
 import { patchBlobIds, type DiffFile } from '@plannotator/core/diff-files';
@@ -45,6 +46,7 @@ import { DiffStyleSwitch } from '../components/DiffStyleSwitch';
 import { SidebarTrigger } from '../shell/sidebar';
 import { useNarrowerThan } from '../narrower';
 import { usePhone } from '../phone';
+import { holdBarAfterClose, usePhoneCommentsSheet } from '../components/phoneCommentsSheet';
 import { VerdictKeys, verdictOf } from '../reviewVerdict';
 import { OpenInCodeSpans, OpenInFile } from '../components/OpenIn';
 import { REVIEW_FOLD_PANEL_BELOW } from '../components/ReviewPane';
@@ -501,6 +503,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
   }, [phone, diffBody]);
   const [sheet, setSheet] = useState(false);
   const sheetId = useId();
+  const sheetCloseRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     if (!folded) setSheet(false);
   }, [folded]);
@@ -522,9 +525,14 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     if (filesSheet) railRef.current?.querySelector<HTMLElement>('[data-review-files] button, [data-repo-file-tree] button, [data-pull-layer-row] button')?.focus({ preventScroll: true });
   }, [filesSheet]);
   const closeComments = () => {
-    setSheet(false);
+    // At once: on a phone the button can take focus only once the page shows again.
+    flushSync(() => setSheet(false));
     sheetButton.current?.focus({ preventScroll: true });
+    if (phone) holdBarAfterClose(sheetButton.current);
   };
+  // A phone's Comments sheet covers the window: focus starts on its close, the selection's bar goes, and Escape from
+  // the hidden page closes it first.
+  usePhoneCommentsSheet(phone && sheet, sheetCloseRef, closeComments);
   const closeFiles = () => {
     setFilesSheet(false);
     filesButton.current?.focus({ preventScroll: true });
@@ -560,6 +568,11 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
     const moved = railRef.current?.contains(held) ? filesButton.current : panelRef.current?.contains(held) ? sheetButton.current : held.matches('[data-pull-review-files-button]') ? first(railRef.current) : held.matches('.ib-vcomments') ? first(panelRef.current) : null;
     moved?.focus({ preventScroll: true });
   }, [phone, folded]);
+  // The sheet covers a phone's diff: a comment chosen in it closes it, to show the comment's lines (as ReviewPane).
+  const showFromPanel = (id: string) => {
+    showComment(id);
+    if (phone) setSheet(false);
+  };
   // A global comment chosen in the guide: selected in the panel, and the folded panel opens on it (as ReviewPane).
   const showGlobalComment = (id: string) => {
     setSelectedId(id);
@@ -947,7 +960,7 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
               <b>Comments</b>
               <span className="ib-mut">{comments.length}</span>
               <span className="ib-sp" />
-              <button type="button" className="ib-iconbtn" onClick={closeComments} aria-label="Close the comments">
+              <button ref={sheetCloseRef} type="button" className="ib-iconbtn" onClick={closeComments} aria-label="Close the comments">
                 <Icon name="x" />
               </button>
             </div>
@@ -961,10 +974,10 @@ function LayerReview({ model, modelError, stackId, layerKey, scope, onLayer, onB
             blocks={NO_BLOCKS}
             codeAnnotations={comments}
             codeAnnotationNote={(c) => (here.includes(c) ? null : 'Written on older code')}
-            onSelect={showComment}
+            onSelect={showFromPanel}
             onDelete={remove}
             selectedId={selectedId}
-            onSelectCodeAnnotation={showComment}
+            onSelectCodeAnnotation={showFromPanel}
             onDeleteCodeAnnotation={remove}
             onEditCodeAnnotation={readerComments ? (id, updates) => {
               const before = comments.find((c) => c.id === id);
