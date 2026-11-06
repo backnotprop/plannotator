@@ -8,8 +8,9 @@
  * Host-neutral: everything comes through `host` (ShapeHost, types.ts). Lifted
  * from the approved prototype; what changed and why is in the PR.
  *
- * Keys: Esc only (owner-approved): it closes the panel, or skips the drawing
- * while it plays. The composer, lightbox and popouts take their own Esc first.
+ * Keys: Esc only (owner-approved): it closes the panel, stops following an
+ * example, or skips the drawing while it plays. The composer, lightbox and
+ * popouts take their own Esc first.
  */
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -47,6 +48,7 @@ import { ShapeKnow } from './ShapeKnow';
 import { ShapeChanged, openShapeReview } from './ShapeChanged';
 import { ShapeCode, ShapePatch, type ShapeFileTarget } from './ShapeCode';
 import { RefList, RefPeek, RefsCtx, shapeRefPicture, type RefsState } from './refs';
+import { useShapeFollow } from './ShapeFollow';
 import { CodeSpanContext } from '../LocalLinkContext';
 import { ShapeInline } from './inline';
 import { boxNoteInput, captureBox, pictureRect, placeBox, readBox, useBoxDrag, type KeptBox, type ShapeBoxSelection } from './boxSelect';
@@ -236,6 +238,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const [file, setFile] = useState<ShapeFileTarget | null>(null);
   const [codeNotes, setCodeNotes] = useState<CodeAnnotation[]>([]);
   const [copied, setCopied] = useState(false);
+  // The How it works drawing, for "Follow an example" (its examples light their path on it).
+  const [howBoard, setHowBoard] = useState<HTMLElement | null>(null);
 
   const stageRef = useRef<HTMLDivElement>(null);
   const timers = useRef<number[]>([]);
@@ -445,6 +449,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   }, [codeView, openCode, openCodeTarget]);
 
   // Esc: close the panel; otherwise skip the drawing while it plays.
+  const stopFollowRef = useRef<(() => void) | null>(null);
   useEffect(() => {
     const on = (e: KeyboardEvent) => {
       if (e.key !== 'Escape' || e.defaultPrevented || target || viewer || boxDragging.current) return;
@@ -468,6 +473,12 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
       if (moreRef.current) {
         e.preventDefault();
         toggleMoreRef.current();
+        return;
+      }
+      // Following an example is the same: Esc comes back to the board before it closes anything.
+      if (stopFollowRef.current) {
+        e.preventDefault();
+        stopFollowRef.current();
         return;
       }
       if (Date.now() > drawingUntil.current) return;
@@ -697,7 +708,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
   const onShapeClickCapture = (e: React.MouseEvent) => {
     if (!panel) return;
     const t = (e.nativeEvent.composedPath()[0] ?? e.target) as Element;
-    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, .shp-pill, .shp-general')) return;
+    if (t instanceof Element && t.closest('.shp-dock, .shp-rb, .shp-pill, .shp-general, .shp-ex-card')) return;
     // With the box: a composer is drawn in a portal, and its clicks reach here through React, but they are not on the
     // board (a box dragged beside an open panel opens one). `e.target`: a click in the drawing's shadow root is its host.
     if (boxSelect && (!(e.target instanceof Node) || !e.currentTarget.contains(e.target))) return;
@@ -864,6 +875,21 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     }
   };
 
+  const follow = useShapeFollow({
+    examples: version?.views.how?.examples,
+    board: howBoard,
+    active: view === 'how',
+    phone,
+    reduce,
+    surface: rootEl,
+    onCode: (at) => void openCodeTarget(at),
+    canOpen: (path) => !!host.readFile && isShapeProjectPath(path),
+    panel: !!panel,
+    // Only the Annotate button's choice: a host without it is always annotating, and its picture still steps.
+    annotating: readFirst && annotating,
+  });
+  stopFollowRef.current = follow.stop;
+
   const copyPrompt = async () => {
     const text = host.resumePrompt?.(id);
     if (!text) return;
@@ -903,6 +929,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
           onHoverMark={phase === 'leaving' ? () => {} : hoverMark}
           onPickMark={(el, text) => pickMark(el, v, text)}
           onCode={phase === 'leaving' ? undefined : openCodeTarget}
+          onBoard={v === 'how' && phase !== 'leaving' ? setHowBoard : undefined}
         />
       );
     }
@@ -958,7 +985,7 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
     <RefsCtx.Provider value={refsState}>
     {/* While annotating, a click on the board's words picks them: a code span is only words. */}
     <CodeSpanContext.Provider value={annotating ? null : codeSpan}>
-      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}`}>
+      <div ref={attachRoot} className={`shp-root${phone ? ' phone' : ''}${panel ? ' panel-open' : ''}${follow.sheet ? ' follow-sheet' : ''}`}>
         <RefHoverCards rootRef={rootRef} />
 
         <section className="shp-surface" aria-label="Shape" onClickCapture={onShapeClickCapture}>
@@ -1043,6 +1070,11 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
                 </button>
               ))}
             </div>
+            {follow.button && (
+              <div className="shp-tgroup" role="group" aria-label="Examples">
+                {follow.button}
+              </div>
+            )}
             {view !== 'code' && !readFirst && !phone && (
               <div className="shp-tstrip">
                 <AnnotationToolstrip
@@ -1133,6 +1165,8 @@ export function ShapeSurface({ host, id, onClose, CodeGuide, CodeHoverCard, rend
               )}
             </div>
           </div>
+
+          {follow.card}
 
           {hoverRect && <div className="shp-pin-hover" style={{ left: hoverRect.left - 4, top: hoverRect.top - 3, width: hoverRect.width + 8, height: hoverRect.height + 6 }} />}
 

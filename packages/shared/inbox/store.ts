@@ -604,6 +604,11 @@ export interface InboxDeliveryPresence {
    * saved for the agent's next read. Absent: never.
    */
   uncertain?(session: string, itemId: string): boolean;
+  /**
+   * Whether the session's connection claimed an item and will never deliver it (its wake was killed while it
+   * delivered): the row says it was not delivered, and it may move to another session. Absent: never.
+   */
+  stuck?(session: string, itemId: string): boolean;
   /** The server's wait before an item goes into a busy session's turn by itself (`INBOX_AUTO_SEND_AFTER_MS`). Absent: never. */
   autoSendAfterMs?: number;
   /**
@@ -2063,6 +2068,7 @@ export class InboxStore {
     };
     const askerLive = (session: string): boolean => (presence ? presence.askerLive(session) : true);
     const uncertain = (session: string | null, itemId: string): boolean => !!session && presence?.uncertain?.(session, itemId) === true;
+    const stuck = (session: string | null, itemId: string): boolean => !!session && presence?.stuck?.(session, itemId) === true;
     // How long it waited on a busy session, and whether it goes in by itself (approval "inbox-busy-agent-reply"):
     // the server's clock while it waits, the item's own record once the Inbox marked it.
     const waitOf = (item: InboxMessage, session: string | null) => {
@@ -2108,6 +2114,7 @@ export class InboxStore {
           askedBy.author.session !== to.session;
         const decision = inboxDeliveryState({
           delivered: !!last.delivery,
+          stuck: !last.delivery && stuck(lastTo.session, last.id),
           undelivered: !last.delivery && !askerLive(lastTo.session),
           askerEnded: false,
           wakes: !uncertain(lastTo.session, last.id),
@@ -2138,6 +2145,7 @@ export class InboxStore {
       const askerEnded = !resolved && asking?.wakes === true && !!askingAuthor?.session && !askerLive(askingAuthor.session);
       const decision = inboxDeliveryState({
         delivered: !!deliveredAt,
+        stuck: replyWaiting && stuck(replySession, last.id),
         undelivered: false,
         askerEnded,
         wakes: (wakingSession !== null || (askedSession !== null && connection != null)) && !uncertain(replySession, last.id),
