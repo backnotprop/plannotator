@@ -768,6 +768,12 @@ export interface InboxMessage {
    * tag) and no longer moves the thread. Absent on every other message.
    */
   handoff?: InboxHandoff | null;
+  /**
+   * A person's reply whose `to` took the place of a session that had ended (the recipient pill, or Send to another
+   * session). Until an agent writes again the person's next reply follows its `to`. Set only by the server, which
+   * checks the session really ended; a reply aimed elsewhere while the asker is live does not carry it.
+   */
+  took_over?: boolean;
 }
 
 /** A hand-off a person's reply carries (`InboxMessage.handoff`). */
@@ -779,7 +785,7 @@ export interface InboxHandoff {
   at: string;
   /** The Undo window passed: the new owner and the former one are handed it. */
   settled_at?: string | null;
-  /** Taken back inside the Undo window: the reply went as an Ask instead. */
+  /** Taken back inside the Undo window (the reply went as an Ask instead), or moved back to the former owner later. */
   undone_at?: string | null;
 }
 
@@ -1004,6 +1010,8 @@ export interface InboxLaunchRecord {
   agent: InboxLaunchAgent;
   /** The host's own short id (`claude attach <ref>`); null until it started. */
   session_ref: string | null;
+  /** The session it started as, which the root's `to` stops naming once the root moves. Absent until it started, and on an older launch (`inboxLaunchedSession`). */
+  session?: string;
   /** The folder it runs in: the project root, or the scratch folder the Inbox made (its real path). */
   folder: string;
   /** A new scratch folder (`<scratch root>/<slug>`): Delete purges and removes it. Never a project folder. */
@@ -1052,6 +1060,8 @@ export interface InboxRun {
   untrusted: boolean;
   /** With `untrusted`: the folder is the home folder, which is never trusted (the how-to says to start inside it). */
   home_folder?: true;
+  /** With `untrusted`: trust here would cover home (a repo rooted there) or the folder is `/`; the how-to says to start in a project with its own repo. Wins over `home_folder`, which home in such a repo carries too, for a window that predates this. */
+  trust_covers_home?: true;
   /** With `untrusted`, for the machine's owner when the host can do it: Trust folder, and what would run once trusted. */
   trust?: { warning: string | null };
   /** `claude attach <ref>` from the folder, for Copy; null before the session exists. */
@@ -1520,6 +1530,11 @@ export interface InboxListRow extends InboxThreadSummary {
   /** The thread's name (send_message's `thread`), or null for a session's default thread. */
   thread_name: string | null;
   section: InboxSectionId;
+  /**
+   * The session this thread would reach has ended, as the thread's own note and the delivery line know it (only a
+   * host that can tell: a waking connection, not heard from past the grace). Never in Quiet. Absent otherwise.
+   */
+  session_ended?: boolean;
   /**
    * Waiting on the person or new to them: drawn bold. Not for a row in New only
    * for the person's own unsent words or comments (`unsent`).
