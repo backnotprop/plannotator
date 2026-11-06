@@ -3,7 +3,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import { dirname, join } from 'node:path';
 import { gate, globMatch, isIgnoredPath, loadFiles, type ChangedFile, type SystemModel } from '../src/index.ts';
 import { gateRepo, load, parseNameStatus } from '../src/node/index.ts';
-import { drawingDir, edited, fixturesDir, git, tempDir } from './helpers.ts';
+import { drawingDir, edited, fixturesDir, git, isolateGitConfig, tempDir } from './helpers.ts';
 
 let plannotator: SystemModel;
 beforeAll(async () => {
@@ -126,6 +126,7 @@ describe('the gate rules', () => {
 });
 
 describe('gateRepo on a real repo', () => {
+  isolateGitConfig();
   const cleanups: (() => void)[] = [];
   afterEach(() => cleanups.splice(0).forEach((f) => f()));
 
@@ -169,6 +170,12 @@ describe('gateRepo on a real repo', () => {
     expect(cited).toMatchObject({ touched: { parts: ['api'], flows: ['use'] }, wake: false });
     // the whole range at once: every reason, in git's path order
     expect((await gateRepo({ root, from: base, to: 'HEAD', model })).why.map((w) => w.reason).sort()).toEqual(['added', 'deleted', 'renamed', 'watched']);
+  });
+
+  test('a ref git could read as an option is refused before git runs', async () => {
+    const model = loadFiles(edited('system.yaml', (s) => s)).model!;
+    await expect(gateRepo({ root: drawingDir, from: '--output=/dev/null', to: 'HEAD', model })).rejects.toThrow('is not a git ref');
+    await expect(gateRepo({ root: drawingDir, from: 'HEAD', to: '-p', model })).rejects.toThrow('is not a git ref');
   });
 
   test('parseNameStatus reads renames, copies and type changes', () => {

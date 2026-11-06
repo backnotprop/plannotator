@@ -1,6 +1,6 @@
 import { gate, type ChangedFile, type GateResult } from '../gate/gate.ts';
 import type { SystemModel } from '../format/types.ts';
-import { git } from './git.ts';
+import { checkRef, git } from './git.ts';
 
 /** Parse `git diff --name-status -M -z`: a status, then one path, or two for a rename or a copy. */
 export function parseNameStatus(out: string): ChangedFile[] {
@@ -26,6 +26,6 @@ export function parseNameStatus(out: string): ChangedFile[] {
 
 /** The gate over git: what changed from `from` to `to` in the repo at `root` (read only). */
 export async function gateRepo(o: { root: string; from: string; to: string; model: SystemModel }): Promise<GateResult> {
-  const out = await git(o.root, ['diff', '--name-status', '-M', '-z', '--no-color', '--no-ext-diff', o.from, o.to]);
+  const out = await git(o.root, ['diff', '--name-status', '-M', '-z', '--no-color', '--no-ext-diff', '--end-of-options', checkRef(o.from), checkRef(o.to)]);
   return gate({ files: parseNameStatus(out), model: o.model });
 }

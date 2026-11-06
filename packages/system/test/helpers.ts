@@ -1,7 +1,8 @@
+import { afterAll, beforeAll } from 'bun:test';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { dirname, join, resolve } from 'node:path';
 import type { SystemFiles } from '../src/index.ts';
 
 export const repoRoot = resolve(import.meta.dir, '..', '..', '..');
@@ -14,13 +15,37 @@ export function tempDir(): { dir: string; done: () => void } {
   return { dir, done: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** git in a temp repo, with a fixed identity and no signing, so no user config is read or needed. */
+/** git in a temp repo, with a fixed identity and no signing, and no global or system config read. */
 export function git(root: string, ...args: string[]): string {
   return execFileSync(
     'git',
     ['-C', root, '-c', 'user.name=Maya Chen', '-c', 'user.email=maya@example.com', '-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args],
-    { env: process.env, encoding: 'utf8' },
+    { env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }, encoding: 'utf8' },
   );
+}
+
+/** For the package's own git calls in this file's tests: no global or system git config, restored after. */
+export function isolateGitConfig(): void {
+  const keys = ['GIT_CONFIG_GLOBAL', 'GIT_CONFIG_NOSYSTEM'] as const;
+  const before = keys.map((k) => process.env[k]);
+  beforeAll(() => {
+    process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+    process.env.GIT_CONFIG_NOSYSTEM = '1';
+  });
+  afterAll(() =>
+    keys.forEach((k, i) => {
+      if (before[i] === undefined) delete process.env[k];
+      else process.env[k] = before[i];
+    }),
+  );
+}
+
+/** Write files (text or bytes) under `root`, making folders as needed. */
+export function writeTree(root: string, files: Record<string, string | Uint8Array>): void {
+  for (const [rel, body] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), body);
+  }
 }
 
 /** The smallest drawing that loads clean: two scopes, three parts, one line, two sheets. */
