@@ -53,7 +53,7 @@ import {
   sweepInboxUploads,
 } from "@plannotator/shared/inbox/uploads";
 import type { InboxLaunch } from "./inbox-launch";
-import type { createInboxLiveSessions } from "./inbox-sessions";
+import { replacesEndedAsker, takesOver, thereInThread, type createInboxLiveSessions } from "./inbox-sessions";
 
 /** How many characters of a reply draft the Drafts page shows. */
 const INBOX_REPLY_PREVIEW_MAX = 160;
@@ -78,7 +78,7 @@ export function createInboxCompose(options: {
   readBody: (req: Request) => Promise<Record<string, unknown>>;
   json: (body: unknown, status?: number) => Response;
   /** Launch (inbox-launch.ts): `to: { launch: { agent, project_id } }` starts the agent. Absent: that form is refused. */
-  launch?: Pick<InboxLaunch, "enabled" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
+  launch?: Pick<InboxLaunch, "enabled" | "resumes" | "gone" | "target" | "prepare" | "acceptTrust" | "abandon" | "begin" | "composeBlock">;
   /** A tailnet request from someone other than this computer's owner: never starts an agent (`to.launch`). Absent: nobody is. */
   isGuest?: (req: Request, via: "local" | "tailnet") => boolean;
   now?: () => Date;
@@ -247,7 +247,16 @@ export function createInboxCompose(options: {
     const message = store.message(messageId);
     if (!message) throw new InboxError("message_not_found", `No message ${messageId}.`);
     const target = live.replyTarget(message.thread_id, body.to);
-    const next = store.readdressMessage(messageId, target);
+    // A move needs the session it waits on to have ended; `takesOver` says if it takes the thread too.
+    const asked = message.reply_to ? store.message(message.reply_to) : null;
+    const askedWakes = asked?.author.kind === "agent" && asked.wakes === true ? asked.author.session : null;
+    const waitsOn = message.to?.session ?? askedWakes;
+    const there = thereInThread(live, options.launch, message.thread_id);
+    const next = store.readdressMessage(messageId, target, {
+      targetLive: !!waitsOn && there.askerLive(waitsOn),
+      askerEnded: replacesEndedAsker(asked, there),
+      tookOver: takesOver(store, message.thread_id, asked, waitsOn, there),
+    });
     return json({ message: next, row: store.listRow(next.thread_id) });
   };
 
