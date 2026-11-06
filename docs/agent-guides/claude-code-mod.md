@@ -77,22 +77,29 @@ new one for the current id, restoring that session's open reviews. Only an end
 of the session the instance serves disposes it (`disposesOnSessionEnd`,
 `self-heal.ts`): no `agentId`, and a `sessionId` that is the instance's, the
 one the process is in now (an instance still serving an older id is stale), or
-none (an older engine). `/clear` (whose `session.end` names the id it leaves) and a
-quit still dispose; another session's end (a fork, a side session) or a
-subagent's leaves it running. Seen live: a disposed instance left an idle
-session with nothing polling the Inbox until the person typed. As a safety
-net, a 30 s `$.clock.every` (`MOD_HEAL_EVERY_MS`), started once at the first
-`session.start` the mod runs in, makes a missing or disposed instance again
+none (an older engine). The event decides first, so the dispose (the lease
+release, the hand-off writes) goes out inside the hook's time bound; the
+process's id is asked only when the event names another session. `/clear`
+(whose `session.end` names the id it leaves) and a quit still dispose. The
+rule is defensive: on 2.1.318 `session.end` names this session and carries no
+`agentId`. Seen live: an Inbox reply to an idle session did not go in until the
+person typed, and a disposed instance is one way that happens (nothing polls
+the Inbox). As a safety net, a 30 s `$.clock.every` (`MOD_HEAL_EVERY_MS`),
+armed at the first `session.start` the mod runs in (after the commands and
+the tool, never holding them), makes a missing or disposed instance again
 (through `currentMod`, so never two; one disposed by this session's own
 `session.end` is left for one whole period, since `/clear` moves the id just
 after it). That instance is `healed`: its Inbox link starts without a touch,
 so a live lease another process holds stands. A live instance's Inbox tick
-is armed again when it has not fired for 10 s (`InboxLink.ensureTicking`: the
-engine never re-arms a `$.clock.every` whose call it refused once). With
-`PLANNOTATOR_MOD_DEBUG=1` each `session.end` logs its `sessionId`, `agentId`,
-reason and whether it disposed, a rebuild logs a `self-heal:` line, and each
-reason a waiting reply is not submitted (`inbox: not delivering <id>:
-<reason>`, at most once a minute per reason) is logged. The launch
+that stopped firing (the engine ends an interval at a refused period) is
+armed again at the next look, 30 to 60 s after it stopped
+(`InboxLink.ensureTicking`). The self-heal's own timer, silent for two
+periods, is armed again at the next `turn.complete` (one timer, the old one
+cancelled). With `PLANNOTATOR_MOD_DEBUG=1` each `session.end` logs its
+`sessionId`, `agentId`, reason and whether it disposed, a rebuild or re-arm
+logs a `self-heal:` line, and each reason a waiting reply is not submitted
+(`inbox: not delivering <id>: <reason>`, at most once a minute per reason)
+is logged. The launch
 directory is created owner-only (`umask 077`, `chmod 700`) before `stdin` is
 written; once a decision is delivered its files are removed (`cleanupArgv`),
 except `feedback.md`, which Claude reads afterwards. A launch whose server
@@ -772,4 +779,4 @@ harness: `apps/hook/tests/register.test.ts` via `scripts/test-claude-code-mod.sh
 otherwise try to load; bun skips `apps/hook/tests/` through `pathIgnorePatterns`).
 Typecheck: `apps/hook/hooks/mod/tsconfig.json` (no DOM, no Node; `globals.d.ts`
 declares the few web APIs a hooks module has). `PLANNOTATOR_MOD_DEBUG=1` writes
-`claude-code-mod/debug.log` in the data dir. The Inbox connection is proved against a REAL Inbox in `apps/hook/hooks/mod/inbox.test.ts`: `plannotator inbox --background` under a temp data dir (the compiled binary when `PLANNOTATOR_INBOX_TEST_BINARY` names one, as `.github/workflows/inbox-claude-code.yml` runs it; the CLI from source otherwise) and the mod's own code on a Host of real processes, HTTP and files (`testing/claude-session.ts`, which simulates the conversation the way `register.ts` feeds it): with no registry the tool comes from the bundled list, nothing polls or writes, and the first call starts the Inbox and lands its message, after which the wake polls; the tool carries what the Inbox's `/mcp` offers, `send_message` lands a thread, the window's Send arrives once as a turn with the stable header and the reply verbatim (delivered, then replied), a typed prompt goes first and takes the reply's turn over, `/clear` follows the new id, two processes deliver once, and a dead Inbox is started by the first call with no browser tab. `apps/hook/hooks/mod/inbox-session-end.test.ts` (a real Inbox in process) proves that another session's or a subagent's `session.end` leaves an idle session's wake running, and that the self-heal makes a disposed instance again and the waiting reply goes in once; `self-heal.test.ts` pins the dispose rule and the tick re-arm. `INBOX_PROOF_DIR=<dir>` keeps a transcript per proof. The engine harness (`apps/hook/tests/register.test.ts`) covers the wiring with the engine's own `$`.
+`claude-code-mod/debug.log` in the data dir. The Inbox connection is proved against a REAL Inbox in `apps/hook/hooks/mod/inbox.test.ts`: `plannotator inbox --background` under a temp data dir (the compiled binary when `PLANNOTATOR_INBOX_TEST_BINARY` names one, as `.github/workflows/inbox-claude-code.yml` runs it; the CLI from source otherwise) and the mod's own code on a Host of real processes, HTTP and files (`testing/claude-session.ts`, which simulates the conversation the way `register.ts` feeds it): with no registry the tool comes from the bundled list, nothing polls or writes, and the first call starts the Inbox and lands its message, after which the wake polls; the tool carries what the Inbox's `/mcp` offers, `send_message` lands a thread, the window's Send arrives once as a turn with the stable header and the reply verbatim (delivered, then replied), a typed prompt goes first and takes the reply's turn over, `/clear` follows the new id, two processes deliver once, and a dead Inbox is started by the first call with no browser tab. `apps/hook/hooks/mod/inbox-session-end.test.ts` (a real Inbox in process) proves that another session's or a subagent's `session.end` leaves an idle session's wake running, and that the self-heal makes a disposed instance again and the waiting reply goes in once; `register-self-heal.test.ts` drives the real registered hooks on a fake `$` (the dispose rule, the self-heal armed, rebuilding and armed again, a healed link leaving another process's lease alone), and `self-heal.test.ts` pins the rule and the tick re-arm. `INBOX_PROOF_DIR=<dir>` keeps a transcript per proof. The engine harness (`apps/hook/tests/register.test.ts`) covers the wiring with the engine's own `$`.

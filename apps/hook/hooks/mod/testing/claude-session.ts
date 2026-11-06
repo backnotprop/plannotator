@@ -235,7 +235,9 @@ export class ClaudeSession {
   }
 
   /**
-   * register.ts's self-heal, every `everyMs` (MOD_HEAL_EVERY_MS there): a
+   * A stand-in for register.ts's self-heal (whose wiring
+   * register-self-heal.test.ts proves on the real hooks), every `everyMs`
+   * (MOD_HEAL_EVERY_MS there), for proofs against a real Inbox: a
    * disposed instance is made again for the same session id, quietly (no
    * touch), and a live one's Inbox tick is looked at.
    */

@@ -308,7 +308,11 @@ export const INBOX_POLL_WAIT_MS = 20_000
 export const INBOX_RETRY_MS = { first: 5_000, max: 60_000 } as const
 /** The tick: one per second, as the mod's review watcher. */
 export const INBOX_TICK_MS = 1_000
-/** A tick that has not fired for this long is armed again by the self-heal (`InboxLink.ensureTicking`). */
+/**
+ * A tick seen not firing for at least this long is armed again by the
+ * self-heal (`InboxLink.ensureTicking`). Its looks are MOD_HEAL_EVERY_MS
+ * apart, so a stopped tick is armed again 30 to 60 s after it stopped.
+ */
 const INBOX_TICK_STALL_MS = 10_000
 /** Each reason a reply was not submitted is logged at most this often (`PLANNOTATOR_MOD_DEBUG`). */
 const NOT_DELIVERING_LOG_EVERY_MS = 60_000
@@ -866,9 +870,9 @@ export class InboxLink {
   }
 
   /**
-   * The self-heal's look (self-heal.ts): a tick that has not fired for
-   * INBOX_TICK_STALL_MS (the engine refused one `$.clock.every` call, which
-   * it then never re-arms) is armed again. Never a touch.
+   * The self-heal's look (self-heal.ts): a tick that did not fire between
+   * two looks at least INBOX_TICK_STALL_MS apart (the engine refused one
+   * `$.clock.every` period, which ends the interval) is armed again. Never a touch.
    */
   async ensureTicking(): Promise<void> {
     if (this.disposed) return

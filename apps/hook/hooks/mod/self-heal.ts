@@ -1,13 +1,15 @@
 /**
- * Keeps the session's instance alive while the session is (seen live: an
- * Inbox reply to an idle session never woke it until the person typed).
+ * Keeps the session's instance alive while the session is. Seen live: an
+ * Inbox reply to an idle session never woke it until the person typed; a
+ * disposed instance is one way that happens (nothing makes it again until
+ * the next turn, tool call or command).
  *
  * `session.end` disposes the instance only when it is for the session that
- * instance serves (`disposesOnSessionEnd`): another session's end (a fork, a
- * side session, a subagent) leaves it polling. And while the mod runs here, a
- * slow timer started once at `session.start` (`healAction`) rebuilds an
- * instance that is gone or disposed (nothing else does until the next turn,
- * tool call or command) and re-arms an Inbox tick that stopped firing.
+ * instance serves (`disposesOnSessionEnd`). Defensive: 2.1.318's
+ * `session.end` names this session and carries no `agentId`, but an end
+ * naming another session or a subagent leaves it polling. And while the mod
+ * runs here, a slow timer (`healAction`) rebuilds an instance that is gone or
+ * disposed and re-arms an Inbox tick that stopped firing.
  */
 
 /** How often the self-heal looks at the instance. */
