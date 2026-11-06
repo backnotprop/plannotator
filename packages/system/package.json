@@ -12,6 +12,7 @@
   },
   "scripts": {
     "check": "bun src/node/check-cli.ts",
+    "recipes": "bun src/node/recipes-cli.ts",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "test": "bun test"
   },
