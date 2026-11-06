@@ -320,12 +320,13 @@ test('a comment on the guide\'s diffs: a line and a range, listed beside the gui
   const auth = viewer.locator('[data-guide-file-shell="src/auth.ts"]');
   const added = (line: number) => auth.locator(`[data-line-type="change-addition"][data-column-number="${line}"]`);
   await expect(added(2)).toBeVisible({ timeout: 30_000 });
-  // The file's box is as tall as its lines: no empty band under them (the guided review in a thread, as on the PR page).
+  // The file's box is as tall as its lines and the arrow row after them (32 px): no empty band (the guided review in a
+  // thread, as on the PR page).
   await expect.poll(async () => {
     const box = (await auth.locator('[data-guide-code-view-mounted]').boundingBox())!;
     const rows = await auth.locator('[data-line-type][data-column-number]').evaluateAll((els) => Math.max(...els.map((el) => el.getBoundingClientRect().bottom)));
     return box.y + box.height - rows;
-  }).toBeLessThan(24);
+  }).toBeLessThan(24 + 32);
 
   // A range: drag across the new side's line numbers 2 to 3, as in the review app.
   const from = (await added(2).boundingBox())!;
@@ -643,6 +644,144 @@ test('Split | Unified sits in a tab on the first section card only, switches eve
     await page.emulateMedia({ colorScheme: 'light', reducedMotion: 'no-preference' });
   }
   await page.setViewportSize({ width: 1440, height: 900 });
+  await page.keyboard.press('Escape');
+});
+
+test('a thread\'s guided review with Code review off: arrows open a long file in place, the page scrolls with no box limit, the file header sticks, and a comment on an opened line saves', async () => {
+  const { page, claude } = world;
+  const path = 'src/long.ts';
+  const number = (i: number) => `export const LINE_${i + 1} = ${i + 1};`;
+  const before = Array.from({ length: 900 }, (_, i) => number(i));
+  const after = before.map((line, i) => (i === 40 || i === 700 ? `${line} // edited` : line));
+  const allChanged = before.map((line) => `${line} // changed`);
+  const git = (...args: string[]) => {
+    const run = spawnSync('git', args, { cwd: world.ledger, encoding: 'utf8', env: { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1', GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@example.com', GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@example.com' } });
+    expect(run.status, run.stderr).toBe(0);
+    return run.stdout;
+  };
+  mkdirSync(join(world.ledger, 'src'), { recursive: true });
+  const text = (lines: string[]) => `${lines.join('\n')}\n`;
+  writeFileSync(join(world.ledger, path), text(before));
+  writeFileSync(join(world.ledger, 'src/changed.ts'), text(before));
+  git('add', '-A');
+  git('commit', '-q', '-m', 'long files');
+  writeFileSync(join(world.ledger, path), text(after));
+  writeFileSync(join(world.ledger, 'src/changed.ts'), text(allChanged));
+  const sent = await claude.submitGuide({
+    project_path: world.ledger,
+    thread: 'long-file',
+    subject: 'A long file',
+    patch: git('diff'),
+    body: 'Two edits in a long file, and a file changed through and through.',
+    guide: { title: 'Long', intent: 'Long files.', sections: [{ title: 'Files', overview: 'Both.', diffs: [{ file: path, summary: 'Two edits.' }, { file: 'src/changed.ts', summary: 'Every line.' }] }] },
+  } as never);
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
+  const shell = page.locator(`[data-guide-file-shell="${path}"]`);
+  const box = shell.locator('[data-guide-code-view-mounted]');
+  // Read from the project's own git: Code review is off in this world.
+  const arrow = shell.locator('[data-expand-button][data-expand-down]').first();
+  await expect(arrow).toBeVisible({ timeout: 30_000 });
+
+  const pane = page.locator('.ib-gbody');
+  const scrollTop = () => pane.evaluate((el) => el.scrollTop);
+  const height = async () => (await box.boundingBox())!.height;
+  const closed = await height();
+  const place = await scrollTop();
+  // A box is its content: no band of empty space above the header (the box's 8 px and its border) or under the last
+  // row (those, and the 4 px under a last arrow row).
+  const slack = await box.evaluate((el) => {
+    const outer = el.getBoundingClientRect();
+    const code = el.querySelector('diffs-container')!.getBoundingClientRect();
+    const header = el.querySelector('diffs-container')!.shadowRoot!.querySelector('[data-diffs-header]')!;
+    return { above: code.top - outer.top, below: outer.bottom - code.bottom, line: getComputedStyle(header, '::after').content };
+  });
+  expect(slack.above).toBeLessThanOrEqual(9);
+  expect(slack.below).toBeLessThanOrEqual(13);
+  // The line under a file header shows only while the header is stuck.
+  expect(slack.line).toBe('none');
+  await arrow.click();
+  await expect.poll(height).toBeGreaterThan(closed);
+  expect(await scrollTop()).toBe(place);
+
+  // A comment on a line no hunk has: posted through the store, listed, and no alert.
+  const opened = shell.locator('[data-column-number="20"]').last();
+  await expect(opened).toBeVisible({ timeout: 10_000 });
+  await shell.hover();
+  await opened.click();
+  await page.getByPlaceholder('Leave feedback...').fill('Why this name?');
+  const saved = page.waitForResponse((response) => response.url().includes('/guide/annotations') && response.request().method() === 'POST');
+  await page.getByRole('button', { name: 'Add Comment' }).click();
+  expect((await saved).status()).toBe(200);
+
+  // The whole long file is one box, far taller than any screen: the page scrolls, nothing inside it does.
+  const longShell = page.locator('[data-guide-file-shell="src/changed.ts"]');
+  await longShell.scrollIntoViewIfNeeded();
+  const longBox = longShell.locator('[data-guide-code-view-mounted]');
+  await expect(longBox).toHaveAttribute('data-guide-code-view-mounted', 'true');
+  await expect.poll(async () => (await longBox.boundingBox())!.height).toBeGreaterThan(900 * 20);
+  const middle = await longShell.evaluate((el) => {
+    const page = document.querySelector('.ib-gbody')!;
+    page.scrollTop += el.getBoundingClientRect().top - page.getBoundingClientRect().top + 9000;
+    return page.scrollTop;
+  });
+  await page.waitForTimeout(400);
+  expect(await scrollTop()).toBe(middle);
+  const seen = await longShell.evaluate((el) => {
+    const paneTop = document.querySelector('.ib-gbody')!.getBoundingClientRect().top;
+    const within: Element[] = [];
+    const walk = (node: Element | ShadowRoot) => {
+      for (const kid of Array.from(node.children)) {
+        within.push(kid);
+        if (kid.shadowRoot) walk(kid.shadowRoot);
+        walk(kid);
+      }
+    };
+    walk(el);
+    const scrollers = within.filter((kid) => /auto|scroll/.test(getComputedStyle(kid).overflowY) && kid.scrollHeight > kid.clientHeight + 1);
+    const headerEl = within.find((kid) => kid.hasAttribute('data-diffs-header'))!;
+    const header = headerEl.getBoundingClientRect();
+    const rows = within.filter((kid) => kid.hasAttribute('data-column-number')).map((kid) => kid.getBoundingClientRect());
+    return { scrollers: scrollers.length, headerFromTop: Math.round(header.top - paneTop), headerLine: getComputedStyle(headerEl, '::after').height, rows: rows.length, onScreen: rows.filter((r) => r.top >= paneTop && r.bottom <= window.innerHeight).length };
+  });
+  expect(seen.scrollers).toBe(0);
+  expect(seen.headerFromTop).toBe(0);
+  expect(seen.headerLine).toBe('1px');
+  expect(seen.onScreen).toBeGreaterThan(10);
+  // Pierre's own window: only rows near the viewport are drawn.
+  expect(seen.rows).toBeLessThan(900);
+  await page.keyboard.press('Escape');
+});
+
+test('a guided review whose blobs are nowhere: the first click takes the arrows away, and nothing logged', async () => {
+  const { page, claude } = world;
+  const patch = [
+    'diff --git a/src/gone.ts b/src/gone.ts',
+    `index ${'1'.repeat(10)}..${'2'.repeat(10)} 100644`,
+    '--- a/src/gone.ts',
+    '+++ b/src/gone.ts',
+    '@@ -10,3 +10,3 @@',
+    ' keep',
+    '-old',
+    '+new',
+    ' keep',
+    '',
+  ].join('\n');
+  const sent = await claude.submitGuide({
+    project_path: world.ledger,
+    thread: 'gone-blobs',
+    subject: 'Gone blobs',
+    patch,
+    body: 'A file whose blobs this clone does not have.',
+    guide: { title: 'Gone', intent: 'Gone.', sections: [{ title: 'One', overview: 'One.', diffs: [{ file: 'src/gone.ts', summary: 'One edit.' }] }] },
+  } as never);
+  await page.goto(`${world.url}#thread=${sent.thread_id}&guide=${sent.message_id}`);
+  const shell = page.locator('[data-guide-file-shell="src/gone.ts"]');
+  await expect(shell.locator('[data-column-number]').first()).toBeVisible({ timeout: 30_000 });
+  // Whether a blob is there is known only by asking, and nobody asks before an arrow is opened.
+  const answered = page.waitForResponse((response) => response.url().includes('/guide/file'));
+  await shell.locator('[data-expand-button]').first().click();
+  expect((await answered).status()).toBe(200);
+  await expect(shell.locator('[data-expand-button]')).toHaveCount(0);
   await page.keyboard.press('Escape');
 });
 

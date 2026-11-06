@@ -800,7 +800,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
   const held = order(el);
   const notice = el.querySelector('[data-inbox-notice]')!.textContent;
   expect(notice).toContain('1 new in');
-  // Pin thread from the header's ⋯ menu (Base UI opens on the pointer's press).
+  // Star thread from the header's ⋯ menu (Base UI opens on the pointer's press).
   const more = el.querySelector<HTMLElement>('[data-thread-more]')!;
   await act(async () => {
     more.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, button: 0, pointerType: 'mouse' }));
@@ -809,7 +809,7 @@ test.skipIf(!hasDom)('pinning the open thread leaves the held row order and the 
     more.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, button: 0 }));
     more.click();
   });
-  await until(() => document.querySelector('[data-thread-pin-item]') !== null, 'the Pin thread item');
+  await until(() => document.querySelector('[data-thread-pin-item]') !== null, 'the Star thread item');
   await act(async () => document.querySelector<HTMLElement>('[data-thread-pin-item]')!.click());
   await until(() => el.querySelector(`[data-pinned-row="${first}"]`) !== null, 'the pinned row');
   await wait(150);
