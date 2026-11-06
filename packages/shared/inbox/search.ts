@@ -73,6 +73,7 @@ export {
   INBOX_SEARCH_GROUPS,
   INBOX_SEARCH_LIMIT_MAX,
   INBOX_SEARCH_RECENT_THREADS,
+  INBOX_SEARCH_SORTS,
   INBOX_SEARCH_STATUSES,
   type InboxSearchAnswer,
   type InboxSearchFileRow,
@@ -83,6 +84,7 @@ export {
   type InboxSearchProjectRow,
   type InboxSearchQuery,
   type InboxSearchRow,
+  type InboxSearchSort,
   type InboxSearchStatus,
   type InboxSearchThreadRow,
 } from "@plannotator/core/inbox-search";
@@ -1040,7 +1042,9 @@ export class InboxSearchIndex {
         const admitted = admit(doc);
         if (!admitted) continue;
         const archived = admitted.facts?.archived ?? false;
-        groups[admitted.group].push({ doc: hit.doc, score: score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at) });
+        // Newest: by the latest message alone (a thread's latest message, a message's own time); best match ranks first.
+        const ranked = query.sort === "newest" ? Math.max(0, doc.at) : score(hit.tier, hit.title, archived, !!query.current && this.store.sameProject(doc.projectId, query.current), doc.at);
+        groups[admitted.group].push({ doc: hit.doc, score: ranked });
       }
     }
     const totals = {} as Record<InboxSearchGroupId, number>;

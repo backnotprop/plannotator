@@ -308,6 +308,28 @@ describe("ranking", () => {
     expect(messageIds(search(index, "retry budget", { current: a.id }))).toEqual([inA.id, inB.id, better.id]);
   });
 
+  test("Newest: every group by its latest message, whatever the match; Best match stays the default; Show all pages follow it", async () => {
+    const store = open();
+    const project = store.ensureProject({ name: "api", root: "/w/api" });
+    const phrase = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "The rate limit holds." }).message;
+    const prefix = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "b", body: "The limits of the rate card." }).message;
+    const whole = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "c", body: "A limit on the rate of retries." }).message;
+    // A thread whose subject matches, then a later reply in the oldest thread: its latest message makes it the newest thread.
+    const titled = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Rate limit decided", thread: "d", body: "Nothing here." }).message;
+    const late = store.sendMessage({ project_id: project.id, author: CLAUDE, subject: "Notes", thread: "a", body: "Rate cards again." }).message;
+    const index = await built(store);
+    expect(messageIds(search(index, "rate limit"))).toEqual([phrase.id, whole.id, prefix.id]);
+    expect(messageIds(search(index, "rate limit", { sort: "best" }))).toEqual([phrase.id, whole.id, prefix.id]);
+    expect(messageIds(search(index, "rate limit", { sort: "newest" }))).toEqual([whole.id, prefix.id, phrase.id]);
+    expect(messageIds(search(index, "rate", { sort: "newest" }))).toEqual([late.id, whole.id, prefix.id, phrase.id]);
+    // Threads: by their latest message (thread a's late reply), not by when they started.
+    expect(threadIds(search(index, "rate", { sort: "best" }))).toEqual([titled.id]);
+    expect(threadIds(search(index, "notes", { sort: "newest" }))).toEqual([phrase.id, whole.id, prefix.id]);
+    // "Show all" pages go on in the same order.
+    const page = search(index, "rate", { sort: "newest", group: "messages", offset: 1, limit: 2 });
+    expect(messageIds(page)).toEqual([whole.id, prefix.id]);
+  });
+
 });
 
 describe("identifiers", () => {
