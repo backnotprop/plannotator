@@ -63,7 +63,53 @@ export function shownFolderPath(typed: string): string {
   return path.length > 2 ? path.replace(/\/+$/, '') : path;
 }
 
-/** The line in place of the names when the typed path isn't there. */
-export function missingFolderLine(machine: string | null, path: string): string {
-  return machine ? `${machine} has no folder ${path}. Check the path, or pick a folder below.` : `There's no folder ${path}. Check the path, or pick a folder below.`;
+/**
+ * The line in place of the names when the typed path isn't there. `below`: folders are listed under it (what is there
+ * instead); without any, it doesn't point at them.
+ */
+export function missingFolderLine(machine: string | null, path: string, below = true): string {
+  const pick = below ? ', or pick a folder below' : '';
+  return machine ? `${machine} has no folder ${path}. Check the path${pick}.` : `There's no folder ${path}. Check the path${pick}.`;
+}
+
+/** How many single-letter edits turn one name into another (case aside): how close a folder is to what was typed. */
+function editDistance(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  let row = Array.from({ length: y.length + 1 }, (_, j) => j);
+  for (let i = 1; i <= x.length; i++) {
+    const next = [i];
+    for (let j = 1; j <= y.length; j++) next[j] = Math.min(row[j]! + 1, next[j - 1]! + 1, row[j - 1]! + (x[i - 1] === y[j - 1] ? 0 : 1));
+    row = next;
+  }
+  return row[y.length]!;
+}
+
+/** How many letters a name starts with as typed (case aside). */
+function sharedStart(a: string, b: string): number {
+  const x = a.toLowerCase();
+  const y = b.toLowerCase();
+  let n = 0;
+  while (n < x.length && n < y.length && x[n] === y[n]) n++;
+  return n;
+}
+
+/**
+ * The names, the closest to what was typed first: the longest shared start, then the fewest letter edits ("biling-svc"
+ * → billing-svc, "nope" → notes-local); ties keep their order (the server's, alphabetical).
+ */
+export function closestFirst(names: readonly string[], typed: string): string[] {
+  if (typed === '') return [...names];
+  const rank = new Map(names.map((name) => [name, [sharedStart(name, typed), editDistance(name, typed)] as const]));
+  return [...names].sort((a, b) => rank.get(b)![0] - rank.get(a)![0] || rank.get(a)![1] - rank.get(b)![1]);
+}
+
+/**
+ * The name typed one level below `above` in `path`: `~/cod/billing` under `~` → "cod". What the folders of the nearest
+ * folder that is there are matched against. Empty when `path` is not under `above`.
+ */
+export function nameBelow(path: string, above: string): string {
+  const start = above === '~' ? '~/' : `${above.replace(/\/+$/, '')}/`;
+  if (!path.startsWith(start)) return '';
+  return path.slice(start.length).split('/').find(Boolean) ?? '';
 }

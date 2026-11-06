@@ -106,14 +106,20 @@ export function FolderMenu({
   folderPicked?: { folder: string; machine: string | null } | null;
 }) {
   const [query, setQuery] = useState('');
-  // The folder browser open in place of the list, for one machine's group.
-  const [other, setOther] = useState<FolderGroup | null>(null);
+  // The folder browser open in place of the list, for one machine's group: by its id (null: this computer), so the
+  // browser always sees that machine as it is now (asleep since, or gone).
+  const [otherId, setOtherId] = useState<string | null | undefined>(undefined);
   const grouped = !!groups;
   // Without linked machines: one group with no caption, so the menu is exactly what it was.
   const all = useMemo<readonly FolderGroup[]>(
     () => groups ?? [{ machine: null, name: '', quiet: null, home, projects, last: null, scratch: scratch && onScratch ? scratch : null, notice: null }],
     [groups, home, projects, scratch, onScratch],
   );
+  const other = otherId === undefined ? null : (all.find((group) => group.machine === otherId) ?? null);
+  // Its machine left the menu (unlinked): back to the list.
+  useEffect(() => {
+    if (otherId !== undefined && !other) setOtherId(undefined);
+  }, [otherId, other]);
   const shown = useMemo(() => {
     const words = query.toLowerCase().split(/\s+/).filter(Boolean);
     return all
@@ -126,7 +132,8 @@ export function FolderMenu({
           scratch: group.scratch && (named || scratchMatches(query)) ? group.scratch : null,
           notice: group.notice && (named || words.length === 0) ? group.notice : null,
           // A group that offers anything to start in (not a machine's notice) ends with "Another folder on <machine>…".
-          other: !!onFolder && !group.notice && (named || otherFolderMatches(query)),
+          // Not for an asleep machine: its folders can't be read, and its caption already says it is asleep.
+          other: !!onFolder && !group.notice && !group.asleep && (named || otherFolderMatches(query)),
         };
       })
       .filter((g) => g.projects.length > 0 || g.scratch || g.notice || g.other);
@@ -172,7 +179,7 @@ export function FolderMenu({
     return () => document.removeEventListener('pointerdown', onDown, true);
   }, [onClose]);
 
-  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? setOther(row.group) : onPick(row.project, row.group.machine));
+  const choose = (row: Row) => (row.kind === 'scratch' ? onScratch?.(row.group.machine) : row.kind === 'other' ? setOtherId(row.group.machine) : onPick(row.project, row.group.machine));
 
   const onKey = (event: ReactKeyboardEvent) => {
     // The folder browser takes its own keys.
@@ -215,7 +222,7 @@ export function FolderMenu({
           initialPath={folderPicked && folderPicked.machine === other.machine ? `${folderPicked.folder.replace(/\/+$/, '')}/` : undefined}
           onBack={() => {
             setHlId(rowKey(other.machine, OTHER_PICK));
-            setOther(null);
+            setOtherId(undefined);
           }}
           onPick={(folder, name) => onFolder?.(folder, name, other.machine)}
         />
@@ -374,7 +381,7 @@ export function FolderMenu({
                         data-compose-folder-other={group.machine ?? 'self'}
                         onPointerMove={() => hl !== i && setHlId(rowKey(group.machine, OTHER_PICK))}
                         onMouseDown={(event) => event.preventDefault()}
-                        onClick={() => setOther(group)}
+                        onClick={() => setOtherId(group.machine)}
                       >
                         <Icon name="folder" size={15} />
                         <span className="ib-cp-op" dir="auto">

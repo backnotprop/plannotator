@@ -5,7 +5,7 @@
  * start an agent somewhere the person never saw.
  */
 import { describe, expect, test } from 'bun:test';
-import { folderSuggestions, namedFolder, normalizeFolderPath, shownFolderPath, splitFolderPath } from './homeFolders';
+import { closestFirst, folderSuggestions, missingFolderLine, nameBelow, namedFolder, normalizeFolderPath, shownFolderPath, splitFolderPath } from './homeFolders';
 
 describe('splitFolderPath', () => {
   test('the parent is read, the tail filters', () => {
@@ -57,4 +57,25 @@ describe('namedFolder', () => {
 test('the missing line names the path as typed, without its last slash', () => {
   expect(shownFolderPath('~/code/biling-svc/')).toBe('~/code/biling-svc');
   expect(shownFolderPath('~/')).toBe('~/');
+});
+
+test('a missing path points below only when folders are listed there', () => {
+  expect(missingFolderLine('Mac mini', '~/code/x')).toBe('Mac mini has no folder ~/code/x. Check the path, or pick a folder below.');
+  expect(missingFolderLine('Mac mini', '~/code/x', false)).toBe('Mac mini has no folder ~/code/x. Check the path.');
+  expect(missingFolderLine(null, '~/code/x', false)).toBe("There's no folder ~/code/x. Check the path.");
+});
+
+test('the folders under the missing line: the one closest to what was typed first, ties in their order', () => {
+  expect(closestFirst(['billing-api', 'billing-reports', 'billing-svc', 'infra'], 'biling-svc')).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
+  expect(closestFirst(['code', 'notes'], 'NOTE')).toEqual(['notes', 'code']);
+  // A shared start counts before length: "nope" is nearer notes-local than the shorter web-app.
+  expect(closestFirst(['notes-local', 'web-app'], 'nope')).toEqual(['notes-local', 'web-app']);
+  expect(closestFirst(['web-app', 'notes-local'], 'nope')).toEqual(['notes-local', 'web-app']);
+  expect(closestFirst(['b', 'a'], '')).toEqual(['b', 'a']);
+});
+
+test('the name typed one level below the nearest folder that is there', () => {
+  expect(nameBelow('~/cod/billing', '~')).toBe('cod');
+  expect(nameBelow('~/code/nope/deeper', '~/code')).toBe('nope');
+  expect(nameBelow('~/code', '~/other')).toBe('');
 });

@@ -2,7 +2,7 @@ import { useEffect, useId, useLayoutEffect, useRef, useState, type KeyboardEvent
 import { InboxApiError, inboxApi } from '../api';
 import { Icon } from '../icons';
 import { FolderPath } from './ToPicker';
-import { HOME_FOLDER_START, folderChild, folderName, folderSuggestions, missingFolderLine, namedFolder, shownFolderPath, splitFolderPath } from './homeFolders';
+import { HOME_FOLDER_START, closestFirst, folderChild, folderName, folderSuggestions, missingFolderLine, nameBelow, namedFolder, shownFolderPath, splitFolderPath } from './homeFolders';
 
 /**
  * "Another folder on <machine>…" (remote launch, approval addendum "existing folders"): a folder under one machine's
@@ -10,7 +10,8 @@ import { HOME_FOLDER_START, folderChild, folderName, folderSuggestions, missingF
  * and under it the folders of the typed path's parent that start with what is typed after its last slash (read
  * through `inboxApi.homeFolders`, this computer's route or the machine's forward, a moment after typing stops; an
  * answer for a path no longer typed is dropped). Picking a folder goes into it; when the field names a folder that is
- * there, "✓ Start in <name>" leads, and picking it calls `onPick`. A path that isn't there says so; an asleep machine
+ * there, "✓ Start in <name>" leads, and picking it calls `onPick`. A path that isn't there says so, with the folders
+ * that are there under the line (its parent's, else the server's `nearest`), the closest to what was typed first; an asleep machine
  * is never read ("Mac mini is asleep"), so nothing unverified can be picked.
  *
  * The menu's keys only: ↑ ↓ walk the rows, Enter picks one, Escape (or the back arrow) is `onBack`.
@@ -28,12 +29,13 @@ export interface HomeFolderMachine {
 }
 
 /** The read for one parent path: its names, or why there are none. */
-type Read = { parent: string; exists: boolean; folders: string[] } | { parent: string; error: string };
+type Read = { parent: string; exists: boolean; folders: string[]; nearest: { path: string; folders: string[] } | null } | { parent: string; error: string };
 
 /** How long typing settles before the folders are read. */
 const READ_DEBOUNCE_MS = 150;
 
-type Row = { kind: 'start'; path: string } | { kind: 'folder'; name: string };
+/** A folder row: its name, in `base` (the typed path's parent, or the nearest folder above a path that isn't there). */
+type Row = { kind: 'start'; path: string } | { kind: 'folder'; name: string; base: string };
 
 export function HomeFolderBrowser({
   machine,
@@ -62,7 +64,9 @@ export function HomeFolderBrowser({
     const timer = setTimeout(() => {
       inboxApi.homeFolders(parent, machine.id, controller.signal).then(
         (answer) => {
-          if (live) setRead({ parent, exists: answer.exists === true, folders: Array.isArray(answer.folders) ? answer.folders : [] });
+          if (!live) return;
+          const nearest = answer.nearest && typeof answer.nearest.path === 'string' && Array.isArray(answer.nearest.folders) ? { path: answer.nearest.path, folders: answer.nearest.folders } : null;
+          setRead({ parent, exists: answer.exists === true, folders: Array.isArray(answer.folders) ? answer.folders : [], nearest });
         },
         (cause) => {
           if (!live) return;
@@ -79,11 +83,19 @@ export function HomeFolderBrowser({
 
   // Only the read for the path as typed now: an older one is never shown under a newer path.
   const current = !asleep && read && read.parent === parent ? read : null;
-  const names = current && !('error' in current) && current.exists ? folderSuggestions(current.folders, tail) : [];
-  const start = current && !('error' in current) ? namedFolder(current, tail) : null;
-  const missing = !!current && !('error' in current) && (!current.exists || (tail !== '' && names.length === 0));
-  const rows: Row[] = [...(start ? [{ kind: 'start' as const, path: start }] : []), ...names.map((name) => ({ kind: 'folder' as const, name }))];
-  const rowsKey = rows.map((row) => (row.kind === 'start' ? `>${row.path}` : row.name)).join('\n');
+  const ok = current && !('error' in current) ? current : null;
+  const names = ok && ok.exists ? folderSuggestions(ok.folders, tail) : [];
+  const start = ok ? namedFolder(ok, tail) : null;
+  const missing = !!ok && (!ok.exists || (tail !== '' && names.length === 0));
+  // A path that isn't there: what is there instead, under the line, the folder closest to what was typed first. Its
+  // parent's folders when only the last name is wrong; else the nearest folder above it that is (the server's).
+  const below = !missing || !ok ? null : ok.exists ? { base: ok.parent, names: closestFirst(ok.folders, tail) } : ok.nearest ? { base: ok.nearest.path, names: closestFirst(ok.nearest.folders, nameBelow(shownFolderPath(typed), ok.nearest.path)) } : null;
+  const rows: Row[] = [
+    ...(start ? [{ kind: 'start' as const, path: start }] : []),
+    ...names.map((name) => ({ kind: 'folder' as const, name, base: parent })),
+    ...(below ? below.names.map((name) => ({ kind: 'folder' as const, name, base: below.base })) : []),
+  ];
+  const rowsKey = rows.map((row) => (row.kind === 'start' ? `>${row.path}` : `${row.base}/${row.name}`)).join('\n');
 
   const [hl, setHl] = useState(0);
   useLayoutEffect(() => setHl(0), [rowsKey]);
@@ -104,8 +116,8 @@ export function HomeFolderBrowser({
   }, []);
 
   /** Into a folder: the field names it with a slash, so its own folders are read. */
-  const descend = (name: string) => {
-    setTyped(`${folderChild(parent, name)}/`);
+  const descend = (row: { name: string; base: string }) => {
+    setTyped(`${folderChild(row.base, row.name)}/`);
     requestAnimationFrame(() => {
       const input = inputRef.current;
       if (!input) return;
@@ -113,7 +125,7 @@ export function HomeFolderBrowser({
       input.setSelectionRange(input.value.length, input.value.length);
     });
   };
-  const choose = (row: Row) => (row.kind === 'start' ? onPick(row.path, folderName(row.path)) : descend(row.name));
+  const choose = (row: Row) => (row.kind === 'start' ? onPick(row.path, folderName(row.path)) : descend(row));
 
   const onKey = (event: ReactKeyboardEvent) => {
     if (event.nativeEvent.isComposing) return;
@@ -199,6 +211,11 @@ export function HomeFolderBrowser({
             {machine.name ?? 'This computer'} is asleep
           </div>
         )}
+        {missing && (
+          <div className="ib-cp-none ib-hfb-note" role="status" data-home-folders-note="missing">
+            {missingFolderLine(machine.name, shownFolderPath(typed), !!below && below.names.length > 0)}
+          </div>
+        )}
         {rows.map((row, i) =>
           row.kind === 'start' ? (
             <div
@@ -222,11 +239,11 @@ export function HomeFolderBrowser({
             </div>
           ) : (
             <div
-              key={`folder:${row.name}`}
+              key={`folder:${row.base}/${row.name}`}
               id={optionId(i)}
               role="option"
               aria-selected={i === at}
-              aria-label={`${row.name}, ${folderChild(parent, row.name)}`}
+              aria-label={`${row.name}, ${folderChild(row.base, row.name)}`}
               className={`ib-cp-opt ib-cp-fopt${i === at ? ' ib-hl' : ''}`}
               data-home-folder-option={row.name}
               onPointerMove={() => i !== at && setHl(i)}
@@ -237,15 +254,10 @@ export function HomeFolderBrowser({
               <span className="ib-cp-op" dir="auto">
                 {row.name}
               </span>
-              <FolderPath path={folderChild(parent, row.name)} />
+              <FolderPath path={folderChild(row.base, row.name)} />
               <span className="ib-cp-check" aria-hidden="true" />
             </div>
           ),
-        )}
-        {missing && (
-          <div className="ib-cp-none ib-hfb-note" role="status" data-home-folders-note="missing">
-            {missingFolderLine(machine.name, shownFolderPath(typed))}
-          </div>
         )}
         {current && 'error' in current && (
           <div className="ib-cp-none ib-hfb-note" role="status" data-home-folders-note="error">

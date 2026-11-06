@@ -89,8 +89,13 @@ beforeEach(() => {
     if (read) {
       if (slow && slow.path === read.at) await slow.release;
       if (read.at.split('/').some((s) => s.startsWith('.'))) return Response.json({ error: "Hidden folders aren't listed.", code: 'folder_hidden' }, { status: 422 });
-      const folders = TREES[read.machine]?.[read.at];
-      return Response.json(folders ? { path: read.at, exists: true, folders } : { path: read.at, exists: false, folders: [] });
+      const tree = TREES[read.machine] ?? {};
+      const folders = tree[read.at];
+      if (folders) return Response.json({ path: read.at, exists: true, folders });
+      // As the server: the nearest folder above a path that isn't there, and its folders.
+      let up = read.at;
+      while (up !== '~' && !tree[up]) up = up.slice(0, up.lastIndexOf('/')) || '~';
+      return Response.json({ path: read.at, exists: false, folders: [], ...(tree[up] ? { nearest: { path: up, folders: tree[up] } } : {}) });
     }
     if (path.startsWith('/api/inbox/machines')) return Response.json({ self: SELF, machines });
     if (path.startsWith(`/api/inbox/m/${MINI}/sessions`)) return Response.json({ serverSession: 't', home: '/Users/mini', projects: [], launch: MINI_BLOCK });
@@ -154,6 +159,11 @@ function type(input: HTMLInputElement | HTMLTextAreaElement, words: string) {
 const pathField = () => inDialog('[data-home-folders-path]') as HTMLInputElement;
 const folderReads = () => requests.flatMap((r) => (r.method === 'GET' && folderRead(r.path) ? [folderRead(r.path)!] : []));
 const shownFolders = () => all('[data-home-folder-option]').map((r) => r.getAttribute('data-home-folder-option'));
+/** The folder rows drawn after the missing line, in order: what "pick a folder below" points at. */
+const belowLine = () => {
+  const line = inDialog('[data-home-folders-note="missing"]');
+  return line ? all('[data-home-folder-option]').filter((r) => line.compareDocumentPosition(r) & Node.DOCUMENT_POSITION_FOLLOWING).map((r) => r.getAttribute('data-home-folder-option')) : [];
+};
 const key = (target: Element, name: string) => act(() => target.dispatchEvent(new KeyboardEvent('keydown', { key: name, bubbles: true, cancelable: true })));
 const machinesRead = () => requests.some((r) => r.path === `/api/inbox/m/${MINI}/sessions`);
 
@@ -183,7 +193,18 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   type(pathField(), '~/code/nope');
   await until(() => inDialog('[data-home-folders-note="missing"]') !== null, 'the missing line');
   expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe("There's no folder ~/code/nope. Check the path, or pick a folder below.");
-  expect(inDialog('[data-home-folder-start]')).toBeNull();
+  expect(all('[data-home-folder-start]')).toHaveLength(0);
+  // "Below" is true: the folders that are there, under the line, the closest to "nope" first.
+  expect(shownFolders()).toEqual(['notes-local', 'web-app']);
+  expect(belowLine()).toEqual(['notes-local', 'web-app']);
+  // A folder that isn't there two levels up: the nearest folder that is (home), "code" first for "cod".
+  type(pathField(), '~/cod/notes');
+  await until(() => shownFolders().join() === 'code,notes', "home's folders under the line");
+  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe("There's no folder ~/cod/notes. Check the path, or pick a folder below.");
+  act(() => inDialog('[data-home-folder-option="code"]')!.click());
+  expect(pathField().value).toBe('~/code/');
+  await until(() => shownFolders().join() === 'notes-local,web-app', "code's folders");
+  expect(all('[data-home-folders-note="missing"]')).toHaveLength(0);
 
   type(pathField(), '~/code/NO');
   await until(() => shownFolders().join() === 'notes-local', 'the narrowed folders');
@@ -196,9 +217,9 @@ test.skipIf(!hasDom)('only this computer: "Another folder…" ends the list, rea
   expect(folderReads().map((r) => r.at)).toContain('~/code/notes-local');
 
   act(() => inDialog('[data-home-folder-start]')!.click());
-  expect(inDialog('[data-compose-folders]')).toBeNull();
+  expect(all('[data-compose-folders]')).toHaveLength(0);
   expect(inDialog('[data-compose-folder] bdi')!.textContent).toBe('notes-local');
-  expect(inDialog('[data-compose-machine]')).toBeNull();
+  expect(all('[data-compose-machine]')).toHaveLength(0);
   type(inDialog('textarea') as HTMLTextAreaElement, 'Tidy the notes.');
   act(() => inDialog('[data-compose-send]')!.click());
   await until(() => sent.length === 1, 'the send');
@@ -226,6 +247,13 @@ test.skipIf(!hasDom)("two machines: each group ends with its own row; Mac mini's
   type(pathField(), '~/code/biling-svc');
   await until(() => inDialog('[data-home-folders-note="missing"]') !== null, 'the missing line');
   expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe('Mac mini has no folder ~/code/biling-svc. Check the path, or pick a folder below.');
+  // Under the line, Mac mini's folders in ~/code, the one closest to what was typed first.
+  expect(belowLine()).toEqual(['billing-svc', 'billing-api', 'billing-reports', 'infra']);
+  // An empty folder has nothing to pick: the line doesn't point below.
+  type(pathField(), '~/code/billing-api/x');
+  await until(() => inDialog('[data-home-folders-note="missing"]')?.textContent?.includes('billing-api/x') === true, 'the line for an empty folder');
+  expect(inDialog('[data-home-folders-note="missing"]')!.textContent).toBe('Mac mini has no folder ~/code/billing-api/x. Check the path.');
+  expect(shownFolders()).toEqual([]);
 
   type(pathField(), '~/code/billing-a');
   await until(() => shownFolders().join() === 'billing-api', 'billing-api');
@@ -273,7 +301,7 @@ test.skipIf(!hasDom)('↓ and Enter open the row; Escape goes back to the list w
   key(find, 'Enter');
   expect(inDialog('[data-home-folders]')).not.toBeNull();
   key(pathField(), 'Escape');
-  expect(inDialog('[data-home-folders]')).toBeNull();
+  expect(all('[data-home-folders]')).toHaveLength(0);
   expect(inDialog('[data-compose-folder-other="self"]')!.getAttribute('aria-selected')).toBe('true');
   expect(document.querySelector('dialog[data-compose]')).not.toBeNull();
   // The back arrow too.
@@ -282,25 +310,31 @@ test.skipIf(!hasDom)('↓ and Enter open the row; Escape goes back to the list w
   expect(inDialog('[data-compose-folder-other="self"]')).not.toBeNull();
 });
 
-test.skipIf(!hasDom)('asleep: "Mac mini is asleep" in place of the folders, nothing read, nothing to start', async () => {
+test.skipIf(!hasDom)('asleep: no "Another folder on Mac mini…" row; a browser open when Mac mini falls asleep says so and reads nothing more', async () => {
   await twoMachinesMenu();
-  act(() => inDialog('[data-compose-folder]')!.click());
+  act(() => inDialog(`[data-compose-folder-other="${MINI}"]`)!.click());
+  await until(() => shownFolders().join() === 'code', "Mac mini's home");
+  // Mac mini falls asleep with its folder browser open: the browser follows the machine as it is now.
   machines = [SELF_VIEW, view(MINI, 'Mac mini', { state: 'offline' })];
   await act(async () => {
     document.dispatchEvent(new Event('visibilitychange'));
     await new Promise((r) => setTimeout(r, 30));
   });
-  act(() => inDialog('[data-compose-folder]')!.click());
-  await until(() => all('[data-compose-folder-group]').some((g) => g.textContent === 'Mac mini · asleep'), 'the asleep caption');
-  act(() => inDialog(`[data-compose-folder-other="${MINI}"]`)!.click());
+  await until(() => inDialog('[data-home-folders-note="asleep"]') !== null, 'the asleep line');
   expect(inDialog('[data-home-folders-note="asleep"]')!.textContent).toBe('Mac mini is asleep');
+  const before = folderReads().length;
   type(pathField(), '~/code/billing-api/');
   await act(async () => {
     await new Promise((r) => setTimeout(r, 300));
   });
-  expect(folderReads()).toEqual([]);
-  expect(inDialog('[data-home-folder-start]')).toBeNull();
+  expect(folderReads()).toHaveLength(before);
+  // Absence by count: after this test's many renders, Bun's toBeNull() was seen passing on an element.
+  expect(all('[data-home-folder-start]')).toHaveLength(0);
   expect(shownFolders()).toEqual([]);
+  // Back in the list: Mac mini's group says it is asleep, and offers no folder browser; this computer's still does.
+  act(() => inDialog('[data-home-folders-back]')!.click());
+  await until(() => all('[data-compose-folder-group]').some((g) => g.textContent === 'Mac mini · asleep'), 'the asleep caption');
+  expect(all('[data-compose-folder-other]').map((r) => r.getAttribute('data-compose-folder-other'))).toEqual(['self']);
 });
 
 test.skipIf(!hasDom)("a slow answer for a path no longer typed is dropped; a hidden path shows the server's words", async () => {

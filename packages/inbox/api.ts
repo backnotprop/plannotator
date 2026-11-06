@@ -1037,6 +1037,8 @@ export interface HomeFoldersAnswer {
   path: string;
   exists: boolean;
   folders: string[];
+  /** A path that isn't there: the nearest folder above it that is, and its folders (absent from an older Inbox). */
+  nearest?: { path: string; folders: string[] };
 }
 
 /** What compose sends: a new thread to one live session. */
